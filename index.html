@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>Uber Scan — $/hr Ride Calculator</title>
+<meta name="description" content="Type the pay and time from a ride offer and instantly see dollars per hour, per mile and per minute.">
+<meta name="theme-color" content="#0b0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Uber Scan">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<main id="app">
+
+  <!-- Verdict + headline number -->
+  <section id="verdict" class="verdict empty" aria-live="polite">
+    <div class="verdict-label" id="verdictLabel">ENTER OFFER</div>
+    <div class="rate">
+      <span class="rate-value" id="perHour">--</span>
+      <span class="rate-unit">/hr</span>
+    </div>
+    <div class="submetrics">
+      <div class="sub"><span id="perMile">--</span><small>per mile</small></div>
+      <div class="sub"><span id="perMin">--</span><small>per min</small></div>
+      <div class="sub"><span id="netPay">--</span><small id="netLabel">net pay</small></div>
+    </div>
+  </section>
+
+  <!-- Inputs -->
+  <section class="fields" id="fields">
+    <button class="field active" data-field="pay" type="button">
+      <span class="field-label">PAY</span>
+      <span class="field-value" id="f-pay">$0</span>
+    </button>
+    <button class="field" data-field="minutes" type="button">
+      <span class="field-label">MINUTES</span>
+      <span class="field-value" id="f-minutes">0</span>
+    </button>
+    <button class="field" data-field="miles" type="button">
+      <span class="field-label">MILES</span>
+      <span class="field-value" id="f-miles">0</span>
+    </button>
+  </section>
+
+  <div class="hint" id="hint">Pickup padding: <b id="padHint">0 min</b></div>
+
+  <!-- Keypad -->
+  <section class="keypad" id="keypad">
+    <button class="key" data-key="1">1</button>
+    <button class="key" data-key="2">2</button>
+    <button class="key" data-key="3">3</button>
+    <button class="key act" data-key="back" aria-label="Backspace">⌫</button>
+
+    <button class="key" data-key="4">4</button>
+    <button class="key" data-key="5">5</button>
+    <button class="key" data-key="6">6</button>
+    <button class="key act next" data-key="next">NEXT</button>
+
+    <button class="key" data-key="7">7</button>
+    <button class="key" data-key="8">8</button>
+    <button class="key" data-key="9">9</button>
+    <button class="key act" data-key="clear">CLR</button>
+
+    <button class="key" data-key=".">.</button>
+    <button class="key" data-key="0">0</button>
+    <button class="key" data-key="00">00</button>
+    <button class="key act log" data-key="log">LOG</button>
+  </section>
+
+  <nav class="bottombar">
+    <button id="openSettings" type="button">⚙︎ Targets</button>
+    <button id="openHistory" type="button">☰ History</button>
+  </nav>
+</main>
+
+<!-- Settings sheet -->
+<div class="sheet" id="settingsSheet" hidden>
+  <div class="sheet-inner">
+    <header><h2>Targets</h2><button class="close" data-close="settingsSheet" type="button">Done</button></header>
+
+    <label class="row">
+      <span>Target $/hour<small>Green at or above this</small></span>
+      <input type="number" inputmode="decimal" id="setTarget" step="1" min="0">
+    </label>
+
+    <label class="row">
+      <span>Near-miss band<small>Amber within this % below target</small></span>
+      <input type="number" inputmode="numeric" id="setBand" step="1" min="0" max="50">
+    </label>
+
+    <label class="row">
+      <span>Cost per mile<small>Gas + wear, subtracted from pay. IRS rate is 0.70</small></span>
+      <input type="number" inputmode="decimal" id="setCost" step="0.01" min="0">
+    </label>
+
+    <label class="row">
+      <span>Pickup padding (min)<small>Added to every offer's time</small></span>
+      <input type="number" inputmode="numeric" id="setPad" step="1" min="0">
+    </label>
+
+    <label class="row">
+      <span>Haptics<small>Buzz on each key so you can type without looking</small></span>
+      <input type="checkbox" id="setHaptics">
+    </label>
+
+    <p class="note">Everything is stored on your phone only. Nothing is uploaded.</p>
+  </div>
+</div>
+
+<!-- History sheet -->
+<div class="sheet" id="historySheet" hidden>
+  <div class="sheet-inner">
+    <header><h2>History</h2><button class="close" data-close="historySheet" type="button">Done</button></header>
+    <div class="stats" id="histStats"></div>
+    <ul class="hist" id="histList"></ul>
+    <button class="danger" id="clearHistory" type="button">Clear history</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
