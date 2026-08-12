@@ -95,3 +95,9 @@ local server on port 8765.
   in focus, without glare, while both phones are moving.
 - `vendor/` is ~15MB in the repo so that any phone gets a core build it can
   run; a given phone downloads only the ~4MB variant it needs, once.
+
+## On a Raspberry Pi
+
+A fixed-mount Pi camera is a better version of this idea and removes the
+alignment problem — see [rpi/README.md](rpi/README.md). The perspective warp a
+fixed mount allows also fixes the decimal-point failure described above.
