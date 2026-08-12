@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { width: 814px; height: 1900px; font-family: Roboto, "Segoe UI", system-ui, sans-serif; background: #e8eaf0; overflow: hidden; }
+  #screen { position: relative; width: 814px; height: 1900px; }
+  .map { position: absolute; inset: 0; background: #e9ebf2; }
+  .road { position: absolute; background: #fff; }
+  .hwy { position: absolute; background: #aab4e8; }
+  .label { position: absolute; color: #6b7280; font-size: 26px; font-weight: 600; }
+  .status { position: absolute; top: 22px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 26px; font-size: 30px; font-weight: 600; color: #111; }
+  .card { position: absolute; left: 38px; right: 38px; bottom: 96px; background: #fff; border: 3px solid #1a7f4b; border-radius: 26px; padding: 30px 34px 34px; }
+  .pills { display: flex; align-items: center; gap: 16px; }
+  .pill-green { background: #1a7f4b; color: #fff; font-size: 34px; font-weight: 600; padding: 14px 26px; border-radius: 10px; }
+  .pill-light { background: #e8f5ee; color: #1a7f4b; font-size: 34px; padding: 14px 22px; border-radius: 10px; }
+  .x { margin-left: auto; background: #f3f4f6; border-radius: 12px; width: 92px; height: 92px; display: flex; align-items: center; justify-content: center; font-size: 44px; color: #374151; }
+  .pay { font-size: 96px; font-weight: 700; letter-spacing: -2px; margin: 18px 0 12px; }
+  .chip { display: inline-block; background: #f3f4f6; border-radius: 12px; padding: 14px 22px; font-size: 33px; color: #111; }
+  .row { display: flex; align-items: center; gap: 22px; padding: 26px 0; border-top: 2px solid #eef0f2; font-size: 36px; }
+  .row:first-of-type { margin-top: 22px; }
+  .ico { width: 44px; height: 44px; border: 3px solid #111; border-radius: 50%; flex: none; }
+  .ico.sq { border-radius: 6px; }
+  .addr { padding: 24px 0 0; border-top: 2px solid #eef0f2; font-size: 34px; line-height: 1.5; }
+  .addr .to { color: #6b7280; }
+  .accept { margin-top: 30px; background: #1a7f4b; color: #fff; text-align: center; font-size: 42px; font-weight: 500; padding: 34px; border-radius: 14px; }
+</style></head>
+<body>
+<div id="screen">
+  <div class="map">
+    <div class="hwy" style="left:250px;top:0;width:14px;height:900px;transform:rotate(12deg)"></div>
+    <div class="hwy" style="left:700px;top:0;width:14px;height:1000px;transform:rotate(-6deg)"></div>
+    <div class="road" style="left:0;top:640px;width:814px;height:9px"></div>
+    <div class="road" style="left:430px;top:0;width:9px;height:940px"></div>
+    <div class="label" style="left:236px;top:96px;transform:rotate(62deg)">I-75 N</div>
+    <div class="label" style="left:360px;top:230px;transform:rotate(84deg)">FREY RD NW</div>
+    <div class="label" style="left:0;top:614px">G RD NW</div>
+    <div class="label" style="left:452px;top:20px">SHILOH</div>
+    <div class="label" style="left:770px;top:700px;transform:rotate(80deg)">I-575</div>
+    <div class="label" style="left:560px;top:790px;color:#1d4ed8">75</div>
+  </div>
+
+  <div class="status"><span>6:34</span><span>4G LTE ▮ 67</span></div>
+
+  <div class="card">
+    <div class="pills">
+      <div class="pill-green">Shop &amp; Deliver</div>
+      <div class="pill-light">Exclusive</div>
+      <div class="x">✕</div>
+    </div>
+    <div class="pay">$7.09</div>
+    <div><span class="chip">Guaranteed (incl. tip)</span></div>
+    <div class="row"><div class="ico sq"></div>6 items (6 units)</div>
+    <div class="row"><div class="ico"></div>34 min (3.6 mi) total</div>
+    <div class="addr">
+      <div>Dollar General (925 Shiloh Rd Nw)</div>
+      <div class="to">Hidden Forest Ct, Marietta</div>
+    </div>
+    <div class="accept">Accept</div>
+  </div>
+</div>
+</body></html>
