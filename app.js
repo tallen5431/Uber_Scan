@@ -6,7 +6,9 @@
 
   var SETTINGS_KEY = 'uberscan.settings.v1';
   var HISTORY_KEY = 'uberscan.history.v1';
+  var DRAFT_KEY = 'uberscan.draft.v1';
   var HISTORY_MAX = 100;
+  var DRAFT_TTL = 3 * 60 * 1000;  // an offer older than this is long gone
 
   var DEFAULTS = {
     target: 25,      // $/hour that earns a green ACCEPT
@@ -63,6 +65,31 @@
 
   function saveHistory() {
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch (e) {}
+  }
+
+  // Uber's offer card draws over other apps and can take the screen mid-entry.
+  // Every keystroke is saved so coming back does not cost you what you typed.
+  function saveDraft() {
+    try {
+      if (entry.pay === '' && entry.minutes === '' && entry.miles === '') {
+        localStorage.removeItem(DRAFT_KEY);
+      } else {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          entry: entry, active: active, t: Date.now()
+        }));
+      }
+    } catch (e) {}
+  }
+
+  function restoreDraft() {
+    var d;
+    try { d = JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch (e) { return; }
+    if (!d || !d.entry || Date.now() - d.t > DRAFT_TTL) return;
+    for (var i = 0; i < FIELDS.length; i++) {
+      var f = FIELDS[i];
+      if (typeof d.entry[f] === 'string') entry[f] = d.entry[f];
+    }
+    if (FIELDS.indexOf(d.active) !== -1) active = d.active;
   }
 
   /* ---------- math ---------- */
@@ -201,6 +228,7 @@
       entry[active] = append(entry[active], key);
     }
     buzz(8);
+    saveDraft();
     render();
   }
 
@@ -223,7 +251,7 @@
 
   el.fields.addEventListener('click', function (e) {
     var btn = e.target.closest('.field');
-    if (btn) { active = btn.dataset.field; buzz(8); render(); }
+    if (btn) { active = btn.dataset.field; buzz(8); saveDraft(); render(); }
   });
 
   document.addEventListener('keydown', function (e) {
@@ -257,6 +285,7 @@
     entry = { pay: '', minutes: '', miles: '' };
     active = 'pay';
     lastState = 'empty';
+    saveDraft();
     render();
   }
 
@@ -372,6 +401,7 @@
 
   /* ---------- boot ---------- */
 
+  restoreDraft();
   render();
 
   if ('serviceWorker' in navigator) {

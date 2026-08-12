@@ -30,6 +30,28 @@ If haptics are on, each key gives a short buzz and the verdict gives a distinct
 one — a double-tap buzz for green, a long buzz for red — so you can feel the
 answer without staring at the screen.
 
+## When Uber takes the screen
+
+Uber's offer card is a *system overlay* — it uses the "Display over other apps"
+permission, so it can appear on top of whatever you are doing, including this app.
+Three things help, in order of how well they work:
+
+**1. Split screen (best, nothing to install).** Open Uber Driver, then Recent Apps,
+tap the Uber icon at the top of its card, choose *Split screen*, and pick Uber Scan
+for the other half. Put Uber on top and the calculator underneath. Both are live at
+once, so you read the offer and type without either app going away. Worth setting up
+once at the start of a shift.
+
+**2. Nothing you type is lost.** Every keystroke is saved immediately. If Uber does
+take the screen mid-entry, reopening Uber Scan brings your digits back exactly where
+they were, with the same field selected. Drafts older than 3 minutes are dropped, so
+you never come back to a stale offer's numbers.
+
+**3. Turning off Uber's overlay permission** (Settings → Apps → Uber Driver →
+Display over other apps) stops it from covering other apps entirely — but drivers
+report Uber demanding that permission before it will let you go online, so this one
+may cost you more than it gains. Try split screen first.
+
 ## Targets (⚙︎)
 
 | Setting | What it does |
