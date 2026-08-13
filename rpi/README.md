@@ -59,6 +59,35 @@ collapses.
 
 ## Hardware setup
 
+**Sensor mode — the one setting that can quietly ruin framing.** `rpicam-hello
+--list-cameras` on this module reports:
+
+| Mode | Rate | Sensor window | Field of view |
+|---|---|---|---|
+| 1280×720 | 80fps | 2560×1440 crop | **cropped** |
+| 1920×1080 | 60fps | 3840×2160 crop | **cropped** |
+| **2328×1748** | **30fps** | full 4656×3496 | **full** — 2×2 binned |
+| 3840×2160 | 18fps | 3840×2160 crop | **cropped** |
+| 4656×3496 | 9fps | full 4656×3496 | **full** |
+
+The small modes are *windows onto the sensor*, not scaled-down full frames.
+Picking 1080p to "go faster" narrows the field of view and can push the phone
+partly out of shot. Only 2328×1748 and 4656×3496 see everything, so those are
+the only two `calibrate.py --mode` offers, and `scan_pi.py` pins the mode
+explicitly rather than letting the size request choose one.
+
+**2328×1748 is the default and the right one.** 30fps is far more than this
+needs, and 2×2 binning gives cleaner pixels in a dim car. Go to 4656×3496 only
+if calibration says the card is too small — 9fps is still plenty, since offers
+do not arrive sixty times a second.
+
+**Framing.** Because 2328×1748 is binned, the card carries half the pixel
+density the headline 16MP suggests. `calibrate.py` measures the card's height
+in real sensor pixels and tells you whether it is enough — below about 350px it
+stops reading, and no later upscaling recovers detail the mount never caught.
+Aim to fill the frame with the phone; on the test frame a well-filled shot
+measures ~870px against a 450px floor.
+
 **Camera.** The IMX519 needs its overlay enabled in `/boot/firmware/config.txt`:
 
 ```
@@ -100,8 +129,8 @@ Put a live offer — or any bright screen — on the phone, then:
 python3 rpi/calibrate.py
 ```
 
-It finds the screen automatically, writes `rpi/config.json`, and saves
-`rpi/config-preview.png`. **Look at that preview.** It is the exact image
+It finds the screen automatically, writes `rpi/config.json`, saves
+`rpi/config-preview.png`, and reports the card's height in sensor pixels. **Look at that preview.** It is the exact image
 tesseract will be handed. It should be a straight-on, sharp, glare-free card.
 If the detector locked onto something brighter than the phone, pass corners
 by hand:
@@ -122,7 +151,8 @@ python3 rpi/scan_pi.py --speak
 Reads are printed as they happen. `--speak` says the verdict aloud once per
 offer, at the point two reads agree — "pass, twelve an hour" — which is the
 right output for driving, since it needs no glance at all. `--display` shows a
-big colour panel if you have a screen attached. `--save-misses DIR` keeps frames
+big colour panel if you have a screen attached, and `--list-modes` prints what
+the sensor reports if you want to check the table above against your module. `--save-misses DIR` keeps frames
 that failed to parse so you can feed them back through `bench.py`.
 
 ## Tuning
@@ -154,7 +184,9 @@ If the two ever disagree, that suite fails. Edit one, re-run both.
 
 - The picamera2 layer — capture configuration, pinned exposure and focus — is
   **written but not tested on hardware**, because this was built without a Pi
-  or a camera attached. Everything below it (warp, crop, preprocess, OCR,
+  or a camera attached. It now pins the sensor mode, reads the motion gate's
+  luma straight out of the YUV buffer, and only sets focus controls the camera
+  actually reports, but none of that has met the real module yet. Everything below it (warp, crop, preprocess, OCR,
   parse, motion gate, calibration, bench) is tested and passing.
 - Timings are from x86, not a Pi 4. Run `bench.py`.
 - Tested against a rendered replica with synthetic lens degradation, not a real

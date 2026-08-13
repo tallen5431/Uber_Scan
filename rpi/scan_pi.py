@@ -36,17 +36,33 @@ def load_config(path):
         return json.load(fh)
 
 
+LORES = (640, 480)
+
+# IMX519 modes, from `rpicam-hello --list-cameras`. The two smallest are
+# *cropped* out of the sensor, not scaled down: 1280x720 sees only a
+# 2560x1440 window and 1920x1080 only 3840x2160, so both throw away field of
+# view. Only these two see the whole sensor, which is what a phone in a mount
+# needs.
+FULL_FOV_MODES = {
+    '2328x1748': (2328, 1748),   # 2x2 binned, 30fps — the default
+    '4656x3496': (4656, 3496),   # full resolution, 9fps
+}
+
+
 def start_camera(cfg, exposure_us, gain, lens):
     from picamera2 import Picamera2
-    from libcamera import controls
 
     cam = Picamera2()
     cap = cfg.get('capture', {})
     main_size = (cap.get('width', 2328), cap.get('height', 1748))
 
+    # Pin the sensor mode explicitly. Left to itself picamera2 picks a mode from
+    # the requested size, and on this sensor a smaller pick silently crops the
+    # field of view — which moves the phone out of the calibrated quad.
     cam.configure(cam.create_video_configuration(
         main={'size': main_size, 'format': 'RGB888'},
-        lores={'size': (640, 480), 'format': 'YUV420'},
+        lores={'size': LORES, 'format': 'YUV420'},
+        raw={'size': main_size},
         buffer_count=4,
     ))
 
@@ -61,11 +77,18 @@ def start_camera(cfg, exposure_us, gain, lens):
         'ExposureTime': exposure_us,
         'AnalogueGain': gain,
     }
-    try:
+
+    # Ask the camera what it has rather than assuming. libcamera defines the
+    # autofocus enums whatever the hardware is, so importing them proves
+    # nothing — a fixed-focus IMX519 would still reject the control.
+    available = cam.camera_controls
+    if 'AfMode' in available and 'LensPosition' in available:
+        from libcamera import controls
         ctrls['AfMode'] = controls.AfModeEnum.Manual
         ctrls['LensPosition'] = lens
-    except AttributeError:
-        pass                       # fixed-focus module: nothing to pin
+    else:
+        print('fixed-focus module: --lens ignored, focus is set by the mount distance')
+
     cam.set_controls(ctrls)
     time.sleep(0.5)
     return cam
@@ -110,10 +133,20 @@ def main():
                     help='microseconds; keep above ~10000 so OLED dimming does not band')
     ap.add_argument('--gain', type=float, default=1.5)
     ap.add_argument('--lens', type=float, default=4.0,
-                    help='dioptres (1/metres): 4.0 focuses at 25cm')
+                    help='dioptres (1/metres): 4.0 focuses at 25cm. Ignored on fixed-focus modules')
+    ap.add_argument('--list-modes', action='store_true',
+                    help='print the sensor modes this camera reports, then exit')
     ap.add_argument('--save-misses', metavar='DIR',
                     help='write frames that failed to parse, for tuning')
     args = ap.parse_args()
+
+    if args.list_modes:
+        from picamera2 import Picamera2
+        cam = Picamera2()
+        for m in cam.sensor_modes:
+            print(m)
+        cam.close()
+        return
 
     cfg = load_config(args.config)
     scanner = PL.Scanner(
@@ -137,11 +170,16 @@ def main():
         while True:
             request = cam.capture_request()
             try:
-                lores = request.make_array('lores')
-                # YUV420's first plane is luma, which is all the gate needs.
-                luma = lores[:480, :640]
+                # The Y plane leads the YUV420 buffer, and luma is all the gate
+                # needs. Taken from the flat buffer rather than a reshaped array
+                # so the chroma planes cannot be mistaken for image rows.
+                buf = request.make_buffer('lores')
+                luma = np.frombuffer(buf, dtype=np.uint8,
+                                     count=LORES[0] * LORES[1]).reshape((LORES[1], LORES[0]))
                 if not scanner.should_read(luma):
                     continue
+                # picamera2's "RGB888" hands back B, G, R ordered arrays, which
+                # is exactly what OpenCV expects. The name is the odd one out.
                 frame = request.make_array('main')
             finally:
                 request.release()

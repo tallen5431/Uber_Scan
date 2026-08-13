@@ -26,6 +26,16 @@ DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'confi
 # roughly halves the pixels tesseract walks, for no loss of accuracy.
 DEFAULT_ROI = [0.02, 0.48, 0.96, 0.50]
 
+# Measured floor: the offer card stops reading below roughly 350 pixels of real
+# height. Upscaling past that invents nothing, so this is about where the camera
+# sits, not about settings. 450 leaves margin for a dimmer or busier card.
+MIN_CARD_PIXELS = 450
+
+# The two IMX519 modes that see the whole sensor. 1280x720 and 1920x1080 are
+# cropped windows (2560x1440 and 3840x2160 respectively), so they cut field of
+# view rather than resolution and can put the phone partly out of frame.
+FULL_FOV_MODES = {'2328x1748': (2328, 1748), '4656x3496': (4656, 3496)}
+
 
 def grab_from_camera(size):
     from picamera2 import Picamera2
@@ -45,16 +55,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--from-image', help='calibrate from a saved frame instead of the camera')
     ap.add_argument('--config', default=DEFAULT_CONFIG)
-    ap.add_argument('--width', type=int, default=2328)
-    ap.add_argument('--height', type=int, default=1748)
+    ap.add_argument('--mode', choices=sorted(FULL_FOV_MODES), default='2328x1748',
+                    help='sensor mode; both see the full frame. 2328x1748 is 2x2 '
+                         'binned at 30fps, 4656x3496 is full resolution at 9fps')
     ap.add_argument('--card-height', type=int, default=900,
                     help='warp height; 900 is the measured speed/accuracy sweet spot')
     ap.add_argument('--corners', help='manual override: x1,y1,x2,y2,x3,y3,x4,y4 clockwise from top-left')
     ap.add_argument('--full-screen', action='store_true', help='read the whole screen, not just the card')
     args = ap.parse_args()
 
+    width, height = FULL_FOV_MODES[args.mode]
     frame = cv2.imread(args.from_image) if args.from_image \
-        else grab_from_camera((args.width, args.height))
+        else grab_from_camera((width, height))
     if frame is None:
         sys.exit('could not read a frame')
 
@@ -73,7 +85,7 @@ def main():
         'quad': [[float(x), float(y)] for x, y in quad],
         'roi': roi,
         'cardHeight': args.card_height,
-        'capture': {'width': args.width, 'height': args.height},
+        'capture': {'width': width, 'height': height},
         'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
                      'pad': 0, 'secondsPerItem': 0},
     }
@@ -90,7 +102,30 @@ def main():
     print('corners: %s' % config['quad'])
     print('preview: %s  (%dx%d — the exact image tesseract will read)'
           % (preview_path, preview.shape[1], preview.shape[0]))
+
+    # How big the card actually is on the sensor decides whether this works at
+    # all. 2328x1748 is 2x2 binned, so the card has half the pixel density the
+    # sensor's headline resolution suggests, and no amount of upscaling later
+    # recovers detail the mount never captured.
+    card_px = card_source_pixels(quad, roi)
+    print('\ncard height on the sensor: %d px' % card_px)
+    if card_px < MIN_CARD_PIXELS:
+        print('  TOO SMALL — reading will be unreliable below about %d px.' % MIN_CARD_PIXELS)
+        print('  Move the camera closer so the phone fills more of the frame,')
+        print('  or re-run with --mode 4656x3496 for double the detail at 9fps.')
+    else:
+        print('  comfortable (floor is about %d px)' % MIN_CARD_PIXELS)
+
     print('\nCheck the preview is a straight-on, sharp, glare-free offer card.')
+
+
+def card_source_pixels(quad, roi):
+    """Height, in real sensor pixels, of the region that gets OCR'd."""
+    import numpy as np
+    left = np.linalg.norm(quad[3] - quad[0])
+    right = np.linalg.norm(quad[2] - quad[1])
+    screen_px = (left + right) / 2.0
+    return int(round(screen_px * (roi[3] if roi else 1.0)))
 
 
 if __name__ == '__main__':
