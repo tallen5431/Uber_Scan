@@ -14,6 +14,7 @@
 'use strict';
 
 var http = require('http');
+var https = require('https');
 var fs = require('fs');
 var path = require('path');
 var url = require('url');
@@ -45,7 +46,7 @@ function send(res, status, body, headers) {
   res.end(body);
 }
 
-var server = http.createServer(function (req, res) {
+function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return send(res, 405, 'method not allowed', { 'Content-Type': 'text/plain' });
   }
@@ -81,10 +82,33 @@ var server = http.createServer(function (req, res) {
     stream.on('error', function () { res.destroy(); });
     stream.pipe(res);
   });
-});
+}
+
+// Browsers gate the camera, home-screen install and service workers behind a
+// secure context, so over plain http on a LAN address the scanner cannot open a
+// camera at all. Point SSL_CERT and SSL_KEY at a certificate to serve https;
+// README.md has a one-liner for a self-signed one.
+var certPath = process.env.SSL_CERT;
+var keyPath = process.env.SSL_KEY;
+var server, scheme;
+
+if (certPath && keyPath) {
+  server = https.createServer({
+    cert: fs.readFileSync(certPath),
+    key: fs.readFileSync(keyPath)
+  }, handler);
+  scheme = 'https';
+} else {
+  server = http.createServer(handler);
+  scheme = 'http';
+}
 
 server.listen(PORT, HOST, function () {
   console.log('Uber Scan serving ' + ROOT);
-  console.log('  http://localhost:' + PORT + '/');
-  console.log('\nInstalling to a phone needs HTTPS (or localhost) — see README.md.');
+  console.log('  ' + scheme + '://localhost:' + PORT + '/');
+  if (scheme === 'http') {
+    console.log('\nPlain http. The camera scanner and home-screen install need a');
+    console.log('secure context, so they work on localhost but not over a LAN address.');
+    console.log('Set SSL_CERT and SSL_KEY to serve https — see README.md.');
+  }
 });

@@ -106,6 +106,18 @@ Then open `http://localhost:8080`. `PORT=3000 npm start` to move it. There are
 no dependencies to install — `server.js` is plain Node with a zero-install
 static file server, and it is what `package.json` points `main` and `start` at.
 
+To serve HTTPS — which the camera scanner and home-screen install both require,
+since browsers gate them behind a secure context — point the server at a
+certificate:
+
+```sh
+SSL_CERT=cert.pem SSL_KEY=key.pem PORT=8443 npm start
+```
+
+Started without those it prints a reminder that the camera and install will not
+work over a LAN address. See [SCANNING.md](SCANNING.md) for generating a
+self-signed certificate.
+
 **If your host tried to run `ui.js` (or the old `app.js`) with Node and died on
 `ReferenceError: document is not defined`**, that is the symptom of this project
 being executed rather than served. Everything in it except `server.js` is

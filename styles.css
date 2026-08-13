@@ -141,8 +141,8 @@ html, body {
 .key.flash { filter: brightness(1.6); }
 
 /* ---------- Bottom bar ---------- */
-.bottombar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.bottombar button {
+.bottombar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.bottombar button, .bottombar .linkbtn {
   appearance: none;
   border: 1px solid var(--line);
   background: transparent;
@@ -152,6 +152,9 @@ html, body {
   font: inherit;
   font-size: 14px;
   font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  display: block;
 }
 
 /* ---------- Sheets ---------- */

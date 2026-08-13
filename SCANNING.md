@@ -4,10 +4,31 @@ Point a second phone's camera at the driving phone, read the offer card, show
 the rate. This is an experimental branch; the typed calculator on
 `index.html` is the version to rely on.
 
-Open `scan.html` (the **📷** route from the main app) and it works offline —
+Open it with the **📷 Camera** button in the main app's bottom bar, or go
+straight to `/scan.html`. It works offline —
 the OCR engine and its language model are vendored in `vendor/`, so nothing is
 uploaded and nothing needs a signal. Camera frames are read and discarded; no
 image is stored or transmitted.
+
+## It needs HTTPS
+
+Browsers only hand out a camera in a *secure context*: HTTPS, or `localhost`.
+Over plain http on a LAN address — `http://192.168.1.20:8080/scan.html` — there
+is no camera to open at all, and the page says so rather than failing quietly.
+The **📷 Photo** button still works there, on the same reader.
+
+To serve HTTPS, point the server at a certificate:
+
+```sh
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout key.pem -out cert.pem -subj "/CN=$(hostname -I | awk '{print $1}')"
+
+SSL_CERT=cert.pem SSL_KEY=key.pem PORT=8443 npm start
+```
+
+A self-signed certificate makes the browser warn once; accepting it gives a
+real secure context and the camera works. Tailscale or a reverse proxy with a
+proper certificate avoids the warning.
 
 ## Does it work?
 

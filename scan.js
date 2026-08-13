@@ -76,6 +76,29 @@
 
   /* ---------- camera ---------- */
 
+  // Browsers only expose a camera on HTTPS or localhost. Over plain http on a
+  // LAN address navigator.mediaDevices is simply absent, which surfaces as an
+  // unhelpful TypeError unless it is named for what it is.
+  function cameraBlockedReason() {
+    if (window.isSecureContext === false) return 'insecure';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'unsupported';
+    return null;
+  }
+
+  function explainNoCamera(reason) {
+    if (reason === 'insecure') {
+      el.verdictLabel.textContent = 'CAMERA NEEDS HTTPS';
+      el.warn.textContent = 'You are on ' + location.protocol + '//' + location.host +
+        '. Browsers only allow camera access over HTTPS or on localhost. ' +
+        'The 📷 Photo button below still works — it runs the same reader on a screenshot.';
+    } else {
+      el.verdictLabel.textContent = 'NO CAMERA';
+      el.warn.textContent = 'This browser exposes no camera. Use 📷 Photo, or ⌨ Type.';
+    }
+    el.warn.hidden = false;
+    status('camera unavailable — 📷 Photo still works');
+  }
+
   async function startCamera() {
     status('starting camera…');
     var stream = await navigator.mediaDevices.getUserMedia({
@@ -299,13 +322,22 @@
       status('reader failed to load: ' + e.message);
       return;
     }
+    var blocked = cameraBlockedReason();
+    if (blocked) {
+      explainNoCamera(blocked);
+      return;
+    }
     try {
       await startCamera();
       running = true;
       loop();
     } catch (e) {
-      // No camera is not a dead end — the photo button runs the same pipeline.
-      status('no camera (' + e.name + ') — use 📷 Photo, or ⌨ Type');
+      // A refused permission is not a dead end — 📷 Photo runs the same pipeline.
+      el.verdictLabel.textContent = 'CAMERA BLOCKED';
+      el.warn.textContent = 'The browser refused the camera (' + e.name + '). Check the ' +
+        'permission for this site, or use 📷 Photo.';
+      el.warn.hidden = false;
+      status('camera refused — 📷 Photo still works');
     }
   })();
 
