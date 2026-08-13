@@ -106,17 +106,22 @@ Then open `http://localhost:8080`. `PORT=3000 npm start` to move it. There are
 no dependencies to install — `server.js` is plain Node with a zero-install
 static file server, and it is what `package.json` points `main` and `start` at.
 
-To serve HTTPS — which the camera scanner and home-screen install both require,
-since browsers gate them behind a secure context — point the server at a
-certificate:
+The home-screen install needs HTTPS, because browsers gate service workers
+behind a secure context. From the project directory:
 
 ```sh
-SSL_CERT=cert.pem SSL_KEY=key.pem PORT=8443 npm start
+npm run cert       # writes ./ssl, then restart the server
 ```
 
-Started without those it prints a reminder that the camera and install will not
-work over a LAN address. See [SCANNING.md](SCANNING.md) for generating a
-self-signed certificate.
+The certificate is found on disk rather than configured, so this works even when
+a process manager is the one running `npm start` and there is no shell to set an
+environment variable in. https then serves on 8443 *alongside* http on 8080 —
+nothing pointing at the old address breaks — and startup prints the URL to open
+on the phone.
+
+Accepting the browser's warning is enough for the camera but **not** for the
+offline install; for that, install `ssl/ca.pem` on the phone.
+[SCANNING.md](SCANNING.md) has the details and the per-platform steps.
 
 **If your host tried to run `ui.js` (or the old `app.js`) with Node and died on
 `ReferenceError: document is not defined`**, that is the symptom of this project
@@ -135,6 +140,7 @@ it read `package.json`, and it will serve instead.
 | `sw.js` | Offline cache — bump `CACHE` when you change files |
 | `manifest.webmanifest` | Home-screen install metadata |
 | `tools/make_icons.py` | Regenerates the icons in `icons/` |
+| `tools/make-cert.sh` | `npm run cert` — local certificate authority for https |
 
 ## Notes
 

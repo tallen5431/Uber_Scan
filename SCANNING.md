@@ -17,18 +17,37 @@ Over plain http on a LAN address — `http://192.168.1.20:8080/scan.html` — th
 is no camera to open at all, and the page says so rather than failing quietly.
 The **📷 Photo** button still works there, on the same reader.
 
-To serve HTTPS, point the server at a certificate:
+To serve HTTPS, from the project directory:
 
 ```sh
-openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-  -keyout key.pem -out cert.pem -subj "/CN=$(hostname -I | awk '{print $1}')"
-
-SSL_CERT=cert.pem SSL_KEY=key.pem PORT=8443 npm start
+npm run cert     # writes ./ssl, then restart the server
 ```
 
-A self-signed certificate makes the browser warn once; accepting it gives a
-real secure context and the camera works. Tailscale or a reverse proxy with a
-proper certificate avoids the warning.
+The server picks the certificate up off disk on its next start and serves https
+on 8443 *alongside* http on 8080, so nothing pointing at the old address breaks.
+It prints the exact URL to open on the phone.
+
+**Then decide how much you want.** The two outcomes are different, and the
+difference is easy to lose an evening to:
+
+| | Camera | Offline install |
+|---|---|---|
+| Accept the browser warning | **works** | **no** |
+| Install `ssl/ca.pem` on the phone | works | works |
+
+Accepting the warning gives a genuine secure context, which is all the camera
+needs. It is not enough for the install: Chrome still refuses to register a
+service worker on a certificate it does not trust, failing with *"An SSL
+certificate error occurred when fetching the script"* — measured, not assumed.
+Installing the authority once removes the warning and the restriction together:
+
+- **Android** — Settings → Security → More security settings → Encryption &
+  credentials → Install a certificate → CA certificate
+- **iOS** — open the file, install the profile, then Settings → General → About
+  → Certificate Trust Settings and enable full trust
+
+Re-running `npm run cert` reuses the existing authority, so the phone only ever
+has to trust one.
 
 ## Does it work?
 

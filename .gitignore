@@ -1,4 +1,6 @@
-__pycache__/
+*.pem
 *.pyc
-rpi/config.json
+__pycache__/
 rpi/config-preview.png
+rpi/config.json
+ssl/
