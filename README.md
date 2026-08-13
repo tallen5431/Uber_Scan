@@ -96,14 +96,21 @@ Then add it to your home screen:
 Launched from the home screen it runs full screen with no browser chrome, and it
 works in a parking garage with no bars.
 
-## Running it locally
-
-Any static file server works:
+## Running it on a server
 
 ```sh
-python3 -m http.server 8000
-# then open http://localhost:8000
+npm start          # or: node server.js
 ```
+
+Then open `http://localhost:8080`. `PORT=3000 npm start` to move it. There are
+no dependencies to install — `server.js` is plain Node with a zero-install
+static file server, and it is what `package.json` points `main` and `start` at.
+
+**If your host tried to run `ui.js` (or the old `app.js`) with Node and died on
+`ReferenceError: document is not defined`**, that is the symptom of this project
+being executed rather than served. Everything in it except `server.js` is
+browser code, and Node has no `document`. Point the host at `server.js`, or let
+it read `package.json`, and it will serve instead.
 
 ## Files
 
@@ -111,7 +118,8 @@ python3 -m http.server 8000
 |---|---|
 | `index.html` | Layout |
 | `styles.css` | Styling |
-| `app.js` | All of the logic |
+| `ui.js` | All of the app logic — browser only, never run under Node |
+| `server.js` | Zero-dependency static server; the Node entry point |
 | `sw.js` | Offline cache — bump `CACHE` when you change files |
 | `manifest.webmanifest` | Home-screen install metadata |
 | `tools/make_icons.py` | Regenerates the icons in `icons/` |
