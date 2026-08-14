@@ -2,7 +2,7 @@
  * that has the old worker keeps serving the old page forever otherwise —
  * v7 shipped before live.html, styles.css and offer-parser.js all changed,
  * which would have hidden every one of those changes behind a stale cache. */
-var CACHE = 'uberscan-v10';
+var CACHE = 'uberscan-v11';
 
 var ASSETS = [
   './',
@@ -14,6 +14,7 @@ var ASSETS = [
   'scan.css',
   'scan.js',
   'live.html',
+  'journal.html',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

@@ -278,8 +278,13 @@
       net: net,
       cost: cost,
       // Echoed back so a display can say what it deducted and why, rather
-      // than showing a number nobody can reconstruct.
+      // than showing a number nobody can reconstruct. The target and band go
+      // with it because a verdict outlives the settings that produced it: a
+      // stored "PASS" means nothing a month later without the line it was
+      // being held to at the time.
       costPerMile: costPerMile,
+      target: target,
+      band: band,
       perHour: perHour,
       // The same rate before running costs come off, over the same minutes.
       // A display that works this out for itself from the card's own time

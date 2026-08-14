@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Uber Scan — offers</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b0d10">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* live.html is a screen glanced at while driving and is sized to fill the
+     viewport exactly. This one is read while parked, it scrolls, and it is the
+     one page here worth being able to select text on — the shared rules turn
+     selection off everywhere so a mistimed long-press cannot highlight the
+     verdict mid-shift, which is not a risk when the car is stopped. */
+  #app { height: auto; min-height: 100dvh; }
+  body { user-select: text; -webkit-user-select: text; overscroll-behavior: auto; }
+
+  /* The bar is a background, not a box, so a long row cannot push the layout
+     sideways on a narrow phone — which is the only screen this is read on. */
+  .block { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+  .block .label { flex: none; width: 62px; font-size: 12px; color: var(--muted);
+                  font-variant-numeric: tabular-nums; }
+  .block .bar { flex: 1; height: 20px; border-radius: 4px; background: var(--panel);
+                background-image: linear-gradient(to right, var(--go) 0 0);
+                background-repeat: no-repeat; position: relative; }
+  .block .bar.warn { background-image: linear-gradient(to right, var(--warn) 0 0); }
+  .block .bar.no   { background-image: linear-gradient(to right, var(--no) 0 0); }
+  .block .amount { flex: none; width: 58px; text-align: right; font-size: 13px;
+                   font-weight: 700; font-variant-numeric: tabular-nums; }
+  .block .n { flex: none; width: 30px; text-align: right; font-size: 11px; color: var(--muted); }
+  /* The target line, drawn where the eye needs it rather than described. */
+  .scale { position: relative; height: 12px; margin-left: 70px; margin-right: 92px; }
+  .scale span { position: absolute; top: 0; transform: translateX(-50%);
+                font-size: 10px; color: var(--muted); letter-spacing: .04em; }
+  .rangebtns { display: flex; gap: 6px; justify-content: center; margin: 0 0 14px; }
+  .rangebtns button { flex: 1; padding: 8px 0; font: inherit; font-size: 13px;
+                      font-weight: 700; color: var(--muted); background: var(--panel);
+                      border: 1px solid transparent; border-radius: 8px; }
+  .rangebtns button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+       color: var(--muted); margin: 22px 0 8px; font-weight: 700; }
+</style>
+</head>
+<body>
+<main id="app">
+
+  <div class="rangebtns" id="ranges">
+    <button type="button" data-days="1">Today</button>
+    <button type="button" data-days="7" aria-pressed="true">7 days</button>
+    <button type="button" data-days="30">30 days</button>
+    <button type="button" data-days="0">All</button>
+  </div>
+
+  <!-- Percentiles, not an average. $/hour is a ratio with a small noisy
+       denominator, and the characteristic failure here — a leg lost to glare —
+       manufactures exactly the fat right tail that destroys a mean. The middle
+       of the distribution is also the honest answer to "what does a shift round
+       here actually pay". -->
+  <div class="stats" id="ladder">
+    <div><span id="p25">--</span><small>quarter below</small></div>
+    <div><span id="p50">--</span><small>typical</small></div>
+    <div><span id="p75">--</span><small>quarter above</small></div>
+  </div>
+
+  <p class="hint" id="headline">Reading the journal…</p>
+
+  <h2>By time of day</h2>
+  <div id="blocks"></div>
+  <div class="scale" id="blockScale"></div>
+
+  <h2>Rides and shop orders</h2>
+  <div id="kinds"></div>
+
+  <h2>Recent offers</h2>
+  <ul class="hist" id="recent"></ul>
+
+  <p class="note" id="caveats"></p>
+
+  <nav class="bottombar">
+    <a class="linkbtn" href="live.html">◂ Live</a>
+    <a class="linkbtn" href="index.html">⌨ Type</a>
+    <a class="linkbtn" id="csv" href="/api/journal.csv?days=7">⤓ CSV</a>
+  </nav>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var el = {};
+  ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds', 'recent',
+   'caveats', 'ranges', 'csv'].forEach(function (id) {
+    el[id] = document.getElementById(id);
+  });
+
+  var days = 7;
+
+  function money(n, dp) {
+    if (n === null || n === undefined || !isFinite(n)) return '--';
+    var neg = n < 0;
+    return (neg ? '-$' : '$') + Math.abs(n).toFixed(dp === undefined ? 0 : dp);
+  }
+
+  // The value below which a given share of offers fall. Linear interpolation
+  // between the two straddling samples, so a handful of offers still gives a
+  // sensible middle rather than jumping between whole readings.
+  function percentile(sorted, share) {
+    if (!sorted.length) return null;
+    if (sorted.length === 1) return sorted[0];
+    var pos = share * (sorted.length - 1);
+    var low = Math.floor(pos), high = Math.ceil(pos);
+    return sorted[low] + (sorted[high] - sorted[low]) * (pos - low);
+  }
+
+  // Three-hour blocks. Eight rows fit a phone without scrolling and each one
+  // holds enough offers to mean something; twenty-four hourly rows would be
+  // mostly empty and mostly noise.
+  var BLOCK_NAMES = ['12–3am', '3–6am', '6–9am', '9am–12', '12–3pm',
+                     '3–6pm', '6–9pm', '9pm–12'];
+
+  function verdictFor(rate, target, band) {
+    if (rate === null) return '';
+    var floor = target * (1 - band / 100);
+    return rate >= target ? 'go' : (rate >= floor ? 'warn' : 'no');
+  }
+
+  function render(data) {
+    var offers = (data.offers || []).filter(function (r) {
+      // A row flagged suspect is kept in the file on purpose, but it should not
+      // shift a percentile. The count below says how many were set aside.
+      return !r.suspect && typeof r.perHour === 'number';
+    });
+    var setAside = (data.offers || []).length - offers.length;
+
+    if (!offers.length) {
+      el.headline.innerHTML = data.offers && data.offers.length
+        ? 'Nothing usable in this stretch — <b>' + setAside + '</b> set aside as doubtful.'
+        : 'No offers recorded yet. The scanner keeps one line per offer it is sure of.';
+      el.blocks.innerHTML = el.kinds.innerHTML = '';
+      el.recent.innerHTML = '';
+      el.p25.textContent = el.p50.textContent = el.p75.textContent = '--';
+      el.caveats.textContent = '';
+      return;
+    }
+
+    // The target is whatever the scanner was actually using, taken from the
+    // most recent row rather than assumed — it lives in the Pi's config and
+    // this page has no other way to know it.
+    var newest = offers[offers.length - 1];
+    var target = typeof newest.target === 'number' ? newest.target : 25;
+    var band = typeof newest.band === 'number' ? newest.band : 15;
+
+    var rates = offers.map(function (r) { return r.perHour; })
+                      .sort(function (a, b) { return a - b; });
+    el.p25.textContent = money(percentile(rates, 0.25), 0);
+    el.p50.textContent = money(percentile(rates, 0.50), 0);
+    el.p75.textContent = money(percentile(rates, 0.75), 0);
+
+    var cleared = offers.filter(function (r) { return r.perHour >= target; }).length;
+    el.headline.innerHTML = 'At ' + money(target) + '/hr you would have taken <b>'
+      + Math.round(cleared / offers.length * 100) + '%</b> of <b>'
+      + offers.length + '</b> offer' + (offers.length === 1 ? '' : 's') + '.';
+
+    // --- by time of day ---
+    var blocks = BLOCK_NAMES.map(function (name) {
+      return { name: name, rates: [] };
+    });
+    offers.forEach(function (r) {
+      var hour = new Date(r.at).getHours();
+      blocks[Math.floor(hour / 3)].rates.push(r.perHour);
+    });
+    // A fixed scale at twice the target puts the target itself at the halfway
+    // point of every bar, so the line being judged against is the same line in
+    // every row instead of moving with whatever the best block happened to be.
+    var full = target * 2;
+    el.blocks.innerHTML = blocks.map(function (b) {
+      if (!b.rates.length) {
+        return '<div class="block"><span class="label">' + b.name + '</span>'
+             + '<span class="bar" style="background-size:0 100%"></span>'
+             + '<span class="amount">--</span><span class="n"></span></div>';
+      }
+      var sorted = b.rates.slice().sort(function (x, y) { return x - y; });
+      var mid = percentile(sorted, 0.5);
+      var pct = Math.max(1, Math.min(100, mid / full * 100));
+      return '<div class="block"><span class="label">' + b.name + '</span>'
+           + '<span class="bar ' + verdictFor(mid, target, band) + '" style="background-size:'
+           + pct.toFixed(1) + '% 100%"></span>'
+           + '<span class="amount">' + money(mid, 0) + '</span>'
+           + '<span class="n">' + b.rates.length + '</span></div>';
+    }).join('');
+    el.blockScale.innerHTML =
+      '<span style="left:50%">' + money(target) + ' target</span>'
+      + '<span style="left:100%">' + money(full) + '</span>';
+
+    // --- rides against shop orders ---
+    var kinds = [
+      { name: 'Rides', rates: [] },
+      { name: 'Shop', rates: [] }
+    ];
+    offers.forEach(function (r) {
+      kinds[r.items ? 1 : 0].rates.push(r.perHour);
+    });
+    el.kinds.innerHTML = kinds.map(function (k) {
+      if (!k.rates.length) return '';
+      var sorted = k.rates.slice().sort(function (x, y) { return x - y; });
+      var mid = percentile(sorted, 0.5);
+      return '<div class="block"><span class="label">' + k.name + '</span>'
+           + '<span class="bar ' + verdictFor(mid, target, band) + '" style="background-size:'
+           + Math.max(1, Math.min(100, mid / full * 100)).toFixed(1) + '% 100%"></span>'
+           + '<span class="amount">' + money(mid, 0) + '</span>'
+           + '<span class="n">' + k.rates.length + '</span></div>';
+    }).join('');
+
+    // --- the last few, so a number can be traced back to an offer ---
+    el.recent.innerHTML = offers.slice(-12).reverse().map(function (r) {
+      var when = new Date(r.at);
+      var mins = r.minutes === null ? '--' : Math.round(r.minutes);
+      return '<li><span class="dot ' + verdictFor(r.perHour, target, band) + '"></span>'
+           + '<span class="big">' + money(r.perHour, 0) + '</span>'
+           + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
+           + (r.miles === null ? '' : ' · ' + r.miles + ' mi')
+           + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
+           + '<span class="when">' + when.toLocaleDateString(undefined,
+               { month: 'short', day: 'numeric' }) + ' '
+           + when.toLocaleTimeString(undefined,
+               { hour: 'numeric', minute: '2-digit' }) + '</span></li>';
+    }).join('');
+
+    var notes = ['These are offers the scanner read, not trips taken — it cannot '
+                 + 'see which ones were accepted.'];
+    if (setAside) {
+      notes.push(setAside + ' reading' + (setAside === 1 ? '' : 's')
+                 + ' left out as doubtful.');
+    }
+    notes.push('Rates are after ' + money(newest.costPerMile, 2)
+               + '/mi of running costs.');
+    el.caveats.textContent = notes.join(' ');
+  }
+
+  function load() {
+    el.csv.href = '/api/journal.csv?days=' + days;
+    fetch('/api/journal?days=' + days)
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () {
+        el.headline.textContent = 'Could not reach the scanner.';
+      });
+  }
+
+  el.ranges.addEventListener('click', function (e) {
+    var button = e.target.closest('button');
+    if (!button) return;
+    days = parseInt(button.getAttribute('data-days'), 10);
+    Array.prototype.forEach.call(el.ranges.querySelectorAll('button'), function (b) {
+      b.setAttribute('aria-pressed', b === button ? 'true' : 'false');
+    });
+    load();
+  });
+
+  load();
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+})();
+</script>
+</body>
+</html>

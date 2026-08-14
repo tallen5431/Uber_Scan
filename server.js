@@ -210,6 +210,73 @@ var shuttingDown = false;
   });
 });
 
+var JOURNAL_PATH = path.join(ROOT, 'rpi', 'journal.jsonl');
+
+// Columns worth putting in a spreadsheet, in the order a person reads them.
+// Not every field in the row: `content` is an internal fingerprint and `v`,
+// `seq` and `id` only matter to whatever is collapsing the rows, which has
+// already happened by the time anything gets here.
+var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
+                   'perHour', 'grossPerHour', 'perMile', 'cost', 'state',
+                   'target', 'costPerMile', 'legs', 'mergedFrom', 'hasTotal',
+                   'milesCorrected', 'milesUncertain', 'settled', 'suspect', 'ms'];
+
+function clampNumber(raw, low, high, fallback) {
+  var n = parseInt(raw, 10);
+  if (!isFinite(n)) return fallback;
+  return Math.max(low, Math.min(high, n));
+}
+
+// The scanner appends a further row for the same offer when the reading
+// improves, so the last row of each id is the one that is true. Rows written
+// before ids existed, or by something else, keep their own identity.
+function latestPerOffer(rows) {
+  var byId = Object.create(null);
+  var out = [];
+  rows.forEach(function (r) {
+    if (!r || typeof r !== 'object') return;
+    if (!r.id) { out.push(r); return; }
+    if (!(r.id in byId)) { byId[r.id] = out.length; out.push(r); return; }
+    out[byId[r.id]] = r;
+  });
+  return out.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+}
+
+function readJournal(done) {
+  fs.readFile(JOURNAL_PATH, 'utf8', function (err, text) {
+    if (err) return done([]);           // nothing recorded yet is not an error
+    var rows = [];
+    text.split('\n').forEach(function (line) {
+      line = line.trim();
+      if (!line) return;
+      try {
+        var row = JSON.parse(line);
+        if (row && typeof row === 'object') rows.push(row);
+      } catch (e) { /* a line torn by a power cut; skip it */ }
+    });
+    done(rows);
+  });
+}
+
+function toCsv(offers) {
+  var lines = [CSV_COLUMNS.concat(['when']).join(',')];
+  offers.forEach(function (r) {
+    var cells = CSV_COLUMNS.map(function (k) {
+      var v = r[k];
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'boolean') return v ? '1' : '0';
+      if (typeof v === 'number') return String(v);
+      return '"' + String(v).replace(/"/g, '""') + '"';
+    });
+    // A second, human-readable stamp. A spreadsheet will not turn epoch
+    // milliseconds into a date on its own, and the whole point of exporting is
+    // to ask when things happened.
+    cells.push('"' + new Date(r.at || 0).toISOString() + '"');
+    lines.push(cells.join(','));
+  });
+  return lines.join('\n') + '\n';
+}
+
 function send(res, status, body, headers) {
   res.writeHead(status, Object.assign({ 'Cache-Control': 'no-cache' }, headers || {}));
   res.end(body);
@@ -310,6 +377,31 @@ function route(req, res) {
       listeners = listeners.filter(function (r) { return r !== res; });
     });
     return;
+  }
+
+  // Everything the scanner has kept. The file itself is inside rpi/, which the
+  // static handler refuses to serve, and it stays that way — this returns the
+  // rows and nothing else, so the path is never taken from the request.
+  if (pathname === '/api/journal' || pathname === '/api/journal.csv') {
+    var q = url.parse(req.url, true).query || {};
+    var days = clampNumber(q.days, 0, 3650, 30);
+    var limit = clampNumber(q.limit, 0, 20000, 5000);
+    return readJournal(function (rows) {
+      var offers = latestPerOffer(rows);
+      if (days > 0) {
+        var floor = Date.now() - days * 86400000;
+        offers = offers.filter(function (r) { return (r.at || 0) >= floor; });
+      }
+      if (limit && offers.length > limit) offers = offers.slice(-limit);
+      if (pathname === '/api/journal.csv') {
+        return send(res, 200, toCsv(offers), {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="uber-scan-offers.csv"'
+        });
+      }
+      send(res, 200, JSON.stringify({ count: offers.length, days: days, offers: offers }),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    });
   }
 
   if (pathname.endsWith('/')) pathname += 'index.html';

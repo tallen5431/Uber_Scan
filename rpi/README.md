@@ -816,6 +816,46 @@ following the phone. Only worth it if tracking is misbehaving — a genuinely
 fixed mount loses nothing by leaving it on, and a mount that moves loses offers
 without it.
 
+## Keeping the offers
+
+Every offer the scanner is confident about gets one line in `rpi/journal.jsonl`,
+so a shift can be looked at afterwards. `journal.html` on the web side reads it
+and draws the distribution, the time-of-day blocks and the ride/shop split; the
+raw file is JSON Lines and needs nothing but `json.loads` per line.
+
+The write happens on the same confidence the spoken verdict uses — a whole
+reading, two frames agreeing, a rate ready — so the file and the voice can never
+disagree about what was read. What the two do *not* share is when to forget:
+speech resets on any empty read so the next card gets announced, and doing that
+here would record the same offer twice every time a glare frame landed in the
+middle of a resample burst. The journal forgets an offer only when the
+accumulator says the card changed.
+
+A reading can improve after the scanner is first sure of it — a leg arriving
+late, an item count two frames behind. That is worth keeping rather than hiding,
+so the better reading is appended as another row with the same `id`. **Anything
+reading the file takes the last row of each `id`.** Nothing is ever rewritten in
+place, which is what makes it safe to append to from a process that can be
+killed at any moment.
+
+Three deliberate omissions:
+
+* **no accept/decline column.** The scanner cannot see the Accept button and
+  must never touch it, so anything here would be a guess presented as a record.
+* **no OCR text.** The useful part is already parsed into numbers; what is left
+  is pickup addresses. `rpi/journal.jsonl` is gitignored and the server refuses
+  to serve anything under `rpi/`.
+* **no failing.** A full card or a read-only filesystem costs the journal and
+  nothing else. The scanner exists to read offers and keeps reading them.
+
+```sh
+python3 rpi/scan_pi.py --no-journal        # keep no record
+python3 rpi/scan_pi.py --journal /some/other/path.jsonl
+```
+
+Rows carry the `target`, `band` and `costPerMile` in force when they were
+written, because a stored "PASS" is unreadable a month after the target moved.
+
 ## Tuning
 
 ```sh

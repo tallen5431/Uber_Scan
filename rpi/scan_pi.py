@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import exposure as EX
 import offer_parser as OP
 import pipeline as PL
+import journal as JR
 import track as TR
 from accumulate import OfferAccumulator
 
@@ -434,6 +435,11 @@ def main():
                     help='write frames that failed to parse, for tuning')
     ap.add_argument('--snapshot', default=DEFAULT_SNAPSHOT,
                     help='where to write the live view the web UI shows ("" to disable)')
+    ap.add_argument('--journal', default=JR.DEFAULT_PATH,
+                    help='where to keep every confident offer, for looking at '
+                         'a shift afterwards')
+    ap.add_argument('--no-journal', action='store_true',
+                    help='read offers without keeping any record of them')
     ap.add_argument('--no-parallel', action='store_true',
                     help='read one frame at a time. The default reads the '
                          'confirming frame alongside the first, which is 56%% '
@@ -549,6 +555,20 @@ def main():
     resample_until = 0.0
     last_resample = 0.0
     settled_on = None
+
+    # Every offer the scanner is sure of, kept so a shift can be looked at
+    # afterwards. Seeded from the file rather than from nothing: the scanner is
+    # restarted with a backoff when it dies, and a card sits on screen far
+    # longer than a restart takes, so starting empty meant coming back to the
+    # same offer and recording it twice.
+    offer_log = None
+    if not args.no_journal:
+        offer_log = JR.OfferLog(JR.Journal(args.journal))
+        kept = offer_log.journal.rows()
+        resumed = offer_log.resume()
+        log('journal: %s (%d offer%s so far)%s'
+            % (args.journal, len(kept), '' if len(kept) == 1 else 's',
+               ', still on the last one' if resumed else ''))
     try:
         while True:
             request = cam.capture_request()
@@ -748,6 +768,27 @@ def main():
                     say(spoken(rate))
             if not rate['ready']:
                 spoke_for = None
+
+            # Keep the offer. Same confidence the spoken verdict uses, so the
+            # file and the voice can never disagree about what was read.
+            #
+            # Unlike `spoke_for`, nothing here is cleared by a read that came
+            # back empty. Clearing on a bad read is right for speech — the next
+            # card should be announced even if it pays the same — but it is
+            # wrong for a file: a clipped payout parses as nothing at all, so
+            # one glare frame during the resample burst would re-arm the gate
+            # and record the same card twice. What separates one offer from the
+            # next here is the accumulator's own episode, which is the thing
+            # that actually knows.
+            #
+            # Whether the reading had settled is recorded rather than required.
+            # A card whose OCR never holds still is the marginal reading most
+            # worth studying afterwards, and refusing to write it would leave
+            # the hardest offers missing with nothing to say so.
+            if offer_log is not None and whole and rate['ready'] and out['locked']:
+                offer_log.consider(parsed, rate, ms=out['ms']['total'],
+                                   locked=out['locked'],
+                                   settled=(signature == settled_on))
 
             if args.display:
                 cv2.imshow('uber-scan', render_panel(rate, parsed))

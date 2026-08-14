@@ -6,3 +6,9 @@ rpi/config-preview.png
 rpi/config.json
 rpi/live-frame.jpg
 ssl/
+
+# A shift's worth of offers: what was paid, how far, and when. That is the
+# driver's own earnings history and, by the hour, where they were. It stays on
+# the Pi, like the calibration and the live frame.
+rpi/journal.jsonl
+rpi/journal.jsonl.*

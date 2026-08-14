@@ -44,9 +44,15 @@ class OfferAccumulator:
 
     def __init__(self, window=WINDOW):
         self.window = window
+        # Counts the cards this accumulator has been shown, and survives reset()
+        # so it never repeats. It is what lets a caller tell "the same offer,
+        # read again and better" from "a different offer" without comparing
+        # numbers that legitimately move as the reading improves.
+        self.episode = 0
         self.reset()
 
     def reset(self):
+        self.episode += 1
         self.key = None
         self.started = 0.0
         self.last_add = 0.0
@@ -237,6 +243,7 @@ class OfferAccumulator:
         merged['complete'] = (merged['pay'] is not None and merged['pay'] > 0
                               and merged['minutes'] is not None and merged['minutes'] > 0)
         merged['mergedFrom'] = self.samples
+        merged['episode'] = self.episode
         # True when the window supplied a leg this frame did not see, which is
         # the whole reason for keeping one.
         merged['grew'] = len(used) > len(parsed.get('legDetail') or [])

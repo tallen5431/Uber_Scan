@@ -141,10 +141,45 @@ it read `package.json`, and it will serve instead.
 | `styles.css` | Styling |
 | `ui.js` | All of the app logic — browser only, never run under Node |
 | `server.js` | Zero-dependency static server; the Node entry point |
+| `journal.html` | Every offer the scanner kept, and what it adds up to |
 | `sw.js` | Offline cache — bump `CACHE` when you change files |
 | `manifest.webmanifest` | Home-screen install metadata |
 | `tools/make_icons.py` | Regenerates the icons in `icons/` |
 | `tools/make-cert.sh` | `npm run cert` — local certificate authority for https |
+
+## Looking at a shift afterwards
+
+The verdict on screen answers one question and then it is gone. The questions
+that need a season of offers behind them cannot be answered that way: what a
+typical offer round here actually pays, whether Saturday evening is worth more
+than Tuesday lunchtime, whether shop orders earn their shopping time, and
+whether the target you set is the right line to be drawing.
+
+So the Pi scanner keeps one line per offer it was confident about, in
+`rpi/journal.jsonl`. **Offers ▤** in the live view opens the page that reads it:
+
+* the **middle of the distribution** — a quarter of offers below, the typical
+  one, a quarter above. Percentiles rather than an average, because $/hour is a
+  ratio with a small noisy denominator and one misread leg produces exactly the
+  long tail an average cannot survive.
+* what share of offers your target would have had you take.
+* **by time of day**, in three-hour blocks, each bar drawn on the same scale so
+  the halfway mark is always your target.
+* **rides against shop orders**.
+* the last dozen offers, so a number can be traced back to a card.
+* a **CSV** of everything, for a spreadsheet.
+
+Two things it is careful about:
+
+* **it is a record of offers, not of trips.** The scanner cannot see the Accept
+  button and never touches it, so nothing here knows which offers you took.
+* **it stores numbers, not addresses.** The pickup and dropoff text the reader
+  saw is not written to the file. It is your earnings history and, by the hour,
+  your whereabouts — so `rpi/journal.jsonl` is gitignored and, like everything
+  under `rpi/`, the server refuses to serve the file itself. The page gets its
+  data through `/api/journal`.
+
+Run the scanner with `--no-journal` to keep no record at all.
 
 ## What the server will not serve
 
