@@ -341,7 +341,24 @@
 
   /* ---------- boot ---------- */
 
+  // A Pi running its own scanner has a camera this page can never reach, so
+  // sending the driver to the browser camera API only produces NotFoundError.
+  async function piScannerPresent() {
+    try {
+      var res = await fetch('/api/status', { cache: 'no-store' });
+      if (!res.ok) return false;
+      var status = await res.json();
+      return !!(status.scanner && status.scanner.enabled);
+    } catch (e) {
+      return false;      // no server API here: this is a plain phone browser
+    }
+  }
+
   (async function () {
+    if (await piScannerPresent()) {
+      location.replace('live.html');
+      return;
+    }
     el.reticle.classList.toggle('full', settings.fullFrame);
     try {
       await startEngine();

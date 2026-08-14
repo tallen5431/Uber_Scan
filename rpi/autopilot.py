@@ -72,7 +72,7 @@ def check(as_json):
     return True
 
 
-def aim(as_json, port, timeout):
+def aim(as_json, port, timeout, min_card=None):
     """Serve the preview and wait for the mount to be good enough, then stop.
 
     Returns True once the frame has been big enough and sharp enough for several
@@ -83,7 +83,11 @@ def aim(as_json, port, timeout):
     import camera as CAM
     from calibrate import DEFAULT_ROI, MIN_CARD_PIXELS
 
-    source = PV.Source()
+    try:
+        source = PV.Source()
+    except CAM.CameraBusy as e:
+        emit({'phase': 'error', 'message': str(e)}, as_json)
+        return None
     focus = getattr(source, 'focus', None)
     if focus and not focus.get('supported'):
         emit({'phase': 'aim', 'message': 'no working autofocus: ' + focus['reason']}, as_json)
@@ -97,6 +101,7 @@ def aim(as_json, port, timeout):
     emit({'phase': 'aim', 'message': 'not calibrated — open http://<this-pi>:%d/ and '
           'move the mount until the overlay is green' % port, 'previewPort': port}, as_json)
 
+    floor = min_card or MIN_CARD_PIXELS
     good = 0
     started = time.time()
     last_report = 0
@@ -112,7 +117,7 @@ def aim(as_json, port, timeout):
                 if quad is not None:
                     sharp = PV.sharpness(PL.crop(PL.warp(frame, quad, 600), DEFAULT_ROI))
 
-            ok = bool(card_px and card_px >= MIN_CARD_PIXELS and sharp and sharp >= PV.SHARP_FLOOR)
+            ok = bool(card_px and card_px >= floor and sharp and sharp >= PV.SHARP_FLOOR)
             good = good + 1 if ok else 0
 
             now = time.time()
@@ -120,7 +125,7 @@ def aim(as_json, port, timeout):
                 last_report = now
                 emit({'phase': 'aim', 'cardPixels': card_px, 'sharpness': round(sharp) if sharp else None,
                       'stable': good, 'need': STABLE_READINGS,
-                      'message': _aim_hint(card_px, sharp, MIN_CARD_PIXELS, PV.SHARP_FLOOR)}, as_json)
+                      'message': _aim_hint(card_px, sharp, floor, PV.SHARP_FLOOR)}, as_json)
 
             if good >= STABLE_READINGS:
                 emit({'phase': 'aim', 'message': 'mount looks good — calibrating'}, as_json)
@@ -192,6 +197,15 @@ def scan(as_json, speak, extra_args):
     args.extend(extra_args)
     emit({'phase': 'scanning', 'message': 'starting scanner'}, as_json)
     sys.stdout.flush()
+    # execv keeps the process, so the camera lock this process holds has to go
+    # first or the scanner would find the camera busy with itself.
+    try:
+        import camera as CAM
+        if CAM._lock_handle:
+            CAM._lock_handle.close()
+            CAM._lock_handle = None
+    except Exception:
+        pass
     os.execv(sys.executable, args)
 
 
@@ -201,12 +215,16 @@ def main():
     ap.add_argument('--speak', action='store_true', help='say verdicts aloud')
     ap.add_argument('--recalibrate', action='store_true', help='ignore any existing calibration')
     ap.add_argument('--preview-port', type=int, default=8081)
+    ap.add_argument('--min-card', type=int, default=None,
+                    help='override the card-height floor in sensor pixels')
     ap.add_argument('--aim-timeout', type=int, default=900,
                     help='seconds to wait for a good mount before giving up')
     args, extra = ap.parse_known_args()
 
     if not check(args.json):
         return 1
+
+    import camera as CAM
 
     if args.recalibrate:
         try:
@@ -215,7 +233,7 @@ def main():
             pass
 
     if not os.path.exists(CONFIG):
-        source = aim(args.json, args.preview_port, args.aim_timeout)
+        source = aim(args.json, args.preview_port, args.aim_timeout, args.min_card)
         if source is None:
             return 1
         ok = calibrate_from(source, args.json)

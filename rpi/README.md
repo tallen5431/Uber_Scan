@@ -46,6 +46,17 @@ than four scripts to run in the right order. The individual steps still exist �
 `doctor.py`, `preview.py`, `calibrate.py`, `scan_pi.py` — for when you want to
 poke at one of them, but stop the autopilot first.
 
+**If the web server is running this project, the scanner is already going.**
+Starting a second one by hand gets you a clear refusal rather than libcamera's
+"Failed to acquire camera: Device or resource busy":
+
+```
+the camera is already in use by this project (pid 3559) ...
+```
+
+Stop the server's copy first (`SCANNER=0` in its environment, or stop the
+service) if you want to drive the camera by hand.
+
 ### Or run it from the web server
 
 If you already manage this project with a process supervisor that runs
@@ -154,11 +165,11 @@ if calibration says the card is too small — 9fps is still plenty, since offers
 do not arrive sixty times a second.
 
 **Framing.** Because 2328×1748 is binned, the card carries half the pixel
-density the headline 16MP suggests. `calibrate.py` measures the card's height
-in real sensor pixels and tells you whether it is enough — below about 350px it
-stops reading, and no later upscaling recovers detail the mount never caught.
-Aim to fill the frame with the phone; on the test frame a well-filled shot
-measures ~870px against a 450px floor.
+density the headline 16MP suggests. Two numbers matter, and they are not the
+same: **380px** of card height is where reading measurably stops working, and
+**450px** is where there is comfortable margin. Anything between is workable and
+the tools say so rather than refusing. Below 380 no later upscaling recovers
+detail the mount never caught.
 
 **Camera.** The IMX519 needs its overlay enabled in `/boot/firmware/config.txt`:
 

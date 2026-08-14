@@ -28,6 +28,44 @@ TUNING_DIRS = [
 
 AF_KEY = 'rpi.af'
 
+LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.camera.lock')
+_lock_handle = None
+
+
+class CameraBusy(RuntimeError):
+    """Something else already holds the camera."""
+
+
+def acquire_lock():
+    """Take the camera lock, or return False if another process has it.
+
+    libcamera allows exactly one holder, and losing that race produces a
+    traceback about acquiring a device that says nothing about which of your own
+    programs is already running. The lock is advisory between our own scripts,
+    which is precisely where the confusion was.
+    """
+    global _lock_handle
+    import fcntl
+
+    fh = open(LOCK_PATH, 'a+')
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.seek(0)
+        holder = fh.read().strip()
+        fh.close()
+        raise CameraBusy(
+            'the camera is already in use by this project (pid %s). It is most '
+            'likely the scanner started by the web server — check /api/status, '
+            'or stop it with SCANNER=0, before running a camera script by hand.'
+            % (holder or 'unknown'))
+    fh.seek(0)
+    fh.truncate()
+    fh.write(str(os.getpid()))
+    fh.flush()
+    _lock_handle = fh          # held open for the life of the process
+    return True
+
 
 def _has_af(path):
     try:
@@ -87,6 +125,7 @@ def open_camera(prefer_autofocus=True):
     """
     from picamera2 import Picamera2
 
+    acquire_lock()
     sensor = sensor_name()
     tuning_path, has_af = find_tuning(sensor)
 

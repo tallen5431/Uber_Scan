@@ -26,10 +26,12 @@ DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'confi
 # roughly halves the pixels tesseract walks, for no loss of accuracy.
 DEFAULT_ROI = [0.02, 0.48, 0.96, 0.50]
 
-# Measured floor: the offer card stops reading below roughly 350 pixels of real
-# height. Upscaling past that invents nothing, so this is about where the camera
-# sits, not about settings. 450 leaves margin for a dimmer or busier card.
-MIN_CARD_PIXELS = 450
+# Two numbers, because they mean different things. 350px is where reading
+# measurably stops working; below it no setting helps. 450px is where there is
+# comfortable margin for a dimmer or busier card. Refusing to calibrate anywhere
+# between the two would be enforcing a preference as though it were a limit.
+MIN_CARD_PIXELS = 380          # below this, do not bother
+GOOD_CARD_PIXELS = 450         # above this, no notes
 
 # The two IMX519 modes that see the whole sensor. 1280x720 and 1920x1080 are
 # cropped windows (2560x1440 and 3840x2160 respectively), so they cut field of
@@ -153,9 +155,12 @@ def main():
     card_px = card_source_pixels(quad, roi)
     print('\ncard height on the sensor: %d px' % card_px)
     if card_px < MIN_CARD_PIXELS:
-        print('  TOO SMALL — reading will be unreliable below about %d px.' % MIN_CARD_PIXELS)
+        print('  TOO SMALL — reading stops working below about %d px.' % MIN_CARD_PIXELS)
         print('  Move the camera closer so the phone fills more of the frame,')
         print('  or re-run with --mode 4656x3496 for double the detail at 9fps.')
+    elif card_px < GOOD_CARD_PIXELS:
+        print('  workable, but thin on margin (%d px against a comfortable %d)'
+              % (card_px, GOOD_CARD_PIXELS))
     else:
         print('  comfortable (floor is about %d px)' % MIN_CARD_PIXELS)
 
