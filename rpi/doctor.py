@@ -78,6 +78,28 @@ def main():
         check('camera detected', False, str(e),
               'rpicam-hello --list-cameras   # see what libcamera thinks')
 
+    # Focus deserves its own section, because the usual evidence is misleading:
+    # rpicam-still lists --autofocus-mode whatever the camera is.
+    try:
+        import camera as CAM
+        sensor, tunings = CAM.tuning_report()
+        if not tunings:
+            check('focus tuning', False, 'no tuning file found for %s' % sensor)
+        else:
+            usable = [t for t in tunings if t[1]]
+            check('autofocus available', bool(usable),
+                  ('%s' % usable[0][0]) if usable else
+                  'none of %d tuning file(s) for %s contain an AF algorithm'
+                  % (len(tunings), sensor),
+                  'install Arducam\'s tuning for this module, then re-run. Point at '
+                  'it directly with UBERSCAN_TUNING=/path/to/tuning.json if it lands '
+                  'outside /usr/share/libcamera. Without it the lens cannot be moved '
+                  'at all — focus it by hand using the sharpness number in preview.py')
+            for path, has_af in tunings:
+                print('      %s  %s' % ('AF  ' if has_af else 'no AF', path))
+    except Exception as e:
+        check('focus tuning', False, str(e))
+
     # Calibration is per-mount, so a missing config is expected on a fresh setup.
     config = os.path.join(HERE, 'config.json')
     check('calibration', os.path.exists(config),
@@ -96,7 +118,10 @@ def main():
             check('parser self-test', False, str(e))
 
     failed = [r for r in results if not r[1]]
-    blocking = [r for r in failed if 'espeak' not in r[0] and 'calibration' not in r[0]]
+    # Focus by hand still works, so a missing AF algorithm is not blocking.
+    blocking = [r for r in failed
+                if 'espeak' not in r[0] and 'calibration' not in r[0] and 'focus' not in r[0]
+                and 'autofocus' not in r[0]]
 
     print()
     if not failed:

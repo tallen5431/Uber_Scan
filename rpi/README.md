@@ -201,7 +201,21 @@ The IMX519 has a motorised lens, and left alone it sits wherever it was, which
 is usually blurry. Focus is decided once and then pinned, because a fixed mount
 has nothing to track and a refocus mid-offer costs more than the read does:
 
-**First, autofocus may not exist even though the control does.** libcamera
+**`rpicam-still --help` listing `--autofocus-mode` proves nothing.** Those flags
+are compiled into rpicam-apps for every camera, so the help text reads the same
+whether or not your sensor can focus. `python3 rpi/doctor.py` answers it
+properly, by reading the tuning files themselves:
+
+```
+FAIL  autofocus available   none of 1 tuning file(s) for imx519 contain an AF algorithm
+      fix: install Arducam's tuning for this module, then re-run...
+      no AF  /usr/share/libcamera/ipa/rpi/vc4/imx519.json
+```
+
+If Arducam's tuning ends up somewhere non-standard, point straight at it:
+`UBERSCAN_TUNING=/path/to/imx519.json`.
+
+**Autofocus may not exist even though the control does.** libcamera
 advertises `AfMode` for this sensor, but Raspberry Pi's stock `imx519.json`
 tuning contains no autofocus *algorithm*, so setting it logs
 

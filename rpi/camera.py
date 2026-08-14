@@ -80,6 +80,23 @@ def _has_af(path):
     return AF_KEY in algorithms
 
 
+def tuning_report(sensor=None):
+    """Every tuning file for this sensor and whether it can actually focus.
+
+    Worth printing rather than summarising: rpicam-apps advertises
+    --autofocus-mode for every camera because the flag is compiled in, not
+    because the sensor can use it. The tuning file is the only thing that
+    settles it.
+    """
+    sensor = sensor or sensor_name()
+    found = []
+    for directory in TUNING_DIRS + ['/usr/share/libcamera/ipa/rpi/*']:
+        for path in sorted(glob.glob(os.path.join(directory, sensor + '*.json'))):
+            if path not in [f[0] for f in found]:
+                found.append((path, _has_af(path)))
+    return sensor, found
+
+
 def find_tuning(sensor):
     """Return (path, has_af) for the best tuning file available for this sensor.
 
@@ -127,7 +144,14 @@ def open_camera(prefer_autofocus=True):
 
     acquire_lock()
     sensor = sensor_name()
-    tuning_path, has_af = find_tuning(sensor)
+
+    # An explicit override wins: if Arducam's tuning is installed somewhere
+    # non-standard, pointing at it is the whole fix.
+    override = os.environ.get('UBERSCAN_TUNING')
+    if override and os.path.exists(override):
+        tuning_path, has_af = override, _has_af(override)
+    else:
+        tuning_path, has_af = find_tuning(sensor)
 
     focus = {'sensor': sensor, 'tuning': tuning_path, 'supported': has_af, 'reason': None}
 
