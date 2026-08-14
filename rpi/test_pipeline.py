@@ -216,6 +216,20 @@ eq('and it is reused, not multiplied',
 back = cv2.imread(staged, cv2.IMREAD_GRAYSCALE)
 eq('the staged image survives the round trip', back.shape, (90, 40))
 
+# --- the live picture, written where a server may be reading it ------------
+import tempfile                                               # noqa: E402
+
+shot = os.path.join(tempfile.gettempdir(), 'uberscan-test-frame.jpg')
+eq('a frame is written', PL.write_jpeg(shot, np.full((60, 80, 3), 128, np.uint8)), None)
+ok_('...and is a readable jpeg', cv2.imread(shot) is not None)
+eq('...at the size given', cv2.imread(shot).shape[:2], (60, 80))
+ok_('no half-written file is left behind', not os.path.exists(shot + '.part'))
+# A failure is reported, not raised: this runs on a timer and the scanner has
+# better things to do than die because it could not draw a picture.
+eq('an unwritable path reports rather than raises',
+   type(PL.write_jpeg('/nonexistent-dir/x.jpg', np.zeros((4, 4, 3), np.uint8))), str)
+os.remove(shot)
+
 # --- the log has to be worth pasting ---------------------------------------
 import scan_pi as SP                                          # noqa: E402
 

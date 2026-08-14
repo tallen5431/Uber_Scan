@@ -166,34 +166,20 @@ _snapshot_error = None
 
 
 def write_snapshot(frame, cfg, path):
-    """Write what the camera sees, atomically.
-
-    Encoded to bytes first, then renamed into place. Writing straight to a
-    temporary name does not work here: OpenCV chooses its encoder from the file
-    extension, so a ".tmp" suffix has no writer at all. Encoding by format and
-    writing plain bytes keeps the rename — the web server may read this at any
-    moment, and half a JPEG is worse than a slightly old one.
-    """
+    """Write what the camera sees, for the live page. Never fatally."""
     global _snapshot_error
     try:
         view = PL.snapshot(frame, np.array(cfg['quad'], dtype=np.float32),
                            cfg.get('roi'), cfg.get('cardHeight', 900))
-        ok, buf = cv2.imencode('.jpg', view, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-        if not ok:
-            raise RuntimeError('jpeg encoding failed')
-
-        tmp = path + '.part'
-        with open(tmp, 'wb') as fh:
-            fh.write(buf.tobytes())
-        os.replace(tmp, path)
-        _snapshot_error = None
     except Exception as e:
-        # This runs several times a second; repeating one broken thing that
-        # often buries everything else in the log.
         message = str(e)
-        if message != _snapshot_error:
-            _snapshot_error = message
-            print('snapshot failed (further identical errors suppressed): %s' % message)
+    else:
+        message = PL.write_jpeg(path, view)
+    # This runs several times a second; repeating one broken thing that often
+    # buries everything else in the log.
+    if message and message != _snapshot_error:
+        print('snapshot failed (further identical errors suppressed): %s' % message)
+    _snapshot_error = message
 
 
 def log(message):

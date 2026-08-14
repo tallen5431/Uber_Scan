@@ -286,6 +286,14 @@ write a config from it, and the scanner warns at startup if the stored
 calibration has the problem. Fill the frame with the phone, but leave a dark
 border all the way round it.
 
+**The camera view on `/live.html` is live while aiming**, so the page telling
+you to move the mount also shows you the mount. That matters more since the
+refusal above: aiming is now a state you can be held in, and being held there
+with no picture is being asked to aim blind. Port 8081 still serves the same
+overlay as a full-size MJPEG stream if you want it — but note that the address
+to open is the Pi's, not `localhost`, since the phone you are holding while you
+move the bracket is not the Pi.
+
 ## Darkness and the wavy screen
 
 A phone display is not a lit object, it is a strobe. Backlights and OLED panels
@@ -572,7 +580,7 @@ The Pi parser is a port of the browser one. Both run the same corpus:
 node tests/corpus.test.js       # 127 checks
 python3 rpi/test_parser.py      # the same 127 checks
 python3 rpi/test_accumulate.py  # 38 checks on merging across frames
-python3 rpi/test_pipeline.py    # 79 checks on where, how big, and what to log
+python3 rpi/test_pipeline.py    # 84 checks on where, how big, and what to log
 python3 rpi/test_exposure.py    # 38 checks on flicker, brightness and gain
 python3 rpi/test_track.py       # 43 checks on following the phone
 ```

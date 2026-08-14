@@ -384,7 +384,10 @@ if (scannerEnabled()) {
   console.log('\nPi scanner running here too' +
     (calibrated() ? '.' : ' — not calibrated yet, so it starts by aiming.'));
   if (!calibrated()) {
-    console.log('  aim the camera: http://localhost:8081/   (the overlay tells you when)');
+    // Deliberately not "localhost": the phone you are holding while you move
+    // the mount is not this machine, and localhost there is the phone.
+    console.log('  aim the camera: open /live.html — the camera view is live while aiming');
+    console.log('  (or http://<this-pi>:8081/ for a full-size stream)');
   }
   console.log('  live verdict: /live.html      state: /api/status');
   startScanner();

@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(HERE, 'config.json')
+SNAPSHOT = os.path.join(HERE, 'live-frame.jpg')
 
 # The frame has to be this good, this consistently, before calibrating itself.
 # One lucky frame while the bracket is still in your hand is not a mount.
@@ -79,8 +80,9 @@ def aim(as_json, port, timeout, min_card=None):
     readings in a row.
     """
     import cv2
-    import preview as PV
     import camera as CAM
+    import pipeline as PL
+    import preview as PV
     from calibrate import DEFAULT_ROI, MIN_CARD_PIXELS
 
     try:
@@ -98,8 +100,10 @@ def aim(as_json, port, timeout, min_card=None):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
-    emit({'phase': 'aim', 'message': 'not calibrated — open http://<this-pi>:%d/ and '
-          'move the mount until the overlay is green' % port, 'previewPort': port}, as_json)
+    emit({'phase': 'aim', 'message': 'not calibrated — open /live.html and move the mount '
+          'until this says good. The camera view there is live during aiming; port %d '
+          'serves the same thing as a plain MJPEG stream if you want it full size.'
+          % port, 'previewPort': port}, as_json)
 
     floor = min_card or MIN_CARD_PIXELS
     good = 0
@@ -108,12 +112,19 @@ def aim(as_json, port, timeout, min_card=None):
     try:
         while time.time() - started < timeout:
             frame = source.frame()
-            _, card_px = PV.annotate(frame, source.scale_to_capture, source.lens_position)
+            shown, card_px = PV.annotate(frame, source.scale_to_capture, source.lens_position)
+
+            # Put the annotated frame where the live page looks for it. Aiming a
+            # camera you cannot see is the worst part of building this rig, and
+            # until now the only picture during this phase was on a second port
+            # that the printed URL gave as "localhost" — which, from the phone
+            # you are holding, is the phone. The page that is already telling
+            # you to move the mount can show you the mount.
+            PL.write_jpeg(SNAPSHOT, PL.resize_height(shown, 480))
 
             sharp = None
             spill = []
             if card_px:
-                import pipeline as PL
                 quad = PL.detect_screen_quad(frame)
                 if quad is not None:
                     spill = PL.touches_edge(quad, frame.shape)

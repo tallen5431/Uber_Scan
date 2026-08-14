@@ -60,7 +60,7 @@
       <div class="verdict-label" id="verdictLabel">WAITING FOR AN OFFER</div>
       <div class="rate big">
         <span class="rate-value" id="perHour">--</span>
-        <span class="rate-unit">/hr</span>
+        <span class="rate-unit" id="rateUnit">/hr</span>
       </div>
       <div class="submetrics">
         <div class="sub"><span id="vPay">--</span><small id="lPay">pay</small></div>
@@ -101,11 +101,14 @@
 
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
-   'lPay', 'lMin', 'lMile', 'raw', 'rawText']
+   'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
-  // Keep the headline number inside the panel whatever it says.
-  function setRate(text) {
+  // Keep the headline number inside the panel whatever it says. The unit comes
+  // with it: while aiming, that number is a pixel count, and labelling a pixel
+  // count "/hr" made a mount measurement read as a fantastic offer.
+  function setRate(text, unit) {
+    el.rateUnit.textContent = unit || '/hr';
     el.perHour.textContent = text;
     el.perHour.style.setProperty('--chars', Math.max(3, text.length));
     el.verdict.classList.toggle('novalue', text === '--');
@@ -138,7 +141,8 @@
       var p = phase || {};
       el.verdict.className = 'verdict ' + (p.phase === 'error' ? 'no' : 'empty');
       el.verdictLabel.textContent = PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER';
-      setRate(p.cardPixels ? String(p.cardPixels) : '--');
+      setRate(p.cardPixels ? String(p.cardPixels) : '--',
+              p.phase === 'aim' ? 'px' : '/hr');
       el.vPay.textContent = el.vMin.textContent = el.vMile.textContent = '--';
 
       var aiming = p.phase === 'aim';
@@ -152,8 +156,8 @@
       }
       el.warn.textContent = p.message || '';
       el.warn.hidden = !p.message;
-      el.detail.textContent = p.previewPort
-        ? 'live camera view on port ' + p.previewPort
+      el.detail.textContent = aiming
+        ? 'the view below is live — move the mount until this says good'
         : (r ? 'scanner running, no offer on screen' + trackNote(r) : '');
       showRaw(r && r.text);
       return;

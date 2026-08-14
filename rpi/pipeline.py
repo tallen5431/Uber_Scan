@@ -221,6 +221,31 @@ def fit_for_ocr(card, height=OCR_CARD_HEIGHT, max_pixels=MAX_OCR_PIXELS):
     return card
 
 
+def write_jpeg(path, image, quality=80):
+    """Write an image where a web server may be reading it at any moment.
+
+    Encoded to bytes first, then renamed into place. Writing straight to a
+    temporary name does not work: OpenCV chooses its encoder from the file
+    extension, so a ".tmp" suffix has no writer at all. Encoding by format and
+    renaming plain bytes keeps the swap atomic — half a JPEG is worse than a
+    slightly old one.
+
+    Returns None on success or the error text, because this runs on a timer and
+    a caller that cannot show the picture should say so rather than die.
+    """
+    try:
+        ok, buf = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+        if not ok:
+            return 'jpeg encoding failed'
+        tmp = path + '.part'
+        with open(tmp, 'wb') as fh:
+            fh.write(buf.tobytes())
+        os.replace(tmp, path)
+        return None
+    except Exception as e:
+        return str(e)
+
+
 def resize_height(image, height):
     """Resize to an exact height, either direction, keeping the aspect."""
     height = int(height)
