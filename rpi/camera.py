@@ -17,14 +17,33 @@ there is none it says so plainly instead of silently doing nothing.
 import glob
 import json
 import os
+import re
 
-# Where tuning files live, newest layouts first. pisp is Pi 5, vc4 is Pi 4 and
-# earlier, and the flat directory is older libcamera.
-TUNING_DIRS = [
-    '/usr/share/libcamera/ipa/rpi/pisp',
-    '/usr/share/libcamera/ipa/rpi/vc4',
-    '/usr/share/libcamera/ipa/raspberrypi',
-]
+# Tuning lives per ISP pipeline: pisp on Pi 5, vc4 on Pi 4 and earlier, and a
+# flat directory on older libcamera. These are NOT interchangeable — a Pi 5
+# tuning describes an ISP a Pi 4 does not have — so the running pipeline decides
+# the order rather than a fixed preference.
+PISP_DIR = '/usr/share/libcamera/ipa/rpi/pisp'
+VC4_DIR = '/usr/share/libcamera/ipa/rpi/vc4'
+LEGACY_DIR = '/usr/share/libcamera/ipa/raspberrypi'
+
+
+def pi_model():
+    try:
+        with open('/proc/device-tree/model') as fh:
+            return fh.read().strip('\x00').strip()
+    except OSError:
+        return ''
+
+
+def tuning_dirs():
+    """Directories to search, the pipeline this machine actually runs first."""
+    if 'Raspberry Pi 5' in pi_model():
+        return [PISP_DIR, VC4_DIR, LEGACY_DIR]
+    return [VC4_DIR, PISP_DIR, LEGACY_DIR]
+
+
+TUNING_DIRS = tuning_dirs()
 
 AF_KEY = 'rpi.af'
 
@@ -121,7 +140,25 @@ def find_tuning(sensor):
     return (ordered[0] if ordered else None), False
 
 
+def sensor_from_device_tree():
+    """The attached sensor, without starting libcamera.
+
+    Needed because LIBCAMERA_RPI_TUNING_FILE is read when the camera manager
+    registers cameras. Asking picamera2 for the sensor name starts that manager,
+    so anything decided afterwards arrives too late to matter.
+    """
+    for pattern in ('/proc/device-tree/soc/*/*/*@*', '/proc/device-tree/soc/*/*@*'):
+        for path in sorted(glob.glob(pattern)):
+            name = os.path.basename(path).split('@')[0]
+            if re.match(r'^(imx|ov)\d+', name):
+                return name
+    return None
+
+
 def sensor_name(default='imx519'):
+    found = sensor_from_device_tree()
+    if found:
+        return found
     try:
         from picamera2 import Picamera2
         info = Picamera2.global_camera_info()
@@ -169,12 +206,22 @@ def open_camera(prefer_autofocus=True):
             'Install Arducam\'s tuning for this module, or focus the lens by hand.'
             % sensor)
 
-    # Point libcamera at the real file on disk. Handing picamera2 a loaded dict
-    # instead makes it write a temp file and set LIBCAMERA_RPI_TUNING_FILE to
-    # that path — which is fine until the variable is inherited by a child or an
-    # exec, because the temp file dies with the process that made it and the
-    # camera then fails to register at all. A permanent path survives both.
-    if tuning_path and prefer_autofocus and has_af:
+    # Only override when overriding actually buys something. libcamera loads the
+    # tuning for the running pipeline by itself, and if that file already has
+    # autofocus there is nothing to fix — pointing it elsewhere would risk
+    # handing a vc4 pipeline a tuning written for a different ISP.
+    default_path = os.path.join(TUNING_DIRS[0], sensor + '.json')
+    default_has_af = _has_af(default_path)
+    focus['pipelineDefault'] = default_path if os.path.exists(default_path) else None
+
+    if default_has_af:
+        focus['tuning'] = default_path
+        os.environ.pop('LIBCAMERA_RPI_TUNING_FILE', None)
+    elif tuning_path and prefer_autofocus and has_af:
+        # Point libcamera at the real file on disk. Handing picamera2 a loaded
+        # dict instead makes it write a temp file and set the variable to that
+        # path — fine until it is inherited across an exec, because the temp
+        # file dies with the process that made it.
         os.environ['LIBCAMERA_RPI_TUNING_FILE'] = tuning_path
     else:
         # Never leave an inherited value behind: a stale one points at a file

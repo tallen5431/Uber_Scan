@@ -141,7 +141,9 @@ def aim(as_json, port, timeout, min_card=None):
 
 def _aim_hint(card_px, sharp, min_px, min_sharp):
     if not card_px:
-        return 'no phone screen in frame — is it lit and pointing at the camera?'
+        return ('no phone screen found — it must be lit, in frame, and with some '
+                'darker surround; a frame filled edge to edge cannot be told '
+                'apart from the room')
     if card_px < min_px:
         return 'card is %d px, needs %d — move the camera closer' % (card_px, min_px)
     if not sharp or sharp < min_sharp:

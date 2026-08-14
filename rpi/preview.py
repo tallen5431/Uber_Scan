@@ -138,10 +138,17 @@ def annotate(frame, scale_to_capture, lens_position=None):
     out = frame.copy()
 
     if quad is None:
-        cv2.putText(out, 'no screen found', (16, 44),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.1, RED, 3)
-        cv2.putText(out, 'is the phone lit and in frame?', (16, 86),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, RED, 2)
+        # Distinguish "nothing bright" from "everything bright", because the
+        # fixes are opposites: bring the phone in, or back off from it.
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        bright = float(np.count_nonzero(mask)) / mask.size
+        if bright > 0.85:
+            first, second = 'frame is all screen', 'back off so a dark border surrounds the phone'
+        else:
+            first, second = 'no screen found', 'is the phone lit and in frame?'
+        cv2.putText(out, first, (16, 44), cv2.FONT_HERSHEY_SIMPLEX, 1.1, RED, 3)
+        cv2.putText(out, second, (16, 86), cv2.FONT_HERSHEY_SIMPLEX, 0.7, RED, 2)
         return out, None
 
     card_px = int(round(card_source_pixels(quad, DEFAULT_ROI) * scale_to_capture))

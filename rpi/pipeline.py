@@ -33,11 +33,17 @@ CARD_HEIGHT = 1100         # canonical warp height; the decimal point needs this
 OCR_CONFIG = '--oem 1 --psm 6'
 
 
-def detect_screen_quad(frame, min_area_frac=0.05):
+def detect_screen_quad(frame, min_area_frac=0.05, max_area_frac=0.90):
     """Find the phone screen: in a dark car it is the bright rectangle.
 
     Used at calibration time, not per frame — with a fixed mount the corners
     only need finding once.
+
+    A result covering nearly the whole frame is rejected. Otsu splits an image
+    into light and dark whatever is in it, so a scene with no dark surround
+    "finds" a screen the size of the picture — and calibrating on that makes the
+    card region an arbitrary strip of the room. Better to report no screen and
+    say why than to lock in a frame-shaped one.
     """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (7, 7), 0)
@@ -49,9 +55,18 @@ def detect_screen_quad(frame, min_area_frac=0.05):
     if not contours:
         return None
 
-    frame_area = frame.shape[0] * frame.shape[1]
+    h, w = frame.shape[:2]
     best = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(best) < frame_area * min_area_frac:
+    area = cv2.contourArea(best)
+    if area < h * w * min_area_frac or area > h * w * max_area_frac:
+        return None
+
+    # A phone stood in portrait can fill the frame's height, but it cannot also
+    # fill its width — the frame is 4:3 and the phone is about 1:2. Something
+    # spanning both dimensions is the picture itself, not a screen in it, which
+    # is what Otsu returns when the scene has no darker surround to split off.
+    bx, by, bw, bh = cv2.boundingRect(best)
+    if bw > w * 0.95 and bh > h * 0.95:
         return None
 
     peri = cv2.arcLength(best, True)

@@ -160,6 +160,12 @@ partly out of shot. Only 2328×1748 and 4656×3496 see everything, so those are
 the only two `calibrate.py --mode` offers, and `scan_pi.py` pins the mode
 explicitly rather than letting the size request choose one.
 
+**Tuning files are per pipeline, not interchangeable.** Pi 5 uses `pisp`, Pi 4
+and earlier use `vc4`, and a tuning written for one ISP does not describe the
+other. The search order follows the machine's own pipeline, and the tuning is
+only overridden when the pipeline's own file lacks autofocus and another has it
+— otherwise libcamera's own choice stands.
+
 **2328×1748 is the default and the right one.** 30fps is far more than this
 needs, and 2×2 binning gives cleaner pixels in a dim car. Go to 4656×3496 only
 if calibration says the card is too small — 9fps is still plenty, since offers
@@ -270,6 +276,18 @@ off-Pi.
 |---|---|
 | **Green outline** | the four corners locked in at calibration. Every frame is perspective-warped from inside it, which is what makes the text square rather than skewed. If it is not hugging the phone's screen, the calibration is stale — recalibrate. |
 | **White inset** | the exact image handed to the reader: de-skewed, cropped to the card, contrast boosted. If the pay, minutes and miles are legible there, the reader has everything it needs. |
+
+**If the green outline covers the whole view, it has not found your phone.** The
+screen is located by splitting the frame into light and dark, which needs some
+darker surround to split against — fill the frame edge to edge and the brightest
+region *is* the picture. That used to calibrate happily on a frame-shaped
+"screen", which makes the card region an arbitrary strip of the room and
+explains a scan area that looks far too narrow. It is now rejected, and the
+overlay says `frame is all screen — back off so a dark border surrounds the
+phone`.
+
+Fill most of the frame with the phone, but leave a margin of something darker
+around it.
 
 The view refreshes about twice a second while the page is open and drops to
 every three seconds when nothing is watching, because a live picture is only
