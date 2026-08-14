@@ -1,5 +1,5 @@
 /* Offline cache. Bump CACHE when files change so phones pick up the new version. */
-var CACHE = 'uberscan-v4';
+var CACHE = 'uberscan-v5';
 
 var ASSETS = [
   './',
@@ -10,6 +10,7 @@ var ASSETS = [
   'scan.html',
   'scan.css',
   'scan.js',
+  'live.html',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

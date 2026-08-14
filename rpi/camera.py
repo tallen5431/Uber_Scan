@@ -143,6 +143,13 @@ def open_camera(prefer_autofocus=True):
     from picamera2 import Picamera2
 
     acquire_lock()
+
+    # Anything inherited from a parent process is untrustworthy — most likely a
+    # temp file that no longer exists — and it is read before we get a say.
+    inherited = os.environ.get('LIBCAMERA_RPI_TUNING_FILE')
+    if inherited and not os.path.exists(inherited):
+        os.environ.pop('LIBCAMERA_RPI_TUNING_FILE', None)
+
     sensor = sensor_name()
 
     # An explicit override wins: if Arducam's tuning is installed somewhere
@@ -162,12 +169,28 @@ def open_camera(prefer_autofocus=True):
             'Install Arducam\'s tuning for this module, or focus the lens by hand.'
             % sensor)
 
+    # Point libcamera at the real file on disk. Handing picamera2 a loaded dict
+    # instead makes it write a temp file and set LIBCAMERA_RPI_TUNING_FILE to
+    # that path — which is fine until the variable is inherited by a child or an
+    # exec, because the temp file dies with the process that made it and the
+    # camera then fails to register at all. A permanent path survives both.
     if tuning_path and prefer_autofocus and has_af:
-        cam = Picamera2(tuning=Picamera2.load_tuning_file(os.path.basename(tuning_path),
-                                                          dir=os.path.dirname(tuning_path)))
+        os.environ['LIBCAMERA_RPI_TUNING_FILE'] = tuning_path
     else:
-        cam = Picamera2()
+        # Never leave an inherited value behind: a stale one points at a file
+        # that no longer exists and takes the camera down with it.
+        os.environ.pop('LIBCAMERA_RPI_TUNING_FILE', None)
 
+    # A camera that failed to register surfaces as an empty list and then an
+    # IndexError from deep inside picamera2, which says nothing useful.
+    if not Picamera2.global_camera_info():
+        raise RuntimeError(
+            'libcamera registered no cameras. If the log above mentions a tuning '
+            'file it could not open, that file is missing or unreadable: '
+            'LIBCAMERA_RPI_TUNING_FILE=%s'
+            % os.environ.get('LIBCAMERA_RPI_TUNING_FILE', '(unset)'))
+
+    cam = Picamera2()
     return cam, focus
 
 

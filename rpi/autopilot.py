@@ -206,6 +206,12 @@ def scan(as_json, speak, extra_args):
             CAM._lock_handle = None
     except Exception:
         pass
+    # execv passes this environment on. Anything pointing into /tmp came from
+    # picamera2 writing a tuning file for this process, and will be gone before
+    # the scanner reads it.
+    tuning = os.environ.get('LIBCAMERA_RPI_TUNING_FILE', '')
+    if tuning.startswith('/tmp/'):
+        os.environ.pop('LIBCAMERA_RPI_TUNING_FILE', None)
     os.execv(sys.executable, args)
 
 
