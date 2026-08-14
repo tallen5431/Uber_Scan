@@ -167,6 +167,80 @@ def touches_edge(quad, shape, margin=EDGE_MARGIN):
     return hit
 
 
+# How much taller than wide a phone screen is. Used only to size a screen that
+# runs off the frame, where its height cannot be measured directly. Modern
+# phones are 18:9 through 20:9, so assume the shortest: guessing low makes a
+# clipped mount read smaller than it is, and everything downstream would rather
+# under-read the card than over-read it.
+PHONE_ASPECT = 2.0
+
+
+def screen_height_px(quad, shape=None):
+    """How tall the whole phone screen is, in the units the quad is drawn in.
+
+    The quad's own height, until the screen runs off the frame — at which point
+    the quad stops at the frame edge and its height is the *frame's*, not the
+    phone's. Then the only intact measurement left is across the screen, so the
+    height comes from the width.
+    """
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    down = (np.linalg.norm(q[3] - q[0]) + np.linalg.norm(q[2] - q[1])) / 2.0
+    if shape is None or not touches_edge(q, shape):
+        return float(down)
+    across = (np.linalg.norm(q[1] - q[0]) + np.linalg.norm(q[2] - q[3])) / 2.0
+    return float(max(down, across * PHONE_ASPECT))
+
+
+def card_share_of_quad(quad, shape=None):
+    """What fraction of the detected quad the offer card takes up.
+
+    CARD_SHARE is the card's share of a whole *screen*. The quad is the whole
+    screen only when the whole screen is in frame, and on the mount that
+    actually works it is not — so anywhere the quad's own height is the thing
+    being divided up, this is the number, not the constant.
+
+    Getting this wrong does not look wrong, it just costs. A rig logged corners
+    spanning 1690 rows of a 1748-row frame with the top of the phone off the
+    edge: a quad that is 86% card, treated as 50% card. Every read warped the
+    screen 1.7x taller than it needed to be — 2.6 megapixels where 0.9 would
+    do — and since tesseract's cost is linear in pixels and there is a ceiling
+    on what it will be handed (MAX_OCR_PIXELS), the picture was then shrunk
+    back down again. Same text, three times the work, and on a narrow crop the
+    shrinking took the payout below the size it can be read at, so the crop
+    that was meant to be the fast one was the one that could not read.
+    """
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    down = (np.linalg.norm(q[3] - q[0]) + np.linalg.norm(q[2] - q[1])) / 2.0
+    if down <= 0:
+        return CARD_SHARE
+    share = screen_height_px(q, shape) * CARD_SHARE / down
+    # Never below the whole-screen assumption: that is the unclipped answer and
+    # the conservative one. Never above 1.0: the card cannot exceed the quad.
+    return float(min(1.0, max(CARD_SHARE, share)))
+
+
+def quad_window(image, quad, scale=(1.0, 1.0)):
+    """The part of `image` the screen covers — its bounding box, clamped.
+
+    A box rather than a warp because the callers that want this want it often
+    and cheaply, and for measuring light a box is as good: the few corner
+    pixels it picks up outside a slightly rotated screen are the same few every
+    frame. `scale` divides quad coordinates into this image's, for callers
+    working on the small preview stream rather than the capture.
+
+    Returns the whole image, rather than nothing, when the box comes out empty.
+    """
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    h, w = image.shape[:2]
+    x0 = int(max(0, np.floor(q[:, 0].min() / scale[0])))
+    x1 = int(min(w, np.ceil(q[:, 0].max() / scale[0])))
+    y0 = int(max(0, np.floor(q[:, 1].min() / scale[1])))
+    y1 = int(min(h, np.ceil(q[:, 1].max() / scale[1])))
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return image
+    return image[y0:y1, x0:x1]
+
+
 def order_quad(pts):
     """Order corners as top-left, top-right, bottom-right, bottom-left."""
     s = pts.sum(axis=1)
@@ -212,11 +286,18 @@ def preprocess(card):
     return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
 
 
-# Ceiling on the image handed to the reader. Tesseract's cost is roughly linear
-# in pixels, and height alone does not bound them: a wide quad warped to 1800
-# came out 1336px across, which is nearly twice the pixels of a normal card and
-# turned 0.6s reads into 1.4s ones on a real rig. Text size is set by height, so
-# trimming from here costs legibility only once the picture is already outsized.
+# Ceiling on the image handed to the reader, for pictures that are outsized in
+# both directions — a wide quad warped too tall. Height alone does not bound
+# pixels, and an image nobody asked for is work nobody wanted.
+#
+# How much it is worth is smaller than it looks, and worth writing down so the
+# next person does not spend the read budget here. "Tesseract's cost is linear
+# in pixels" is folklore; measured on a real card it is nothing like linear —
+# 1.83MP against 0.76MP is four times the pixels for 26% more time, because the
+# cost is the recogniser walking the text rather than the image. Trimming to
+# this budget also scales text down, and a card trimmed from 900px to 650px
+# still read correctly, so neither side of the trade is large. It stays because
+# an image nobody asked for is work nobody wanted, not because it is a lever.
 MAX_OCR_PIXELS = 1_000_000
 
 
@@ -265,26 +346,39 @@ def resize_height(image, height):
                       interpolation=cv2.INTER_CUBIC if scale > 1 else cv2.INTER_AREA)
 
 
-def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640):
+def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640, card=None):
     """One image that answers "is it looking at the right thing?".
 
     The whole frame with the calibrated corners drawn on it, and inset, the
     exact card image handed to the OCR engine. Aim problems show up in the
     first; focus and glare problems show up in the second.
+
+    This runs several times a second on a small computer that is also trying to
+    read, so it does the least it can: it shrinks first and draws on the small
+    picture, rather than copying and drawing over a 12MB frame to throw 97% of
+    it away, and it will take a card image the reader has already made rather
+    than warping a second one. Pass `card` whenever a read just produced one —
+    the picture is more honest that way as well, since it is then literally
+    what the reader saw and not a re-creation of it.
     """
-    view = frame.copy()
+    scale = width / float(frame.shape[1])
+    # resize returns a new array, so this is also the copy. Linear rather than
+    # area: over a 4-megapixel frame that is the difference between 6ms and
+    # 0.4ms, which at several frames a second is most of what the preview
+    # costs, and the aliasing it trades away lands on a 640px thumbnail of a
+    # car interior. The one part of this picture anybody reads detail from is
+    # the inset, which is the reader's own image and is not resampled here.
+    view = cv2.resize(frame, (width, max(1, int(frame.shape[0] * scale))),
+                      interpolation=cv2.INTER_LINEAR)
     if quad is not None:
-        q = np.asarray(quad, dtype=np.int32)
-        cv2.polylines(view, [q], True, (100, 201, 23), 6)
-
-    scale = width / float(view.shape[1])
-    view = cv2.resize(view, (width, max(1, int(view.shape[0] * scale))),
-                      interpolation=cv2.INTER_AREA)
+        q = (np.asarray(quad, dtype=np.float32) * scale).astype(np.int32)
+        cv2.polylines(view, [q], True, (100, 201, 23), 2)
 
     if quad is not None:
-        card = crop(warp(frame, quad, card_height), roi)
-        card = preprocess(card)
-        card = cv2.cvtColor(card, cv2.COLOR_GRAY2BGR)
+        if card is None:
+            card = preprocess(crop(warp(frame, quad, card_height), roi))
+        if card.ndim == 2:
+            card = cv2.cvtColor(card, cv2.COLOR_GRAY2BGR)
         # Inset it at a third of the width, bottom-right, inside a border so it
         # reads as a separate picture rather than part of the scene.
         cw = width // 3
@@ -408,6 +502,17 @@ FIT_PAD_BELOW = 0.05
 # a box tall enough to look plausible, and a lone payout is furniture.
 FIT_MIN_HEIGHT = 0.28
 
+# How much of the card a crop must be able to hold to be worth believing.
+#
+# Well under 1.0, because a fit is anchored on the payout and the lowest line
+# beneath it — not on the card. On a real Uber card that span plus its padding
+# is about 73% of the card rectangle; the rest is the badge row above and the
+# Accept button below, neither of which is worth a pixel. A floor above that
+# would refuse every correct tightening there is. What it has to exclude is a
+# fit that caught the middle of a card and lost the payout, which measured
+# around 57%. See Scanner.min_crop_height.
+CROP_HOLDS = 0.60
+
 # A payout this close to the top edge of the crop, as a fraction of the crop's
 # height, is not trusted to be whole.
 TOP_EDGE = 0.02
@@ -418,7 +523,7 @@ TOP_EDGE = 0.02
 TIGHTEN_SLACK = 1.30
 
 
-def tighten_roi(lines, image_height, current):
+def tighten_roi(lines, image_height, current, min_height=FIT_MIN_HEIGHT):
     """Shrink a working crop onto the card inside it. Returns a box or None.
 
     The mirror of fit_roi, and the half that makes a clipped screen workable.
@@ -454,8 +559,8 @@ def tighten_roi(lines, image_height, current):
         return None                      # already tight
 
     fitted = [current[0], current[1] + top * scale, current[2], (bottom - top) * scale]
-    if fitted[3] < FIT_MIN_HEIGHT or current[3] < fitted[3] * TIGHTEN_SLACK:
-        return None                      # not enough slack to be worth moving
+    if fitted[3] < min_height or current[3] < fitted[3] * TIGHTEN_SLACK:
+        return None                      # too short to hold a card, or not worth moving
     return fitted
 
 
@@ -478,7 +583,7 @@ def money_is_clipped(lines, image_height):
     return min(l['top'] for l in money) <= TOP_EDGE * image_height
 
 
-def fit_roi(lines, image_height, current=None):
+def fit_roi(lines, image_height, current=None, min_height=FIT_MIN_HEIGHT):
     """Where the offer card is, deduced from where its text landed.
 
     The payout is the top of the card for our purposes — everything above it is
@@ -502,7 +607,7 @@ def fit_roi(lines, image_height, current=None):
 
     y0 = max(0.0, top / float(image_height) - FIT_PAD_ABOVE)
     y1 = min(1.0, bottom / float(image_height) + FIT_PAD_BELOW)
-    if y1 - y0 < FIT_MIN_HEIGHT:
+    if y1 - y0 < min_height:
         return None
 
     x0, w = (current[0], current[2]) if current else (0.0, 1.0)
@@ -571,6 +676,12 @@ class Scanner:
         # can write it down rather than rediscovering it every run.
         self.on_roi = on_roi
 
+        # The card's share of the quad, which is CARD_SHARE only while the
+        # whole screen is in frame. Measured from the first frame that arrives,
+        # because it takes the frame's shape to know whether the quad is the
+        # whole screen or just the part of it that fitted.
+        self.card_share = CARD_SHARE
+
         self._prev = None
         self._dirty = True      # first frame always reads
         self.last_diff = 0.0    # how much the picture moved, for callers that care
@@ -580,6 +691,9 @@ class Scanner:
         self._last_refit = 0.0
         self._misses = 0
         self._proposal = None
+        # Whether this crop has ever produced a whole reading. A crop that has
+        # is defended; one that has not is still a guess. See _adopt.
+        self._roi_proven = False
         self.rescues = 0
         self.dropped = 0
         self.locked = False
@@ -600,9 +714,15 @@ class Scanner:
         widening the crop to stop clipping the payout would shrink the warp,
         and the text would come out smaller than before — the crop would keep
         more of the card and read less of it.
+
+        What it *is* derived from is the card's share of this quad, measured
+        (self.card_share), not the whole-screen constant. On a mount close
+        enough to clip the map away the quad is most of the way to being the
+        card already, and warping as though it were half a screen makes a
+        picture nearly twice as tall as the reader can use.
         """
         if self.roi and self.roi[3] and self.ocr_height:
-            return int(min(max(self.card_height, round(self.ocr_height / CARD_SHARE)),
+            return int(min(max(self.card_height, round(self.ocr_height / self.card_share)),
                            MAX_READ_HEIGHT))
         return self.card_height
 
@@ -612,6 +732,26 @@ class Scanner:
             return screen.shape[0]
         share = (self.roi[3] if self.roi else 1.0) or 1.0
         return int(min(max(self.ocr_height / share, self.ocr_height), RESCUE_MAX_HEIGHT))
+
+    @property
+    def min_crop_height(self):
+        """Shortest crop worth believing, as a fraction of the quad.
+
+        A crop cannot be much shorter than the card and still hold it, and how
+        tall the card is on this mount is known (card_share) rather than
+        guessed. Without this the failure is self-inflicted and self-sustaining:
+        a fit that catches only the middle of the card leaves a crop far wider
+        than it is tall, the pixel ceiling then shrinks the text to fit, the
+        payout drops below a readable size, and the reads that follow fail in
+        exactly the way that asks for another re-fit.
+
+        This is above FIT_MIN_HEIGHT even on an unclipped mount — 0.375 of a
+        screen against a bare 0.28 — because the bare number was a guess made
+        without knowing how big the card was, and now that is known. The max()
+        is only there so a caller that sets card_share by hand cannot go under
+        the old floor.
+        """
+        return max(FIT_MIN_HEIGHT, self.card_share * CROP_HOLDS)
 
     def _motion(self, frame):
         small = cv2.cvtColor(cv2.resize(frame, MOTION_SIZE, interpolation=cv2.INTER_AREA),
@@ -663,6 +803,11 @@ class Scanner:
         """Full read of one frame, ignoring the motion gate."""
         now = time.time() if now is None else now
         t0 = time.perf_counter()
+        if self.quad is not None:
+            # Before anything is sized, work out what this quad actually is. A
+            # tracked quad moves and a re-locked one can change shape, so this
+            # is re-measured per read rather than settled once at startup.
+            self.card_share = card_share_of_quad(self.quad, frame.shape)
         screen = warp(frame, self.quad, self.read_height) if self.quad is not None else frame
         t1 = time.perf_counter()
         prepped = preprocess(fit_for_ocr(crop(screen, self.roi), self.ocr_height))
@@ -689,7 +834,9 @@ class Scanner:
             # whole visible screen cannot miss the card however the phone is
             # framed; this is what stops it staying that expensive.
             if parsed['complete'] and self.roi:
-                refit = self._adopt(tighten_roi(lines, prepped.shape[0], self.roi), now)
+                self._roi_proven = True
+                refit = self._adopt(tighten_roi(lines, prepped.shape[0], self.roi,
+                                                self.min_crop_height), now)
             else:
                 self._proposal = None
         elif self.roi:
@@ -742,6 +889,14 @@ class Scanner:
         the same either way. A single fit is one OCR pass on a hard image and is
         quite capable of being wrong; two that agree is evidence, and having
         moved, it stays put for a while so the crop cannot oscillate.
+
+        That settling time is owed to a crop that has *earned* it. A crop which
+        has produced a whole reading is worth defending against one bad search;
+        a crop that has never read anything is a guess, and making a guess sit
+        out the same six seconds is how the box ends up somewhere useless and
+        stays there. So the wait applies only once the crop has worked at least
+        once, which is the difference between recovering inside one offer and
+        recovering inside several.
         """
         if not fitted or _same_roi(fitted, self.roi):
             self._proposal = None
@@ -749,12 +904,13 @@ class Scanner:
         if not (self._proposal and _same_roi(fitted, self._proposal, REFIT_AGREE)):
             self._proposal = fitted
             return None
-        if (now - self._last_refit) < REFIT_EVERY:
+        if self._roi_proven and (now - self._last_refit) < REFIT_EVERY:
             return None
 
         self._proposal = None
         self._last_refit = now
         self._misses = 0
+        self._roi_proven = False
         self.roi = fitted
         if self.on_roi:
             self.on_roi(fitted)
@@ -790,7 +946,8 @@ class Scanner:
         if not parsed['complete']:
             return found, None
 
-        fitted = self._adopt(fit_roi(lines, wide.shape[0], self.roi), now)
+        fitted = self._adopt(fit_roi(lines, wide.shape[0], self.roi,
+                                     self.min_crop_height), now)
         if not fitted:
             return found, None      # the card is where we thought, or not agreed yet
         self.rescues += 1

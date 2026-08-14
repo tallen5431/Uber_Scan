@@ -51,11 +51,9 @@ SHARP_ROI = [0.0, 0.40, 1.0, 0.60]
 MIN_CARD_PIXELS = 380          # below this, do not bother
 GOOD_CARD_PIXELS = 450         # above this, no notes
 
-# How much taller than wide a phone screen is, used only to size a screen that
-# runs off the frame (card_source_pixels). Modern phones are 18:9 through 20:9,
-# so the shortest of those is the one to assume: guessing low makes a clipped
-# mount read smaller than it is, and a floor that errs small is a floor.
-PHONE_ASPECT = 2.0
+# Re-exported: the aiming copy reads better next to the two pixel floors above,
+# but it belongs with the geometry that uses it.
+PHONE_ASPECT = PL.PHONE_ASPECT
 
 # The two IMX519 modes that see the whole sensor. 1280x720 and 1920x1080 are
 # cropped windows (2560x1440 and 3840x2160 respectively), so they cut field of
@@ -211,20 +209,13 @@ def card_source_pixels(quad, shape=None):
     Across the screen nothing is missing, so the height is inferred from the
     width using the shortest aspect ratio phones come in. That errs low, which
     is the right way to err for a floor.
+
+    The measuring itself lives in pipeline.screen_height_px, because the reader
+    needs the same answer for a different reason — how tall to warp — and two
+    copies of this geometry would be two things to get wrong.
     """
-    import numpy as np
-
     import pipeline as PL
-    left = np.linalg.norm(quad[3] - quad[0])
-    right = np.linalg.norm(quad[2] - quad[1])
-    screen_px = (left + right) / 2.0
-
-    if shape is not None and PL.touches_edge(quad, shape):
-        top = np.linalg.norm(quad[1] - quad[0])
-        bottom = np.linalg.norm(quad[2] - quad[3])
-        across = (top + bottom) / 2.0 * PHONE_ASPECT
-        screen_px = max(screen_px, across)
-    return int(round(screen_px * PL.CARD_SHARE))
+    return int(round(PL.screen_height_px(quad, shape) * PL.CARD_SHARE))
 
 
 if __name__ == '__main__':

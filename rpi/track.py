@@ -53,6 +53,11 @@ AGREE = 5
 # same screen, as a fraction of the screen's own diagonal.
 MAX_JUMP = 0.22
 
+# ...and within how far it is a nudge rather than a move: close enough that,
+# given it is also the same size, there is nothing else it could be. Followed
+# without waiting for agreement.
+NUDGE = 0.05
+
 # ...and how close two consecutive candidates must be to count as agreeing.
 SETTLE = 0.06
 
@@ -124,8 +129,14 @@ class QuadTracker:
         self.agreeing = self.agreeing + 1 if consistent else 1
         self._candidate = candidate
 
-        if near(candidate, self.quad, MAX_JUMP):
-            if self.agreeing >= self.agree:
+        if near(candidate, self.quad, MAX_JUMP) and same_size(candidate, self.quad):
+            # A correction this small, of a thing this size, cannot be anything
+            # but the screen: a hand or a reflection arrives somewhere else or
+            # at some other size, and both are already excluded by here. So a
+            # nudge is followed on the first check that sees it, and only the
+            # bigger moves have to argue their case. That is the difference
+            # between the outline catching up in half a second and in four.
+            if self.agreeing >= self.agree or near(candidate, self.quad, NUDGE):
                 self.quad = ease_toward(self.quad, candidate, self.ease)
                 self.moves += 1
                 return True
@@ -187,6 +198,16 @@ def span(quad):
 # How far the diagonal may differ and still be the same phone, seen from a
 # slightly different place. A phone that has genuinely moved in the mount stays
 # about the same size; something a third bigger or smaller is a different thing.
+#
+# This guards both paths, and for a while it only guarded the dramatic one. The
+# reasoning was that a re-lock takes the candidate whole, so it had better be
+# the right thing — while drift only eases 35% of the way and looked harmless.
+# It is not harmless: easing has no floor. A candidate a fifth smaller than the
+# screen sits inside MAX_JUMP, so the outline could be walked down onto the
+# white card, or onto the lit half of a dimmed screen, one third at a time,
+# with every individual step looking reasonable. That is a green box that ends
+# up too small for no visible reason, and a crop measured against it that is
+# wrong in a way nothing downstream can detect.
 SIZE_BAND = (0.78, 1.28)
 
 

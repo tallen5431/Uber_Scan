@@ -72,12 +72,25 @@ def banding_score(frames):
 
 
 def brightness(gray, percentile=BRIGHT_PERCENTILE):
-    """How bright the bright part is — the card, rather than the dark surround."""
+    """How bright the bright part is — the card, rather than the dark surround.
+
+    The percentile is a stand-in for knowing where the card is. Hand this the
+    screen when the caller does know (see AutoGain), because the stand-in gets
+    worse the more dark room there is around the phone.
+    """
     return float(np.percentile(np.asarray(gray, dtype=np.float32), percentile))
 
 
 def clipped_fraction(gray):
-    """Share of the picture blown out. Detail lost here cannot be recovered."""
+    """Share of the picture blown out. Detail lost here cannot be recovered.
+
+    Unlike brightness this has no percentile to hide behind: it is a share of
+    whatever it is given, so giving it the whole frame divides the answer by
+    however much of that frame is dark car. A rig ran with its card at 237 and
+    a fifth of it blown out — which should have backed the gain straight off —
+    and the guard never fired, because over the whole frame that came to 9%
+    against a threshold of 8%. Give it the screen.
+    """
     a = np.asarray(gray)
     return float(np.count_nonzero(a >= CLIPPED_AT)) / max(a.size, 1)
 

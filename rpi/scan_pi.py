@@ -40,7 +40,15 @@ DEFAULT_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'liv
 # it. The server touches a file whenever the browser fetches a frame; within
 # that window the view is worth refreshing quickly, and outside it a slow tick
 # is enough to prove the camera is alive.
-SNAPSHOT_FAST = 0.4
+#
+# The fast rate is what someone watching the page actually experiences, so it
+# is set by what looks alive rather than by what is cheap. Raising it was paid
+# for first: a snapshot used to copy a 12MB frame, draw on it at full size,
+# shrink it with an area filter and then warp a second copy of a card the
+# reader had already made. It now shrinks once, draws on the small picture and
+# reuses the reader's card — about a quarter of the work, which buys nearly
+# three times the frame rate and still costs less than it did.
+SNAPSHOT_FAST = 0.15
 SNAPSHOT_IDLE = 3.0
 
 # The motion gate fires once per offer, because a card sitting still is not a
@@ -165,12 +173,19 @@ def start_camera(cfg, exposure_us, gain, lens):
 _snapshot_error = None
 
 
-def write_snapshot(frame, cfg, path):
-    """Write what the camera sees, for the live page. Never fatally."""
+def write_snapshot(frame, cfg, path, quad=None, card=None):
+    """Write what the camera sees, for the live page. Never fatally.
+
+    `quad` overrides the calibrated corners so the outline follows the tracker
+    rather than lagging behind it, and `card` is the reader's own last picture,
+    which saves warping another one.
+    """
     global _snapshot_error
     try:
-        view = PL.snapshot(frame, np.array(cfg['quad'], dtype=np.float32),
-                           cfg.get('roi'), cfg.get('cardHeight', 900))
+        if quad is None:
+            quad = np.array(cfg['quad'], dtype=np.float32)
+        view = PL.snapshot(frame, quad, cfg.get('roi'),
+                           cfg.get('cardHeight', 900), card=card)
     except Exception as e:
         message = str(e)
     else:
@@ -389,8 +404,15 @@ def main():
         cfg['roi'] = roi
         roi_dirty[0] = True
         health.refits += 1
-        log('crop moved: %s -> %s (reads were failing; the card was found there '
-            'by two whole-screen searches that agreed)' % (_fmt_roi(was), _fmt_roi(roi)))
+        # Say which of the two it was. They mean opposite things about how the
+        # scanner is doing — one is a repair after failures, the other is a
+        # working crop being trimmed — and a log that called both "reads were
+        # failing" made a healthy scanner look like a broken one.
+        widened = was is None or roi[3] > was[3] + 0.01
+        why = ('reads were failing; the card was found there by two '
+               'whole-screen searches that agreed' if widened else
+               'reads were working; trimmed onto the card two reads agreed on')
+        log('crop moved: %s -> %s (%s)' % (_fmt_roi(was), _fmt_roi(roi), why))
 
     scanner = PL.Scanner(
         quad=np.array(cfg['quad'], dtype=np.float32),
@@ -511,8 +533,20 @@ def main():
                 # where it was measured — moving it would undo the flicker
                 # arithmetic — and gain does the adapting, slowly, off the same
                 # small frame the gate just used.
+                #
+                # Measured on the screen, not the frame. The dark car around
+                # the phone is most of the picture and none of the subject: it
+                # drags the brightness reading down and divides the blown-out
+                # fraction by however much of the frame it fills, so a card
+                # sitting at 237 with a fifth of it clipped still asked for
+                # more gain. Rig logs showed the gain hunting between 6.8 and
+                # its 8.0 ceiling while the card was over-exposed the whole
+                # time, which is also what turns a screen's flicker into the
+                # ripple that fails reads.
                 if auto_gain is not None and scanner.settled:
-                    new_gain = auto_gain.update(luma, now)
+                    lit = PL.quad_window(luma, scanner.quad, track_scale) \
+                        if scanner.quad is not None else luma
+                    new_gain = auto_gain.update(lit, now)
                     if new_gain is not None:
                         cam.set_controls({'AnalogueGain': float(new_gain)})
                         cfg['analogueGain'] = round(new_gain, 3)
@@ -535,7 +569,8 @@ def main():
                 request.release()
 
             if args.snapshot and (due or do_read):
-                write_snapshot(frame, cfg, args.snapshot)
+                write_snapshot(frame, cfg, args.snapshot,
+                               quad=scanner.quad, card=previous_card)
                 last_snapshot = time.time()
 
             if not do_read:

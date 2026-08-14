@@ -19,6 +19,16 @@ import json
 import os
 import re
 
+# libcamera narrates its startup at INFO on stderr — which media node it bound,
+# which yaml it read, the sensor format it picked — seven lines every time the
+# camera is opened, and the camera is opened twice per run. A supervisor that
+# tags stderr as an error then files all of it under errors, so the log a
+# person pastes back is mostly this. Warnings and errors still come through,
+# and the lines worth having (tuning file, autofocus, sensor mode) are printed
+# by this program in its own words. Set before picamera2 is imported anywhere,
+# and never over the top of a choice already made.
+os.environ.setdefault('LIBCAMERA_LOG_LEVELS', '*:WARN')
+
 # Tuning lives per ISP pipeline: pisp on Pi 5, vc4 on Pi 4 and earlier, and a
 # flat directory on older libcamera. These are NOT interchangeable — a Pi 5
 # tuning describes an ISP a Pi 4 does not have — so the running pipeline decides

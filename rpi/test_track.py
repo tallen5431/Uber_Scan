@@ -43,9 +43,15 @@ def frame_with_phone(x, y, size=PHONE):
     frame = np.full((H, W, 3), 22, np.uint8)
     w, h = size
     cv2.rectangle(frame, (x, y), (x + w, y + h), (238, 240, 238), -1)
-    for i in range(6):        # card-ish content, so it is not a flat block
-        cv2.rectangle(frame, (x + 20, y + 320 + i * 45),
-                      (x + w - 20, y + 336 + i * 45), (90, 90, 90), -1)
+    # Card-ish content, so it is not a flat block. Placed as a fraction of the
+    # phone rather than at fixed offsets, or a smaller phone gets its text
+    # painted on the dark ground underneath it and stops being detectable at
+    # all — which would make a shrunken-candidate test pass for the wrong
+    # reason.
+    for i in range(6):
+        top = y + int(h * (0.52 + i * 0.072))
+        cv2.rectangle(frame, (x + w // 15, top),
+                      (x + w - w // 15, top + max(3, h // 40)), (90, 90, 90), -1)
     return frame
 
 
@@ -77,22 +83,37 @@ ok_('detected corners land on it', T.distance(found, quad_at(400, 140)) < 5.0)
 full = PL.detect_screen_quad(frame_with_phone(400, 140))
 ok_('thumbnail detection agrees with full', T.distance(found, full) < 4.0)
 
-# --- nothing moves until the same thing is seen repeatedly ------------------
+# --- a real move is not believed until it is repeated -----------------------
 start = quad_at(400, 140)
+SPAN = T.span(start)
+MOVED = (460, 180)          # far enough to be a move rather than a nudge
+ok_('the test move is a move, not a nudge',
+    T.NUDGE * SPAN < T.distance(start, quad_at(*MOVED)) < T.MAX_JUMP * SPAN)
+
 tr = T.QuadTracker(start)
-drifted = frame_with_phone(418, 152)
-# Nothing happens until the same thing has been seen AGREE times running.
+drifted = frame_with_phone(*MOVED)
 for i in range(T.AGREE - 1):
     eq('check %d does not move it' % (i + 1), tr.update(drifted, now=1.0 + 2.0 * i), False)
 eq('the last one does', tr.update(drifted, now=1.0 + 2.0 * (T.AGREE - 1)), True)
 ok_('and it moved toward the phone, not onto it',
-    0 < T.distance(tr.quad, start) < T.distance(start, quad_at(418, 152)))
+    0 < T.distance(tr.quad, start) < T.distance(start, quad_at(*MOVED)))
 
 # --- and it converges if the phone stays there ------------------------------
 settle(tr, drifted, 8, t0=40.0)
-ok_('converges on the new position', T.distance(tr.quad, quad_at(418, 152)) < 4.0)
+ok_('converges on the new position', T.distance(tr.quad, quad_at(*MOVED)) < 4.0)
 ok_('counted the moves', tr.moves >= 4)
 eq('drift is not a re-lock', tr.jumps, 0)
+
+# --- but a nudge is followed at once ----------------------------------------
+# A candidate a hair from the corners and the same size as them is the screen;
+# there is nothing else it could be, since anything else is excluded by one of
+# those two tests. Waiting for five checks to agree before following it is four
+# checks of the outline visibly lagging the phone for no gain.
+nudged_at = (409, 147)
+ok_('the test nudge is a nudge', T.distance(start, quad_at(*nudged_at)) < T.NUDGE * SPAN)
+tr = T.QuadTracker(start)
+eq('a nudge moves on the first check', tr.update(frame_with_phone(*nudged_at), now=1.0), True)
+ok_('...toward it', 0 < T.distance(tr.quad, start))
 
 # --- the recheck interval is honoured ---------------------------------------
 # Frames arrive far faster than the corners are re-found, and adopting a move
@@ -102,7 +123,26 @@ window = T.RECHECK_EVERY * (T.AGREE - 1) * 0.9      # just short of enough
 for i in range(200):
     tr.update(drifted, now=10.0 + i * (window / 200.0))
 eq('rapid frames cannot rush a move', tr.moves, 0)
-ok_('...though the checks that fit did happen', 0 < tr.agreeing < T.AGREE)
+
+# --- a nearby candidate of the wrong size is refused ------------------------
+# The failure this stops is quiet and cumulative. Easing has no floor, so a
+# candidate a fifth too small sits inside MAX_JUMP and could be followed a
+# third of the way at a time, walking the outline down onto the white card or
+# the lit half of a dimmed screen. Every step looks reasonable and the end
+# state is a green box too small, with a crop measured against it.
+tr = T.QuadTracker(start)
+shrunk = (300 - 90, 620 - 190)         # same centre-ish, a third smaller
+ok_('the shrunken candidate is nearby by the distance test',
+    T.near(quad_at(445, 235, shrunk), start, T.MAX_JUMP))
+ok_('...but not the same size', not T.same_size(quad_at(445, 235, shrunk), start))
+settle(tr, frame_with_phone(445, 235, shrunk), 12)
+eq('so the corners are left alone', tr.moves, 0)
+ok_('and stay where they were', T.distance(tr.quad, start) < 0.01)
+# And refused however long it insists — which is the part that matters, since
+# the old guard only covered the re-lock and this candidate would never have
+# reached it.
+ok_('...however many times it agrees with itself', tr.agreeing >= T.AGREE * 2)
+eq('...and it is not adopted as a re-lock either', tr.jumps, 0)
 
 # --- one bad frame cannot steal the corners ---------------------------------
 tr = T.QuadTracker(start)

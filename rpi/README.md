@@ -120,7 +120,7 @@ Two things run continuously to stop that:
 
 | | |
 |---|---|
-| **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the right size, in roughly the right place, and say the same thing five checks running before the corners are eased 35% of the way toward it — so drift is followed within about two seconds and a hand crossing the frame is not followed at all. A candidate that keeps insisting from somewhere else for twice as long, *and is the same size of thing*, is treated as the mount having been knocked and adopted whole. |
+| **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the same size as the screen already held and in roughly the right place; a small correction of something that passes both is followed on the first check, and a larger move has to say the same thing five checks running before the corners are eased 35% of the way toward it. A candidate that keeps insisting from somewhere else for twice as long, and is still the same size of thing, is treated as the mount having been knocked and adopted whole. |
 | **Crop recovery** (`fit_roi`) | If reads stop finding a payout — or find one hard against the top edge of the crop, which means the crop is cutting the card — the whole screen is read once and the crop is re-fitted to where the payout actually is. The new box is written back to `config.json`, so the next run starts from what this one learned. |
 | **Crop tightening** (`tighten_roi`) | The other direction, and free: a read that worked already handed back where every line landed, so a crop carrying more than about 30% slack around its card is trimmed onto it. This is what lets the crop ship as "everything visible" and still end up fast, and it is why no assumption about how the phone is framed is needed anywhere. |
 
@@ -161,6 +161,16 @@ second spent reading the wrong part of the screen. A crop that is genuinely
 misplaced repairs itself in about **three reads, six seconds of Pi time**;
 replayed against offers interleaved with driving screens it moves **zero**
 times.
+
+There is a fourth rule that came later, and it is about who the caution is
+*for*. Having moved, the crop sits still for six seconds so it cannot
+oscillate. That is worth having when the crop has read something — one bad
+search should not undo a working crop. It is worth nothing when the crop has
+never read anything at all, which is a guess, and making a guess serve the same
+sentence is how a box lands somewhere useless and stays there. So the settling
+time applies only once a crop has produced a whole reading. Unproven crops are
+free to move immediately, which is the difference between recovering inside one
+offer and recovering inside several.
 
 ### The crop is loose on purpose
 
@@ -331,6 +341,48 @@ so this errs low, which is the right way to err for a floor):
 | 660px | top | 659 | 715 | good |
 | 900px | top | 899 | 975 | good |
 
+### ...and the same mistake, one layer down
+
+`CARD_SHARE` is the card's share of a **whole screen**, 0.5. Half the file used
+it as though it were the card's share of the **quad**, and those are the same
+number only when the whole screen is in frame.
+
+A rig logged corners spanning 1690 rows of a 1748-row frame with the top of the
+phone off the edge. Its quad was 86% card. Treated as 50% card, every read
+warped the screen to 1800px tall when 1120 would do:
+
+| | warp | what the reader got |
+|---|---|---|
+| quad assumed 50% card | 1444×1800 (2.60MP) | 977×1023 — shrunk to fit the ceiling |
+| quad measured at 80% card | 900×1121 (1.01MP) | 900×943 — not shrunk at all |
+
+`card_share_of_quad` measures it instead of assuming, and `min_crop_height`
+refuses a fit that could not hold the card it now knows the size of.
+
+**How much that is worth is worth being straight about**, because the obvious
+story is wrong. The obvious story: `MAX_OCR_PIXELS` caps what tesseract is
+handed, the scaling to reach that cap is uniform, so an oversized warp came out
+with its text below the size the code had just decided it needed — and on a
+narrow crop that would cost the payout.
+
+It does not. Cropped short and wide at four different heights and read both
+ways, the trimmed version got its card down to 650px and still read the payout
+every time. And the cap it was trimming to buys less than it appears to:
+
+| what the reader was handed | OCR |
+|---|---|
+| 1.83MP | 227ms |
+| 0.93MP | 193ms |
+| 0.76MP | 180ms |
+| 0.46MP | 167ms |
+
+Four times the pixels for 26% more time. Tesseract's cost is the recogniser
+walking the text, not the image — so "linear in pixels" is folklore, sizing the
+picture down is not where reads get faster, and neither is sizing it up where
+they break. What the wrong `card_share` really cost was 1.6MP of warping per
+read for nothing, and a crop floor that could not be set correctly because
+nothing knew how big the card was.
+
 **The camera view on `/live.html` is live while aiming**, so the page telling
 you to move the mount also shows you the mount. That matters more since the
 refusal above: aiming is now a state you can be held in, and being held there
@@ -377,7 +429,32 @@ stops it moving.
 
 Both show up in the health line — `card brightness 190/205; banding 0.4; gain
 2.1` — so "it looks dark" and "it looks wavy" can be confirmed with a number
-rather than argued about.
+rather than argued about. Which is how the next one was caught.
+
+### Measure the screen, not the room
+
+A rig logged `card brightness 233/205 ... gain 8.00`, then `237/205 ... gain
+6.78`, then `198/205 ... gain 8.00`. Over-exposed, and asking for more gain
+anyway, while hunting against its own 8.0 ceiling.
+
+The gain loop was measuring the whole frame. Most of that frame is dark car,
+and it distorts the two numbers differently:
+
+- **Brightness** takes the 90th percentile, which is a stand-in for "the bright
+  part, not the surround". Stand-ins drift: how well it picks out the card
+  depends on how much of the frame the card is.
+- **Clipped fraction** has no stand-in at all. It is a share of whatever it is
+  given, so the dark surround divides it directly. A card with a fifth of it
+  blown out came to 9% of the frame against an 8% threshold — the guard that
+  exists precisely to stop this barely fired.
+
+The corners are known, so the light can be measured on the screen instead of on
+the room, which is what both numbers meant in the first place. It matters
+beyond exposure: gain is also what amplifies a panel's flicker, and the same
+logs show `banding 19.9 (rippling)` and `28.4` at railed gain against `0.5`
+when calibration measured it. Rippling fails reads, failed reads trigger
+whole-screen searches, and a search costs a second read — so a diluted
+brightness measurement shows up at the far end as the scanner being slow.
 
 ## Hardware setup
 
@@ -512,8 +589,31 @@ off-Pi.
 
 | | |
 |---|---|
-| **Green outline** | the four corners locked in at calibration. Every frame is perspective-warped from inside it, which is what makes the text square rather than skewed. If it is not hugging the phone's screen, the calibration is stale — recalibrate. |
-| **White inset** | the exact image handed to the reader: de-skewed, cropped to the card, contrast boosted. If the pay, minutes and miles are legible there, the reader has everything it needs. |
+| **Green outline** | where the corners are *now* — calibration as the tracker has since moved it, not as it was written down. If it is not hugging the phone's screen, see below. |
+| **White inset** | the exact image handed to the reader: de-skewed, cropped to the card, contrast boosted. Literally the reader's own last picture rather than a re-creation of it, so it can lag the outline by a read. If the pay, minutes and miles are legible there, the reader has everything it needs. |
+
+The view refreshes about **seven times a second** while the page is open. That
+got cheaper before it got faster: a snapshot used to copy a 12MB frame, draw the
+outline on it at full size, shrink it with an area filter and then warp a second
+copy of a card the reader had already made. It now shrinks once with a linear
+filter, draws on the small picture and reuses the reader's card — about a
+quarter of the work, so nearly three times the frame rate still costs less than
+the old rate did.
+
+**A green outline that is too small** used to be possible, and quietly. A
+candidate has to be the same size as the screen already held before it can be
+adopted — but that check was only on the dramatic path, the one that re-locks
+onto a moved mount and takes the new corners whole. Ordinary drift only eases
+35% of the way toward a candidate, which looked harmless enough not to need it.
+
+Easing has no floor. A candidate a fifth too small sits comfortably inside the
+distance test, so the outline could be walked down onto the white card, or onto
+the lit half of a dimmed screen, a third at a time — every individual step
+reasonable, the end state a box around part of a phone, and a crop measured
+against it that is wrong in a way nothing downstream can detect. The size check
+now guards both paths. Having it there is also what makes the outline *quicker*:
+a small correction of something already the right size cannot be a hand or a
+reflection, so it is followed on the first check rather than after five.
 
 **If the green outline covers the whole view, it has not found your phone.** The
 screen is located by splitting the frame into light and dark, which needs some
@@ -528,9 +628,9 @@ Get as close as you like, but leave a margin of something darker down at least
 two opposite sides. On a good mount that is the left and right — the phone runs
 off the top and bottom, and those edges are the map you wanted rid of.
 
-The view refreshes about twice a second while the page is open and drops to
-every three seconds when nothing is watching, because a live picture is only
-worth CPU while someone is looking at it. That rate is the *preview*; verdicts
+The view drops to a frame every three seconds when nothing is watching, because
+a live picture is only worth CPU while someone is looking at it. That rate is
+the *preview*; verdicts
 are not on a timer at all — a read fires as soon as the picture changes.
 
 **While scanning, the view moves to the app.** The aiming preview only runs
@@ -685,6 +785,26 @@ address became a $45 offer, and `ZIM` out of map texture became a 21-minute leg.
 `health` lines appear at most every two minutes and only when reads have
 happened, so a quiet scanner stays quiet. The same detail is on `live.html`
 under **what the reader read**, which is quicker if you are standing at the car.
+
+`crop moved` says which of the two moves it was, because they mean opposite
+things about how the scanner is doing — `reads were failing` is a repair,
+`reads were working` is a working crop being trimmed. A log that called both a
+failure made a healthy scanner look broken.
+
+**libcamera is told to be quiet.** Opening the camera used to narrate itself at
+INFO on stderr — which media node it bound, which yaml it read, the sensor
+format it picked — seven lines each time, twice a run, all of which a
+supervisor that tags stderr as an error files under errors. The lines actually
+worth having (tuning file, autofocus, sensor mode) this program prints in its
+own words, so `LIBCAMERA_LOG_LEVELS` is set to `*:WARN` unless you have already
+set it. Warnings and errors still come through.
+
+**If your log grows without end**, that is whatever supervises this, not this.
+The `[system]`, `[SETUP]` and `[ERR]` tags in `logs/uberscan.log` are added by
+the process manager that runs `npm start`; this program only writes lines to
+stdout and stderr and never opens a log file. Truncate per run where that file
+is opened — `>` instead of `>>` in a shell wrapper, or `flags: 'w'` instead of
+`'a'` in a Node `createWriteStream`.
 
 ## Known limits
 

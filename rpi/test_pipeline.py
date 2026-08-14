@@ -266,6 +266,64 @@ eq('...measured across it', read[0], int(round(900 * CAL.PHONE_ASPECT * PL.CARD_
 ok_('and never over-reports the real card',
     all(px <= int(round(h * PL.CARD_SHARE)) + 1 for px, (_, (_, h)) in zip(read, mounts)))
 
+# --- how much of the quad the card is, which is not CARD_SHARE --------------
+# The same measurement, asked the other way, and the one that decides how tall
+# to warp. Get it wrong and nothing looks wrong: the picture is just bigger
+# than the reader can use, gets shrunk back to fit the pixel ceiling, and the
+# text ends up smaller than it started.
+eq('an unclipped quad is a whole screen',
+   round(PL.card_share_of_quad(whole_screen, SHAPE), 3), PL.CARD_SHARE)
+eq('...and with no frame to check, always',
+   round(PL.card_share_of_quad(whole_screen), 3), PL.CARD_SHARE)
+
+clipped_quad, clipped_h = phone_at(1400)
+ok_('a clipped quad is mostly card', PL.card_share_of_quad(clipped_quad, SHAPE) > 0.7)
+# It is the card over the *quad*, so it has to match what is really there. The
+# quad of a clipped phone is the frame's full height.
+truth = clipped_h * PL.CARD_SHARE / float(SHAPE[0])
+ok_('...to within the aspect it had to assume',
+    abs(PL.card_share_of_quad(clipped_quad, SHAPE) - truth) < 0.12)
+ok_('never below the whole-screen assumption, which is the safe answer',
+    all(PL.card_share_of_quad(q, SHAPE) >= PL.CARD_SHARE
+        for q, _ in (phone_at(w) for w in (300, 700, 900, 1200, 1600))))
+ok_('and never above all of it',
+    all(PL.card_share_of_quad(q, SHAPE) <= 1.0
+        for q, _ in (phone_at(w) for w in (300, 700, 900, 1200, 1600))))
+
+# The point of the number: the reader gets a picture sized for the card.
+their_quad = np.array([[393, 0], [1750, 0], [1740, 1695], [383, 1687]], dtype=np.float32)
+sc = PL.Scanner(quad=their_quad, roi=[0.0, 0.10, 1.0, 0.86], card_height=900)
+eq('untold, a quad is assumed to be a whole screen', sc.read_height, 1800)
+sc.card_share = PL.card_share_of_quad(their_quad, SHAPE)
+ok_('told otherwise, the warp comes down to suit', 1000 < sc.read_height < 1300)
+ok_('...which is where the pixels went', sc.read_height < 1800 * 0.7)
+
+# --- and the crop cannot be smaller than the card is known to be ------------
+# A fit that catches only the middle of the card leaves a crop far wider than
+# it is tall. The pixel ceiling then shrinks it to fit, taking the payout below
+# a readable size — so the crop meant to be the fast one is the one that cannot
+# read, and it fails in exactly the way that asks for another re-fit.
+# The floor has to sit between two crops that look similar and are not: a fit
+# that caught only the middle of the card (the rig logged 0.46 of the quad) and
+# a correct tight one, which is the payout-to-last-line span plus its padding —
+# about 73% of the card, so 0.80 * 0.73 here.
+ok_('a mostly-card quad demands a tall crop', sc.min_crop_height > 0.46)
+ok_('...but not so tall that a correct tightening is refused',
+    sc.min_crop_height < sc.card_share * 0.73)
+sliver = [line('$7.09', 100, 60), line('34 min (3.6 mi) total', 200),
+          line('Dollar General', 260)]
+eq('so a sliver of a fit is refused',
+   PL.fit_roi(sliver, 1000, [0.0, 0.0, 1.0, 1.0], sc.min_crop_height), None)
+ok_('...where the bare floor would have taken it',
+    PL.fit_roi(sliver, 1000, [0.0, 0.0, 1.0, 1.0]) is not None)
+# Even an unclipped mount gets a floor above the bare constant, because the
+# constant was a guess made before the card's size was known.
+plain = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=900)
+eq('an unclipped mount floors at most of a card',
+   plain.min_crop_height, PL.CARD_SHARE * PL.CROP_HOLDS)
+ok_('...which is stricter than the old bare floor',
+    plain.min_crop_height > PL.FIT_MIN_HEIGHT)
+
 # --- the reader's picture is bounded ---------------------------------------
 # Height alone does not bound pixels: a wide quad warped to 1800 came out
 # 1336px across on a real rig, nearly twice a normal card, and reads went from

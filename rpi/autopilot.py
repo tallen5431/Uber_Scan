@@ -26,6 +26,11 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Same reason as the copy in camera.py, set here too because check() imports
+# picamera2 before anything imports camera, and this has to be in the
+# environment before libcamera starts talking.
+os.environ.setdefault('LIBCAMERA_LOG_LEVELS', '*:WARN')
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(HERE, 'config.json')
 SNAPSHOT = os.path.join(HERE, 'live-frame.jpg')
