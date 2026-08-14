@@ -49,6 +49,9 @@
   .unit { font-style: normal; font-size: 11px; font-weight: 700;
           color: var(--muted); letter-spacing: 0; }
   .stats .unit { font-size: 12px; }
+  /* The rate before running costs, under the one the verdict was made on. */
+  .hist .big em { display: block; font-style: normal; font-size: 11px;
+                  font-weight: 600; color: var(--muted); line-height: 1.3; }
 </style>
 </head>
 <body>
@@ -81,7 +84,7 @@
   <h2>Rides and shop orders <em>· median $/hr</em></h2>
   <div id="kinds"></div>
 
-  <h2>Recent offers <em>· $/hr, and the card it came from</em></h2>
+  <h2>Recent offers <em id="recentNote">· $/hr, and the card it came from</em></h2>
   <ul class="hist" id="recent"></ul>
 
   <p class="note" id="caveats"></p>
@@ -99,7 +102,7 @@
 
   var el = {};
   ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds', 'recent',
-   'caveats', 'ranges', 'csv'].forEach(function (id) {
+   'caveats', 'ranges', 'csv', 'recentNote'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -237,6 +240,17 @@
     }).join('');
 
     // --- the last few, so a number can be traced back to an offer ---
+    // Only promise the second rate when there is one. With no running cost set
+    // the two are the same number and the raw line is correctly absent, so a
+    // heading announcing it would be describing a column that is not there.
+    var anyGross = offers.some(function (r) {
+      return typeof r.grossPerHour === 'number'
+        && Math.round(r.grossPerHour) !== Math.round(r.perHour);
+    });
+    el.recentNote.textContent = anyGross
+      ? '· net $/hr, raw beneath, and the card it came from'
+      : '· $/hr, and the card it came from';
+
     el.recent.innerHTML = offers.slice(-12).reverse().map(function (r) {
       var when = new Date(r.at);
       var mins = r.minutes === null ? '--' : Math.round(r.minutes);
@@ -244,8 +258,19 @@
       // the working behind it. The payout alone is the number that flatters a
       // long job and punishes a short one, which is the whole reason this rig
       // exists — so it is never the figure the eye lands on first.
+      //
+      // The raw rate sits under the net one rather than beside it. Beside it
+      // would cost the distance its place on the same line, and these two
+      // belong together anyway: one figure and the same figure after the car
+      // has been paid for. It is left off entirely when the two are equal —
+      // no running cost set, or a distance too doubtful to charge for — since
+      // printing a number twice says only that it was printed twice.
+      var gross = (typeof r.grossPerHour === 'number'
+                   && Math.round(r.grossPerHour) !== Math.round(r.perHour))
+        ? '<em>' + money(r.grossPerHour, 0) + ' raw</em>' : '';
       return '<li><span class="dot ' + verdictFor(r.perHour, target, band) + '"></span>'
-           + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i></span>'
+           + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i>'
+           + gross + '</span>'
            + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
            + (r.miles === null ? '' : ' · ' + r.miles + ' mi')
            + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
@@ -262,8 +287,12 @@
                  + ' set aside — the scanner never saw the whole card, so they '
                  + 'would read better than they were.');
     }
-    notes.push('Rates are after ' + money(newest.costPerMile, 2)
-               + '/mi of running costs.');
+    // Only when something was actually deducted. "Rates are after $0.00/mi of
+    // running costs" is a sentence about nothing, and it invites the reader to
+    // hunt for a subtraction that never happened.
+    notes.push(newest.costPerMile > 0
+      ? 'Rates are after ' + money(newest.costPerMile, 2) + '/mi of running costs.'
+      : 'No running cost is set, so these are what the offers paid before the car.');
     el.caveats.textContent = notes.join(' ');
   }
 

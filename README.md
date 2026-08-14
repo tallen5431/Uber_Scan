@@ -168,7 +168,9 @@ So the Pi scanner keeps one line per offer it was confident about, in
 * **by time of day**, in three-hour blocks, each bar drawn on the same scale so
   the halfway mark is always your target.
 * **rides against shop orders**.
-* the last dozen offers, so a number can be traced back to a card.
+* the last dozen offers — each led by its rate, with the same rate before
+  running costs beneath it, and the card's own pay, time and distance
+  alongside so a figure can be traced back to the offer it came from.
 * a **CSV** of everything, for a spreadsheet.
 
 Two things it is careful about:
