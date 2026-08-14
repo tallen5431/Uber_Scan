@@ -838,6 +838,14 @@ reading the file takes the last row of each `id`.** Nothing is ever rewritten in
 place, which is what makes it safe to append to from a process that can be
 killed at any moment.
 
+A reading the scanner never saw *whole* — a single leg whose "total" the reader
+mangled, or a two-leg card no frame caught both halves of — is written with
+`whole: false` rather than refused. Such a reading always flatters the offer, so
+it must never reach a median, and `journal.html` sets it aside and says how many.
+But refusing it made the offer *vanish*, and a gap nothing accounts for is the
+worst thing to find in a file being read back months later. If a later frame does
+see the card whole, it supersedes the partial row anyway.
+
 Three deliberate omissions:
 
 * **no accept/decline column.** The scanner cannot see the Accept button and

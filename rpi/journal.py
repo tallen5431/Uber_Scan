@@ -196,7 +196,7 @@ class OfferLog:
         return row
 
     def consider(self, parsed, rate, now=None, ms=None, locked=None,
-                 settled=False):
+                 settled=False, whole=True):
         """Offer one confident reading. Returns the row written, or None.
 
         The caller decides confidence; this decides novelty.
@@ -239,7 +239,7 @@ class OfferLog:
         self.seq += 1
         row = row_for(parsed, rate, at, first_at=self.first_at,
                       offer_id=self.id, seq=self.seq, ms=ms, locked=locked,
-                      settled=settled)
+                      settled=settled, whole=whole)
         if self.journal.append(row):
             self.written += 1
             return row
@@ -261,7 +261,7 @@ def content_of(parsed):
 
 
 def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
-            locked=None, settled=False):
+            locked=None, settled=False, whole=True):
     """One offer, as it will be stored.
 
     Numbers only, and each one either read off the card or derived from the
@@ -305,6 +305,13 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         'milesCorrected': bool(parsed.get('milesCorrected')),
         'milesUncertain': bool(parsed.get('milesUncertain')),
         'locked': bool(locked),
+        # Whether the whole journey was in view: a line tagged as the total, or
+        # both legs of a two-leg card. A reading without it is a *fragment*, and
+        # a fragment always flatters the offer — the first leg of a two-leg card
+        # on its own is a shorter, better-paying job than the card describes. So
+        # it must never reach a median. It is written anyway, because an offer
+        # that simply disappears is a hole nothing can account for later.
+        'whole': bool(whole),
         # Whether the merged reading had stopped moving. Recorded rather than
         # required: a card whose OCR never settles is exactly the marginal
         # reading worth studying later, and refusing to write it would leave

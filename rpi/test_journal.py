@@ -160,6 +160,50 @@ third = JR.OfferLog(JR.Journal(path))
 eq('an old row is not resumed',
    third.resume(now=1_700_000_020.0 + JR.RESUME_WINDOW_MS / 1000.0 + 60), None)
 
+# --- a partial reading is kept and flagged, not silently dropped ------------
+# A single leg whose "total" the reader mangled, and a two-leg card no frame
+# ever caught both halves of, both look complete and both read far too well: a
+# card's first leg alone is a shorter, better-paying job than the card is. They
+# used to be refused, which made the offer vanish — and a gap nothing accounts
+# for is the worst thing to find in a file being read back months later.
+log = fresh()
+acc = OfferAccumulator()
+for i in range(2):
+    parsed = acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=1_700_000_000.0 + i * 0.5)
+    whole = parsed['complete'] and (parsed.get('hasTotal') or (parsed.get('legs') or 0) >= 2)
+    log.consider(parsed, P.rate(parsed, MONEY), now=1_700_000_000.0 + i * 0.5, whole=whole)
+rows = log.journal.rows()
+eq('a fragment is still recorded', len(rows), 1)
+eq('...and marked as one', rows[0]['whole'], False)
+eq('...with the reading it actually got', rows[0]['minutes'], 23.0)
+
+# A card seen whole is marked whole, so the two can be told apart.
+log = fresh()
+acc = OfferAccumulator()
+for i in range(2):
+    parsed = acc.add(P.parse(OFFER), now=1_700_000_000.0 + i * 0.5)
+    whole = parsed['complete'] and (parsed.get('hasTotal') or (parsed.get('legs') or 0) >= 2)
+    log.consider(parsed, P.rate(parsed, MONEY), now=1_700_000_000.0 + i * 0.5, whole=whole)
+eq('a card seen whole says so', log.journal.rows()[0]['whole'], True)
+
+# And a fragment that later comes good supersedes itself, so the last row of the
+# offer is the true one rather than the flattering one.
+log = fresh()
+acc = OfferAccumulator()
+t = 1_700_000_000.0
+for i, text in enumerate(['$12.45 5 min (1.2 mi) away'] * 2 + [OFFER] * 2):
+    parsed = acc.add(P.parse(text), now=t + i * 0.5)
+    rate = P.rate(parsed, MONEY)
+    if not rate['ready']:
+        continue
+    whole = parsed['complete'] and (parsed.get('hasTotal') or (parsed.get('legs') or 0) >= 2)
+    log.consider(parsed, rate, now=t + i * 0.5, whole=whole)
+rows = log.journal.rows()
+eq('the fragment and the full reading share an id', len({r['id'] for r in rows}), 1)
+eq('the last row is the whole card', rows[-1]['whole'], True)
+eq('...with both legs', rows[-1]['minutes'], 28.0)
+ok_('...and it is the less flattering figure', rows[-1]['perHour'] < rows[0]['perHour'])
+
 # --- nonsense is flagged, never dropped -------------------------------------
 log = fresh()
 feed(log, ['$1450.00 3 min (0.1 mi) total'] * 2)

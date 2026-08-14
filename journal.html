@@ -126,10 +126,16 @@
   }
 
   function render(data) {
+    // Rows the scanner was not sure of are kept in the file on purpose, and
+    // must not shift a percentile. `whole` is the one that matters most: a
+    // reading missing a leg is not merely noisy, it is biased upwards — the
+    // first leg of a two-leg card on its own is a shorter, better-paying job
+    // than the card describes — so including them would quietly raise every
+    // figure on this page. `whole` is absent from rows written before it
+    // existed, and those were only ever written when whole, so undefined counts
+    // as true.
     var offers = (data.offers || []).filter(function (r) {
-      // A row flagged suspect is kept in the file on purpose, but it should not
-      // shift a percentile. The count below says how many were set aside.
-      return !r.suspect && typeof r.perHour === 'number';
+      return typeof r.perHour === 'number' && !r.suspect && r.whole !== false;
     });
     var setAside = (data.offers || []).length - offers.length;
 
@@ -231,7 +237,8 @@
                  + 'see which ones were accepted.'];
     if (setAside) {
       notes.push(setAside + ' reading' + (setAside === 1 ? '' : 's')
-                 + ' left out as doubtful.');
+                 + ' set aside — the scanner never saw the whole card, so they '
+                 + 'would read better than they were.');
     }
     notes.push('Rates are after ' + money(newest.costPerMile, 2)
                + '/mi of running costs.');

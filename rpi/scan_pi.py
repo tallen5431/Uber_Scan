@@ -785,9 +785,21 @@ def main():
             # A card whose OCR never holds still is the marginal reading most
             # worth studying afterwards, and refusing to write it would leave
             # the hardest offers missing with nothing to say so.
-            if offer_log is not None and whole and rate['ready'] and out['locked']:
+            #
+            # `whole` is recorded rather than required, for the same reason
+            # `settled` is. Requiring it dropped two real shapes without a
+            # word: a single-leg card whose "total" the reader mangled, and a
+            # two-leg card no single frame ever caught both halves of. Those
+            # readings are optimistic — a card's first leg alone looks like a
+            # much better job than the card is — so they must not reach a
+            # median. But dropping them makes the offer *vanish*, and a gap
+            # nothing accounts for is the worst thing to find in a file being
+            # read back months later. Written and flagged: the page sets them
+            # aside and says how many, and if a later frame does see the card
+            # whole it supersedes the partial row anyway.
+            if offer_log is not None and rate['ready'] and out['locked']:
                 offer_log.consider(parsed, rate, ms=out['ms']['total'],
-                                   locked=out['locked'],
+                                   locked=out['locked'], whole=whole,
                                    settled=(signature == settled_on))
 
             if args.display:
