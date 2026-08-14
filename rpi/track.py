@@ -83,13 +83,24 @@ class QuadTracker:
     """
 
     def __init__(self, quad, scale=1.0, recheck=RECHECK_EVERY, agree=AGREE, ease=EASE,
-                 save_drift=SAVE_DRIFT, save_every=SAVE_EVERY):
+                 save_drift=SAVE_DRIFT, save_every=SAVE_EVERY, calibrated=None):
         self.quad = np.asarray(quad, dtype=np.float32).reshape(4, 2)
         self.saved = self.quad.copy()
-        # The screen as calibrated. Never updated: it is the only fixed thing
-        # to judge a candidate against, and judging against anything that moves
-        # is what let the corners walk off the phone. See looks_like_the_screen.
-        self.calibrated = self.quad.copy()
+        # The screen as *calibrated*, which is not always where tracking starts.
+        # Never updated within a run, because it is the one fixed thing a
+        # candidate can be judged against, and judging against anything that
+        # moves is what let the corners walk off the phone.
+        #
+        # Passed in separately for a reason that only shows up across restarts.
+        # The tracked position is written back to config.json so the next run
+        # resumes where this one ended — sensible — but if that file's `quad`
+        # were also the reference, every run would re-anchor to wherever the
+        # last one finished and the per-run bound would compound exactly as the
+        # per-check one used to. Measured: two runs beside a phone-shaped decoy
+        # went 100% -> 79% -> 63%. So the calibration is kept apart from the
+        # position and only calibration writes it.
+        self.calibrated = (self.quad.copy() if calibrated is None
+                           else np.asarray(calibrated, dtype=np.float32).reshape(4, 2).copy())
         # One number or an (x, y) pair; the streams are not always the same
         # aspect ratio to the last pixel, and a couple of pixels of skew across
         # a 1700px screen is not worth being sloppy about.

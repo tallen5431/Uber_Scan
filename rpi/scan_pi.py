@@ -333,7 +333,12 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None):
         'locked': locked,
         'state': rate['state'],
         'perHour': round(rate['perHour'], 2) if rate['ready'] else None,
-        'perMile': round(rate['perMile'], 2) if rate.get('perMile') else None,
+        # `is not None`, not truthiness: this is a number that can legitimately
+        # be zero, and now that it is net of running costs it can be negative
+        # too. Testing it for truth turned "you break exactly even per mile"
+        # into "--".
+        'perMile': (round(rate['perMile'], 2)
+                    if rate.get('perMile') is not None else None),
         'pay': parsed['pay'],
         'minutes': parsed['minutes'],
         'miles': parsed['miles'],
@@ -397,11 +402,11 @@ def main():
     cfg = load_config(args.config)
     health = Health()
 
-    # The crop can move itself back onto the card. When it does, keep it: the
-    # next run should start from what this one learned, not from the box that
-    # had already stopped working.
+    # Start tracking from where the last run ended, if it wrote that down —
+    # a fixed mount usually has not moved between runs, so resuming saves
+    # re-converging. `quad` stays the calibration; see QuadTracker.calibrated.
     scanner = PL.Scanner(
-        quad=np.array(cfg['quad'], dtype=np.float32),
+        quad=np.array(cfg.get('trackedQuad') or cfg['quad'], dtype=np.float32),
         card_height=cfg.get('cardHeight', 900),
         settings=cfg.get('settings', {}),
     )
@@ -410,7 +415,11 @@ def main():
     cap = cfg.get('capture', {})
     track_scale = (cap.get('width', 2328) / float(LORES[0]),
                    cap.get('height', 1748) / float(LORES[1]))
-    tracker = None if args.no_track else TR.QuadTracker(scanner.quad, scale=track_scale)
+    # Start from where the last run left off, but judge candidates against the
+    # calibration itself — see QuadTracker.calibrated.
+    tracker = None if args.no_track else TR.QuadTracker(
+        scanner.quad, scale=track_scale,
+        calibrated=np.array(cfg['quad'], dtype=np.float32))
 
     # Calibration already found focus with autofocus; reuse it rather than
     # making the driver rediscover a number that cannot change on a fixed mount.
@@ -493,7 +502,10 @@ def main():
                     jumps_before, lost_before = tracker.jumps, tracker.status()['lost']
                     if tracker.update(luma, now):
                         scanner.quad = tracker.quad
-                        cfg['quad'] = [[float(x), float(y)] for x, y in tracker.quad]
+                        # Where tracking has got to, kept apart from `quad`,
+                        # which is the calibration and is written only by
+                        # calibrate.py / autopilot.py.
+                        cfg['trackedQuad'] = [[float(x), float(y)] for x, y in tracker.quad]
                     if tracker.jumps > jumps_before:
                         health.relocks += 1
                         log('corners re-locked: the phone is somewhere the stored '

@@ -236,6 +236,26 @@ ok_('every accepted ratio has an accepted inverse',
     all(lo <= 1.0 / r <= hi for r in (lo, 1.0, hi, 0.9, 1.1)))
 ok_('...which a rounded 1.28 would fail', not (lo <= 1.0 / lo <= 1.28))
 
+# --- the calibration outlives the process ----------------------------------
+# The tracked position is written back so the next run resumes where this one
+# ended. If that same value were also the reference, every run would re-anchor
+# to wherever the last one finished and the per-run bound would compound just
+# as the per-check one used to: measured, two runs beside a phone-shaped decoy
+# went 100% -> 79% -> 63%.
+here = quad_at(400, 140)
+tracked = here.copy()
+for _ in range(3):
+    tr = T.QuadTracker(tracked, calibrated=here)
+    w, h = int(PHONE[0] * 0.8), int(PHONE[1] * 0.8)
+    settle(tr, frame_with_phone(400 + (PHONE[0] - w) // 2, 140 + (PHONE[1] - h) // 2, (w, h)), 10)
+    tracked = tr.quad.copy()
+ok_('the bound holds across restarts, not just within a run',
+    T.span(tracked) / T.span(here) > T.SIZE_BAND[0] - 0.01)
+ok_('and the reference is the calibration, not the resume point',
+    T.distance(T.QuadTracker(tracked, calibrated=here).calibrated, here) < 0.01)
+eq('...defaulting to the starting quad when none is given',
+   round(T.distance(T.QuadTracker(here).calibrated, here), 3), 0.0)
+
 # --- and a stuck tracker is visible in the status --------------------------
 # drift is measured against the last *save*, which mark_saved re-baselines, so
 # corners far from the phone can report a contented zero. A rig did exactly
