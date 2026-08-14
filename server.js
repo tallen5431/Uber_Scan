@@ -46,6 +46,25 @@ var TYPES = {
   '.gz': 'application/octet-stream'
 };
 
+/* Things that must never leave the machine, however they are asked for.
+ *
+ * This server sits on a LAN, on plain http, with no authentication — every
+ * file under ROOT is one GET away from anyone on the same wifi. That is fine
+ * for a page of HTML and catastrophic for `ssl/ca-key.pem`, which is the
+ * private key of the certificate authority `tools/make-cert.sh` asks you to
+ * install on your phone as a trust anchor. Anyone who fetches it can mint a
+ * certificate your phone will believe, for any site.
+ *
+ * `rpi/` is denied because nothing there is meant for a browser: the live
+ * frame has its own route, and config.json is the rig's calibration.
+ */
+var PRIVATE = /(^|\/)(ssl|rpi|node_modules|\.git)(\/|$)|(^|\/)\./i;
+var SECRET_EXT = /\.(pem|key|crt|cer|p12|pfx|jks)$/i;
+
+function isPrivate(pathname) {
+  return PRIVATE.test(pathname) || SECRET_EXT.test(pathname);
+}
+
 /* ---------- the Pi scanner, as a child of this process ----------
  *
  * Started automatically when rpi/config.json exists, because that file only
@@ -99,6 +118,15 @@ function startScanner() {
   scanner.started = Date.now();
   scanner.error = null;
   console.log('scanner: started ' + bin + ' ' + args.join(' '));
+
+  // Without this, a missing python3 or a bad SCANNER_CMD emits an 'error' with
+  // nothing listening, which in Node is an uncaught exception — so the failure
+  // to start the scanner takes down the web server that was reporting on it.
+  // The site is meant to keep working when the camera side does not.
+  scanner.proc.on('error', function (err) {
+    scanner.error = 'could not start ' + bin + ': ' + err.message;
+    console.error('scanner: ' + scanner.error);
+  });
 
   var buffered = '';
   scanner.proc.stdout.on('data', function (chunk) {
@@ -244,13 +272,26 @@ function handler(req, res) {
 
   if (pathname.endsWith('/')) pathname += 'index.html';
 
-  // Resolve first, then confirm the result is still inside ROOT, so that "..",
-  // encoded traversal and symlinked paths all fail the same way.
+  // Resolve first, then confirm the result is still inside ROOT, so "..", an
+  // encoded traversal and an absolute path all fail the same way.
   var file = path.resolve(ROOT, '.' + pathname);
-  if (file !== ROOT && !file.startsWith(ROOT + path.sep)) {
+  if ((file !== ROOT && !file.startsWith(ROOT + path.sep)) || isPrivate(pathname)) {
     return send(res, 403, 'forbidden', { 'Content-Type': 'text/plain' });
   }
 
+  // ...and again after following links. Resolving the *path* proves nothing
+  // about where a symlink inside ROOT actually points, and a lexical check
+  // alone would happily serve whatever it aims at.
+  fs.realpath(file, function (linkErr, real) {
+    if (linkErr) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
+    if (real !== ROOT && !real.startsWith(ROOT + path.sep)) {
+      return send(res, 403, 'forbidden', { 'Content-Type': 'text/plain' });
+    }
+    serveFile(req, res, real);
+  });
+}
+
+function serveFile(req, res, file) {
   fs.stat(file, function (err, stat) {
     if (err || !stat.isFile()) {
       return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });

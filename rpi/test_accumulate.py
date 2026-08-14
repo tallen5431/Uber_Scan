@@ -100,6 +100,48 @@ merged = acc.add(P.parse('blurry nonsense'), now=900.0)
 eq('unkeyed passes through', merged['complete'], False)
 eq('unkeyed merges nothing', merged['mergedFrom'], 0)
 
+# --- a misread field must not become a leg of its own -----------------------
+# From a real capture: one frame read "23 min (8.4 mi)" as "(3.4 mi)". Keyed by
+# distance, that opened a third slot and a 28-minute offer reported 51 minutes
+# for the rest of the window. 3.4 miles in 23 minutes is a believable 9 mph, so
+# no plausibility guard can catch it — only knowing it is the same leg can.
+acc = OfferAccumulator()
+GOOD = '$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip'
+acc.add(P.parse(GOOD), now=100.0)
+acc.add(P.parse(GOOD), now=101.0)
+misread = acc.add(P.parse('$12.45 5 min (1.2 mi) away 23 min (3.4 mi) trip'), now=102.0)
+eq('a misread distance does not add a leg', misread['legs'], 2)
+eq('...and is outvoted on distance', misread['miles'], 9.6)
+eq('...leaving the time alone', misread['minutes'], 28)
+after = acc.add(P.parse(GOOD), now=103.0)
+eq('and it does not linger', after['minutes'], 28)
+
+# The same in the other direction: the duration misread, the distance proving
+# the two readings are one leg.
+acc = OfferAccumulator()
+acc.add(P.parse('$8.00 23 min (4.0 mi) trip'), now=200.0)
+acc.add(P.parse('$8.00 23 min (4.0 mi) trip'), now=201.0)
+merged = acc.add(P.parse('$8.00 28 min (4.0 mi) trip'), now=202.0)
+eq('a misread duration does not add a leg either', merged['legs'], 1)
+eq('...and is outvoted on time', merged['minutes'], 23)
+
+# A card really listing two legs of the same duration keeps both, because
+# within one frame they cannot be the same leg however alike they read.
+acc = OfferAccumulator()
+both = acc.add(P.parse('$9.00 5 min (1.2 mi) away 5 min (2.5 mi) trip'), now=300.0)
+eq('equal durations in one frame stay two legs', both['legs'], 2)
+eq('...and both count', both['minutes'], 10)
+eq('...including their distances', both['miles'], 3.7)
+
+# No frame of a real card lists more legs than the card has, so the union
+# cannot exceed the most any single frame saw.
+acc = OfferAccumulator()
+acc.add(P.parse('$9.00 5 min (1.2 mi) away 20 min (6.0 mi) trip'), now=400.0)
+acc.add(P.parse('$9.00 5 min (1.2 mi) away 20 min (6.0 mi) trip'), now=401.0)
+odd = acc.add(P.parse('$9.00 5 min (1.2 mi) away 41 min (9.9 mi) trip'), now=402.0)
+eq('the union never exceeds one frame\'s worth', odd['legs'], 2)
+eq('...keeping the best-supported', odd['minutes'], 25)
+
 # --- the merged result still rates correctly --------------------------------
 acc = OfferAccumulator()
 acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=1000.0)

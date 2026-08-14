@@ -571,7 +571,7 @@ The Pi parser is a port of the browser one. Both run the same corpus:
 ```sh
 node tests/corpus.test.js       # 127 checks
 python3 rpi/test_parser.py      # the same 127 checks
-python3 rpi/test_accumulate.py  # 27 checks on merging across frames
+python3 rpi/test_accumulate.py  # 38 checks on merging across frames
 python3 rpi/test_pipeline.py    # 79 checks on where, how big, and what to log
 python3 rpi/test_exposure.py    # 38 checks on flicker, brightness and gain
 python3 rpi/test_track.py       # 43 checks on following the phone

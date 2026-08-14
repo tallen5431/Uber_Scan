@@ -12,8 +12,10 @@ Two things keep that safe:
 
   * the pay is the key. A different payout is a different offer, and the window
     resets rather than merging one card's distance into another's.
-  * legs are identified by their distance, so re-reading the same leg does not
-    add it twice. Only a genuinely different leg extends the total.
+  * a leg is matched to one already seen when *either* its duration or its
+    distance agrees, so re-reading the same leg does not add it twice and a
+    misread field lands in the slot it belongs to, where it gets outvoted
+    instead of becoming a leg of its own.
 """
 
 import time
@@ -37,20 +39,42 @@ class OfferAccumulator:
     def reset(self):
         self.key = None
         self.started = 0.0
-        self.legs = {}          # leg key -> {'minutes': [...], 'miles': [...], 'isTotal': bool}
+        self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool, 'seen': n}]
         self.items = None
         self.samples = 0
+        self.max_legs = 0
 
-    def _leg_key(self, leg):
-        """What makes two readings the same leg.
+    def _slot_for(self, leg, taken):
+        """Find the slot this reading belongs in, or open a new one.
 
-        Distance when there is one, since it is the more distinctive of the two
-        and rounding it absorbs the small disagreements OCR produces. Time alone
-        when there is not.
+        A leg matches on *either* field agreeing, not on one chosen field. That
+        matters because each field fails differently and neither is reliable
+        alone:
+
+          * keying on distance alone files a misread distance as a brand new
+            leg. One frame reading "23 min (8.4 mi)" as "(3.4 mi)" turned a
+            28-minute offer into a 51-minute one and it stayed that way for the
+            rest of the window — 3.4 miles in 23 minutes is a perfectly
+            believable 9 mph, so no plausibility check can catch it.
+          * keying on duration alone loses the case where the duration is what
+            was misread and the distance proves the legs are the same.
+
+        Either field agreeing is evidence; both disagreeing is a different leg.
+
+        `taken` holds the slots this frame has already used, so a card genuinely
+        listing two legs of equal duration keeps both — within a single frame
+        they are certainly distinct, however alike they read.
         """
-        if leg.get('miles') is not None:
-            return ('mi', round(leg['miles'] / SAME_LEG_MILES))
-        return ('min', leg.get('minutes'))
+        for i, slot in enumerate(self.legs):
+            if i in taken:
+                continue
+            if leg['minutes'] in slot['minutes']:
+                return i
+            if leg.get('miles') is not None and any(
+                    abs(m - leg['miles']) <= SAME_LEG_MILES for m in slot['miles']):
+                return i
+        self.legs.append({'minutes': [], 'miles': [], 'isTotal': False, 'seen': 0})
+        return len(self.legs) - 1
 
     def add(self, parsed, now=None):
         """Merge one reading in, and return the combined view of the offer.
@@ -73,11 +97,19 @@ class OfferAccumulator:
 
         self.samples += 1
 
-        for leg in parsed.get('legDetail') or []:
-            if leg.get('minutes') is None:
-                continue
-            slot = self.legs.setdefault(self._leg_key(leg),
-                                        {'minutes': [], 'miles': [], 'isTotal': False})
+        # No frame of a real card lists more legs than the card has, so the most
+        # any single frame reported is a ceiling on the union. Without it a
+        # misread *duration* invents a leg the same way a misread distance used
+        # to, and nothing outvotes it because it sits in a slot of its own.
+        detail = [l for l in (parsed.get('legDetail') or []) if l.get('minutes') is not None]
+        self.max_legs = max(self.max_legs, len(detail))
+
+        taken = set()
+        for leg in detail:
+            index = self._slot_for(leg, taken)
+            taken.add(index)
+            slot = self.legs[index]
+            slot['seen'] += 1
             slot['minutes'].append(leg['minutes'])
             if leg.get('miles') is not None:
                 slot['miles'].append(leg['miles'])
@@ -91,9 +123,13 @@ class OfferAccumulator:
         return self._merged(parsed)
 
     def _merged(self, parsed):
-        legs = list(self.legs.values())
+        legs = list(self.legs)
         totals = [l for l in legs if l['isTotal']]
         used = totals or legs
+        if self.max_legs and len(used) > self.max_legs:
+            # More slots than any frame ever saw legs: at least one is a misread.
+            # Keep the best-supported, which is the ones most frames agreed on.
+            used = sorted(used, key=lambda l: -l['seen'])[:self.max_legs]
 
         minutes = None
         miles = None

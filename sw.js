@@ -1,5 +1,5 @@
 /* Offline cache. Bump CACHE when files change so phones pick up the new version. */
-var CACHE = 'uberscan-v6';
+var CACHE = 'uberscan-v7';
 
 var ASSETS = [
   './',
@@ -38,12 +38,39 @@ self.addEventListener('activate', function (e) {
 
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
+
+  var url = new URL(e.request.url);
+  if (url.origin !== self.location.origin) return;
+
+  /* The live endpoints must never touch the cache, and a cache-first worker
+   * gets all three of them wrong in a different way:
+   *
+   *   /api/status    answers once and is then frozen at that answer forever,
+   *                  because Cache.match happily satisfies a request that
+   *                  asked for `cache: 'no-store'`. The page would seed
+   *                  itself from a snapshot of whatever the scanner was
+   *                  doing the first time it was ever opened.
+   *   /api/frame.jpg is fetched with a cache-busting `?t=<ms>` twice a
+   *                  second, and every distinct URL is a distinct cache
+   *                  entry — a few hours of watching fills the quota with
+   *                  stale JPEGs.
+   *   /api/events    is server-sent events: a response body that never ends.
+   *                  Cloning it into cache.put() buffers a stream with no
+   *                  last byte.
+   *
+   * None of it is any use offline either — it is all live state from a
+   * scanner that is, by definition, not running.
+   */
+  if (url.pathname.indexOf('/api/') === 0) return;
+
   e.respondWith(
     caches.match(e.request).then(function (hit) {
       if (hit) return hit;
       return fetch(e.request).then(function (res) {
-        // Cache same-origin successes so a first visit online works offline later.
-        if (res && res.ok && res.type === 'basic') {
+        // Cache same-origin successes so a first visit online works offline
+        // later. Query strings are skipped: they are cache-busters here, and
+        // storing them accumulates entries nothing will ever ask for again.
+        if (res && res.ok && res.type === 'basic' && !url.search) {
           var copy = res.clone();
           caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
         }

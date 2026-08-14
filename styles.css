@@ -86,15 +86,19 @@ html, body {
 .sub small { font-size: 10px; font-weight: 600; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
 
 /* Sits under the submetrics, so it needs a gap of its own — without one it
-   collides with the uppercase labels above it. */
-.warn {
+   collides with the uppercase labels above it.
+   Named `notice` rather than `warn` on purpose: `warn` is already a verdict
+   *state* (`.verdict.warn` is the CLOSE CALL panel), and a bare `.warn` rule
+   matched that panel too — giving a close-call offer 12px amber body text and
+   a stray margin. A message and a state should not share a class name. */
+.notice {
   margin-top: 10px;
   font-size: 12px;
   line-height: 1.45;
   font-weight: 600;
   color: var(--warn);
 }
-.warn[hidden] { display: none; }
+.notice[hidden] { display: none; }
 
 /* ---------- Fields ---------- */
 .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }

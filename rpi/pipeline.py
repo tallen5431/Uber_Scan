@@ -442,6 +442,11 @@ def fit_roi(lines, image_height, current=None):
 MISSES_BEFORE_RESCUE = 2
 RESCUE_EVERY = 1.2          # ...and no more often than this even then
 
+# How many consecutive failures are worth chasing before accepting that the
+# screen simply has no offer on it. Enough to reach the rescue and act on it,
+# few enough that an idle scanner goes quiet again.
+RECOVER_LOOKS = 4
+
 # Two searches must land in the same place before the crop actually moves, and
 # having moved it, it stays put for a while. A single search is one OCR pass on
 # a hard image and is quite capable of being wrong.
@@ -541,14 +546,22 @@ class Scanner:
 
     @property
     def recovering(self):
-        """True when reads are failing and the crop is under suspicion.
+        """True while extra looks are still worth taking at a suspect crop.
 
         The motion gate fires once per card, so left alone a suspect crop learns
         one thing per offer and takes several offers to work out that it is
         broken. A caller that keeps feeding it frames while this is set turns
         that into a couple of seconds.
+
+        Bounded, and that bound is the whole point. "Reads are failing" is the
+        normal state of a scanner pointed at a screen with no offer on it, so a
+        caller that re-armed on every failure would never stop: the extra looks
+        fail, which asks for more extra looks, and a motion-gated scanner that
+        should be idle instead warps and OCRs twice a second forever. A few
+        looks are enough to tell a broken crop from an empty screen; after that
+        the answer is in, and the gate can go back to doing its job.
         """
-        return self._misses > 0 and self.roi is not None
+        return self.roi is not None and 0 < self._misses <= RECOVER_LOOKS
 
     @property
     def settled(self):

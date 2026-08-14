@@ -146,6 +146,23 @@ it read `package.json`, and it will serve instead.
 | `tools/make_icons.py` | Regenerates the icons in `icons/` |
 | `tools/make-cert.sh` | `npm run cert` — local certificate authority for https |
 
+## What the server will not serve
+
+`server.js` sits on a LAN, on plain http, with no authentication — every file
+under the project root is one GET away from anyone on the same wifi. That is
+fine for a page of HTML and was not fine for `ssl/`, which holds the **private
+key of the certificate authority** `make-cert.sh` asks you to install on your
+phone as a trust anchor. Anyone who fetched it could mint a certificate your
+phone would believe, for any site. It was served with a 200.
+
+`ssl/`, `rpi/`, `node_modules/`, dotfiles and anything ending `.pem`/`.key`/
+`.crt` are now refused outright, and paths are re-checked after following
+symlinks rather than only being resolved lexically — resolving a path proves
+nothing about where a link inside the root actually points.
+
+If you ran an earlier version on an untrusted network, regenerate the CA
+(`rm -rf ssl && npm run cert`) and re-install the new one on the phone.
+
 ## Notes
 
 Uber's quoted trip time is the *driving* time. Whether you count the pickup drive

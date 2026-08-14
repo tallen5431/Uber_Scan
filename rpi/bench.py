@@ -65,29 +65,37 @@ def main():
     if args.quick:
         combos = [(card_height, roi, PL.OCR_CARD_HEIGHT, 'configured')]
     else:
+        # Two axes, and only one of them applies at a time. Warp height sets the
+        # read size when there is no crop; when there *is* one the read size is
+        # derived from the card's share of the screen instead, so sweeping warp
+        # height there would print five rows of the identical measurement.
         combos = ([(h, None, PL.OCR_CARD_HEIGHT, 'whole screen') for h in (1400, 1100, 900, 700)] +
-                  [(h, CARD_ROI, PL.OCR_CARD_HEIGHT, 'card only') for h in (1400, 1100, 900, 700, 500)] +
                   # The read size is the axis that matters most and the one
                   # nobody expects: the same crop, handed over larger, reads
                   # things it could not read before. 0 means "as cropped".
-                  [(900, CARD_ROI, o, 'read size') for o in (0, 600, 900, 1200, 1500)])
+                  [(card_height, CARD_ROI, o, 'card only')
+                   for o in (0, 500, 700, 900, 1100, 1300)])
 
     print('%-14s %-7s %-7s %-9s %-7s %-7s %-8s  %s'
-          % ('crop', 'height', 'read', 'pixels', 'warp', 'ocr', 'total', 'result'))
+          % ('crop', 'warp', 'read', 'pixels', 'warp', 'ocr', 'total', 'result'))
     for height, r, ocr_height, label in combos:
         scanner = PL.Scanner(quad=quad, roi=r, card_height=height, ocr_height=ocr_height)
         ms, parsed = timed(scanner, frame, args.repeat)
-        shape = PL.fit_for_ocr(PL.crop(PL.warp(frame, quad, height), r), ocr_height).shape
+        # Exactly what the reader was handed, taken through the same path it
+        # takes — read_height, not card_height, and the pixel cap applied.
+        shape = PL.fit_for_ocr(PL.crop(PL.warp(frame, quad, scanner.read_height), r),
+                               ocr_height).shape
         ok = 'OK' if parsed['complete'] else 'MISS'
         print('%-14s %-7d %-7s %-9s %-7.0f %-7.0f %-8.0f  %s pay=%s min=%s mi=%s%s'
-              % (label, height, ocr_height or 'as-is', '%dx%d' % (shape[1], shape[0]),
+              % (label, scanner.read_height, ocr_height or 'as-is',
+                 '%dx%d' % (shape[1], shape[0]),
                  ms['warp'], ms['ocr'], ms['total'], ok, parsed['pay'], parsed['minutes'],
                  parsed['miles'], ' (recovered)' if parsed['milesCorrected'] else ''))
 
-    print('\nPick the smallest warp height that still reads, then leave margin: the '
-          'card is smaller in frame when the phone sits further away.')
-    print('Read size buys accuracy, not detail — it cannot recover what the mount '
-          'never captured, but tesseract needs about a 20px x-height to work at all.')
+    print('\nRead size buys accuracy, not detail — it cannot recover what the mount '
+          'never captured, but tesseract needs about a 20px x-height to work at all. '
+          'Take the smallest that still reads everything, then leave margin: the card '
+          'is smaller in frame when the phone sits further away.')
 
 
 if __name__ == '__main__':
