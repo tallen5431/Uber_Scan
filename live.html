@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Uber Scan — Live</title>
+<meta name="theme-color" content="#0b0f14">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* Read at arm's length, in a car, at a glance. Nothing subtle here. */
+  #app { justify-content: center; }
+  .live { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: var(--pad); }
+  .big .rate-value { font-size: clamp(72px, 28vw, 180px); }
+  .stale { opacity: .35; }
+  .pending { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .connbar {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 12px; color: var(--muted); padding: 8px;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--no); }
+  .dot.on { background: var(--go); }
+</style>
+</head>
+<body>
+
+<main id="app">
+  <div class="live">
+    <section id="verdict" class="verdict empty">
+      <div class="verdict-label" id="verdictLabel">WAITING FOR AN OFFER</div>
+      <div class="rate big">
+        <span class="rate-value" id="perHour">--</span>
+        <span class="rate-unit">/hr</span>
+      </div>
+      <div class="submetrics">
+        <div class="sub"><span id="vPay">--</span><small>pay</small></div>
+        <div class="sub"><span id="vMin">--</span><small>minutes</small></div>
+        <div class="sub"><span id="vMile">--</span><small>miles</small></div>
+      </div>
+      <div id="warn" class="warn" hidden></div>
+    </section>
+    <div class="pending" id="detail" style="text-align:center"></div>
+  </div>
+
+  <div class="connbar"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
+
+  <nav class="bottombar">
+    <a class="linkbtn" href="index.html">⌨ Type</a>
+    <a class="linkbtn" href="/api/status">⚙︎ Status</a>
+  </nav>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // An offer the scanner stopped seeing this long ago is history, not news.
+  var STALE_MS = 90000;
+
+  var el = {};
+  ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot']
+    .forEach(function (id) { el[id] = document.getElementById(id); });
+
+  var last = null;
+
+  function money(n, d) { return (n === null || n === undefined) ? '--' : '$' + Number(n).toFixed(d); }
+
+  function render() {
+    var r = last;
+    if (!r || !r.ready) {
+      el.verdict.className = 'verdict empty';
+      el.verdictLabel.textContent = 'WAITING FOR AN OFFER';
+      el.perHour.textContent = '--';
+      el.vPay.textContent = el.vMin.textContent = el.vMile.textContent = '--';
+      el.warn.hidden = true;
+      el.detail.textContent = r ? 'scanner running, no offer on screen' : '';
+      return;
+    }
+
+    var stale = Date.now() - r.at > STALE_MS;
+    el.verdict.className = 'verdict ' + r.state + (stale ? ' stale' : '');
+    el.verdictLabel.textContent =
+      ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '') + (r.locked ? '' : ' ?');
+    el.perHour.textContent = '$' + (Math.abs(r.perHour) >= 100
+      ? Math.round(r.perHour) : Number(r.perHour).toFixed(1));
+    el.vPay.textContent = money(r.pay, 2);
+    el.vMin.textContent = r.minutes === null ? '--' : Math.round(r.minutes);
+    el.vMile.textContent = r.miles === null ? '--' : Number(r.miles).toFixed(1);
+
+    var notes = [];
+    if (r.milesUncertain) notes.push('Distance unreadable — pay shown before mileage cost.');
+    else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
+    el.warn.textContent = notes.join(' ');
+    el.warn.hidden = !notes.length;
+
+    el.detail.textContent = (stale ? 'last seen ' + Math.round((Date.now() - r.at) / 1000) + 's ago · ' : '')
+      + r.ms + 'ms' + (r.items ? ' · ' + r.items + ' items' : '');
+  }
+
+  function connect() {
+    var src = new EventSource('/api/events');
+    src.onopen = function () {
+      el.conn.textContent = 'scanner connected';
+      el.dot.classList.add('on');
+    };
+    src.onmessage = function (e) {
+      try { last = JSON.parse(e.data); } catch (err) { return; }
+      render();
+    };
+    src.onerror = function () {
+      el.conn.textContent = 'reconnecting…';
+      el.dot.classList.remove('on');
+    };
+  }
+
+  // Seed from the current state so a fresh tab is not blank until the next read.
+  fetch('/api/status').then(function (r) { return r.json(); }).then(function (s) {
+    if (s.last) { last = s.last; render(); }
+    if (!s.scanner.enabled) {
+      el.conn.textContent = 'scanner not calibrated — run rpi/calibrate.py';
+    } else if (!s.scanner.running) {
+      el.conn.textContent = 'scanner not running' + (s.scanner.error ? ': ' + s.scanner.error : '');
+    }
+  }).catch(function () {});
+
+  connect();
+  setInterval(render, 1000);   // keeps the "last seen" counter honest
+})();
+</script>
+</body>
+</html>

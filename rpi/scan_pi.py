@@ -124,6 +124,26 @@ def show(frame_text, rate, parsed, ms, locked):
              ms['total'], '  LOCKED' if locked else ''))
 
 
+def emit(rate, parsed, ms, locked):
+    """One JSON object per line, flushed, so a parent process sees reads live."""
+    payload = {
+        'ready': rate['ready'],
+        'locked': locked,
+        'state': rate['state'],
+        'perHour': round(rate['perHour'], 2) if rate['ready'] else None,
+        'perMile': round(rate['perMile'], 2) if rate.get('perMile') else None,
+        'pay': parsed['pay'],
+        'minutes': parsed['minutes'],
+        'miles': parsed['miles'],
+        'items': parsed['items'],
+        'milesCorrected': parsed['milesCorrected'],
+        'milesUncertain': parsed['milesUncertain'],
+        'ms': round(ms['total']),
+    }
+    sys.stdout.write(json.dumps(payload) + '\n')
+    sys.stdout.flush()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--config', default=DEFAULT_CONFIG)
@@ -132,8 +152,11 @@ def main():
     ap.add_argument('--exposure', type=int, default=12000,
                     help='microseconds; keep above ~10000 so OLED dimming does not band')
     ap.add_argument('--gain', type=float, default=1.5)
-    ap.add_argument('--lens', type=float, default=4.0,
-                    help='dioptres (1/metres): 4.0 focuses at 25cm. Ignored on fixed-focus modules')
+    ap.add_argument('--lens', type=float, default=None,
+                    help='dioptres (1/metres): 4.0 focuses at 25cm. Defaults to the '
+                         'value autofocus found during calibration')
+    ap.add_argument('--json', action='store_true',
+                    help='emit one JSON object per read on stdout, for another process to consume')
     ap.add_argument('--list-modes', action='store_true',
                     help='print the sensor modes this camera reports, then exit')
     ap.add_argument('--save-misses', metavar='DIR',
@@ -156,7 +179,10 @@ def main():
         settings=cfg.get('settings', {}),
     )
 
-    cam = start_camera(cfg, args.exposure, args.gain, args.lens)
+    # Calibration already found focus with autofocus; reuse it rather than
+    # making the driver rediscover a number that cannot change on a fixed mount.
+    lens = args.lens if args.lens is not None else cfg.get('lensPosition') or 4.0
+    cam = start_camera(cfg, args.exposure, args.gain, lens)
     if args.save_misses:
         os.makedirs(args.save_misses, exist_ok=True)
     if args.display:
@@ -187,7 +213,10 @@ def main():
             frames += 1
             out = scanner.read(frame)
             rate, parsed = out['rate'], out['parsed']
-            show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
+            if args.json:
+                emit(rate, parsed, out['ms'], out['locked'])
+            else:
+                show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
 
             if args.save_misses and not parsed['complete']:
                 cv2.imwrite(os.path.join(args.save_misses, 'miss-%d.png' % int(time.time())), frame)

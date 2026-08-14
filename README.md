@@ -123,6 +123,10 @@ Accepting the browser's warning is enough for the camera but **not** for the
 offline install; for that, install `ssl/ca.pem` on the phone.
 [SCANNING.md](SCANNING.md) has the details and the per-platform steps.
 
+On a Raspberry Pi with a camera, `npm start` also runs the offer scanner once
+`rpi/config.json` exists, serving the live verdict at `/live.html` and its state
+at `/api/status`. See [rpi/README.md](rpi/README.md); `SCANNER=0` turns it off.
+
 **If your host tried to run `ui.js` (or the old `app.js`) with Node and died on
 `ReferenceError: document is not defined`**, that is the symptom of this project
 being executed rather than served. Everything in it except `server.js` is

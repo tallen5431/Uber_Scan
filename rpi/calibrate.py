@@ -37,15 +37,52 @@ MIN_CARD_PIXELS = 450
 FULL_FOV_MODES = {'2328x1748': (2328, 1748), '4656x3496': (4656, 3496)}
 
 
-def grab_from_camera(size):
+def grab_from_camera(size, lens=None):
+    """One sharp frame, plus the lens position that made it sharp.
+
+    The scanner pins focus rather than tracking it, so the focus has to be
+    decided once — here — and recorded. Otherwise every run starts at whatever
+    the lens happens to be resting at, which is the blurry default.
+    """
+    import time
     from picamera2 import Picamera2
+
     cam = Picamera2()
     cam.configure(cam.create_still_configuration(main={'size': size, 'format': 'RGB888'}))
     cam.start()
     try:
-        import time
         time.sleep(2)          # let auto-exposure settle before the one frame we keep
-        return cam.capture_array('main')
+        lens_position = None
+
+        if 'AfMode' in cam.camera_controls:
+            from libcamera import controls
+            if lens is not None:
+                cam.set_controls({'AfMode': controls.AfModeEnum.Manual, 'LensPosition': lens})
+                time.sleep(1.5)
+                lens_position = lens
+            else:
+                print('running autofocus...')
+                cam.set_controls({'AfMode': controls.AfModeEnum.Auto})
+                try:
+                    cam.autofocus_cycle()
+                except Exception as e:
+                    print('  autofocus cycle failed (%s); using whatever it settled on' % e)
+                time.sleep(0.5)
+        else:
+            print('no autofocus on this module; focus is set by the mount distance')
+
+        request = cam.capture_request()
+        try:
+            frame = request.make_array('main')
+            if lens_position is None:
+                lens_position = request.get_metadata().get('LensPosition')
+        finally:
+            request.release()
+
+        if lens_position:
+            print('focus locked at %.2f dioptres (about %.0f cm)'
+                  % (lens_position, 100.0 / lens_position))
+        return frame, lens_position
     finally:
         cam.stop()
         cam.close()
@@ -62,11 +99,16 @@ def main():
                     help='warp height; 900 is the measured speed/accuracy sweet spot')
     ap.add_argument('--corners', help='manual override: x1,y1,x2,y2,x3,y3,x4,y4 clockwise from top-left')
     ap.add_argument('--full-screen', action='store_true', help='read the whole screen, not just the card')
+    ap.add_argument('--lens', type=float, default=None,
+                    help='pin focus in dioptres (4.0 = 25cm) instead of autofocusing')
     args = ap.parse_args()
 
     width, height = FULL_FOV_MODES[args.mode]
-    frame = cv2.imread(args.from_image) if args.from_image \
-        else grab_from_camera((width, height))
+    lens_position = args.lens
+    if args.from_image:
+        frame = cv2.imread(args.from_image)
+    else:
+        frame, lens_position = grab_from_camera((width, height), args.lens)
     if frame is None:
         sys.exit('could not read a frame')
 
@@ -86,6 +128,7 @@ def main():
         'roi': roi,
         'cardHeight': args.card_height,
         'capture': {'width': width, 'height': height},
+        'lensPosition': lens_position,
         'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
                      'pad': 0, 'secondsPerItem': 0},
     }

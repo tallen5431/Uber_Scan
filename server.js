@@ -20,6 +20,7 @@ var path = require('path');
 var url = require('url');
 
 var os = require('os');
+var spawn = require('child_process').spawn;
 
 var ROOT = __dirname;
 var PORT = parseInt(process.env.PORT, 10) || 8080;
@@ -45,6 +46,104 @@ var TYPES = {
   '.gz': 'application/octet-stream'
 };
 
+/* ---------- the Pi scanner, as a child of this process ----------
+ *
+ * Started automatically when rpi/config.json exists, because that file only
+ * exists once the camera has been aimed and calibrated — which is exactly the
+ * point at which running the scanner starts making sense. There is no
+ * environment variable to set, since a process manager runs `npm start` with no
+ * shell to set one in. SCANNER=0 turns it off.
+ */
+var scanner = {
+  proc: null,
+  last: null,          // most recent read
+  started: null,
+  restarts: 0,
+  error: null
+};
+
+var listeners = [];    // open server-sent-event responses
+
+function scannerEnabled() {
+  if (process.env.SCANNER === '0') return false;
+  try {
+    fs.statSync(path.join(ROOT, 'rpi', 'config.json'));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function startScanner() {
+  var cmd = process.env.SCANNER_CMD;
+  var args = cmd ? [] : [path.join(ROOT, 'rpi', 'scan_pi.py'), '--json'];
+  var bin = cmd || 'python3';
+  if (cmd) args = process.env.SCANNER_ARGS ? process.env.SCANNER_ARGS.split(' ') : [];
+  if (process.env.SCANNER_SPEAK !== '0' && !cmd) args.push('--speak');
+
+  scanner.proc = spawn(bin, args, { cwd: ROOT });
+  scanner.started = Date.now();
+  scanner.error = null;
+  console.log('scanner: started ' + bin + ' ' + args.join(' '));
+
+  var buffered = '';
+  scanner.proc.stdout.on('data', function (chunk) {
+    buffered += chunk.toString();
+    var lines = buffered.split('\n');
+    buffered = lines.pop();          // keep the partial line for next time
+    lines.forEach(function (line) {
+      line = line.trim();
+      if (!line) return;
+      try {
+        var read = JSON.parse(line);
+        read.at = Date.now();
+        scanner.last = read;
+        broadcast(read);
+      } catch (e) {
+        console.log('scanner: ' + line);   // not JSON, so it is a log line
+      }
+    });
+  });
+
+  scanner.proc.stderr.on('data', function (c) {
+    var text = c.toString().trim();
+    if (text) console.error('scanner: ' + text);
+    scanner.error = text.split('\n').slice(-3).join(' ');
+  });
+
+  scanner.proc.on('exit', function (code, signal) {
+    console.error('scanner: exited (' + (signal || code) + ')');
+    scanner.proc = null;
+    if (shuttingDown) return;
+    // Back off so a camera that is missing or busy does not spin the CPU.
+    var delay = Math.min(60000, 3000 * Math.pow(2, Math.min(scanner.restarts, 4)));
+    scanner.restarts++;
+    console.error('scanner: retrying in ' + Math.round(delay / 1000) + 's');
+    setTimeout(startScanner, delay);
+  });
+}
+
+function broadcast(read) {
+  var payload = 'data: ' + JSON.stringify(read) + '\n\n';
+  listeners = listeners.filter(function (res) {
+    try {
+      res.write(payload);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  });
+}
+
+var shuttingDown = false;
+['SIGTERM', 'SIGINT'].forEach(function (sig) {
+  process.on(sig, function () {
+    shuttingDown = true;
+    if (scanner.proc) scanner.proc.kill('SIGTERM');
+    process.exit(0);
+  });
+});
+
 function send(res, status, body, headers) {
   res.writeHead(status, Object.assign({ 'Cache-Control': 'no-cache' }, headers || {}));
   res.end(body);
@@ -61,6 +160,35 @@ function handler(req, res) {
   } catch (e) {
     return send(res, 400, 'bad request', { 'Content-Type': 'text/plain' });
   }
+
+  if (pathname === '/api/status') {
+    return send(res, 200, JSON.stringify({
+      scanner: {
+        enabled: scannerEnabled(),
+        running: !!scanner.proc,
+        restarts: scanner.restarts,
+        startedAt: scanner.started,
+        error: scanner.error
+      },
+      last: scanner.last
+    }), { 'Content-Type': 'application/json; charset=utf-8' });
+  }
+
+  if (pathname === '/api/events') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    });
+    res.write('retry: 2000\n\n');
+    if (scanner.last) res.write('data: ' + JSON.stringify(scanner.last) + '\n\n');
+    listeners.push(res);
+    req.on('close', function () {
+      listeners = listeners.filter(function (r) { return r !== res; });
+    });
+    return;
+  }
+
   if (pathname.endsWith('/')) pathname += 'index.html';
 
   // Resolve first, then confirm the result is still inside ROOT, so that "..",
@@ -152,7 +280,19 @@ if (tls) {
     console.log('origin secure, which is what the camera and install need.');
   });
 } else {
-  console.log('\nNo certificate in ./ssl, so http only. The camera scanner and');
+  console.log('\nNo certificate in ./ssl, so http only. The browser camera page and');
   console.log('home-screen install need a secure context: they work on localhost,');
   console.log('but not over a LAN address. Run `npm run cert` and restart to fix.');
+  console.log('(The Pi scanner below does not care — it never touches a browser.)');
+}
+
+if (scannerEnabled()) {
+  console.log('\nrpi/config.json found, so the Pi scanner runs here too.');
+  console.log('  live verdict: /live.html      state: /api/status');
+  startScanner();
+} else if (process.env.SCANNER === '0') {
+  console.log('\nPi scanner disabled (SCANNER=0).');
+} else {
+  console.log('\nNo rpi/config.json, so the Pi scanner is not started.');
+  console.log('Aim and calibrate first:  python3 rpi/preview.py  then  rpi/calibrate.py');
 }

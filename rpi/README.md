@@ -31,12 +31,32 @@ says *"pass, twelve an hour"* out loud. Speech is the right output in a car — 
 needs no glance at all. `--display` draws a big colour panel instead if you have
 a screen on the Pi, and reads are always printed to the terminal.
 
-To have it start with the Pi:
+### Or run it from the web server
+
+If you already manage this project with a process supervisor that runs
+`npm start`, the scanner can live there instead of in its own service. Once
+`rpi/config.json` exists — that is, once you have calibrated — `npm start`
+launches the scanner alongside the site automatically. There is nothing to
+configure, because a supervisor gives you no shell to configure it in.
+
+| | |
+|---|---|
+| `/live.html` | the verdict, full screen, updating live |
+| `/api/status` | scanner state and the last read, as JSON |
+| `/api/events` | server-sent events, one per read |
+
+The scanner is restarted with a backoff if it dies, its errors appear in
+`/api/status`, and the site keeps serving throughout. `SCANNER=0` disables it,
+`SCANNER_SPEAK=0` keeps it silent.
+
+### Or as its own service
 
 ```sh
 sudo bash rpi/install-service.sh
 journalctl -u uberscan -f       # watch it work
 ```
+
+Use one or the other, not both — two processes cannot share the camera.
 
 Stop the service before recalibrating, so the camera is free:
 `sudo systemctl stop uberscan`.
@@ -147,6 +167,26 @@ warp.
 **Phone.** Turn auto-brightness off and brightness up. Auto-brightness changes
 exposure mid-offer, which is exactly what the pinned camera settings are trying
 to avoid.
+
+## Focus
+
+The IMX519 has a motorised lens, and left alone it sits wherever it was, which
+is usually blurry. Focus is decided once and then pinned, because a fixed mount
+has nothing to track and a refocus mid-offer costs more than the read does:
+
+- `preview.py` runs **continuous autofocus** while you aim, and overlays both a
+  sharpness score and the lens position it settles at;
+- `calibrate.py` runs one autofocus cycle and records that position in
+  `config.json`;
+- `scan_pi.py` pins the recorded position at startup.
+
+So a blurry feed means either you have not calibrated since moving the mount, or
+autofocus never ran. The preview overlay says which: it prints `focus NNN` and
+marks the frame `BLURRY` below the usable threshold. A sharp card scores in the
+hundreds; a visibly soft one scores under twenty.
+
+`--lens 4.0` on either script pins focus manually instead, in dioptres — 4.0 is
+25cm, 3.0 is 33cm, 2.0 is 50cm.
 
 ## Aim the camera
 

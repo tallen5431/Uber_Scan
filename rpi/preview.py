@@ -45,9 +45,11 @@ b{color:#17c964}</style>
 class Source:
     """A still or a camera, behind one method."""
 
-    def __init__(self, image=None, size=(2328, 1748)):
+    def __init__(self, image=None, size=(2328, 1748), lens=None):
         self.cam = None
         self.still = None
+        self.af = False
+        self.lens_position = None
         if image:
             self.still = cv2.imread(image)
             if self.still is None:
@@ -65,6 +67,31 @@ class Source:
                 raw={'size': size}))
             self.cam.start()
             time.sleep(1.0)
+            self._setup_focus(lens)
+
+    def _setup_focus(self, lens):
+        """Aiming is the one time autofocus earns its keep.
+
+        The scanner pins focus because a fixed mount has nothing to track and a
+        refocus mid-offer costs more than the read. While positioning the
+        bracket the opposite is true: the distance changes constantly, so run
+        continuous autofocus and report where it settles, which is the number
+        to pin later.
+        """
+        controls_available = self.cam.camera_controls
+        if 'AfMode' not in controls_available:
+            print('this module reports no autofocus; focus is fixed by mount distance')
+            return
+        from libcamera import controls as libcontrols
+        if lens is not None:
+            self.cam.set_controls({'AfMode': libcontrols.AfModeEnum.Manual,
+                                   'LensPosition': lens})
+            print('focus pinned at %.2f dioptres (%.0f cm)' % (lens, 100.0 / lens if lens else 0))
+        else:
+            self.cam.set_controls({'AfMode': libcontrols.AfModeEnum.Continuous})
+            self.af = True
+            print('continuous autofocus on — the overlay reports where it settles')
+        time.sleep(0.5)
 
     @property
     def scale_to_capture(self):
@@ -75,7 +102,13 @@ class Source:
     def frame(self):
         if self.still is not None:
             return self.still.copy()
-        return self.cam.capture_array('main')
+        request = self.cam.capture_request()
+        try:
+            frame = request.make_array('main')
+            self.lens_position = request.get_metadata().get('LensPosition')
+        finally:
+            request.release()
+        return frame
 
     def close(self):
         if self.cam is not None:
@@ -83,7 +116,18 @@ class Source:
             self.cam.close()
 
 
-def annotate(frame, scale_to_capture):
+def sharpness(image):
+    """Variance of the Laplacian — high is crisp, low is soft."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
+# Below this the card reads as mush however well it is framed. Calibrated
+# against the test frames, where a sharp card measures in the hundreds.
+SHARP_FLOOR = 60.0
+
+
+def annotate(frame, scale_to_capture, lens_position=None):
     """Draw the detected screen and the number that decides everything."""
     quad = PL.detect_screen_quad(frame)
     out = frame.copy()
@@ -99,17 +143,32 @@ def annotate(frame, scale_to_capture):
     ok = card_px >= MIN_CARD_PIXELS
     colour = GREEN if ok else (AMBER if card_px >= MIN_CARD_PIXELS * 0.75 else RED)
 
+    # Measure focus on the card itself, not the whole scene; a sharp dashboard
+    # around a soft phone would read as perfectly in focus.
+    card = PL.crop(PL.warp(frame, quad, 600), DEFAULT_ROI)
+    sharp = sharpness(card)
+    sharp_ok = sharp >= SHARP_FLOOR
+    sharp_colour = GREEN if sharp_ok else (AMBER if sharp >= SHARP_FLOOR * 0.6 else RED)
+
     cv2.polylines(out, [quad.astype(np.int32)], True, colour, 3)
     # The card sits in the lower part of the screen; show what will be read.
     top = quad[0] + (quad[3] - quad[0]) * DEFAULT_ROI[1]
     top_r = quad[1] + (quad[2] - quad[1]) * DEFAULT_ROI[1]
     cv2.line(out, tuple(top.astype(int)), tuple(top_r.astype(int)), colour, 2)
 
-    cv2.rectangle(out, (0, 0), (out.shape[1], 92), (20, 27, 36), -1)
+    cv2.rectangle(out, (0, 0), (out.shape[1], 132), (20, 27, 36), -1)
     cv2.putText(out, 'card %d px' % card_px, (14, 40),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.2, colour, 3)
-    cv2.putText(out, 'need %d+' % MIN_CARD_PIXELS if not ok else 'good (need %d+)' % MIN_CARD_PIXELS,
-                (14, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
+    cv2.putText(out, ('need %d+' % MIN_CARD_PIXELS) if not ok else ('good (need %d+)' % MIN_CARD_PIXELS),
+                (14, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.65, colour, 2)
+
+    focus_text = 'focus %.0f' % sharp
+    if lens_position:
+        focus_text += '   lens %.2f  (%.0f cm)' % (lens_position, 100.0 / lens_position)
+    cv2.putText(out, focus_text, (14, 112), cv2.FONT_HERSHEY_SIMPLEX, 0.8, sharp_colour, 2)
+    if not sharp_ok:
+        cv2.putText(out, 'BLURRY', (out.shape[1] - 150, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, RED, 3)
     return out, card_px
 
 
@@ -151,7 +210,8 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 with self.lock:
                     frame = self.source.frame()
-                shown, _ = annotate(frame, self.source.scale_to_capture)
+                shown, _ = annotate(frame, self.source.scale_to_capture,
+                                    self.source.lens_position)
                 ok, jpg = cv2.imencode('.jpg', shown, [cv2.IMWRITE_JPEG_QUALITY, 80])
                 if not ok:
                     continue
@@ -173,12 +233,15 @@ def main():
     ap.add_argument('--image', help='annotate a still instead of the camera')
     ap.add_argument('--save', metavar='PATH',
                     help='write one annotated frame and exit, no server')
+    ap.add_argument('--lens', type=float, default=None,
+                    help='pin focus in dioptres (4.0 = 25cm) instead of autofocusing')
     args = ap.parse_args()
 
-    Handler.source = Source(args.image)
+    Handler.source = Source(args.image, lens=args.lens)
 
     if args.save:
-        shown, card_px = annotate(Handler.source.frame(), Handler.source.scale_to_capture)
+        shown, card_px = annotate(Handler.source.frame(), Handler.source.scale_to_capture,
+                                  Handler.source.lens_position)
         cv2.imwrite(args.save, shown)
         print('wrote %s  (card %s px)' % (args.save, card_px))
         Handler.source.close()
