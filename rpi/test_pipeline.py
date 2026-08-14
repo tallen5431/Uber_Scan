@@ -149,6 +149,38 @@ eq('the warp cannot run away', sc.read_height, PL.MAX_READ_HEIGHT)
 eq('and the search pass is bounded too', sc._search_height(np.zeros((5000, 900), np.uint8)),
    PL.RESCUE_MAX_HEIGHT)
 
+# --- a screen running off the frame is not a big screen --------------------
+# The failure this catches, verbatim from a rig: corners [[548,0],[1844,0],
+# [1792,1746],[592,1746]] in a 2328x1748 frame. Top and bottom both off the
+# edge, so only the middle of the phone was ever being measured.
+SHAPE = (1748, 2328)
+spilling = [[548, 0], [1844, 0], [1792, 1746], [592, 1746]]
+eq('the real failure is caught', PL.touches_edge(spilling, SHAPE), ['top', 'bottom'])
+
+inside = [[548, 200], [1844, 200], [1792, 1500], [592, 1500]]
+eq('a screen with room around it is fine', PL.touches_edge(inside, SHAPE), [])
+eq('off the left', PL.touches_edge([[2, 200], [900, 200], [900, 1500], [2, 1500]], SHAPE),
+   ['left'])
+eq('off the right',
+   PL.touches_edge([[1400, 200], [2326, 200], [2326, 1500], [1400, 1500]], SHAPE), ['right'])
+eq('cornered', PL.touches_edge([[0, 0], [2327, 0], [2327, 1747], [0, 1747]], SHAPE),
+   ['top', 'bottom', 'left', 'right'])
+# Just inside the margin still counts — a screen a pixel from the edge is
+# almost certainly continuing past it.
+ok_('a hair off the edge counts',
+    'top' in PL.touches_edge([[548, 8], [1844, 8], [1792, 1500], [592, 1500]], SHAPE))
+
+# --- the reader's picture is bounded ---------------------------------------
+# Height alone does not bound pixels: a wide quad warped to 1800 came out
+# 1336px across on a real rig, nearly twice a normal card, and reads went from
+# 0.6s to 1.4s.
+wide = PL.fit_for_ocr(np.zeros((1080, 1336, 3), np.uint8), 900)
+ok_('an outsized card is trimmed', wide.shape[0] * wide.shape[1] <= PL.MAX_OCR_PIXELS)
+ok_('...keeping its aspect', abs(wide.shape[1] / float(wide.shape[0]) - 1336 / 1080.0) < 0.02)
+normal = PL.fit_for_ocr(np.zeros((450, 397, 3), np.uint8), 900)
+eq('a normal card is untouched by the cap', normal.shape[0], 900)
+ok_('...and is well inside it', normal.shape[0] * normal.shape[1] < PL.MAX_OCR_PIXELS)
+
 # --- resize_height goes both ways ------------------------------------------
 eq('resize up', PL.resize_height(np.zeros((450, 300, 3), np.uint8), 900).shape[:2], (900, 600))
 eq('resize down', PL.resize_height(np.zeros((1800, 600, 3), np.uint8), 900).shape[:2], (900, 300))

@@ -111,21 +111,27 @@ def aim(as_json, port, timeout, min_card=None):
             _, card_px = PV.annotate(frame, source.scale_to_capture, source.lens_position)
 
             sharp = None
+            spill = []
             if card_px:
                 import pipeline as PL
                 quad = PL.detect_screen_quad(frame)
                 if quad is not None:
+                    spill = PL.touches_edge(quad, frame.shape)
                     sharp = PV.sharpness(PL.crop(PL.warp(frame, quad, 600), DEFAULT_ROI))
 
-            ok = bool(card_px and card_px >= floor and sharp and sharp >= PV.SHARP_FLOOR)
+            # A screen running off the edge of the frame is not a big screen, it
+            # is a cropped one, and calibrating on it poisons every measurement
+            # that follows. It has to fail the gate, not pass it for being large.
+            ok = bool(card_px and card_px >= floor and sharp
+                      and sharp >= PV.SHARP_FLOOR and not spill)
             good = good + 1 if ok else 0
 
             now = time.time()
             if now - last_report > 2:
                 last_report = now
                 emit({'phase': 'aim', 'cardPixels': card_px, 'sharpness': round(sharp) if sharp else None,
-                      'stable': good, 'need': STABLE_READINGS,
-                      'message': _aim_hint(card_px, sharp, floor, PV.SHARP_FLOOR)}, as_json)
+                      'stable': good, 'need': STABLE_READINGS, 'spill': spill,
+                      'message': _aim_hint(card_px, sharp, floor, PV.SHARP_FLOOR, spill)}, as_json)
 
             if good >= STABLE_READINGS:
                 emit({'phase': 'aim', 'message': 'mount looks good — calibrating'}, as_json)
@@ -139,16 +145,64 @@ def aim(as_json, port, timeout, min_card=None):
     return None
 
 
-def _aim_hint(card_px, sharp, min_px, min_sharp):
+def _aim_hint(card_px, sharp, min_px, min_sharp, spill=()):
     if not card_px:
         return ('no phone screen found — it must be lit, in frame, and with some '
                 'darker surround; a frame filled edge to edge cannot be told '
                 'apart from the room')
+    if spill:
+        return ('the %s of the screen is out of frame — move the camera back '
+                'until the whole phone fits with a dark border around it. It '
+                'looks like a big card from here, but only the middle of the '
+                'screen is being measured' % ' and '.join(spill))
     if card_px < min_px:
         return 'card is %d px, needs %d — move the camera closer' % (card_px, min_px)
     if not sharp or sharp < min_sharp:
         return 'card is big enough but blurry (%s) — adjust focus' % (round(sharp) if sharp else '?')
     return 'good: %d px, sharp %d' % (card_px, round(sharp))
+
+
+def _measure_exposure(source, quad, as_json):
+    """Find the exposure this particular phone does not ripple at.
+
+    Every panel dims at its own frequency, so the right exposure is a property
+    of the phone rather than of the camera, and the only way to know it is to
+    try a few and watch. Measured on the warped screen so the banding being
+    scored is the screen's, not the dashboard's.
+
+    Falls back to the default — one 60Hz cycle, which is also two of 120 and
+    four of 240 — if the camera will not take exposure settings at all.
+    """
+    import exposure as EX
+    import pipeline as PL
+
+    def grab(exposure_us):
+        try:
+            source.cam.set_controls({'AeEnable': False, 'ExposureTime': int(exposure_us)})
+        except Exception:
+            return []
+        time.sleep(0.45)          # let the setting take effect before believing it
+        frames = []
+        for _ in range(3):
+            frame = source.frame()
+            warped = PL.warp(frame, quad, 400)
+            frames.append(PL.preprocess(warped))
+        return frames
+
+    if source.cam is None:
+        return EX.DEFAULT_EXPOSURE, 'no camera to measure with'
+
+    chosen, report = EX.choose_exposure(grab)
+    if not report:
+        return EX.DEFAULT_EXPOSURE, 'exposure not settable on this camera'
+
+    best = [r for r in report if r['exposure'] == chosen]
+    detail = '; '.join('%dus banding %.1f bright %.0f' % (r['exposure'], r['banding'], r['bright'])
+                       for r in report)
+    emit({'phase': 'calibrated',
+          'message': 'exposure %dus (banding %.1f) — measured against this screen; tried %s'
+                     % (chosen, best[0]['banding'] if best else -1, detail)}, as_json)
+    return int(chosen), detail
 
 
 def calibrate_from(source, as_json):
@@ -163,10 +217,20 @@ def calibrate_from(source, as_json):
         emit({'phase': 'error', 'message': 'lost the screen while calibrating'}, as_json)
         return False
 
+    spill = PL.touches_edge(quad, frame.shape)
+    if spill:
+        emit({'phase': 'error', 'message':
+              'refusing to calibrate: the %s of the screen is out of frame, so only '
+              'part of it would be measured. Move the camera back until the whole '
+              'phone fits with a dark border around it.' % ' and '.join(spill)}, as_json)
+        return False
+
     # The preview runs smaller than the scanner captures, so the corners have to
     # be scaled into capture coordinates or every read would be cropped wrong.
     scale = source.scale_to_capture
     quad_full = [[float(x * scale), float(y * scale)] for x, y in quad]
+
+    exposure_us, why = _measure_exposure(source, quad, as_json)
 
     config = {
         'quad': quad_full,
@@ -174,6 +238,8 @@ def calibrate_from(source, as_json):
         'cardHeight': 900,
         'capture': {'width': source.capture_size[0], 'height': source.capture_size[1]},
         'lensPosition': source.lens_position,
+        'exposureTime': exposure_us,
+        'exposureWhy': why,
         'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
                      'pad': 0, 'secondsPerItem': 0},
     }

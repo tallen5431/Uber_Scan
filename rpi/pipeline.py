@@ -126,6 +126,38 @@ def _detect_quad(frame, min_area_frac, max_area_frac):
     return order_quad(cv2.boxPoints(cv2.minAreaRect(best)).astype(np.float32))
 
 
+# A screen this close to the frame edge is probably continuing past it.
+EDGE_MARGIN = 0.012
+
+
+def touches_edge(quad, shape, margin=EDGE_MARGIN):
+    """Which frame edges the screen runs into. Empty when it fits.
+
+    This matters more than it looks. A phone too close to the camera does not
+    fail loudly — the detector finds the *visible* part of the screen, which is
+    a perfectly good rectangle, and everything downstream is then measured
+    against a screen that is not the whole screen. The card crop lands somewhere
+    arbitrary, the card-height reading is inflated, the warp is the wrong shape,
+    and the only symptom is reads that quietly do not find the payout.
+
+    A real rig logged corners at y=0 and y=1746 of a 1748-row frame and spent an
+    hour re-fitting its crop into worse and worse places because of it.
+    """
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    h, w = shape[:2]
+    mx, my = w * margin, h * margin
+    hit = []
+    if q[:, 1].min() <= my:
+        hit.append('top')
+    if q[:, 1].max() >= h - 1 - my:
+        hit.append('bottom')
+    if q[:, 0].min() <= mx:
+        hit.append('left')
+    if q[:, 0].max() >= w - 1 - mx:
+        hit.append('right')
+    return hit
+
+
 def order_quad(pts):
     """Order corners as top-left, top-right, bottom-right, bottom-left."""
     s = pts.sum(axis=1)
@@ -171,11 +203,22 @@ def preprocess(card):
     return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
 
 
-def fit_for_ocr(card, height=OCR_CARD_HEIGHT):
-    """Scale a small card up to the size tesseract reads best. Never shrinks."""
-    if not height or card.shape[0] >= height:
-        return card
-    return resize_height(card, height)
+# Ceiling on the image handed to the reader. Tesseract's cost is roughly linear
+# in pixels, and height alone does not bound them: a wide quad warped to 1800
+# came out 1336px across, which is nearly twice the pixels of a normal card and
+# turned 0.6s reads into 1.4s ones on a real rig. Text size is set by height, so
+# trimming from here costs legibility only once the picture is already outsized.
+MAX_OCR_PIXELS = 1_000_000
+
+
+def fit_for_ocr(card, height=OCR_CARD_HEIGHT, max_pixels=MAX_OCR_PIXELS):
+    """Scale a card to the size tesseract reads best, within a pixel budget."""
+    if height and card.shape[0] < height:
+        card = resize_height(card, height)
+    pixels = card.shape[0] * card.shape[1]
+    if max_pixels and pixels > max_pixels:
+        card = resize_height(card, int(card.shape[0] * (max_pixels / float(pixels)) ** 0.5))
+    return card
 
 
 def resize_height(image, height):
@@ -579,6 +622,9 @@ class Scanner:
             # Why a read was unsatisfying, for whoever has to explain it later.
             'clipped': clipped,
             'misses': self._misses,
+            # The exact picture the reader was given, so a caller can measure how
+            # bright it was and whether it was rippling.
+            'card': prepped,
             'ms': {
                 'warp': (t1 - t0) * 1000,
                 'prep': (t2 - t1) * 1000,

@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import exposure as EX
 import offer_parser as OP
 import pipeline as PL
 import track as TR
@@ -135,13 +136,15 @@ def start_camera(cfg, exposure_us, gain, lens):
     cam.start()
     time.sleep(1.0)
 
-    # A phone screen is an emissive, PWM-dimmed panel: auto-exposure hunts on it
-    # and short exposures alias into the dimming as dark bands. Pin everything.
+    # A phone screen is an emissive, PWM-dimmed panel: auto-exposure hunts on it,
+    # and an exposure that is not a whole number of dimming cycles aliases into
+    # rolling bands that drift down the picture. Pin both, and pick the exposure
+    # by arithmetic rather than by taste — see exposure.py.
     ctrls = {
         'AeEnable': False,
         'AwbEnable': False,
-        'ExposureTime': exposure_us,
-        'AnalogueGain': gain,
+        'ExposureTime': int(exposure_us),
+        'AnalogueGain': float(gain),
     }
 
     # Advertised controls prove nothing: a tuning file with no autofocus
@@ -224,6 +227,9 @@ class Health:
         self.reset(None)
         self.refits = 0
         self.relocks = 0
+        self.gain = None
+        self.bright = None
+        self.banding = None
 
     def reset(self, now):
         # None rather than time.time(): the window starts when the first read
@@ -232,9 +238,15 @@ class Health:
         self.reads = self.complete = self.no_pay = self.clipped = 0
         self.ms = []
 
-    def add(self, out, parsed):
+    def add(self, out, parsed, card=None, previous=None):
         self.reads += 1
         self.ms.append(out['ms']['total'])
+        if card is not None:
+            self.bright = EX.brightness(card)
+            # Two consecutive reads of a still card differ by flicker and noise
+            # and almost nothing else, which is exactly what banding_score is.
+            if previous is not None and previous.shape == card.shape:
+                self.banding = EX.banding_score([previous, card])
         if parsed.get('complete'):
             self.complete += 1
         if parsed.get('pay') is None:
@@ -254,6 +266,16 @@ class Health:
             bits.append('%d found no payout' % self.no_pay)
         if self.clipped:
             bits.append('%d had the payout at the crop edge' % self.clipped)
+        # Brightness and banding, because "the picture looks dark" and "the
+        # screen looks wavy" are things a person notices and a log should be
+        # able to confirm or deny with a number.
+        if self.bright is not None:
+            bits.append('card brightness %d/%d' % (round(self.bright), round(EX.TARGET_BRIGHT)))
+        if self.banding is not None:
+            bits.append('banding %.1f%s' % (self.banding,
+                                            ' (rippling)' if self.banding > 4.0 else ''))
+        if self.gain is not None:
+            bits.append('gain %.2f' % self.gain)
         bits.append('crop %s' % _fmt_roi(scanner.roi))
         if self.refits:
             bits.append('crop moved %dx since start' % self.refits)
@@ -335,9 +357,16 @@ def main():
     ap.add_argument('--config', default=DEFAULT_CONFIG)
     ap.add_argument('--speak', action='store_true', help='say the verdict aloud via espeak-ng')
     ap.add_argument('--display', action='store_true', help='fullscreen verdict on an attached screen')
-    ap.add_argument('--exposure', type=int, default=12000,
-                    help='microseconds; keep above ~10000 so OLED dimming does not band')
-    ap.add_argument('--gain', type=float, default=1.5)
+    ap.add_argument('--exposure', type=int, default=None,
+                    help='microseconds. Defaults to the value measured at calibration, '
+                         'or %d — one 60Hz cycle, which is also two of 120 and four of '
+                         '240, so it does not band against any of them'
+                         % EX.DEFAULT_EXPOSURE)
+    ap.add_argument('--gain', type=float, default=None,
+                    help='fixed analogue gain. Omit to let it track the phone dimming '
+                         'itself, which is what a screen does at night')
+    ap.add_argument('--no-auto-gain', action='store_true',
+                    help='never adjust gain; use exactly what --gain says')
     ap.add_argument('--lens', type=float, default=None,
                     help='dioptres (1/metres): 4.0 focuses at 25cm. Defaults to the '
                          'value autofocus found during calibration')
@@ -394,7 +423,14 @@ def main():
     # Calibration already found focus with autofocus; reuse it rather than
     # making the driver rediscover a number that cannot change on a fixed mount.
     lens = args.lens if args.lens is not None else cfg.get('lensPosition') or 4.0
-    cam = start_camera(cfg, args.exposure, args.gain, lens)
+
+    # Exposure is chosen for flicker, not for brightness; gain then does the
+    # brightening, because gain cannot reintroduce banding and exposure can.
+    exposure_us = (args.exposure if args.exposure is not None
+                   else cfg.get('exposureTime') or EX.DEFAULT_EXPOSURE)
+    gain = args.gain if args.gain is not None else cfg.get('analogueGain') or 1.5
+    auto_gain = None if (args.no_auto_gain or args.gain is not None) else EX.AutoGain(gain)
+    cam = start_camera(cfg, exposure_us, gain, lens)
     if args.save_misses:
         os.makedirs(args.save_misses, exist_ok=True)
     if args.display:
@@ -413,9 +449,21 @@ def main():
            scanner.read_height, scanner.ocr_height,
            ('%.2f dioptres' % lens) if lens else 'fixed',
            '' if tracker is not None else ', corner tracking OFF'))
+    log('setup: exposure %dus (%s), gain %.2f (%s)'
+        % (exposure_us,
+           'a whole number of 60/120/240Hz cycles, so the screen should not band'
+           if exposure_us in EX.FLICKER_SAFE else 'not a standard flicker period',
+           gain, 'tracking the screen' if auto_gain else 'fixed'))
     log('setup: corners %s' % [[int(x), int(y)] for x, y in quad])
+    spill = PL.touches_edge(quad, (cap.get('height', 1748), cap.get('width', 2328)))
+    if spill:
+        log('setup: WARNING — the calibrated screen runs off the %s of the frame, so '
+            'only part of the phone is being measured. Reads will find the card and '
+            'miss the payout, and the crop will wander looking for it. Move the '
+            'camera back and re-run with --recalibrate.' % ' and '.join(spill))
     accumulator = OfferAccumulator()
     last_sample = 0.0
+    previous_card = None
     spoke_for = None
     frames = 0
     last_snapshot = 0.0
@@ -466,6 +514,19 @@ def main():
                 elif roi_dirty[0]:
                     save_config(args.config, cfg)
                     roi_dirty[0] = False
+
+                # A phone dims itself. A screen set up in daylight is a much
+                # darker subject at two in the morning, and a fixed exposure that
+                # suited one leaves the other too dark to read. Exposure stays
+                # where it was measured — moving it would undo the flicker
+                # arithmetic — and gain does the adapting, slowly, off the same
+                # small frame the gate just used.
+                if auto_gain is not None and scanner.settled:
+                    new_gain = auto_gain.update(luma, now)
+                    if new_gain is not None:
+                        cam.set_controls({'AnalogueGain': float(new_gain)})
+                        cfg['analogueGain'] = round(new_gain, 3)
+                        health.gain = new_gain
 
                 # Keep sampling for a short while after a card appears, so a leg
                 # missed by one frame can still be picked up by the next.
@@ -523,7 +584,8 @@ def main():
                 # unread before it fixes itself.
                 resample_until = time.time() + RECOVER_WINDOW
             settled_on = signature
-            health.add(out, parsed)
+            health.add(out, parsed, out.get('card'), previous_card)
+            previous_card = out.get('card')
 
             # When a read comes back wrong, the one thing worth having is what
             # the reader actually saw. Rate limited, because a screen with no

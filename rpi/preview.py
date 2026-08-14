@@ -152,9 +152,11 @@ def annotate(frame, scale_to_capture, lens_position=None):
         return out, None
 
     card_px = int(round(card_source_pixels(quad, DEFAULT_ROI) * scale_to_capture))
-    ok = card_px >= MIN_CARD_PIXELS
-    colour = (GREEN if card_px >= GOOD_CARD_PIXELS
-              else (AMBER if ok else RED))
+    spill = PL.touches_edge(quad, frame.shape)
+    ok = card_px >= MIN_CARD_PIXELS and not spill
+    colour = (RED if spill else
+              GREEN if card_px >= GOOD_CARD_PIXELS else
+              (AMBER if card_px >= MIN_CARD_PIXELS else RED))
 
     # Measure focus on the card itself, not the whole scene; a sharp dashboard
     # around a soft phone would read as perfectly in focus.
@@ -172,8 +174,13 @@ def annotate(frame, scale_to_capture, lens_position=None):
     cv2.rectangle(out, (0, 0), (out.shape[1], 132), (20, 27, 36), -1)
     cv2.putText(out, 'card %d px' % card_px, (14, 40),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.2, colour, 3)
-    caption = ('need %d+' % MIN_CARD_PIXELS) if not ok else (
-        'good' if card_px >= GOOD_CARD_PIXELS else 'workable, %d+ is roomier' % GOOD_CARD_PIXELS)
+    if spill:
+        caption = '%s off frame — MOVE BACK' % '+'.join(spill)
+    elif card_px < MIN_CARD_PIXELS:
+        caption = 'need %d+' % MIN_CARD_PIXELS
+    else:
+        caption = ('good' if card_px >= GOOD_CARD_PIXELS
+                   else 'workable, %d+ is roomier' % GOOD_CARD_PIXELS)
     cv2.putText(out, caption, (14, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.65, colour, 2)
 
     focus_text = 'focus %.0f' % sharp

@@ -266,6 +266,66 @@ Card height 900 with the card crop and a 900px read size is the recommended
 starting point: near the floor for speed, with real margin before reading
 collapses.
 
+## The phone has to fit in the frame
+
+Too close is a real failure mode, and a silent one. The detector finds the
+*visible* part of the screen, which is a perfectly good rectangle, so nothing
+complains — but every measurement after it is taken against a screen that is not
+the whole screen. The crop lands somewhere arbitrary, the card-height reading is
+inflated, the warp comes out the wrong shape and twice the pixels, and the only
+symptom is reads that find the card and quietly miss the payout.
+
+A real rig logged corners at `y=0` and `y=1746` of a 1748-row frame, spent an
+hour walking its crop into worse and worse places looking for the payout, and
+took 1.4–2.0s a read doing it. The aiming gate had a floor and no ceiling, so a
+phone overflowing the frame passed for a big one.
+
+Aiming now refuses a screen touching any frame edge and says which one, the
+overlay goes red with `top+bottom off frame — MOVE BACK`, calibration will not
+write a config from it, and the scanner warns at startup if the stored
+calibration has the problem. Fill the frame with the phone, but leave a dark
+border all the way round it.
+
+## Darkness and the wavy screen
+
+A phone display is not a lit object, it is a strobe. Backlights and OLED panels
+dim by switching on and off — commonly in the 60/120/240/480 Hz family — and a
+rolling shutter reads the sensor one row at a time, so different rows of one
+frame catch different parts of that cycle. The result is horizontal bands that
+drift down the picture, which looks like the screen rippling and gives the
+reader a band of the card that is dark this frame and light the next.
+
+The cure is arithmetic, not filtering: an exposure lasting a whole number of
+flicker cycles collects the same light in every row, and the banding cancels
+exactly. Simulating a rolling shutter against a square-wave-dimmed panel
+(`test_exposure.py`, so this is checkable without a phone):
+
+| Exposure | 60 Hz | 120 Hz | 240 Hz |
+|---|---|---|---|
+| 8333µs | **102** | 0.1 | 0.1 |
+| 12000µs *(the old default)* | **56** | **8.2** | **3.4** |
+| **16667µs** | **0.1** | **0.1** | **0.1** |
+| 25000µs | **40** | 0.1 | 0.1 |
+
+16667µs is one 60Hz cycle, two of 120 and four of 240, so it is quiet against
+all of them — and it is 39% brighter than the 12000µs this used to run at, which
+is the other half of the complaint. It is the default now, and calibration
+measures the real thing anyway: it tries each flicker-safe candidate against the
+actual phone and keeps the quietest that still lights the card, recording what
+every candidate scored.
+
+Brightness is then handled by **gain, never exposure** — a phone dims itself, and
+a screen set up in daylight is a much darker subject at 2am. Full auto-exposure
+is not the answer: it hunts on a strobing emissive panel and would undo the
+flicker arithmetic the moment it decided the picture was dim. So the exposure
+stays where it was measured and gain tracks the screen in small steps every few
+seconds, which cannot reintroduce banding. `--gain` pins it; `--no-auto-gain`
+stops it moving.
+
+Both show up in the health line — `card brightness 190/205; banding 0.4; gain
+2.1` — so "it looks dark" and "it looks wavy" can be confirmed with a number
+rather than argued about.
+
 ## Hardware setup
 
 **Sensor mode — the one setting that can quietly ruin framing.** `rpicam-hello
@@ -512,7 +572,8 @@ The Pi parser is a port of the browser one. Both run the same corpus:
 node tests/corpus.test.js       # 127 checks
 python3 rpi/test_parser.py      # the same 127 checks
 python3 rpi/test_accumulate.py  # 27 checks on merging across frames
-python3 rpi/test_pipeline.py    # 69 checks on where, how big, and what to log
+python3 rpi/test_pipeline.py    # 79 checks on where, how big, and what to log
+python3 rpi/test_exposure.py    # 38 checks on flicker, brightness and gain
 python3 rpi/test_track.py       # 43 checks on following the phone
 ```
 
@@ -548,14 +609,17 @@ per-read — that would bury it — and everything that matters otherwise:
 ```
 setup: capture 2328x1748, card ~549px on the sensor (floor 380), crop [0.00 0.40 1.00 0.60],
        warp 1800px, reader gets 900px, lens 4.00 dioptres
+setup: exposure 16667us (a whole number of 60/120/240Hz cycles, so the screen should
+       not band), gain 1.50 (tracking the screen)
 setup: corners [[951, 300], [1456, 301], [1455, 1399], [950, 1398]]
 read 1 found nothing usable (no payout in the crop, 1 in a row).
        Reader saw: '34 min (3.6 mi) total\nDollar General (925 Shiloh Rd Nw)\n...'
 crop moved: [0.00 0.66 1.00 0.34] -> [0.00 0.47 1.00 0.33] (reads were failing; the card
        was found there by two whole-screen searches that agreed)
 screen not visible — is the phone lit and in frame?
-health over 120s: 7 reads, 5 complete; median 259ms; 2 found no payout; crop
-       [0.00 0.47 1.00 0.33]; crop moved 1x since start; corners held, drift 7px from saved
+health over 120s: 7 reads, 5 complete; median 259ms; 2 found no payout; card
+       brightness 190/205; banding 0.4; gain 2.10; crop [0.00 0.47 1.00 0.33]; crop
+       moved 1x since start; corners held, drift 7px from saved
 ```
 
 The `Reader saw:` line is the one that settles arguments. In the example above
