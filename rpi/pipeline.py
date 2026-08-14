@@ -6,12 +6,17 @@ The speed of this thing comes from what it refuses to do:
   * it does not OCR a moving frame (waits for the picture to settle),
   * it does not OCR the whole sensor frame (warps to just the phone screen),
   * it does not OCR at 16MP (downscales to the smallest size that keeps a
-    decimal point legible).
+    decimal point legible),
+  * and it does not spend a third of each read compressing a PNG nobody wants
+    (see stage_for_ocr).
 
 Tesseract cost scales with pixels, so the warp is worth far more than any
 tuning of the engine itself.
 """
 
+import atexit
+import os
+import tempfile
 import time
 
 import cv2
@@ -203,8 +208,53 @@ def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640):
     return view
 
 
+# A RAM-backed file handed to tesseract instead of the image itself.
+#
+# pytesseract's array path routes the picture through PIL, whose PNG encoder
+# measured 93ms — well over a third of a whole read, spent compressing an image
+# that tesseract is about to decompress again. An uncompressed PGM of the same
+# picture encodes in 0.1ms and tesseract reads it just as happily: 262ms a read
+# becomes 157ms, for no change in what comes back.
+#
+# /dev/shm when it exists, so this never touches the SD card. One file per
+# process, reused, because the loop is sequential and a fresh temp file per read
+# is churn for its own sake.
+_SCRATCH = None
+
+
+def _clear_scratch():
+    """/dev/shm is RAM. Leaving a megabyte of it behind per run is rude."""
+    try:
+        os.remove(_SCRATCH)
+    except OSError:
+        pass
+
+
+def stage_for_ocr(image):
+    """Put an image where tesseract can read it cheaply. Returns a path.
+
+    Falls back to handing over the array — slow but correct — if the scratch
+    file cannot be written, since a working slow read beats a broken fast one.
+    """
+    global _SCRATCH
+    if _SCRATCH is None:
+        base = '/dev/shm' if os.path.isdir('/dev/shm') and os.access('/dev/shm', os.W_OK) \
+            else tempfile.gettempdir()
+        _SCRATCH = os.path.join(base, 'uberscan-ocr-%d.pgm' % os.getpid())
+        atexit.register(_clear_scratch)
+    # PGM is greyscale only, which everything here already is by this point.
+    if image.ndim == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    try:
+        if cv2.imwrite(_SCRATCH, image):
+            return _SCRATCH
+    except Exception:
+        pass
+    return image
+
+
 def ocr(image, config=OCR_CONFIG):
-    return pytesseract.image_to_string(image, config=config)
+    return pytesseract.image_to_string(stage_for_ocr(image), config=config)
 
 
 def ocr_lines(image, config=OCR_CONFIG):
@@ -214,7 +264,7 @@ def ocr_lines(image, config=OCR_CONFIG):
     well, so this costs nothing extra. The boxes are what let a crop that has
     slid off the card find its way back on.
     """
-    tsv = pytesseract.image_to_data(image, config=config)
+    tsv = pytesseract.image_to_data(stage_for_ocr(image), config=config)
     rows = [r.split('\t') for r in tsv.splitlines()[1:]]
     grouped = {}
     order = []
@@ -355,6 +405,21 @@ class Scanner:
         self.locked = False
         self.last = None
 
+    @property
+    def read_height(self):
+        """Warp height for a read, as opposed to for a picture of the screen.
+
+        The crop is going to be scaled up to the reader's size anyway, so warp
+        the screen tall enough that it arrives there directly: same pixels, one
+        resampling instead of shrinking and stretching back. It measured no
+        better and no worse — the double resampling was not costing accuracy —
+        but it removes a trap, because otherwise a small `card_height` quietly
+        shrinks the card below what the reader needs and no setting says so.
+        """
+        if self.roi and self.roi[3] and self.ocr_height:
+            return max(self.card_height, int(round(self.ocr_height / self.roi[3])))
+        return self.card_height
+
     def _motion(self, frame):
         small = cv2.cvtColor(cv2.resize(frame, MOTION_SIZE, interpolation=cv2.INTER_AREA),
                              cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else \
@@ -386,7 +451,7 @@ class Scanner:
         """Full read of one frame, ignoring the motion gate."""
         now = time.time() if now is None else now
         t0 = time.perf_counter()
-        screen = warp(frame, self.quad, self.card_height) if self.quad is not None else frame
+        screen = warp(frame, self.quad, self.read_height) if self.quad is not None else frame
         t1 = time.perf_counter()
         prepped = preprocess(fit_for_ocr(crop(screen, self.roi), self.ocr_height))
         t2 = time.perf_counter()

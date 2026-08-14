@@ -143,6 +143,45 @@ tr.quad = quad_at(480, 220)
 eq('and it will not write again immediately', tr.needs_save(now=1010.0), False)
 eq('but will once the interval passes', tr.needs_save(now=1040.0), True)
 
+# --- following on a small stream, reporting in capture coordinates ----------
+# This is how the scanner really runs it: corners are found on the 640-wide
+# preview the motion gate already has, and have to land on the sensor frame.
+SCALE = (3.6375, 3.6417)          # 2328x1748 capture against a 640x480 stream
+
+
+def small(x, y, size=(150, 330)):
+    """The same scene as frame_with_phone, at preview scale."""
+    f = np.full((480, 640, 3), 22, np.uint8)
+    w, h = size
+    cv2.rectangle(f, (x, y), (x + w, y + h), (238, 240, 238), -1)
+    for i in range(6):
+        cv2.rectangle(f, (x + 8, y + 170 + i * 24), (x + w - 8, y + 179 + i * 24), (90, 90, 90), -1)
+    return f
+
+
+def big_quad(x, y, size=(150, 330)):
+    w, h = size
+    return np.float32([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) * np.float32(SCALE)
+
+
+start_small = big_quad(240, 70)
+tr = T.QuadTracker(start_small, scale=SCALE)
+eq('a preview-scale tracker starts where told', T.distance(tr.quad, start_small), 0.0)
+settle(tr, small(240, 70), 4)
+ok_('and holds a still phone', T.distance(tr.quad, start_small) < 12.0)
+
+# A 6px slide in the preview is a 22px slide on the sensor — which is the whole
+# reason for tracking, and it must be reported at sensor scale.
+tr = T.QuadTracker(start_small, scale=SCALE)
+settle(tr, small(246, 74), 10)
+moved = T.distance(tr.quad, start_small)
+ok_('a small-stream nudge is scaled up', moved > 15.0)
+ok_('...and lands on the phone, not past it', T.distance(tr.quad, big_quad(246, 74)) < 14.0)
+
+# A single number must behave exactly like a matching pair.
+tr_one = T.QuadTracker(big_quad(240, 70), scale=3.6375)
+eq('a scalar scale is accepted', [round(v, 4) for v in tr_one.scale.tolist()], [3.6375, 3.6375])
+
 # --- geometry ---------------------------------------------------------------
 eq('distance of a quad to itself', T.distance(start, start), 0.0)
 eq('shifting by 10px reads as 10px', round(T.distance(start, quad_at(410, 140))), 10.0)

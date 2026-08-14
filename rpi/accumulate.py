@@ -107,6 +107,9 @@ class OfferAccumulator:
         merged['miles'] = miles if miles is not None else parsed.get('miles')
         merged['items'] = self.items if self.items is not None else parsed.get('items')
         merged['legs'] = len(used)
+        # A total is the whole journey in one line, so one of them is a complete
+        # picture where one ordinary leg is only ever half of one.
+        merged['hasTotal'] = bool(totals)
         merged['complete'] = (merged['pay'] is not None and merged['pay'] > 0
                               and merged['minutes'] is not None and merged['minutes'] > 0)
         merged['mergedFrom'] = self.samples

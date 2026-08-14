@@ -296,7 +296,12 @@ def main():
         settings=cfg.get('settings', {}),
         on_roi=roi_moved,
     )
-    tracker = None if args.no_track else TR.QuadTracker(scanner.quad)
+    # The tracker works in the small stream's coordinates and reports in the
+    # capture's, so it needs the ratio between them.
+    cap = cfg.get('capture', {})
+    track_scale = (cap.get('width', 2328) / float(LORES[0]),
+                   cap.get('height', 1748) / float(LORES[1]))
+    tracker = None if args.no_track else TR.QuadTracker(scanner.quad, scale=track_scale)
 
     # Calibration already found focus with autofocus; reuse it rather than
     # making the driver rediscover a number that cannot change on a fixed mount.
@@ -315,6 +320,7 @@ def main():
     last_snapshot = 0.0
     resample_until = 0.0
     last_resample = 0.0
+    settled_on = None
     try:
         while True:
             request = cam.capture_request()
@@ -327,6 +333,29 @@ def main():
                                      count=LORES[0] * LORES[1]).reshape((LORES[1], LORES[0]))
                 now = time.time()
                 do_read = scanner.should_read(luma)
+
+                # Re-find the phone on this same small frame. A mount is not a
+                # clamp, and corners a centimetre out slide the crop off the
+                # payout — which looks exactly like no offer being on screen.
+                #
+                # Done here, on the stream the motion gate already has, it costs
+                # about a millisecond and needs no full-resolution capture at
+                # all; finding the corners on a sensor frame costs seven times
+                # as much, almost entirely in shrinking the frame down to this
+                # size. Blurred frames are skipped: a smeared edge is a worse
+                # guess than the corners already held.
+                if tracker is not None and scanner.settled:
+                    if tracker.update(luma, now):
+                        scanner.quad = tracker.quad
+                        cfg['quad'] = [[float(x), float(y)] for x, y in tracker.quad]
+                    if tracker.needs_save(now) or roi_dirty[0]:
+                        save_config(args.config, cfg)
+                        tracker.mark_saved(now)
+                        roi_dirty[0] = False
+                elif roi_dirty[0]:
+                    save_config(args.config, cfg)
+                    roi_dirty[0] = False
+
                 # Keep sampling for a short while after a card appears, so a leg
                 # missed by one frame can still be picked up by the next.
                 if not do_read and now < resample_until and (now - last_resample) > RESAMPLE_EVERY:
@@ -342,23 +371,6 @@ def main():
                 frame = request.make_array('main')
             finally:
                 request.release()
-
-            # Re-find the phone on any full frame that is holding still. A mount
-            # is not a clamp, and a quad a centimetre out slides the crop off
-            # the payout — which looks exactly like no offer being on screen.
-            # Blurred frames are skipped: a smeared edge is a worse guess than
-            # the corners already held.
-            if tracker is not None and scanner.settled:
-                if tracker.update(frame, now):
-                    scanner.quad = tracker.quad
-                    cfg['quad'] = [[float(x), float(y)] for x, y in tracker.quad]
-                if tracker.needs_save(now) or roi_dirty[0]:
-                    save_config(args.config, cfg)
-                    tracker.mark_saved(now)
-                    roi_dirty[0] = False
-            elif roi_dirty[0]:
-                save_config(args.config, cfg)
-                roi_dirty[0] = False
 
             if args.snapshot and (due or do_read):
                 write_snapshot(frame, cfg, args.snapshot)
@@ -378,8 +390,22 @@ def main():
 
             # Anything with a payout is worth a second look; anything without is
             # not an offer and should not hold the loop open.
-            if parsed.get('pay'):
+            #
+            # But a second look is all it takes once the reading is whole — a
+            # total, or both legs of a two-leg card — and two reads running have
+            # said the same thing. Sampling on past that point re-reads a card
+            # nothing more can be learned from, which on a Pi is several seconds
+            # of a small computer's whole attention. What keeps sampling is the
+            # case that needs it: a single leg that is not a total, which is
+            # exactly the shape of a card with a leg still missing.
+            signature = (parsed['pay'], parsed['minutes'], parsed['miles'])
+            whole = parsed['complete'] and (parsed.get('hasTotal')
+                                            or (parsed.get('legs') or 0) >= 2)
+            if whole and signature == settled_on:
+                resample_until = 0.0
+            elif parsed.get('pay'):
                 resample_until = time.time() + RESAMPLE_WINDOW
+            settled_on = signature
             if args.json:
                 emit(rate, parsed, out['ms'], out['locked'], tracker, scanner)
             else:

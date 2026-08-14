@@ -139,6 +139,9 @@ Not from tuning the OCR engine. From refusing to run it:
 | **Settle wait** | After a change, it waits for the picture to stop moving. Reading a frame mid-transition just wastes a read on motion blur. |
 | **Warp to the screen** | Tesseract's cost scales with pixels. Feeding it a card instead of a 16MP frame is worth more than every other optimisation combined. |
 | **Crop to the card** | Uber puts the card in the same place every time. Cropping to it roughly halves the pixels again, for no loss of accuracy. |
+| **Hand over a file, not an array** | pytesseract's array path routes the image through PIL, whose PNG encoder measured **93ms** — over a third of a read, spent compressing a picture tesseract immediately decompresses. An uncompressed PGM encodes in 0.1ms and reads identically: **262ms → 157ms**. It goes in `/dev/shm`, so the SD card is never in the hot path. |
+| **Track on the small stream** | Re-finding the corners uses the 640×480 luma the motion gate already has, not a shrunk-down sensor frame: **0.96ms against 6.98ms**, almost all of the difference being the shrinking. It also means tracking needs no full-resolution capture at all, so it keeps working at full rate while the scanner is otherwise idle. |
+| **Stop when there is nothing left to learn** | Sampling continues after a card appears so a leg missed by one frame can be caught by the next — but it stops as soon as the reading is *whole* (a total, or both legs of a two-leg card) and two reads running agree. In a 30-frame run over one offer that is 2 reads instead of 9. What keeps sampling is the case that needs it: a single leg that is not a total, which is the shape of a card with a leg still missing. |
 
 ...and then one place where it is worth spending, in the opposite direction:
 
@@ -170,20 +173,33 @@ size:
 
 | Crop | Warp height | Pixels to OCR | OCR | Total | Result |
 |---|---|---|---|---|---|
-| whole screen | 1400 | 644×1400 | 303ms | 307ms | correct |
-| whole screen | 900 | 414×900 | 212ms | 214ms | correct |
-| whole screen | 700 | 414×900 | 205ms | 208ms | **fails** |
-| card only | 1100 | 794×900 | 263ms | 267ms | correct |
-| **card only** | **900** | **794×900** | **259ms** | **262ms** | **correct** |
-| card only | 700 | 795×900 | 238ms | 241ms | correct |
+| whole screen | 1400 | 644×1400 | 162ms | 166ms | correct |
+| whole screen | 900 | 414×900 | 134ms | 136ms | correct |
+| whole screen | 700 | 414×900 | 133ms | 136ms | **fails** |
+| card only | 1100 | 794×900 | 179ms | 183ms | correct |
+| **card only** | **900** | **794×900** | **178ms** | **181ms** | **correct** |
+| card only | 700 | 795×900 | 172ms | 176ms | correct |
 
-Warp costs 1–3ms and parsing 0.1–0.4ms; effectively all the time is OCR.
+Everything before the OCR call — warp, crop, scale, CLAHE, staging the file —
+totals **2.7ms**, and parsing the text costs 0.3ms. There is nothing left to
+optimise outside the engine itself; what is left is not calling it.
 
-**A Pi 4 is slower than this — expect roughly 2–4×**, so budget ~0.5–1.5s per
-read and a few seconds to a verdict two reads agree on. Against a 30–45 second
-offer window that is ample. Measure it yourself with `bench.py` rather than
-trusting these numbers; that is what it is for — it sweeps both axes, and the
-read-size rows are the ones worth reading first.
+Things tried here that did **not** help, so they are not in the code: an unsharp
+mask (19/40, it eats the thin `$`), Otsu binarisation (25/40, it closes up the
+small digits), a character whitelist (loses the distance entirely), `--psm 4`
+and `--psm 11` (both slower, no more accurate), `tessedit_do_invert=0`, and
+pinning `OMP_THREAD_LIMIT`. The last two are worth re-measuring on a Pi 4, where
+the core count differs — `bench.py` is the way to check.
+
+**A Pi 4 is slower than this — expect roughly 2–4×**, so budget ~0.4–0.8s per
+read and a couple of seconds to a verdict two reads agree on. Against a 30–45
+second offer window that is ample. Measure it yourself with `bench.py` rather
+than trusting these numbers; that is what it is for — it sweeps both axes, and
+the read-size rows are the ones worth reading first.
+
+Between offers the cost is the motion gate plus corner tracking, measured
+together at **0.6ms per frame** — the scanner is asleep almost all of the time,
+which is the only reason a Pi 4 can do this at all.
 
 Card height 900 with the card crop and a 900px read size is the recommended
 starting point: near the floor for speed, with real margin before reading
@@ -435,8 +451,8 @@ The Pi parser is a port of the browser one. Both run the same corpus:
 node tests/corpus.test.js       # 97 checks
 python3 rpi/test_parser.py      # the same 97 checks
 python3 rpi/test_accumulate.py  # 27 checks on merging across frames
-python3 rpi/test_pipeline.py    # 34 checks on where and how big to read
-python3 rpi/test_track.py       # 31 checks on following the phone
+python3 rpi/test_pipeline.py    # 45 checks on where and how big to read
+python3 rpi/test_track.py       # 36 checks on following the phone
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

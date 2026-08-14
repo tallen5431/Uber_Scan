@@ -14,6 +14,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import cv2
+
 import pipeline as PL
 
 ok = bad = 0
@@ -111,6 +113,34 @@ eq('a frame that is all screen is refused',
 eq('...on a thumbnail too',
    PL.detect_screen_quad(np.full((900, 1200, 3), 240, np.uint8), work_width=PL.DETECT_WIDTH), None)
 eq('a speck is not a screen', PL.detect_screen_quad(phone_frame(30, 60, 400, 140)), None)
+
+# --- read height: warp once, at the size the reader wants ------------------
+sc = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=900)
+eq('a half-screen crop warps to double', sc.read_height, 1800)
+eq('so the crop needs no scaling at all',
+   PL.fit_for_ocr(np.zeros((900, 400, 3), np.uint8), 900).shape[0], 900)
+
+sc = PL.Scanner(quad=None, roi=None, card_height=900, ocr_height=900)
+eq('no crop, no adjustment', sc.read_height, 900)
+sc = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=0)
+eq('no upscaling, no adjustment', sc.read_height, 900)
+sc = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=1400, ocr_height=900)
+eq('a full-height crop never shrinks the warp', sc.read_height, 1400)
+
+# The crop moves at runtime, so the height has to follow it.
+sc = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=900)
+sc.roi = [0.02, 0.33, 0.96, 0.39]
+eq('a re-fitted crop re-derives the height', sc.read_height, 2308)
+
+# --- staging the image for tesseract ---------------------------------------
+staged = PL.stage_for_ocr(np.zeros((900, 400), np.uint8))
+ok_('an image is staged to a path', isinstance(staged, str) and staged.endswith('.pgm'))
+ok_('...that exists', os.path.exists(staged))
+ok_('colour is accepted too', isinstance(PL.stage_for_ocr(np.zeros((90, 40, 3), np.uint8)), str))
+eq('and it is reused, not multiplied',
+   PL.stage_for_ocr(np.zeros((90, 40), np.uint8)), staged)
+back = cv2.imread(staged, cv2.IMREAD_GRAYSCALE)
+eq('the staged image survives the round trip', back.shape, (90, 40))
 
 # --- the motion gate still gates ------------------------------------------
 sc = PL.Scanner(quad=None, roi=None)

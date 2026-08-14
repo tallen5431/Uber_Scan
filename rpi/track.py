@@ -63,12 +63,26 @@ SAVE_EVERY = 30.0
 
 
 class QuadTracker:
-    """Follows the phone screen, starting from a calibrated quad."""
+    """Follows the phone screen, starting from a calibrated quad.
 
-    def __init__(self, quad, recheck=RECHECK_EVERY, agree=AGREE, ease=EASE,
+    `scale` converts a corner found in the tracking image into capture
+    coordinates, which is what the stored quad is in. Pass the ratio of capture
+    size to tracking size when following on the small preview stream — the
+    corners of a phone are a coarse feature and finding them there costs about a
+    seventh of finding them on a downscaled sensor frame, because the small
+    stream is already the right size and the sensor frame is not.
+    """
+
+    def __init__(self, quad, scale=1.0, recheck=RECHECK_EVERY, agree=AGREE, ease=EASE,
                  save_drift=SAVE_DRIFT, save_every=SAVE_EVERY):
         self.quad = np.asarray(quad, dtype=np.float32).reshape(4, 2)
         self.saved = self.quad.copy()
+        # One number or an (x, y) pair; the streams are not always the same
+        # aspect ratio to the last pixel, and a couple of pixels of skew across
+        # a 1700px screen is not worth being sloppy about.
+        self.scale = np.asarray(scale, dtype=np.float32).reshape(-1)
+        if self.scale.size == 1:
+            self.scale = np.array([self.scale[0], self.scale[0]], dtype=np.float32)
         self.recheck = recheck
         self.agree = agree
         self.ease = ease
@@ -98,6 +112,7 @@ class QuadTracker:
             self.agreeing = 0
             self._candidate = None
             return False
+        candidate = candidate * self.scale
 
         self.misses = 0
         consistent = (self._candidate is not None
