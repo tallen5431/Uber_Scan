@@ -19,7 +19,9 @@ pixels off a picture it was going to read either way.
 import atexit
 import os
 import tempfile
+import threading
 import time
+from concurrent import futures
 
 import cv2
 import numpy as np
@@ -422,17 +424,24 @@ def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640, card=None):
 # becomes 157ms, for no change in what comes back.
 #
 # /dev/shm when it exists, so this never touches the SD card. One file per
-# process, reused, because the loop is sequential and a fresh temp file per read
-# is churn for its own sake.
-_SCRATCH = None
+# reading *thread*, reused.
+#
+# Per thread rather than per process because two reads of the same card can now
+# run at once (Scanner.read_many). A single shared path would have had them
+# overwriting each other's image between the write and tesseract opening it —
+# a race that produces a plausible reading of the wrong frame, which is the
+# worst failure this code has.
+_SCRATCH = {}
+_SCRATCH_LOCK = threading.Lock()
 
 
 def _clear_scratch():
     """/dev/shm is RAM. Leaving a megabyte of it behind per run is rude."""
-    try:
-        os.remove(_SCRATCH)
-    except OSError:
-        pass
+    for path in list(_SCRATCH.values()):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def stage_for_ocr(image):
@@ -441,18 +450,22 @@ def stage_for_ocr(image):
     Falls back to handing over the array — slow but correct — if the scratch
     file cannot be written, since a working slow read beats a broken fast one.
     """
-    global _SCRATCH
-    if _SCRATCH is None:
+    key = threading.get_ident()
+    path = _SCRATCH.get(key)
+    if path is None:
         base = '/dev/shm' if os.path.isdir('/dev/shm') and os.access('/dev/shm', os.W_OK) \
             else tempfile.gettempdir()
-        _SCRATCH = os.path.join(base, 'uberscan-ocr-%d.pgm' % os.getpid())
-        atexit.register(_clear_scratch)
+        path = os.path.join(base, 'uberscan-ocr-%d-%d.pgm' % (os.getpid(), key))
+        with _SCRATCH_LOCK:
+            if not _SCRATCH:
+                atexit.register(_clear_scratch)
+            _SCRATCH[key] = path
     # PGM is greyscale only, which everything here already is by this point.
     if image.ndim == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     try:
-        if cv2.imwrite(_SCRATCH, image):
-            return _SCRATCH
+        if cv2.imwrite(path, image):
+            return path
     except Exception:
         pass
     return image
@@ -678,6 +691,57 @@ class Scanner:
 
     def read(self, frame, now=None):
         """Full read of one frame, ignoring the motion gate."""
+        out = self._look(frame, now)
+        self._consider(out['parsed'])
+        # After, not during: _look runs before the agreement counter is
+        # updated, so the copy it took is the state as of the *previous* read.
+        # Reporting that would have said "not locked yet" on the very read that
+        # locked, which is the read the spoken verdict waits for.
+        out['locked'] = self.locked
+        return out
+
+    def read_many(self, frames, now=None):
+        """Read several frames of the same card at once. Returns one per frame.
+
+        A verdict needs two reads that agree, and agreement is the only thing
+        standing between the driver and a confidently wrong number: over
+        rippling, soft, glared and dim frames, one read claiming a whole offer
+        was wrong 1 time in 36, and two agreeing were wrong none. So the
+        confirmation stays — it just stops being a second helping of wall clock.
+
+        Tesseract releases the interpreter while it runs, and a Pi 4 has four
+        cores that the loop was using one of. Two reads at once measured 55% of
+        the cost of two in a row, which halves the time to a verdict without
+        weakening the evidence by anything at all.
+
+        The catch is that OpenMP must be pinned to one thread per instance, or
+        two of them fight over all four cores: unpinned, the same pair took
+        **46 seconds** against 435ms sequential. scan_pi sets it; this says so
+        rather than assuming, because a hundredfold regression is not something
+        to leave to an environment variable nobody mentions.
+
+        Only the reading is concurrent. The agreement counter is applied here,
+        in frame order, because "two reads said the same thing" has to mean the
+        same thing every run.
+        """
+        frames = list(frames)
+        if len(frames) == 1:
+            return [self.read(frames[0], now)]
+
+        with futures.ThreadPoolExecutor(max_workers=len(frames)) as pool:
+            outs = list(pool.map(lambda f: self._look(f, now), frames))
+        for out in outs:
+            self._consider(out['parsed'])
+            out['locked'] = self.locked
+        return outs
+
+    def _look(self, frame, now=None):
+        """Everything a read does except change what the Scanner believes.
+
+        Split out so several can run at once. Nothing here touches state that
+        another reader could be touching: card_share is recomputed from the
+        quad and the frame, and both readers arrive at the same answer.
+        """
         now = time.time() if now is None else now
         t0 = time.perf_counter()
         if self.quad is not None:
@@ -710,7 +774,6 @@ class Scanner:
         rate = OP.rate(parsed, self.settings)
         t4 = time.perf_counter()
 
-        self._consider(parsed)
         return {
             'parsed': parsed,
             'rate': rate,

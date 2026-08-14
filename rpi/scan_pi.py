@@ -427,6 +427,10 @@ def main():
                     help='write frames that failed to parse, for tuning')
     ap.add_argument('--snapshot', default=DEFAULT_SNAPSHOT,
                     help='where to write the live view the web UI shows ("" to disable)')
+    ap.add_argument('--no-parallel', action='store_true',
+                    help='read one frame at a time. The default reads the '
+                         'confirming frame alongside the first, which is 56%% '
+                         'of the wall clock for the same evidence')
     ap.add_argument('--no-track', action='store_true',
                     help='never re-find the phone; use the calibrated corners exactly')
     args = ap.parse_args()
@@ -489,6 +493,14 @@ def main():
         cv2.namedWindow('uber-scan', cv2.WND_PROP_FULLSCREEN)
         cv2.setWindowProperty('uber-scan', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
+    # Two reads at once need OpenMP pinned to one thread per instance, or the
+    # two tesseracts fight over all four cores: unpinned, a pair measured 46
+    # seconds against 435ms sequential. Pinning costs a single read nothing
+    # measurable. setdefault so an explicit setting still wins.
+    pair_reads = not args.no_parallel
+    if pair_reads:
+        os.environ.setdefault('OMP_THREAD_LIMIT', '1')
+
     # Everything that decides what gets read, in one place, once. A log without
     # this is a log where every question starts with "what was it set to?".
     import calibrate as CAL
@@ -506,6 +518,9 @@ def main():
            scanner.read_height, scanner.ocr_height,
            ('%.2f dioptres' % lens) if lens else 'fixed',
            '' if tracker is not None else ', corner tracking OFF'))
+    log('setup: reads %s'
+        % ('paired — the confirming frame is read alongside the first'
+           if pair_reads else 'one at a time (--no-parallel)'))
     log('setup: exposure %dus (%s), gain %.2f (%s)'
         % (exposure_us,
            'a whole number of 60/120/240Hz cycles, so the screen should not band'
@@ -612,6 +627,21 @@ def main():
             finally:
                 request.release()
 
+            # A verdict needs two reads that agree, so when one is due, take
+            # the frame after it as well and read both at once. The sensor is
+            # already producing them 33ms apart, and two reads together cost
+            # 56% of two in a row — so the confirmation stops costing a second
+            # of wall clock while an offer is timing out. It is the same
+            # evidence, gathered at the same time instead of one after the
+            # other. --no-parallel falls back to one at a time.
+            partner = None
+            if do_read and pair_reads:
+                partner_request = cam.capture_request()
+                try:
+                    partner = partner_request.make_array('main')
+                finally:
+                    partner_request.release()
+
             if args.snapshot and (due or do_read):
                 write_snapshot(frame, cfg, args.snapshot, quad=scanner.quad,
                                roi=scanner.crop_box, card=previous_card)
@@ -622,7 +652,14 @@ def main():
 
             frames += 1
             try:
-                out = scanner.read(frame, now=time.time())
+                batch = scanner.read_many(
+                    [frame] if partner is None else [frame, partner], now=time.time())
+                out = batch[-1]
+                # The earlier frame's reading is evidence too: the accumulator
+                # merges partial reads, and a leg lost to glare in one frame is
+                # often present in the other.
+                for earlier in batch[:-1]:
+                    accumulator.add(earlier['parsed'])
             except Exception as e:
                 # A read is the one part of this loop that touches an external
                 # engine, a homography and a JPEG encoder, and any of them can

@@ -402,6 +402,41 @@ said = [l for l in buf.getvalue().splitlines() if l.strip()]
 eq('repeats of one fault are said once', len(said), 2)
 ok_('and the fault is named', 'tesseract died' in said[0])
 
+# --- reading two frames at once -------------------------------------------
+# A verdict needs two reads that agree, and that confirmation earns its keep:
+# over rippling, soft, glared and dim frames a single read claiming a whole
+# offer was wrong 1 time in 36, and two agreeing were wrong none. So it is not
+# the checking that gets shortened, only the waiting — the two reads happen at
+# the same time instead of one after the other.
+pair = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=200, ocr_height=0)
+blank = np.full((200, 300, 3), 255, np.uint8)
+outs = pair.read_many([blank, blank], now=1.0)
+eq('one reading per frame', len(outs), 2)
+eq('a single frame still works', len(pair.read_many([blank], now=2.0)), 1)
+
+# The agreement counter is the whole point of the confirmation, so it must be
+# applied per frame and in order — the same evidence, however it was gathered.
+seq = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=200, ocr_height=0)
+seq.agree_to_lock = 2
+for parsed in ({'complete': True, 'pay': 7.09, 'minutes': 34.0, 'miles': 3.6},) * 2:
+    seq._consider(parsed)
+ok_('two agreeing readings lock', seq.locked)
+alone = PL.Scanner(quad=None)
+alone.agree_to_lock = 2
+alone._consider({'complete': True, 'pay': 7.09, 'minutes': 34.0, 'miles': 3.6})
+ok_('...and one on its own does not', not alone.locked)
+alone._consider({'complete': True, 'pay': 9.99, 'minutes': 34.0, 'miles': 3.6})
+ok_('nor do two that disagree', not alone.locked)
+
+# The reported lock has to be the state *after* this reading is counted, or the
+# read that locks reports itself as unlocked — and that is the read the spoken
+# verdict waits for.
+one = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=200, ocr_height=0)
+one._sig = (7.09, 34.0, 3.6)
+one._agree = 1
+out = one.read(blank, now=3.0)
+eq('the reported lock is current', out['locked'], one.locked)
+
 # --- the motion gate still gates ------------------------------------------
 sc = PL.Scanner(quad=None, roi=None)
 still = np.full((480, 640), 100, np.uint8)
