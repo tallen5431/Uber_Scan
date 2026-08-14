@@ -158,8 +158,10 @@ whether the target you set is the right line to be drawing.
 So the Pi scanner keeps one line per offer it was confident about, in
 `rpi/journal.jsonl`. **Offers ▤** in the live view opens the page that reads it:
 
-* the **middle of the distribution** — a quarter of offers below, the typical
-  one, a quarter above. Percentiles rather than an average, because $/hour is a
+* the **middle of the distribution in $/hr** — a quarter of offers below, the
+  typical one, a quarter above. Every figure on the page is a rate, never the
+  payout on the card: the total flatters a long job and punishes a short one,
+  which is the whole reason this rig exists. Percentiles rather than an average, because $/hour is a
   ratio with a small noisy denominator and one misread leg produces exactly the
   long tail an average cannot survive.
 * what share of offers your target would have had you take.

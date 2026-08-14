@@ -40,6 +40,15 @@
   .rangebtns button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
   h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
        color: var(--muted); margin: 22px 0 8px; font-weight: 700; }
+  /* Every figure on this page is a rate, and not one of them said so. "$21
+     TYPICAL" reads perfectly naturally as "the typical offer pays $21" — the
+     total on the card, which is the one number here that is never meant. The
+     unit is now attached to the figure rather than left to be inferred. */
+  h2 em { font-style: normal; text-transform: none; letter-spacing: .02em;
+          opacity: .75; font-weight: 600; }
+  .unit { font-style: normal; font-size: 11px; font-weight: 700;
+          color: var(--muted); letter-spacing: 0; }
+  .stats .unit { font-size: 12px; }
 </style>
 </head>
 <body>
@@ -58,21 +67,21 @@
        of the distribution is also the honest answer to "what does a shift round
        here actually pay". -->
   <div class="stats" id="ladder">
-    <div><span id="p25">--</span><small>quarter below</small></div>
-    <div><span id="p50">--</span><small>typical</small></div>
-    <div><span id="p75">--</span><small>quarter above</small></div>
+    <div><span id="p25">--</span><i class="unit">/hr</i><small>quarter below</small></div>
+    <div><span id="p50">--</span><i class="unit">/hr</i><small>typical</small></div>
+    <div><span id="p75">--</span><i class="unit">/hr</i><small>quarter above</small></div>
   </div>
 
   <p class="hint" id="headline">Reading the journal…</p>
 
-  <h2>By time of day</h2>
+  <h2>By time of day <em>· median $/hr</em></h2>
   <div id="blocks"></div>
   <div class="scale" id="blockScale"></div>
 
-  <h2>Rides and shop orders</h2>
+  <h2>Rides and shop orders <em>· median $/hr</em></h2>
   <div id="kinds"></div>
 
-  <h2>Recent offers</h2>
+  <h2>Recent offers <em>· $/hr, and the card it came from</em></h2>
   <ul class="hist" id="recent"></ul>
 
   <p class="note" id="caveats"></p>
@@ -119,6 +128,12 @@
   var BLOCK_NAMES = ['12–3am', '3–6am', '6–9am', '9am–12', '12–3pm',
                      '3–6pm', '6–9pm', '9pm–12'];
 
+  var unitTags = document.querySelectorAll('.stats .unit');
+
+  function showUnits(on) {
+    Array.prototype.forEach.call(unitTags, function (u) { u.hidden = !on; });
+  }
+
   function verdictFor(rate, target, band) {
     if (rate === null) return '';
     var floor = target * (1 - band / 100);
@@ -146,9 +161,12 @@
       el.blocks.innerHTML = el.kinds.innerHTML = '';
       el.recent.innerHTML = '';
       el.p25.textContent = el.p50.textContent = el.p75.textContent = '--';
+      // "--/hr" is not a rate, it is a dash wearing a unit.
+      showUnits(false);
       el.caveats.textContent = '';
       return;
     }
+    showUnits(true);
 
     // The target is whatever the scanner was actually using, taken from the
     // most recent row rather than assumed — it lives in the Pi's config and
@@ -222,8 +240,12 @@
     el.recent.innerHTML = offers.slice(-12).reverse().map(function (r) {
       var when = new Date(r.at);
       var mins = r.minutes === null ? '--' : Math.round(r.minutes);
+      // The rate leads and carries its unit; the card's own figures follow as
+      // the working behind it. The payout alone is the number that flatters a
+      // long job and punishes a short one, which is the whole reason this rig
+      // exists — so it is never the figure the eye lands on first.
       return '<li><span class="dot ' + verdictFor(r.perHour, target, band) + '"></span>'
-           + '<span class="big">' + money(r.perHour, 0) + '</span>'
+           + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i></span>'
            + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
            + (r.miles === null ? '' : ' · ' + r.miles + ' mi')
            + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
