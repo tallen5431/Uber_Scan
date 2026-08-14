@@ -1,5 +1,8 @@
-/* Offline cache. Bump CACHE when files change so phones pick up the new version. */
-var CACHE = 'uberscan-v7';
+/* Offline cache. Bumped whenever a file in ASSETS changes. This is cache-first, so a phone
+ * that has the old worker keeps serving the old page forever otherwise —
+ * v7 shipped before live.html, styles.css and offer-parser.js all changed,
+ * which would have hidden every one of those changes behind a stale cache. */
+var CACHE = 'uberscan-v8';
 
 var ASSETS = [
   './',

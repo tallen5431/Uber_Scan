@@ -21,10 +21,15 @@
     --chars: 4;
     font-size: min(28vw, 180px, calc((100cqw - 70px) / (var(--chars) * 0.62)));
   }
-  /* Nothing to report: a 180px "--" is a pair of grey slabs, not information. */
-  .verdict.novalue .rate { display: none; }
+  /* Nothing to report: a 180px "--" is a pair of grey slabs, not information,
+     and a row of dashes under a rule reads as a table that failed to load.
+     Between offers the panel says only what it knows, which is the phase. */
+  .verdict.novalue .rate,
+  .verdict.novalue .submetrics { display: none; }
   .stale { opacity: .35; }
-  .pending { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  /* Diagnostics, not a heading. It was uppercase with wide tracking, which
+     made a line of read timings shout louder than the verdict above it. */
+  .pending { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
   .connbar {
     display: flex; align-items: center; justify-content: center; gap: 8px;
     font-size: 12px; color: var(--muted); padding: 8px;
@@ -62,6 +67,12 @@
         <span class="rate-value" id="perHour">--</span>
         <span class="rate-unit" id="rateUnit">/hr</span>
       </div>
+      <!-- The arithmetic behind the headline, spelled out. A rate a driver
+           cannot reconstruct at a glance is a rate they cannot act on. -->
+      <div class="working" id="working" hidden></div>
+      <!-- As read off the card, so it can be checked against the phone in the
+           two seconds before the offer times out. These three are deliberately
+           the raw numbers: their whole job is to match what is on the screen. -->
       <div class="submetrics">
         <div class="sub"><span id="vPay">--</span><small id="lPay">pay</small></div>
         <div class="sub"><span id="vMin">--</span><small id="lMin">minutes</small></div>
@@ -102,7 +113,8 @@
 
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
-   'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile']
+   'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
+   'working']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -160,6 +172,7 @@
       el.detail.textContent = aiming
         ? 'the view below is live — move the mount until this says good'
         : (r ? 'scanner running, no offer on screen' + trackNote(r) : '');
+      el.working.hidden = true;
       showRaw(r && r.text);
       return;
     }
@@ -173,10 +186,13 @@
     // $12.51/hr, the screen said $10.61, and nothing here explained the gap.
     var deducted = r.cost > 0;
     setRate('$' + (Math.abs(r.perHour) >= 100
-      ? Math.round(r.perHour) : Number(r.perHour).toFixed(1)),
-      deducted ? '/hr net' : '/hr');
-    el.lPay.textContent = deducted ? 'net pay' : 'pay';
-    el.vPay.textContent = money(deducted ? r.pay - r.cost : r.pay, 2);
+      ? Math.round(r.perHour) : Number(r.perHour).toFixed(1)));
+
+    // Raw, always. This row is checked against the phone, so it has to be what
+    // the card says — a "net pay" here would never match and the check would
+    // be worse than useless.
+    el.lPay.textContent = 'pay';
+    el.vPay.textContent = money(r.pay, 2);
     el.vMin.textContent = r.minutes === null ? '--' : Math.round(r.minutes);
     el.vMile.textContent = r.miles === null ? '--' : Number(r.miles).toFixed(1);
     // Secondary on purpose: $/hr is what decides an offer, because an hour is
@@ -186,6 +202,18 @@
       ? '--' : money(r.perMile, 2);
     el.lPerMile.textContent = deducted ? 'net $/mi' : '$/mi';
 
+    // The working, in the panel rather than in the small print. It is the
+    // difference between a number to trust and a number to argue with.
+    var mins = r.minutes === null ? '--' : Math.round(r.minutes);
+    // Two unbreakable halves, so a narrow screen splits between them rather
+    // than stranding "min" on a line of its own.
+    el.working.innerHTML = (deducted
+      ? '<span>' + money(r.pay, 2) + ' <i>&minus;</i> ' + money(r.cost, 2)
+        + ' <i>=</i> <b>' + money(r.pay - r.cost, 2) + '</b></span>'
+      : '<span><b>' + money(r.pay, 2) + '</b></span>')
+      + ' <span><i>in</i> ' + mins + ' min</span>';
+    el.working.hidden = false;
+
     var notes = [];
     if (r.milesUncertain) notes.push('Distance unreadable — pay shown before mileage cost.');
     else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
@@ -193,9 +221,7 @@
     el.warn.hidden = !notes.length;
 
     el.detail.textContent = (stale ? 'last seen ' + Math.round((Date.now() - r.at) / 1000) + 's ago · ' : '')
-      + (deducted ? '$' + Number(r.pay).toFixed(2) + ' less ' + Number(r.miles).toFixed(1)
-                    + ' mi × $' + Number(r.costPerMile).toFixed(2) + ' = $'
-                    + Number(r.cost).toFixed(2) + ' · ' : '')
+      + (deducted ? 'after $' + Number(r.costPerMile).toFixed(2) + '/mi costs · ' : '')
       + r.ms + 'ms'
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
       + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')

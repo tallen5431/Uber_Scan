@@ -76,16 +76,44 @@ html, body {
 
 /* Four across on a phone held in one hand. auto-fit rather than a fixed count
    so a narrow screen wraps to two rows instead of squeezing the digits. */
-.submetrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 6px; }
+/* The arithmetic behind the headline. Sized between the rate and the labels:
+   big enough to take in without focusing, small enough that the rate is still
+   obviously the answer. Tabular figures so the digits do not shuffle as the
+   numbers change under a moving car. */
+.working {
+  text-align: center;
+  font-size: clamp(15px, 4.4vw, 23px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.005em;
+  color: var(--text);
+  padding: 2px 0 6px;
+}
+.working span { white-space: nowrap; }
+.working i { font-style: normal; font-weight: 600; color: var(--muted); padding: 0 .12em; }
+.working b { font-weight: 800; }
+.verdict.go .working b   { color: var(--go); }
+.verdict.warn .working b { color: var(--warn); }
+.verdict.no .working b   { color: var(--no); }
+
+/* Four across on a phone held in one hand. auto-fit rather than a fixed count
+   so a narrow screen wraps to two rows instead of squeezing the digits. */
+.submetrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  gap: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
 .sub {
   display: flex;
   flex-direction: column;
   gap: 2px;
   font-variant-numeric: tabular-nums;
-  font-size: clamp(15px, 4.6vw, 20px);
-  font-weight: 700;
+  font-size: clamp(17px, 5.2vw, 23px);
+  font-weight: 800;
 }
-.sub small { font-size: 10px; font-weight: 600; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+.sub small { font-size: 11px; font-weight: 700; letter-spacing: .09em; color: var(--muted); text-transform: uppercase; }
 
 /* Sits under the submetrics, so it needs a gap of its own — without one it
    collides with the uppercase labels above it.
