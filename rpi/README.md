@@ -1,9 +1,45 @@
 # Raspberry Pi scanner (IMX519)
 
-A Pi 4 with a camera on a fixed mount, watching the driving phone. This is the
-version worth building: a fixed mount is what makes the reading reliable, and it
-removes the alignment problem that makes the handheld phone-camera version
+The Pi does everything: its own camera watches the phone screen, and the Pi
+reads the offer and tells you the rate. Nothing is sent anywhere, no second
+device is involved, and it needs no network once it is set up.
+
+This is the version worth building. A fixed mount is what makes the reading
+reliable, and it removes the alignment problem that makes a hand-held camera
 fiddly.
+
+> The browser scanner (`scan.html`) is a **different, phone-based** experiment
+> and is not part of this. It uses the browser's camera API, which cannot see a
+> CSI camera — opening it on the Pi fails with `NotFoundError` no matter what
+> permissions you grant, because there is no webcam to find. Everything below
+> uses the camera directly instead.
+
+## Quickstart
+
+```sh
+sudo apt install -y python3-picamera2 python3-opencv tesseract-ocr espeak-ng
+pip3 install pytesseract --break-system-packages
+
+python3 rpi/doctor.py        # checks every dependency, prints the fix for each
+python3 rpi/preview.py       # open http://<pi>:8081/ and aim until it reads green
+python3 rpi/calibrate.py     # locks in the screen corners
+python3 rpi/scan_pi.py --speak
+```
+
+That last command is the whole product: it watches, and when an offer appears it
+says *"pass, twelve an hour"* out loud. Speech is the right output in a car — it
+needs no glance at all. `--display` draws a big colour panel instead if you have
+a screen on the Pi, and reads are always printed to the terminal.
+
+To have it start with the Pi:
+
+```sh
+sudo bash rpi/install-service.sh
+journalctl -u uberscan -f       # watch it work
+```
+
+Stop the service before recalibrating, so the camera is free:
+`sudo systemctl stop uberscan`.
 
 ## Why the fixed mount changes everything
 
@@ -112,15 +148,6 @@ warp.
 exposure mid-offer, which is exactly what the pinned camera settings are trying
 to avoid.
 
-## Install
-
-```sh
-sudo apt install -y python3-picamera2 python3-opencv tesseract-ocr espeak-ng
-pip3 install pytesseract --break-system-packages
-```
-
-`espeak-ng` is only needed for `--speak`.
-
 ## Aim the camera
 
 A CSI camera is invisible to browsers, so `scan.html` will never show this feed —
@@ -198,6 +225,13 @@ python3 rpi/test_parser.py    # the same 81 checks
 ```
 
 If the two ever disagree, that suite fails. Edit one, re-run both.
+
+## If something is wrong
+
+`python3 rpi/doctor.py` checks each dependency, the camera, and the calibration,
+and prints the exact command to fix whatever is missing. It also runs the parser
+against a known offer, so a green line there means the reading logic is sound and
+the problem is the mount or the camera.
 
 ## Known limits
 
