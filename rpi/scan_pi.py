@@ -31,7 +31,24 @@ DEFAULT_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'liv
 
 # The motion gate means whole minutes can pass with no read, so the snapshot is
 # refreshed on a timer as well. Cheap: a warp and a resize, no OCR.
-SNAPSHOT_INTERVAL = 2.0
+#
+# Two rates, because a live view is only worth CPU while a person is looking at
+# it. The server touches a file whenever the browser fetches a frame; within
+# that window the view is worth refreshing quickly, and outside it a slow tick
+# is enough to prove the camera is alive.
+SNAPSHOT_FAST = 0.4
+SNAPSHOT_IDLE = 3.0
+WATCH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.viewing')
+WATCH_WINDOW = 10.0
+
+
+def snapshot_interval():
+    try:
+        if time.time() - os.path.getmtime(WATCH_PATH) < WATCH_WINDOW:
+            return SNAPSHOT_FAST
+    except OSError:
+        pass
+    return SNAPSHOT_IDLE
 
 
 def load_config(path):
@@ -247,7 +264,7 @@ def main():
                 do_read = scanner.should_read(luma)
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.
-                due = args.snapshot and (time.time() - last_snapshot) > SNAPSHOT_INTERVAL
+                due = args.snapshot and (time.time() - last_snapshot) > snapshot_interval()
                 if not do_read and not due:
                     continue
                 # picamera2's "RGB888" hands back B, G, R ordered arrays, which

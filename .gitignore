@@ -1,6 +1,8 @@
 *.pem
 *.pyc
 __pycache__/
+rpi/.viewing
 rpi/config-preview.png
 rpi/config.json
+rpi/live-frame.jpg
 ssl/

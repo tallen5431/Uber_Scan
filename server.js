@@ -143,6 +143,16 @@ function startScanner() {
   });
 }
 
+var WATCH_PATH = path.join(ROOT, 'rpi', '.viewing');
+var lastTouch = 0;
+
+function touchWatchFile() {
+  var now = Date.now();
+  if (now - lastTouch < 1000) return;      // the mtime only needs to be recent
+  lastTouch = now;
+  fs.writeFile(WATCH_PATH, '', function () {});
+}
+
 function broadcast(read) {
   var payload = 'data: ' + JSON.stringify(read) + '\n\n';
   listeners = listeners.filter(function (res) {
@@ -201,6 +211,9 @@ function handler(req, res) {
   // from here means the live view needs no second server and no camera of its
   // own — the one process holding the camera is the one producing the picture.
   if (pathname === '/api/frame.jpg') {
+    // Tell the scanner someone is looking, so it refreshes the view quickly
+    // instead of on its idle tick. Throttled: this fires twice a second.
+    touchWatchFile();
     var framePath = path.join(ROOT, 'rpi', 'live-frame.jpg');
     return fs.readFile(framePath, function (err, data) {
       if (err) {

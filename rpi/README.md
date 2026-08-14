@@ -264,6 +264,18 @@ later will save it. Move the bracket until it goes green, then calibrate.
 `--image f.png` runs the same overlay on a still, which is how it is tested
 off-Pi.
 
+### Reading the live view
+
+| | |
+|---|---|
+| **Green outline** | the four corners locked in at calibration. Every frame is perspective-warped from inside it, which is what makes the text square rather than skewed. If it is not hugging the phone's screen, the calibration is stale — recalibrate. |
+| **White inset** | the exact image handed to the reader: de-skewed, cropped to the card, contrast boosted. If the pay, minutes and miles are legible there, the reader has everything it needs. |
+
+The view refreshes about twice a second while the page is open and drops to
+every three seconds when nothing is watching, because a live picture is only
+worth CPU while someone is looking at it. That rate is the *preview*; verdicts
+are not on a timer at all — a read fires as soon as the picture changes.
+
 **While scanning, the view moves to the app.** The aiming preview only runs
 during setup, since the scanner needs the camera for itself afterwards. From
 then on `/live.html` shows the same picture: the whole frame with the

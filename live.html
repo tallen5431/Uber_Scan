@@ -188,7 +188,13 @@
     view.src = '/api/frame.jpg?t=' + Date.now();
   }
   refreshView();
-  setInterval(refreshView, 2000);
+  // The scanner speeds up while this is being fetched, so a quick poll is what
+  // makes the view feel live. It stops entirely on a hidden tab, which is also
+  // what lets the scanner fall back to its idle rate.
+  setInterval(refreshView, 500);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) refreshView();
+  });
 
   connect();
   setInterval(render, 1000);   // keeps the "last seen" counter honest
