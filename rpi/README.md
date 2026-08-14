@@ -923,12 +923,14 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 The Pi parser is a port of the browser one. Both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 127 checks
-python3 rpi/test_parser.py      # the same 127 checks
-python3 rpi/test_accumulate.py  # 38 checks on merging across frames
-python3 rpi/test_pipeline.py    # 84 checks on where, how big, and what to log
-python3 rpi/test_exposure.py    # 38 checks on flicker, brightness and gain
-python3 rpi/test_track.py       # 43 checks on following the phone
+node tests/corpus.test.js       # 130 checks
+python3 rpi/test_parser.py      # the same corpus, plus 146 in all
+python3 rpi/test_accumulate.py  # 65 checks on merging across frames
+python3 rpi/test_pipeline.py    # 116 checks on where, how big, and what to log
+python3 rpi/test_exposure.py    # 61 checks on flicker, brightness and gain
+python3 rpi/test_track.py       # 71 checks on following the phone
+python3 rpi/test_journal.py     # 49 checks on keeping one row per offer
+python3 rpi/test_calibrate.py   # 30 checks on what calibration may overwrite
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

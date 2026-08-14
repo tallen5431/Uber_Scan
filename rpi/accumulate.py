@@ -57,7 +57,7 @@ class OfferAccumulator:
         self.started = 0.0
         self.last_add = 0.0
         self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool, 'seen': n}]
-        self.items = None
+        self.items = []
         self.samples = 0
         self.max_legs = 0
         self.corrected = False
@@ -188,7 +188,7 @@ class OfferAccumulator:
             slot['isTotal'] = slot['isTotal'] or bool(leg.get('isTotal'))
 
         if parsed.get('items') is not None:
-            self.items = parsed['items']
+            self.items.append(parsed['items'])
 
         return self._merged(parsed)
 
@@ -235,7 +235,14 @@ class OfferAccumulator:
         # whichever frame happened to be last. If any frame needed a decimal put
         # back, the distance is worth a glance.
         merged['milesCorrected'] = self.corrected
-        merged['items'] = self.items if self.items is not None else parsed.get('items')
+        # Voted on, like the minutes and the distance. This took whichever
+        # frame happened to be last, so a single misread outvoted every good
+        # reading before it purely by arriving after them — and the item count
+        # is not decoration, it buys shopping time. At 90s an item, "12 items"
+        # misread as "2" on the last frame of a $18.40 shop order took a
+        # 56-minute job to 41 minutes and $17.75/hr PASS to $24.25/hr, on two
+        # frames out of three that said 12.
+        merged['items'] = _consensus(self.items) if self.items else parsed.get('items')
         merged['legs'] = len(used)
         # A total is the whole journey in one line, so one of them is a complete
         # picture where one ordinary leg is only ever half of one.

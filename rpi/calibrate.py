@@ -77,6 +77,47 @@ def load_existing(path):
         return {}
 
 
+DEFAULT_SETTINGS = {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                    'pad': 0, 'secondsPerItem': 0}
+
+
+def calibrated_config(existing, quad, pin, card_height, capture, lens_position):
+    """The stored config with the geometry replaced and nothing else touched.
+
+    Calibrating is about where the phone is, and nothing else. This used to
+    build a fresh dict, so re-aiming the camera also put the driver's money back
+    to the defaults — and the README tells you to re-run calibration whenever
+    the mount moves, then tells you to keep your target and running costs in the
+    same file. A driver on $32/hr and $0.62/mi came back to $25/hr and $0.30/mi
+    and was not told. On the very offer this command reads back to prove itself,
+    their own numbers say $25.0/hr PASS and the reset ones say $35.3/hr ACCEPT,
+    which the rig then announces out loud. There is no second copy of those
+    settings on the Pi to restore them from.
+
+    Kept separate from main() so the guarantee can be tested without a camera.
+    The last version of this regressed once already, and the test that would
+    have caught it did not exist because the only way in was a hardware path.
+    """
+    config = dict(existing or {})
+    config.update({
+        'quad': [[float(x), float(y)] for x, y in quad],
+        # Only written when asked for, and under a key nothing inherits: an
+        # older config's `roi` must not act as a pin, or a rig upgrading gets
+        # its crop frozen at whatever that version happened to write.
+        'cropBox': pin,
+        'cardHeight': card_height,
+        'capture': {'width': capture[0], 'height': capture[1]},
+        'lensPosition': lens_position,
+    })
+    config.setdefault('settings', dict(DEFAULT_SETTINGS))
+    # The tracker's running position is the one thing that must NOT survive: it
+    # is where the screen drifted to relative to corners that no longer exist.
+    # Exposure measurements do survive, because they describe the phone's
+    # backlight rather than where the camera is pointing.
+    config.pop('trackedQuad', None)
+    return config
+
+
 def grab_from_camera(size, lens=None):
     """One sharp frame, plus the lens position that made it sharp.
 
@@ -178,34 +219,8 @@ def main():
             sys.exit('no screen found — is the phone lit and in frame? else pass --corners')
 
     pin = WHOLE_VIEW if args.full_screen else DEFAULT_ROI
-
-    # Calibrating is about where the phone is, and nothing else. This used to
-    # write a fresh dict over the file, which meant re-aiming the camera also
-    # put the driver's money back to the defaults — and the README tells you to
-    # re-run this any time the mount moves, then tells you to keep your target
-    # and running costs in the same file. A driver on $32/hr and $0.62/mi came
-    # back to $25/hr and $0.30/mi and was not told: on the very offer this
-    # command reads back to prove itself, their own numbers say $25.0/hr PASS
-    # and the reset ones say $35.3/hr ACCEPT, which the rig then says out loud.
-    # There is no other copy of those settings on the Pi to restore them from.
-    config = load_existing(args.config)
-    config.update({
-        'quad': [[float(x), float(y)] for x, y in quad],
-        # Only written when asked for, and under a key nothing inherits: an
-        # older config's `roi` must not act as a pin, or a rig upgrading gets
-        # its crop frozen at whatever that version happened to write.
-        'cropBox': pin,
-        'cardHeight': args.card_height,
-        'capture': {'width': width, 'height': height},
-        'lensPosition': lens_position,
-    })
-    config.setdefault('settings', {'target': 25, 'band': 15, 'costPerMile': 0.30,
-                                   'pad': 0, 'secondsPerItem': 0})
-    # The tracker's running position is the one thing that must NOT survive:
-    # it is where the screen drifted to relative to corners that no longer
-    # exist. Exposure measurements do survive, because they describe the
-    # phone's backlight rather than where the camera is pointing.
-    config.pop('trackedQuad', None)
+    config = calibrated_config(load_existing(args.config), quad, pin,
+                               args.card_height, (width, height), lens_position)
     with open(args.config, 'w') as fh:
         json.dump(config, fh, indent=2)
 

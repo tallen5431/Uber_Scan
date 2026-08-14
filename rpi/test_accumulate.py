@@ -173,6 +173,38 @@ eq('merged rate uses both legs', round(rate['perHour'], 2), 20.51)
 single = P.rate(P.parse('$12.45 23 min (8.4 mi) trip'), {'target': 25, 'costPerMile': 0.30})
 eq('one leg alone flatters the offer', round(single['perHour'], 2) > round(rate['perHour'], 2), True)
 
+# --- the item count is voted on, like everything else that moves money ------
+# It used to take whichever frame happened to be last, so one misread outvoted
+# every good reading before it purely by arriving after them. The count is not
+# decoration: it buys shopping time. At 90s an item, "12 items" misread as "2"
+# on the last frame of a $18.40 shop order took a 56-minute job to 41 minutes,
+# and $17.75/hr PASS to $24.25/hr.
+SHOPPING = {'target': 25, 'band': 15, 'costPerMile': 0.30, 'secondsPerItem': 90}
+TWELVE = '$18.40 12 items (12 units) 38 min (6.1 mi) total'
+MISREAD = '$18.40 2 items (2 units) 38 min (6.1 mi) total'
+for label, order in (('misread last', [TWELVE, TWELVE, MISREAD]),
+                     ('misread first', [MISREAD, TWELVE, TWELVE]),
+                     ('misread in the middle', [TWELVE, MISREAD, TWELVE])):
+    acc = OfferAccumulator()
+    for i, text in enumerate(order):
+        merged = acc.add(P.parse(text), now=800.0 + i * 0.5)
+    eq('the majority item count wins, %s' % label, merged['items'], 12)
+    eq('...so the rate is the true one, %s' % label,
+       round(P.rate(merged, SHOPPING)['perHour'], 2), 17.75)
+
+# A tie takes the larger count, for the same reason a tie in the minutes takes
+# the longer time: more shopping is the cautious side of a coin toss.
+acc = OfferAccumulator()
+for i, text in enumerate([MISREAD, TWELVE]):
+    merged = acc.add(P.parse(text), now=900.0 + i * 0.5)
+eq('a tie in the item count takes the larger', merged['items'], 12)
+
+# A frame that loses the count entirely must not erase one already seen.
+acc = OfferAccumulator()
+acc.add(P.parse(TWELVE), now=950.0)
+merged = acc.add(P.parse('$18.40 38 min (6.1 mi) total'), now=950.5)
+eq('a frame that misses the items keeps the count', merged['items'], 12)
+
 # --- the merged distance is judged on its own, not on the last frame's -------
 # The plausibility check runs inside parse(), on one frame's own numbers. The
 # merge then replaces those numbers and used to keep the verdict, so a single

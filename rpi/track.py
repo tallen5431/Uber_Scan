@@ -22,9 +22,11 @@ without ever making things worse than the stored calibration:
   * and it is then eased toward, not jumped to, so the crop never twitches
     mid-offer.
 
-A candidate that fails the first test but keeps insisting anyway is treated as a
-mount that genuinely moved, and adopted outright after twice the agreement. That
-is the difference between drift and a knock, and both need handling.
+A candidate that fails the *position* test but keeps insisting anyway is treated
+as a mount that genuinely moved, and adopted after the same agreement as any
+other move. It still has to look like the screen — the right size and the right
+shape — which is the check that stopped an Accept bar being adopted as a phone.
+That is the difference between drift and a knock, and both need handling.
 """
 
 import time

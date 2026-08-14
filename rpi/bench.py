@@ -53,7 +53,11 @@ def main():
     if os.path.exists(args.config):
         cfg = json.load(open(args.config))
         quad = np.array(cfg['quad'], dtype=np.float32)
-        roi = cfg.get('roi')
+        # `cropBox`, not `roi`: config has been written under the new key since
+        # the crop stopped being pinned by default, and reading the old one here
+        # meant the benchmark silently measured a different crop from the one
+        # the scanner uses.
+        roi = cfg.get('cropBox')
         card_height = cfg.get('cardHeight', 900)
     else:
         quad = PL.detect_screen_quad(frame)
