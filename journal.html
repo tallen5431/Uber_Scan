@@ -296,9 +296,20 @@
     el.caveats.textContent = notes.join(' ');
   }
 
+  // "Today" has to mean today where the driver is. A trailing 24 hours folds
+  // last night's shift into this morning's percentiles and puts its offers in
+  // the wrong time-of-day block — and the Pi cannot work out when the day began
+  // for them, so the browser says.
+  function windowQuery() {
+    if (days !== 1) return 'days=' + days;
+    var midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    return 'days=2&since=' + midnight.getTime();
+  }
+
   function load() {
-    el.csv.href = '/api/journal.csv?days=' + days;
-    fetch('/api/journal?days=' + days)
+    el.csv.href = '/api/journal.csv?' + windowQuery();
+    fetch('/api/journal?' + windowQuery())
       .then(function (r) { return r.json(); })
       .then(render)
       .catch(function () {

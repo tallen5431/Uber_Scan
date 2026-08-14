@@ -445,7 +445,9 @@ def main():
                     help='where to write the live view the web UI shows ("" to disable)')
     ap.add_argument('--journal', default=JR.DEFAULT_PATH,
                     help='where to keep every confident offer, for looking at '
-                         'a shift afterwards')
+                         'a shift afterwards. The web side reads the default '
+                         'path, so if you move it, set JOURNAL to match or the '
+                         'offers page will keep saying there is nothing there')
     ap.add_argument('--no-journal', action='store_true',
                     help='read offers without keeping any record of them')
     ap.add_argument('--no-parallel', action='store_true',
@@ -748,7 +750,13 @@ def main():
             signature = (parsed['pay'], parsed['minutes'], parsed['miles'])
             whole = parsed['complete'] and (parsed.get('hasTotal')
                                             or (parsed.get('legs') or 0) >= 2)
-            if whole and signature == settled_on:
+            # Held on to, because `settled_on` is overwritten a few lines below
+            # and the journal wants this answer further down still. Asking again
+            # after the overwrite compares the signature with itself, which is
+            # true on every read — so every row was stored as settled and the
+            # flag said nothing about anything.
+            settled = whole and signature == settled_on
+            if settled:
                 resample_until = 0.0
             elif parsed.get('pay'):
                 resample_until = time.time() + RESAMPLE_WINDOW
@@ -829,7 +837,7 @@ def main():
             if offer_log is not None and rate['ready'] and out['locked']:
                 offer_log.consider(parsed, rate, ms=out['ms']['total'],
                                    locked=out['locked'], whole=whole,
-                                   settled=(signature == settled_on))
+                                   settled=settled)
 
             if args.display:
                 cv2.imshow('uber-scan', render_panel(rate, parsed))

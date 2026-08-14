@@ -104,6 +104,14 @@ SAVE_EVERY = 30.0
 # likely explanation than being lured onto a sub-region of the screen.
 RECOVER_AFTER = 30.0
 
+# ...and how long before it is worth *saying* so. The clock starts on the first
+# check that finds the corners off the screen, which is also what an ordinary
+# move looks like for the two seconds it spends gathering agreement — so
+# reporting from the first check called every routine drift "stuck" and made the
+# word useless. Comfortably longer than AGREE * RECHECK_EVERY, comfortably
+# shorter than the recovery itself.
+STALL_VISIBLE = 5.0
+
 
 class QuadTracker:
     """Follows the phone screen, starting from a calibrated quad.
@@ -367,7 +375,9 @@ class QuadTracker:
                 # from out here: a candidate was found on every check, so
                 # `misses` stayed at zero and nothing distinguished corners
                 # tracking a screen from corners frozen beside one.
-                'stalled': self._stuck_since is not None}
+                'stalled': (self._stuck_since is not None
+                            and self._last_check is not None
+                            and self._last_check - self._stuck_since >= STALL_VISIBLE)}
 
 
 # --- geometry ---------------------------------------------------------------

@@ -113,8 +113,13 @@ class OfferAccumulator:
         the contaminated merge reproduces the old card's signature exactly the
         loop stops resampling and never looks again.
 
-        Two things separate a new card from a new *leg* of the card already
-        being read, which is the case the merging exists for and must survive:
+        Nothing is a new card while it still lines up with the one on record.
+        That test comes first and outranks everything below it: a reading that
+        matches a stored leg *is* that card, however long it took to arrive.
+
+        Only once nothing lines up do two further signals get a say, and between
+        them they separate a new card from a new *leg* of the card already being
+        read, which is the case the merging exists for and must survive:
 
           * a quiet stretch. Readings of one card arrive in a burst; a gap means
             the burst ended.
@@ -133,14 +138,22 @@ class OfferAccumulator:
         """
         if not self.legs:
             return False
-        if self.last_add and (now - self.last_add) > QUIET:
-            return True
         if not detail:
             return False
         for leg in detail:
             if self._find_slot(leg, set()) is not None:
                 return False        # something lines up: the same card.
-        return len(detail) >= 2 or any(l.get('isTotal') for l in detail)
+
+        # Only now does the gap get a say. It used to be tested first and on its
+        # own, which threw the card away whenever a re-read arrived late — and
+        # the motion gate fires once per card, so a second look is *often* late.
+        # A frame that had lost the pickup leg to glare then became the whole
+        # answer: 28 minutes and 9.6 miles collapsed to 23 and 8.4, a $20.51/hr
+        # PASS was published as $25.90/hr ACCEPT, and the journal filed it as a
+        # second offer. A reading that lines up with the card on record is that
+        # card, however long it took to arrive.
+        quiet = bool(self.last_add) and (now - self.last_add) > QUIET
+        return quiet or len(detail) >= 2 or any(l.get('isTotal') for l in detail)
 
     def add(self, parsed, now=None):
         """Merge one reading in, and return the combined view of the offer.

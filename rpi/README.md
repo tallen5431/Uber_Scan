@@ -911,7 +911,13 @@ Three deliberate omissions:
 ```sh
 python3 rpi/scan_pi.py --no-journal        # keep no record
 python3 rpi/scan_pi.py --journal /some/other/path.jsonl
+JOURNAL=/some/other/path.jsonl npm start   # ...and tell the web side where it went
 ```
+
+The scanner and the web server have to name the same file. Nothing detects a
+mismatch: the page simply reports no offers while the scanner writes happily to
+somewhere else.
+
 
 Rows carry the `target`, `band` and `costPerMile` in force when they were
 written, because a stored "PASS" is unreadable a month after the target moved.

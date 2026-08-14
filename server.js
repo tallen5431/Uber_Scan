@@ -210,7 +210,11 @@ var shuttingDown = false;
   });
 });
 
-var JOURNAL_PATH = path.join(ROOT, 'rpi', 'journal.jsonl');
+// Where the scanner keeps its offers. Overridable for the same reason the
+// scanner's --journal is: the two have to name the same file, and a mismatch is
+// silent — the page just says "no offers recorded yet" while the scanner
+// happily writes somewhere else.
+var JOURNAL_PATH = process.env.JOURNAL || path.join(ROOT, 'rpi', 'journal.jsonl');
 
 // Columns worth putting in a spreadsheet, in the order a person reads them.
 // Not every field in the row: `content` is an internal fingerprint and `v`,
@@ -218,8 +222,9 @@ var JOURNAL_PATH = path.join(ROOT, 'rpi', 'journal.jsonl');
 // already happened by the time anything gets here.
 var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    'perHour', 'grossPerHour', 'perMile', 'cost', 'state',
-                   'target', 'costPerMile', 'legs', 'mergedFrom', 'hasTotal',
-                   'milesCorrected', 'milesUncertain', 'settled', 'suspect', 'ms'];
+                   'target', 'band', 'costPerMile', 'legs', 'mergedFrom', 'hasTotal',
+                   'milesCorrected', 'milesUncertain', 'whole', 'settled',
+                   'suspect', 'ms'];
 
 function clampNumber(raw, low, high, fallback) {
   var n = parseInt(raw, 10);
@@ -386,10 +391,15 @@ function route(req, res) {
     var q = url.parse(req.url, true).query || {};
     var days = clampNumber(q.days, 0, 3650, 30);
     var limit = clampNumber(q.limit, 0, 20000, 5000);
+    // The page can name an exact start instead of a span. It has to, for
+    // "today": a trailing 24 hours folds last night's shift into this morning's
+    // figures, and only the browser knows where the driver is and therefore
+    // when their day began.
+    var since = clampNumber(q.since, 0, 4102444800000, 0);
     return readJournal(function (rows) {
       var offers = latestPerOffer(rows);
-      if (days > 0) {
-        var floor = Date.now() - days * 86400000;
+      var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
+      if (floor) {
         offers = offers.filter(function (r) { return (r.at || 0) >= floor; });
       }
       if (limit && offers.length > limit) offers = offers.slice(-limit);

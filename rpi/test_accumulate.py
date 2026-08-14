@@ -250,6 +250,21 @@ for gap, label in ((0.6, 'swapped fast'), (3.0, 'swapped after a pause')):
     eq('%s / miles are its own' % label, merged['miles'], 2.6)
     eq('%s / nothing inherited' % label, merged['mergedFrom'], 1)
 
+# A late re-read of the SAME card is that card, not a new one. The motion gate
+# fires once per card, so a second look is often seconds later — and the gap
+# used to be tested on its own, before anything asked whether the frame lined up
+# with what was already known. A frame that had lost the pickup leg to glare
+# then became the whole answer: 28 minutes and 9.6 miles collapsed to 23 and
+# 8.4, and a $20.51/hr PASS was published as $25.90/hr ACCEPT.
+acc = OfferAccumulator()
+acc.add(P.parse(GOOD), now=1340.0)
+acc.add(P.parse(GOOD), now=1340.5)
+merged = acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=1343.0)
+eq('a late re-read keeps the whole journey', merged['minutes'], 28.0)
+eq('...and the whole distance', merged['miles'], 9.6)
+eq('...and rates as the true one',
+   round(P.rate(merged, money)['perHour'], 2), 20.51)
+
 # ...and the cases that protects. A frame that finally catches a leg glare had
 # been hiding also matches no stored slot, and must NOT be read as a new card.
 acc = OfferAccumulator()

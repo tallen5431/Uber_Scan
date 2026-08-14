@@ -357,13 +357,20 @@ tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
 ok_('a re-seated phone is refused by the gate',
     not tr.looks_like_the_screen(quad_at(430, 200, size=SMALLER)))
 
-settle(tr, reseated, 3, step=2.0)
+settle(tr, reseated, 2, step=1.0)
 eq('...and the corners do not move for it', tr.rebaselines, 0)
-ok_('...but it is reported as stuck rather than held', tr.status()['stalled'])
+ok_('...and it is not called stuck straight away, because that is also what an '
+    'ordinary move looks like while it gathers agreement',
+    not tr.status()['stalled'])
+
+settle(tr, reseated, 6, t0=2.0, step=T.STALL_VISIBLE / 2.0)
+ok_('...but it is reported as stuck once it outlasts a re-lock',
+    tr.status()['stalled'])
 ok_('...and not as lost, because the screen is right there',
     not tr.status()['lost'])
+eq('...and still nothing has moved', tr.rebaselines, 0)
 
-settle(tr, reseated, 12, t0=6.0, step=T.RECOVER_AFTER / 4.0)
+settle(tr, reseated, 12, t0=20.0, step=T.RECOVER_AFTER / 4.0)
 eq('after RECOVER_AFTER the corners are un-stuck', tr.rebaselines, 1)
 ok_('...and land on the screen that is actually there',
     T.distance(tr.quad, quad_at(430, 200, size=SMALLER)) < 12.0)
