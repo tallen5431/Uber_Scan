@@ -27,6 +27,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pipeline as PL
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+DEFAULT_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'live-frame.jpg')
+
+# The motion gate means whole minutes can pass with no read, so the snapshot is
+# refreshed on a timer as well. Cheap: a warp and a resize, no OCR.
+SNAPSHOT_INTERVAL = 2.0
 
 
 def load_config(path):
@@ -93,6 +98,22 @@ def start_camera(cfg, exposure_us, gain, lens):
     return cam
 
 
+def write_snapshot(frame, cfg, path):
+    """Write what the camera sees, atomically.
+
+    Renamed into place rather than written in place, because the web server may
+    read it at any moment and half a JPEG is worse than a slightly old one.
+    """
+    try:
+        view = PL.snapshot(frame, np.array(cfg['quad'], dtype=np.float32),
+                           cfg.get('roi'), cfg.get('cardHeight', 900))
+        tmp = path + '.tmp'
+        cv2.imwrite(tmp, view, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        os.replace(tmp, path)
+    except Exception as e:
+        print('snapshot failed: %s' % e)
+
+
 def say(text):
     try:
         subprocess.Popen(['espeak-ng', '-s', '165', text],
@@ -138,6 +159,7 @@ def emit(rate, parsed, ms, locked):
         'milesCorrected': parsed['milesCorrected'],
         'milesUncertain': parsed['milesUncertain'],
         'ms': round(ms['total']),
+        'text': (parsed.get('text') or '')[:200],
     }
     sys.stdout.write(json.dumps(payload) + '\n')
     sys.stdout.flush()
@@ -160,6 +182,8 @@ def main():
                     help='print the sensor modes this camera reports, then exit')
     ap.add_argument('--save-misses', metavar='DIR',
                     help='write frames that failed to parse, for tuning')
+    ap.add_argument('--snapshot', default=DEFAULT_SNAPSHOT,
+                    help='where to write the live view the web UI shows ("" to disable)')
     args = ap.parse_args()
 
     if args.list_modes:
@@ -191,6 +215,7 @@ def main():
     print('scanning — ctrl-c to stop')
     spoke_for = None
     frames = 0
+    last_snapshot = 0.0
     try:
         while True:
             request = cam.capture_request()
@@ -201,13 +226,24 @@ def main():
                 buf = request.make_buffer('lores')
                 luma = np.frombuffer(buf, dtype=np.uint8,
                                      count=LORES[0] * LORES[1]).reshape((LORES[1], LORES[0]))
-                if not scanner.should_read(luma):
+                do_read = scanner.should_read(luma)
+                # Grab the full frame for a read, or when the live view is due —
+                # otherwise nothing is ever seen between offers.
+                due = args.snapshot and (time.time() - last_snapshot) > SNAPSHOT_INTERVAL
+                if not do_read and not due:
                     continue
                 # picamera2's "RGB888" hands back B, G, R ordered arrays, which
                 # is exactly what OpenCV expects. The name is the odd one out.
                 frame = request.make_array('main')
             finally:
                 request.release()
+
+            if args.snapshot and (due or do_read):
+                write_snapshot(frame, cfg, args.snapshot)
+                last_snapshot = time.time()
+
+            if not do_read:
+                continue
 
             frames += 1
             out = scanner.read(frame)

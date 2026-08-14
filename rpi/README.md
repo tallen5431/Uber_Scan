@@ -68,9 +68,10 @@ once calibration succeeds, and the camera preview is on port 8081 meanwhile.
 
 | | |
 |---|---|
-| `/live.html` | the verdict, full screen, updating live |
+| `/live.html` | the verdict, full screen, updating live — with the camera view |
 | `/api/status` | scanner state and the last read, as JSON |
 | `/api/events` | server-sent events, one per read |
+| `/api/frame.jpg` | the most recent camera view, refreshed every couple of seconds |
 
 The scanner is restarted with a backoff if it dies, its errors appear in
 `/api/status`, and the site keeps serving throughout. `SCANNER=0` disables it,
@@ -262,6 +263,14 @@ later will save it. Move the bracket until it goes green, then calibrate.
 `--save shot.png` writes one annotated frame instead of serving, and
 `--image f.png` runs the same overlay on a still, which is how it is tested
 off-Pi.
+
+**While scanning, the view moves to the app.** The aiming preview only runs
+during setup, since the scanner needs the camera for itself afterwards. From
+then on `/live.html` shows the same picture: the whole frame with the
+calibrated corners drawn on it, and inset, the exact card image handed to the
+reader. Aim problems show up in the first, focus and glare in the second. It is
+written every couple of seconds even when nothing is happening, so a blank
+stretch between offers still proves the camera is alive.
 
 ## Calibrate
 

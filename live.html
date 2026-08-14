@@ -19,6 +19,14 @@
   }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--no); }
   .dot.on { background: var(--go); }
+  #viewWrap { margin: 0; }
+  #viewWrap img {
+    width: 100%; display: block; border-radius: 14px;
+    border: 1px solid var(--line); background: var(--panel);
+  }
+  #viewWrap img.stalefeed { opacity: .4; }
+  #viewNote { font-size: 11px; color: var(--muted); text-align: center; padding: 6px 0 0; }
+  #viewWrap.gone img { display: none; }
 </style>
 </head>
 <body>
@@ -39,6 +47,13 @@
       <div id="warn" class="warn" hidden></div>
     </section>
     <div class="pending" id="detail" style="text-align:center"></div>
+
+    <!-- What the camera is actually looking at. The inset is the exact image
+         handed to the reader, so aim and focus are both visible here. -->
+    <figure id="viewWrap">
+      <img id="view" alt="live camera view">
+      <figcaption id="viewNote">camera view · inset is what the reader sees</figcaption>
+    </figure>
   </div>
 
   <div class="connbar"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
@@ -153,6 +168,27 @@
       el.conn.textContent = 'scanner not running' + (s.scanner.error ? ': ' + s.scanner.error : '');
     }
   }).catch(function () {});
+
+  // Poll the still rather than streaming: the scanner writes it every couple of
+  // seconds, so a stream would mostly be duplicate frames, and a plain <img>
+  // survives the scanner restarting underneath it.
+  var view = document.getElementById('view');
+  var viewNote = document.getElementById('viewNote');
+  var viewWrap = document.getElementById('viewWrap');
+  view.addEventListener('error', function () {
+    viewWrap.classList.add('gone');
+    viewNote.textContent = 'no camera view yet — the scanner writes one every few seconds';
+  });
+  view.addEventListener('load', function () {
+    viewWrap.classList.remove('gone');
+    viewNote.textContent = 'camera view · inset is what the reader sees';
+  });
+  function refreshView() {
+    if (document.hidden) return;
+    view.src = '/api/frame.jpg?t=' + Date.now();
+  }
+  refreshView();
+  setInterval(refreshView, 2000);
 
   connect();
   setInterval(render, 1000);   // keeps the "last seen" counter honest

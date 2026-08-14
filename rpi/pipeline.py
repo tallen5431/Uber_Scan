@@ -108,6 +108,40 @@ def preprocess(card):
     return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
 
 
+def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640):
+    """One image that answers "is it looking at the right thing?".
+
+    The whole frame with the calibrated corners drawn on it, and inset, the
+    exact card image handed to the OCR engine. Aim problems show up in the
+    first; focus and glare problems show up in the second.
+    """
+    view = frame.copy()
+    if quad is not None:
+        q = np.asarray(quad, dtype=np.int32)
+        cv2.polylines(view, [q], True, (100, 201, 23), 6)
+
+    scale = width / float(view.shape[1])
+    view = cv2.resize(view, (width, max(1, int(view.shape[0] * scale))),
+                      interpolation=cv2.INTER_AREA)
+
+    if quad is not None:
+        card = crop(warp(frame, quad, card_height), roi)
+        card = preprocess(card)
+        card = cv2.cvtColor(card, cv2.COLOR_GRAY2BGR)
+        # Inset it at a third of the width, bottom-right, inside a border so it
+        # reads as a separate picture rather than part of the scene.
+        cw = width // 3
+        ch = max(1, int(card.shape[0] * (cw / float(card.shape[1]))))
+        ch = min(ch, view.shape[0] - 20)
+        cw = max(1, int(card.shape[1] * (ch / float(card.shape[0]))))
+        card = cv2.resize(card, (cw, ch), interpolation=cv2.INTER_AREA)
+        x0, y0 = view.shape[1] - cw - 8, view.shape[0] - ch - 8
+        if x0 > 0 and y0 > 0:
+            view[y0:y0 + ch, x0:x0 + cw] = card
+            cv2.rectangle(view, (x0 - 2, y0 - 2), (x0 + cw + 1, y0 + ch + 1), (255, 255, 255), 2)
+    return view
+
+
 def ocr(image, config=OCR_CONFIG):
     return pytesseract.image_to_string(image, config=config)
 

@@ -197,6 +197,23 @@ function handler(req, res) {
     }), { 'Content-Type': 'application/json; charset=utf-8' });
   }
 
+  // The scanner writes this every couple of seconds while it runs. Serving it
+  // from here means the live view needs no second server and no camera of its
+  // own — the one process holding the camera is the one producing the picture.
+  if (pathname === '/api/frame.jpg') {
+    var framePath = path.join(ROOT, 'rpi', 'live-frame.jpg');
+    return fs.readFile(framePath, function (err, data) {
+      if (err) {
+        return send(res, 404, 'no frame yet', { 'Content-Type': 'text/plain' });
+      }
+      send(res, 200, data, {
+        'Content-Type': 'image/jpeg',
+        'Content-Length': data.length,
+        'Cache-Control': 'no-store'
+      });
+    });
+  }
+
   if (pathname === '/api/events') {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
