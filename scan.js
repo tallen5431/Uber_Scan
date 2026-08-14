@@ -99,6 +99,33 @@
     status('camera unavailable — 📷 Photo still works');
   }
 
+  // These failures need different answers, and calling them all "permission"
+  // sends you to a settings page that cannot help.
+  function explainCameraError(e) {
+    var label = 'CAMERA UNAVAILABLE';
+    var msg;
+    if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
+      label = 'NO CAMERA ON THIS DEVICE';
+      msg = 'The browser found no camera at all, so this is not a permission ' +
+        'problem. If you are on a Raspberry Pi, a CSI camera on libcamera is ' +
+        'invisible to browsers — run rpi/scan_pi.py instead, which drives it ' +
+        'directly. Otherwise open this page on the phone you want to scan with.';
+    } else if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+      label = 'CAMERA PERMISSION DENIED';
+      msg = 'This site was refused the camera. Allow it in the browser\'s site ' +
+        'settings and reload.';
+    } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
+      label = 'CAMERA IN USE';
+      msg = 'Another app already holds the camera. Close it and reload.';
+    } else {
+      msg = 'The camera could not start (' + e.name + ': ' + e.message + ').';
+    }
+    el.verdictLabel.textContent = label;
+    el.warn.textContent = msg + ' 📷 Photo below still works on any device.';
+    el.warn.hidden = false;
+    status('camera unavailable — 📷 Photo still works');
+  }
+
   async function startCamera() {
     status('starting camera…');
     var stream = await navigator.mediaDevices.getUserMedia({
@@ -332,12 +359,7 @@
       running = true;
       loop();
     } catch (e) {
-      // A refused permission is not a dead end — 📷 Photo runs the same pipeline.
-      el.verdictLabel.textContent = 'CAMERA BLOCKED';
-      el.warn.textContent = 'The browser refused the camera (' + e.name + '). Check the ' +
-        'permission for this site, or use 📷 Photo.';
-      el.warn.hidden = false;
-      status('camera refused — 📷 Photo still works');
+      explainCameraError(e);
     }
   })();
 

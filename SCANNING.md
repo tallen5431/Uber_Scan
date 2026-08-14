@@ -136,6 +136,14 @@ local server on port 8765.
 - `vendor/` is ~15MB in the repo so that any phone gets a core build it can
   run; a given phone downloads only the ~4MB variant it needs, once.
 
+## It needs a camera the browser can see
+
+`scan.html` uses the browser's camera API, which only sees ordinary webcams. A
+Raspberry Pi CSI camera on libcamera is not one, so opening this page on the Pi
+fails with `NotFoundError` however many permissions you grant — nothing is being
+refused, there is simply no device. Run `rpi/scan_pi.py` there instead, and
+`rpi/preview.py` to see the feed while aiming.
+
 ## On a Raspberry Pi
 
 A fixed-mount Pi camera is a better version of this idea and removes the

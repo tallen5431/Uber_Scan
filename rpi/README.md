@@ -121,6 +121,25 @@ pip3 install pytesseract --break-system-packages
 
 `espeak-ng` is only needed for `--speak`.
 
+## Aim the camera
+
+A CSI camera is invisible to browsers, so `scan.html` will never show this feed —
+open it in Chromium on the Pi and you get `NotFoundError`, because there is no
+V4L2 webcam to find. Use this instead:
+
+```sh
+python3 rpi/preview.py        # then open http://<pi>:8081/ on the phone
+```
+
+It streams the frame with the detected phone screen outlined and the number that
+decides whether any of this works: how many real sensor pixels tall the offer
+card is. Green means the mount is close enough, red means no amount of tuning
+later will save it. Move the bracket until it goes green, then calibrate.
+
+`--save shot.png` writes one annotated frame instead of serving, and
+`--image f.png` runs the same overlay on a still, which is how it is tested
+off-Pi.
+
 ## Calibrate
 
 Put a live offer — or any bright screen — on the phone, then:
