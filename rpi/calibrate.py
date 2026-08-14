@@ -23,8 +23,18 @@ import pipeline as PL
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
 # Uber draws the offer card against the bottom of the screen. Cropping to it
-# roughly halves the pixels tesseract walks, for no loss of accuracy.
-DEFAULT_ROI = [0.02, 0.48, 0.96, 0.50]
+# saves tesseract a good share of the pixels, for no loss of accuracy.
+#
+# The margins are deliberately loose. A tight crop looks efficient and is not:
+# the card's top edge moves with the phone, with the service badge above the
+# payout, and with the card type, and a crop that clips the payout does not
+# degrade — it reports no offer, or worse, reads the rating underneath as one.
+# Measured against cards drawn anywhere from 0.34 to 0.58 down the screen: the
+# old [0.02, 0.48, 0.96, 0.50] lost the payout entirely on 13 of 42 reads, this
+# on none of them, and where nothing was being clipped the two scored the same
+# (57/72) for about 7ms. Going wider still starts costing accuracy to the map
+# text it drags in, so this is the far edge of free.
+DEFAULT_ROI = [0.0, 0.40, 1.0, 0.60]
 
 # Two numbers, because they mean different things. 350px is where reading
 # measurably stops working; below it no setting helps. 450px is where there is
@@ -167,13 +177,22 @@ def main():
     print('\nCheck the preview is a straight-on, sharp, glare-free offer card.')
 
 
-def card_source_pixels(quad, roi):
-    """Height, in real sensor pixels, of the region that gets OCR'd."""
+def card_source_pixels(quad, roi=None):
+    """Height, in real sensor pixels, of the offer card itself.
+
+    Of the card, deliberately, and not of the crop around it. This number is
+    what MIN_CARD_PIXELS is judged against, so it has to mean the same thing
+    however much slack the crop is carrying — measure the crop instead and
+    widening it for safety would silently pass mounts that are too far away,
+    which is the opposite of safe.
+    """
     import numpy as np
+
+    import pipeline as PL
     left = np.linalg.norm(quad[3] - quad[0])
     right = np.linalg.norm(quad[2] - quad[1])
     screen_px = (left + right) / 2.0
-    return int(round(screen_px * (roi[3] if roi else 1.0)))
+    return int(round(screen_px * PL.CARD_SHARE))
 
 
 if __name__ == '__main__':

@@ -56,17 +56,23 @@ screen = [line('W 63rd St', 120), line('S Rhodes Ave', 300),
           line('6 items (6 units)', 680), line('34 min (3.6 mi) total', 730),
           line('Dollar General', 790), line('Accept', 860)]
 
-fitted = PL.fit_roi(screen, 1000, current=[0.02, 0.48, 0.96, 0.50])
+fitted = PL.fit_roi(screen, 1000, current=[0.0, 0.40, 1.0, 0.60])
 ok_('a card is found', fitted is not None)
 ok_('the crop starts above the payout', fitted[1] < 570 / 1000.0)
 ok_('...but below the map labels', fitted[1] > 300 / 1000.0)
-ok_('and it reaches the bottom line', fitted[1] + fitted[3] > 890 / 1000.0)
-eq('the horizontal extent is inherited', (fitted[0], fitted[2]), (0.02, 0.96))
+ok_('and it reaches past the bottom line', fitted[1] + fitted[3] > 890 / 1000.0)
+eq('the horizontal extent is inherited', (fitted[0], fitted[2]), (0.0, 1.0))
 
 # The payout anchors the top, one padding above it — street names further up
 # must not drag the crop back over the map.
 eq('anchored a padding above the payout',
    round(fitted[1], 3), round(570 / 1000.0 - PL.FIT_PAD_ABOVE, 3))
+
+# And that padding has to be real headroom, or the very next read calls its own
+# crop clipped and the pair of them oscillate.
+crop_h = fitted[3] * 1000
+ok_('the payout lands clear of the top edge',
+    (570 - fitted[1] * 1000) > PL.TOP_EDGE * crop_h * 2)
 
 # --- fit_roi refuses rather than guessing ----------------------------------
 eq('no text, no fit', PL.fit_roi([], 1000), None)
@@ -125,16 +131,21 @@ eq('no crop, no adjustment', sc.read_height, 900)
 sc = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=0)
 eq('no upscaling, no adjustment', sc.read_height, 900)
 sc = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=1400, ocr_height=900)
-eq('a full-height crop never shrinks the warp', sc.read_height, 1400)
+eq('a full-screen crop still reads the card at scale', sc.read_height, 1800)
 
-# The crop moves at runtime, so the height has to follow it — up to a point.
-sc = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=900)
-sc.roi = [0.02, 0.40, 0.96, 0.45]
-eq('a re-fitted crop re-derives the height', sc.read_height, 2000)
-# A thin crop would otherwise ask for a warp nothing can afford: 0.18 high wants
-# 5000px, which is a 40MB image and an OCR pass to match.
-sc.roi = [0.02, 0.40, 0.96, 0.18]
-eq('but it cannot run away', sc.read_height, PL.MAX_READ_HEIGHT)
+# Text size must not depend on how much slack the crop carries. Widening the
+# crop to stop it clipping the payout would otherwise shrink the warp, and the
+# card would come out smaller than before — keeping more of it and reading less.
+tight = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=900)
+roomy = PL.Scanner(quad=None, roi=[0.0, 0.40, 1.0, 0.60], card_height=900, ocr_height=900)
+eq('a roomier crop reads at the same scale', roomy.read_height, tight.read_height)
+ok_('...and that scale is bigger than the screen', roomy.read_height > 900)
+roomy.roi = [0.0, 0.20, 1.0, 0.80]
+eq('however roomy it gets', roomy.read_height, tight.read_height)
+
+# A thin crop must not ask for a warp nothing can afford either.
+sc = PL.Scanner(quad=None, roi=[0.02, 0.40, 0.96, 0.18], card_height=900, ocr_height=4800)
+eq('the warp cannot run away', sc.read_height, PL.MAX_READ_HEIGHT)
 eq('and the search pass is bounded too', sc._search_height(np.zeros((5000, 900), np.uint8)),
    PL.RESCUE_MAX_HEIGHT)
 
@@ -172,6 +183,29 @@ eq('and it is reused, not multiplied',
    PL.stage_for_ocr(np.zeros((90, 40), np.uint8)), staged)
 back = cv2.imread(staged, cv2.IMREAD_GRAYSCALE)
 eq('the staged image survives the round trip', back.shape, (90, 40))
+
+# --- the log has to be worth pasting ---------------------------------------
+import scan_pi as SP                                          # noqa: E402
+
+eq('a crop reads as a box', SP._fmt_roi([0.0, 0.4, 1.0, 0.6]), '[0.00 0.40 1.00 0.60]')
+eq('and no crop says so', SP._fmt_roi(None), 'whole screen')
+
+h = SP.Health()
+eq('nothing to report before anything happens', h.report(1000.0, None, tight), None)
+for i in range(5):
+    h.add({'ms': {'total': 200.0 + i}, 'clipped': i == 4},
+          {'complete': i < 3, 'pay': 7.09 if i < 4 else None})
+eq('counted the reads', h.reads, 5)
+eq('counted the complete ones', h.complete, 3)
+eq('counted the ones with no payout', h.no_pay, 1)
+eq('counted the clipped ones', h.clipped, 1)
+# The window starts at the first report, not at import, so the clock it is
+# judged against is always the caller's.
+eq('too soon to summarise', h.report(1000.0, None, tight), None)
+eq('still counting', h.reads, 5)
+h.report(1000.0 + SP.HEALTH_EVERY + 1, None, tight)
+eq('summarising clears the window', h.reads, 0)
+ok_('but not the running totals', h.refits == 0 and h.relocks == 0)
 
 # --- the motion gate still gates ------------------------------------------
 sc = PL.Scanner(quad=None, roi=None)

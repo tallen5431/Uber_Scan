@@ -152,11 +152,43 @@ general shape of this hazard:
    crop's share of the screen, so a crop that re-fitted itself to 0.18 asked for
    a 5000px warp: a 40MB image and an OCR pass to match. That is capped now.
 
-What remains is deliberately reluctant: several reads must fail in a row with
-nothing succeeding between them, two searches must agree on where the card
-really is, and the crop moves at most once every 20 seconds. Replayed against
-offers interleaved with driving screens it re-fits **zero** times; given a crop
-that is genuinely wrong it re-fits **once** and then reads normally.
+What remains is deliberately conditional rather than slow: several reads must
+fail in a row with nothing succeeding between them, and two whole-screen
+searches must agree on where the card really is. Those conditions are what makes
+it safe, so the *intervals* can be short — every second spent deciding is a
+second spent reading the wrong part of the screen. A crop that is genuinely
+misplaced repairs itself in about **three reads, six seconds of Pi time**;
+replayed against offers interleaved with driving screens it moves **zero**
+times.
+
+### The crop is loose on purpose
+
+A tight crop looks efficient and is not. The card's top edge moves with the
+phone, with the service badge above the payout, and with the card type, and a
+crop that clips the payout does not degrade — it reports no offer at all, or
+reads the rating underneath as one. Measured against cards drawn anywhere from
+0.34 to 0.58 down the screen:
+
+| Crop | Exact reads | Lost the payout entirely |
+|---|---|---|
+| `[0.02, 0.48, 0.96, 0.50]` (old) | 28/42 | **13** |
+| **`[0.0, 0.40, 1.0, 0.60]`** | **42/42** | **0** |
+| `[0.0, 0.30, 1.0, 0.70]` | 42/42 | 0, but slower and no better |
+
+Where nothing was being clipped, the loose crop scored exactly the same as the
+tight one (57/72) for about 7ms. Going wider than this starts costing accuracy
+to the map text it drags in, so it sits at the far edge of free.
+
+One trap is worth naming, because it is invisible and it points the wrong way.
+Text size in the finished image depends on the *warp height*, and the warp
+height used to be derived from the crop's share of the screen — so widening the
+crop to stop it clipping the payout would have **shrunk the text**, keeping more
+of the card and reading less of it. The warp is now derived from how much of a
+screen a card is (`CARD_SHARE`), which is a property of the card rather than of
+however much slack the crop is carrying. For the same reason `card_source_pixels`
+reports the height of the *card*, not of the crop: it is what the aiming floor is
+judged against, and measuring the crop instead would have quietly passed mounts
+that are too far away.
 
 ## Where the speed comes from
 
@@ -167,7 +199,7 @@ Not from tuning the OCR engine. From refusing to run it:
 | **Motion gate** | A 640×480 luma stream answers "did anything change?" for ~1ms. The full read only happens when the answer is yes, so idle cost is near zero. |
 | **Settle wait** | After a change, it waits for the picture to stop moving. Reading a frame mid-transition just wastes a read on motion blur. |
 | **Warp to the screen** | Tesseract's cost scales with pixels. Feeding it a card instead of a 16MP frame is worth more than every other optimisation combined. |
-| **Crop to the card** | Uber puts the card in the same place every time. Cropping to it roughly halves the pixels again, for no loss of accuracy. |
+| **Crop to the card** | Uber puts the card in roughly the same place every time. Cropping to it saves a good share of the pixels, for no loss of accuracy — but the crop is deliberately loose, see below. |
 | **Hand over a file, not an array** | pytesseract's array path routes the image through PIL, whose PNG encoder measured **93ms** — over a third of a read, spent compressing a picture tesseract immediately decompresses. An uncompressed PGM encodes in 0.1ms and reads identically: **262ms → 157ms**. It goes in `/dev/shm`, so the SD card is never in the hot path. |
 | **Track on the small stream** | Re-finding the corners uses the 640×480 luma the motion gate already has, not a shrunk-down sensor frame: **0.96ms against 6.98ms**, almost all of the difference being the shrinking. It also means tracking needs no full-resolution capture at all, so it keeps working at full rate while the scanner is otherwise idle. |
 | **Stop when there is nothing left to learn** | Sampling continues after a card appears so a leg missed by one frame can be caught by the next — but it stops as soon as the reading is *whole* (a total, or both legs of a two-leg card) and two reads running agree. In a 30-frame run over one offer that is 2 reads instead of 9. What keeps sampling is the case that needs it: a single leg that is not a total, which is the shape of a card with a leg still missing. |
@@ -480,7 +512,7 @@ The Pi parser is a port of the browser one. Both run the same corpus:
 node tests/corpus.test.js       # 127 checks
 python3 rpi/test_parser.py      # the same 127 checks
 python3 rpi/test_accumulate.py  # 27 checks on merging across frames
-python3 rpi/test_pipeline.py    # 55 checks on where and how big to read
+python3 rpi/test_pipeline.py    # 69 checks on where, how big, and what to log
 python3 rpi/test_track.py       # 43 checks on following the phone
 ```
 
@@ -507,6 +539,34 @@ as perfectly ordinary text. Each of these came off a real rig:
 and prints the exact command to fix whatever is missing. It also runs the parser
 against a known offer, so a green line there means the reading logic is sound and
 the problem is the mount or the camera.
+
+### Reading the log
+
+The scanner's log is written to be pasted into a bug report. It says nothing
+per-read — that would bury it — and everything that matters otherwise:
+
+```
+setup: capture 2328x1748, card ~549px on the sensor (floor 380), crop [0.00 0.40 1.00 0.60],
+       warp 1800px, reader gets 900px, lens 4.00 dioptres
+setup: corners [[951, 300], [1456, 301], [1455, 1399], [950, 1398]]
+read 1 found nothing usable (no payout in the crop, 1 in a row).
+       Reader saw: '34 min (3.6 mi) total\nDollar General (925 Shiloh Rd Nw)\n...'
+crop moved: [0.00 0.66 1.00 0.34] -> [0.00 0.47 1.00 0.33] (reads were failing; the card
+       was found there by two whole-screen searches that agreed)
+screen not visible — is the phone lit and in frame?
+health over 120s: 7 reads, 5 complete; median 259ms; 2 found no payout; crop
+       [0.00 0.47 1.00 0.33]; crop moved 1x since start; corners held, drift 7px from saved
+```
+
+The `Reader saw:` line is the one that settles arguments. In the example above
+the crop is sitting below the payout — the text starts at the journey line — and
+that is visible at a glance without needing the rig. Two rounds of fixes here
+were diagnosed from exactly this kind of evidence: `S 4S Rhodes` out of a street
+address became a $45 offer, and `ZIM` out of map texture became a 21-minute leg.
+
+`health` lines appear at most every two minutes and only when reads have
+happened, so a quiet scanner stays quiet. The same detail is on `live.html`
+under **what the reader read**, which is quicker if you are standing at the car.
 
 ## Known limits
 

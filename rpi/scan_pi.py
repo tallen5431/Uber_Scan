@@ -49,6 +49,12 @@ SNAPSHOT_IDLE = 3.0
 # view of the same card to work from.
 RESAMPLE_WINDOW = 4.0
 RESAMPLE_EVERY = 0.5
+
+# How long to keep looking after a read that found nothing while the crop is
+# under suspicion. Short, because it only runs when reads are already failing —
+# the cost is a few OCR passes on a screen that was giving nothing anyway, and
+# the payoff is the crop repairing itself inside one offer instead of five.
+RECOVER_WINDOW = 3.0
 WATCH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.viewing')
 WATCH_WINDOW = 10.0
 
@@ -187,6 +193,84 @@ def write_snapshot(frame, cfg, path):
             print('snapshot failed (further identical errors suppressed): %s' % message)
 
 
+def log(message):
+    """A human-readable line for the log file.
+
+    Deliberately not JSON. In --json mode every read goes to stdout as an
+    object for the web server to parse; anything that fails to parse is passed
+    through to the log instead, which is exactly where these belong. The point
+    of them is that a log someone pastes back should be enough to diagnose the
+    problem without also needing the rig.
+    """
+    sys.stdout.write(message + '\n')
+    sys.stdout.flush()
+
+
+# How often to summarise, and how often at most to quote what the reader saw.
+# Both are rate limits rather than schedules: a quiet scanner says nothing.
+HEALTH_EVERY = 120.0
+SAMPLE_EVERY = 20.0
+
+
+class Health:
+    """Counts what happened, and says so occasionally.
+
+    A per-read line would bury the log and a silent scanner cannot be
+    diagnosed. This reports a summary only when something has actually
+    happened since the last one.
+    """
+
+    def __init__(self):
+        self.reset(None)
+        self.refits = 0
+        self.relocks = 0
+
+    def reset(self, now):
+        # None rather than time.time(): the window starts when the first read
+        # arrives, so the clock this is judged against is always the caller's.
+        self.since = now
+        self.reads = self.complete = self.no_pay = self.clipped = 0
+        self.ms = []
+
+    def add(self, out, parsed):
+        self.reads += 1
+        self.ms.append(out['ms']['total'])
+        if parsed.get('complete'):
+            self.complete += 1
+        if parsed.get('pay') is None:
+            self.no_pay += 1
+        if out.get('clipped'):
+            self.clipped += 1
+
+    def report(self, now, tracker, scanner):
+        if self.since is None:
+            self.since = now
+        if now - self.since < HEALTH_EVERY or not self.reads:
+            return
+        median = sorted(self.ms)[len(self.ms) // 2]
+        bits = ['%d reads, %d complete' % (self.reads, self.complete),
+                'median %.0fms' % median]
+        if self.no_pay:
+            bits.append('%d found no payout' % self.no_pay)
+        if self.clipped:
+            bits.append('%d had the payout at the crop edge' % self.clipped)
+        bits.append('crop %s' % _fmt_roi(scanner.roi))
+        if self.refits:
+            bits.append('crop moved %dx since start' % self.refits)
+        if tracker is not None:
+            status = tracker.status()
+            bits.append('corners %s, drift %.0fpx from saved'
+                        % ('lost' if status['lost'] else 'held', status['drift']))
+            if self.relocks:
+                bits.append('re-locked %dx since start' % self.relocks)
+        log('health over %.0fs: %s' % (now - self.since, '; '.join(bits)))
+        self.reset(now)
+
+
+def _fmt_roi(roi):
+    return 'whole screen' if not roi else '[%.2f %.2f %.2f %.2f]' % tuple(roi)
+
+
 def say(text):
     try:
         subprocess.Popen(['espeak-ng', '-s', '165', text],
@@ -278,6 +362,7 @@ def main():
         return
 
     cfg = load_config(args.config)
+    health = Health()
 
     # The crop can move itself back onto the card. When it does, keep it: the
     # next run should start from what this one learned, not from the box that
@@ -285,9 +370,12 @@ def main():
     roi_dirty = [False]
 
     def roi_moved(roi):
+        was = cfg.get('roi')
         cfg['roi'] = roi
         roi_dirty[0] = True
-        print('re-fitted the card crop to %s' % [round(v, 3) for v in roi])
+        health.refits += 1
+        log('crop moved: %s -> %s (reads were failing; the card was found there '
+            'by two whole-screen searches that agreed)' % (_fmt_roi(was), _fmt_roi(roi)))
 
     scanner = PL.Scanner(
         quad=np.array(cfg['quad'], dtype=np.float32),
@@ -313,8 +401,21 @@ def main():
         cv2.namedWindow('uber-scan', cv2.WND_PROP_FULLSCREEN)
         cv2.setWindowProperty('uber-scan', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
-    print('scanning — ctrl-c to stop')
+    # Everything that decides what gets read, in one place, once. A log without
+    # this is a log where every question starts with "what was it set to?".
+    import calibrate as CAL
+    quad = scanner.quad
+    log('scanning — ctrl-c to stop')
+    log('setup: capture %dx%d, card ~%dpx on the sensor (floor %d), crop %s, '
+        'warp %dpx, reader gets %dpx, lens %s%s'
+        % (cap.get('width', 0), cap.get('height', 0),
+           CAL.card_source_pixels(quad), CAL.MIN_CARD_PIXELS, _fmt_roi(scanner.roi),
+           scanner.read_height, scanner.ocr_height,
+           ('%.2f dioptres' % lens) if lens else 'fixed',
+           '' if tracker is not None else ', corner tracking OFF'))
+    log('setup: corners %s' % [[int(x), int(y)] for x, y in quad])
     accumulator = OfferAccumulator()
+    last_sample = 0.0
     spoke_for = None
     frames = 0
     last_snapshot = 0.0
@@ -345,9 +446,19 @@ def main():
                 # size. Blurred frames are skipped: a smeared edge is a worse
                 # guess than the corners already held.
                 if tracker is not None and scanner.settled:
+                    jumps_before, lost_before = tracker.jumps, tracker.status()['lost']
                     if tracker.update(luma, now):
                         scanner.quad = tracker.quad
                         cfg['quad'] = [[float(x), float(y)] for x, y in tracker.quad]
+                    if tracker.jumps > jumps_before:
+                        health.relocks += 1
+                        log('corners re-locked: the phone is somewhere the stored '
+                            'calibration did not expect, and has been for several '
+                            'checks running. Mount moved?')
+                    lost_now = tracker.status()['lost']
+                    if lost_now != lost_before:
+                        log('screen %s' % ('not visible — is the phone lit and in frame?'
+                                           if lost_now else 'visible again'))
                     if tracker.needs_save(now) or roi_dirty[0]:
                         save_config(args.config, cfg)
                         tracker.mark_saved(now)
@@ -405,7 +516,30 @@ def main():
                 resample_until = 0.0
             elif parsed.get('pay'):
                 resample_until = time.time() + RESAMPLE_WINDOW
+            elif scanner.recovering:
+                # A read that found nothing while the crop is under suspicion is
+                # worth repeating straight away. Waiting for the next offer to
+                # find out whether the crop is broken means several offers go by
+                # unread before it fixes itself.
+                resample_until = time.time() + RECOVER_WINDOW
             settled_on = signature
+            health.add(out, parsed)
+
+            # When a read comes back wrong, the one thing worth having is what
+            # the reader actually saw. Rate limited, because a screen with no
+            # offer on it fails constantly and correctly.
+            now = time.time()
+            if not parsed['complete'] and (now - last_sample) > SAMPLE_EVERY:
+                last_sample = now
+                why = ('the payout sat against the top edge of the crop'
+                       if out.get('clipped') else
+                       'no payout in the crop' if parsed['pay'] is None else
+                       'a payout but no journey')
+                log('read %d found nothing usable (%s, %d in a row). Reader saw: %r'
+                    % (frames, why, out.get('misses', 0),
+                       (out.get('text') or '').strip()[:220]))
+            health.report(now, tracker, scanner)
+
             if args.json:
                 emit(rate, parsed, out['ms'], out['locked'], tracker, scanner)
             else:
