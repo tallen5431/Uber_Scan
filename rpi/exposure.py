@@ -44,6 +44,12 @@ GAIN_STEP = 1.18
 GAIN_LIMITS = (1.0, 8.0)
 GAIN_TOLERANCE = 0.10       # within 10% of target is close enough to leave alone
 
+# Below this, the window holds no lit screen — it is the dark inside of a car.
+# A phone at its dimmest still reads several times this; an unlit mount reads
+# well under it. Used only as a backstop for when nothing is tracking the
+# screen, since a caller that knows the phone is missing says so outright.
+LIT_ENOUGH = 20.0
+
 
 def row_profile(gray):
     """Mean brightness of each row."""
@@ -179,14 +185,32 @@ class AutoGain:
         self.last = None
         self.moves = 0
 
-    def update(self, gray, now):
-        """Returns a new gain to apply, or None to leave it alone."""
+    def update(self, gray, now, has_screen=True):
+        """Returns a new gain to apply, or None to leave it alone.
+
+        `has_screen` is the caller saying whether there is actually a phone in
+        view. Brightening an empty mount is not a smaller mistake than getting
+        the brightness wrong — it is a worse one. The window handed here is
+        wherever the screen was last seen, so with the phone gone it is dark car
+        interior, and this dutifully wound the gain up chasing a card that was
+        not there: 1.5 to the 8.0 ceiling in about 78 seconds. The phone then
+        comes back to a card blown out at 8x, and it takes another **60 seconds**
+        of six-second steps to climb back down — a full minute of unreadable
+        offers, at the exact moment the driver picked the phone up to look at
+        one. Gain is held instead, so what it comes back to is the last value
+        that suited a real card.
+        """
         if self.last is not None and now - self.last < self.every:
             return None
         self.last = now
 
         bright = brightness(gray)
         if bright <= 0:
+            return None
+        # Nothing lit in view: hold. The tracker's answer is the one that counts,
+        # but it has none to give when tracking is off, and a brightness this low
+        # is a dark cabin however it is measured.
+        if not has_screen or bright < LIT_ENOUGH:
             return None
         # Clipping is worse than dimness: detail that is blown out is gone,
         # while a dim card still has its edges.

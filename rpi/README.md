@@ -816,6 +816,22 @@ following the phone. Only worth it if tracking is misbehaving — a genuinely
 fixed mount loses nothing by leaving it on, and a mount that moves loses offers
 without it.
 
+### Gain holds when the phone is away
+
+Gain adapts to a phone dimming itself, measured on the screen's own corner of
+the frame. Once the phone is out of the mount that corner is dark upholstery,
+which reads as a very dim card — so the gain used to wind up chasing something
+that was not there, reaching its 8x ceiling in about 78 seconds. The phone then
+came back to a card blown out at 8x and needed a further **minute** of
+six-second steps to climb down, which is exactly the minute the driver had
+picked the phone up to look at an offer.
+
+Gain is now held whenever the tracker has lost the screen, so what the phone
+comes back to is the last value that suited a real card. With `--no-track` there
+is no tracker to ask, so darkness speaks for itself: below `LIT_ENOUGH` nothing
+in view is a lit screen. A phone that genuinely has dimmed still gets brightened
+— it reads several times that threshold even at its dimmest.
+
 ## Keeping the offers
 
 Every offer the scanner is confident about gets one line in `rpi/journal.jsonl`,

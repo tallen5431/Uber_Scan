@@ -629,10 +629,21 @@ def main():
                 # its 8.0 ceiling while the card was over-exposed the whole
                 # time, which is also what turns a screen's flicker into the
                 # ripple that fails reads.
+                #
+                # And only while there is a screen there to expose for. The
+                # window is wherever the phone was last seen, so once the phone
+                # is out of the mount it is dark upholstery, and the gain used
+                # to wind up chasing a card that had gone — railing at 8x in
+                # about 78 seconds and then needing a further minute of
+                # six-second steps to come back down once the phone returned.
+                # That minute lands exactly when the driver has picked the phone
+                # up to look at an offer.
                 if auto_gain is not None and scanner.settled:
                     lit = PL.quad_window(luma, scanner.quad, track_scale) \
                         if scanner.quad is not None else luma
-                    new_gain = auto_gain.update(lit, now)
+                    have_screen = True if tracker is None \
+                        else not tracker.status()['lost']
+                    new_gain = auto_gain.update(lit, now, has_screen=have_screen)
                     if new_gain is not None:
                         cam.set_controls({'AnalogueGain': float(new_gain)})
                         cfg['analogueGain'] = round(new_gain, 3)

@@ -200,6 +200,49 @@ ok_('...near enough the target',
     abs(min(255, level * g.gain) - EX.TARGET_BRIGHT) / EX.TARGET_BRIGHT < 0.2)
 ok_('never below the floor', g.gain >= EX.GAIN_LIMITS[0])
 
+# --- an empty mount is not a dim card ---------------------------------------
+# The window handed to AutoGain is wherever the screen was last seen, so with
+# the phone out of the mount it is dark upholstery. Read as a very dim card, it
+# wound the gain to its 8.0 ceiling in about 78 seconds — and the phone then
+# came back to a card blown out at 8x, needing a further minute of six-second
+# steps to climb down. That minute lands exactly when the driver has picked the
+# phone up to look at an offer.
+def cabin(gain):
+    """What the screen's corner of the frame holds once the phone is gone."""
+    return np.clip(np.full((60, 40), 6.0 * gain, np.float32), 0, 255).astype(np.uint8)
+
+
+def lit_card(gain, dim=1.0):
+    return np.clip(np.full((60, 40), 150.0 * gain * dim, np.float32), 0, 255).astype(np.uint8)
+
+
+g = EX.AutoGain(gain=1.5, every=6.0)
+for i in range(1, 31):
+    g.update(cabin(g.gain), 100.0 + i * 6.0, has_screen=False)
+eq('gain is held while the phone is away', g.gain, 1.5)
+
+# The same, with nothing tracking the screen to say so — --no-track leaves the
+# caller no answer to give, so the darkness has to speak for itself.
+g = EX.AutoGain(gain=1.5, every=6.0)
+for i in range(1, 31):
+    g.update(cabin(g.gain), 100.0 + i * 6.0)
+eq('...and held on darkness alone when nothing is tracking', g.gain, 1.5)
+
+# None of which may cost it its actual job: a phone that really has dimmed.
+g = EX.AutoGain(gain=1.5, every=6.0)
+for i in range(1, 31):
+    g.update(lit_card(g.gain, dim=0.35), 100.0 + i * 6.0)
+ok_('a genuinely dimmed phone is still brightened', g.gain > 3.0)
+ok_('...to about the right level',
+    abs(EX.brightness(lit_card(g.gain, dim=0.35)) - EX.TARGET_BRIGHT)
+    / EX.TARGET_BRIGHT < 0.2)
+
+# ...and a card that comes back blown out is still brought down.
+g = EX.AutoGain(gain=8.0, every=6.0)
+for i in range(1, 31):
+    g.update(lit_card(g.gain), 100.0 + i * 6.0)
+ok_('a blown-out card still pulls gain down', g.gain < 2.0)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d exposure checks passed' % ok)
 sys.exit(1 if bad else 0)
