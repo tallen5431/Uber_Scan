@@ -237,7 +237,10 @@ def rate(parsed, settings=None):
         'costPerMile': cost_per_mile,
         'perHour': per_hour,
         'perMin': net / minutes,
-        'perMile': (parsed['pay'] / parsed['miles']
+        # Net, like perHour, so the two agree about what a dollar means. A
+        # display showing one gross and the other net invites exactly the
+        # arithmetic that does not add up.
+        'perMile': (net / parsed['miles']
                     if parsed['miles'] and not parsed['milesUncertain'] else None),
         'milesUncertain': parsed['milesUncertain'],
         'milesCorrected': parsed['milesCorrected'],

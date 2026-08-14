@@ -164,16 +164,88 @@ settle(tr, frame_with_phone(400, 140), T.AGREE + 1, t0=200.0)
 eq('and recovers when the screen comes back', tr.status()['misses'], 0)
 
 # --- a real knock is adopted outright, not eased ----------------------------
+# The phone taken out and put back is the same event as the mount being
+# knocked, and it is the one the driver actually notices. It used to need
+# twice the agreement of any other move, which measured out at 93% of a 4.2s
+# recovery - and nearer 10s on a Pi, where a read in flight stops the loop
+# honouring the recheck interval at all. The shape gate makes that caution
+# redundant, so it is the same bar as everything else.
 tr = T.QuadTracker(start)
 knocked = frame_with_phone(700, 220)
-moved = settle(tr, knocked, T.AGREE * 2 + 2)
+moved = settle(tr, knocked, T.AGREE + 2)
 ok_('a sustained move is taken', moved >= 1)
 ok_('and taken whole', T.distance(tr.quad, quad_at(700, 220)) < 5.0)
 eq('recorded as a re-lock', tr.jumps, 1)
-# Two checks is not sustained: the far position must not be adopted early.
 tr2 = T.QuadTracker(start)
-settle(tr2, knocked, T.AGREE * 2 - 1)
+settle(tr2, knocked, T.AGREE - 1)
 eq('but not before it has insisted', T.distance(tr2.quad, start), 0.0)
+
+# --- shape, which a diagonal cannot see -------------------------------------
+# span() is the mean of the diagonals, and a diagonal is one number about a
+# rectangle that needs two. This is the exact geometry a rig was photographed
+# wearing: its outline on the Accept button and the dark strip beneath it,
+# with a readable offer sitting above, untouched.
+phone_q = np.float32([[100, 100], [795, 100], [795, 1612], [100, 1612]])   # 695x1512
+strip_q = np.float32([[100, 100], [1440, 100], [1440, 330], [100, 330]])   # 1340x230
+ok_('a flat strip passes for the right size', T.same_size(strip_q, phone_q))
+ok_('...which is why size alone was never the guard', not T.same_shape(strip_q, phone_q))
+dimmer = np.float32([[100, 100], [795, 100], [795, 1400], [100, 1400]])    # 695x1300
+ok_('a dimmed screen is still the same shape', T.same_shape(dimmer, phone_q))
+angled = np.float32([[100, 100], [760, 100], [760, 1550], [100, 1550]])    # 660x1450
+ok_('and so is one seen from a slight angle', T.same_shape(angled, phone_q))
+
+# --- the gate is anchored, so it cannot be walked downhill ------------------
+# A relative test has no floor: every step is "the same size as the last", and
+# the corners walk off the phone one reasonable step at a time. Worse, once
+# they have, the real phone is *bigger* than the band allows the other way, so
+# the thing being looked for is the one thing that can no longer be accepted.
+tr = T.QuadTracker(start)
+here = quad_at(400, 140)
+ok_('the calibration is kept', T.distance(tr.calibrated, here) < 0.01)
+w, h = PHONE
+step = 0.0
+for _ in range(6):
+    w, h = int(w * 0.82), int(h * 0.82)
+    settle(tr, frame_with_phone(400 + (PHONE[0] - w) // 2, 140 + (PHONE[1] - h) // 2,
+                                (w, h)), 8, t0=step)
+    step += 40.0
+ok_('six shrinking candidates do not compound',
+    T.span(tr.quad) / T.span(here) > T.SIZE_BAND[0] - 0.01)
+# ...and the phone is still acceptable afterwards, which is the whole point.
+ok_('the real screen is still recognised', tr.looks_like_the_screen(here))
+settle(tr, frame_with_phone(400, 140), 12, t0=step + 40.0)
+ok_('so it comes back', T.distance(tr.quad, here) < 20.0)
+
+# --- the band has to answer the same question both ways round --------------
+# A band is asked "is this candidate right for that screen" and later "is that
+# screen right for this candidate". 1/0.78 is 1.2821, so a rounded 1.28 made
+# those two disagree in a sliver — and a rig held in the sliver watched the
+# phone sit plainly in frame for 1500 checks without moving.
+lo, hi = T.SIZE_BAND
+ok_('the band is self-inverse', abs(hi - 1.0 / lo) < 1e-9)
+# Just inside the bound rather than exactly on it: float32 corners land a few
+# parts in ten million either side of an exact ratio, so testing the knife
+# edge tests the rounding rather than the rule.
+centre = start.mean(axis=0)
+edge = (centre + (start - centre) * (lo * 1.001)).astype(np.float32)
+ok_('a quad at the bottom of the band is accepted', T.same_size(edge, start))
+ok_('...and can still accept the screen back', T.same_size(start, edge))
+# Stated directly: whatever ratio the band accepts, it must accept the inverse,
+# or there is a sliver where A can adopt B and B can never adopt A back.
+ok_('every accepted ratio has an accepted inverse',
+    all(lo <= 1.0 / r <= hi for r in (lo, 1.0, hi, 0.9, 1.1)))
+ok_('...which a rounded 1.28 would fail', not (lo <= 1.0 / lo <= 1.28))
+
+# --- and a stuck tracker is visible in the status --------------------------
+# drift is measured against the last *save*, which mark_saved re-baselines, so
+# corners far from the phone can report a contented zero. A rig did exactly
+# that: "corners held, drift 0px from saved", every health line, while sitting
+# 826px off.
+tr = T.QuadTracker(start)
+settle(tr, frame_with_phone(*MOVED), T.AGREE + 6)
+tr.mark_saved(now=999.0)
+eq('drift resets when the file catches up', round(tr.status()['drift']), 0)
+ok_('wander does not', tr.status()['wander'] > 20)
 
 # ...and never onto something that is not the same size of thing. A lit panel
 # elsewhere in the car can be every bit as steady as the phone.

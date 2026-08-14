@@ -120,7 +120,7 @@ One thing runs continuously to stop that, and one thing used to:
 
 | | |
 |---|---|
-| **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the same size as the screen already held and in roughly the right place; a small correction of something that passes both is followed on the first check, and a larger move has to say the same thing five checks running before the corners are eased 35% of the way toward it. A candidate that keeps insisting from somewhere else for twice as long, and is still the same size of thing, is treated as the mount having been knocked and adopted whole. `--no-track` turns it off. |
+| **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the right **size and shape for the calibrated screen** — not for wherever the corners have got to, which is the distinction that matters, see below. Past that gate, a small correction is followed on the first check; a bigger move has to say the same thing five checks running, and is then either eased 35% of the way toward (if it is nearby) or taken whole (if it is not, which is a phone put back or a mount knocked). `--no-track` turns it off. |
 | **Crop fitting** | There used to be a second mechanism here that moved the crop about looking for the card. It is gone — see below. |
 
 ### The crop stopped chasing the card
@@ -606,20 +606,61 @@ filter, draws on the small picture and reuses the reader's card — about a
 quarter of the work, so nearly three times the frame rate still costs less than
 the old rate did.
 
-**A green outline that is too small** used to be possible, and quietly. A
-candidate has to be the same size as the screen already held before it can be
-adopted — but that check was only on the dramatic path, the one that re-locks
-onto a moved mount and takes the new corners whole. Ordinary drift only eases
-35% of the way toward a candidate, which looked harmless enough not to need it.
+**A green outline that ends up too small** was possible, and it was worse than
+it looked. Three things had to be true at once, and all three were.
 
-Easing has no floor. A candidate a fifth too small sits comfortably inside the
-distance test, so the outline could be walked down onto the white card, or onto
-the lit half of a dimmed screen, a third at a time — every individual step
-reasonable, the end state a box around part of a phone, and a crop measured
-against it that is wrong in a way nothing downstream can detect. The size check
-now guards both paths. Having it there is also what makes the outline *quicker*:
-a small correction of something already the right size cannot be a hand or a
-reflection, so it is followed on the first check rather than after five.
+**The size test was relative.** It compared a candidate against the corners as
+they stood, not against the calibration — so every step was "the same size as
+the last one", every step looked reasonable, and the outline walked downhill.
+Six candidates each 80% of the one before left it at 63% of the calibrated
+screen. Adding the check to the drift path did not fix this: `ease_toward` has
+no floor either, it just converges over a few more checks, and a drift-only
+collapse emits no `corners re-locked` line at all — so a log's re-lock count is
+a lower bound on how far things moved.
+
+**Then the trap closed.** At 63%, the real phone is 1.57× the shrunken box —
+outside the band the *other* way. The one thing the tracker exists to find
+became the one thing it could no longer accept, with the detector handing it
+corners that were exactly right and both gates refusing them. Not "for a
+while": a rig sat like that for 1500 checks, twelve and a half minutes, with
+the phone plainly in frame, and moved zero pixels.
+
+**And the band was not self-inverse.** `1/0.78` is 1.2821 and the upper bound
+was a rounded 1.28, so there was a sliver where A could adopt B and B could
+never adopt A back. Measured: a quad at 0.780 of the screen recovers; one at
+0.778 never does.
+
+**The size test could not see shape at all.** `span` is the mean of the
+diagonals, and a diagonal is one number about a rectangle that needs two. A
+1340×230 strip — the Accept button and the dark beneath it — scores 0.82
+against a 695×1512 phone and sails through a function called `same_size`. That
+is the outline in the photograph, with a readable `$16.05` sitting above it.
+
+So there is one gate now, `looks_like_the_screen`, and it is **absolute** —
+measured against the calibration, which never moves, because the phone does not
+change size and the mount is fixed — and it checks **shape as well as scale**.
+The band is `(0.78, 1/0.78)` so it answers the same question both ways round.
+
+That gate is strong enough to pay for the recovery being quick. A phone put
+back used to need twice the agreement of any other move: 4.2s measured, of
+which 93% was the counting, and nearer 10s on a Pi because a read in flight
+stops the loop honouring the 0.4s recheck at all. It is the same bar as
+everything else now:
+
+| | before | after |
+|---|---|---|
+| phone removed, an Accept-shaped strip in frame | adopted it | refused, corners hold |
+| phone put back | 4.2s (≈10s on a Pi), or never | **instant** |
+| mount genuinely knocked 150px | 4.2s | **2.4s** |
+| a nudge of a few px | instant | instant |
+| a hand across the frame for 2.4s | ignored | ignored |
+
+One more thing was hiding this. `status()['drift']` is measured against the
+last *save*, and `mark_saved` re-baselines it — so a rig 826px off the phone
+reported `corners held, drift 0px from saved` on every health line, forever.
+The health line now leads with `wander`, the distance from the calibration this
+run started at, which is never re-baselined and can still see the problem after
+the file has caught up with it.
 
 **If the green outline covers the whole view, it has not found your phone.** The
 screen is located by splitting the frame into light and dark, which needs some
@@ -696,6 +737,36 @@ Worth knowing: the browser scanner (`ui.js`) defaults this to **0** while the
 Pi defaults it to **0.30**, so the two show different numbers for the same
 offer. Both now label themselves, but pick one and set it in both if you use
 both.
+
+### Picking a number
+
+$0.30 is a petrol midsize with some depreciation in it. Built up from parts,
+for rideshare miles (tyres wear faster than the brochure says):
+
+| | energy/fuel | tyres | service | depreciation | total |
+|---|---|---|---|---|---|
+| **Model 3**, home charging | $0.037 | $0.033 | $0.015 | — | **$0.09** |
+| **Model 3**, supercharging | $0.090 | $0.033 | $0.015 | — | **$0.14** |
+| **Model 3** + depreciation | $0.037 | $0.033 | $0.015 | $0.10 | **$0.19** |
+| petrol midsize, 30mpg @ $3.50 | $0.117 | $0.018 | $0.050 | — | **$0.18** |
+| petrol midsize + depreciation | $0.117 | $0.018 | $0.050 | $0.10 | **$0.28** |
+
+Energy assumes 250 Wh/mi including charging losses, home at $0.15/kWh and
+Supercharger at $0.36/kWh; tyres a $1,000 set over 30,000 miles.
+
+An EV's *running* cost really is about half a petrol car's, and most of what
+remains is tyres rather than fuel. **Depreciation is the judgement call**, not
+the arithmetic: it is the largest single term, it varies more than everything
+else combined, and whether it belongs in a per-offer decision is a question
+about your own finances rather than about the car. Leave it out and the number
+tells you what a trip costs you today; put it in and it tells you what it costs
+over the life of the car.
+
+```json
+"settings": { "target": 25, "band": 15, "costPerMile": 0.10, "pad": 0, "secondsPerItem": 0 }
+```
+
+`0` gives the gross rate, which is pay divided by time and nothing else.
 
 ## Run
 

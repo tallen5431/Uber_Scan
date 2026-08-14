@@ -66,6 +66,7 @@
         <div class="sub"><span id="vPay">--</span><small id="lPay">pay</small></div>
         <div class="sub"><span id="vMin">--</span><small id="lMin">minutes</small></div>
         <div class="sub"><span id="vMile">--</span><small id="lMile">miles</small></div>
+        <div class="sub"><span id="vPerMile">--</span><small id="lPerMile">$/mi</small></div>
       </div>
       <div id="warn" class="notice" hidden></div>
     </section>
@@ -101,7 +102,7 @@
 
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
-   'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit']
+   'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -178,6 +179,12 @@
     el.vPay.textContent = money(deducted ? r.pay - r.cost : r.pay, 2);
     el.vMin.textContent = r.minutes === null ? '--' : Math.round(r.minutes);
     el.vMile.textContent = r.miles === null ? '--' : Number(r.miles).toFixed(1);
+    // Secondary on purpose: $/hr is what decides an offer, because an hour is
+    // the thing actually being spent. $/mi is the number most drivers carry a
+    // rule of thumb for, so it is worth showing beside it.
+    el.vPerMile.textContent = (r.perMile === null || r.perMile === undefined)
+      ? '--' : money(r.perMile, 2);
+    el.lPerMile.textContent = deducted ? 'net $/mi' : '$/mi';
 
     var notes = [];
     if (r.milesUncertain) notes.push('Distance unreadable — pay shown before mileage cost.');

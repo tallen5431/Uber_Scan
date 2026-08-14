@@ -276,7 +276,10 @@
       costPerMile: costPerMile,
       perHour: perHour,
       perMin: net / minutes,
-      perMile: (parsed.miles && !parsed.milesUncertain) ? parsed.pay / parsed.miles : null,
+      // Net, like perHour, so the two agree about what a dollar means. A
+      // display showing one gross and the other net invites exactly the
+      // arithmetic that does not add up.
+      perMile: (parsed.miles && !parsed.milesUncertain) ? net / parsed.miles : null,
       milesUncertain: !!parsed.milesUncertain,
       milesCorrected: !!parsed.milesCorrected,
       state: perHour >= target ? 'go' : (perHour >= floor ? 'warn' : 'no')

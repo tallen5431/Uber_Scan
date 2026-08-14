@@ -86,6 +86,10 @@ class QuadTracker:
                  save_drift=SAVE_DRIFT, save_every=SAVE_EVERY):
         self.quad = np.asarray(quad, dtype=np.float32).reshape(4, 2)
         self.saved = self.quad.copy()
+        # The screen as calibrated. Never updated: it is the only fixed thing
+        # to judge a candidate against, and judging against anything that moves
+        # is what let the corners walk off the phone. See looks_like_the_screen.
+        self.calibrated = self.quad.copy()
         # One number or an (x, y) pair; the streams are not always the same
         # aspect ratio to the last pixel, and a couple of pixels of skew across
         # a 1700px screen is not worth being sloppy about.
@@ -129,29 +133,32 @@ class QuadTracker:
         self.agreeing = self.agreeing + 1 if consistent else 1
         self._candidate = candidate
 
-        if near(candidate, self.quad, MAX_JUMP) and same_size(candidate, self.quad):
-            # A correction this small, of a thing this size, cannot be anything
-            # but the screen: a hand or a reflection arrives somewhere else or
-            # at some other size, and both are already excluded by here. So a
-            # nudge is followed on the first check that sees it, and only the
-            # bigger moves have to argue their case. That is the difference
-            # between the outline catching up in half a second and in four.
+        # One gate, and it is measured against the calibration rather than
+        # against wherever the corners have got to. See looks_like_the_screen.
+        if not self.looks_like_the_screen(candidate):
+            return False
+
+        if near(candidate, self.quad, MAX_JUMP):
+            # A correction this small, of a thing this shape, cannot be
+            # anything but the screen. So a nudge is followed on the first
+            # check that sees it, and only bigger moves argue their case.
             if self.agreeing >= self.agree or near(candidate, self.quad, NUDGE):
                 self.quad = ease_toward(self.quad, candidate, self.ease)
                 self.moves += 1
                 return True
             return False
 
-        # Well away from the stored corners, and it has been saying so steadily:
-        # the mount was moved rather than misread. Take the new position whole,
-        # since easing toward it would spend seconds cropping the gap between
-        # two places the card is not.
+        # Well away from where the corners are, and it has been saying so
+        # steadily: the phone was moved, or taken away and put back. Take it
+        # whole, since easing across the gap spends seconds reading neither
+        # place.
         #
-        # It must still be the same *size* of thing. Without that check any
-        # steady bright rectangle — a lit dashboard panel, a window at dusk —
-        # can eventually claim the lock, and re-locking onto one is worse than
-        # never moving at all: the corners are then confidently wrong.
-        if self.agreeing >= self.agree * 2 and same_size(candidate, self.quad):
+        # This used to demand twice the agreement, which measured out at 93% of
+        # a 4.2s recovery — and more like 10s on a Pi, because a read in flight
+        # stops the loop from honouring the 0.4s recheck at all. That caution
+        # was buying protection the shape gate now provides outright, so it is
+        # the same bar as any other move.
+        if self.agreeing >= self.agree:
             self.quad = np.asarray(candidate, dtype=np.float32)
             self.agreeing = 0
             self.moves += 1
@@ -159,6 +166,32 @@ class QuadTracker:
             return True
         return False
 
+    def looks_like_the_screen(self, candidate):
+        """Is this the phone, judged against the screen that was calibrated?
+
+        Two things, and both matter for a reason found the hard way.
+
+        **Against the calibration, not against the current corners.** A
+        relative test has no floor. Every step is "the same size as the last
+        one", every step looks reasonable, and the corners walk downhill: six
+        candidates each 80% of the one before left a rig at 63% of its
+        calibrated screen. Then the trap closes — the real phone is now 1.57x
+        the shrunken box, outside the band the other way, so the one thing the
+        tracker exists to find is the one thing it can no longer accept. A rig
+        sat there permanently, with the detector handing it corners that were
+        exactly right and both gates refusing them. The phone does not change
+        size and the mount is fixed, so there is an absolute answer available
+        and no reason to use a relative one.
+
+        **Shape, not just scale.** `span` is the mean of the diagonals, and a
+        diagonal says nothing about proportions: a 1340x230 strip along the
+        bottom of the frame — the Accept button and the dark below it — scores
+        0.82 against a 695x1512 phone and sails through a test called
+        `same_size`. That is not a hypothetical; it is the outline a rig was
+        photographed wearing while a readable offer sat above it.
+        """
+        return (same_size(candidate, self.calibrated)
+                and same_shape(candidate, self.calibrated))
     def needs_save(self, now=None):
         """True when what is on disk is stale enough to be worth rewriting."""
         now = time.time() if now is None else now
@@ -176,8 +209,21 @@ class QuadTracker:
         return distance(self.quad, self.saved)
 
     def status(self):
+        """What the corners are doing, in terms a log line can use.
+
+        `drift` is against the last *saved* calibration, which mark_saved
+        re-baselines — so a tracker that has walked a long way and then written
+        itself to disk reports a contented zero. That is exactly what a rig did
+        while its corners sat 826px off the phone: "corners held, drift 0px
+        from saved", every health line, indefinitely. `wander` is against the
+        calibration this run started from and is never re-baselined, so it is
+        the number that can still see a problem after the file has caught up
+        with it.
+        """
         return {'moves': self.moves, 'jumps': self.jumps, 'misses': self.misses,
-                'drift': round(self.drift, 1), 'lost': self.misses >= 3}
+                'drift': round(self.drift, 1),
+                'wander': round(distance(self.quad, self.calibrated), 1),
+                'lost': self.misses >= 3}
 
 
 # --- geometry ---------------------------------------------------------------
@@ -208,12 +254,45 @@ def span(quad):
 # with every individual step looking reasonable. That is a green box that ends
 # up too small for no visible reason, and a crop measured against it that is
 # wrong in a way nothing downstream can detect.
-SIZE_BAND = (0.78, 1.28)
+SIZE_BAND = (0.78, 1.0 / 0.78)
 
 
 def same_size(a, b):
     ratio = span(a) / max(span(b), 1.0)
     return SIZE_BAND[0] <= ratio <= SIZE_BAND[1]
+
+
+# How far the proportions may differ and still be the same screen. Generous,
+# because perspective genuinely skews a quad and a dimmed map can shorten the
+# lit part of a screen; nowhere near generous enough to admit a strip.
+ASPECT_BAND = (0.70, 1.43)
+
+
+def sides(quad):
+    """Mean width and mean height of the quad, in its own units."""
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    across = (np.linalg.norm(q[1] - q[0]) + np.linalg.norm(q[2] - q[3])) / 2.0
+    down = (np.linalg.norm(q[3] - q[0]) + np.linalg.norm(q[2] - q[1])) / 2.0
+    return float(across), float(down)
+
+
+def aspect(quad):
+    across, down = sides(quad)
+    return down / max(across, 1.0)
+
+
+def same_shape(a, b):
+    """Same proportions, which `same_size` cannot see.
+
+    span() is the mean of the diagonals, and a diagonal is one number about a
+    rectangle that needs two. A 1340x230 strip and a 695x1512 phone have
+    diagonals within 18% of each other, so a test on span alone calls a flat
+    bar the same thing as a tall screen. A rig was photographed with its
+    outline on exactly that bar — the Accept button and the dark beneath it —
+    while the offer it was supposed to be reading sat above it, untouched.
+    """
+    ratio = aspect(a) / max(aspect(b), 0.01)
+    return ASPECT_BAND[0] <= ratio <= ASPECT_BAND[1]
 
 
 def near(a, b, tolerance):

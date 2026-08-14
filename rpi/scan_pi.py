@@ -276,8 +276,12 @@ class Health:
         bits.append('crop %s' % _fmt_roi(scanner.crop_box))
         if tracker is not None:
             status = tracker.status()
-            bits.append('corners %s, drift %.0fpx from saved'
-                        % ('lost' if status['lost'] else 'held', status['drift']))
+            # Both numbers, because they answer different questions and the
+            # reassuring one can be reassuring while the corners are nowhere
+            # near the phone: drift is against the last save, which moves.
+            bits.append('corners %s, %.0fpx from calibration (%.0fpx since last save)'
+                        % ('lost' if status['lost'] else 'held',
+                           status.get('wander', status['drift']), status['drift']))
             if self.relocks:
                 bits.append('re-locked %dx since start' % self.relocks)
         log('health over %.0fs: %s' % (now - self.since, '; '.join(bits)))

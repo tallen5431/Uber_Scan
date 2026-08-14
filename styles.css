@@ -74,7 +74,9 @@ html, body {
 }
 .rate-unit { font-size: clamp(18px, 5vw, 26px); font-weight: 700; color: var(--muted); }
 
-.submetrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+/* Four across on a phone held in one hand. auto-fit rather than a fixed count
+   so a narrow screen wraps to two rows instead of squeezing the digits. */
+.submetrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 6px; }
 .sub {
   display: flex;
   flex-direction: column;
