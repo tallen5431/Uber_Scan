@@ -27,7 +27,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import camera as CAM
 import pipeline as PL
-from calibrate import (DEFAULT_ROI, GOOD_CARD_PIXELS, MIN_CARD_PIXELS,
+from calibrate import (GOOD_CARD_PIXELS, MIN_CARD_PIXELS, SHARP_ROI,
                        card_source_pixels)
 
 GREEN = (100, 201, 23)
@@ -40,7 +40,9 @@ PAGE = b"""<!doctype html><meta name=viewport content="width=device-width,initia
 img{width:100%;height:auto;display:block}p{padding:10px 14px;font-size:14px;line-height:1.5;margin:0}
 b{color:#17c964}</style>
 <img src="/stream.mjpg"><p>Move the camera until the card height reads
-<b>green</b>, then run <code>calibrate.py</code>. Fill the frame with the phone.</p>
+<b>green</b>, then run <code>calibrate.py</code>. Get as close as you can while the
+whole offer card still shows. The top of the screen running off frame is fine,
+and is what makes the text big enough to read.</p>
 """
 
 
@@ -151,36 +153,36 @@ def annotate(frame, scale_to_capture, lens_position=None):
         cv2.putText(out, second, (16, 86), cv2.FONT_HERSHEY_SIMPLEX, 0.7, RED, 2)
         return out, None
 
-    card_px = int(round(card_source_pixels(quad, DEFAULT_ROI) * scale_to_capture))
+    card_px = int(round(card_source_pixels(quad, frame.shape) * scale_to_capture))
     spill = PL.touches_edge(quad, frame.shape)
-    ok = card_px >= MIN_CARD_PIXELS and not spill
-    colour = (RED if spill else
-              GREEN if card_px >= GOOD_CARD_PIXELS else
-              (AMBER if card_px >= MIN_CARD_PIXELS else RED))
+    ok = card_px >= MIN_CARD_PIXELS
+    colour = (GREEN if card_px >= GOOD_CARD_PIXELS
+              else (AMBER if ok else RED))
 
     # Measure focus on the card itself, not the whole scene; a sharp dashboard
     # around a soft phone would read as perfectly in focus.
-    card = PL.crop(PL.warp(frame, quad, 600), DEFAULT_ROI)
+    card = PL.crop(PL.warp(frame, quad, 600), SHARP_ROI)
     sharp = sharpness(card)
     sharp_ok = sharp >= SHARP_FLOOR
     sharp_colour = GREEN if sharp_ok else (AMBER if sharp >= SHARP_FLOOR * 0.6 else RED)
 
     cv2.polylines(out, [quad.astype(np.int32)], True, colour, 3)
     # The card sits in the lower part of the screen; show what will be read.
-    top = quad[0] + (quad[3] - quad[0]) * DEFAULT_ROI[1]
-    top_r = quad[1] + (quad[2] - quad[1]) * DEFAULT_ROI[1]
+    top = quad[0] + (quad[3] - quad[0]) * SHARP_ROI[1]
+    top_r = quad[1] + (quad[2] - quad[1]) * SHARP_ROI[1]
     cv2.line(out, tuple(top.astype(int)), tuple(top_r.astype(int)), colour, 2)
 
     cv2.rectangle(out, (0, 0), (out.shape[1], 132), (20, 27, 36), -1)
     cv2.putText(out, 'card %d px' % card_px, (14, 40),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.2, colour, 3)
-    if spill:
-        caption = '%s off frame — MOVE BACK' % '+'.join(spill)
-    elif card_px < MIN_CARD_PIXELS:
+    if card_px < MIN_CARD_PIXELS:
         caption = 'need %d+' % MIN_CARD_PIXELS
     else:
         caption = ('good' if card_px >= GOOD_CARD_PIXELS
                    else 'workable, %d+ is roomier' % GOOD_CARD_PIXELS)
+        # Not a fault: clipping the map away is what buys the resolution.
+        if spill:
+            caption += '  (%s off frame — fine if the whole card shows)' % '+'.join(spill)
     cv2.putText(out, caption, (14, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.65, colour, 2)
 
     focus_text = 'focus %.0f' % sharp

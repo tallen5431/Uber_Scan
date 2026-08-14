@@ -133,15 +133,24 @@ EDGE_MARGIN = 0.012
 def touches_edge(quad, shape, margin=EDGE_MARGIN):
     """Which frame edges the screen runs into. Empty when it fits.
 
-    This matters more than it looks. A phone too close to the camera does not
-    fail loudly — the detector finds the *visible* part of the screen, which is
-    a perfectly good rectangle, and everything downstream is then measured
-    against a screen that is not the whole screen. The card crop lands somewhere
-    arbitrary, the card-height reading is inflated, the warp is the wrong shape,
-    and the only symptom is reads that quietly do not find the payout.
+    Worth knowing, but *not* worth refusing over, and the difference matters.
 
-    A real rig logged corners at y=0 and y=1746 of a 1748-row frame and spent an
-    hour re-fitting its crop into worse and worse places because of it.
+    A screen running off the frame used to be treated as a fault, on the
+    grounds that everything downstream was measured against a screen that was
+    not the whole screen — the crop landing somewhere arbitrary, the card
+    height inflated, the warp the wrong shape. All true, and all of it was
+    really one fault: the crop was a *fraction of the detected quad*, so it
+    only meant anything if the quad was the whole screen.
+
+    Backing off far enough to fix that is not free. A phone is about 2.15 times
+    taller than it is wide and the frame is 4:3, so fitting all of it makes the
+    width the constraint and drops the card to around 400px — the floor, from
+    a mount that used to have 870. Clipping the map away is precisely what buys
+    the resolution that makes the text readable.
+
+    So the crop is anchored to the card by content instead (see fit_roi and
+    tighten_roi), which does not care how much of the screen is visible, and
+    this is reported as a note rather than enforced as a rule.
     """
     q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
     h, w = shape[:2]
@@ -404,6 +413,52 @@ FIT_MIN_HEIGHT = 0.28
 TOP_EDGE = 0.02
 
 
+# A crop this much taller than the card it holds is worth tightening. Loose
+# enough that ordinary variation between cards does not cause a move.
+TIGHTEN_SLACK = 1.30
+
+
+def tighten_roi(lines, image_height, current):
+    """Shrink a working crop onto the card inside it. Returns a box or None.
+
+    The mirror of fit_roi, and the half that makes a clipped screen workable.
+    fit_roi answers "reads are failing, where is the card?" by looking at the
+    whole screen; this answers "reads are working, but how much of this crop is
+    actually card?" from the lines a successful read already produced — which
+    costs nothing, because the reader hands back its layout anyway.
+
+    Together they mean the crop never has to be guessed from the geometry of
+    the screen. It can start as the whole of whatever is visible, which cannot
+    miss the card however the phone is framed, and walk in to fit.
+
+    `lines` are positioned within the crop; the box returned is in screen
+    fractions, like `current`.
+    """
+    if not lines or not image_height or not current:
+        return None
+
+    money = [l for l in lines if OP.find_pay(OP.normalize(l['text'])) is not None]
+    if not money:
+        return None
+
+    top = min(l['top'] for l in money) / float(image_height)
+    bottom = max(l['bottom'] for l in lines if l['top'] >= min(m['top'] for m in money))
+    bottom = bottom / float(image_height)
+
+    # Padding is expressed against the screen, so convert it into this crop's
+    # own scale before applying it, or a small crop gets a huge margin.
+    scale = current[3] or 1.0
+    top = max(0.0, top - FIT_PAD_ABOVE / scale)
+    bottom = min(1.0, bottom + FIT_PAD_BELOW / scale)
+    if bottom - top >= 1.0:
+        return None                      # already tight
+
+    fitted = [current[0], current[1] + top * scale, current[2], (bottom - top) * scale]
+    if fitted[3] < FIT_MIN_HEIGHT or current[3] < fitted[3] * TIGHTEN_SLACK:
+        return None                      # not enough slack to be worth moving
+    return fitted
+
+
 def money_is_clipped(lines, image_height):
     """True when the payout sits flush against the top of the crop.
 
@@ -629,7 +684,14 @@ class Scanner:
             # The crop is working. Whatever it failed to read a moment ago was
             # the screen's fault, not the crop's.
             self._misses = 0
-            self._proposal = None
+            # ...and a working crop is the one chance to make it a *tight* one,
+            # from lines this read already produced. A crop that starts as the
+            # whole visible screen cannot miss the card however the phone is
+            # framed; this is what stops it staying that expensive.
+            if parsed['complete'] and self.roi:
+                refit = self._adopt(tighten_roi(lines, prepped.shape[0], self.roi), now)
+            else:
+                self._proposal = None
         elif self.roi:
             self._misses += 1
         if suspect and self.roi and self._misses >= MISSES_BEFORE_RESCUE \
@@ -672,6 +734,32 @@ class Scanner:
             },
         }
 
+    def _adopt(self, fitted, now):
+        """Move the crop to `fitted`, but only on agreement. Returns it or None.
+
+        Shared by both directions — the rescue that widens onto a lost card and
+        the tightening that trims a working crop — because the discipline is
+        the same either way. A single fit is one OCR pass on a hard image and is
+        quite capable of being wrong; two that agree is evidence, and having
+        moved, it stays put for a while so the crop cannot oscillate.
+        """
+        if not fitted or _same_roi(fitted, self.roi):
+            self._proposal = None
+            return None
+        if not (self._proposal and _same_roi(fitted, self._proposal, REFIT_AGREE)):
+            self._proposal = fitted
+            return None
+        if (now - self._last_refit) < REFIT_EVERY:
+            return None
+
+        self._proposal = None
+        self._last_refit = now
+        self._misses = 0
+        self.roi = fitted
+        if self.on_roi:
+            self.on_roi(fitted)
+        return fitted
+
     def _rescue(self, screen, now):
         """Find the card on the whole screen and move the crop back onto it.
 
@@ -702,25 +790,10 @@ class Scanner:
         if not parsed['complete']:
             return found, None
 
-        fitted = fit_roi(lines, wide.shape[0], self.roi)
-        if not fitted or _same_roi(fitted, self.roi):
-            return found, None      # the card is where we thought
-
-        # One search is a single OCR pass on the hardest image this thing ever
-        # reads. Two that agree is evidence.
-        if not (self._proposal and _same_roi(fitted, self._proposal, REFIT_AGREE)):
-            self._proposal = fitted
-            return found, None
-        if (now - self._last_refit) < REFIT_EVERY:
-            return found, None
-
-        self._proposal = None
-        self._last_refit = now
-        self._misses = 0
-        self.roi = fitted
+        fitted = self._adopt(fit_roi(lines, wide.shape[0], self.roi), now)
+        if not fitted:
+            return found, None      # the card is where we thought, or not agreed yet
         self.rescues += 1
-        if self.on_roi:
-            self.on_roi(fitted)
 
         again = ocr(preprocess(fit_for_ocr(crop(screen, fitted), self.ocr_height)), self.config)
         reparsed = OP.parse(again)

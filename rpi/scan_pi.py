@@ -427,11 +427,16 @@ def main():
     # this is a log where every question starts with "what was it set to?".
     import calibrate as CAL
     quad = scanner.quad
+    # The frame shape matters to the measurement, not just to the spill note
+    # below: a screen taller than the frame has to be measured across rather
+    # than down, or this reports the frame's height back at you.
+    frame_shape = (cap.get('height', 1748), cap.get('width', 2328))
     log('scanning — ctrl-c to stop')
     log('setup: capture %dx%d, card ~%dpx on the sensor (floor %d), crop %s, '
         'warp %dpx, reader gets %dpx, lens %s%s'
         % (cap.get('width', 0), cap.get('height', 0),
-           CAL.card_source_pixels(quad), CAL.MIN_CARD_PIXELS, _fmt_roi(scanner.roi),
+           CAL.card_source_pixels(quad, frame_shape), CAL.MIN_CARD_PIXELS,
+           _fmt_roi(scanner.roi),
            scanner.read_height, scanner.ocr_height,
            ('%.2f dioptres' % lens) if lens else 'fixed',
            '' if tracker is not None else ', corner tracking OFF'))
@@ -441,12 +446,11 @@ def main():
            if exposure_us in EX.FLICKER_SAFE else 'not a standard flicker period',
            gain, 'tracking the screen' if auto_gain else 'fixed'))
     log('setup: corners %s' % [[int(x), int(y)] for x, y in quad])
-    spill = PL.touches_edge(quad, (cap.get('height', 1748), cap.get('width', 2328)))
+    spill = PL.touches_edge(quad, frame_shape)
     if spill:
-        log('setup: WARNING — the calibrated screen runs off the %s of the frame, so '
-            'only part of the phone is being measured. Reads will find the card and '
-            'miss the payout, and the crop will wander looking for it. Move the '
-            'camera back and re-run with --recalibrate.' % ' and '.join(spill))
+        log('setup: the screen runs off the %s of the frame. That is expected on a '
+            'close mount and is not a problem — the crop is fitted to the card by '
+            'content, not to the screen by fraction.' % ' and '.join(spill))
     accumulator = OfferAccumulator()
     last_sample = 0.0
     previous_card = None

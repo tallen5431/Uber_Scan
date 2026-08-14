@@ -84,6 +84,47 @@ eq('no height, no fit', PL.fit_roi(screen, 0), None)
 ok_('payout alone near the foot is rejected',
     PL.fit_roi([line('W 63rd St', 120), line('$7.09', 900)], 1000) is None)
 
+# --- tighten_roi: the same job from the other side -------------------------
+# fit_roi answers "reads are failing, where is the card?". This answers "reads
+# are working, how much of this crop is actually card?" — which is what lets
+# the shipped crop start as the whole visible screen and walk itself in, so no
+# guess has to be made about how the phone is framed.
+whole = [0.0, 0.0, 1.0, 1.0]
+# A crop of the whole screen, with the card in the lower half of it.
+inside_crop = [line('W 63rd St', 120), line('Shop & Deliver', 520), line('$7.09', 570, 70),
+               line('6 items (6 units)', 680), line('34 min (3.6 mi) total', 730),
+               line('Dollar General', 790)]
+tighter = PL.tighten_roi(inside_crop, 1000, whole)
+ok_('a roomy crop is worth tightening', tighter is not None)
+ok_('...and gets smaller, not bigger', tighter[3] < whole[3])
+ok_('the payout is still inside it', tighter[1] < 570 / 1000.0)
+ok_('so is the last line of the card', tighter[1] + tighter[3] > 820 / 1000.0)
+eq('the horizontal extent is left alone', (tighter[0], tighter[2]), (0.0, 1.0))
+
+# It must converge: tightening the result of a tighten has to stop, or the crop
+# walks itself down to nothing one read at a time.
+ok_('a crop already on the card stays put',
+    PL.tighten_roi([line('$7.09', 60, 70), line('34 min (3.6 mi) total', 300),
+                    line('Accept', 700)], 1000, [0.0, 0.30, 1.0, 0.40]) is None)
+
+# Same refusals as fit_roi, for the same reason: no evidence, no move.
+eq('no lines, no tighten', PL.tighten_roi([], 1000, whole), None)
+eq('no money, no tighten',
+   PL.tighten_roi([line('W 63rd St', 120), line('Accept', 800)], 1000, whole), None)
+eq('no crop to tighten', PL.tighten_roi(inside_crop, 1000, None), None)
+eq('no height, no tighten', PL.tighten_roi(inside_crop, 0, whole), None)
+
+# The lines are positioned in the crop, but the box comes back in screen
+# fractions — get that conversion wrong and the crop leaps somewhere arbitrary.
+part = [0.0, 0.20, 1.0, 0.80]
+mapped = PL.tighten_roi(inside_crop, 1000, part)
+ok_('a fit inside a partial crop stays inside it', mapped is not None
+    and mapped[1] >= part[1] and mapped[1] + mapped[3] <= part[1] + part[3] + 0.001)
+# Padding is a fraction of the screen, so it has to survive that conversion at
+# the same size — otherwise a small crop gets a huge margin and grows.
+ok_('...with the same headroom above the payout, in screen terms',
+    abs((0.570 * part[3] + part[1]) - mapped[1] - PL.FIT_PAD_ABOVE) < 0.005)
+
 # --- money_is_clipped: the guard that stops a phantom payout ---------------
 eq('a payout with room above it is fine', PL.money_is_clipped(screen, 1000), False)
 ok_('one flush against the top edge is not',
@@ -149,13 +190,13 @@ eq('the warp cannot run away', sc.read_height, PL.MAX_READ_HEIGHT)
 eq('and the search pass is bounded too', sc._search_height(np.zeros((5000, 900), np.uint8)),
    PL.RESCUE_MAX_HEIGHT)
 
-# --- a screen running off the frame is not a big screen --------------------
-# The failure this catches, verbatim from a rig: corners [[548,0],[1844,0],
-# [1792,1746],[592,1746]] in a 2328x1748 frame. Top and bottom both off the
-# edge, so only the middle of the phone was ever being measured.
+# --- knowing the screen runs off the frame ---------------------------------
+# Reported, not refused. Backing off far enough to fit a whole phone into a 4:3
+# frame puts the card at the floor, and the resolution is the thing that makes
+# any of this work — so this says which edges, and the callers decide.
 SHAPE = (1748, 2328)
 spilling = [[548, 0], [1844, 0], [1792, 1746], [592, 1746]]
-eq('the real failure is caught', PL.touches_edge(spilling, SHAPE), ['top', 'bottom'])
+eq('a screen off two edges is spotted', PL.touches_edge(spilling, SHAPE), ['top', 'bottom'])
 
 inside = [[548, 200], [1844, 200], [1792, 1500], [592, 1500]]
 eq('a screen with room around it is fine', PL.touches_edge(inside, SHAPE), [])
@@ -169,6 +210,61 @@ eq('cornered', PL.touches_edge([[0, 0], [2327, 0], [2327, 1747], [0, 1747]], SHA
 # almost certainly continuing past it.
 ok_('a hair off the edge counts',
     'top' in PL.touches_edge([[548, 8], [1844, 8], [1792, 1500], [592, 1500]], SHAPE))
+
+# --- and measuring a card on a screen that does ----------------------------
+# The number the whole mount is aimed by. Measured down the screen it saturates
+# the moment the screen is taller than the frame — past that, moving the camera
+# closer cannot make it go up, so it would sit under the "good" mark forever on
+# exactly the mount worth having.
+import calibrate as CAL                                        # noqa: E402
+
+
+def screen_quad(width, height, x=600, y=200):
+    return np.array([[x, y], [x + width, y], [x + width, y + height], [x, y + height]],
+                    dtype=np.float32)
+
+
+REAL_ASPECT = 2.15                        # what an actual phone is, 19.5:9
+
+
+def phone_at(width, shape=SHAPE, aspect=REAL_ASPECT):
+    """The quad a phone of this width leaves, clipped by the frame if it must.
+
+    Built rather than declared, because a clipped screen cannot be any shape
+    you like: the visible part can never be more elongated than the whole
+    phone, so the obvious fixture (a fixed height, a shrinking width) is a
+    phone that does not exist.
+    """
+    frame_h, frame_w = shape[:2]
+    height = width * aspect
+    top = max(0.0, (frame_h - height) / 2.0)
+    bottom = min(float(frame_h), top + height)
+    x = (frame_w - width) / 2.0
+    return np.array([[x, top], [x + width, top], [x + width, bottom], [x, bottom]],
+                    dtype=np.float32), height
+
+
+whole_screen, _ = phone_at(700)
+eq('an unclipped screen is measured down it',
+   CAL.card_source_pixels(whole_screen, SHAPE), int(round(700 * REAL_ASPECT * PL.CARD_SHARE)))
+eq('...and with no frame to check, always',
+   CAL.card_source_pixels(whole_screen), int(round(700 * REAL_ASPECT * PL.CARD_SHARE)))
+eq('an unclipped screen is not guessed at', PL.touches_edge(whole_screen, SHAPE), [])
+
+# The same phone, moved closer until it runs off the top and bottom. Its
+# visible height is the frame's now and says nothing about the phone, but its
+# width still does.
+mounts = [(w, phone_at(w)) for w in (900, 1050, 1200, 1400)]
+ok_('these are the mounts being tested', all(PL.touches_edge(q, SHAPE) == ['top', 'bottom']
+                                             for _, (q, _) in mounts))
+read = [CAL.card_source_pixels(q, SHAPE) for _, (q, _) in mounts]
+ok_('a clipped screen keeps growing as it gets closer',
+    all(a < b for a, b in zip(read, read[1:])))
+eq('...measured across it', read[0], int(round(900 * CAL.PHONE_ASPECT * PL.CARD_SHARE)))
+
+# Erring low is the point: a floor that flatters the mount is not a floor.
+ok_('and never over-reports the real card',
+    all(px <= int(round(h * PL.CARD_SHARE)) + 1 for px, (_, (_, h)) in zip(read, mounts)))
 
 # --- the reader's picture is bounded ---------------------------------------
 # Height alone does not bound pixels: a wide quad warped to 1800 came out

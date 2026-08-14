@@ -122,6 +122,7 @@ Two things run continuously to stop that:
 |---|---|
 | **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the right size, in roughly the right place, and say the same thing five checks running before the corners are eased 35% of the way toward it — so drift is followed within about two seconds and a hand crossing the frame is not followed at all. A candidate that keeps insisting from somewhere else for twice as long, *and is the same size of thing*, is treated as the mount having been knocked and adopted whole. |
 | **Crop recovery** (`fit_roi`) | If reads stop finding a payout — or find one hard against the top edge of the crop, which means the crop is cutting the card — the whole screen is read once and the crop is re-fitted to where the payout actually is. The new box is written back to `config.json`, so the next run starts from what this one learned. |
+| **Crop tightening** (`tighten_roi`) | The other direction, and free: a read that worked already handed back where every line landed, so a crop carrying more than about 30% slack around its card is trimmed onto it. This is what lets the crop ship as "everything visible" and still end up fast, and it is why no assumption about how the phone is framed is needed anywhere. |
 
 Both are reported in the live view, and `--no-track` turns the first off.
 
@@ -266,25 +267,69 @@ Card height 900 with the card crop and a 900px read size is the recommended
 starting point: near the floor for speed, with real margin before reading
 collapses.
 
-## The phone has to fit in the frame
+## The phone does not have to fit in the frame
+
+It used to have to, and that was the wrong call. The reasoning was sound and the
+conclusion was backwards, so it is worth writing down which part was which.
 
 Too close is a real failure mode, and a silent one. The detector finds the
 *visible* part of the screen, which is a perfectly good rectangle, so nothing
 complains — but every measurement after it is taken against a screen that is not
-the whole screen. The crop lands somewhere arbitrary, the card-height reading is
-inflated, the warp comes out the wrong shape and twice the pixels, and the only
-symptom is reads that find the card and quietly miss the payout.
+the whole screen. A real rig logged corners at `y=0` and `y=1746` of a 1748-row
+frame, spent an hour walking its crop into worse and worse places looking for
+the payout, and took 1.4–2.0s a read doing it.
 
-A real rig logged corners at `y=0` and `y=1746` of a 1748-row frame, spent an
-hour walking its crop into worse and worse places looking for the payout, and
-took 1.4–2.0s a read doing it. The aiming gate had a floor and no ceiling, so a
-phone overflowing the frame passed for a big one.
+All of that was true, and all of it was one fault: **the crop was a fraction of
+the detected quad**, so it only meant anything if the quad was the whole screen.
+Refusing to run unless the whole screen was visible fixed the symptom by
+outlawing the mount.
 
-Aiming now refuses a screen touching any frame edge and says which one, the
-overlay goes red with `top+bottom off frame — MOVE BACK`, calibration will not
-write a config from it, and the scanner warns at startup if the stored
-calibration has the problem. Fill the frame with the phone, but leave a dark
-border all the way round it.
+And that mount is the one you want. A phone is about 2.15 times taller than it
+is wide, the frame is 4:3, so fitting all of it makes the *width* the constraint
+and leaves the screen occupying under half the frame height — around 400px of
+card, the floor, from a rig that had 870 before it backed off. Clipping the map
+away is precisely what buys the resolution that makes the text readable.
+
+So the crop is anchored to the card by content instead. It ships as the whole
+visible view — which cannot miss the card however the phone is framed — and the
+first successful read walks it in to fit (`tighten_roi`, the mirror of
+`fit_roi`). Neither cares how much of the screen is showing. The cost is that
+the first read of a fresh calibration is a slow one:
+
+```
+read 0  pay=7.09 min=34.0 mi=3.6  crop=[0.00 0.00 1.00 1.00]   442ms
+read 1  pay=7.09 min=34.0 mi=3.6  crop=[0.00 0.15 1.00 0.46]   181ms
+```
+
+Spill is now reported and not refused — aiming says *"the top of the screen is
+out of frame, which is fine as long as the whole offer card is visible"*, and
+that last clause is the whole rule. Point it at the card, get as close as you
+like, and let the map go.
+
+### The number you aim by
+
+One thing did not survive the change unaltered. `card_source_pixels` measured
+the card by taking the detected screen's height and multiplying by the card's
+share of it — which stops meaning anything the moment the screen is taller than
+the frame, because the height being measured is then the *frame's*. It
+saturates: past that point, moving closer cannot make it go up.
+
+Which would have been a fine bug to ship, since the reading sits at ~439px right
+under the 450 "good" mark, and the fix for a number that will not go green is to
+move closer, and moving closer does nothing. The advice above would have walked
+you into a wall.
+
+A clipped screen is measured *across* instead, where nothing is missing, using
+the shortest aspect ratio phones come in (18:9 — real ones are 19.5:9 or 20:9,
+so this errs low, which is the right way to err for a floor):
+
+| screen width in frame | spill | reported | real card | verdict |
+|---|---|---|---|---|
+| 340px | — | 368 | 368 | too small |
+| 400px | — | 433 | 433 | workable |
+| 480px | top | 479 | 520 | good |
+| 660px | top | 659 | 715 | good |
+| 900px | top | 899 | 975 | good |
 
 **The camera view on `/live.html` is live while aiming**, so the page telling
 you to move the mount also shows you the mount. That matters more since the
@@ -479,8 +524,9 @@ explains a scan area that looks far too narrow. It is now rejected, and the
 overlay says `frame is all screen — back off so a dark border surrounds the
 phone`.
 
-Fill most of the frame with the phone, but leave a margin of something darker
-around it.
+Get as close as you like, but leave a margin of something darker down at least
+two opposite sides. On a good mount that is the left and right — the phone runs
+off the top and bottom, and those edges are the map you wanted rid of.
 
 The view refreshes about twice a second while the page is open and drops to
 every three seconds when nothing is watching, because a live picture is only

@@ -22,19 +22,27 @@ import pipeline as PL
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
-# Uber draws the offer card against the bottom of the screen. Cropping to it
-# saves tesseract a good share of the pixels, for no loss of accuracy.
+# Start by reading everything the camera can see, and let the crop find the
+# card itself from the first read that works (pipeline.tighten_roi).
 #
-# The margins are deliberately loose. A tight crop looks efficient and is not:
-# the card's top edge moves with the phone, with the service badge above the
-# payout, and with the card type, and a crop that clips the payout does not
-# degrade — it reports no offer, or worse, reads the rating underneath as one.
-# Measured against cards drawn anywhere from 0.34 to 0.58 down the screen: the
-# old [0.02, 0.48, 0.96, 0.50] lost the payout entirely on 13 of 42 reads, this
-# on none of them, and where nothing was being clipped the two scored the same
-# (57/72) for about 7ms. Going wider still starts costing accuracy to the map
-# text it drags in, so this is the far edge of free.
-DEFAULT_ROI = [0.0, 0.40, 1.0, 0.60]
+# Any fixed fraction is a guess about how the phone is framed, and that guess
+# is what kept breaking. A crop is a fraction of the *detected screen*, so it
+# only means what it says when the whole screen is visible — and it usually is
+# not, because fitting a whole phone into a 4:3 frame makes the width the
+# constraint and drops the card to around 400px. Clipping the map away is what
+# makes the text readable in the first place.
+#
+# So this guesses nothing. The whole visible view cannot miss the card however
+# the phone is framed; one successful read then walks the crop in to fit it,
+# which took 442ms to 181ms in testing and needs no assumption about framing at
+# all. The cost is that the very first read of a fresh calibration is a slow
+# one — worth it for never having to be right about where the card will be.
+DEFAULT_ROI = [0.0, 0.0, 1.0, 1.0]
+
+# Where to judge focus while aiming. The card is the thing that has to be
+# sharp, and a dashboard in focus around a soft phone reads as perfectly sharp
+# if you measure the whole frame.
+SHARP_ROI = [0.0, 0.40, 1.0, 0.60]
 
 # Two numbers, because they mean different things. 350px is where reading
 # measurably stops working; below it no setting helps. 450px is where there is
@@ -42,6 +50,12 @@ DEFAULT_ROI = [0.0, 0.40, 1.0, 0.60]
 # between the two would be enforcing a preference as though it were a limit.
 MIN_CARD_PIXELS = 380          # below this, do not bother
 GOOD_CARD_PIXELS = 450         # above this, no notes
+
+# How much taller than wide a phone screen is, used only to size a screen that
+# runs off the frame (card_source_pixels). Modern phones are 18:9 through 20:9,
+# so the shortest of those is the one to assume: guessing low makes a clipped
+# mount read smaller than it is, and a floor that errs small is a floor.
+PHONE_ASPECT = 2.0
 
 # The two IMX519 modes that see the whole sensor. 1280x720 and 1920x1080 are
 # cropped windows (2560x1440 and 3840x2160 respectively), so they cut field of
@@ -162,7 +176,7 @@ def main():
     # all. 2328x1748 is 2x2 binned, so the card has half the pixel density the
     # sensor's headline resolution suggests, and no amount of upscaling later
     # recovers detail the mount never captured.
-    card_px = card_source_pixels(quad, roi)
+    card_px = card_source_pixels(quad, frame.shape)
     print('\ncard height on the sensor: %d px' % card_px)
     if card_px < MIN_CARD_PIXELS:
         print('  TOO SMALL — reading stops working below about %d px.' % MIN_CARD_PIXELS)
@@ -177,7 +191,7 @@ def main():
     print('\nCheck the preview is a straight-on, sharp, glare-free offer card.')
 
 
-def card_source_pixels(quad, roi=None):
+def card_source_pixels(quad, shape=None):
     """Height, in real sensor pixels, of the offer card itself.
 
     Of the card, deliberately, and not of the crop around it. This number is
@@ -185,6 +199,18 @@ def card_source_pixels(quad, roi=None):
     however much slack the crop is carrying — measure the crop instead and
     widening it for safety would silently pass mounts that are too far away,
     which is the opposite of safe.
+
+    Pass `shape` (the frame the quad was found in) and a screen running off the
+    frame is measured across instead of down. That case is the mount to want,
+    not a fault: clipping the map away is what buys the resolution. But once the
+    screen is taller than the frame, its visible height is the *frame's* height,
+    so measuring down stops measuring the phone — the reading saturates, and
+    moving the camera closer cannot make it go up. The one number you aim by
+    would go dead at exactly the distances worth using.
+
+    Across the screen nothing is missing, so the height is inferred from the
+    width using the shortest aspect ratio phones come in. That errs low, which
+    is the right way to err for a floor.
     """
     import numpy as np
 
@@ -192,6 +218,12 @@ def card_source_pixels(quad, roi=None):
     left = np.linalg.norm(quad[3] - quad[0])
     right = np.linalg.norm(quad[2] - quad[1])
     screen_px = (left + right) / 2.0
+
+    if shape is not None and PL.touches_edge(quad, shape):
+        top = np.linalg.norm(quad[1] - quad[0])
+        bottom = np.linalg.norm(quad[2] - quad[3])
+        across = (top + bottom) / 2.0 * PHONE_ASPECT
+        screen_px = max(screen_px, across)
     return int(round(screen_px * PL.CARD_SHARE))
 
 

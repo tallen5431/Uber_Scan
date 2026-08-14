@@ -83,7 +83,7 @@ def aim(as_json, port, timeout, min_card=None):
     import camera as CAM
     import pipeline as PL
     import preview as PV
-    from calibrate import DEFAULT_ROI, MIN_CARD_PIXELS
+    from calibrate import MIN_CARD_PIXELS, SHARP_ROI
 
     try:
         source = PV.Source()
@@ -128,13 +128,15 @@ def aim(as_json, port, timeout, min_card=None):
                 quad = PL.detect_screen_quad(frame)
                 if quad is not None:
                     spill = PL.touches_edge(quad, frame.shape)
-                    sharp = PV.sharpness(PL.crop(PL.warp(frame, quad, 600), DEFAULT_ROI))
+                    sharp = PV.sharpness(PL.crop(PL.warp(frame, quad, 600), SHARP_ROI))
 
-            # A screen running off the edge of the frame is not a big screen, it
-            # is a cropped one, and calibrating on it poisons every measurement
-            # that follows. It has to fail the gate, not pass it for being large.
-            ok = bool(card_px and card_px >= floor and sharp
-                      and sharp >= PV.SHARP_FLOOR and not spill)
+            # Spill is reported, not refused. Backing off far enough to fit a
+            # whole phone in a 4:3 frame drops the card to around 400px, and
+            # the resolution is the thing that makes any of this work — so
+            # clipping the map away is the right mount, not a broken one. What
+            # used to depend on seeing the whole screen was the crop being a
+            # fraction of it, and the crop finds the card by content now.
+            ok = bool(card_px and card_px >= floor and sharp and sharp >= PV.SHARP_FLOOR)
             good = good + 1 if ok else 0
 
             now = time.time()
@@ -161,15 +163,14 @@ def _aim_hint(card_px, sharp, min_px, min_sharp, spill=()):
         return ('no phone screen found — it must be lit, in frame, and with some '
                 'darker surround; a frame filled edge to edge cannot be told '
                 'apart from the room')
-    if spill:
-        return ('the %s of the screen is out of frame — move the camera back '
-                'until the whole phone fits with a dark border around it. It '
-                'looks like a big card from here, but only the middle of the '
-                'screen is being measured' % ' and '.join(spill))
     if card_px < min_px:
         return 'card is %d px, needs %d — move the camera closer' % (card_px, min_px)
     if not sharp or sharp < min_sharp:
         return 'card is big enough but blurry (%s) — adjust focus' % (round(sharp) if sharp else '?')
+    if spill:
+        return ('good: %d px, sharp %d — the %s of the screen is out of frame, which '
+                'is fine as long as the whole offer card is visible'
+                % (card_px, round(sharp), ' and '.join(spill)))
     return 'good: %d px, sharp %d' % (card_px, round(sharp))
 
 
@@ -228,13 +229,6 @@ def calibrate_from(source, as_json):
         emit({'phase': 'error', 'message': 'lost the screen while calibrating'}, as_json)
         return False
 
-    spill = PL.touches_edge(quad, frame.shape)
-    if spill:
-        emit({'phase': 'error', 'message':
-              'refusing to calibrate: the %s of the screen is out of frame, so only '
-              'part of it would be measured. Move the camera back until the whole '
-              'phone fits with a dark border around it.' % ' and '.join(spill)}, as_json)
-        return False
 
     # The preview runs smaller than the scanner captures, so the corners have to
     # be scaled into capture coordinates or every read would be cropped wrong.
@@ -261,7 +255,7 @@ def calibrate_from(source, as_json):
     cv2.imwrite(preview_path, PL.preprocess(PL.crop(PL.warp(frame, quad, 900), DEFAULT_ROI)))
 
     emit({'phase': 'calibrated',
-          'cardPixels': int(round(card_source_pixels(quad, DEFAULT_ROI) * scale)),
+          'cardPixels': int(round(card_source_pixels(quad, frame.shape) * scale)),
           'message': 'wrote config.json (preview at rpi/config-preview.png)'}, as_json)
     return True
 
