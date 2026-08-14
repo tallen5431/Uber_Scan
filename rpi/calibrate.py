@@ -60,6 +60,23 @@ PHONE_ASPECT = PL.PHONE_ASPECT
 FULL_FOV_MODES = {'2328x1748': (2328, 1748), '4656x3496': (4656, 3496)}
 
 
+def load_existing(path):
+    """Whatever is already in the config, or an empty dict.
+
+    Unreadable is treated as absent rather than fatal: a half-written or
+    hand-edited file should not stop a driver re-aiming the camera, and
+    everything this command needs it is about to write anyway. The cost of
+    getting it wrong is the settings block, which is replaced with the defaults
+    either way if it cannot be read.
+    """
+    try:
+        with open(path) as fh:
+            existing = json.load(fh)
+        return existing if isinstance(existing, dict) else {}
+    except (IOError, OSError, ValueError):
+        return {}
+
+
 def grab_from_camera(size, lens=None):
     """One sharp frame, plus the lens position that made it sharp.
 
@@ -132,6 +149,19 @@ def main():
     lens_position = args.lens
     if args.from_image:
         frame = cv2.imread(args.from_image)
+        # The corners about to be detected are in this still's pixel space, so
+        # the capture size recorded beside them has to be this still's too.
+        # Taking it from --mode instead described a sensor the corners were
+        # never measured on: an rpicam-still is 4656x3496 by default while
+        # --mode defaults to 2328x1748, so the scanner warped a quad twice the
+        # size of the frames it was given and read empty text off every one.
+        # Nothing recovers from it either — the tracker gates candidates on the
+        # calibrated size, so the real screen is refused on every check while
+        # the health line goes on reporting "corners held, 0px from
+        # calibration". Silent, total and permanent, from a still of the wrong
+        # size and no warning anywhere.
+        if frame is not None:
+            height, width = frame.shape[:2]
     else:
         frame, lens_position = grab_from_camera((width, height), args.lens)
     if frame is None:
@@ -148,7 +178,18 @@ def main():
             sys.exit('no screen found — is the phone lit and in frame? else pass --corners')
 
     pin = WHOLE_VIEW if args.full_screen else DEFAULT_ROI
-    config = {
+
+    # Calibrating is about where the phone is, and nothing else. This used to
+    # write a fresh dict over the file, which meant re-aiming the camera also
+    # put the driver's money back to the defaults — and the README tells you to
+    # re-run this any time the mount moves, then tells you to keep your target
+    # and running costs in the same file. A driver on $32/hr and $0.62/mi came
+    # back to $25/hr and $0.30/mi and was not told: on the very offer this
+    # command reads back to prove itself, their own numbers say $25.0/hr PASS
+    # and the reset ones say $35.3/hr ACCEPT, which the rig then says out loud.
+    # There is no other copy of those settings on the Pi to restore them from.
+    config = load_existing(args.config)
+    config.update({
         'quad': [[float(x), float(y)] for x, y in quad],
         # Only written when asked for, and under a key nothing inherits: an
         # older config's `roi` must not act as a pin, or a rig upgrading gets
@@ -157,9 +198,14 @@ def main():
         'cardHeight': args.card_height,
         'capture': {'width': width, 'height': height},
         'lensPosition': lens_position,
-        'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
-                     'pad': 0, 'secondsPerItem': 0},
-    }
+    })
+    config.setdefault('settings', {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                                   'pad': 0, 'secondsPerItem': 0})
+    # The tracker's running position is the one thing that must NOT survive:
+    # it is where the screen drifted to relative to corners that no longer
+    # exist. Exposure measurements do survive, because they describe the
+    # phone's backlight rather than where the camera is pointing.
+    config.pop('trackedQuad', None)
     with open(args.config, 'w') as fh:
         json.dump(config, fh, indent=2)
 

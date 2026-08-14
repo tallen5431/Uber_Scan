@@ -128,6 +128,31 @@ def blinding(us):
 chosen, report = EX.choose_exposure(blinding)
 ok_('an over-exposed candidate is rejected', chosen <= EX.FLICKER_SAFE[1])
 
+# ...but when EVERY candidate is over-exposed, clipping must not get to decide.
+# The checks above all run at gain 1.0, where nothing clips and the clipping
+# path is never taken. The sweep on a real rig runs at whatever gain the
+# preview's auto-exposure froze while metering a mostly-dark car around a
+# bright screen, so blowing the card out is the ordinary case, not the edge
+# one — and there the least-clipped candidate was taken as the winner.
+#
+# Ranking by clipping there actively selects for banding: once every candidate
+# is over the line, the one that ripples has dark rows and dark rows do not
+# clip. On a 60Hz panel that hands the prize to 8333us, the one entry in
+# FLICKER_SAFE that is half a 60Hz cycle instead of a whole one, and the only
+# one that bands — measured, written to config.json, and used for every read
+# thereafter.
+for hz in (60, 120, 240):
+    for gain in (3.0, 6.0):
+        chosen, report = EX.choose_exposure(
+            lambda us, h=hz, g=gain: frames_at(us, h, gain=g))
+        cycles = chosen / (1e6 / hz)
+        ok_('%dHz at gain %.0f still picks a whole number of cycles (%.2f at %dus)'
+            % (hz, gain, cycles, chosen), abs(cycles - round(cycles)) < 0.02)
+        ok_('%dHz at gain %.0f is still quiet' % (hz, gain),
+            EX.banding_score(frames_at(chosen, hz)) < 1.5)
+        ok_('%dHz at gain %.0f still reports every candidate' % (hz, gain),
+            len(report) == len(EX.FLICKER_SAFE))
+
 # Nothing to look at: fall back rather than crash.
 eq('no frames at all falls back', EX.choose_exposure(lambda us: [])[0], EX.DEFAULT_EXPOSURE)
 

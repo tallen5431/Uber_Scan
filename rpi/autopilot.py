@@ -226,7 +226,7 @@ def calibrate_from(source, as_json):
     """Write config.json from the frame the preview is already looking at."""
     import cv2
     import pipeline as PL
-    from calibrate import DEFAULT_ROI, card_source_pixels
+    from calibrate import DEFAULT_ROI, card_source_pixels, load_existing
 
     frame = source.frame()
     quad = PL.detect_screen_quad(frame)
@@ -242,7 +242,11 @@ def calibrate_from(source, as_json):
 
     exposure_us, why = _measure_exposure(source, quad, as_json)
 
-    config = {
+    # Keep whatever the driver put in the file. Calibrating decides where the
+    # phone is; it has no business deciding what an hour of their time is worth,
+    # and there is no second copy of that on the Pi to put back afterwards.
+    config = load_existing(CONFIG)
+    config.update({
         'quad': quad_full,
         'cropBox': DEFAULT_ROI,
         'cardHeight': 900,
@@ -250,9 +254,12 @@ def calibrate_from(source, as_json):
         'lensPosition': source.lens_position,
         'exposureTime': exposure_us,
         'exposureWhy': why,
-        'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
-                     'pad': 0, 'secondsPerItem': 0},
-    }
+    })
+    config.setdefault('settings', {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                                   'pad': 0, 'secondsPerItem': 0})
+    # Where the screen had drifted to is measured against corners that no
+    # longer exist, so it cannot survive a re-aim.
+    config.pop('trackedQuad', None)
     with open(CONFIG, 'w') as fh:
         json.dump(config, fh, indent=2)
 
@@ -326,13 +333,11 @@ def main():
 
     import camera as CAM
 
-    if args.recalibrate:
-        try:
-            os.remove(CONFIG)
-        except OSError:
-            pass
-
-    if not os.path.exists(CONFIG):
+    # Deleting the file was the old way to force a re-aim, and it took the
+    # driver's target and running costs with it — calibrate_from can only
+    # preserve settings that are still there to read. Forcing the branch
+    # directly leaves the file, and its settings, in place.
+    if args.recalibrate or not os.path.exists(CONFIG):
         source = aim(args.json, args.preview_port, args.aim_timeout, args.min_card)
         if source is None:
             return 1

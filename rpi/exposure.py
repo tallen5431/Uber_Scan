@@ -122,8 +122,26 @@ def choose_exposure(grab, candidates=FLICKER_SAFE, target=TARGET_BRIGHT):
 
     usable = [r for r in report if r['clipped'] <= CLIPPED_FRACTION]
     if not usable:
-        # Everything is blown out: take the shortest, which is the least blown.
-        usable = sorted(report, key=lambda r: r['clipped'])[:1]
+        # Everything is blown out — at whatever gain the preview's auto-exposure
+        # happened to freeze while metering a mostly-dark car interior around a
+        # bright screen. That is a gain problem and it does not survive
+        # calibration: AutoGain re-sets gain to TARGET_BRIGHT the moment
+        # scanning starts. Letting it decide the exposure meant a condition
+        # that was about to go away vetoing one that is permanent, against the
+        # rule this whole module is built on — gain cannot reintroduce banding,
+        # and exposure can.
+        #
+        # Ranking by least-clipped was worse than merely irrelevant: it selects
+        # *for* banding. Once every candidate's white has crossed the clipping
+        # point, the one that ripples is the one with dark rows, and dark rows
+        # do not clip — so on a 60Hz panel the winner was 8333us, the single
+        # entry in FLICKER_SAFE that is half a 60Hz cycle rather than a whole
+        # one, and the only one that bands. It was then written to config.json
+        # and announced as "measured against this screen".
+        #
+        # So keep every candidate and let banding decide, which is what the
+        # rest of this function already does correctly.
+        usable = report
     if not usable:
         return DEFAULT_EXPOSURE, report
 
