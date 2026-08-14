@@ -25,6 +25,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import camera as CAM
 import pipeline as PL
 from calibrate import DEFAULT_ROI, MIN_CARD_PIXELS, card_source_pixels
 
@@ -50,18 +51,20 @@ class Source:
         self.still = None
         self.af = False
         self.lens_position = None
+        self.focus = {'supported': False, 'reason': 'no camera in use'}
+        self.capture_size = size
         if image:
             self.still = cv2.imread(image)
             if self.still is None:
                 sys.exit('could not read %s' % image)
         else:
-            from picamera2 import Picamera2
-            self.cam = Picamera2()
+            # Loads an autofocus-capable tuning file if one exists, because the
+            # stock imx519 tuning has none and the lens then cannot move at all.
+            self.cam, self.focus = CAM.open_camera()
             # Preview only, so a modest size keeps the quad search cheap. The
             # measurement is scaled back up to the capture size that scan_pi.py
             # will really use, or the number would flatter the mount.
             self.preview_size = (1164, 874)
-            self.capture_size = size
             self.cam.configure(self.cam.create_video_configuration(
                 main={'size': self.preview_size, 'format': 'RGB888'},
                 raw={'size': size}))
@@ -78,19 +81,20 @@ class Source:
         continuous autofocus and report where it settles, which is the number
         to pin later.
         """
-        controls_available = self.cam.camera_controls
-        if 'AfMode' not in controls_available:
-            print('this module reports no autofocus; focus is fixed by mount distance')
+        if not self.focus.get('supported'):
+            print('autofocus unavailable: %s' % self.focus.get('reason'))
+            print('the overlay still reports sharpness, so you can focus by hand')
             return
+
         from libcamera import controls as libcontrols
         if lens is not None:
             self.cam.set_controls({'AfMode': libcontrols.AfModeEnum.Manual,
                                    'LensPosition': lens})
-            print('focus pinned at %.2f dioptres (%.0f cm)' % (lens, 100.0 / lens if lens else 0))
+            print('focus pinned at %.2f dioptres (%.0f cm)' % (lens, 100.0 / lens))
         else:
             self.cam.set_controls({'AfMode': libcontrols.AfModeEnum.Continuous})
             self.af = True
-            print('continuous autofocus on — the overlay reports where it settles')
+            print('continuous autofocus on (tuning: %s)' % self.focus.get('tuning'))
         time.sleep(0.5)
 
     @property

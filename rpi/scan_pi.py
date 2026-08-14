@@ -50,9 +50,9 @@ FULL_FOV_MODES = {
 
 
 def start_camera(cfg, exposure_us, gain, lens):
-    from picamera2 import Picamera2
+    import camera as CAM
 
-    cam = Picamera2()
+    cam, focus = CAM.open_camera()
     cap = cfg.get('capture', {})
     main_size = (cap.get('width', 2328), cap.get('height', 1748))
 
@@ -78,16 +78,15 @@ def start_camera(cfg, exposure_us, gain, lens):
         'AnalogueGain': gain,
     }
 
-    # Ask the camera what it has rather than assuming. libcamera defines the
-    # autofocus enums whatever the hardware is, so importing them proves
-    # nothing — a fixed-focus IMX519 would still reject the control.
-    available = cam.camera_controls
-    if 'AfMode' in available and 'LensPosition' in available:
+    # Advertised controls prove nothing: a tuning file with no autofocus
+    # algorithm still exposes AfMode and then ignores every lens position.
+    if focus.get('supported') and 'AfMode' in cam.camera_controls:
         from libcamera import controls
         ctrls['AfMode'] = controls.AfModeEnum.Manual
         ctrls['LensPosition'] = lens
     else:
-        print('fixed-focus module: --lens ignored, focus is set by the mount distance')
+        print('focus not settable (%s) — it is whatever the mount distance gives'
+              % focus.get('reason', 'no autofocus'))
 
     cam.set_controls(ctrls)
     time.sleep(0.5)

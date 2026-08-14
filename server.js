@@ -57,6 +57,8 @@ var TYPES = {
 var scanner = {
   proc: null,
   last: null,          // most recent read
+  phase: null,         // check / aim / calibrated / scanning / error
+  status: null,        // most recent non-read message, e.g. aiming progress
   started: null,
   restarts: 0,
   error: null
@@ -64,8 +66,20 @@ var scanner = {
 
 var listeners = [];    // open server-sent-event responses
 
+// The autopilot calibrates itself, so it runs whenever the Pi scanner code is
+// present — waiting for a config file would mean waiting for a manual step that
+// no longer exists.
 function scannerEnabled() {
   if (process.env.SCANNER === '0') return false;
+  try {
+    fs.statSync(path.join(ROOT, 'rpi', 'autopilot.py'));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function calibrated() {
   try {
     fs.statSync(path.join(ROOT, 'rpi', 'config.json'));
     return true;
@@ -76,7 +90,7 @@ function scannerEnabled() {
 
 function startScanner() {
   var cmd = process.env.SCANNER_CMD;
-  var args = cmd ? [] : [path.join(ROOT, 'rpi', 'scan_pi.py'), '--json'];
+  var args = cmd ? [] : [path.join(ROOT, 'rpi', 'autopilot.py'), '--json'];
   var bin = cmd || 'python3';
   if (cmd) args = process.env.SCANNER_ARGS ? process.env.SCANNER_ARGS.split(' ') : [];
   if (process.env.SCANNER_SPEAK !== '0' && !cmd) args.push('--speak');
@@ -97,7 +111,13 @@ function startScanner() {
       try {
         var read = JSON.parse(line);
         read.at = Date.now();
-        scanner.last = read;
+        if (read.phase) {
+          scanner.phase = read.phase;
+          scanner.status = read;
+          if (read.message) console.log('scanner[' + read.phase + ']: ' + read.message);
+        }
+        // Setup messages carry no rate, so they must not overwrite the last read.
+        if (read.ready !== undefined) scanner.last = read;
         broadcast(read);
       } catch (e) {
         console.log('scanner: ' + line);   // not JSON, so it is a log line
@@ -165,12 +185,15 @@ function handler(req, res) {
     return send(res, 200, JSON.stringify({
       scanner: {
         enabled: scannerEnabled(),
+        calibrated: calibrated(),
+        phase: scanner.phase,
         running: !!scanner.proc,
         restarts: scanner.restarts,
         startedAt: scanner.started,
         error: scanner.error
       },
-      last: scanner.last
+      last: scanner.last,
+      status: scanner.status
     }), { 'Content-Type': 'application/json; charset=utf-8' });
   }
 
@@ -287,12 +310,13 @@ if (tls) {
 }
 
 if (scannerEnabled()) {
-  console.log('\nrpi/config.json found, so the Pi scanner runs here too.');
+  console.log('\nPi scanner running here too' +
+    (calibrated() ? '.' : ' — not calibrated yet, so it starts by aiming.'));
+  if (!calibrated()) {
+    console.log('  aim the camera: http://localhost:8081/   (the overlay tells you when)');
+  }
   console.log('  live verdict: /live.html      state: /api/status');
   startScanner();
 } else if (process.env.SCANNER === '0') {
   console.log('\nPi scanner disabled (SCANNER=0).');
-} else {
-  console.log('\nNo rpi/config.json, so the Pi scanner is not started.');
-  console.log('Aim and calibrate first:  python3 rpi/preview.py  then  rpi/calibrate.py');
 }

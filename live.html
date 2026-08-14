@@ -32,9 +32,9 @@
         <span class="rate-unit">/hr</span>
       </div>
       <div class="submetrics">
-        <div class="sub"><span id="vPay">--</span><small>pay</small></div>
-        <div class="sub"><span id="vMin">--</span><small>minutes</small></div>
-        <div class="sub"><span id="vMile">--</span><small>miles</small></div>
+        <div class="sub"><span id="vPay">--</span><small id="lPay">pay</small></div>
+        <div class="sub"><span id="vMin">--</span><small id="lMin">minutes</small></div>
+        <div class="sub"><span id="vMile">--</span><small id="lMile">miles</small></div>
       </div>
       <div id="warn" class="warn" hidden></div>
     </section>
@@ -57,22 +57,49 @@
   var STALE_MS = 90000;
 
   var el = {};
-  ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot']
+  ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
+   'lPay', 'lMin', 'lMile']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   var last = null;
+  var phase = null;      // setup progress, before any offer exists
+
+  var PHASE_LABEL = {
+    check: 'CHECKING',
+    aim: 'AIM THE CAMERA',
+    calibrated: 'CALIBRATED',
+    scanning: 'WAITING FOR AN OFFER',
+    error: 'SCANNER PROBLEM'
+  };
 
   function money(n, d) { return (n === null || n === undefined) ? '--' : '$' + Number(n).toFixed(d); }
 
   function render() {
     var r = last;
     if (!r || !r.ready) {
-      el.verdict.className = 'verdict empty';
-      el.verdictLabel.textContent = 'WAITING FOR AN OFFER';
-      el.perHour.textContent = '--';
+      // Before the first offer the useful thing to show is setup progress, so
+      // the page doubles as the aiming instructions.
+      var p = phase || {};
+      el.verdict.className = 'verdict ' + (p.phase === 'error' ? 'no' : 'empty');
+      el.verdictLabel.textContent = PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER';
+      el.perHour.textContent = p.cardPixels ? p.cardPixels : '--';
       el.vPay.textContent = el.vMin.textContent = el.vMile.textContent = '--';
-      el.warn.hidden = true;
-      el.detail.textContent = r ? 'scanner running, no offer on screen' : '';
+
+      var aiming = p.phase === 'aim';
+      el.lPay.textContent = aiming ? 'card px' : 'pay';
+      el.lMin.textContent = aiming ? 'sharpness' : 'minutes';
+      el.lMile.textContent = aiming ? 'steady' : 'miles';
+      if (aiming) {
+        el.perHour.textContent = p.cardPixels || '--';
+        el.vPay.textContent = p.cardPixels ? p.cardPixels + 'px' : '--';
+        el.vMin.textContent = p.sharpness !== null && p.sharpness !== undefined ? p.sharpness : '--';
+        el.vMile.textContent = (p.stable || 0) + '/' + (p.need || 6);
+      }
+      el.warn.textContent = p.message || '';
+      el.warn.hidden = !p.message;
+      el.detail.textContent = p.previewPort
+        ? 'live camera view on port ' + p.previewPort
+        : (r ? 'scanner running, no offer on screen' : '');
       return;
     }
 
@@ -103,7 +130,10 @@
       el.dot.classList.add('on');
     };
     src.onmessage = function (e) {
-      try { last = JSON.parse(e.data); } catch (err) { return; }
+      var msg;
+      try { msg = JSON.parse(e.data); } catch (err) { return; }
+      if (msg.phase) phase = msg;
+      if (msg.ready !== undefined) last = msg;
       render();
     };
     src.onerror = function () {
@@ -114,9 +144,11 @@
 
   // Seed from the current state so a fresh tab is not blank until the next read.
   fetch('/api/status').then(function (r) { return r.json(); }).then(function (s) {
-    if (s.last) { last = s.last; render(); }
+    if (s.last) last = s.last;
+    if (s.status) phase = s.status;
+    render();
     if (!s.scanner.enabled) {
-      el.conn.textContent = 'scanner not calibrated — run rpi/calibrate.py';
+      el.conn.textContent = 'Pi scanner not present on this machine';
     } else if (!s.scanner.running) {
       el.conn.textContent = 'scanner not running' + (s.scanner.error ? ': ' + s.scanner.error : '');
     }

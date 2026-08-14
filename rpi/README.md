@@ -20,24 +20,40 @@ fiddly.
 sudo apt install -y python3-picamera2 python3-opencv tesseract-ocr espeak-ng
 pip3 install pytesseract --break-system-packages
 
-python3 rpi/doctor.py        # checks every dependency, prints the fix for each
-python3 rpi/preview.py       # open http://<pi>:8081/ and aim until it reads green
-python3 rpi/calibrate.py     # locks in the screen corners
-python3 rpi/scan_pi.py --speak
+python3 rpi/autopilot.py --speak
 ```
 
-That last command is the whole product: it watches, and when an offer appears it
-says *"pass, twelve an hour"* out loud. Speech is the right output in a car — it
-needs no glance at all. `--display` draws a big colour panel instead if you have
-a screen on the Pi, and reads are always printed to the terminal.
+That is the whole thing. The autopilot checks its dependencies, and if the rig
+is not calibrated it serves the aiming preview on
+`http://<this-pi>:8081/`, waits for the mount to be big enough and sharp enough
+for several readings in a row, calibrates itself from that frame, and starts
+scanning. Already calibrated, it goes straight to scanning. `--recalibrate`
+starts over.
+
+It prints what it is doing at each step:
+
+```
+[aim] not calibrated — open http://<this-pi>:8081/ and move the mount until green
+[aim] card is 290 px, needs 450 — move the camera closer
+[aim] good: 873 px, sharp 772
+[calibrated] wrote config.json
+[scanning] starting scanner
+$10.61/hr PASS  (pay $7.09, 34 min, 3.6 mi)
+```
+
+Only one process can hold the camera, which is why this is one process rather
+than four scripts to run in the right order. The individual steps still exist —
+`doctor.py`, `preview.py`, `calibrate.py`, `scan_pi.py` — for when you want to
+poke at one of them, but stop the autopilot first.
 
 ### Or run it from the web server
 
 If you already manage this project with a process supervisor that runs
-`npm start`, the scanner can live there instead of in its own service. Once
-`rpi/config.json` exists — that is, once you have calibrated — `npm start`
-launches the scanner alongside the site automatically. There is nothing to
-configure, because a supervisor gives you no shell to configure it in.
+`npm start`, the scanner can live there instead of in its own service — nothing
+to configure, since a supervisor gives you no shell to configure it in. The
+server runs the **autopilot**, so an uncalibrated Pi sets itself up rather than
+waiting for you: `/live.html` shows the aiming numbers, turns into the verdict
+once calibration succeeds, and the camera preview is on port 8081 meanwhile.
 
 | | |
 |---|---|
@@ -174,8 +190,23 @@ The IMX519 has a motorised lens, and left alone it sits wherever it was, which
 is usually blurry. Focus is decided once and then pinned, because a fixed mount
 has nothing to track and a refocus mid-offer costs more than the read does:
 
-- `preview.py` runs **continuous autofocus** while you aim, and overlays both a
-  sharpness score and the lens position it settles at;
+**First, autofocus may not exist even though the control does.** libcamera
+advertises `AfMode` for this sensor, but Raspberry Pi's stock `imx519.json`
+tuning contains no autofocus *algorithm*, so setting it logs
+
+```
+WARN IPARPI ipa_base.cpp:797 Could not set AF_MODE - no AF algorithm
+```
+
+and the lens never moves — manual `LensPosition` included, since the same
+algorithm applies it. The code now reads the tuning file rather than trusting
+the control list: it loads an autofocus-capable tuning if one is installed, and
+otherwise says so instead of pretending. To get autofocus, install Arducam's
+tuning for the module; without it, focus the lens by hand using the sharpness
+number in the preview, which works either way.
+
+- `preview.py` runs **continuous autofocus** while you aim (when the tuning
+  supports it), and overlays both a sharpness score and the lens position;
 - `calibrate.py` runs one autofocus cycle and records that position in
   `config.json`;
 - `scan_pi.py` pins the recorded position at startup.
