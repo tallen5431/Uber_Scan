@@ -81,32 +81,37 @@ ok_('thumbnail detection agrees with full', T.distance(found, full) < 4.0)
 start = quad_at(400, 140)
 tr = T.QuadTracker(start)
 drifted = frame_with_phone(418, 152)
-eq('first check does not move it', tr.update(drifted, now=1.0), False)
-eq('nor the second', tr.update(drifted, now=3.0), False)
-eq('the third does', tr.update(drifted, now=5.0), True)
+# Nothing happens until the same thing has been seen AGREE times running.
+for i in range(T.AGREE - 1):
+    eq('check %d does not move it' % (i + 1), tr.update(drifted, now=1.0 + 2.0 * i), False)
+eq('the last one does', tr.update(drifted, now=1.0 + 2.0 * (T.AGREE - 1)), True)
 ok_('and it moved toward the phone, not onto it',
     0 < T.distance(tr.quad, start) < T.distance(start, quad_at(418, 152)))
 
 # --- and it converges if the phone stays there ------------------------------
-settle(tr, drifted, 8, t0=5.0)
+settle(tr, drifted, 8, t0=40.0)
 ok_('converges on the new position', T.distance(tr.quad, quad_at(418, 152)) < 4.0)
 ok_('counted the moves', tr.moves >= 4)
 eq('drift is not a re-lock', tr.jumps, 0)
 
 # --- the recheck interval is honoured ---------------------------------------
+# Frames arrive far faster than the corners are re-found, and adopting a move
+# takes AGREE checks however many frames went past in the meantime.
 tr = T.QuadTracker(start)
-for i in range(30):
-    tr.update(drifted, now=10.0 + i * 0.1)      # 3s of frames, 0.1s apart
-eq('rapid frames collapse into few checks', tr.moves, 0)
+window = T.RECHECK_EVERY * (T.AGREE - 1) * 0.9      # just short of enough
+for i in range(200):
+    tr.update(drifted, now=10.0 + i * (window / 200.0))
+eq('rapid frames cannot rush a move', tr.moves, 0)
+ok_('...though the checks that fit did happen', 0 < tr.agreeing < T.AGREE)
 
 # --- one bad frame cannot steal the corners ---------------------------------
 tr = T.QuadTracker(start)
-settle(tr, frame_with_phone(402, 142), 4)
+settle(tr, frame_with_phone(402, 142), T.AGREE + 1)
 before = tr.quad.copy()
 # A hand, a windscreen reflection: something bright and elsewhere, once.
 tr.update(frame_with_phone(60, 400, size=(280, 300)), now=100.0)
 eq('a single intruder moves nothing', T.distance(tr.quad, before), 0.0)
-settle(tr, frame_with_phone(402, 142), 3, t0=100.0)
+settle(tr, frame_with_phone(402, 142), T.AGREE + 1, t0=100.0)
 ok_('and the real phone is still held', T.distance(tr.quad, quad_at(402, 142)) < 12.0)
 
 # --- a screen that is simply gone leaves the calibration alone --------------
@@ -115,20 +120,31 @@ dark = np.full((H, W, 3), 20, np.uint8)
 settle(tr, dark, 5)
 eq('a dark frame never moves the corners', T.distance(tr.quad, start), 0.0)
 ok_('but it is reported as lost', tr.status()['lost'])
-settle(tr, frame_with_phone(400, 140), 4, t0=200.0)
+settle(tr, frame_with_phone(400, 140), T.AGREE + 1, t0=200.0)
 eq('and recovers when the screen comes back', tr.status()['misses'], 0)
 
 # --- a real knock is adopted outright, not eased ----------------------------
 tr = T.QuadTracker(start)
 knocked = frame_with_phone(700, 220)
-moved = settle(tr, knocked, 8)
+moved = settle(tr, knocked, T.AGREE * 2 + 2)
 ok_('a sustained move is taken', moved >= 1)
 ok_('and taken whole', T.distance(tr.quad, quad_at(700, 220)) < 5.0)
 eq('recorded as a re-lock', tr.jumps, 1)
 # Two checks is not sustained: the far position must not be adopted early.
 tr2 = T.QuadTracker(start)
-settle(tr2, knocked, 5)
+settle(tr2, knocked, T.AGREE * 2 - 1)
 eq('but not before it has insisted', T.distance(tr2.quad, start), 0.0)
+
+# ...and never onto something that is not the same size of thing. A lit panel
+# elsewhere in the car can be every bit as steady as the phone.
+tr3 = T.QuadTracker(start)
+settle(tr3, frame_with_phone(120, 120, size=(620, 700)), T.AGREE * 4)
+eq('a differently sized bright thing never takes the lock', tr3.jumps, 0)
+eq('...and leaves the corners alone', T.distance(tr3.quad, start), 0.0)
+ok_('same_size accepts a phone seen slightly nearer',
+    T.same_size(quad_at(400, 140, size=(330, 680)), start))
+ok_('...and rejects something half the size',
+    not T.same_size(quad_at(400, 140, size=(150, 310)), start))
 
 # --- saving is rate limited and drift limited -------------------------------
 tr = T.QuadTracker(start)
@@ -167,13 +183,13 @@ def big_quad(x, y, size=(150, 330)):
 start_small = big_quad(240, 70)
 tr = T.QuadTracker(start_small, scale=SCALE)
 eq('a preview-scale tracker starts where told', T.distance(tr.quad, start_small), 0.0)
-settle(tr, small(240, 70), 4)
+settle(tr, small(240, 70), T.AGREE + 1)
 ok_('and holds a still phone', T.distance(tr.quad, start_small) < 12.0)
 
 # A 6px slide in the preview is a 22px slide on the sensor — which is the whole
 # reason for tracking, and it must be reported at sensor scale.
 tr = T.QuadTracker(start_small, scale=SCALE)
-settle(tr, small(246, 74), 10)
+settle(tr, small(246, 74), 14)
 moved = T.distance(tr.quad, start_small)
 ok_('a small-stream nudge is scaled up', moved > 15.0)
 ok_('...and lands on the phone, not past it', T.distance(tr.quad, big_quad(246, 74)) < 14.0)

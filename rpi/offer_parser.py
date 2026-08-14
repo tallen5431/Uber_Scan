@@ -32,11 +32,20 @@ MONEY_STRICT = re.compile(r'\$\s*(' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)')
 # addresses are full of tokens that survive two guesses.
 MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'{2})')
 
+# The minute unit has to be spelled out. It was once allowed to be a bare "m",
+# and on a map full of street names that turns any two letters into a journey:
+# "ZIM" out of the road texture became a 21-minute leg, which is enough to make
+# a screen with no offer on it look like an offer. The "i" may still be a
+# lookalike, because that is one guess inside a word already confirmed.
 LEG = re.compile(
     r'(?:(\d{1,2})\s*h(?:r|rs|our|ours)?\s*)?'
-    r'(' + DC + r'{1,3})\s*m(?:in|ins|inute|inutes)?\b'
+    r'(' + DC + r'{1,3})\s*m[il1|]n(?:s|ute|utes)?\b'
     r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b\s*\)?)?',
     re.IGNORECASE)
+
+# ...and the number in front of it has to contain a real digit. "SI min" is two
+# guesses stacked, and stacked guesses are how noise becomes data.
+HAS_DIGIT = re.compile(r'\d')
 
 ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE)
 TOTAL_TAIL = re.compile(r'\btota?l\b')
@@ -82,7 +91,7 @@ def find_legs(text):
     legs = []
     for m in LEG.finditer(text):
         mins = to_number(m.group(2))
-        if mins is None:
+        if mins is None or not HAS_DIGIT.search(m.group(2)):
             continue
         minutes = (to_number(m.group(1)) or 0) * 60 + mins
         if minutes <= 0 or minutes > 600:
@@ -95,12 +104,40 @@ def find_legs(text):
         # thing to be lost, so remember whether this reading actually had one.
         had_decimal = m.group(3) is not None and bool(re.search(r'[.,]', m.group(3)))
 
+        # Recover a decimal lost from this leg alone, before it reaches the sum.
+        # "20 min (7.3 mi)" read as "(73 mi)" is a 219 mph leg, and left alone it
+        # does more than inflate the distance: a merger keying legs by distance
+        # files it as a *third* leg beside the real one, so a 23-minute card
+        # reports 43 minutes. Checking each leg against its own time catches it
+        # while it is still identifiable as the leg it came from.
+        miles, leg_corrected = recover_decimal(minutes, miles, had_decimal)
+
         tail = text[m.end():m.end() + 14].lower()
         legs.append({
-            'minutes': minutes, 'miles': miles, 'hadDecimal': had_decimal,
-            'isTotal': bool(TOTAL_TAIL.search(tail)),
+            'minutes': minutes, 'miles': miles, 'hadDecimal': had_decimal or leg_corrected,
+            'isTotal': bool(TOTAL_TAIL.search(tail)), 'corrected': leg_corrected,
         })
     return legs
+
+
+def recover_decimal(minutes, miles, had_decimal):
+    """Put back a decimal point this leg clearly lost. Returns (miles, corrected).
+
+    Deliberately narrower than check_distance: it only ever divides by ten, only
+    when the reading had no decimal at all, and only when doing so lands the leg
+    back in a believable range. Anything else is left for the total to judge,
+    because leg times are whole minutes and a two-minute leg is too coarse to
+    argue with — a rounded 2 min over 2.0 mi is already "60 mph" and perfectly
+    real.
+    """
+    if miles is None or not minutes or had_decimal:
+        return miles, False
+    if miles / (minutes / 60.0) <= MAX_MPH:
+        return miles, False
+    recovered = miles / 10.0
+    if 0.5 <= recovered / (minutes / 60.0) <= MAX_MPH:
+        return recovered, True
+    return miles, False
 
 
 def check_distance(minutes, miles, had_decimal):
@@ -131,14 +168,18 @@ def parse(raw_text):
     minutes = None
     miles = None
     had_decimal = False
+    corrected_leg = False
     for leg in used:
         minutes = (minutes or 0) + leg['minutes']
         if leg['miles'] is not None:
             miles = (miles or 0) + leg['miles']
             if leg['hadDecimal']:
                 had_decimal = True
+            if leg.get('corrected'):
+                corrected_leg = True
 
     miles, corrected, uncertain = check_distance(minutes, miles, had_decimal)
+    corrected = corrected or corrected_leg
 
     m = ITEMS.search(text)
     items = to_number(m.group(1)) if m else None

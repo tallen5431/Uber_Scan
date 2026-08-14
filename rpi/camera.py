@@ -37,13 +37,26 @@ def pi_model():
 
 
 def tuning_dirs():
-    """Directories to search, the pipeline this machine actually runs first."""
+    """Directories to load from: only the pipeline this machine actually runs.
+
+    Not a preference order — a hard restriction. A pisp tuning describes an ISP
+    a Pi 4 does not have, and handing one to the vc4 pipeline does not degrade
+    gracefully: libcamera fails to load the IPA, registers no cameras, and
+    picamera2 dies with an IndexError about an empty list. That happened, and
+    the reason it happened is that the search fell through to pisp looking for
+    autofocus and found it there. Better no autofocus than no camera.
+    """
     if 'Raspberry Pi 5' in pi_model():
-        return [PISP_DIR, VC4_DIR, LEGACY_DIR]
-    return [VC4_DIR, PISP_DIR, LEGACY_DIR]
+        return [PISP_DIR, LEGACY_DIR]
+    return [VC4_DIR, LEGACY_DIR]
 
 
 TUNING_DIRS = tuning_dirs()
+
+# Everything on disk, for reporting. Seeing that an autofocus-capable tuning
+# exists but sits in the wrong pipeline's directory is exactly the diagnosis
+# someone needs, so doctor.py should show it even though nothing will load it.
+ALL_DIRS = [PISP_DIR, VC4_DIR, LEGACY_DIR]
 
 AF_KEY = 'rpi.af'
 
@@ -109,7 +122,7 @@ def tuning_report(sensor=None):
     """
     sensor = sensor or sensor_name()
     found = []
-    for directory in TUNING_DIRS + ['/usr/share/libcamera/ipa/rpi/*']:
+    for directory in ALL_DIRS + ['/usr/share/libcamera/ipa/rpi/*']:
         for path in sorted(glob.glob(os.path.join(directory, sensor + '*.json'))):
             if path not in [f[0] for f in found]:
                 found.append((path, _has_af(path)))
@@ -124,10 +137,11 @@ def find_tuning(sensor):
     """
     seen = []
     for directory in TUNING_DIRS:
+        # Arducam's packages drop extra tuning beside the stock file rather than
+        # replacing it, so the whole directory is worth looking at — but only
+        # this pipeline's directory. Reaching into another ISP's tuning to find
+        # autofocus takes the camera down entirely.
         seen.extend(sorted(glob.glob(os.path.join(directory, sensor + '*.json'))))
-    # Arducam's packages drop tuning beside their drivers rather than in the
-    # standard directories.
-    seen.extend(sorted(glob.glob('/usr/share/libcamera/ipa/rpi/*/' + sensor + '*.json')))
 
     ordered = []
     for path in seen:

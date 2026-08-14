@@ -37,13 +37,17 @@ except ImportError:      # running as a plain script
     import pipeline as PL
 
 
-# Corners are re-found no more often than this. The phone does not move quickly
-# enough to need more, and every check costs a detection.
-RECHECK_EVERY = 1.5
+# Corners are re-found no more often than this. Finding them on the preview
+# stream costs about a millisecond, so this is set by how fast the answer should
+# arrive rather than by what it costs: at 0.4s the corners follow a nudge within
+# about two seconds instead of the six the old 1.5s interval took.
+RECHECK_EVERY = 0.4
 
-# Agreeing checks before the corners are allowed to move. Three at the interval
-# above is a shade over four seconds — slower than an offer, faster than a shift.
-AGREE = 3
+# Agreeing checks before the corners are allowed to move. Raised alongside the
+# faster interval on purpose — five checks at 0.4s is both quicker to react and
+# strictly more evidence than three at 1.5s, so a hand crossing the frame has to
+# work harder to be believed, not less.
+AGREE = 5
 
 # How far a candidate may sit from the current corners and still count as the
 # same screen, as a fraction of the screen's own diagonal.
@@ -131,7 +135,12 @@ class QuadTracker:
         # the mount was moved rather than misread. Take the new position whole,
         # since easing toward it would spend seconds cropping the gap between
         # two places the card is not.
-        if self.agreeing >= self.agree * 2:
+        #
+        # It must still be the same *size* of thing. Without that check any
+        # steady bright rectangle — a lit dashboard panel, a window at dusk —
+        # can eventually claim the lock, and re-locking onto one is worse than
+        # never moving at all: the corners are then confidently wrong.
+        if self.agreeing >= self.agree * 2 and same_size(candidate, self.quad):
             self.quad = np.asarray(candidate, dtype=np.float32)
             self.agreeing = 0
             self.moves += 1
@@ -173,6 +182,17 @@ def span(quad):
     """The screen's own scale: the mean of its two diagonals."""
     q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
     return float((np.linalg.norm(q[2] - q[0]) + np.linalg.norm(q[3] - q[1])) / 2.0)
+
+
+# How far the diagonal may differ and still be the same phone, seen from a
+# slightly different place. A phone that has genuinely moved in the mount stays
+# about the same size; something a third bigger or smaller is a different thing.
+SIZE_BAND = (0.78, 1.28)
+
+
+def same_size(a, b):
+    ratio = span(a) / max(span(b), 1.0)
+    return SIZE_BAND[0] <= ratio <= SIZE_BAND[1]
 
 
 def near(a, b, tolerance):

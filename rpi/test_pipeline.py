@@ -127,10 +127,41 @@ eq('no upscaling, no adjustment', sc.read_height, 900)
 sc = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=1400, ocr_height=900)
 eq('a full-height crop never shrinks the warp', sc.read_height, 1400)
 
-# The crop moves at runtime, so the height has to follow it.
+# The crop moves at runtime, so the height has to follow it — up to a point.
 sc = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=900)
-sc.roi = [0.02, 0.33, 0.96, 0.39]
-eq('a re-fitted crop re-derives the height', sc.read_height, 2308)
+sc.roi = [0.02, 0.40, 0.96, 0.45]
+eq('a re-fitted crop re-derives the height', sc.read_height, 2000)
+# A thin crop would otherwise ask for a warp nothing can afford: 0.18 high wants
+# 5000px, which is a 40MB image and an OCR pass to match.
+sc.roi = [0.02, 0.40, 0.96, 0.18]
+eq('but it cannot run away', sc.read_height, PL.MAX_READ_HEIGHT)
+eq('and the search pass is bounded too', sc._search_height(np.zeros((5000, 900), np.uint8)),
+   PL.RESCUE_MAX_HEIGHT)
+
+# --- resize_height goes both ways ------------------------------------------
+eq('resize up', PL.resize_height(np.zeros((450, 300, 3), np.uint8), 900).shape[:2], (900, 600))
+eq('resize down', PL.resize_height(np.zeros((1800, 600, 3), np.uint8), 900).shape[:2], (900, 300))
+eq('resize to the same is a no-op',
+   PL.resize_height(np.zeros((900, 300, 3), np.uint8), 900).shape[:2], (900, 300))
+eq('resize to nothing is refused',
+   PL.resize_height(np.zeros((900, 300, 3), np.uint8), 0).shape[:2], (900, 300))
+
+# --- the crop only moves on real evidence ----------------------------------
+# A driving screen shows the day's earnings: money, no journey. Fitting the crop
+# to that is how a working scanner talks itself onto the wrong half of the
+# screen, and it logged seventy re-fits in twenty minutes doing exactly that.
+offer = [line('Shop & Deliver', 520), line('$7.09', 570, 70),
+         line('34 min (3.6 mi) total', 730), line('Accept', 860)]
+furniture = [line('Today', 120), line('$142.60', 180, 70), line('12 trips', 300)]
+
+ok_('an offer card can be located', PL.fit_roi(offer, 1000) is not None)
+ok_('...and so can a screen of earnings, geometrically',
+    PL.fit_roi(furniture, 1000) is not None)
+# Which is why the gate is not geometric: it is whether the text is an offer.
+import offer_parser as OP2                                    # noqa: E402
+ok_('but only the offer parses as one', OP2.parse(' '.join(l['text'] for l in offer))['complete'])
+ok_('...and the earnings screen does not',
+    not OP2.parse(' '.join(l['text'] for l in furniture))['complete'])
 
 # --- staging the image for tesseract ---------------------------------------
 staged = PL.stage_for_ocr(np.zeros((900, 400), np.uint8))

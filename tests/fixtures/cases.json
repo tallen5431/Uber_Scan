@@ -105,6 +105,51 @@
       "name": "uberx two-leg card, verbatim from a real offer",
       "text": "UberX Exclusive $16.05 4.95 Verified 3 min (1.1 mi) away E 61 St & S Rhodes Ave, IL 20 min (7.3 mi) trip S Cottage Grove Ave & 62nd St, IL Accept",
       "expect": { "pay": 16.05, "minutes": 23, "miles": 8.4, "complete": true }
+    },
+    {
+      "name": "a leg that lost its decimal is repaired before it can become a second leg",
+      "text": "$16.05 3 min (1.1 mi) away 20 min (73 mi) trip",
+      "expect": { "pay": 16.05, "minutes": 23, "miles": 8.4, "legs": 2, "milesCorrected": true, "complete": true }
+    },
+    {
+      "name": "a plausible short leg is left alone, however fast it rounds to",
+      "text": "$9.00 2 min (2.0 mi) away 20 min (6.0 mi) trip",
+      "expect": { "minutes": 22, "miles": 8.0, "milesCorrected": false, "milesUncertain": false }
+    },
+    {
+      "name": "a decimal lost from a total is still repaired",
+      "text": "$7.09 34 min (36 mi) total",
+      "expect": { "minutes": 34, "miles": 3.6, "milesCorrected": true }
+    },
+    {
+      "name": "an implausible leg that ten cannot save stays uncertain",
+      "text": "$20.00 10 min (305 mi) total",
+      "expect": { "miles": 305, "milesUncertain": true, "milesCorrected": false }
+    },
+    {
+      "name": "map noise is not a journey: 'ZIM' must not read as 21 minutes",
+      "text": "Today $142.60 12 trips ZIM Sects eae You are online Marietta, GA",
+      "expect": { "minutes": null, "miles": null, "legs": 0, "complete": false }
+    },
+    {
+      "name": "nor is any bare number-plus-m",
+      "text": "$8.00 Rau WeS 34 m AC a RRC",
+      "expect": { "minutes": null, "complete": false }
+    },
+    {
+      "name": "a minute count needs at least one real digit",
+      "text": "$8.00 SI min (2.0 mi) total",
+      "expect": { "minutes": null, "complete": false }
+    },
+    {
+      "name": "but one real digit among lookalikes is still read",
+      "text": "$8.00 l2 min (2.0 mi) total",
+      "expect": { "minutes": 12, "miles": 2.0, "complete": true }
+    },
+    {
+      "name": "and a mangled 'min' is still a minute",
+      "text": "$7.09 34 mln (3.6 mi) total",
+      "expect": { "minutes": 34, "miles": 3.6, "complete": true }
     }
   ],
   "rate": [

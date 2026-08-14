@@ -120,14 +120,43 @@ Two things run continuously to stop that:
 
 | | |
 |---|---|
-| **Corner tracking** (`track.py`) | The screen is re-found on any still frame, at most every 1.5s, on a 640px thumbnail so it costs almost nothing. A candidate must be the right size, in roughly the right place, and say the same thing three checks running before the corners are eased 35% of the way toward it — so drift is followed and a hand crossing the frame is not. A candidate that keeps insisting from somewhere else for twice as long is treated as the mount having been knocked, and adopted whole. |
-| **Crop recovery** (`fit_roi`) | If a read finds no payout — or finds one hard against the top edge of the crop, which means the crop is cutting the card — the whole screen is read once and the crop is re-fitted to where the payout actually is. The new box is written back to `config.json`, so the next run starts from what this one learned. |
+| **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the right size, in roughly the right place, and say the same thing five checks running before the corners are eased 35% of the way toward it — so drift is followed within about two seconds and a hand crossing the frame is not followed at all. A candidate that keeps insisting from somewhere else for twice as long, *and is the same size of thing*, is treated as the mount having been knocked and adopted whole. |
+| **Crop recovery** (`fit_roi`) | If reads stop finding a payout — or find one hard against the top edge of the crop, which means the crop is cutting the card — the whole screen is read once and the crop is re-fitted to where the payout actually is. The new box is written back to `config.json`, so the next run starts from what this one learned. |
 
 Both are reported in the live view, and `--no-track` turns the first off.
 
 The recovery pass is what makes a bad crop self-correcting rather than silent.
-It costs one slow read (~1s here, more on a Pi) at the moment it fires, and
+It costs one slow read (~0.6s here, more on a Pi) at the moment it fires, and
 normal fast reads resume immediately afterwards.
+
+### Self-correction has to be harder than it sounds
+
+The first version of that recovery was far worse than the problem. A scanner
+logged **70 re-fits in twenty minutes**, each one moving the crop somewhere new
+— `y` wandering between 0.02 and 0.38, height between 0.44 and 0.98 — and spent
+the time between them reading whichever slice of screen the last mistake had
+chosen. It looked exactly like the scanner being slow.
+
+Three things caused it, and all three are worth stating because they are the
+general shape of this hazard:
+
+1. **A payout is not an offer.** The driving screen shows the day's earnings.
+   Money with no journey under it is furniture, and fitting the crop to it is
+   how a working scanner talks itself onto the wrong half of the screen. A
+   re-fit now requires a *complete* read — a payout with a leg.
+2. **Noise makes journeys too.** The minute unit used to accept a bare "m", so
+   `ZIM` out of the road texture parsed as a 21-minute leg — which made the
+   earnings screen above look complete. The unit must now be spelled out, and
+   the number must contain a real digit.
+3. **A thin crop asks for a huge picture.** Read height is derived from the
+   crop's share of the screen, so a crop that re-fitted itself to 0.18 asked for
+   a 5000px warp: a 40MB image and an OCR pass to match. That is capped now.
+
+What remains is deliberately reluctant: several reads must fail in a row with
+nothing succeeding between them, two searches must agree on where the card
+really is, and the crop moves at most once every 20 seconds. Replayed against
+offers interleaved with driving screens it re-fits **zero** times; given a crop
+that is genuinely wrong it re-fits **once** and then reads normally.
 
 ## Where the speed comes from
 
@@ -448,20 +477,29 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 The Pi parser is a port of the browser one. Both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 97 checks
-python3 rpi/test_parser.py      # the same 97 checks
+node tests/corpus.test.js       # 127 checks
+python3 rpi/test_parser.py      # the same 127 checks
 python3 rpi/test_accumulate.py  # 27 checks on merging across frames
-python3 rpi/test_pipeline.py    # 45 checks on where and how big to read
-python3 rpi/test_track.py       # 36 checks on following the phone
+python3 rpi/test_pipeline.py    # 55 checks on where and how big to read
+python3 rpi/test_track.py       # 43 checks on following the phone
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
 
 The corpus includes the false positives that cost real money, because they read
-as perfectly ordinary text. `E 61 St & S Rhodes Ave` came off a real card as
-`S 4S Rhodes`, which the loose money pattern read as a **$45.00 offer** — a
-confident ACCEPT on a $7 job. The fallback for a dollar sign misread as `S` now
-insists on cents, which every Uber payout has.
+as perfectly ordinary text. Each of these came off a real rig:
+
+- `E 61 St & S Rhodes Ave` was read as `S 4S Rhodes`, which the loose money
+  pattern turned into a **$45.00 offer** — a confident ACCEPT on a $7 job. The
+  fallback for a dollar sign misread as `S` now insists on cents.
+- `20 min (7.3 mi)` was read as `(73 mi)`. Left alone that does more than
+  inflate the distance: the merger keys legs by distance, so it filed a *third*
+  leg beside the real one and a 23-minute card reported **43 minutes and 81.4
+  miles**. A leg is now checked against its own time and a lost decimal put back
+  while it is still recognisable as the leg it came from.
+- `ZIM`, out of map texture, parsed as a **21-minute leg**, which made a screen
+  with no offer on it look like a complete offer. The minute unit must now be
+  spelled out and the number must contain a real digit.
 
 ## If something is wrong
 

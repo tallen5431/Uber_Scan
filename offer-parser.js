@@ -99,9 +99,14 @@
 
   // "34 min (3.6 mi) total", "1 hr 4 min (26.1 mi)", "23 min (8.4mi) trip".
   // The distance group is optional so a time with no miles still registers.
+  // The minute unit has to be spelled out. It was once allowed to be a bare
+  // "m", and on a map full of street names that turns any two letters into a
+  // journey: "ZIM" out of the road texture became a 21-minute leg, which is
+  // enough to make a screen with no offer on it look like an offer. The "i" may
+  // still be a lookalike, because that is one guess inside a confirmed word.
   var LEG = new RegExp(
     '(?:(\\d{1,2})\\s*h(?:r|rs|our|ours)?\\s*)?' +   // optional hours
-    '(' + DC + '{1,3})\\s*m(?:in|ins|inute|inutes)?\\b' +
+    '(' + DC + '{1,3})\\s*m[il1|]n(?:s|ute|utes)?\\b' +
     '(?:[^(\\d]{0,6}\\(?\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b\\s*\\)?)?',
     'gi'
   );
@@ -114,7 +119,9 @@
     while ((m = LEG.exec(text)) !== null) {
       var hours = toNumber(m[1]) || 0;
       var mins = toNumber(m[2]);
-      if (mins === null) continue;
+      // The number has to contain a real digit. "SI min" is two guesses
+      // stacked, and stacked guesses are how noise becomes data.
+      if (mins === null || !/\d/.test(String(m[2]))) continue;
       var minutes = hours * 60 + mins;
       if (minutes <= 0 || minutes > 600) continue;
 
@@ -124,12 +131,20 @@
       // thing to be lost, so remember whether this reading actually had one.
       var hadDecimal = m[3] !== undefined && /[.,]/.test(String(m[3]));
 
+      // Recover a decimal lost from this leg alone, before it reaches the sum.
+      // "20 min (7.3 mi)" read as "(73 mi)" is a 219 mph leg, and left alone it
+      // does more than inflate the distance: a merger keying legs by distance
+      // files it as a third leg beside the real one, so a 23-minute card
+      // reports 43 minutes.
+      var fixed = recoverDecimal(minutes, miles, hadDecimal);
+      miles = fixed.miles;
+
       // Uber labels a combined figure "total"; a card that has one is not also
       // listing its legs, so mixing the two would double count the trip.
       var tail = text.slice(m.index + m[0].length, m.index + m[0].length + 14).toLowerCase();
       legs.push({
-        minutes: minutes, miles: miles, hadDecimal: hadDecimal,
-        isTotal: /\btota?l\b/.test(tail)
+        minutes: minutes, miles: miles, hadDecimal: hadDecimal || fixed.corrected,
+        isTotal: /\btota?l\b/.test(tail), corrected: fixed.corrected
       });
 
       if (m.index === LEG.lastIndex) LEG.lastIndex++;
@@ -142,6 +157,22 @@
   // No offer averages highway speed door to door once pickup, lights and
   // parking are in it. A reading above this means the distance was misread.
   var MAX_MPH = 55;
+
+  // Deliberately narrower than checkDistance: only ever divides by ten, only
+  // when the reading had no decimal at all, and only when that lands the leg
+  // back in a believable range. Anything else is left for the total to judge,
+  // because leg times are whole minutes and a two-minute leg is too coarse to
+  // argue with — a rounded 2 min over 2.0 mi is already "60 mph" and real.
+  function recoverDecimal(minutes, miles, hadDecimal) {
+    if (miles === null || miles === undefined || !minutes || hadDecimal) {
+      return { miles: miles, corrected: false };
+    }
+    if (miles / (minutes / 60) <= MAX_MPH) return { miles: miles, corrected: false };
+    var recovered = miles / 10;
+    var mph = recovered / (minutes / 60);
+    if (mph >= 0.5 && mph <= MAX_MPH) return { miles: recovered, corrected: true };
+    return { miles: miles, corrected: false };
+  }
 
   // Guards against the one OCR failure that silently inverts the answer:
   // losing the decimal in "3.6 mi" turns a 6 mph errand into a 63 mph one, and
@@ -170,17 +201,19 @@
     var totals = legs.filter(function (l) { return l.isTotal; });
     var used = totals.length ? totals : legs;
 
-    var minutes = null, miles = null, hadDecimal = false;
+    var minutes = null, miles = null, hadDecimal = false, correctedLeg = false;
     for (var i = 0; i < used.length; i++) {
       minutes = (minutes || 0) + used[i].minutes;
       if (used[i].miles !== null) {
         miles = (miles || 0) + used[i].miles;
         if (used[i].hadDecimal) hadDecimal = true;
+        if (used[i].corrected) correctedLeg = true;
       }
     }
 
     var dist = checkDistance(minutes, miles, hadDecimal);
     miles = dist.miles;
+    dist.corrected = dist.corrected || correctedLeg;
 
     var itemMatch = text.match(ITEMS);
     var items = itemMatch ? toNumber(itemMatch[1]) : null;
