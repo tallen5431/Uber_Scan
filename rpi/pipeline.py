@@ -10,8 +10,10 @@ The speed of this thing comes from what it refuses to do:
   * and it does not spend a third of each read compressing a PNG nobody wants
     (see stage_for_ocr).
 
-Tesseract cost scales with pixels, so the warp is worth far more than any
-tuning of the engine itself.
+Tesseract's cost is mostly the recogniser walking the text, not the image: four
+times the pixels measured 26% more time. So the wins are in not running it, and
+in not making it read the same page twice (see OCR_CONFIG) — not in shaving
+pixels off a picture it was going to read either way.
 """
 
 import atexit
@@ -35,7 +37,14 @@ MOTION_SIZE = (160, 120)   # the gate runs on a thumbnail; it is nearly free
 CHANGE_T = 6.0             # mean abs difference that counts as "something happened"
 STILL_T = 2.0              # ...and below which the picture has settled again
 CARD_HEIGHT = 1100         # canonical warp height; the decimal point needs this
-OCR_CONFIG = '--oem 1 --psm 6'
+# tessedit_do_invert=0 is the one engine switch worth setting. When a page
+# scores badly, tesseract runs the whole thing again inverted in case it was
+# white-on-black — and preprocess() hands it dark text on a light card every
+# single time, so that second pass can never help and is pure cost. It is paid
+# exactly where it hurts most, on the reads that fail: a map costs 282ms with
+# the retry and 211 without, a dark screen 199 against 154. Half of a driving
+# shift's reads are of something that is not an offer.
+OCR_CONFIG = '--oem 1 --psm 6 -c tessedit_do_invert=0'
 
 # How tall the card image handed to tesseract should be, whatever the mount
 # gives us. This is the single highest-value number in the file.
@@ -104,7 +113,18 @@ def _detect_quad(frame, min_area_frac, max_area_frac):
         return None
 
     h, w = frame.shape[:2]
-    best = max(contours, key=cv2.contourArea)
+    # The biggest bright thing that the middle of the frame is inside — and
+    # only failing that, the biggest bright thing.
+    #
+    # "Biggest" alone is a guess about the scene, and it is wrong whenever
+    # something in the car is brighter and larger than the phone: a lit
+    # dashboard panel, a window at dusk, a passenger's own screen. Aiming the
+    # card at the middle is a thing the driver can actually do and does, so it
+    # is better evidence than size, and preferring it means the outline stops
+    # wandering off onto scenery.
+    centre = (w / 2.0, h / 2.0)
+    inside = [c for c in contours if cv2.pointPolygonTest(c, centre, False) >= 0]
+    best = max(inside or contours, key=cv2.contourArea)
     area = cv2.contourArea(best)
     if area < h * w * min_area_frac or area > h * w * max_area_frac:
         return None
@@ -486,82 +506,49 @@ def ocr_lines(image, config=OCR_CONFIG):
     return '\n'.join(l['text'] for l in lines), lines
 
 
-# Padding around the text found on the card, as a fraction of screen height.
+# The crop, and why it is not learned any more.
 #
-# Generous on purpose, and generous above in particular. These were half this
-# size and the crops came back shaved: one capture from the road cropped in
-# below the "$16.05" it was supposed to be reading, and reported a payout it had
-# only remembered from an earlier frame. Clipping the top line is the expensive
-# mistake here, and buffer is nearly free — it costs a few percent of a read and
-# does not shrink the text, because the size handed to the reader is set by
-# CARD_SHARE rather than by how much slack the crop carries.
-FIT_PAD_ABOVE = 0.10
-FIT_PAD_BELOW = 0.05
-# Anything shorter than this did not find a card. Raised alongside the padding:
-# with generous margins even a lone payout near the foot of the screen produces
-# a box tall enough to look plausible, and a lone payout is furniture.
-FIT_MIN_HEIGHT = 0.28
+# It used to find itself: fit the box to wherever the payout and the lines
+# under it landed, widen when reads failed, tighten when they worked, with
+# agreement counting and settling times to keep it honest. It was careful and
+# it still could not converge, because it was chasing something that genuinely
+# moves. A rig logged **sixteen crop moves in eighteen minutes** — 0.70, 0.45,
+# 0.70, 0.54, 0.74, 0.54, 0.71, 0.82, 0.92, 0.66, 0.46, 0.80 — never settling,
+# and spending the gaps reading whichever slice the last move had chosen.
+#
+# Nothing was wrong with the fitting. An UberX card and a Shop & Deliver card
+# are different heights; a two-leg card is taller than a one-leg card. Every
+# one of those moves was a correct fit to the card in front of it, and the next
+# card wanted a different box. A crop learned from the last offer is always the
+# wrong shape for the next one.
+#
+# So it is derived instead. Two things are known without learning anything:
+# how much of the quad is card (card_share_of_quad, measured per read), and
+# that the card is aimed at the middle of the frame. That is enough to place a
+# box, it costs nothing, it cannot drift, and it is right for the *current*
+# card rather than the last one.
+#
+# Slack on top of the card's own height, to cover the card not being perfectly
+# centred and card_share erring low by design (it assumes the shortest phone
+# there is). A fifth of the screen is about a centimetre of aim.
+CROP_SLACK = 0.20
 
-# How much of the card a crop must be able to hold to be worth believing.
-#
-# Well under 1.0, because a fit is anchored on the payout and the lowest line
-# beneath it — not on the card. On a real Uber card that span plus its padding
-# is about 73% of the card rectangle; the rest is the badge row above and the
-# Accept button below, neither of which is worth a pixel. A floor above that
-# would refuse every correct tightening there is. What it has to exclude is a
-# fit that caught the middle of a card and lost the payout, which measured
-# around 57%. See Scanner.min_crop_height.
-CROP_HOLDS = 0.60
+
+def centred_roi(card_share, slack=CROP_SLACK):
+    """The box to read, given how much of the quad the card takes up.
+
+    Centred, because that is where the card is put. Never taller than the quad
+    and never so tall that it is not a crop at all — on a mount close enough
+    that the visible screen is nearly all card, the honest answer is to read
+    all of it, and this returns that.
+    """
+    height = min(1.0, float(card_share) + slack)
+    return [0.0, (1.0 - height) / 2.0, 1.0, height]
+
 
 # A payout this close to the top edge of the crop, as a fraction of the crop's
 # height, is not trusted to be whole.
 TOP_EDGE = 0.02
-
-
-# A crop this much taller than the card it holds is worth tightening. Loose
-# enough that ordinary variation between cards does not cause a move.
-TIGHTEN_SLACK = 1.30
-
-
-def tighten_roi(lines, image_height, current, min_height=FIT_MIN_HEIGHT):
-    """Shrink a working crop onto the card inside it. Returns a box or None.
-
-    The mirror of fit_roi, and the half that makes a clipped screen workable.
-    fit_roi answers "reads are failing, where is the card?" by looking at the
-    whole screen; this answers "reads are working, but how much of this crop is
-    actually card?" from the lines a successful read already produced — which
-    costs nothing, because the reader hands back its layout anyway.
-
-    Together they mean the crop never has to be guessed from the geometry of
-    the screen. It can start as the whole of whatever is visible, which cannot
-    miss the card however the phone is framed, and walk in to fit.
-
-    `lines` are positioned within the crop; the box returned is in screen
-    fractions, like `current`.
-    """
-    if not lines or not image_height or not current:
-        return None
-
-    money = [l for l in lines if OP.find_pay(OP.normalize(l['text'])) is not None]
-    if not money:
-        return None
-
-    top = min(l['top'] for l in money) / float(image_height)
-    bottom = max(l['bottom'] for l in lines if l['top'] >= min(m['top'] for m in money))
-    bottom = bottom / float(image_height)
-
-    # Padding is expressed against the screen, so convert it into this crop's
-    # own scale before applying it, or a small crop gets a huge margin.
-    scale = current[3] or 1.0
-    top = max(0.0, top - FIT_PAD_ABOVE / scale)
-    bottom = min(1.0, bottom + FIT_PAD_BELOW / scale)
-    if bottom - top >= 1.0:
-        return None                      # already tight
-
-    fitted = [current[0], current[1] + top * scale, current[2], (bottom - top) * scale]
-    if fitted[3] < min_height or current[3] < fitted[3] * TIGHTEN_SLACK:
-        return None                      # too short to hold a card, or not worth moving
-    return fitted
 
 
 def money_is_clipped(lines, image_height):
@@ -583,72 +570,6 @@ def money_is_clipped(lines, image_height):
     return min(l['top'] for l in money) <= TOP_EDGE * image_height
 
 
-def fit_roi(lines, image_height, current=None, min_height=FIT_MIN_HEIGHT):
-    """Where the offer card is, deduced from where its text landed.
-
-    The payout is the top of the card for our purposes — everything above it is
-    map — and the lowest text is the bottom. Anchoring to the money rather than
-    to all text is what keeps street labels on the map from dragging the crop
-    back over the whole screen.
-
-    Returns a fractional (x, y, w, h) box, or None when there is nothing to
-    anchor to. The horizontal extent is inherited, because the card always spans
-    the screen and a short line would otherwise narrow the crop onto itself.
-    """
-    if not lines or not image_height:
-        return None
-
-    money = [l for l in lines if OP.find_pay(OP.normalize(l['text'])) is not None]
-    if not money:
-        return None
-
-    top = min(l['top'] for l in money)
-    bottom = max(l['bottom'] for l in lines if l['top'] >= top)
-
-    y0 = max(0.0, top / float(image_height) - FIT_PAD_ABOVE)
-    y1 = min(1.0, bottom / float(image_height) + FIT_PAD_BELOW)
-    if y1 - y0 < min_height:
-        return None
-
-    x0, w = (current[0], current[2]) if current else (0.0, 1.0)
-    return [float(x0), float(y0), float(w), float(y1 - y0)]
-
-
-# A crop that has slid off the card is worth work to put back. All of the rest
-# of these numbers exist because that work, left ungoverned, is far worse than
-# the problem: a scanner logged 70 re-fits in twenty minutes, each one moving
-# the crop somewhere new, and spent the time between them reading whichever
-# slice of screen the last mistake had chosen.
-#
-# The governing idea is that a crop which is genuinely in the wrong place fails
-# *every* time. One failed read is an empty screen or a blurred frame; several
-# in a row, with nothing succeeding between them, is a crop that has stopped
-# working.
-MISSES_BEFORE_RESCUE = 2
-RESCUE_EVERY = 1.2          # ...and no more often than this even then
-
-# How many consecutive failures are worth chasing before accepting that the
-# screen simply has no offer on it. Enough to reach the rescue and act on it,
-# few enough that an idle scanner goes quiet again.
-RECOVER_LOOKS = 4
-
-# Two searches must land in the same place before the crop actually moves, and
-# having moved it, it stays put for a while. A single search is one OCR pass on
-# a hard image and is quite capable of being wrong.
-#
-# The intervals are short because the *conditions* are what make this safe, not
-# the waiting. A search only counts if it read a complete offer, and two of them
-# have to agree; once that holds there is nothing to be gained by sitting on the
-# answer, and plenty to lose — every second spent deciding is a second spent
-# reading the wrong part of the screen.
-REFIT_AGREE = 0.06          # how close two proposals must be to count as agreeing
-REFIT_EVERY = 6.0           # seconds between actually moving the crop
-
-# The rescue pass reads the whole screen, and the card is only part of it, so it
-# needs proportionally more height to leave the card legible — but not without
-# limit, or a tall thin crop would ask for a picture nothing can afford to read.
-RESCUE_MAX_HEIGHT = 1500
-
 # Ceiling on the warp used for a read. Without one, a crop that has re-fitted
 # itself thin asks for a proportionally taller screen — a 0.18-high crop wants
 # 5000px, which is a 40MB warp and an OCR pass to match. That is the difference
@@ -666,15 +587,15 @@ class Scanner:
         # Fractional (x, y, w, h) of the warped screen holding the offer card.
         # Uber puts it in the same place every time, so cropping to it is free
         # accuracy and halves the pixels tesseract has to walk.
+        # A fixed override for the crop. Left None — which is the normal case —
+        # the crop is derived per read from the measured geometry, which is
+        # what stops it wandering. See centred_roi.
         self.roi = roi
         self.settings = settings or {}
         self.agree_to_lock = agree_to_lock
         self.card_height = card_height
         self.ocr_height = ocr_height
         self.config = config
-        # Called with the new box whenever the crop is re-fitted, so the owner
-        # can write it down rather than rediscovering it every run.
-        self.on_roi = on_roi
 
         # The card's share of the quad, which is CARD_SHARE only while the
         # whole screen is in frame. Measured from the first frame that arrives,
@@ -687,17 +608,21 @@ class Scanner:
         self.last_diff = 0.0    # how much the picture moved, for callers that care
         self._sig = None
         self._agree = 0
-        self._last_rescue = 0.0
-        self._last_refit = 0.0
-        self._misses = 0
-        self._proposal = None
-        # Whether this crop has ever produced a whole reading. A crop that has
-        # is defended; one that has not is still a guess. See _adopt.
-        self._roi_proven = False
-        self.rescues = 0
         self.dropped = 0
         self.locked = False
         self.last = None
+
+    @property
+    def crop_box(self):
+        """The box to read this frame, derived rather than remembered.
+
+        Nothing here carries over from the last read. That is the point: a crop
+        learned from the last offer is the wrong shape for the next one, since
+        an UberX card and a Shop & Deliver card are different heights and a
+        two-leg card is taller than a one-leg card. Deriving it costs nothing
+        and is right for the card actually in front of the camera.
+        """
+        return self.roi if self.roi else centred_roi(self.card_share)
 
     @property
     def read_height(self):
@@ -721,37 +646,10 @@ class Scanner:
         card already, and warping as though it were half a screen makes a
         picture nearly twice as tall as the reader can use.
         """
-        if self.roi and self.roi[3] and self.ocr_height:
-            return int(min(max(self.card_height, round(self.ocr_height / self.card_share)),
-                           MAX_READ_HEIGHT))
-        return self.card_height
-
-    def _search_height(self, screen):
-        """Height for the whole-screen pass that looks for a lost card."""
         if not self.ocr_height:
-            return screen.shape[0]
-        share = (self.roi[3] if self.roi else 1.0) or 1.0
-        return int(min(max(self.ocr_height / share, self.ocr_height), RESCUE_MAX_HEIGHT))
-
-    @property
-    def min_crop_height(self):
-        """Shortest crop worth believing, as a fraction of the quad.
-
-        A crop cannot be much shorter than the card and still hold it, and how
-        tall the card is on this mount is known (card_share) rather than
-        guessed. Without this the failure is self-inflicted and self-sustaining:
-        a fit that catches only the middle of the card leaves a crop far wider
-        than it is tall, the pixel ceiling then shrinks the text to fit, the
-        payout drops below a readable size, and the reads that follow fail in
-        exactly the way that asks for another re-fit.
-
-        This is above FIT_MIN_HEIGHT even on an unclipped mount — 0.375 of a
-        screen against a bare 0.28 — because the bare number was a guess made
-        without knowing how big the card was, and now that is known. The max()
-        is only there so a caller that sets card_share by hand cannot go under
-        the old floor.
-        """
-        return max(FIT_MIN_HEIGHT, self.card_share * CROP_HOLDS)
+            return self.card_height
+        return int(min(max(self.card_height, round(self.ocr_height / self.card_share)),
+                       MAX_READ_HEIGHT))
 
     def _motion(self, frame):
         small = cv2.cvtColor(cv2.resize(frame, MOTION_SIZE, interpolation=cv2.INTER_AREA),
@@ -763,25 +661,6 @@ class Scanner:
         diff = float(np.mean(cv2.absdiff(small, self._prev)))
         self._prev = small
         return diff
-
-    @property
-    def recovering(self):
-        """True while extra looks are still worth taking at a suspect crop.
-
-        The motion gate fires once per card, so left alone a suspect crop learns
-        one thing per offer and takes several offers to work out that it is
-        broken. A caller that keeps feeding it frames while this is set turns
-        that into a couple of seconds.
-
-        Bounded, and that bound is the whole point. "Reads are failing" is the
-        normal state of a scanner pointed at a screen with no offer on it, so a
-        caller that re-armed on every failure would never stop: the extra looks
-        fail, which asks for more extra looks, and a motion-gated scanner that
-        should be idle instead warps and OCRs twice a second forever. A few
-        looks are enough to tell a broken crop from an empty screen; after that
-        the answer is in, and the gate can go back to doing its job.
-        """
-        return self.roi is not None and 0 < self._misses <= RECOVER_LOOKS
 
     @property
     def settled(self):
@@ -810,7 +689,7 @@ class Scanner:
             self.card_share = card_share_of_quad(self.quad, frame.shape)
         screen = warp(frame, self.quad, self.read_height) if self.quad is not None else frame
         t1 = time.perf_counter()
-        prepped = preprocess(fit_for_ocr(crop(screen, self.roi), self.ocr_height))
+        prepped = preprocess(fit_for_ocr(crop(screen, self.crop_box), self.ocr_height))
         t2 = time.perf_counter()
         # Asked for its layout as well as its text, at no extra cost, because
         # where the payout landed is the only way to tell a crop that read
@@ -819,42 +698,16 @@ class Scanner:
         t3 = time.perf_counter()
         parsed = OP.parse(text)
 
-        # Either of these means the crop, not the screen, is the problem — and
-        # from inside the crop neither is distinguishable from an empty screen.
-        # Ask the whole screen where the card really is.
-        refit = None
+        # A payout hard against the cut edge is half a number, and half a
+        # number still reads as a number: a "4.95" rating with its top shaved
+        # became a $45.00 offer in testing. Nothing is re-fitted over it any
+        # more — the crop is derived and has nowhere better to go — so the
+        # answer is simply to report nothing. A missed offer costs one fare; a
+        # phantom $45 one costs an hour driving it.
         clipped = money_is_clipped(lines, prepped.shape[0])
-        suspect = parsed['pay'] is None or clipped
-        if not suspect:
-            # The crop is working. Whatever it failed to read a moment ago was
-            # the screen's fault, not the crop's.
-            self._misses = 0
-            # ...and a working crop is the one chance to make it a *tight* one,
-            # from lines this read already produced. A crop that starts as the
-            # whole visible screen cannot miss the card however the phone is
-            # framed; this is what stops it staying that expensive.
-            if parsed['complete'] and self.roi:
-                self._roi_proven = True
-                refit = self._adopt(tighten_roi(lines, prepped.shape[0], self.roi,
-                                                self.min_crop_height), now)
-            else:
-                self._proposal = None
-        elif self.roi:
-            self._misses += 1
-        if suspect and self.roi and self._misses >= MISSES_BEFORE_RESCUE \
-                and (now - self._last_rescue) > RESCUE_EVERY:
-            self._last_rescue = now
-            rescued, refit = self._rescue(screen, now)
-            if rescued is not None:
-                parsed, text = rescued['parsed'], rescued['text']
-            elif clipped:
-                # The crop found a payout hard against its cut edge and the
-                # whole screen found none. One of the two passes is wrong, and
-                # it is not the one that could see the entire card. Report
-                # nothing: a missed offer costs one fare, a phantom $45 one
-                # costs an hour driving it.
-                parsed = OP.parse('')
-                self.dropped += 1
+        if clipped:
+            parsed = OP.parse('')
+            self.dropped += 1
 
         rate = OP.rate(parsed, self.settings)
         t4 = time.perf_counter()
@@ -865,10 +718,9 @@ class Scanner:
             'rate': rate,
             'locked': self.locked,
             'text': text,
-            'refit': refit,
             # Why a read was unsatisfying, for whoever has to explain it later.
             'clipped': clipped,
-            'misses': self._misses,
+            'crop': list(self.crop_box),
             # The exact picture the reader was given, so a caller can measure how
             # bright it was and whether it was rippling.
             'card': prepped,
@@ -880,83 +732,6 @@ class Scanner:
                 'total': (t4 - t0) * 1000,
             },
         }
-
-    def _adopt(self, fitted, now):
-        """Move the crop to `fitted`, but only on agreement. Returns it or None.
-
-        Shared by both directions — the rescue that widens onto a lost card and
-        the tightening that trims a working crop — because the discipline is
-        the same either way. A single fit is one OCR pass on a hard image and is
-        quite capable of being wrong; two that agree is evidence, and having
-        moved, it stays put for a while so the crop cannot oscillate.
-
-        That settling time is owed to a crop that has *earned* it. A crop which
-        has produced a whole reading is worth defending against one bad search;
-        a crop that has never read anything is a guess, and making a guess sit
-        out the same six seconds is how the box ends up somewhere useless and
-        stays there. So the wait applies only once the crop has worked at least
-        once, which is the difference between recovering inside one offer and
-        recovering inside several.
-        """
-        if not fitted or _same_roi(fitted, self.roi):
-            self._proposal = None
-            return None
-        if not (self._proposal and _same_roi(fitted, self._proposal, REFIT_AGREE)):
-            self._proposal = fitted
-            return None
-        if self._roi_proven and (now - self._last_refit) < REFIT_EVERY:
-            return None
-
-        self._proposal = None
-        self._last_refit = now
-        self._misses = 0
-        self._roi_proven = False
-        self.roi = fitted
-        if self.on_roi:
-            self.on_roi(fitted)
-        return fitted
-
-    def _rescue(self, screen, now):
-        """Find the card on the whole screen and move the crop back onto it.
-
-        Two passes on purpose. The first only has to find the payout and say
-        where it is; the second reads the re-cropped card properly, and that is
-        the answer returned.
-
-        The search pass is scaled by how much of the screen the card was last
-        thought to occupy, because a card at half the screen's height needs the
-        screen at twice the card's target to arrive legible. Getting this wrong
-        is silent and total: the search finds no money on a screen with money on
-        it, and concludes the crop was fine.
-        """
-        wide = resize_height(screen, self._search_height(screen))
-        text, lines = ocr_lines(preprocess(wide), self.config)
-        parsed = OP.parse(text)
-        if parsed['pay'] is None:
-            return None, None       # genuinely nothing on the screen
-
-        found = {'parsed': parsed, 'text': text}
-
-        # Only a whole offer may move the crop. This is the rule that matters:
-        # a driving screen shows the day's earnings, a promotion, a fare
-        # estimate — money with no journey attached — and fitting the crop to
-        # one of those is exactly how a working scanner talks itself onto the
-        # wrong part of the screen and stays there. A payout with a leg beneath
-        # it is an offer card; a payout on its own is furniture.
-        if not parsed['complete']:
-            return found, None
-
-        fitted = self._adopt(fit_roi(lines, wide.shape[0], self.roi,
-                                     self.min_crop_height), now)
-        if not fitted:
-            return found, None      # the card is where we thought, or not agreed yet
-        self.rescues += 1
-
-        again = ocr(preprocess(fit_for_ocr(crop(screen, fitted), self.ocr_height)), self.config)
-        reparsed = OP.parse(again)
-        if reparsed['pay'] is None:
-            return {'parsed': parsed, 'text': text}, fitted
-        return {'parsed': reparsed, 'text': again}, fitted
 
     def _consider(self, parsed):
         if not parsed['complete']:
@@ -975,10 +750,3 @@ class Scanner:
         if not self.should_read(frame):
             return None
         return self.read(frame)
-
-
-def _same_roi(a, b, tol=0.02):
-    """Boxes this close are the same box; moving between them is jitter."""
-    if a is None or b is None:
-        return a is b
-    return all(abs(float(x) - float(y)) <= tol for x, y in zip(a, b))

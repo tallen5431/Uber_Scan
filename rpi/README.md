@@ -116,90 +116,100 @@ same fraction now lands lower on the real screen, the crop walks off the payout,
 and the scanner reports — perfectly confidently — that there is no offer, on a
 screen with an offer on it.
 
-Two things run continuously to stop that:
+One thing runs continuously to stop that, and one thing used to:
 
 | | |
 |---|---|
-| **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the same size as the screen already held and in roughly the right place; a small correction of something that passes both is followed on the first check, and a larger move has to say the same thing five checks running before the corners are eased 35% of the way toward it. A candidate that keeps insisting from somewhere else for twice as long, and is still the same size of thing, is treated as the mount having been knocked and adopted whole. |
-| **Crop recovery** (`fit_roi`) | If reads stop finding a payout — or find one hard against the top edge of the crop, which means the crop is cutting the card — the whole screen is read once and the crop is re-fitted to where the payout actually is. The new box is written back to `config.json`, so the next run starts from what this one learned. |
-| **Crop tightening** (`tighten_roi`) | The other direction, and free: a read that worked already handed back where every line landed, so a crop carrying more than about 30% slack around its card is trimmed onto it. This is what lets the crop ship as "everything visible" and still end up fast, and it is why no assumption about how the phone is framed is needed anywhere. |
+| **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the same size as the screen already held and in roughly the right place; a small correction of something that passes both is followed on the first check, and a larger move has to say the same thing five checks running before the corners are eased 35% of the way toward it. A candidate that keeps insisting from somewhere else for twice as long, and is still the same size of thing, is treated as the mount having been knocked and adopted whole. `--no-track` turns it off. |
+| **Crop fitting** | There used to be a second mechanism here that moved the crop about looking for the card. It is gone — see below. |
 
-Both are reported in the live view, and `--no-track` turns the first off.
+### The crop stopped chasing the card
 
-The recovery pass is what makes a bad crop self-correcting rather than silent.
-It costs one slow read (~0.6s here, more on a Pi) at the moment it fires, and
-normal fast reads resume immediately afterwards.
+There used to be a whole machine here. The crop found itself: fit the box to
+wherever the payout and the lines beneath it landed, widen it when reads
+failed, tighten it when they worked, with agreement counting, settling times,
+and a rule that a crop had to prove itself before it earned the right to sit
+still. Every one of those rules was added to fix a real misbehaviour, and each
+one did.
 
-### Self-correction has to be harder than it sounds
+It still could not converge. A rig logged **sixteen crop moves in eighteen
+minutes**, height going 0.70, 0.45, 0.70, 0.54, 0.74, 0.54, 0.71, 0.82, 0.92,
+0.66, 0.46, 0.80, and spent the gaps reading whichever slice the last move had
+chosen.
 
-The first version of that recovery was far worse than the problem. A scanner
-logged **70 re-fits in twenty minutes**, each one moving the crop somewhere new
-— `y` wandering between 0.02 and 0.38, height between 0.44 and 0.98 — and spent
-the time between them reading whichever slice of screen the last mistake had
-chosen. It looked exactly like the scanner being slow.
+The interesting part is that nothing was malfunctioning. An UberX card and a
+Shop & Deliver card are different heights. A two-leg card is taller than a
+one-leg card. **Every one of those fits was correct for the card in front of
+it, and wrong for the next one.** A crop learned from the last offer is a
+memory of a card that is no longer on the screen, and no amount of hysteresis
+fixes a design that is remembering the wrong thing.
 
-Three things caused it, and all three are worth stating because they are the
-general shape of this hazard:
+So it is derived instead. Two things are known without learning anything:
 
-1. **A payout is not an offer.** The driving screen shows the day's earnings.
-   Money with no journey under it is furniture, and fitting the crop to it is
-   how a working scanner talks itself onto the wrong half of the screen. A
-   re-fit now requires a *complete* read — a payout with a leg.
-2. **Noise makes journeys too.** The minute unit used to accept a bare "m", so
-   `ZIM` out of the road texture parsed as a 21-minute leg — which made the
-   earnings screen above look complete. The unit must now be spelled out, and
-   the number must contain a real digit.
-3. **A thin crop asks for a huge picture.** Read height is derived from the
-   crop's share of the screen, so a crop that re-fitted itself to 0.18 asked for
-   a 5000px warp: a 40MB image and an OCR pass to match. That is capped now.
+- how much of the quad is card — measured per read, `card_share_of_quad`;
+- that the card is aimed at the middle of the frame, because that is a thing a
+  driver can actually do, and the one running this rig says they do.
 
-What remains is deliberately conditional rather than slow: several reads must
-fail in a row with nothing succeeding between them, and two whole-screen
-searches must agree on where the card really is. Those conditions are what makes
-it safe, so the *intervals* can be short — every second spent deciding is a
-second spent reading the wrong part of the screen. A crop that is genuinely
-misplaced repairs itself in about **three reads, six seconds of Pi time**;
-replayed against offers interleaved with driving screens it moves **zero**
-times.
+That is enough to place a box (`centred_roi`), it costs nothing, and it is
+right for the card *currently* in front of the camera rather than the last one.
+It has the property the old machine could not have at any level of care: the
+same mount produces the same box, every read, forever.
 
-There is a fourth rule that came later, and it is about who the caution is
-*for*. Having moved, the crop sits still for six seconds so it cannot
-oscillate. That is worth having when the crop has read something — one bad
-search should not undo a working crop. It is worth nothing when the crop has
-never read anything at all, which is a guess, and making a guess serve the same
-sentence is how a box lands somewhere useless and stays there. So the settling
-time applies only once a crop has produced a whole reading. Unproven crops are
-free to move immediately, which is the difference between recovering inside one
-offer and recovering inside several.
+Across both card types, five card positions and mounts from 520px to 1450px of
+screen width — **42/42 exact reads**, and the box is identical for an UberX
+card and a Shop & Deliver card at every mount:
+
+| screen in frame | card's share of the quad | crop |
+|---|---|---|
+| 520–760px (whole phone visible) | 0.50 | 0.70 |
+| 900px | 0.52 | 0.72 |
+| 1200px | 0.70 | 0.90 |
+| 1450px | 0.84 | 1.00 — read whole |
+
+**What was lost.** The old fitting could find a card the crop had slid off
+entirely. Nothing can do that now, because nothing needs to: the crop cannot
+slide off something it recomputes every read. What genuinely goes is the case where the
+card is *not* near the middle — a phone mounted so the offer sits in a corner
+now needs aiming rather than fixing itself. That is the trade, and it is the
+one the driver asked for.
+
+The one guard that survives is `money_is_clipped`: a payout hard against the
+cut edge of the crop is half a number, and half a number still reads as a
+number — a `4.95` rating with its top shaved became a `$45.00` offer in
+testing. There is nowhere better to re-fit to any more, so the answer is to
+report nothing. A missed offer costs one fare; a phantom $45 one costs an hour
+driving it.
 
 ### The crop is loose on purpose
 
-A tight crop looks efficient and is not. The card's top edge moves with the
-phone, with the service badge above the payout, and with the card type, and a
-crop that clips the payout does not degrade — it reports no offer at all, or
-reads the rating underneath as one. Measured against cards drawn anywhere from
-0.34 to 0.58 down the screen:
+The box is the card's own height plus a fifth of the quad (`CROP_SLACK`), not
+the card's height exactly. A tight crop looks efficient and is not: the card's
+top edge moves with the service badge above the payout and with the card type,
+and a crop that clips the payout does not degrade gracefully — it reports no
+offer at all, or reads the rating underneath as one. Measured against cards
+drawn anywhere from 0.34 to 0.58 down the screen, back when the crop was a
+hand-set box:
 
 | Crop | Exact reads | Lost the payout entirely |
 |---|---|---|
-| `[0.02, 0.48, 0.96, 0.50]` (old) | 28/42 | **13** |
+| `[0.02, 0.48, 0.96, 0.50]` (tight) | 28/42 | **13** |
 | **`[0.0, 0.40, 1.0, 0.60]`** | **42/42** | **0** |
 | `[0.0, 0.30, 1.0, 0.70]` | 42/42 | 0, but slower and no better |
 
 Where nothing was being clipped, the loose crop scored exactly the same as the
-tight one (57/72) for about 7ms. Going wider than this starts costing accuracy
-to the map text it drags in, so it sits at the far edge of free.
+tight one for about 7ms. The slack costs almost nothing and the clipping costs
+everything, which is why it errs generous — and why on a close mount, where the
+card plus slack comes to more than the whole visible screen, the honest answer
+is to read all of it.
 
 One trap is worth naming, because it is invisible and it points the wrong way.
-Text size in the finished image depends on the *warp height*, and the warp
-height used to be derived from the crop's share of the screen — so widening the
-crop to stop it clipping the payout would have **shrunk the text**, keeping more
-of the card and reading less of it. The warp is now derived from how much of a
-screen a card is (`CARD_SHARE`), which is a property of the card rather than of
-however much slack the crop is carrying. For the same reason `card_source_pixels`
-reports the height of the *card*, not of the crop: it is what the aiming floor is
-judged against, and measuring the crop instead would have quietly passed mounts
-that are too far away.
+Text size in the finished image depends on the *warp height*, and if the warp
+height were derived from the crop, widening the crop to stop it clipping the
+payout would **shrink the text** — keeping more of the card and reading less of
+it. The warp comes from how much of the quad the card is, which is a property
+of the mount rather than of however much slack the box is carrying. For the
+same reason `card_source_pixels` reports the height of the *card*, not of the
+crop.
 
 ## Where the speed comes from
 
@@ -210,8 +220,10 @@ Not from tuning the OCR engine. From refusing to run it:
 | **Motion gate** | A 640×480 luma stream answers "did anything change?" for ~1ms. The full read only happens when the answer is yes, so idle cost is near zero. |
 | **Settle wait** | After a change, it waits for the picture to stop moving. Reading a frame mid-transition just wastes a read on motion blur. |
 | **Warp to the screen** | Tesseract's cost scales with pixels. Feeding it a card instead of a 16MP frame is worth more than every other optimisation combined. |
-| **Crop to the card** | Uber puts the card in roughly the same place every time. Cropping to it saves a good share of the pixels, for no loss of accuracy — but the crop is deliberately loose, see below. |
+| **Crop to the card** | The card is aimed at the middle of the frame, so the crop is the middle of the quad, sized to the card. On the rig's own health lines this is worth about **200ms of a 1100ms read** — real, but far less than the old self-fitting crop cost by wandering. |
+| **Never look at the page upside down** | When a page scores badly, tesseract runs the whole thing a second time inverted, in case it was white-on-black. `preprocess()` hands it dark text on a light card every time, so that pass can never help — and it is charged exactly where it hurts, on the reads that fail. A map costs **282ms with it and 211 without**, a dark screen **199 against 154**. Half a shift's reads are of something that is not an offer, so over a realistic mix the median read goes **586ms → 438ms** with no change in what it reads. `-c tessedit_do_invert=0`. |
 | **Hand over a file, not an array** | pytesseract's array path routes the image through PIL, whose PNG encoder measured **93ms** — over a third of a read, spent compressing a picture tesseract immediately decompresses. An uncompressed PGM encodes in 0.1ms and reads identically: **262ms → 157ms**. It goes in `/dev/shm`, so the SD card is never in the hot path. |
+| **Look in the middle first** | The screen is the biggest bright thing *that the middle of the frame is inside*, falling back to plain biggest. Size alone is a guess about the scene and it loses to a lit dashboard panel or a window at dusk; with a panel larger and brighter than the phone beside it, the old rule locked onto the panel and read nothing while this one reads the card. |
 | **Track on the small stream** | Re-finding the corners uses the 640×480 luma the motion gate already has, not a shrunk-down sensor frame: **0.96ms against 6.98ms**, almost all of the difference being the shrinking. It also means tracking needs no full-resolution capture at all, so it keeps working at full rate while the scanner is otherwise idle. |
 | **Stop when there is nothing left to learn** | Sampling continues after a card appears so a leg missed by one frame can be caught by the next — but it stops as soon as the reading is *whole* (a total, or both legs of a two-leg card) and two reads running agree. In a 30-frame run over one offer that is 2 reads instead of 9. What keeps sampling is the case that needs it: a single leg that is not a total, which is the shape of a card with a leg still missing. |
 
@@ -300,16 +312,10 @@ and leaves the screen occupying under half the frame height — around 400px of
 card, the floor, from a rig that had 870 before it backed off. Clipping the map
 away is precisely what buys the resolution that makes the text readable.
 
-So the crop is anchored to the card by content instead. It ships as the whole
-visible view — which cannot miss the card however the phone is framed — and the
-first successful read walks it in to fit (`tighten_roi`, the mirror of
-`fit_roi`). Neither cares how much of the screen is showing. The cost is that
-the first read of a fresh calibration is a slow one:
-
-```
-read 0  pay=7.09 min=34.0 mi=3.6  crop=[0.00 0.00 1.00 1.00]   442ms
-read 1  pay=7.09 min=34.0 mi=3.6  crop=[0.00 0.15 1.00 0.46]   181ms
-```
+So the crop is placed from the measured geometry instead — how much of the quad
+is card, centred — which does not care how much of the screen is showing. On a
+mount close enough to clip the map away that comes out at or near the whole
+visible view, which is the right answer: there is nothing there but card.
 
 Spill is now reported and not refused — aiming says *"the top of the screen is
 out of frame, which is fine as long as the whole offer card is visible"*, and
@@ -813,16 +819,17 @@ is opened — `>` instead of `>>` in a shell wrapper, or `flags: 'w'` instead of
   or a camera attached. It now pins the sensor mode, reads the motion gate's
   luma straight out of the YUV buffer, and only sets focus controls the camera
   actually reports, but none of that has met the real module yet. Everything below it (warp, crop, preprocess, OCR,
-  parse, motion gate, tracking, crop recovery, calibration, bench) is tested and
-  passing.
+  parse, motion gate, tracking, crop placement, calibration, bench) is tested
+  and passing.
 - Timings are from x86, not a Pi 4. Run `bench.py`.
 - Tested against a rendered replica with synthetic lens degradation, not a real
   lens pointed at a real phone in a moving car. The corner tracker in particular
   is tested against synthesised frames of a bright rectangle on a dark ground,
   which is what the detector keys on but is kinder than a windscreen at night.
-- Crop recovery needs the payout to be legible *somewhere* on the screen. If the
-  card is out of frame entirely, or the phone is too far away to resolve the
-  digits at all, it will keep looking and reporting nothing — correctly, but it
-  cannot fix a mount that was never good enough.
+- The crop assumes the card is aimed at the middle of the frame. It no longer
+  hunts for a card it has lost, because it no longer has anything to lose — but
+  the flip side is that a mount putting the offer in a corner needs aiming
+  rather than fixing itself. Nothing here can fix a mount that was never good
+  enough.
 - Only Uber's current card wording is handled. A layout change breaks parsing,
   which is why the typed keypad on `index.html` stays the reliable path.

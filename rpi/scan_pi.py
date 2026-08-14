@@ -46,9 +46,11 @@ DEFAULT_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'liv
 # for first: a snapshot used to copy a 12MB frame, draw on it at full size,
 # shrink it with an area filter and then warp a second copy of a card the
 # reader had already made. It now shrinks once, draws on the small picture and
-# reuses the reader's card — about a quarter of the work, which buys nearly
-# three times the frame rate and still costs less than it did.
-SNAPSHOT_FAST = 0.15
+# reuses the reader's card — about a quarter of the work, roughly 20ms of a
+# Pi 4's loop thread per frame. At this rate that is an eighth of that one
+# thread, which measured against the reads is affordable: the Pi 4 has four
+# cores and the reads leave most of them idle.
+SNAPSHOT_FAST = 0.10
 SNAPSHOT_IDLE = 3.0
 
 # The motion gate fires once per offer, because a card sitting still is not a
@@ -59,11 +61,6 @@ SNAPSHOT_IDLE = 3.0
 RESAMPLE_WINDOW = 4.0
 RESAMPLE_EVERY = 0.5
 
-# How long to keep looking after a read that found nothing while the crop is
-# under suspicion. Short, because it only runs when reads are already failing —
-# the cost is a few OCR passes on a screen that was giving nothing anyway, and
-# the payoff is the crop repairing itself inside one offer instead of five.
-RECOVER_WINDOW = 3.0
 WATCH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.viewing')
 WATCH_WINDOW = 10.0
 
@@ -173,18 +170,18 @@ def start_camera(cfg, exposure_us, gain, lens):
 _snapshot_error = None
 
 
-def write_snapshot(frame, cfg, path, quad=None, card=None):
+def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None):
     """Write what the camera sees, for the live page. Never fatally.
 
     `quad` overrides the calibrated corners so the outline follows the tracker
-    rather than lagging behind it, and `card` is the reader's own last picture,
-    which saves warping another one.
+    rather than lagging behind it, `roi` is the box being read, and `card` is
+    the reader's own last picture, which saves warping another one.
     """
     global _snapshot_error
     try:
         if quad is None:
             quad = np.array(cfg['quad'], dtype=np.float32)
-        view = PL.snapshot(frame, quad, cfg.get('roi'),
+        view = PL.snapshot(frame, quad, roi,
                            cfg.get('cardHeight', 900), card=card)
     except Exception as e:
         message = str(e)
@@ -226,7 +223,6 @@ class Health:
 
     def __init__(self):
         self.reset(None)
-        self.refits = 0
         self.relocks = 0
         self.gain = None
         self.bright = None
@@ -277,9 +273,7 @@ class Health:
                                             ' (rippling)' if self.banding > 4.0 else ''))
         if self.gain is not None:
             bits.append('gain %.2f' % self.gain)
-        bits.append('crop %s' % _fmt_roi(scanner.roi))
-        if self.refits:
-            bits.append('crop moved %dx since start' % self.refits)
+        bits.append('crop %s' % _fmt_roi(scanner.crop_box))
         if tracker is not None:
             status = tracker.status()
             bits.append('corners %s, drift %.0fpx from saved'
@@ -331,7 +325,6 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None):
     """One JSON object per line, flushed, so a parent process sees reads live."""
     payload = {
         'track': tracker.status() if tracker is not None else None,
-        'rescues': scanner.rescues if scanner is not None else 0,
         'ready': rate['ready'],
         'locked': locked,
         'state': rate['state'],
@@ -397,29 +390,10 @@ def main():
     # The crop can move itself back onto the card. When it does, keep it: the
     # next run should start from what this one learned, not from the box that
     # had already stopped working.
-    roi_dirty = [False]
-
-    def roi_moved(roi):
-        was = cfg.get('roi')
-        cfg['roi'] = roi
-        roi_dirty[0] = True
-        health.refits += 1
-        # Say which of the two it was. They mean opposite things about how the
-        # scanner is doing — one is a repair after failures, the other is a
-        # working crop being trimmed — and a log that called both "reads were
-        # failing" made a healthy scanner look like a broken one.
-        widened = was is None or roi[3] > was[3] + 0.01
-        why = ('reads were failing; the card was found there by two '
-               'whole-screen searches that agreed' if widened else
-               'reads were working; trimmed onto the card two reads agreed on')
-        log('crop moved: %s -> %s (%s)' % (_fmt_roi(was), _fmt_roi(roi), why))
-
     scanner = PL.Scanner(
         quad=np.array(cfg['quad'], dtype=np.float32),
-        roi=cfg.get('roi'),
         card_height=cfg.get('cardHeight', 900),
         settings=cfg.get('settings', {}),
-        on_roi=roi_moved,
     )
     # The tracker works in the small stream's coordinates and reports in the
     # capture's, so it needs the ratio between them.
@@ -458,7 +432,7 @@ def main():
         'warp %dpx, reader gets %dpx, lens %s%s'
         % (cap.get('width', 0), cap.get('height', 0),
            CAL.card_source_pixels(quad, frame_shape), CAL.MIN_CARD_PIXELS,
-           _fmt_roi(scanner.roi),
+           _fmt_roi(scanner.crop_box),
            scanner.read_height, scanner.ocr_height,
            ('%.2f dioptres' % lens) if lens else 'fixed',
            '' if tracker is not None else ', corner tracking OFF'))
@@ -519,13 +493,9 @@ def main():
                     if lost_now != lost_before:
                         log('screen %s' % ('not visible — is the phone lit and in frame?'
                                            if lost_now else 'visible again'))
-                    if tracker.needs_save(now) or roi_dirty[0]:
+                    if tracker.needs_save(now):
                         save_config(args.config, cfg)
                         tracker.mark_saved(now)
-                        roi_dirty[0] = False
-                elif roi_dirty[0]:
-                    save_config(args.config, cfg)
-                    roi_dirty[0] = False
 
                 # A phone dims itself. A screen set up in daylight is a much
                 # darker subject at two in the morning, and a fixed exposure that
@@ -569,8 +539,8 @@ def main():
                 request.release()
 
             if args.snapshot and (due or do_read):
-                write_snapshot(frame, cfg, args.snapshot,
-                               quad=scanner.quad, card=previous_card)
+                write_snapshot(frame, cfg, args.snapshot, quad=scanner.quad,
+                               roi=scanner.crop_box, card=previous_card)
                 last_snapshot = time.time()
 
             if not do_read:
@@ -581,10 +551,6 @@ def main():
             parsed = accumulator.add(out['parsed'])
             rate = OP.rate(parsed, cfg.get('settings', {}))
             out['parsed'], out['rate'] = parsed, rate
-            if out['refit']:
-                save_config(args.config, cfg)
-                roi_dirty[0] = False
-
             # Anything with a payout is worth a second look; anything without is
             # not an offer and should not hold the loop open.
             #
@@ -602,12 +568,6 @@ def main():
                 resample_until = 0.0
             elif parsed.get('pay'):
                 resample_until = time.time() + RESAMPLE_WINDOW
-            elif scanner.recovering:
-                # A read that found nothing while the crop is under suspicion is
-                # worth repeating straight away. Waiting for the next offer to
-                # find out whether the crop is broken means several offers go by
-                # unread before it fixes itself.
-                resample_until = time.time() + RECOVER_WINDOW
             settled_on = signature
             health.add(out, parsed, out.get('card'), previous_card)
             previous_card = out.get('card')

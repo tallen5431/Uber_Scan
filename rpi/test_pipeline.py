@@ -49,100 +49,51 @@ eq('and it can be switched off', PL.fit_for_ocr(small, 0).shape[0], 450)
 eq('an exactly-sized card is untouched',
    PL.fit_for_ocr(np.zeros((900, 300, 3), np.uint8), 900).shape[0], 900)
 
-# --- fit_roi: find the card from where its text landed ---------------------
-# A screen 1000px tall: map labels up top, then the card from 520 down.
-screen = [line('W 63rd St', 120), line('S Rhodes Ave', 300),
-          line('Shop & Deliver', 520), line('$7.09', 570, 70),
-          line('6 items (6 units)', 680), line('34 min (3.6 mi) total', 730),
-          line('Dollar General', 790), line('Accept', 860)]
+# --- the crop is derived, not learned --------------------------------------
+# It used to fit itself to wherever the payout landed, and it could not
+# converge: a rig logged sixteen moves in eighteen minutes because an UberX
+# card and a Shop & Deliver card are genuinely different heights, so every fit
+# was correct for the card in front of it and wrong for the next one. Now it
+# comes from two things that need no history — how much of the quad is card,
+# and that the card is aimed at the middle.
+half = PL.centred_roi(0.5)
+eq('a half-card quad gets the card plus slack', round(half[3], 3), 0.5 + PL.CROP_SLACK)
+eq('...centred', round(half[1], 3), round((1.0 - half[3]) / 2.0, 3))
+eq('...spanning the full width', (half[0], half[2]), (0.0, 1.0))
 
-fitted = PL.fit_roi(screen, 1000, current=[0.0, 0.40, 1.0, 0.60])
-ok_('a card is found', fitted is not None)
-ok_('the crop starts above the payout', fitted[1] < 570 / 1000.0)
-ok_('...but below the map labels', fitted[1] > 300 / 1000.0)
-ok_('and it reaches past the bottom line', fitted[1] + fitted[3] > 890 / 1000.0)
-eq('the horizontal extent is inherited', (fitted[0], fitted[2]), (0.0, 1.0))
+ok_('a bigger card gets a bigger box', PL.centred_roi(0.7)[3] > PL.centred_roi(0.5)[3])
+eq('and a quad that is nearly all card is read whole', PL.centred_roi(0.85)[3], 1.0)
+eq('...starting at the top, since there is nowhere to centre it',
+   PL.centred_roi(0.85)[1], 0.0)
+ok_('a box never leaves the quad',
+    all(0.0 <= PL.centred_roi(s)[1] and PL.centred_roi(s)[1] + PL.centred_roi(s)[3] <= 1.0001
+        for s in (0.3, 0.5, 0.62, 0.8, 0.95, 1.0)))
 
-# The payout anchors the top, one padding above it — street names further up
-# must not drag the crop back over the map.
-eq('anchored a padding above the payout',
-   round(fitted[1], 3), round(570 / 1000.0 - PL.FIT_PAD_ABOVE, 3))
-
-# And that padding has to be real headroom, or the very next read calls its own
-# crop clipped and the pair of them oscillate.
-crop_h = fitted[3] * 1000
-ok_('the payout lands clear of the top edge',
-    (570 - fitted[1] * 1000) > PL.TOP_EDGE * crop_h * 2)
-
-# --- fit_roi refuses rather than guessing ----------------------------------
-eq('no text, no fit', PL.fit_roi([], 1000), None)
-eq('no money, no fit', PL.fit_roi([line('W 63rd St', 120), line('Accept', 800)], 1000), None)
-eq('a sliver is not a card', PL.fit_roi([line('$7.09', 950)], 1000), None)
-eq('no height, no fit', PL.fit_roi(screen, 0), None)
-
-# A payout at the very bottom with nothing under it is not a card either.
-ok_('payout alone near the foot is rejected',
-    PL.fit_roi([line('W 63rd St', 120), line('$7.09', 900)], 1000) is None)
-
-# --- tighten_roi: the same job from the other side -------------------------
-# fit_roi answers "reads are failing, where is the card?". This answers "reads
-# are working, how much of this crop is actually card?" — which is what lets
-# the shipped crop start as the whole visible screen and walk itself in, so no
-# guess has to be made about how the phone is framed.
-whole = [0.0, 0.0, 1.0, 1.0]
-# A crop of the whole screen, with the card in the lower half of it.
-inside_crop = [line('W 63rd St', 120), line('Shop & Deliver', 520), line('$7.09', 570, 70),
-               line('6 items (6 units)', 680), line('34 min (3.6 mi) total', 730),
-               line('Dollar General', 790)]
-tighter = PL.tighten_roi(inside_crop, 1000, whole)
-ok_('a roomy crop is worth tightening', tighter is not None)
-ok_('...and gets smaller, not bigger', tighter[3] < whole[3])
-ok_('the payout is still inside it', tighter[1] < 570 / 1000.0)
-ok_('so is the last line of the card', tighter[1] + tighter[3] > 820 / 1000.0)
-eq('the horizontal extent is left alone', (tighter[0], tighter[2]), (0.0, 1.0))
-
-# It must converge: tightening the result of a tighten has to stop, or the crop
-# walks itself down to nothing one read at a time.
-ok_('a crop already on the card stays put',
-    PL.tighten_roi([line('$7.09', 60, 70), line('34 min (3.6 mi) total', 300),
-                    line('Accept', 700)], 1000, [0.0, 0.30, 1.0, 0.40]) is None)
-
-# Same refusals as fit_roi, for the same reason: no evidence, no move.
-eq('no lines, no tighten', PL.tighten_roi([], 1000, whole), None)
-eq('no money, no tighten',
-   PL.tighten_roi([line('W 63rd St', 120), line('Accept', 800)], 1000, whole), None)
-eq('no crop to tighten', PL.tighten_roi(inside_crop, 1000, None), None)
-eq('no height, no tighten', PL.tighten_roi(inside_crop, 0, whole), None)
-
-# The lines are positioned in the crop, but the box comes back in screen
-# fractions — get that conversion wrong and the crop leaps somewhere arbitrary.
-part = [0.0, 0.20, 1.0, 0.80]
-mapped = PL.tighten_roi(inside_crop, 1000, part)
-ok_('a fit inside a partial crop stays inside it', mapped is not None
-    and mapped[1] >= part[1] and mapped[1] + mapped[3] <= part[1] + part[3] + 0.001)
-# Padding is a fraction of the screen, so it has to survive that conversion at
-# the same size — otherwise a small crop gets a huge margin and grows.
-ok_('...with the same headroom above the payout, in screen terms',
-    abs((0.570 * part[3] + part[1]) - mapped[1] - PL.FIT_PAD_ABOVE) < 0.005)
+# The same input twice is the same box: nothing accumulates, so there is
+# nothing to drift. This is the property the old fitting could not have.
+eq('it is a function of the geometry and nothing else',
+   PL.centred_roi(0.64), PL.centred_roi(0.64))
 
 # --- money_is_clipped: the guard that stops a phantom payout ---------------
-eq('a payout with room above it is fine', PL.money_is_clipped(screen, 1000), False)
+# The only guard left that can throw a reading away, and the one that has to be:
+# half a payout still reads as a payout, and a "4.95" rating with its top shaved
+# became a $45.00 offer.
+card_text = [line('Shop & Deliver', 520), line('$7.09', 570, 70),
+             line('6 items (6 units)', 680), line('34 min (3.6 mi) total', 730),
+             line('Dollar General', 790), line('Accept', 860)]
+eq('a payout with room above it is fine', PL.money_is_clipped(card_text, 1000), False)
 ok_('one flush against the top edge is not',
     PL.money_is_clipped([line('$45.00', 2), line('34 min (3.6 mi)', 90)], 1000))
 eq('no money means nothing to clip',
    PL.money_is_clipped([line('34 min (3.6 mi) total', 4)], 1000), False)
 eq('no lines at all is not a clip', PL.money_is_clipped([], 1000), False)
 
-# --- crop and _same_roi ----------------------------------------------------
+# --- crop ------------------------------------------------------------------
 img = np.zeros((1000, 400, 3), np.uint8)
 eq('crop takes the requested slice', PL.crop(img, [0.0, 0.5, 1.0, 0.5]).shape[0], 500)
 eq('crop clamps past the edge', PL.crop(img, [0.0, 0.8, 1.0, 0.9]).shape[0], 200)
 eq('no roi is the whole image', PL.crop(img, None).shape[0], 1000)
 
-ok_('identical boxes are the same', PL._same_roi([0.02, 0.48, 0.96, 0.5], [0.02, 0.48, 0.96, 0.5]))
-ok_('a jitter apart is the same', PL._same_roi([0.02, 0.48, 0.96, 0.5], [0.02, 0.49, 0.96, 0.5]))
-ok_('a real move is not', not PL._same_roi([0.02, 0.48, 0.96, 0.5], [0.02, 0.33, 0.96, 0.39]))
-ok_('nothing is not something', not PL._same_roi(None, [0.02, 0.48, 0.96, 0.5]))
 
 # --- detection: the frame-filling guard, at both scales --------------------
 def phone_frame(w, h, x, y, W=1200, H=900):
@@ -161,22 +112,38 @@ eq('...on a thumbnail too',
    PL.detect_screen_quad(np.full((900, 1200, 3), 240, np.uint8), work_width=PL.DETECT_WIDTH), None)
 eq('a speck is not a screen', PL.detect_screen_quad(phone_frame(30, 60, 400, 140)), None)
 
+# --- and it prefers the middle of the frame to the biggest bright thing -----
+# "Biggest" is a guess about the scene, and it is wrong whenever something in
+# the car is brighter and larger than the phone: a lit dashboard panel, a
+# window at dusk, a passenger's screen. Aiming the card at the middle is a
+# thing a driver can actually do, so it is better evidence than size.
+# The phone straddles the middle of the frame (1200x900, so 600,450); the
+# panel is bigger and brighter and does not.
+distracted = phone_frame(300, 620, 450, 140)
+distracted[60:840, 30:410] = 250
+found = PL.detect_screen_quad(distracted)
+ok_('something is found', found is not None)
+ok_('and it is the phone, not the bigger panel', found[:, 0].min() > 420)
+ok_('...on a thumbnail too',
+    PL.detect_screen_quad(distracted, work_width=PL.DETECT_WIDTH)[:, 0].min() > 420)
+
+# Failing that, size is still the fallback — an off-centre phone is better than
+# no phone.
+off = phone_frame(300, 620, 60, 140)
+ok_('a phone nowhere near the middle is still found', PL.detect_screen_quad(off) is not None)
+
 # --- read height: warp once, at the size the reader wants ------------------
-sc = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=900)
-eq('a half-screen crop warps to double', sc.read_height, 1800)
+sc = PL.Scanner(quad=None, card_height=900, ocr_height=900)
+eq('a half-card quad warps to double', sc.read_height, 1800)
 eq('so the crop needs no scaling at all',
    PL.fit_for_ocr(np.zeros((900, 400, 3), np.uint8), 900).shape[0], 900)
+eq('no upscaling asked for, no adjustment',
+   PL.Scanner(quad=None, card_height=900, ocr_height=0).read_height, 900)
 
-sc = PL.Scanner(quad=None, roi=None, card_height=900, ocr_height=900)
-eq('no crop, no adjustment', sc.read_height, 900)
-sc = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=0)
-eq('no upscaling, no adjustment', sc.read_height, 900)
-sc = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=1400, ocr_height=900)
-eq('a full-screen crop still reads the card at scale', sc.read_height, 1800)
-
-# Text size must not depend on how much slack the crop carries. Widening the
-# crop to stop it clipping the payout would otherwise shrink the warp, and the
-# card would come out smaller than before — keeping more of it and reading less.
+# Text size must not depend on how much slack the crop carries — that is the
+# whole reason it comes from card_share and not from the box. Widening the crop
+# would otherwise shrink the warp, and the card would come out smaller than
+# before: keeping more of it and reading less of it.
 tight = PL.Scanner(quad=None, roi=[0.02, 0.48, 0.96, 0.50], card_height=900, ocr_height=900)
 roomy = PL.Scanner(quad=None, roi=[0.0, 0.40, 1.0, 0.60], card_height=900, ocr_height=900)
 eq('a roomier crop reads at the same scale', roomy.read_height, tight.read_height)
@@ -184,11 +151,14 @@ ok_('...and that scale is bigger than the screen', roomy.read_height > 900)
 roomy.roi = [0.0, 0.20, 1.0, 0.80]
 eq('however roomy it gets', roomy.read_height, tight.read_height)
 
-# A thin crop must not ask for a warp nothing can afford either.
-sc = PL.Scanner(quad=None, roi=[0.02, 0.40, 0.96, 0.18], card_height=900, ocr_height=4800)
-eq('the warp cannot run away', sc.read_height, PL.MAX_READ_HEIGHT)
-eq('and the search pass is bounded too', sc._search_height(np.zeros((5000, 900), np.uint8)),
-   PL.RESCUE_MAX_HEIGHT)
+# A quad that is nearly all card asks for the least warping, and one that is a
+# sliver of card must not ask for a warp nothing can afford.
+mostly = PL.Scanner(quad=None, card_height=900, ocr_height=900)
+mostly.card_share = 0.9
+ok_('a mostly-card quad warps least', mostly.read_height < tight.read_height)
+runaway = PL.Scanner(quad=None, card_height=900, ocr_height=4800)
+runaway.card_share = 0.5
+eq('and the warp cannot run away', runaway.read_height, PL.MAX_READ_HEIGHT)
 
 # --- knowing the screen runs off the frame ---------------------------------
 # Reported, not refused. Backing off far enough to fit a whole phone into a 4:3
@@ -298,31 +268,26 @@ sc.card_share = PL.card_share_of_quad(their_quad, SHAPE)
 ok_('told otherwise, the warp comes down to suit', 1000 < sc.read_height < 1300)
 ok_('...which is where the pixels went', sc.read_height < 1800 * 0.7)
 
-# --- and the crop cannot be smaller than the card is known to be ------------
-# A fit that catches only the middle of the card leaves a crop far wider than
-# it is tall. The pixel ceiling then shrinks it to fit, taking the payout below
-# a readable size — so the crop meant to be the fast one is the one that cannot
-# read, and it fails in exactly the way that asks for another re-fit.
-# The floor has to sit between two crops that look similar and are not: a fit
-# that caught only the middle of the card (the rig logged 0.46 of the quad) and
-# a correct tight one, which is the payout-to-last-line span plus its padding —
-# about 73% of the card, so 0.80 * 0.73 here.
-ok_('a mostly-card quad demands a tall crop', sc.min_crop_height > 0.46)
-ok_('...but not so tall that a correct tightening is refused',
-    sc.min_crop_height < sc.card_share * 0.73)
-sliver = [line('$7.09', 100, 60), line('34 min (3.6 mi) total', 200),
-          line('Dollar General', 260)]
-eq('so a sliver of a fit is refused',
-   PL.fit_roi(sliver, 1000, [0.0, 0.0, 1.0, 1.0], sc.min_crop_height), None)
-ok_('...where the bare floor would have taken it',
-    PL.fit_roi(sliver, 1000, [0.0, 0.0, 1.0, 1.0]) is not None)
-# Even an unclipped mount gets a floor above the bare constant, because the
-# constant was a guess made before the card's size was known.
-plain = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=900)
-eq('an unclipped mount floors at most of a card',
-   plain.min_crop_height, PL.CARD_SHARE * PL.CROP_HOLDS)
-ok_('...which is stricter than the old bare floor',
-    plain.min_crop_height > PL.FIT_MIN_HEIGHT)
+# --- and the crop follows the same measurement ------------------------------
+# The two consumers of card_share have to agree, or the reader is handed a box
+# and a scale that describe different cards.
+derived = PL.Scanner(quad=their_quad, card_height=900)
+derived.card_share = sc.card_share
+box = derived.crop_box
+ok_('the crop holds the card the warp was sized for',
+    box[3] >= min(1.0, sc.card_share))
+ok_('...with slack for the aim being imperfect', box[3] >= min(1.0, sc.card_share + 0.1))
+eq('a mount this close reads its whole visible screen', box[3], 1.0)
+
+# On a mount far enough back to see the whole phone, it really is a crop.
+plain = PL.Scanner(quad=None, card_height=900)
+ok_('a whole screen in frame gets a real crop', plain.crop_box[3] < 1.0)
+ok_('...still holding the card', plain.crop_box[3] > PL.CARD_SHARE)
+ok_('...and centred on it', abs(plain.crop_box[1] - (1 - plain.crop_box[3]) / 2) < 0.001)
+
+# An explicit box wins, for anyone who wants to pin one.
+eq('a given crop is used as given',
+   PL.Scanner(quad=None, roi=[0.0, 0.3, 1.0, 0.4]).crop_box, [0.0, 0.3, 1.0, 0.4])
 
 # --- the reader's picture is bounded ---------------------------------------
 # Height alone does not bound pixels: a wide quad warped to 1800 came out
@@ -343,21 +308,16 @@ eq('resize to the same is a no-op',
 eq('resize to nothing is refused',
    PL.resize_height(np.zeros((900, 300, 3), np.uint8), 0).shape[:2], (900, 300))
 
-# --- the crop only moves on real evidence ----------------------------------
-# A driving screen shows the day's earnings: money, no journey. Fitting the crop
-# to that is how a working scanner talks itself onto the wrong half of the
-# screen, and it logged seventy re-fits in twenty minutes doing exactly that.
+# --- money still has to come with a journey --------------------------------
+# A driving screen shows the day's earnings: money, no journey. The crop no
+# longer moves for anything, so this can no longer walk it onto the wrong half
+# of the screen — but the reading must still not be reported as an offer.
 offer = [line('Shop & Deliver', 520), line('$7.09', 570, 70),
          line('34 min (3.6 mi) total', 730), line('Accept', 860)]
 furniture = [line('Today', 120), line('$142.60', 180, 70), line('12 trips', 300)]
-
-ok_('an offer card can be located', PL.fit_roi(offer, 1000) is not None)
-ok_('...and so can a screen of earnings, geometrically',
-    PL.fit_roi(furniture, 1000) is not None)
-# Which is why the gate is not geometric: it is whether the text is an offer.
 import offer_parser as OP2                                    # noqa: E402
-ok_('but only the offer parses as one', OP2.parse(' '.join(l['text'] for l in offer))['complete'])
-ok_('...and the earnings screen does not',
+ok_('an offer parses as one', OP2.parse(' '.join(l['text'] for l in offer))['complete'])
+ok_('...and a screen of earnings does not',
     not OP2.parse(' '.join(l['text'] for l in furniture))['complete'])
 
 # --- staging the image for tesseract ---------------------------------------
@@ -405,7 +365,7 @@ eq('too soon to summarise', h.report(1000.0, None, tight), None)
 eq('still counting', h.reads, 5)
 h.report(1000.0 + SP.HEALTH_EVERY + 1, None, tight)
 eq('summarising clears the window', h.reads, 0)
-ok_('but not the running totals', h.refits == 0 and h.relocks == 0)
+ok_('but not the running totals', h.relocks == 0)
 
 # --- the motion gate still gates ------------------------------------------
 sc = PL.Scanner(quad=None, roi=None)
