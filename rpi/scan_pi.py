@@ -351,6 +351,13 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None):
         'locked': locked,
         'state': rate['state'],
         'perHour': round(rate['perHour'], 2) if rate['ready'] else None,
+        # Both rates, and the time they were both divided by. The card's own
+        # minutes are below as `minutes`, for checking against the phone; these
+        # are what the arithmetic actually used, which differ once `pad` or
+        # `secondsPerItem` is set. Sending both is what lets the page show a
+        # sum that adds up instead of one it has to guess at.
+        'grossPerHour': round(rate['grossPerHour'], 2) if rate['ready'] else None,
+        'billedMinutes': round(rate['minutes'], 1) if rate['ready'] else None,
         # `is not None`, not truthiness: this is a number that can legitimately
         # be zero, and now that it is net of running costs it can be negative
         # too. Testing it for truth turned "you break exactly even per mile"

@@ -67,8 +67,11 @@
         <span class="rate-value" id="perHour">--</span>
         <span class="rate-unit" id="rateUnit">/hr</span>
       </div>
-      <!-- The arithmetic behind the headline, spelled out. A rate a driver
-           cannot reconstruct at a glance is a rate they cannot act on. -->
+      <!-- The arithmetic behind the headline, spelled out, in two steps: what
+           the card pays per hour, and what is left after running the car. A
+           rate a driver cannot reconstruct at a glance is a rate they cannot
+           act on, and both halves are worth seeing — one is checkable against
+           the offer, the other is the one that decides. -->
       <div class="working" id="working" hidden></div>
       <!-- As read off the card, so it can be checked against the phone in the
            two seconds before the offer times out. These three are deliberately
@@ -202,16 +205,44 @@
       ? '--' : money(r.perMile, 2);
     el.lPerMile.textContent = deducted ? 'net $/mi' : '$/mi';
 
-    // The working, in the panel rather than in the small print. It is the
-    // difference between a number to trust and a number to argue with.
+    // The working, in the panel rather than in the small print, and in two
+    // steps so both rates are on screen at once: what the offer itself pays
+    // per hour — checkable against the card, and the number most drivers
+    // already have a feel for — and what is left after running the car, which
+    // is the one the verdict is made on.
+    //
+    // Each line is a pair of unbreakable halves, so a narrow screen splits
+    // between them rather than stranding "min" on a line of its own.
     var mins = r.minutes === null ? '--' : Math.round(r.minutes);
-    // Two unbreakable halves, so a narrow screen splits between them rather
-    // than stranding "min" on a line of its own.
-    el.working.innerHTML = (deducted
-      ? '<span>' + money(r.pay, 2) + ' <i>&minus;</i> ' + money(r.cost, 2)
-        + ' <i>=</i> <b>' + money(r.pay - r.cost, 2) + '</b></span>'
-      : '<span><b>' + money(r.pay, 2) + '</b></span>')
-      + ' <span><i>in</i> ' + mins + ' min</span>';
+    // Both rates come off the scanner, divided by the same minutes, so this
+    // sum is the scanner's arithmetic rather than a second version of it.
+    // Older payloads carried only the net rate; there, the card's own time is
+    // the denominator, which is what those versions meant by it.
+    var gross = (typeof r.grossPerHour === 'number') ? r.grossPerHour
+      : (r.minutes > 0 ? r.pay / (r.minutes / 60) : null);
+    // And the time it was divided by. Usually the card's own minutes, longer
+    // once a shopping allowance or a pad is configured — shown as an extra so
+    // the figure in the stat row below and the one these rates divide by are
+    // both accounted for, instead of silently disagreeing.
+    var billed = (typeof r.billedMinutes === 'number') ? r.billedMinutes : r.minutes;
+    var extra = r.minutes === null ? 0 : Math.round(billed) - Math.round(r.minutes);
+    var time = extra > 0 ? mins + ' <i>+</i> ' + extra + ' min'
+             : extra < 0 ? Math.round(billed) + ' min'
+             : mins + ' min';
+    // Formatted exactly as the headline is, so the net figure here and the
+    // big one above are visibly the same number rather than $10.60 sitting
+    // under $10.6 and reading as a second, slightly different answer.
+    var rate = function (n) {
+      return n === null ? '--'
+        : '$' + (Math.abs(n) >= 100 ? Math.round(n) : Number(n).toFixed(1));
+    };
+    var rows = ['<span>' + money(r.pay, 2) + ' <i>in</i> ' + time + '</span>'
+                + ' <span><i>=</i> <b>' + rate(gross) + '/hr</b> <i>raw</i></span>'];
+    if (deducted) {
+      rows.push('<span><i>less</i> ' + money(r.cost, 2) + ' <i>car costs</i></span>'
+                + ' <span><i>=</i> <b>' + rate(r.perHour) + '/hr</b> <i>net</i></span>');
+    }
+    el.working.innerHTML = rows.map(function (h) { return '<div>' + h + '</div>'; }).join('');
     el.working.hidden = false;
 
     var notes = [];

@@ -4,190 +4,375 @@
     {
       "name": "shop and deliver, verbatim from a real offer",
       "text": "Shop & Deliver Exclusive $7.09 Guaranteed (incl. tip) 6 items (6 units) 34 min (3.6 mi) total Dollar General (925 Shiloh Rd Nw) Hidden Forest Ct, Marietta Accept",
-      "expect": { "pay": 7.09, "minutes": 34, "miles": 3.6, "items": 6, "complete": true }
+      "expect": {
+        "pay": 7.09,
+        "minutes": 34,
+        "miles": 3.6,
+        "items": 6,
+        "complete": true
+      }
     },
     {
       "name": "ocr reads $ as S and 0 as O",
       "text": "Shop & Deliver S7.O9 Guaranteed (incl. tip) 6 items (6 units) 34 min (3.6 mi) total",
-      "expect": { "pay": 7.09, "minutes": 34, "miles": 3.6, "items": 6, "complete": true }
+      "expect": {
+        "pay": 7.09,
+        "minutes": 34,
+        "miles": 3.6,
+        "items": 6,
+        "complete": true
+      }
     },
     {
       "name": "ocr reads decimal points as commas",
       "text": "$7,09 Guaranteed 34 min (3,6 mi) total",
-      "expect": { "pay": 7.09, "minutes": 34, "miles": 3.6, "complete": true }
+      "expect": {
+        "pay": 7.09,
+        "minutes": 34,
+        "miles": 3.6,
+        "complete": true
+      }
     },
     {
       "name": "ocr loses the spaces around units",
       "text": "$7.09 34min (3.6mi) total",
-      "expect": { "pay": 7.09, "minutes": 34, "miles": 3.6, "complete": true }
+      "expect": {
+        "pay": 7.09,
+        "minutes": 34,
+        "miles": 3.6,
+        "complete": true
+      }
     },
     {
       "name": "ocr reads 1 as l and 5 as S",
       "text": "$l2.4S 23 min (8.4 mi) trip",
-      "expect": { "pay": 12.45, "minutes": 23, "miles": 8.4, "complete": true }
+      "expect": {
+        "pay": 12.45,
+        "minutes": 23,
+        "miles": 8.4,
+        "complete": true
+      }
     },
     {
       "name": "rideshare legs are summed",
       "text": "$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip",
-      "expect": { "pay": 12.45, "minutes": 28, "miles": 9.6, "complete": true }
+      "expect": {
+        "pay": 12.45,
+        "minutes": 28,
+        "miles": 9.6,
+        "complete": true
+      }
     },
     {
       "name": "hours and minutes",
       "text": "$41.80 1 hr 4 min (26.1 mi) total",
-      "expect": { "pay": 41.8, "minutes": 64, "miles": 26.1, "complete": true }
+      "expect": {
+        "pay": 41.8,
+        "minutes": 64,
+        "miles": 26.1,
+        "complete": true
+      }
     },
     {
       "name": "a total line replaces the legs it summarises",
       "text": "$9.00 8 min (2.0 mi) to store 14 min (4.0 mi) to customer 22 min (6.0 mi) total",
-      "expect": { "pay": 9.0, "minutes": 22, "miles": 6.0, "complete": true }
+      "expect": {
+        "pay": 9.0,
+        "minutes": 22,
+        "miles": 6.0,
+        "complete": true
+      }
     },
     {
       "name": "street numbers are never pay",
       "text": "$7.09 6 items 34 min (3.6 mi) total Dollar General (925 Shiloh Rd Nw) Hidden Forest Ct",
-      "expect": { "pay": 7.09, "minutes": 34, "miles": 3.6, "items": 6, "complete": true }
+      "expect": {
+        "pay": 7.09,
+        "minutes": 34,
+        "miles": 3.6,
+        "items": 6,
+        "complete": true
+      }
     },
     {
       "name": "the largest dollar figure is the payout",
       "text": "Was $4.50 now $11.25 20 min (5.0 mi) total",
-      "expect": { "pay": 11.25, "minutes": 20, "miles": 5.0, "complete": true }
+      "expect": {
+        "pay": 11.25,
+        "minutes": 20,
+        "miles": 5.0,
+        "complete": true
+      }
     },
     {
       "name": "pay with no time is incomplete",
       "text": "$7.09 Guaranteed (incl. tip) 6 items",
-      "expect": { "pay": 7.09, "minutes": null, "miles": null, "items": 6, "complete": false }
+      "expect": {
+        "pay": 7.09,
+        "minutes": null,
+        "miles": null,
+        "items": 6,
+        "complete": false
+      }
     },
     {
       "name": "garbage yields nothing",
       "text": "blurry nonsense with no numbers at all",
-      "expect": { "pay": null, "minutes": null, "miles": null, "complete": false }
+      "expect": {
+        "pay": null,
+        "minutes": null,
+        "miles": null,
+        "complete": false
+      }
     },
     {
       "name": "time without distance still computes",
       "text": "$7.09 34 min total",
-      "expect": { "pay": 7.09, "minutes": 34, "miles": null, "complete": true }
+      "expect": {
+        "pay": 7.09,
+        "minutes": 34,
+        "miles": null,
+        "complete": true
+      }
     },
     {
       "name": "lost decimal in distance is recovered and flagged",
       "text": "$7.09 6 items (6 units) 34 min (36 mi) total",
-      "expect": { "pay": 7.09, "minutes": 34, "miles": 3.6, "milesCorrected": true, "milesUncertain": false }
+      "expect": {
+        "pay": 7.09,
+        "minutes": 34,
+        "miles": 3.6,
+        "milesCorrected": true,
+        "milesUncertain": false
+      }
     },
     {
       "name": "a plausible highway distance is left alone",
       "text": "$41.80 1 hr 4 min (26.1 mi) total",
-      "expect": { "miles": 26.1, "milesCorrected": false }
+      "expect": {
+        "miles": 26.1,
+        "milesCorrected": false
+      }
     },
     {
       "name": "53 mph is fast but real, so untouched",
       "text": "$60.00 45 min (40 mi) trip",
-      "expect": { "miles": 40, "milesCorrected": false }
+      "expect": {
+        "miles": 40,
+        "milesCorrected": false
+      }
     },
     {
       "name": "implausible but clearly decimalled is uncertain, not corrected",
       "text": "$20.00 10 min (30.5 mi) total",
-      "expect": { "miles": 30.5, "milesUncertain": true, "milesCorrected": false }
+      "expect": {
+        "miles": 30.5,
+        "milesUncertain": true,
+        "milesCorrected": false
+      }
     },
     {
       "name": "an address is not a payout: 'E 61 St & S Rhodes' misread as 'S 4S'",
       "text": "3 min (1.1 mi) away E61 S 4S Rhodes Ave, 20 min (7.3 mi) trip",
-      "expect": { "pay": null, "minutes": 23, "miles": 8.4, "complete": false }
+      "expect": {
+        "pay": null,
+        "minutes": 23,
+        "miles": 8.4,
+        "complete": false
+      }
     },
     {
       "name": "nor is a rating with the star read as an S",
       "text": "UberX Exclusive S 4S Verified 20 min (7.3 mi) trip",
-      "expect": { "pay": null, "minutes": 20, "miles": 7.3, "complete": false }
+      "expect": {
+        "pay": null,
+        "minutes": 20,
+        "miles": 7.3,
+        "complete": false
+      }
     },
     {
       "name": "a real payout with the dollar sign lost still reads, cents and all",
       "text": "UberX Exclusive S16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
-      "expect": { "pay": 16.05, "minutes": 23, "miles": 8.4, "complete": true }
+      "expect": {
+        "pay": 16.05,
+        "minutes": 23,
+        "miles": 8.4,
+        "complete": true
+      }
     },
     {
       "name": "uberx two-leg card, verbatim from a real offer",
       "text": "UberX Exclusive $16.05 4.95 Verified 3 min (1.1 mi) away E 61 St & S Rhodes Ave, IL 20 min (7.3 mi) trip S Cottage Grove Ave & 62nd St, IL Accept",
-      "expect": { "pay": 16.05, "minutes": 23, "miles": 8.4, "complete": true }
+      "expect": {
+        "pay": 16.05,
+        "minutes": 23,
+        "miles": 8.4,
+        "complete": true
+      }
     },
     {
       "name": "a leg that lost its decimal is repaired before it can become a second leg",
       "text": "$16.05 3 min (1.1 mi) away 20 min (73 mi) trip",
-      "expect": { "pay": 16.05, "minutes": 23, "miles": 8.4, "legs": 2, "milesCorrected": true, "complete": true }
+      "expect": {
+        "pay": 16.05,
+        "minutes": 23,
+        "miles": 8.4,
+        "legs": 2,
+        "milesCorrected": true,
+        "complete": true
+      }
     },
     {
       "name": "a plausible short leg is left alone, however fast it rounds to",
       "text": "$9.00 2 min (2.0 mi) away 20 min (6.0 mi) trip",
-      "expect": { "minutes": 22, "miles": 8.0, "milesCorrected": false, "milesUncertain": false }
+      "expect": {
+        "minutes": 22,
+        "miles": 8.0,
+        "milesCorrected": false,
+        "milesUncertain": false
+      }
     },
     {
       "name": "a decimal lost from a total is still repaired",
       "text": "$7.09 34 min (36 mi) total",
-      "expect": { "minutes": 34, "miles": 3.6, "milesCorrected": true }
+      "expect": {
+        "minutes": 34,
+        "miles": 3.6,
+        "milesCorrected": true
+      }
     },
     {
       "name": "an implausible leg that ten cannot save stays uncertain",
       "text": "$20.00 10 min (305 mi) total",
-      "expect": { "miles": 305, "milesUncertain": true, "milesCorrected": false }
+      "expect": {
+        "miles": 305,
+        "milesUncertain": true,
+        "milesCorrected": false
+      }
     },
     {
       "name": "map noise is not a journey: 'ZIM' must not read as 21 minutes",
       "text": "Today $142.60 12 trips ZIM Sects eae You are online Marietta, GA",
-      "expect": { "minutes": null, "miles": null, "legs": 0, "complete": false }
+      "expect": {
+        "minutes": null,
+        "miles": null,
+        "legs": 0,
+        "complete": false
+      }
     },
     {
       "name": "nor is any bare number-plus-m",
       "text": "$8.00 Rau WeS 34 m AC a RRC",
-      "expect": { "minutes": null, "complete": false }
+      "expect": {
+        "minutes": null,
+        "complete": false
+      }
     },
     {
       "name": "a minute count needs at least one real digit",
       "text": "$8.00 SI min (2.0 mi) total",
-      "expect": { "minutes": null, "complete": false }
+      "expect": {
+        "minutes": null,
+        "complete": false
+      }
     },
     {
       "name": "but one real digit among lookalikes is still read",
       "text": "$8.00 l2 min (2.0 mi) total",
-      "expect": { "minutes": 12, "miles": 2.0, "complete": true }
+      "expect": {
+        "minutes": 12,
+        "miles": 2.0,
+        "complete": true
+      }
     },
     {
       "name": "and a mangled 'min' is still a minute",
       "text": "$7.09 34 mln (3.6 mi) total",
-      "expect": { "minutes": 34, "miles": 3.6, "complete": true }
+      "expect": {
+        "minutes": 34,
+        "miles": 3.6,
+        "complete": true
+      }
     }
   ],
   "rate": [
     {
       "name": "the real offer, gross",
       "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": { "target": 25, "costPerMile": 0 },
-      "expect": { "perHour": 12.51, "state": "no" }
+      "settings": {
+        "target": 25,
+        "costPerMile": 0
+      },
+      "expect": {
+        "perHour": 12.51,
+        "state": "no",
+        "grossPerHour": 12.51
+      }
     },
     {
       "name": "the real offer, less mileage cost",
       "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": { "target": 25, "costPerMile": 0.3 },
-      "expect": { "perHour": 10.61, "state": "no" }
+      "settings": {
+        "target": 25,
+        "costPerMile": 0.3
+      },
+      "expect": {
+        "perHour": 10.61,
+        "state": "no",
+        "grossPerHour": 12.51
+      }
     },
     {
       "name": "the real offer, with 90s per item of shopping",
       "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": { "target": 25, "costPerMile": 0.3, "secondsPerItem": 90 },
-      "expect": { "perHour": 8.39, "state": "no", "shopMinutes": 9 }
+      "settings": {
+        "target": 25,
+        "costPerMile": 0.3,
+        "secondsPerItem": 90
+      },
+      "expect": {
+        "perHour": 8.39,
+        "state": "no",
+        "shopMinutes": 9,
+        "grossPerHour": 9.89
+      }
     },
     {
       "name": "the same offer against a target it clears",
       "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": { "target": 10, "costPerMile": 0 },
-      "expect": { "perHour": 12.51, "state": "go" }
+      "settings": {
+        "target": 10,
+        "costPerMile": 0
+      },
+      "expect": {
+        "perHour": 12.51,
+        "state": "go"
+      }
     },
     {
       "name": "a distrusted distance is never charged as cost",
       "text": "$20.00 10 min (30.5 mi) total",
-      "settings": { "target": 25, "costPerMile": 0.7 },
-      "expect": { "net": 20, "milesUncertain": true }
+      "settings": {
+        "target": 25,
+        "costPerMile": 0.7
+      },
+      "expect": {
+        "net": 20,
+        "milesUncertain": true
+      }
     },
     {
       "name": "the guard keeps a recovered read positive",
       "text": "$7.09 34 min (36 mi) total",
-      "settings": { "target": 25, "costPerMile": 0.3 },
-      "expect": { "perHour": 10.61, "state": "no" }
+      "settings": {
+        "target": 25,
+        "costPerMile": 0.3
+      },
+      "expect": {
+        "perHour": 10.61,
+        "state": "no"
+      }
     }
   ]
 }

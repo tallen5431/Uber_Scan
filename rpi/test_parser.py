@@ -28,7 +28,7 @@ for c in cases['rate']:
     r = P.rate(P.parse(c['text']), c['settings'])
     for key, want in c['expect'].items():
         got = r[key]
-        if key == 'perHour' and got is not None:
+        if key.lower().endswith('perhour') and got is not None:
             got = round(got, 2)
         eq(c['name'] + ' / ' + key, got, want)
 
@@ -48,6 +48,24 @@ eq('deducting nothing reports nothing', gross['cost'], 0)
 eq('...at a rate of nothing', gross['costPerMile'], 0)
 eq('and the gap is exactly the deduction',
    round(gross['perHour'] - net['perHour'], 2), round(net['cost'] / (34 / 60.0), 2))
+
+# The screen shows both rates and the cost between them, so those three have to
+# be one sum. They are only one sum if both rates were divided by the same
+# minutes — and the billed minutes are not the card's as soon as a shopping
+# allowance is set. Working the raw rate out from the card's own time gave
+# $12.51/hr next to a net $8.39/hr and a $1.08 deduction, three numbers that
+# cannot be reconciled by anyone checking them.
+shopping = P.rate(offer, {'target': 25, 'costPerMile': 0.30, 'secondsPerItem': 90})
+eq('the raw rate is over the billed time, not the card time',
+   round(shopping['grossPerHour'], 2), round(offer['pay'] / (43 / 60.0), 2))
+eq('...which the card time would have got wrong',
+   round(shopping['grossPerHour'], 2) != round(offer['pay'] / (34 / 60.0), 2), True)
+for name, r in (('no costs', gross), ('mileage', net), ('shopping', shopping)):
+    eq('raw less the cost is the net rate (%s)' % name,
+       round(r['grossPerHour'] - r['cost'] / (r['minutes'] / 60.0), 6),
+       round(r['perHour'], 6))
+eq('with nothing deducted the two rates are the same figure',
+   gross['grossPerHour'], gross['perHour'])
 
 # A trip that takes no time pays infinitely well. parse() will not produce a
 # zero-minute offer, but `pad` is edited by hand in config.json and a negative

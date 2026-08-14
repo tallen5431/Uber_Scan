@@ -19,7 +19,7 @@ cases.rate.forEach(function (c) {
   var r = P.rate(P.parse(c.text), c.settings);
   Object.keys(c.expect).forEach(function (k) {
     var got = r[k];
-    if (k === 'perHour' && typeof got === 'number') got = Math.round(got * 100) / 100;
+    if (/PerHour$/i.test(k) && typeof got === 'number') got = Math.round(got * 100) / 100;
     eq(c.name + ' / ' + k, got, c.expect[k]);
   });
 });

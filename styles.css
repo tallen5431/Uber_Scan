@@ -90,6 +90,7 @@ html, body {
   padding: 2px 0 6px;
 }
 .working span { white-space: nowrap; }
+.working div + div { padding-top: 2px; }
 .working i { font-style: normal; font-weight: 600; color: var(--muted); padding: 0 .12em; }
 .working b { font-weight: 800; }
 .verdict.go .working b   { color: var(--go); }

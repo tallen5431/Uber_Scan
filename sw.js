@@ -2,7 +2,7 @@
  * that has the old worker keeps serving the old page forever otherwise —
  * v7 shipped before live.html, styles.css and offer-parser.js all changed,
  * which would have hidden every one of those changes behind a stale cache. */
-var CACHE = 'uberscan-v8';
+var CACHE = 'uberscan-v9';
 
 var ASSETS = [
   './',

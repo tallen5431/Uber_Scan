@@ -281,6 +281,12 @@
       // than showing a number nobody can reconstruct.
       costPerMile: costPerMile,
       perHour: perHour,
+      // The same rate before running costs come off, over the same minutes.
+      // A display that works this out for itself from the card's own time
+      // divides by a different number as soon as `pad` or `secondsPerItem`
+      // is set, and then the two rates it shows cannot be reconciled by
+      // subtracting the cost it also shows.
+      grossPerHour: parsed.pay / (minutes / 60),
       perMin: net / minutes,
       // Net, like perHour, so the two agree about what a dollar means. A
       // display showing one gross and the other net invites exactly the
