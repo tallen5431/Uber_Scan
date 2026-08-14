@@ -138,11 +138,15 @@ ok_('...but not the same size', not T.same_size(quad_at(445, 235, shrunk), start
 settle(tr, frame_with_phone(445, 235, shrunk), 12)
 eq('so the corners are left alone', tr.moves, 0)
 ok_('and stay where they were', T.distance(tr.quad, start) < 0.01)
-# And refused however long it insists — which is the part that matters, since
-# the old guard only covered the re-lock and this candidate would never have
-# reached it.
-ok_('...however many times it agrees with itself', tr.agreeing >= T.AGREE * 2)
+# And refused however long it insists, which is the part that matters.
 eq('...and it is not adopted as a re-lock either', tr.jumps, 0)
+# Its evidence does not survive the refusal either. `agreeing` counts checks
+# that saw the same thing; leaving it standing let a run of refused candidates
+# walk the counter to the bar, so the first one that squeaked through moved the
+# corners on sight with the authority of ten sightings of something else.
+eq('and it banks no evidence on the way', tr.agreeing, 0)
+settle(tr, frame_with_phone(*MOVED), 1, t0=500.0)
+eq('so the next real candidate starts from scratch', tr.moves, 0)
 
 # --- one bad frame cannot steal the corners ---------------------------------
 tr = T.QuadTracker(start)

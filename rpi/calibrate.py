@@ -147,10 +147,13 @@ def main():
         if quad is None:
             sys.exit('no screen found — is the phone lit and in frame? else pass --corners')
 
-    roi = WHOLE_VIEW if args.full_screen else DEFAULT_ROI
+    pin = WHOLE_VIEW if args.full_screen else DEFAULT_ROI
     config = {
         'quad': [[float(x), float(y)] for x, y in quad],
-        'roi': roi,
+        # Only written when asked for, and under a key nothing inherits: an
+        # older config's `roi` must not act as a pin, or a rig upgrading gets
+        # its crop frozen at whatever that version happened to write.
+        'cropBox': pin,
         'cardHeight': args.card_height,
         'capture': {'width': width, 'height': height},
         'lensPosition': lens_position,
@@ -164,7 +167,7 @@ def main():
     # obvious before it costs a shift's worth of missed offers. Taken from a
     # real read rather than rebuilt, because the crop is placed per read now
     # and a rebuild would show a composition the scanner never uses.
-    probe = PL.Scanner(quad=quad, roi=roi, card_height=args.card_height)
+    probe = PL.Scanner(quad=quad, roi=pin, card_height=args.card_height)
     checked = probe.read(frame)
     preview = checked['card']
     preview_path = os.path.splitext(args.config)[0] + '-preview.png'

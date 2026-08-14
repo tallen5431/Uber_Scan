@@ -167,6 +167,24 @@ def start_camera(cfg, exposure_us, gain, lens):
     return cam
 
 
+_read_error = None
+
+
+def _read_failed(exc):
+    """Report a read that raised, once per distinct fault.
+
+    Rate-limited by message the same way the snapshot and config writers are:
+    whatever makes one frame fail usually makes the next hundred fail too, and
+    a log that repeats it at thirty lines a second buries the one line that
+    said what happened.
+    """
+    global _read_error
+    message = '%s: %s' % (type(exc).__name__, exc)
+    if message != _read_error:
+        _read_error = message
+        log('read failed (further identical errors suppressed): %s' % message)
+
+
 _snapshot_error = None
 
 
@@ -361,7 +379,29 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None):
     sys.stdout.flush()
 
 
+def _stop_on_sigterm():
+    """Turn the supervisor's stop signal into an ordinary unwind.
+
+    server.js stops the scanner with SIGTERM, and autopilot execv's into this
+    process so that is where it lands. Python's default action for it ends the
+    process without unwinding, which skips `finally: cam.stop()` and skips the
+    atexit handler that deletes the OCR scratch file — a megabyte of /dev/shm,
+    which is RAM, left behind on every stop. Raising SystemExit instead runs
+    both.
+    """
+    import signal
+
+    def handler(signum, frame):
+        raise SystemExit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, handler)
+    except (ValueError, OSError):
+        pass                    # not the main thread, or no such signal here
+
+
 def main():
+    _stop_on_sigterm()
     ap = argparse.ArgumentParser()
     ap.add_argument('--config', default=DEFAULT_CONFIG)
     ap.add_argument('--speak', action='store_true', help='say the verdict aloud via espeak-ng')
@@ -406,13 +446,19 @@ def main():
     # a fixed mount usually has not moved between runs, so resuming saves
     # re-converging. `quad` stays the calibration; see QuadTracker.calibrated.
     scanner = PL.Scanner(
-        quad=np.array(cfg.get('trackedQuad') or cfg['quad'], dtype=np.float32),
+        # Resume where the last run ended — but only when tracking is on to
+        # pull it back. --no-track promises the calibrated corners exactly, and
+        # pinning a position no run can correct is the opposite of that.
+        quad=np.array((None if args.no_track else cfg.get('trackedQuad')) or cfg['quad'],
+                      dtype=np.float32),
         card_height=cfg.get('cardHeight', 900),
-        # Normally absent, and then the crop is placed per read. A box here
-        # pins it — the escape hatch, and the reason calibrate.py writes the
-        # key at all. It stopped being read when the crop stopped being
-        # learned, which quietly made calibrate.py's --full-screen a no-op.
-        roi=cfg.get('roi'),
+        # A pin has to be asked for, under a key only a pin is written to.
+        # `roi` cannot serve: every config.json written before the crop became
+        # derived has one, and honouring an inherited value silently disables
+        # the placement. The boxes in the wild are [0,0,1,1] (harmless but
+        # slow), [0,0.40,1,0.60], and [0.02,0.48,0.96,0.50] — the old tight
+        # crop, which lost the payout on 13 of 42 test cards.
+        roi=cfg.get('cropBox'),
         settings=cfg.get('settings', {}),
     )
     # The tracker works in the small stream's coordinates and reports in the
@@ -474,6 +520,7 @@ def main():
     accumulator = OfferAccumulator()
     last_sample = 0.0
     previous_card = None
+    failures = 0
     spoke_for = None
     frames = 0
     last_snapshot = 0.0
@@ -574,7 +621,18 @@ def main():
                 continue
 
             frames += 1
-            out = scanner.read(frame, now=time.time())
+            try:
+                out = scanner.read(frame, now=time.time())
+            except Exception as e:
+                # A read is the one part of this loop that touches an external
+                # engine, a homography and a JPEG encoder, and any of them can
+                # throw on one bad frame: a degenerate quad, a tesseract
+                # invocation that fails, a full disk. Killing the process for
+                # it means the supervisor's backoff, a camera re-open, and
+                # roughly a minute of not scanning — for a frame that would
+                # have been replaced 30ms later.
+                _read_failed(e)
+                continue
             parsed = accumulator.add(out['parsed'])
             rate = OP.rate(parsed, cfg.get('settings', {}))
             out['parsed'], out['rate'] = parsed, rate
@@ -588,6 +646,12 @@ def main():
             # of a small computer's whole attention. What keeps sampling is the
             # case that needs it: a single leg that is not a total, which is
             # exactly the shape of a card with a leg still missing.
+            # Counted here because the Scanner stopped counting when the crop
+            # stopped moving, and the log line that says "N in a row" is the
+            # one that tells a bad frame from a broken mount. It had been
+            # printing 0 every time, on every rig.
+            failures = 0 if parsed['complete'] else failures + 1
+
             signature = (parsed['pay'], parsed['minutes'], parsed['miles'])
             whole = parsed['complete'] and (parsed.get('hasTotal')
                                             or (parsed.get('legs') or 0) >= 2)
@@ -610,7 +674,7 @@ def main():
                        'no payout in the crop' if parsed['pay'] is None else
                        'a payout but no journey')
                 log('read %d found nothing usable (%s, %d in a row). Reader saw: %r'
-                    % (frames, why, out.get('misses', 0),
+                    % (frames, why, failures,
                        (out.get('text') or '').strip()[:220]))
             health.report(now, tracker, scanner)
 
@@ -622,8 +686,18 @@ def main():
             if args.save_misses and not parsed['complete']:
                 cv2.imwrite(os.path.join(args.save_misses, 'miss-%d.png' % int(time.time())), frame)
 
-            # Speak once per offer, at the point two reads agree, never per frame.
-            if args.speak and out['locked'] and rate['ready']:
+            # Speak once per offer, never per frame — and only once the
+            # reading is *whole*.
+            #
+            # `locked` means two consecutive raw frames parsed the same, which
+            # is not the same claim: two frames that both lose the pickup leg
+            # to the same glare agree perfectly with each other. The loop
+            # already computes `whole` for exactly this distinction and uses it
+            # to decide whether to keep resampling; speaking before it is
+            # announcing a number the scanner is still in the middle of
+            # correcting, and a two-leg card missing a leg reads as a much
+            # better offer than it is.
+            if args.speak and out['locked'] and whole and rate['ready']:
                 sig = (parsed['pay'], parsed['minutes'])
                 if sig != spoke_for:
                     spoke_for = sig
@@ -635,7 +709,7 @@ def main():
                 cv2.imshow('uber-scan', render_panel(rate, parsed))
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         cam.stop()

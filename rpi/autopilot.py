@@ -244,7 +244,7 @@ def calibrate_from(source, as_json):
 
     config = {
         'quad': quad_full,
-        'roi': DEFAULT_ROI,
+        'cropBox': DEFAULT_ROI,
         'cardHeight': 900,
         'capture': {'width': source.capture_size[0], 'height': source.capture_size[1]},
         'lensPosition': source.lens_position,

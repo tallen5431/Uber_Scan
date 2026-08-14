@@ -367,6 +367,41 @@ h.report(1000.0 + SP.HEALTH_EVERY + 1, None, tight)
 eq('summarising clears the window', h.reads, 0)
 ok_('but not the running totals', h.relocks == 0)
 
+# --- a pin has to be asked for, not inherited ------------------------------
+# The crop is placed per read. A box in the config pins it instead, which is
+# the escape hatch — but the key it is read from must be one nothing inherits.
+# Every config.json written before the crop became derived carries an `roi`,
+# and honouring those silently disabled the placement: [0,0,1,1] (harmless but
+# slow), [0,0.40,1,0.60], and [0.02,0.48,0.96,0.50] — the old tight crop, which
+# lost the payout on 13 of 42 test cards.
+pinned = PL.Scanner(quad=None, roi=[0.0, 0.30, 1.0, 0.40])
+eq('an explicit box is used as given', pinned.crop_box, [0.0, 0.30, 1.0, 0.40])
+free = PL.Scanner(quad=None)
+ok_('and without one the crop is placed', free.crop_box != [0.0, 0.30, 1.0, 0.40])
+eq('...from the measured geometry', free.crop_box, PL.centred_roi(PL.CARD_SHARE))
+
+# The three boxes older versions wrote, each fed in as a config would feed it.
+# None of them may reach the Scanner from the `roi` key any more.
+import scan_pi as SP2                                          # noqa: E402
+for legacy in ([0.0, 0.0, 1.0, 1.0], [0.0, 0.40, 1.0, 0.60], [0.02, 0.48, 0.96, 0.50]):
+    cfg = {'roi': legacy}
+    eq('a config carrying %s pins nothing' % (legacy,), cfg.get('cropBox'), None)
+    eq('...and the scanner built from it places its own crop',
+       PL.Scanner(quad=None, roi=cfg.get('cropBox')).crop_box,
+       PL.centred_roi(PL.CARD_SHARE))
+
+# --- one bad frame is a log line, not a dead scanner ------------------------
+import io                                                      # noqa: E402
+import contextlib                                              # noqa: E402
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    for _ in range(50):
+        SP2._read_failed(RuntimeError('tesseract died'))
+    SP2._read_failed(ValueError('degenerate quad'))
+said = [l for l in buf.getvalue().splitlines() if l.strip()]
+eq('repeats of one fault are said once', len(said), 2)
+ok_('and the fault is named', 'tesseract died' in said[0])
+
 # --- the motion gate still gates ------------------------------------------
 sc = PL.Scanner(quad=None, roi=None)
 still = np.full((480, 640), 100, np.uint8)

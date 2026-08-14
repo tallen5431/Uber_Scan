@@ -146,7 +146,17 @@ class QuadTracker:
 
         # One gate, and it is measured against the calibration rather than
         # against wherever the corners have got to. See looks_like_the_screen.
+        #
+        # A rejected candidate takes its evidence with it. `agreeing` counts
+        # how many checks running have seen the same thing, and a bare return
+        # left the count standing — so a run of steadily-shrinking detections,
+        # each refused, still walked the counter up to the bar. The first
+        # candidate that then squeaked through the gate moved the corners on
+        # sight, carrying the authority of ten sightings that were all of
+        # something else.
         if not self.looks_like_the_screen(candidate):
+            self.agreeing = 0
+            self._candidate = None
             return False
 
         if near(candidate, self.quad, MAX_JUMP):
@@ -276,7 +286,13 @@ def same_size(a, b):
 # How far the proportions may differ and still be the same screen. Generous,
 # because perspective genuinely skews a quad and a dimmed map can shorten the
 # lit part of a screen; nowhere near generous enough to admit a strip.
-ASPECT_BAND = (0.70, 1.43)
+#
+# Written as 1/lower for the same reason SIZE_BAND is, and it was not: 1/0.70
+# is 1.428571 and this said 1.43, which accepts a ratio whose inverse it
+# refuses. That is the sliver where A can adopt B and B can never adopt A back
+# — the exact defect the commit above this one removed from SIZE_BAND, put
+# straight back in the band added alongside it.
+ASPECT_BAND = (0.70, 1.0 / 0.70)
 
 
 def sides(quad):

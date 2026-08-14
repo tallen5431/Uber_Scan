@@ -719,14 +719,24 @@ python3 rpi/calibrate.py --corners 135,229,830,134,838,1979,70,1874
 Targets live in the same file — edit `settings` for your `target`, `costPerMile`,
 `pad` and `secondsPerItem`.
 
-Two keys in `config.json` are about the crop, and they mean different things.
-`roi` is normally `null`, which means "place it per read" — the scanner sizes a
-centred box from the geometry it measures each frame. Put a `[x, y, w, h]` box
-there (or run `calibrate.py --full-screen`) and it is pinned to that instead,
-which is the escape hatch if the automatic placement ever misbehaves. `quad` is
-the calibration and is written only by calibration; `trackedQuad` is where the
-corner tracking has got to and is written while scanning, so the next run
-resumes without re-converging.
+Three keys in `config.json` are about where to look, and they mean different
+things.
+
+- **`quad`** is the calibration — the corners as found when you calibrated.
+  Only calibration writes it, and the corner tracker judges every candidate
+  against it.
+- **`trackedQuad`** is where the tracking has got to. Written while scanning so
+  the next run resumes without re-converging; ignored by `--no-track`.
+- **`cropBox`** pins the crop. Normally absent, and then the crop is placed per
+  read from the measured geometry. `calibrate.py --full-screen` writes one, and
+  you can put a `[x, y, w, h]` box there by hand — the escape hatch if the
+  automatic placement ever misbehaves on a mount nobody anticipated.
+
+A pin lives under its own key rather than under `roi` deliberately. Every
+`config.json` written before the crop became derived carries an `roi`, and
+honouring an inherited one would silently disable the placement — including,
+for the oldest files, restoring the tight `[0.02, 0.48, 0.96, 0.50]` box that
+lost the payout on 13 of 42 test cards. A stale `roi` key is now ignored.
 
 ### The headline is a *net* rate
 
