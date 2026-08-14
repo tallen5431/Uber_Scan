@@ -336,6 +336,12 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None):
         'items': parsed['items'],
         'milesCorrected': parsed['milesCorrected'],
         'milesUncertain': parsed['milesUncertain'],
+        # What was taken off the top, and at what rate. Without these the page
+        # cannot explain its own headline: a driver who works out 7.09 over 34
+        # minutes gets $12.51/hr and the screen says $10.61, with nothing on it
+        # saying that 3.6 miles of running costs came out first.
+        'cost': round(rate['cost'], 2) if rate.get('ready') else None,
+        'costPerMile': rate.get('costPerMile'),
         'ms': round(ms['total']),
         'text': (parsed.get('text') or '')[:200],
         'legs': parsed.get('legs'),

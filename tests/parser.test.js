@@ -142,6 +142,17 @@ check('largest dollar figure wins over a promo line',
 
   var generous = P.rate(p, { target: 10, costPerMile: 0 });
   eq('clears a $10 target', generous.state, 'go');
+
+  // A rate a driver cannot reconstruct is a rate they cannot trust. Working
+  // 7.09 over 34 minutes by hand gives $12.51/hr; the screen said $10.61 and
+  // said nothing about the $1.08 of running costs that made up the gap. The
+  // result has to carry enough to explain itself.
+  eq('the deduction is reported', Math.round(net.cost * 100) / 100, 1.08);
+  eq('...and the rate it came from', net.costPerMile, 0.30);
+  eq('gross deducts nothing', gross.cost, 0);
+  eq('...and says so', gross.costPerMile, 0);
+  eq('net pay is pay less the deduction',
+     Math.round(net.net * 100) / 100, Math.round((p.pay - net.cost) * 100) / 100);
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');

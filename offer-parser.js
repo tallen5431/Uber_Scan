@@ -271,6 +271,9 @@
       shopMinutes: shopMinutes,
       net: net,
       cost: cost,
+      // Echoed back so a display can say what it deducted and why, rather
+      // than showing a number nobody can reconstruct.
+      costPerMile: costPerMile,
       perHour: perHour,
       perMin: net / minutes,
       perMile: (parsed.miles && !parsed.milesUncertain) ? parsed.pay / parsed.miles : null,

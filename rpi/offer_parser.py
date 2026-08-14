@@ -232,6 +232,9 @@ def rate(parsed, settings=None):
         'shopMinutes': shop_minutes,
         'net': net,
         'cost': cost,
+        # Echoed back so a display can say what it deducted and why, rather
+        # than showing a number nobody can reconstruct.
+        'costPerMile': cost_per_mile,
         'perHour': per_hour,
         'perMin': net / minutes,
         'perMile': (parsed['pay'] / parsed['miles']

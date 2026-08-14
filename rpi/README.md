@@ -668,6 +668,35 @@ python3 rpi/calibrate.py --corners 135,229,830,134,838,1979,70,1874
 Targets live in the same file — edit `settings` for your `target`, `costPerMile`,
 `pad` and `secondsPerItem`.
 
+### The headline is a *net* rate
+
+`costPerMile` defaults to **$0.30** here, and it comes off the top. That makes
+the number on screen a rate after vehicle running costs, not the one you get by
+dividing pay by time:
+
+| | Live11 | Live12 |
+|---|---|---|
+| pay, minutes, miles | $7.09, 34, 3.6 | $16.05, 23, 8.4 |
+| gross — pay ÷ time | $12.51/hr | $41.87/hr |
+| less miles × $0.30 | −$1.08 | −$2.52 |
+| **shown** | **$10.61/hr** | **$35.30/hr** |
+
+The arithmetic was always right and always tested. What was missing was any way
+to tell: the page showed `$10.6/hr` with a `PAY $7.09` beside it, and the two
+do not reconcile without knowing about a deduction nothing mentioned. A driver
+checking the number by hand concludes the scanner cannot divide.
+
+So the page now says which it is. With a cost set the headline reads `/hr net`,
+the pay figure becomes **net pay** ($6.01, not $7.09), and the caption spells
+the deduction out: `$7.09 less 3.6 mi × $0.30 = $1.08`. Set `costPerMile` to
+`0` and it reads `/hr`, `pay`, and no caption — the gross number, matching what
+you would work out yourself.
+
+Worth knowing: the browser scanner (`ui.js`) defaults this to **0** while the
+Pi defaults it to **0.30**, so the two show different numbers for the same
+offer. Both now label themselves, but pick one and set it in both if you use
+both.
+
 ## Run
 
 ```sh

@@ -167,9 +167,15 @@
     el.verdict.className = 'verdict ' + r.state + (stale ? ' stale' : '');
     el.verdictLabel.textContent =
       ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '') + (r.locked ? '' : ' ?');
+    // The headline is net of running costs when a cost per mile is set, and
+    // saying so is not optional: a driver who checks 7.09 over 34 minutes gets
+    // $12.51/hr, the screen said $10.61, and nothing here explained the gap.
+    var deducted = r.cost > 0;
     setRate('$' + (Math.abs(r.perHour) >= 100
-      ? Math.round(r.perHour) : Number(r.perHour).toFixed(1)));
-    el.vPay.textContent = money(r.pay, 2);
+      ? Math.round(r.perHour) : Number(r.perHour).toFixed(1)),
+      deducted ? '/hr net' : '/hr');
+    el.lPay.textContent = deducted ? 'net pay' : 'pay';
+    el.vPay.textContent = money(deducted ? r.pay - r.cost : r.pay, 2);
     el.vMin.textContent = r.minutes === null ? '--' : Math.round(r.minutes);
     el.vMile.textContent = r.miles === null ? '--' : Number(r.miles).toFixed(1);
 
@@ -180,6 +186,9 @@
     el.warn.hidden = !notes.length;
 
     el.detail.textContent = (stale ? 'last seen ' + Math.round((Date.now() - r.at) / 1000) + 's ago · ' : '')
+      + (deducted ? '$' + Number(r.pay).toFixed(2) + ' less ' + Number(r.miles).toFixed(1)
+                    + ' mi × $' + Number(r.costPerMile).toFixed(2) + ' = $'
+                    + Number(r.cost).toFixed(2) + ' · ' : '')
       + r.ms + 'ms'
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
       + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')
@@ -189,10 +198,9 @@
   }
 
   // Only worth saying when it is not the quiet default: corners that are being
-  // followed, a crop that had to put itself back, a screen that went missing.
+  // followed, or a screen that went missing.
   function trackNote(r) {
     var bits = [];
-    if (r.rescues) bits.push('crop re-fitted ' + r.rescues + '×');
     var t = r.track;
     if (t && t.lost) bits.push('screen not visible');
     else if (t && t.jumps) bits.push('re-locked on the phone');
