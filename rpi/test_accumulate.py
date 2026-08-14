@@ -76,10 +76,32 @@ acc.add(P.parse('$8.00 23 min (4.0 mi) trip'), now=500.5)
 merged = acc.add(P.parse('$8.00 23 min (4.0 mi) trip'), now=501.0)
 eq('majority reading wins', merged['minutes'], 23)
 
+# A tie is a coin toss, so it has to land on the side that costs nothing to be
+# wrong about. This asserted the shorter time, on the reasoning that a shorter
+# time flatters the offer less — which is backwards, because $/hr is pay over
+# time: at $8.00, 23 minutes is $20.87/hr and 28 minutes is $17.14/hr, so the
+# shorter reading is the *optimistic* one. It is also the corrupted one under
+# the accumulator's own premise that OCR drops digits rather than adding them.
 acc = OfferAccumulator()
 acc.add(P.parse('$8.00 28 min (4.0 mi) trip'), now=600.0)
 merged = acc.add(P.parse('$8.00 23 min (4.0 mi) trip'), now=600.5)
-eq('tie takes the shorter time', merged['minutes'], 23)
+eq('tie takes the longer time, which is the cautious one', merged['minutes'], 28)
+
+# The same tie in the distance, where the larger reading is cautious for the
+# other reason: it is the one that charges full running costs.
+acc = OfferAccumulator()
+acc.add(P.parse('$8.00 23 min (8.0 mi) trip'), now=650.0)
+merged = acc.add(P.parse('$8.00 23 min (3.0 mi) trip'), now=650.5)
+eq('tie takes the longer distance', merged['miles'], 8.0)
+
+# A majority still beats the tie-break in either direction — the caution is
+# only ever the tiebreaker, never an override of what the frames actually saw.
+acc = OfferAccumulator()
+for t, when in (('$8.00 23 min (4.0 mi) trip', 660.0),
+                ('$8.00 23 min (4.0 mi) trip', 660.5),
+                ('$8.00 28 min (4.0 mi) trip', 661.0)):
+    merged = acc.add(P.parse(t), now=when)
+eq('a majority for the shorter time still wins', merged['minutes'], 23)
 
 # --- a total still replaces the legs it summarises --------------------------
 acc = OfferAccumulator()
@@ -150,6 +172,83 @@ rate = P.rate(merged, {'target': 25, 'costPerMile': 0.30})
 eq('merged rate uses both legs', round(rate['perHour'], 2), 20.51)
 single = P.rate(P.parse('$12.45 23 min (8.4 mi) trip'), {'target': 25, 'costPerMile': 0.30})
 eq('one leg alone flatters the offer', round(single['perHour'], 2) > round(rate['perHour'], 2), True)
+
+# --- the merged distance is judged on its own, not on the last frame's -------
+# The plausibility check runs inside parse(), on one frame's own numbers. The
+# merge then replaces those numbers and used to keep the verdict, so a single
+# frame that lost the leading digit of "23 min" — 8.4 miles in 8 minutes, 63mph,
+# correctly flagged — left "distance unreadable" stuck to the merged 9.6 miles
+# over 28 minutes, an ordinary 21 mph. rate() charges no mileage on a distance
+# it does not trust, so the running cost silently vanished and a PASS was
+# published as an ACCEPT.
+GOOD = '$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip'
+DIGIT_LOST = '$12.45 5 min (1.2 mi) away 3 min (8.4 mi) trip'
+acc = OfferAccumulator()
+for i, text in enumerate((GOOD, GOOD, DIGIT_LOST)):
+    merged = acc.add(P.parse(text), now=1100.0 + i * 0.5)
+eq('one bad frame is outvoted on the numbers', merged['minutes'], 28.0)
+eq('...and its doubt does not outlive them', merged['milesUncertain'], False)
+money = {'target': 25, 'band': 15, 'costPerMile': 0.30}
+eq('so the mileage cost is still charged',
+   round(P.rate(merged, money)['cost'], 2), 2.88)
+eq('...and the verdict is the true one',
+   P.rate(merged, money)['state'], P.rate(P.parse(GOOD), money)['state'])
+
+# A merged distance that really is implausible must still be doubted.
+acc = OfferAccumulator()
+for i in range(2):
+    merged = acc.add(P.parse('$12.45 4 min (40.0 mi) total'), now=1200.0 + i * 0.5)
+eq('a merged sum that is genuinely mad is flagged', merged['milesUncertain'], True)
+
+# --- a replacement card cannot wear the previous one's journey --------------
+# The window keys on the payout, and identical payouts recur — minimum fares
+# repeat to the cent. The replacement's legs match none of the stored slots, so
+# they opened new ones, and the trim kept the best-supported slots, which are
+# always the older card's. The new offer was reported *entirely* with the old
+# one's time and distance: an 11-minute $63.65/hr job shown as a 28-minute
+# $20.51/hr one. Worse, the contaminated merge reproduces the old signature
+# exactly, so the loop stops resampling and never looks again.
+REPLACEMENT = '$12.45 2 min (0.5 mi) away 9 min (2.1 mi) trip'
+for gap, label in ((0.6, 'swapped fast'), (3.0, 'swapped after a pause')):
+    acc = OfferAccumulator()
+    acc.add(P.parse(GOOD), now=1300.0)
+    acc.add(P.parse(GOOD), now=1300.5)
+    merged = acc.add(P.parse(REPLACEMENT), now=1300.5 + gap)
+    eq('%s / minutes are its own' % label, merged['minutes'], 11.0)
+    eq('%s / miles are its own' % label, merged['miles'], 2.6)
+    eq('%s / nothing inherited' % label, merged['mergedFrom'], 1)
+
+# ...and the cases that protects. A frame that finally catches a leg glare had
+# been hiding also matches no stored slot, and must NOT be read as a new card.
+acc = OfferAccumulator()
+acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=1400.0)
+merged = acc.add(P.parse(GOOD), now=1400.5)
+eq('a fuller frame still merges', merged['minutes'], 28.0)
+eq('...and is not mistaken for a new card', merged['mergedFrom'], 2)
+
+# The hardest version: each frame catches a *different* single leg, so neither
+# lines up with what is on record. A leg count cannot separate this from a
+# replacement card — both frames show one leg — which is why the test is
+# whether the frame shows a whole journey, and a lone plain leg never does.
+acc = OfferAccumulator()
+acc.add(P.parse('$12.45 5 min (1.2 mi) away'), now=1500.0)
+merged = acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=1500.5)
+eq('two different single legs are still one card', merged['mergedFrom'], 2)
+# What it then reports is a separate matter, and unchanged by any of this: the
+# union is capped at the most legs any single frame saw, which is one, so the
+# second leg is trimmed back off. The cap is what stops a misread duration
+# inventing a leg, and it cannot tell that case from this one. The loop does
+# not act on the result — `whole` requires a total or two legs, so nothing is
+# spoken and it keeps resampling until a frame sees the card entire.
+eq('the union is still capped at one frame\'s worth', merged['legs'], 1)
+
+# A card whose total line arrives after its legs matches no slot either, and
+# resetting to it is harmless: a total is the whole journey by itself.
+acc = OfferAccumulator()
+acc.add(P.parse(GOOD), now=1600.0)
+merged = acc.add(P.parse('$12.45 28 min (9.6 mi) total'), now=1600.5)
+eq('a total that supersedes the legs still reads right', merged['minutes'], 28.0)
+eq('...with the whole distance', merged['miles'], 9.6)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)

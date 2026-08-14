@@ -159,7 +159,15 @@ function startScanner() {
     scanner.error = text.split('\n').slice(-3).join(' ');
   });
 
-  scanner.proc.on('exit', function (code, signal) {
+  // 'close', not 'exit'. A process that starts and then dies emits both, but a
+  // process that never starts at all — python3 missing, SCANNER_CMD wrong or
+  // not executable, EMFILE — emits 'error' and then 'close' and *never* 'exit'.
+  // Hanging the retry off 'exit' meant that case scheduled nothing, ever:
+  // scanner.proc stayed set so /api/status kept answering running:true, the
+  // live page kept its green dot and WAITING FOR AN OFFER, and every offer of
+  // the shift was missed with nothing on screen admitting it. The comment above
+  // names this exact failure and only half of it was handled.
+  scanner.proc.on('close', function (code, signal) {
     console.error('scanner: exited (' + (signal || code) + ')');
     scanner.proc = null;
     if (shuttingDown) return;
@@ -207,7 +215,29 @@ function send(res, status, body, headers) {
   res.end(body);
 }
 
+// Anything thrown while routing becomes a 500 for that one request instead of
+// the end of the process. This server is the scanner's parent — when it dies
+// the child's next stdout write gets EPIPE and the camera side goes down with
+// it, so a single malformed URL took out the whole rig and nothing restarted
+// it: install-service.sh supervises scan_pi.py, and the documented way to run
+// the site is a bare `npm start`. rpi/README.md promises the site keeps serving
+// while the scanner comes and goes; that promise cannot survive the web server
+// being the fragile half.
 function handler(req, res) {
+  try {
+    route(req, res);
+  } catch (e) {
+    console.error('request failed: ' + req.method + ' ' + req.url + ' — ' + e.message);
+    try {
+      send(res, 500, 'server error', { 'Content-Type': 'text/plain' });
+    } catch (ignored) {
+      // Headers already went out. Nothing to say; just do not take the process
+      // down over it.
+    }
+  }
+}
+
+function route(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return send(res, 405, 'method not allowed', { 'Content-Type': 'text/plain' });
   }
@@ -216,6 +246,18 @@ function handler(req, res) {
   try {
     pathname = decodeURIComponent(url.parse(req.url).pathname);
   } catch (e) {
+    return send(res, 400, 'bad request', { 'Content-Type': 'text/plain' });
+  }
+
+  // A percent-encoded NUL survives decodeURIComponent as a real \0, and every
+  // check below it is string work that lets it through: path.resolve keeps it,
+  // ROOT-containment still matches, and PRIVATE wants `rpi` followed by `/` or
+  // end-of-string, which \0 is neither — so /rpi%00/config.json walked straight
+  // past the guard on the private directory. It then reached fs.realpath, which
+  // validates its argument synchronously and throws, and `GET /%00` killed the
+  // server outright. No file has a NUL in its name, so there is nothing here to
+  // serve and nothing to be lost by refusing early.
+  if (pathname.indexOf('\0') !== -1) {
     return send(res, 400, 'bad request', { 'Content-Type': 'text/plain' });
   }
 
