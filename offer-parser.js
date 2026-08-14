@@ -186,6 +186,11 @@
       pay: pay,
       minutes: minutes,
       miles: miles,
+      // The legs behind the sum, so a caller holding readings from several
+      // frames can merge the ones a single frame missed.
+      legDetail: used.map(function (l) {
+        return { minutes: l.minutes, miles: l.miles, isTotal: l.isTotal };
+      }),
       items: items,
       legs: used.length,
       milesCorrected: dist.corrected,

@@ -24,7 +24,9 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import offer_parser as OP
 import pipeline as PL
+from accumulate import OfferAccumulator
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 DEFAULT_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'live-frame.jpg')
@@ -38,6 +40,14 @@ DEFAULT_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'liv
 # is enough to prove the camera is alive.
 SNAPSHOT_FAST = 0.4
 SNAPSHOT_IDLE = 3.0
+
+# The motion gate fires once per offer, because a card sitting still is not a
+# change. One frame is therefore the only sample there would ever be, and one
+# frame is where a leg gets lost to glare or a blink of defocus. After anything
+# is read, keep reading for a few seconds so the accumulator has more than one
+# view of the same card to work from.
+RESAMPLE_WINDOW = 4.0
+RESAMPLE_EVERY = 0.5
 WATCH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.viewing')
 WATCH_WINDOW = 10.0
 
@@ -172,6 +182,9 @@ def show(frame_text, rate, parsed, ms, locked):
         flags.append('decimal recovered')
     if parsed['milesUncertain']:
         flags.append('distance unreadable, cost ignored')
+    if parsed.get('grew'):
+        flags.append('%d legs merged from %d reads'
+                     % (parsed.get('legs') or 0, parsed.get('mergedFrom') or 0))
     print('%s  $%.2f/hr  %-4s  pay $%.2f  %s min  %s mi%s  [%.0fms]%s'
           % (frame_text, rate['perHour'], rate['state'].upper(), parsed['pay'],
              parsed['minutes'], parsed['miles'],
@@ -195,6 +208,9 @@ def emit(rate, parsed, ms, locked):
         'milesUncertain': parsed['milesUncertain'],
         'ms': round(ms['total']),
         'text': (parsed.get('text') or '')[:200],
+        'legs': parsed.get('legs'),
+        'mergedFrom': parsed.get('mergedFrom', 1),
+        'grew': bool(parsed.get('grew')),
     }
     sys.stdout.write(json.dumps(payload) + '\n')
     sys.stdout.flush()
@@ -248,9 +264,12 @@ def main():
         cv2.setWindowProperty('uber-scan', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     print('scanning — ctrl-c to stop')
+    accumulator = OfferAccumulator()
     spoke_for = None
     frames = 0
     last_snapshot = 0.0
+    resample_until = 0.0
+    last_resample = 0.0
     try:
         while True:
             request = cam.capture_request()
@@ -261,10 +280,16 @@ def main():
                 buf = request.make_buffer('lores')
                 luma = np.frombuffer(buf, dtype=np.uint8,
                                      count=LORES[0] * LORES[1]).reshape((LORES[1], LORES[0]))
+                now = time.time()
                 do_read = scanner.should_read(luma)
+                # Keep sampling for a short while after a card appears, so a leg
+                # missed by one frame can still be picked up by the next.
+                if not do_read and now < resample_until and (now - last_resample) > RESAMPLE_EVERY:
+                    do_read = True
+                    last_resample = now
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.
-                due = args.snapshot and (time.time() - last_snapshot) > snapshot_interval()
+                due = args.snapshot and (now - last_snapshot) > snapshot_interval()
                 if not do_read and not due:
                     continue
                 # picamera2's "RGB888" hands back B, G, R ordered arrays, which
@@ -282,7 +307,14 @@ def main():
 
             frames += 1
             out = scanner.read(frame)
-            rate, parsed = out['rate'], out['parsed']
+            parsed = accumulator.add(out['parsed'])
+            rate = OP.rate(parsed, cfg.get('settings', {}))
+            out['parsed'], out['rate'] = parsed, rate
+
+            # Anything with a payout is worth a second look; anything without is
+            # not an offer and should not hold the loop open.
+            if parsed.get('pay'):
+                resample_until = time.time() + RESAMPLE_WINDOW
             if args.json:
                 emit(rate, parsed, out['ms'], out['locked'])
             else:

@@ -135,7 +135,10 @@
     el.warn.hidden = !notes.length;
 
     el.detail.textContent = (stale ? 'last seen ' + Math.round((Date.now() - r.at) / 1000) + 's ago · ' : '')
-      + r.ms + 'ms' + (r.items ? ' · ' + r.items + ' items' : '');
+      + r.ms + 'ms'
+      + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
+      + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')
+      + (r.items ? ' · ' + r.items + ' items' : '');
   }
 
   function connect() {

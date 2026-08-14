@@ -143,6 +143,10 @@ def parse(raw_text):
         'pay': pay,
         'minutes': minutes,
         'miles': miles,
+        # The legs behind the sum, so a caller holding readings from several
+        # frames can merge the ones a single frame missed.
+        'legDetail': [{'minutes': l['minutes'], 'miles': l['miles'],
+                       'isTotal': l['isTotal']} for l in used],
         'items': items,
         'legs': len(used),
         'milesCorrected': corrected,

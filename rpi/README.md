@@ -350,13 +350,35 @@ order: glare across the card, exposure too short (raise `--exposure`; below
 ~10000µs OLED dimming shows as dark bands), and focus (`--lens`, in dioptres —
 4.0 is 25cm, 3.0 is 33cm).
 
+## One offer, several looks
+
+A single frame is not always a complete read. Glare across one line or a blink
+of defocus can cost a leg, and a card listing a pickup *and* a trip then reports
+only the half that survived — which reads as a shorter, better-paying job than
+it is. On a real card that difference was $25.90/hr against $20.51/hr: at a $25
+target, accept versus pass.
+
+So readings of the same offer are merged over a short window. The pay is the
+key — a different payout is a different offer, and the window resets rather than
+lending one card's distance to another. Legs are identified by their distance,
+so re-reading the same leg does not add it twice; only a genuinely different leg
+extends the total. Where two readings of one leg disagree, the more frequent
+wins, and a tie takes the shorter time, which errs towards making an offer look
+worse rather than better.
+
+This needs more than one look, and the motion gate only fires once per card
+because a card sitting still is not a change. After anything with a payout is
+read, the scanner therefore keeps sampling for a few seconds. Reads report
+`legs` and `mergedFrom` so a merged answer is visible as one.
+
 ## Correctness
 
 The Pi parser is a port of the browser one. Both run the same corpus:
 
 ```sh
-node tests/corpus.test.js     # 81 checks
-python3 rpi/test_parser.py    # the same 81 checks
+node tests/corpus.test.js       # 81 checks
+python3 rpi/test_parser.py      # the same 81 checks
+python3 rpi/test_accumulate.py  # 27 checks on merging across frames
 ```
 
 If the two ever disagree, that suite fails. Edit one, re-run both.
