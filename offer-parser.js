@@ -62,7 +62,13 @@
   // A dollar sign is often read as S, 5 or §. Require a currency-ish marker so
   // that bare numbers (item counts, addresses, times) can never be mistaken for pay.
   var MONEY_STRICT = new RegExp('\\$\\s*(' + DC + '{1,4}(?:[.,]' + DC + '{1,2})?)', 'g');
-  var MONEY_LOOSE = new RegExp('(?:^|[\\s(])[$S5§]\\s?(' + DC + '{1,4}(?:[.,]' + DC + '{1,2})?)', 'g');
+  // The fallback insists on cents, which every Uber payout has. Without that it
+  // will invent one: "E 61 St & S Rhodes Ave" came back from a real card as
+  // "S 4S Rhodes", which this read as a $45.00 offer — a confident ACCEPT on a
+  // $7 job. Guessing the currency symbol is already one guess; allowing a
+  // digits-only amount on top of it is two, and addresses are full of tokens
+  // that survive two guesses.
+  var MONEY_LOOSE = new RegExp('(?:^|[\\s(])[$S5§]\\s?(' + DC + '{1,4}[.,]' + DC + '{2})', 'g');
 
   function findPay(text) {
     var all = collect(text, MONEY_STRICT);

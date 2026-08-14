@@ -85,6 +85,26 @@
       "name": "implausible but clearly decimalled is uncertain, not corrected",
       "text": "$20.00 10 min (30.5 mi) total",
       "expect": { "miles": 30.5, "milesUncertain": true, "milesCorrected": false }
+    },
+    {
+      "name": "an address is not a payout: 'E 61 St & S Rhodes' misread as 'S 4S'",
+      "text": "3 min (1.1 mi) away E61 S 4S Rhodes Ave, 20 min (7.3 mi) trip",
+      "expect": { "pay": null, "minutes": 23, "miles": 8.4, "complete": false }
+    },
+    {
+      "name": "nor is a rating with the star read as an S",
+      "text": "UberX Exclusive S 4S Verified 20 min (7.3 mi) trip",
+      "expect": { "pay": null, "minutes": 20, "miles": 7.3, "complete": false }
+    },
+    {
+      "name": "a real payout with the dollar sign lost still reads, cents and all",
+      "text": "UberX Exclusive S16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
+      "expect": { "pay": 16.05, "minutes": 23, "miles": 8.4, "complete": true }
+    },
+    {
+      "name": "uberx two-leg card, verbatim from a real offer",
+      "text": "UberX Exclusive $16.05 4.95 Verified 3 min (1.1 mi) away E 61 St & S Rhodes Ave, IL 20 min (7.3 mi) trip S Cottage Grove Ave & 62nd St, IL Accept",
+      "expect": { "pay": 16.05, "minutes": 23, "miles": 8.4, "complete": true }
     }
   ],
   "rate": [

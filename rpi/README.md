@@ -96,7 +96,8 @@ decimal is one or two pixels through a hand-held lens, and losing it turns a
 $7.09 offer into negative earnings. On the Pi that failure mostly disappears,
 because the geometry is known:
 
-- the four corners of the phone screen are found **once**, at calibration;
+- the four corners of the phone screen are found at calibration, and **kept on
+  the phone from then on** (see below);
 - every frame is perspective-warped straight-on before OCR, so the text is
   square and evenly scaled instead of skewed;
 - focus and exposure are pinned, so nothing hunts.
@@ -104,6 +105,29 @@ because the geometry is known:
 On the same test frame that defeated the handheld pipeline, the warped version
 reads `3.6` unaided — the plausibility guard never has to fire. The guard is
 still there as a backstop.
+
+### ...but a mount is not a clamp
+
+The corners are not used directly. The card is cropped as a *fraction* of
+whatever they enclose, and that makes the whole thing sensitive to the phone
+moving in a way that is easy to miss: slide the phone up until its top edge
+leaves the frame, and the detected screen shrinks to the part still visible. The
+same fraction now lands lower on the real screen, the crop walks off the payout,
+and the scanner reports — perfectly confidently — that there is no offer, on a
+screen with an offer on it.
+
+Two things run continuously to stop that:
+
+| | |
+|---|---|
+| **Corner tracking** (`track.py`) | The screen is re-found on any still frame, at most every 1.5s, on a 640px thumbnail so it costs almost nothing. A candidate must be the right size, in roughly the right place, and say the same thing three checks running before the corners are eased 35% of the way toward it — so drift is followed and a hand crossing the frame is not. A candidate that keeps insisting from somewhere else for twice as long is treated as the mount having been knocked, and adopted whole. |
+| **Crop recovery** (`fit_roi`) | If a read finds no payout — or finds one hard against the top edge of the crop, which means the crop is cutting the card — the whole screen is read once and the crop is re-fitted to where the payout actually is. The new box is written back to `config.json`, so the next run starts from what this one learned. |
+
+Both are reported in the live view, and `--no-track` turns the first off.
+
+The recovery pass is what makes a bad crop self-correcting rather than silent.
+It costs one slow read (~1s here, more on a Pi) at the moment it fires, and
+normal fast reads resume immediately afterwards.
 
 ## Where the speed comes from
 
@@ -113,32 +137,56 @@ Not from tuning the OCR engine. From refusing to run it:
 |---|---|
 | **Motion gate** | A 640×480 luma stream answers "did anything change?" for ~1ms. The full read only happens when the answer is yes, so idle cost is near zero. |
 | **Settle wait** | After a change, it waits for the picture to stop moving. Reading a frame mid-transition just wastes a read on motion blur. |
-| **Warp to the screen** | Tesseract's cost scales with pixels. Feeding it a 363×450 card instead of a 16MP frame is worth more than every other optimisation combined. |
+| **Warp to the screen** | Tesseract's cost scales with pixels. Feeding it a card instead of a 16MP frame is worth more than every other optimisation combined. |
 | **Crop to the card** | Uber puts the card in the same place every time. Cropping to it roughly halves the pixels again, for no loss of accuracy. |
+
+...and then one place where it is worth spending, in the opposite direction:
+
+| | |
+|---|---|
+| **Read size** | The cropped card is scaled *up* to 900px before OCR. Tesseract is trained on scanned pages and wants roughly a 20px x-height; a healthy 420px card cropped out of a 900px screen arrives with eight lines of text on it and an x-height near 10px, squarely in the regime where it starts inventing digits. Interpolation adds no information, but it puts the strokes back on the grid the engine expects. |
 
 ## Measured
 
-On a desktop-class x86 container, median of repeated reads, using a
-camera-simulated frame of a real offer card:
+Two sweeps, on a desktop-class x86 container, using camera-simulated frames of
+real offer cards.
+
+**Read size is the accuracy lever.** Exact reads — all three of pay, minutes and
+miles correct — over 36 synthesised frames spanning card sizes from 350 to 500
+sensor pixels, three noise seeds, straight-on and tilted:
+
+| Read size | Exact reads | OCR |
+|---|---|---|
+| as cropped (~450px) | 12/36 | 158ms |
+| **scaled to 900px** | **29/36** | **257ms** |
+
+Every one of the seven remaining failures is the detector declining to find the
+screen at all on the smallest, most tilted frames — not a misread. Sharpening
+and Otsu binarisation were tried here too and both made things markedly worse:
+an unsharp mask eats the thin `$`, and Otsu closes up the small digits.
+
+**Warp height is the speed lever**, median of repeated reads at a 900px read
+size:
 
 | Crop | Warp height | Pixels to OCR | OCR | Total | Result |
 |---|---|---|---|---|---|
-| whole screen | 1400 | 588×1400 | 311ms | 316ms | correct |
-| whole screen | 900 | 378×900 | 270ms | 273ms | correct |
-| card only | 1100 | 443×550 | 222ms | 226ms | correct |
-| **card only** | **900** | **363×450** | **227ms** | **229ms** | **correct** |
-| card only | 700 | 283×350 | 194ms | 195ms | correct |
-| card only | 500 | 201×250 | 151ms | 152ms | **fails** |
+| whole screen | 1400 | 644×1400 | 303ms | 307ms | correct |
+| whole screen | 900 | 414×900 | 212ms | 214ms | correct |
+| whole screen | 700 | 414×900 | 205ms | 208ms | **fails** |
+| card only | 1100 | 794×900 | 263ms | 267ms | correct |
+| **card only** | **900** | **794×900** | **259ms** | **262ms** | **correct** |
+| card only | 700 | 795×900 | 238ms | 241ms | correct |
 
 Warp costs 1–3ms and parsing 0.1–0.4ms; effectively all the time is OCR.
 
-**A Pi 4 is slower than this — expect roughly 2–4×**, so budget ~0.5–1s per
-read and ~1–2s to a verdict two reads agree on. Against a 30–45 second offer
-window that is ample. Measure it yourself with `bench.py` rather than trusting
-these numbers; that is what it is for.
+**A Pi 4 is slower than this — expect roughly 2–4×**, so budget ~0.5–1.5s per
+read and a few seconds to a verdict two reads agree on. Against a 30–45 second
+offer window that is ample. Measure it yourself with `bench.py` rather than
+trusting these numbers; that is what it is for — it sweeps both axes, and the
+read-size rows are the ones worth reading first.
 
-Card height 900 with the card crop is the recommended starting point: it is
-near the floor for speed while keeping real margin before 500, where reading
+Card height 900 with the card crop and a 900px read size is the recommended
+starting point: near the floor for speed, with real margin before reading
 collapses.
 
 ## Hardware setup
@@ -336,14 +384,22 @@ big colour panel if you have a screen attached, and `--list-modes` prints what
 the sensor reports if you want to check the table above against your module. `--save-misses DIR` keeps frames
 that failed to parse so you can feed them back through `bench.py`.
 
+`--no-track` pins the corners to exactly what calibration found, instead of
+following the phone. Only worth it if tracking is misbehaving — a genuinely
+fixed mount loses nothing by leaving it on, and a mount that moves loses offers
+without it.
+
 ## Tuning
 
 ```sh
 python3 rpi/bench.py --image some-frame.png
 ```
 
-Sweeps warp heights and crops on your hardware and prints where reading breaks.
-Take the smallest height that still reads and leave margin.
+Sweeps warp heights, crops and read sizes on your hardware and prints where
+reading breaks. Take the smallest warp height that still reads and leave margin.
+The `read size` rows show what scaling the card up before OCR costs and buys;
+`as-is` is the old behaviour, and it is worth seeing the difference on your own
+frames rather than taking the table above on trust.
 
 If reads fail in the car but the preview looked fine, the usual causes are, in
 order: glare across the card, exposure too short (raise `--exposure`; below
@@ -376,12 +432,20 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 The Pi parser is a port of the browser one. Both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 81 checks
-python3 rpi/test_parser.py      # the same 81 checks
+node tests/corpus.test.js       # 97 checks
+python3 rpi/test_parser.py      # the same 97 checks
 python3 rpi/test_accumulate.py  # 27 checks on merging across frames
+python3 rpi/test_pipeline.py    # 34 checks on where and how big to read
+python3 rpi/test_track.py       # 31 checks on following the phone
 ```
 
-If the two ever disagree, that suite fails. Edit one, re-run both.
+If the two parsers ever disagree, that suite fails. Edit one, re-run both.
+
+The corpus includes the false positives that cost real money, because they read
+as perfectly ordinary text. `E 61 St & S Rhodes Ave` came off a real card as
+`S 4S Rhodes`, which the loose money pattern read as a **$45.00 offer** — a
+confident ACCEPT on a $7 job. The fallback for a dollar sign misread as `S` now
+insists on cents, which every Uber payout has.
 
 ## If something is wrong
 
@@ -397,9 +461,16 @@ the problem is the mount or the camera.
   or a camera attached. It now pins the sensor mode, reads the motion gate's
   luma straight out of the YUV buffer, and only sets focus controls the camera
   actually reports, but none of that has met the real module yet. Everything below it (warp, crop, preprocess, OCR,
-  parse, motion gate, calibration, bench) is tested and passing.
+  parse, motion gate, tracking, crop recovery, calibration, bench) is tested and
+  passing.
 - Timings are from x86, not a Pi 4. Run `bench.py`.
 - Tested against a rendered replica with synthetic lens degradation, not a real
-  lens pointed at a real phone in a moving car.
+  lens pointed at a real phone in a moving car. The corner tracker in particular
+  is tested against synthesised frames of a bright rectangle on a dark ground,
+  which is what the detector keys on but is kinder than a windscreen at night.
+- Crop recovery needs the payout to be legible *somewhere* on the screen. If the
+  card is out of frame entirely, or the phone is too far away to resolve the
+  digits at all, it will keep looking and reporting nothing — correctly, but it
+  cannot fix a mount that was never good enough.
 - Only Uber's current card wording is handled. A layout change breaks parsing,
   which is why the typed keypad on `index.html` stays the reliable path.

@@ -118,6 +118,7 @@ real offers before mounting anything.
 
 ```sh
 node tests/parser.test.js     # 60 checks, no browser needed
+node tests/corpus.test.js     # 97 checks shared with the Pi parser
 ```
 
 The browser tests live in the session scratchpad and need Playwright plus a

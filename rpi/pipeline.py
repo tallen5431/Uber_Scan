@@ -32,24 +32,61 @@ STILL_T = 2.0              # ...and below which the picture has settled again
 CARD_HEIGHT = 1100         # canonical warp height; the decimal point needs this
 OCR_CONFIG = '--oem 1 --psm 6'
 
+# How tall the card image handed to tesseract should be, whatever the mount
+# gives us. This is the single highest-value number in the file.
+#
+# Tesseract is trained on scanned text and wants roughly a 20px x-height; below
+# that its accuracy falls off a cliff. A phone card measuring a healthy 420px on
+# the sensor, cropped out of a screen warped to 900, arrives about 450px tall
+# with eight lines of text on it — an x-height near 10px, squarely in the bad
+# regime. Interpolating it up adds no information, but it puts the strokes back
+# on the grid the engine expects, and measured over a synthetic sweep of card
+# sizes and noise it took exact reads from 12/36 to 29/36. The cost is roughly
+# +60% on the OCR call, which is the cheapest accuracy ever sold.
+#
+# Sharpening and binarising were tried here too and both made things markedly
+# worse: an unsharp mask eats the thin "$" and Otsu closes up the small digits.
+OCR_CARD_HEIGHT = 900
 
-def detect_screen_quad(frame, min_area_frac=0.05, max_area_frac=0.90):
+# Corner-finding runs on a thumbnail this wide. A phone's outline is a coarse
+# feature, so the answer is the same to within a pixel once scaled back, and it
+# costs about a tenth as much — which is what makes re-checking it while
+# scanning affordable.
+DETECT_WIDTH = 640
+
+
+def detect_screen_quad(frame, min_area_frac=0.05, max_area_frac=0.90, work_width=None):
     """Find the phone screen: in a dark car it is the bright rectangle.
-
-    Used at calibration time, not per frame — with a fixed mount the corners
-    only need finding once.
 
     A result covering nearly the whole frame is rejected. Otsu splits an image
     into light and dark whatever is in it, so a scene with no dark surround
     "finds" a screen the size of the picture — and calibrating on that makes the
     card region an arbitrary strip of the room. Better to report no screen and
     say why than to lock in a frame-shaped one.
+
+    `work_width` detects on a thumbnail and scales the corners back up, for
+    callers that run this repeatedly rather than once.
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    src = frame
+    scale = 1.0
+    if work_width and frame.shape[1] > work_width:
+        scale = work_width / float(frame.shape[1])
+        src = cv2.resize(frame, (int(work_width), max(1, int(round(frame.shape[0] * scale)))),
+                         interpolation=cv2.INTER_AREA)
+
+    quad = _detect_quad(src, min_area_frac, max_area_frac)
+    return None if quad is None else quad / scale
+
+
+def _detect_quad(frame, min_area_frac, max_area_frac):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
     gray = cv2.GaussianBlur(gray, (7, 7), 0)
     _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # The closing kernel is a fraction of the frame so it means the same thing
+    # whether this ran on the sensor image or a thumbnail of it.
+    k = max(3, (int(frame.shape[1] * 0.011) | 1))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
-                            cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25)))
+                            cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
@@ -123,6 +160,15 @@ def preprocess(card):
     return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
 
 
+def fit_for_ocr(card, height=OCR_CARD_HEIGHT):
+    """Scale a small card up to the size tesseract reads best. Never shrinks."""
+    if not height or card.shape[0] >= height:
+        return card
+    scale = height / float(card.shape[0])
+    return cv2.resize(card, (max(1, int(round(card.shape[1] * scale))), int(height)),
+                      interpolation=cv2.INTER_CUBIC)
+
+
 def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640):
     """One image that answers "is it looking at the right thing?".
 
@@ -161,11 +207,129 @@ def ocr(image, config=OCR_CONFIG):
     return pytesseract.image_to_string(image, config=config)
 
 
+def ocr_lines(image, config=OCR_CONFIG):
+    """OCR that also says where each line was. Returns (text, lines).
+
+    Same engine and the same one pass as ocr(), just asked for its layout as
+    well, so this costs nothing extra. The boxes are what let a crop that has
+    slid off the card find its way back on.
+    """
+    tsv = pytesseract.image_to_data(image, config=config)
+    rows = [r.split('\t') for r in tsv.splitlines()[1:]]
+    grouped = {}
+    order = []
+    for r in rows:
+        if len(r) < 12:
+            continue
+        try:
+            key = (int(r[2]), int(r[3]), int(r[4]))       # block, paragraph, line
+            left, top, width, height = (int(r[6]), int(r[7]), int(r[8]), int(r[9]))
+            conf = float(r[10])
+        except ValueError:
+            continue
+        word = r[11].strip()
+        # -1 marks a box with no text in it; an empty word carries no position.
+        if not word or conf < 0:
+            continue
+        if key not in grouped:
+            grouped[key] = {'top': top, 'bottom': top + height,
+                            'left': left, 'right': left + width, 'words': []}
+            order.append(key)
+        line = grouped[key]
+        line['top'] = min(line['top'], top)
+        line['bottom'] = max(line['bottom'], top + height)
+        line['left'] = min(line['left'], left)
+        line['right'] = max(line['right'], left + width)
+        line['words'].append(word)
+
+    lines = []
+    for key in order:
+        line = grouped[key]
+        line['text'] = ' '.join(line['words'])
+        del line['words']
+        lines.append(line)
+    return '\n'.join(l['text'] for l in lines), lines
+
+
+# Padding around the text found on the card, as a fraction of screen height.
+# Above, enough to take in the service badge that sits over the payout; below,
+# just enough not to clip a descender.
+FIT_PAD_ABOVE = 0.045
+FIT_PAD_BELOW = 0.015
+FIT_MIN_HEIGHT = 0.18       # anything shorter than this did not find a card
+
+# A payout this close to the top edge of the crop, as a fraction of the crop's
+# height, is not trusted to be whole.
+TOP_EDGE = 0.02
+
+
+def money_is_clipped(lines, image_height):
+    """True when the payout sits flush against the top of the crop.
+
+    This is the failure that costs money rather than time. A crop that has slid
+    down over the card cuts the payout off at the eyes, and half a line of
+    digits still reads as digits — a "4.95" rating with its top shaved became a
+    $45.00 offer in testing, which is a confident ACCEPT on a $7 job. There is
+    no sign of trouble in the text itself, so the only evidence is geometric: a
+    card read from the right place has its service badge above the payout, never
+    the payout hard against the edge.
+    """
+    if not lines or not image_height:
+        return False
+    money = [l for l in lines if OP.find_pay(OP.normalize(l['text'])) is not None]
+    if not money:
+        return False
+    return min(l['top'] for l in money) <= TOP_EDGE * image_height
+
+
+def fit_roi(lines, image_height, current=None):
+    """Where the offer card is, deduced from where its text landed.
+
+    The payout is the top of the card for our purposes — everything above it is
+    map — and the lowest text is the bottom. Anchoring to the money rather than
+    to all text is what keeps street labels on the map from dragging the crop
+    back over the whole screen.
+
+    Returns a fractional (x, y, w, h) box, or None when there is nothing to
+    anchor to. The horizontal extent is inherited, because the card always spans
+    the screen and a short line would otherwise narrow the crop onto itself.
+    """
+    if not lines or not image_height:
+        return None
+
+    money = [l for l in lines if OP.find_pay(OP.normalize(l['text'])) is not None]
+    if not money:
+        return None
+
+    top = min(l['top'] for l in money)
+    bottom = max(l['bottom'] for l in lines if l['top'] >= top)
+
+    y0 = max(0.0, top / float(image_height) - FIT_PAD_ABOVE)
+    y1 = min(1.0, bottom / float(image_height) + FIT_PAD_BELOW)
+    if y1 - y0 < FIT_MIN_HEIGHT:
+        return None
+
+    x0, w = (current[0], current[2]) if current else (0.0, 1.0)
+    return [float(x0), float(y0), float(w), float(y1 - y0)]
+
+
+# A crop that has slid off the card is worth this much work to put back: read
+# the whole screen, find the card in it, and re-crop. Bounded so that a room
+# full of nothing cannot turn every motion trigger into three OCR passes.
+RESCUE_EVERY = 3.0
+
+# The rescue pass reads the whole screen, and the card is only part of it, so it
+# needs proportionally more height to leave the card legible — but not without
+# limit, or a tall thin crop would ask for a picture nothing can afford to read.
+RESCUE_MAX_HEIGHT = 1500
+
+
 class Scanner:
     """Holds the motion gate and the agreement counter across frames."""
 
     def __init__(self, quad=None, settings=None, agree_to_lock=2,
-                 card_height=CARD_HEIGHT, config=OCR_CONFIG, roi=None):
+                 card_height=CARD_HEIGHT, config=OCR_CONFIG, roi=None,
+                 ocr_height=OCR_CARD_HEIGHT, on_roi=None):
         self.quad = None if quad is None else np.asarray(quad, dtype=np.float32)
         # Fractional (x, y, w, h) of the warped screen holding the offer card.
         # Uber puts it in the same place every time, so cropping to it is free
@@ -174,12 +338,20 @@ class Scanner:
         self.settings = settings or {}
         self.agree_to_lock = agree_to_lock
         self.card_height = card_height
+        self.ocr_height = ocr_height
         self.config = config
+        # Called with the new box whenever the crop is re-fitted, so the owner
+        # can write it down rather than rediscovering it every run.
+        self.on_roi = on_roi
 
         self._prev = None
         self._dirty = True      # first frame always reads
+        self.last_diff = 0.0    # how much the picture moved, for callers that care
         self._sig = None
         self._agree = 0
+        self._last_rescue = 0.0
+        self.rescues = 0
+        self.dropped = 0
         self.locked = False
         self.last = None
 
@@ -194,9 +366,14 @@ class Scanner:
         self._prev = small
         return diff
 
+    @property
+    def settled(self):
+        """True when the picture is holding still enough to measure anything."""
+        return self.last_diff <= STILL_T
+
     def should_read(self, frame):
         """True when the picture just changed and has since settled."""
-        diff = self._motion(frame)
+        diff = self.last_diff = self._motion(frame)
         if diff > CHANGE_T:
             self._dirty = True
             return False        # still moving; reading now would blur
@@ -205,18 +382,41 @@ class Scanner:
             return True
         return False
 
-    def read(self, frame):
+    def read(self, frame, now=None):
         """Full read of one frame, ignoring the motion gate."""
+        now = time.time() if now is None else now
         t0 = time.perf_counter()
-        card = warp(frame, self.quad, self.card_height) if self.quad is not None else frame
-        card = crop(card, self.roi)
+        screen = warp(frame, self.quad, self.card_height) if self.quad is not None else frame
         t1 = time.perf_counter()
-        prepped = preprocess(card)
+        prepped = preprocess(fit_for_ocr(crop(screen, self.roi), self.ocr_height))
         t2 = time.perf_counter()
-        text = ocr(prepped, self.config)
+        # Asked for its layout as well as its text, at no extra cost, because
+        # where the payout landed is the only way to tell a crop that read
+        # nothing from a crop that read half of something.
+        text, lines = ocr_lines(prepped, self.config)
         t3 = time.perf_counter()
-
         parsed = OP.parse(text)
+
+        # Either of these means the crop, not the screen, is the problem — and
+        # from inside the crop neither is distinguishable from an empty screen.
+        # Ask the whole screen where the card really is.
+        refit = None
+        clipped = money_is_clipped(lines, prepped.shape[0])
+        if (parsed['pay'] is None or clipped) and self.roi \
+                and (now - self._last_rescue) > RESCUE_EVERY:
+            self._last_rescue = now
+            rescued, refit = self._rescue(screen)
+            if rescued is not None:
+                parsed, text = rescued['parsed'], rescued['text']
+            elif clipped:
+                # The crop found a payout hard against its cut edge and the
+                # whole screen found none. One of the two passes is wrong, and
+                # it is not the one that could see the entire card. Report
+                # nothing: a missed offer costs one fare, a phantom $45 one
+                # costs an hour driving it.
+                parsed = OP.parse('')
+                self.dropped += 1
+
         rate = OP.rate(parsed, self.settings)
         t4 = time.perf_counter()
 
@@ -226,6 +426,7 @@ class Scanner:
             'rate': rate,
             'locked': self.locked,
             'text': text,
+            'refit': refit,
             'ms': {
                 'warp': (t1 - t0) * 1000,
                 'prep': (t2 - t1) * 1000,
@@ -234,6 +435,43 @@ class Scanner:
                 'total': (t4 - t0) * 1000,
             },
         }
+
+    def _rescue(self, screen):
+        """Find the card on the whole screen and move the crop back onto it.
+
+        Two passes on purpose. The first only has to find the payout and say
+        where it is; the second reads the re-cropped card properly, and that is
+        the answer returned.
+
+        The search pass is scaled by how much of the screen the card was last
+        thought to occupy, because a card at half the screen's height needs the
+        screen at twice the card's target to arrive legible. Getting this wrong
+        is silent and total: the search finds no money on a screen with money on
+        it, and concludes the crop was fine.
+        """
+        share = (self.roi[3] if self.roi else 1.0) or 1.0
+        height = min(self.ocr_height / share, RESCUE_MAX_HEIGHT) if self.ocr_height else 0
+        wide = fit_for_ocr(screen, height)
+        text, lines = ocr_lines(preprocess(wide), self.config)
+        parsed = OP.parse(text)
+        if parsed['pay'] is None:
+            return None, None       # genuinely nothing on the screen
+
+        fitted = fit_roi(lines, wide.shape[0], self.roi)
+        if not fitted or _same_roi(fitted, self.roi):
+            # The card is where we thought; the crop was not the problem.
+            return {'parsed': parsed, 'text': text}, None
+
+        self.roi = fitted
+        self.rescues += 1
+        if self.on_roi:
+            self.on_roi(fitted)
+
+        again = ocr(preprocess(fit_for_ocr(crop(screen, fitted), self.ocr_height)), self.config)
+        reparsed = OP.parse(again)
+        if reparsed['pay'] is None:
+            return {'parsed': parsed, 'text': text}, fitted
+        return {'parsed': reparsed, 'text': again}, fitted
 
     def _consider(self, parsed):
         if not parsed['complete']:
@@ -252,3 +490,10 @@ class Scanner:
         if not self.should_read(frame):
             return None
         return self.read(frame)
+
+
+def _same_roi(a, b, tol=0.02):
+    """Boxes this close are the same box; moving between them is jitter."""
+    if a is None or b is None:
+        return a is b
+    return all(abs(float(x) - float(y)) <= tol for x, y in zip(a, b))

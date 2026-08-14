@@ -1,5 +1,5 @@
 /* Offline cache. Bump CACHE when files change so phones pick up the new version. */
-var CACHE = 'uberscan-v5';
+var CACHE = 'uberscan-v6';
 
 var ASSETS = [
   './',

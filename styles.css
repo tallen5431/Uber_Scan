@@ -85,6 +85,17 @@ html, body {
 }
 .sub small { font-size: 10px; font-weight: 600; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
 
+/* Sits under the submetrics, so it needs a gap of its own — without one it
+   collides with the uppercase labels above it. */
+.warn {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 600;
+  color: var(--warn);
+}
+.warn[hidden] { display: none; }
+
 /* ---------- Fields ---------- */
 .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .field {

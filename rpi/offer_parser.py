@@ -22,7 +22,15 @@ DIGIT_FIX = {
 DC = r'[\dOoQlIiSsBbZz]'
 
 MONEY_STRICT = re.compile(r'\$\s*(' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)')
-MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)')
+
+# The fallback for a dollar sign that OCR read as an S or a 5, used only when no
+# real "$" was found anywhere. It insists on cents, which every Uber payout has,
+# because without that it will invent one: "E 61 St & S Rhodes Ave" came back
+# from a real card as "S 4S Rhodes", and the loose pattern happily read that as
+# a $45.00 offer — a confident ACCEPT on a $7 job. Guessing the currency symbol
+# is already one guess; allowing a digits-only amount on top of it is two, and
+# addresses are full of tokens that survive two guesses.
+MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'{2})')
 
 LEG = re.compile(
     r'(?:(\d{1,2})\s*h(?:r|rs|our|ours)?\s*)?'

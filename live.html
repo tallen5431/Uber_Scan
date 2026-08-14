@@ -10,7 +10,19 @@
   /* Read at arm's length, in a car, at a glance. Nothing subtle here. */
   #app { justify-content: center; }
   .live { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: var(--pad); }
-  .big .rate-value { font-size: clamp(72px, 28vw, 180px); }
+
+  /* The number is sized to the panel and to how many characters it has to
+     hold. A fixed 180px fits "$25" and runs "$41.6" off the edge — which is
+     what a real offer did on a wide screen, pushing the "/hr" past the border.
+     Sized against the panel rather than the viewport because the panel is what
+     it has to fit inside. */
+  .verdict { container-type: inline-size; }
+  .big .rate-value {
+    --chars: 4;
+    font-size: min(28vw, 180px, calc((100cqw - 70px) / (var(--chars) * 0.62)));
+  }
+  /* Nothing to report: a 180px "--" is a pair of grey slabs, not information. */
+  .verdict.novalue .rate { display: none; }
   .stale { opacity: .35; }
   .pending { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
   .connbar {
@@ -27,6 +39,17 @@
   #viewWrap img.stalefeed { opacity: .4; }
   #viewNote { font-size: 11px; color: var(--muted); text-align: center; padding: 6px 0 0; }
   #viewWrap.gone img { display: none; }
+
+  /* What the reader actually saw. Folded away by default, because it is only
+     ever wanted after a wrong answer — and after a wrong answer it is the only
+     thing that explains it. */
+  #raw { font-size: 11px; color: var(--muted); }
+  #raw summary { cursor: pointer; padding: 4px 0; }
+  #raw pre {
+    margin: 4px 0 0; padding: 8px; white-space: pre-wrap; word-break: break-word;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    max-height: 28vh; overflow: auto; font-size: 11px; line-height: 1.45;
+  }
 </style>
 </head>
 <body>
@@ -54,6 +77,11 @@
       <img id="view" alt="live camera view">
       <figcaption id="viewNote">camera view · inset is what the reader sees</figcaption>
     </figure>
+
+    <details id="raw" hidden>
+      <summary>what the reader read</summary>
+      <pre id="rawText"></pre>
+    </details>
   </div>
 
   <div class="connbar"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
@@ -73,8 +101,21 @@
 
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
-   'lPay', 'lMin', 'lMile']
+   'lPay', 'lMin', 'lMile', 'raw', 'rawText']
     .forEach(function (id) { el[id] = document.getElementById(id); });
+
+  // Keep the headline number inside the panel whatever it says.
+  function setRate(text) {
+    el.perHour.textContent = text;
+    el.perHour.style.setProperty('--chars', Math.max(3, text.length));
+    el.verdict.classList.toggle('novalue', text === '--');
+  }
+
+  function showRaw(text) {
+    var body = (text || '').trim();
+    el.raw.hidden = !body;
+    if (body) el.rawText.textContent = body;
+  }
 
   var last = null;
   var phase = null;      // setup progress, before any offer exists
@@ -97,7 +138,7 @@
       var p = phase || {};
       el.verdict.className = 'verdict ' + (p.phase === 'error' ? 'no' : 'empty');
       el.verdictLabel.textContent = PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER';
-      el.perHour.textContent = p.cardPixels ? p.cardPixels : '--';
+      setRate(p.cardPixels ? String(p.cardPixels) : '--');
       el.vPay.textContent = el.vMin.textContent = el.vMile.textContent = '--';
 
       var aiming = p.phase === 'aim';
@@ -105,7 +146,6 @@
       el.lMin.textContent = aiming ? 'sharpness' : 'minutes';
       el.lMile.textContent = aiming ? 'steady' : 'miles';
       if (aiming) {
-        el.perHour.textContent = p.cardPixels || '--';
         el.vPay.textContent = p.cardPixels ? p.cardPixels + 'px' : '--';
         el.vMin.textContent = p.sharpness !== null && p.sharpness !== undefined ? p.sharpness : '--';
         el.vMile.textContent = (p.stable || 0) + '/' + (p.need || 6);
@@ -114,7 +154,8 @@
       el.warn.hidden = !p.message;
       el.detail.textContent = p.previewPort
         ? 'live camera view on port ' + p.previewPort
-        : (r ? 'scanner running, no offer on screen' : '');
+        : (r ? 'scanner running, no offer on screen' + trackNote(r) : '');
+      showRaw(r && r.text);
       return;
     }
 
@@ -122,8 +163,8 @@
     el.verdict.className = 'verdict ' + r.state + (stale ? ' stale' : '');
     el.verdictLabel.textContent =
       ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '') + (r.locked ? '' : ' ?');
-    el.perHour.textContent = '$' + (Math.abs(r.perHour) >= 100
-      ? Math.round(r.perHour) : Number(r.perHour).toFixed(1));
+    setRate('$' + (Math.abs(r.perHour) >= 100
+      ? Math.round(r.perHour) : Number(r.perHour).toFixed(1)));
     el.vPay.textContent = money(r.pay, 2);
     el.vMin.textContent = r.minutes === null ? '--' : Math.round(r.minutes);
     el.vMile.textContent = r.miles === null ? '--' : Number(r.miles).toFixed(1);
@@ -138,7 +179,21 @@
       + r.ms + 'ms'
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
       + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')
-      + (r.items ? ' · ' + r.items + ' items' : '');
+      + (r.items ? ' · ' + r.items + ' items' : '')
+      + trackNote(r);
+    showRaw(r.text);
+  }
+
+  // Only worth saying when it is not the quiet default: corners that are being
+  // followed, a crop that had to put itself back, a screen that went missing.
+  function trackNote(r) {
+    var bits = [];
+    if (r.rescues) bits.push('crop re-fitted ' + r.rescues + '×');
+    var t = r.track;
+    if (t && t.lost) bits.push('screen not visible');
+    else if (t && t.jumps) bits.push('re-locked on the phone');
+    else if (t && t.drift >= 25) bits.push('tracking ' + Math.round(t.drift) + 'px');
+    return bits.length ? ' · ' + bits.join(' · ') : '';
   }
 
   function connect() {

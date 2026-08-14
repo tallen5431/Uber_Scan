@@ -26,6 +26,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import offer_parser as OP
 import pipeline as PL
+import track as TR
 from accumulate import OfferAccumulator
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
@@ -66,6 +67,33 @@ def load_config(path):
         sys.exit('no %s — run calibrate.py first' % path)
     with open(path) as fh:
         return json.load(fh)
+
+
+_config_error = None
+
+
+def save_config(path, cfg):
+    """Write the calibration back, atomically and never fatally.
+
+    Atomically because the web server reads this file to report what the scanner
+    is doing, and must never see a half-written one. Never fatally because this
+    is a convenience — it saves the next run rediscovering what this one already
+    knows — and a read-only card or a full disk is no reason to stop reading
+    offers. The scanner keeps the corrected values in memory either way.
+    """
+    global _config_error
+    try:
+        tmp = path + '.part'
+        with open(tmp, 'w') as fh:
+            json.dump(cfg, fh, indent=2)
+        os.replace(tmp, path)
+        _config_error = None
+    except Exception as e:
+        message = str(e)
+        if message != _config_error:
+            _config_error = message
+            print('could not save calibration (further identical errors '
+                  'suppressed): %s' % message)
 
 
 LORES = (640, 480)
@@ -192,9 +220,11 @@ def show(frame_text, rate, parsed, ms, locked):
              ms['total'], '  LOCKED' if locked else ''))
 
 
-def emit(rate, parsed, ms, locked):
+def emit(rate, parsed, ms, locked, tracker=None, scanner=None):
     """One JSON object per line, flushed, so a parent process sees reads live."""
     payload = {
+        'track': tracker.status() if tracker is not None else None,
+        'rescues': scanner.rescues if scanner is not None else 0,
         'ready': rate['ready'],
         'locked': locked,
         'state': rate['state'],
@@ -235,6 +265,8 @@ def main():
                     help='write frames that failed to parse, for tuning')
     ap.add_argument('--snapshot', default=DEFAULT_SNAPSHOT,
                     help='where to write the live view the web UI shows ("" to disable)')
+    ap.add_argument('--no-track', action='store_true',
+                    help='never re-find the phone; use the calibrated corners exactly')
     args = ap.parse_args()
 
     if args.list_modes:
@@ -246,12 +278,25 @@ def main():
         return
 
     cfg = load_config(args.config)
+
+    # The crop can move itself back onto the card. When it does, keep it: the
+    # next run should start from what this one learned, not from the box that
+    # had already stopped working.
+    roi_dirty = [False]
+
+    def roi_moved(roi):
+        cfg['roi'] = roi
+        roi_dirty[0] = True
+        print('re-fitted the card crop to %s' % [round(v, 3) for v in roi])
+
     scanner = PL.Scanner(
         quad=np.array(cfg['quad'], dtype=np.float32),
         roi=cfg.get('roi'),
         card_height=cfg.get('cardHeight', 900),
         settings=cfg.get('settings', {}),
+        on_roi=roi_moved,
     )
+    tracker = None if args.no_track else TR.QuadTracker(scanner.quad)
 
     # Calibration already found focus with autofocus; reuse it rather than
     # making the driver rediscover a number that cannot change on a fixed mount.
@@ -298,6 +343,23 @@ def main():
             finally:
                 request.release()
 
+            # Re-find the phone on any full frame that is holding still. A mount
+            # is not a clamp, and a quad a centimetre out slides the crop off
+            # the payout — which looks exactly like no offer being on screen.
+            # Blurred frames are skipped: a smeared edge is a worse guess than
+            # the corners already held.
+            if tracker is not None and scanner.settled:
+                if tracker.update(frame, now):
+                    scanner.quad = tracker.quad
+                    cfg['quad'] = [[float(x), float(y)] for x, y in tracker.quad]
+                if tracker.needs_save(now) or roi_dirty[0]:
+                    save_config(args.config, cfg)
+                    tracker.mark_saved(now)
+                    roi_dirty[0] = False
+            elif roi_dirty[0]:
+                save_config(args.config, cfg)
+                roi_dirty[0] = False
+
             if args.snapshot and (due or do_read):
                 write_snapshot(frame, cfg, args.snapshot)
                 last_snapshot = time.time()
@@ -306,17 +368,20 @@ def main():
                 continue
 
             frames += 1
-            out = scanner.read(frame)
+            out = scanner.read(frame, now=time.time())
             parsed = accumulator.add(out['parsed'])
             rate = OP.rate(parsed, cfg.get('settings', {}))
             out['parsed'], out['rate'] = parsed, rate
+            if out['refit']:
+                save_config(args.config, cfg)
+                roi_dirty[0] = False
 
             # Anything with a payout is worth a second look; anything without is
             # not an offer and should not hold the loop open.
             if parsed.get('pay'):
                 resample_until = time.time() + RESAMPLE_WINDOW
             if args.json:
-                emit(rate, parsed, out['ms'], out['locked'])
+                emit(rate, parsed, out['ms'], out['locked'], tracker, scanner)
             else:
                 show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
 
