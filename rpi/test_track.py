@@ -138,8 +138,15 @@ ok_('...but not the same size', not T.same_size(quad_at(445, 235, shrunk), start
 settle(tr, frame_with_phone(445, 235, shrunk), 12)
 eq('so the corners are left alone', tr.moves, 0)
 ok_('and stay where they were', T.distance(tr.quad, start) < 0.01)
-# And refused however long it insists, which is the part that matters.
+# And refused however hard it insists, for as long as being lured is the more
+# likely story. That is no longer forever: a candidate the gate can never accept
+# is also what a genuinely re-seated phone looks like, and refusing that one
+# forever froze the corners with nothing reporting it. The stall watchdog draws
+# the line at RECOVER_AFTER, which is well beyond this window — see the stuck
+# tests further down.
 eq('...and it is not adopted as a re-lock either', tr.jumps, 0)
+ok_('...and this window is well inside the stall watchdog',
+    12 * 2.0 < T.RECOVER_AFTER)
 # Its evidence does not survive the refusal either. `agreeing` counts checks
 # that saw the same thing; leaving it standing let a run of refused candidates
 # walk the counter to the bar, so the first one that squeaked through moved the
@@ -333,6 +340,65 @@ ok_('...and lands on the phone, not past it', T.distance(tr.quad, big_quad(246, 
 # A single number must behave exactly like a matching pair.
 tr_one = T.QuadTracker(big_quad(240, 70), scale=3.6375)
 eq('a scalar scale is accepted', [round(v, 4) for v in tr_one.scale.tolist()], [3.6375, 3.6375])
+
+# --- being stuck is not the same as being lost ------------------------------
+# Judging every candidate against the calibration is what stops the corners
+# walking downhill, and it has no upper bound by design. The cost is that a
+# screen the calibration does not recognise can never be adopted, however
+# plainly it is there: re-seat the phone a quarter further back and the size
+# test refuses the real screen on every check, forever. The corners freeze, and
+# because a candidate *was* found each time, `misses` stays at zero and the
+# health line goes on reporting them held.
+SMALLER = (210, 434)                       # the same phone, 0.7x — outside SIZE_BAND
+CAL = quad_at(400, 140)
+reseated = frame_with_phone(430, 200, size=SMALLER)
+
+tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+ok_('a re-seated phone is refused by the gate',
+    not tr.looks_like_the_screen(quad_at(430, 200, size=SMALLER)))
+
+settle(tr, reseated, 3, step=2.0)
+eq('...and the corners do not move for it', tr.rebaselines, 0)
+ok_('...but it is reported as stuck rather than held', tr.status()['stalled'])
+ok_('...and not as lost, because the screen is right there',
+    not tr.status()['lost'])
+
+settle(tr, reseated, 12, t0=6.0, step=T.RECOVER_AFTER / 4.0)
+eq('after RECOVER_AFTER the corners are un-stuck', tr.rebaselines, 1)
+ok_('...and land on the screen that is actually there',
+    T.distance(tr.quad, quad_at(430, 200, size=SMALLER)) < 12.0)
+ok_('...and stop reporting stuck', not tr.status()['stalled'])
+ok_('...with the calibration taken as out of date, so corrections still work',
+    tr.looks_like_the_screen(quad_at(432, 202, size=SMALLER)))
+
+# It must not fire in place of the ordinary path, which is far quicker.
+tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+settle(tr, frame_with_phone(430, 200), 14, step=0.5)
+eq('a phone that merely moved is re-locked, not un-stuck', tr.rebaselines, 0)
+ok_('...and the corners followed it well inside the stall window',
+    T.distance(tr.quad, quad_at(430, 200)) < 12.0)
+
+# The thing that must NOT come back: a run of steadily shrinking detections is
+# a walk downhill, not a screen sitting still, and the anchor resets under it so
+# the clock never runs.
+tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+for i in range(20):
+    scale = 0.85 ** (i + 1)
+    size = (max(40, int(300 * scale)), max(80, int(620 * scale)))
+    tr.update(frame_with_phone(400, 140, size=size), now=100.0 + i * 2.0)
+eq('a downhill walk is never adopted', tr.rebaselines, 0)
+ok_('...and the corners are still the calibrated size',
+    T.same_size(tr.quad, CAL))
+
+# ...and neither is a strip. Only the size test is given up when un-sticking;
+# the shape test is what tells a screen from the Accept bar beneath it, and it
+# still applies however long the strip sits there.
+strip = np.full((H, W, 3), 22, np.uint8)
+cv2.rectangle(strip, (200, 700), (1000, 790), (238, 240, 238), -1)
+tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+settle(tr, strip, 30, step=2.0)
+eq('a steady strip is never adopted, however long it sits there', tr.rebaselines, 0)
+eq('...and never moves the corners at all', tr.moves, 0)
 
 # --- geometry ---------------------------------------------------------------
 eq('distance of a quad to itself', T.distance(start, start), 0.0)

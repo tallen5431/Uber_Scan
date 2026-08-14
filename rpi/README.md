@@ -832,6 +832,42 @@ is no tracker to ask, so darkness speaks for itself: below `LIT_ENOUGH` nothing
 in view is a lit screen. A phone that genuinely has dimmed still gets brightened
 — it reads several times that threshold even at its dimmest.
 
+### When the corners get stuck
+
+Candidates are judged against the calibration, never against wherever the
+corners have drifted to — a relative test has no floor, and six candidates each
+80% of the last walked one rig down to 63% of its screen, after which the real
+phone was too *big* to be accepted and it sat there permanently.
+
+The anchored test fixes that and creates its own version of it. A screen the
+calibration does not recognise can never be adopted, however plainly it is
+there: re-seat the phone a quarter further back, or knock the mount closer, and
+the size test refuses the real screen on **every check, forever**. The corners
+freeze. And because a candidate *was* found each time, `misses` stays at zero,
+so the health line goes on reporting the corners held — the green box simply
+stops moving and nothing says why.
+
+So there is one bound. Corners that sit off a steady, phone-shaped screen for
+`RECOVER_AFTER` (30s) are taken as the stuck party: they move onto it and the
+stored calibration is written off as out of date, with a log line saying so.
+The health line distinguishes three states now — held, **stuck**, lost — where
+it used to call the first two the same thing.
+
+Two things keep that from reopening the walk it replaced:
+
+* **the candidate has to hold still.** A walk downhill is a sequence of
+  *different* boxes; the anchor resets the moment one moves away from the last
+  by more than the agreement tolerance, so the clock never runs. A phone that
+  has genuinely been re-seated sits still, so its clock runs from the first
+  check.
+* **only the size test is given up, never the shape one.** Size is what
+  legitimately changes when a phone is re-seated; shape is what tells a screen
+  from the Accept bar beneath it. A strip can sit there all day and will never
+  be adopted.
+
+It is a recovery, not a repair: re-run calibration when convenient, or the next
+start begins from the same stale corners.
+
 ## Keeping the offers
 
 Every offer the scanner is confident about gets one line in `rpi/journal.jsonl`,

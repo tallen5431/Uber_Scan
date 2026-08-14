@@ -27,6 +27,18 @@ as a mount that genuinely moved, and adopted after the same agreement as any
 other move. It still has to look like the screen — the right size and the right
 shape — which is the check that stopped an Accept bar being adopted as a phone.
 That is the difference between drift and a knock, and both need handling.
+
+The size test is judged against the calibration and never against where the
+corners have got to, because a relative test has no floor and walks downhill.
+The price is that a screen the calibration does not recognise can never be
+adopted, however plainly it is there — re-seat the phone a little further back
+and the real screen is refused on every check, forever, while `misses` stays at
+zero so nothing reports it. So there is one bound on that: corners that sit off
+a steady, phone-shaped screen for RECOVER_AFTER are taken as the stuck party,
+moved onto it, and the calibration written off as out of date. Only the size
+test is given up there; shape still decides, because size is what legitimately
+changes when a phone is re-seated and shape is what tells a screen from the
+Accept bar beneath it.
 """
 
 import time
@@ -72,6 +84,26 @@ EASE = 0.35
 SAVE_DRIFT = 10.0
 SAVE_EVERY = 30.0
 
+# How long the corners may sit somewhere else while the detector goes on
+# offering a steady, phone-shaped screen, before the stored calibration is
+# treated as the thing that is out of date.
+#
+# Judging candidates against the calibration is what stops the corners walking
+# downhill, and it has no upper bound by design — but that cuts both ways. A
+# phone re-seated a little further back, or a mount knocked closer, is a screen
+# the size test refuses *every time*, forever: the corners freeze wherever they
+# were, and because a candidate was found on each check `misses` stays at zero,
+# so nothing reports it as lost. The green box simply stops moving and the log
+# goes on saying "corners held".
+#
+# Thirty seconds is far longer than any real re-lock takes — those complete in
+# about two — so this cannot fire in place of the ordinary path. It is also
+# deliberately longer than a candidate of the wrong size is given to insist:
+# refusing one of those is a protection worth keeping at the timescale it was
+# written for, and this only overrides it once being stuck has become the more
+# likely explanation than being lured onto a sub-region of the screen.
+RECOVER_AFTER = 30.0
+
 
 class QuadTracker:
     """Follows the phone screen, starting from a calibrated quad.
@@ -85,7 +117,8 @@ class QuadTracker:
     """
 
     def __init__(self, quad, scale=1.0, recheck=RECHECK_EVERY, agree=AGREE, ease=EASE,
-                 save_drift=SAVE_DRIFT, save_every=SAVE_EVERY, calibrated=None):
+                 save_drift=SAVE_DRIFT, save_every=SAVE_EVERY, calibrated=None,
+                 recover_after=RECOVER_AFTER):
         self.quad = np.asarray(quad, dtype=np.float32).reshape(4, 2)
         self.saved = self.quad.copy()
         # The screen as *calibrated*, which is not always where tracking starts.
@@ -115,13 +148,19 @@ class QuadTracker:
         self.save_drift = save_drift
         self.save_every = save_every
 
+        self.recover_after = recover_after
+
         self.moves = 0          # times the corners were adjusted
         self.jumps = 0          # ...of those, how many were a re-lock, not drift
         self.misses = 0         # consecutive checks that found no screen at all
+        self.rebaselines = 0    # ...and how often the calibration itself gave way
         self.agreeing = 0
         self._candidate = None
         self._last_check = None     # None, not 0, so the first check is always due
         self._last_save = 0.0
+        # The screen the corners are *not* on, and how long that has been true.
+        self._stuck_on = None
+        self._stuck_since = None
 
     # --- the loop calls these -------------------------------------------
 
@@ -137,6 +176,7 @@ class QuadTracker:
             self.misses += 1
             self.agreeing = 0
             self._candidate = None
+            self._forget_stall()
             return False
         candidate = candidate * self.scale
 
@@ -145,6 +185,21 @@ class QuadTracker:
                       and near(candidate, self._candidate, SETTLE))
         self.agreeing = self.agreeing + 1 if consistent else 1
         self._candidate = candidate
+
+        # Before the gate, because the gate is one of the things that can be
+        # wrong. See _stalled.
+        if self._stalled(candidate, now):
+            self.quad = np.asarray(candidate, dtype=np.float32)
+            # The reference moves too. Leaving it would mean unsticking the
+            # corners once and then refusing every correction to them
+            # afterwards, which is the same trap one step along.
+            self.calibrated = self.quad.copy()
+            self.agreeing = 0
+            self._forget_stall()
+            self.moves += 1
+            self.jumps += 1
+            self.rebaselines += 1
+            return True
 
         # One gate, and it is measured against the calibration rather than
         # against wherever the corners have got to. See looks_like_the_screen.
@@ -167,6 +222,11 @@ class QuadTracker:
             # check that sees it, and only bigger moves argue their case.
             if self.agreeing >= self.agree or near(candidate, self.quad, NUDGE):
                 self.quad = ease_toward(self.quad, candidate, self.ease)
+                # Corners that are moving are not stuck, however far they still
+                # have to go. Without this a slow ease-in kept the stall clock
+                # running across its own successful moves, and a long enough
+                # convergence turned ordinary drift into a re-baseline.
+                self._forget_stall()
                 self.moves += 1
                 return True
             return False
@@ -184,10 +244,65 @@ class QuadTracker:
         if self.agreeing >= self.agree:
             self.quad = np.asarray(candidate, dtype=np.float32)
             self.agreeing = 0
+            self._forget_stall()
             self.moves += 1
             self.jumps += 1
             return True
         return False
+
+    def _forget_stall(self):
+        self._stuck_on = None
+        self._stuck_since = None
+
+    def _stalled(self, candidate, now):
+        """Have the corners been sitting off the screen for far too long?
+
+        This is the escape hatch for the one failure the absolute size gate
+        creates. Judging candidates against the calibration is right — a
+        relative test has no floor and the corners walk downhill — but it also
+        means a screen the calibration does not recognise can never be adopted,
+        however plainly it is there. Re-seat the phone a quarter further back
+        and every detection of it is refused, on every check, forever, while
+        `misses` stays at zero and the health line goes on saying the corners
+        are held.
+
+        Two conditions, and between them they separate being stuck from being
+        walked downhill, which is the thing that must not be reintroduced:
+
+          * **the candidate has to hold still.** A downhill walk is a sequence
+            of *different* boxes, each a little smaller than the last; the
+            anchor resets the moment one moves away from the one before it, so
+            the clock never runs. A phone that has genuinely been re-seated
+            sits exactly still, so its clock runs from the first check.
+          * **it still has to be phone-shaped.** Only the size test is given
+            up here, never the shape one — because size is what legitimately
+            changes when a phone is re-seated or a mount is knocked, and shape
+            is what tells a screen from the Accept bar underneath it. A strip
+            can sit still all day and will never be adopted.
+
+        And it only counts while the corners are not actually on the candidate.
+        "On it" has to mean tracking it, not merely lying within re-lock range
+        of it: the commonest way to be stuck is a *size* mismatch, where the
+        frozen corners sit concentric with the screen and comfortably inside
+        MAX_JUMP of it while being half again too big. Measured that way the
+        watchdog never started its clock in the one case it was written for.
+        The agreement tolerance is the right scale, and against the candidate's
+        own size, so it means the same thing at any distance from the phone.
+        """
+        if distance(candidate, self.quad) <= SETTLE * max(span(candidate), 1.0):
+            self._forget_stall()
+            return False
+        # SETTLE, not MAX_JUMP: the anchor has to mean "the same box", not
+        # "a box in roughly that area". At re-lock tolerance an 0.82x step still
+        # counts as the same thing, so a downhill walk kept one clock running
+        # across every one of its steps and could have compounded straight
+        # through this — the exact failure the anchored gate exists to stop.
+        if self._stuck_on is None or not near(candidate, self._stuck_on, SETTLE):
+            self._stuck_on = candidate
+            self._stuck_since = now
+            return False
+        return (now - self._stuck_since >= self.recover_after
+                and same_shape(candidate, self.calibrated))
 
     def looks_like_the_screen(self, candidate):
         """Is this the phone, judged against the screen that was calibrated?
@@ -246,7 +361,13 @@ class QuadTracker:
         return {'moves': self.moves, 'jumps': self.jumps, 'misses': self.misses,
                 'drift': round(self.drift, 1),
                 'wander': round(distance(self.quad, self.calibrated), 1),
-                'lost': self.misses >= 3}
+                'rebaselines': self.rebaselines,
+                'lost': self.misses >= 3,
+                # Being stuck is not being lost, and it used to look identical
+                # from out here: a candidate was found on every check, so
+                # `misses` stayed at zero and nothing distinguished corners
+                # tracking a screen from corners frozen beside one.
+                'stalled': self._stuck_since is not None}
 
 
 # --- geometry ---------------------------------------------------------------

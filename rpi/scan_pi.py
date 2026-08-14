@@ -243,6 +243,7 @@ class Health:
     def __init__(self):
         self.reset(None)
         self.relocks = 0
+        self.rebaselines = 0
         self.gain = None
         self.bright = None
         self.banding = None
@@ -298,11 +299,18 @@ class Health:
             # Both numbers, because they answer different questions and the
             # reassuring one can be reassuring while the corners are nowhere
             # near the phone: drift is against the last save, which moves.
+            # Three states, not two. "Held" used to cover being frozen beside
+            # the screen as well as tracking it, because a candidate was found
+            # on every check either way and only `misses` was being reported.
+            where = ('lost' if status['lost']
+                     else 'stuck' if status.get('stalled') else 'held')
             bits.append('corners %s, %.0fpx from calibration (%.0fpx since last save)'
-                        % ('lost' if status['lost'] else 'held',
-                           status.get('wander', status['drift']), status['drift']))
+                        % (where, status.get('wander', status['drift']), status['drift']))
             if self.relocks:
                 bits.append('re-locked %dx since start' % self.relocks)
+            if self.rebaselines:
+                bits.append('un-stuck %dx — the stored calibration is out of date'
+                            % self.rebaselines)
         log('health over %.0fs: %s' % (now - self.since, '; '.join(bits)))
         self.reset(now)
 
@@ -594,13 +602,23 @@ def main():
                 # guess than the corners already held.
                 if tracker is not None and scanner.settled:
                     jumps_before, lost_before = tracker.jumps, tracker.status()['lost']
+                    rebased_before = tracker.rebaselines
                     if tracker.update(luma, now):
                         scanner.quad = tracker.quad
                         # Where tracking has got to, kept apart from `quad`,
                         # which is the calibration and is written only by
                         # calibrate.py / autopilot.py.
                         cfg['trackedQuad'] = [[float(x), float(y)] for x, y in tracker.quad]
-                    if tracker.jumps > jumps_before:
+                    if tracker.rebaselines > rebased_before:
+                        health.rebaselines += 1
+                        log('corners un-stuck: the screen in front of the camera '
+                            'is not the size the stored calibration describes, and '
+                            'has been steadily so for %ds, so the corners were '
+                            'moved onto it and the calibration taken as out of '
+                            'date. Reading carries on — but re-run calibration '
+                            'when you can, or the next start will be stuck again.'
+                            % TR.RECOVER_AFTER)
+                    elif tracker.jumps > jumps_before:
                         health.relocks += 1
                         log('corners re-locked: the phone is somewhere the stored '
                             'calibration did not expect, and has been for several '
