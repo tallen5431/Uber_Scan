@@ -30,6 +30,7 @@
     verdictLabel: document.getElementById('verdictLabel'),
     perHour: document.getElementById('perHour'),
     perMile: document.getElementById('perMile'),
+    perMileLabel: document.getElementById('perMileLabel'),
     perMin: document.getElementById('perMin'),
     netPay: document.getElementById('netPay'),
     netLabel: document.getElementById('netLabel'),
@@ -52,8 +53,21 @@
     return out;
   }
 
+  // Read, merge, write. This page knows about the five settings in DEFAULTS,
+  // but it shares SETTINGS_KEY with the camera scanner on scan.html, which
+  // stores more — secondsPerItem and fullFrame. loadSettings() copies only the
+  // keys it recognises, so writing `settings` back wholesale deleted the rest.
+  // One keystroke in any field here, or toggling haptics, silently reset the
+  // shopping allowance to zero, and scan.html then rated Shop & Deliver offers
+  // as if the shopping took no time: at 90s an item, "$26.10, 14 items, 38 min"
+  // went from $22.75/hr amber to $33.87/hr green, with the "includes N min of
+  // shopping time" note quietly gone. Nothing resyncs the two pages, so it
+  // stayed wrong until the driver noticed and typed it again.
   function saveSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
+    var stored = {};
+    try { stored = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) {}
+    for (var k in settings) stored[k] = settings[k];
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(stored)); } catch (e) {}
   }
 
   function loadHistory() {
@@ -111,7 +125,10 @@
     var ready = pay > 0 && minutes > 0;
     var perHour = ready ? net / (minutes / 60) : null;
     var perMin = ready ? net / minutes : null;
-    var perMile = (pay > 0 && miles > 0) ? pay / miles : null;
+    // Net, like perHour, so the two agree about what a dollar means. This was
+    // gross while the rate beside it was net, so the same offer read $1.97/mi
+    // here and $1.67/mi on the Pi, and neither screen said why.
+    var perMile = (pay > 0 && miles > 0) ? net / miles : null;
 
     var state = 'empty';
     if (perHour !== null) {
@@ -170,6 +187,7 @@
     el.perMin.textContent = r.perMin === null ? '--' : money(r.perMin, 2);
     el.netPay.textContent = r.pay > 0 ? money(r.net, 2) : '--';
     el.netLabel.textContent = settings.costPerMile > 0 ? 'net pay' : 'trip pay';
+    el.perMileLabel.textContent = settings.costPerMile > 0 ? 'net per mile' : 'per mile';
 
     el.verdict.className = 'verdict ' + r.state;
     el.verdictLabel.textContent = {
