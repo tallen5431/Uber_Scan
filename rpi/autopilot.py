@@ -256,12 +256,28 @@ def calibrate_from(source, as_json):
     with open(CONFIG, 'w') as fh:
         json.dump(config, fh, indent=2)
 
+    # The preview has to be the reader's own picture, not a re-creation of it.
+    # Composed the way the scanner composes it, using this frame and the
+    # corners found in it — the aiming stream is half the capture's width, so
+    # this is softer than a real read, but it is framed identically. Warping
+    # the whole screen and calling it "what tesseract will be handed" stopped
+    # being true when the crop started being placed per read, and this file is
+    # the one thing a driver is told to look at before trusting the mount.
     preview_path = os.path.join(HERE, 'config-preview.png')
-    cv2.imwrite(preview_path, PL.preprocess(PL.crop(PL.warp(frame, quad, 900), DEFAULT_ROI)))
+    probe = PL.Scanner(quad=quad, roi=DEFAULT_ROI, card_height=900)
+    checked = probe.read(frame)
+    cv2.imwrite(preview_path, checked['card'])
+    read = checked['parsed']
 
+    # Say whether the calibration can actually read, while the driver is still
+    # standing at the car. "wrote config.json" is not the same claim.
+    got = ('read $%.2f, %s min, %s mi from this frame'
+           % (read['pay'], read['minutes'], read['miles']) if read['complete']
+           else 'no offer on the screen to test against — check the preview by eye')
     emit({'phase': 'calibrated',
           'cardPixels': int(round(card_source_pixels(quad, frame.shape) * scale)),
-          'message': 'wrote config.json (preview at rpi/config-preview.png)'}, as_json)
+          'read': read['complete'],
+          'message': 'wrote config.json (preview at rpi/config-preview.png); %s' % got}, as_json)
     return True
 
 

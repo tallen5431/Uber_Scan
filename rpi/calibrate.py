@@ -22,22 +22,21 @@ import pipeline as PL
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
-# Start by reading everything the camera can see, and let the crop find the
-# card itself from the first read that works (pipeline.tighten_roi).
+# What to write into config.json as the crop.
 #
-# Any fixed fraction is a guess about how the phone is framed, and that guess
-# is what kept breaking. A crop is a fraction of the *detected screen*, so it
-# only means what it says when the whole screen is visible — and it usually is
-# not, because fitting a whole phone into a 4:3 frame makes the width the
-# constraint and drops the card to around 400px. Clipping the map away is what
-# makes the text readable in the first place.
+# None means "work it out per read", which is what the scanner does: it places
+# a box from geometry it measures each frame (pipeline.centred_roi) rather than
+# from anything written down. That is the answer for a mount, because a crop
+# recorded once is a guess about how the phone is framed and about which card
+# turns up, and both of those were wrong often enough to matter.
 #
-# So this guesses nothing. The whole visible view cannot miss the card however
-# the phone is framed; one successful read then walks the crop in to fit it,
-# which took 442ms to 181ms in testing and needs no assumption about framing at
-# all. The cost is that the very first read of a fresh calibration is a slow
-# one — worth it for never having to be right about where the card will be.
-DEFAULT_ROI = [0.0, 0.0, 1.0, 1.0]
+# A four-element box here overrides that and pins the crop, which --full-screen
+# uses and which is the escape hatch if the automatic placement ever misbehaves
+# on a mount nobody anticipated.
+DEFAULT_ROI = None
+
+# What --full-screen pins it to: everything the camera can see.
+WHOLE_VIEW = [0.0, 0.0, 1.0, 1.0]
 
 # Where to judge focus while aiming. The card is the thing that has to be
 # sharp, and a dashboard in focus around a soft phone reads as perfectly sharp
@@ -122,7 +121,9 @@ def main():
     ap.add_argument('--card-height', type=int, default=900,
                     help='warp height; 900 is the measured speed/accuracy sweet spot')
     ap.add_argument('--corners', help='manual override: x1,y1,x2,y2,x3,y3,x4,y4 clockwise from top-left')
-    ap.add_argument('--full-screen', action='store_true', help='read the whole screen, not just the card')
+    ap.add_argument('--full-screen', action='store_true',
+                    help='pin the crop to the whole visible screen instead of '
+                         'letting the scanner place it per read')
     ap.add_argument('--lens', type=float, default=None,
                     help='pin focus in dioptres (4.0 = 25cm) instead of autofocusing')
     args = ap.parse_args()
@@ -146,7 +147,7 @@ def main():
         if quad is None:
             sys.exit('no screen found — is the phone lit and in frame? else pass --corners')
 
-    roi = None if args.full_screen else DEFAULT_ROI
+    roi = WHOLE_VIEW if args.full_screen else DEFAULT_ROI
     config = {
         'quad': [[float(x), float(y)] for x, y in quad],
         'roi': roi,
@@ -160,8 +161,12 @@ def main():
         json.dump(config, fh, indent=2)
 
     # Write what the OCR engine will actually be handed, so a bad mount is
-    # obvious before it costs a shift's worth of missed offers.
-    preview = PL.preprocess(PL.crop(PL.warp(frame, quad, args.card_height), roi))
+    # obvious before it costs a shift's worth of missed offers. Taken from a
+    # real read rather than rebuilt, because the crop is placed per read now
+    # and a rebuild would show a composition the scanner never uses.
+    probe = PL.Scanner(quad=quad, roi=roi, card_height=args.card_height)
+    checked = probe.read(frame)
+    preview = checked['card']
     preview_path = os.path.splitext(args.config)[0] + '-preview.png'
     cv2.imwrite(preview_path, preview)
 
@@ -186,7 +191,14 @@ def main():
     else:
         print('  comfortable (floor is about %d px)' % MIN_CARD_PIXELS)
 
-    print('\nCheck the preview is a straight-on, sharp, glare-free offer card.')
+    parsed = checked['parsed']
+    if parsed['complete']:
+        print('\nread from this frame: $%.2f, %s min, %s mi — the calibration works'
+              % (parsed['pay'], parsed['minutes'], parsed['miles']))
+    else:
+        print('\nnothing read from this frame. If there was an offer on the screen, '
+              'the mount is not good enough yet; if there was not, that is expected.')
+    print('Check the preview is a straight-on, sharp, glare-free offer card.')
 
 
 def card_source_pixels(quad, shape=None):

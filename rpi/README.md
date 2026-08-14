@@ -362,8 +362,8 @@ warped the screen to 1800px tall when 1120 would do:
 | quad assumed 50% card | 1444×1800 (2.60MP) | 977×1023 — shrunk to fit the ceiling |
 | quad measured at 80% card | 900×1121 (1.01MP) | 900×943 — not shrunk at all |
 
-`card_share_of_quad` measures it instead of assuming, and `min_crop_height`
-refuses a fit that could not hold the card it now knows the size of.
+`card_share_of_quad` measures it instead of assuming, and `centred_roi` sizes
+the crop from that measurement rather than from a guess.
 
 **How much that is worth is worth being straight about**, because the obvious
 story is wrong. The obvious story: `MAX_OCR_PIXELS` caps what tesseract is
@@ -697,8 +697,18 @@ python3 rpi/calibrate.py
 ```
 
 It finds the screen automatically, writes `rpi/config.json`, saves
-`rpi/config-preview.png`, and reports the card's height in sensor pixels. **Look at that preview.** It is the exact image
-tesseract will be handed. It should be a straight-on, sharp, glare-free card.
+`rpi/config-preview.png`, and reports the card's height in sensor pixels. It
+also **runs one real read against that frame and tells you what it got**:
+
+```
+read from this frame: $7.09, 34.0 min, 3.6 mi — the calibration works
+```
+
+which is a different claim from "wrote config.json", and the one worth having
+before driving off. The preview is that read's own picture rather than a
+rebuild of it, so it is literally what tesseract was handed. It should be a
+straight-on, sharp, glare-free card.
+
 If the detector locked onto something brighter than the phone, pass corners
 by hand:
 
@@ -708,6 +718,15 @@ python3 rpi/calibrate.py --corners 135,229,830,134,838,1979,70,1874
 
 Targets live in the same file — edit `settings` for your `target`, `costPerMile`,
 `pad` and `secondsPerItem`.
+
+Two keys in `config.json` are about the crop, and they mean different things.
+`roi` is normally `null`, which means "place it per read" — the scanner sizes a
+centred box from the geometry it measures each frame. Put a `[x, y, w, h]` box
+there (or run `calibrate.py --full-screen`) and it is pinned to that instead,
+which is the escape hatch if the automatic placement ever misbehaves. `quad` is
+the calibration and is written only by calibration; `trackedQuad` is where the
+corner tracking has got to and is written while scanning, so the next run
+resumes without re-converging.
 
 ### The headline is a *net* rate
 

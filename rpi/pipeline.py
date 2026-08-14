@@ -168,9 +168,9 @@ def touches_edge(quad, shape, margin=EDGE_MARGIN):
     a mount that used to have 870. Clipping the map away is precisely what buys
     the resolution that makes the text readable.
 
-    So the crop is anchored to the card by content instead (see fit_roi and
-    tighten_roi), which does not care how much of the screen is visible, and
-    this is reported as a note rather than enforced as a rule.
+    So the crop is placed from the measured geometry instead — see
+    card_share_of_quad and centred_roi — which does not care how much of the
+    screen is visible, and this is a note rather than a rule.
     """
     q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
     h, w = shape[:2]
@@ -582,14 +582,12 @@ class Scanner:
 
     def __init__(self, quad=None, settings=None, agree_to_lock=2,
                  card_height=CARD_HEIGHT, config=OCR_CONFIG, roi=None,
-                 ocr_height=OCR_CARD_HEIGHT, on_roi=None):
+                 ocr_height=OCR_CARD_HEIGHT):
         self.quad = None if quad is None else np.asarray(quad, dtype=np.float32)
-        # Fractional (x, y, w, h) of the warped screen holding the offer card.
-        # Uber puts it in the same place every time, so cropping to it is free
-        # accuracy and halves the pixels tesseract has to walk.
-        # A fixed override for the crop. Left None — which is the normal case —
-        # the crop is derived per read from the measured geometry, which is
-        # what stops it wandering. See centred_roi.
+        # A fixed override for the crop, as fractional (x, y, w, h) of the
+        # warped screen. Left None — which is the normal case — the crop is
+        # derived per read from the measured geometry, which is what stops it
+        # wandering. See centred_roi.
         self.roi = roi
         self.settings = settings or {}
         self.agree_to_lock = agree_to_lock

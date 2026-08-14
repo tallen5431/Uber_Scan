@@ -408,6 +408,11 @@ def main():
     scanner = PL.Scanner(
         quad=np.array(cfg.get('trackedQuad') or cfg['quad'], dtype=np.float32),
         card_height=cfg.get('cardHeight', 900),
+        # Normally absent, and then the crop is placed per read. A box here
+        # pins it — the escape hatch, and the reason calibrate.py writes the
+        # key at all. It stopped being read when the crop stopped being
+        # learned, which quietly made calibrate.py's --full-screen a no-op.
+        roi=cfg.get('roi'),
         settings=cfg.get('settings', {}),
     )
     # The tracker works in the small stream's coordinates and reports in the
