@@ -256,6 +256,12 @@
 
     var shopMinutes = (parsed.items || 0) * secondsPerItem / 60;
     var minutes = parsed.minutes + pad + shopMinutes;
+    // A trip that takes no time pays infinitely well, which is the kind of
+    // arithmetic that ends in an ACCEPT on nonsense. parse() will not produce
+    // a zero-minute offer, but `pad` is a number a driver edits by hand and a
+    // negative one can cancel the trip out. This returned Infinity and state
+    // 'go'; the Python threw ZeroDivisionError and took the scan loop with it.
+    if (!(minutes > 0)) return { ready: false, state: 'empty' };
     // A distance we do not trust must not be turned into a cost. Falling back
     // to gross pay overstates the rate slightly; using a bad distance can
     // understate it enormously, which is the error that loses you money.

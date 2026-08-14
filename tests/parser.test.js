@@ -153,6 +153,17 @@ check('largest dollar figure wins over a promo line',
   eq('...and says so', gross.costPerMile, 0);
   eq('net pay is pay less the deduction',
      Math.round(net.net * 100) / 100, Math.round((p.pay - net.cost) * 100) / 100);
+
+  // A trip that takes no time pays infinitely well. parse() will not produce a
+  // zero-minute offer, but `pad` is a number edited by hand in config.json and
+  // a negative one cancels the trip out. This returned Infinity and a state of
+  // 'go' - a confident ACCEPT on nonsense - while the Python threw
+  // ZeroDivisionError and took the scan loop down with it.
+  var nil = P.rate(p, { target: 25, costPerMile: 0, pad: -p.minutes });
+  eq('no time left is not a verdict', nil.ready, false);
+  eq('...and not a state either', nil.state, 'empty');
+  var neg = P.rate(p, { target: 25, costPerMile: 0, pad: -p.minutes - 10 });
+  eq('nor is negative time', neg.ready, false);
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');

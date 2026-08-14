@@ -49,6 +49,17 @@ eq('...at a rate of nothing', gross['costPerMile'], 0)
 eq('and the gap is exactly the deduction',
    round(gross['perHour'] - net['perHour'], 2), round(net['cost'] / (34 / 60.0), 2))
 
+# A trip that takes no time pays infinitely well. parse() will not produce a
+# zero-minute offer, but `pad` is edited by hand in config.json and a negative
+# one cancels the trip out. This raised ZeroDivisionError, which does not stop
+# at a bad verdict — it takes the scan loop with it. The JS returned Infinity
+# and a confident 'go'.
+nil = P.rate(offer, {'target': 25, 'costPerMile': 0, 'pad': -offer['minutes']})
+eq('no time left is not a verdict', nil['ready'], False)
+eq('...and not a state either', nil['state'], 'empty')
+neg = P.rate(offer, {'target': 25, 'costPerMile': 0, 'pad': -offer['minutes'] - 10})
+eq('nor is negative time', neg['ready'], False)
+
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -218,6 +218,14 @@ def rate(parsed, settings=None):
 
     shop_minutes = (parsed['items'] or 0) * seconds_per_item / 60.0
     minutes = parsed['minutes'] + pad + shop_minutes
+    # A trip that takes no time pays infinitely well, which is the kind of
+    # arithmetic that ends in an ACCEPT on nonsense. parse() will not produce a
+    # zero-minute offer, but `pad` is a number a driver edits by hand in
+    # config.json and a negative one can cancel the trip out. Python raised
+    # ZeroDivisionError here — killing the scan loop — while the JS returned
+    # Infinity and a confident "go". Neither is a verdict.
+    if minutes <= 0:
+        return {'ready': False, 'state': 'empty'}
     # A distance we do not trust must not become a cost. Falling back to gross
     # overstates the rate slightly; a bad distance can understate it enormously.
     cost = 0 if parsed['milesUncertain'] else (parsed['miles'] or 0) * cost_per_mile
