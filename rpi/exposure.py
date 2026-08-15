@@ -199,6 +199,10 @@ class AutoGain:
         offers, at the exact moment the driver picked the phone up to look at
         one. Gain is held instead, so what it comes back to is the last value
         that suited a real card.
+
+        The hold is one-way. Coming down is always allowed, because a blown-out
+        picture is a fault whether or not anything is tracking the screen, and
+        lowering gain can neither rail nor band.
         """
         if self.last is not None and now - self.last < self.every:
             return None
@@ -207,15 +211,27 @@ class AutoGain:
         bright = brightness(gray)
         if bright <= 0:
             return None
-        # Nothing lit in view: hold. The tracker's answer is the one that counts,
-        # but it has none to give when tracking is off, and a brightness this low
-        # is a dark cabin however it is measured.
-        if not has_screen or bright < LIT_ENOUGH:
-            return None
-        # Clipping is worse than dimness: detail that is blown out is gone,
-        # while a dim card still has its edges.
+
+        # Clipping comes first, and is answered whatever else is true. Detail
+        # that is blown out is gone, while a dim card still has its edges — and
+        # coming *down* is safe in a way going up is not: it cannot rail, and it
+        # cannot reintroduce banding.
+        #
+        # This used to sit below the hold, which made the hold symmetric and
+        # broke bright daylight. A bright cabin is exactly where the tracker
+        # loses the screen, because Otsu has nothing dark to split the phone
+        # from — so `has_screen` goes false, gain freezes at whatever the last
+        # dim stretch left it, and the card washes out with the one control that
+        # could fix it switched off.
         if clipped_fraction(gray) > CLIPPED_FRACTION:
             return self._set(self.gain / self.step)
+
+        # Only *raising* it needs a screen to aim at. The window handed here is
+        # wherever the phone was last seen, so with the phone gone it is dark
+        # upholstery, and this dutifully wound the gain up chasing a card that
+        # was not there.
+        if not has_screen or bright < LIT_ENOUGH:
+            return None
         if abs(bright - self.target) / self.target <= GAIN_TOLERANCE:
             return None
         return self._set(self.gain * (self.step if bright < self.target else 1 / self.step))

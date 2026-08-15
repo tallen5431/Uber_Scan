@@ -407,6 +407,57 @@ settle(tr, strip, 30, step=2.0)
 eq('a steady strip is never adopted, however long it sits there', tr.rebaselines, 0)
 eq('...and never moves the corners at all', tr.moves, 0)
 
+# --- the card is presented in the middle, so the middle is the anchor -------
+# Stored position goes stale when the mount is nudged and stored size goes stale
+# when the phone is re-seated. Where the driver aims the card does not: a screen
+# holding the centre while the corners are elsewhere is the phone, and the
+# corners are on something else. Size deliberately does not have to match, since
+# a size the calibration refuses is exactly what leaves the corners stuck.
+OFF_TO_ONE_SIDE = quad_at(60, 120)
+tr = T.QuadTracker(OFF_TO_ONE_SIDE.copy(), calibrated=OFF_TO_ONE_SIDE.copy())
+centred = frame_with_phone(450, 140)          # the frame centre falls inside it
+moved_at = None
+for i in range(12):
+    if tr.update(centred, now=1.0 + i * 0.5) and moved_at is None:
+        moved_at = i * 0.5
+ok_('corners off to one side move onto the centred card', tr.centred >= 1)
+ok_('...quickly, not after the stall timeout',
+    moved_at is not None and moved_at < T.RECOVER_AFTER / 2.0)
+ok_('...and land on it', T.distance(tr.quad, quad_at(450, 140)) < 15.0)
+
+# Already on it: nothing to correct, and nothing should move.
+tr = T.QuadTracker(quad_at(450, 140), calibrated=quad_at(450, 140))
+settle(tr, centred, 20, step=0.5)
+eq('a card already held is left alone', tr.centred, 0)
+
+# The decoy this must never adopt. A strip across the middle of the frame holds
+# the centre perfectly well; shape is what refuses it, and shape still applies.
+strip = np.full((H, W, 3), 22, np.uint8)
+cv2.rectangle(strip, (200, 400), (1000, 500), (238, 240, 238), -1)
+tr = T.QuadTracker(start, calibrated=start)
+settle(tr, strip, 40, step=0.5)
+eq('a strip across the centre is never adopted', tr.centred, 0)
+eq('...and moves nothing at all', tr.moves, 0)
+
+# --- and the driver can always start over -----------------------------------
+# The automatic rules cover what can be told apart by looking. Corners sitting
+# on the screen at the wrong size cannot: that is equally "the phone was
+# re-seated" and "the outline is on part of the screen". The person watching the
+# live view can see which, so they get a way to say so.
+tr = T.QuadTracker(start.copy(), calibrated=start.copy())
+settle(tr, frame_with_phone(460, 180), 10, step=0.5)
+ok_('the corners have moved away from the calibration',
+    T.distance(tr.quad, start) > 1.0)
+tr.start_over()
+eq('start_over puts them back', round(T.distance(tr.quad, start)), 0)
+eq('...and counts it', tr.resets, 1)
+eq('...and drops the evidence behind the old position', tr.agreeing, 0)
+ok_('...and reports no stall', not tr.status()['stalled'])
+# Having reset, it must still be able to follow the phone from there.
+settle(tr, frame_with_phone(460, 180), 10, t0=100.0, step=0.5)
+ok_('and it tracks again afterwards',
+    T.distance(tr.quad, quad_at(460, 180)) < 15.0)
+
 # --- geometry ---------------------------------------------------------------
 eq('distance of a quad to itself', T.distance(start, start), 0.0)
 eq('shifting by 10px reads as 10px', round(T.distance(start, quad_at(410, 140))), 10.0)

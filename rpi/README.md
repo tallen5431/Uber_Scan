@@ -832,6 +832,36 @@ is no tracker to ask, so darkness speaks for itself: below `LIT_ENOUGH` nothing
 in view is a lit screen. A phone that genuinely has dimmed still gets brightened
 — it reads several times that threshold even at its dimmest.
 
+### The middle of the frame is the anchor
+
+The card is presented in the middle. That makes "which bright shape does the
+centre of the frame fall inside" the one piece of evidence here that never goes
+stale — stored position goes wrong the moment the mount is nudged, and stored
+size the moment the phone is re-seated, but where the driver aims the card does
+not change. The detector already prefers the shape containing the centre; the
+tracker now agrees with it.
+
+So a screen holding the centre while the corners are somewhere else is taken as
+the phone, after the usual agreement and in about two seconds. Shape still has
+to match — that is what tells a screen from the Accept bar beneath it — but
+**size deliberately does not**, because a size the calibration refuses is
+exactly the state that used to leave the corners stuck with no way out.
+
+It cannot settle every case. Corners sitting *on* the screen at the wrong size
+still hold the centre, and that is equally "the phone was re-seated" and "the
+outline is on part of the screen"; no amount of looking separates them. That is
+what the timeout below and the **⟳ Re-find** button are for.
+
+### Re-find, when it needs telling
+
+**⟳ Re-find** in the live view puts the corners back where calibration left them
+and drops every piece of accumulated evidence, so the next screen argues for
+itself from nothing. It is a POST to `/api/recalibrate`, which touches
+`rpi/.recalibrate`; the scanner notices within a check and deletes it. A file
+rather than a signal, for the same reason `.viewing` is one — the scanner is
+sometimes a child of the web server and sometimes a systemd unit that has never
+heard of it, and a file works identically either way.
+
 ### When the corners get stuck
 
 Candidates are judged against the calibration, never against wherever the
@@ -974,6 +1004,15 @@ python3 rpi/test_track.py       # 71 checks on following the phone
 python3 rpi/test_journal.py     # 49 checks on keeping one row per offer
 python3 rpi/test_calibrate.py   # 30 checks on what calibration may overwrite
 python3 rpi/test_money.py       # 144 checks from a picture of a card to a $/hr
+
+The live view is deliberately smaller than what the scanner reads: 480px at
+quality 60, about 50kB a frame against 136kB at the old 640/80. What limits the
+preview is bytes over the car's wifi, not pixels on the Pi — composing and
+encoding one costs a few milliseconds either way. The page also asks for the
+next frame only once the last has arrived, so a weak signal makes it slow
+instead of making it lag further behind the longer you watch. None of it touches
+the read: that is warped from the full sensor frame and never goes near this
+path.
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

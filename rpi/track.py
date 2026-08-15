@@ -43,6 +43,7 @@ Accept bar beneath it.
 
 import time
 
+import cv2
 import numpy as np
 
 try:
@@ -162,6 +163,8 @@ class QuadTracker:
         self.jumps = 0          # ...of those, how many were a re-lock, not drift
         self.misses = 0         # consecutive checks that found no screen at all
         self.rebaselines = 0    # ...and how often the calibration itself gave way
+        self.centred = 0        # ...of those, how many were the centre rule
+        self.resets = 0         # times the driver asked for a fresh start
         self.agreeing = 0
         self._candidate = None
         self._last_check = None     # None, not 0, so the first check is always due
@@ -207,6 +210,30 @@ class QuadTracker:
             self.moves += 1
             self.jumps += 1
             self.rebaselines += 1
+            return True
+
+        # The card is presented in the middle of the frame. So a screen that
+        # holds the centre, while the corners do not, is not a candidate to be
+        # weighed against a stored size — it is the phone, and the corners are
+        # on something else.
+        #
+        # This is the one piece of evidence that does not decay. The stored
+        # position goes stale the moment the mount is nudged and the stored size
+        # goes stale the moment the phone is re-seated, but where the driver
+        # aims the card does not change: the detector already prefers the
+        # bright shape the centre falls inside, and this is the tracker agreeing
+        # with it. Shape still has to match, because that is what separates a
+        # screen from the Accept bar under it — but size deliberately does not,
+        # since a size the calibration refuses is exactly the state that leaves
+        # the corners stuck with no way out.
+        if self._holds_the_centre(candidate, frame) and self.agreeing >= self.agree:
+            self.quad = np.asarray(candidate, dtype=np.float32)
+            self.calibrated = self.quad.copy()
+            self.agreeing = 0
+            self._forget_stall()
+            self.moves += 1
+            self.jumps += 1
+            self.centred += 1
             return True
 
         # One gate, and it is measured against the calibration rather than
@@ -257,6 +284,35 @@ class QuadTracker:
             self.jumps += 1
             return True
         return False
+
+    def _holds_the_centre(self, candidate, frame):
+        """Is the candidate on the middle of the frame while the corners are not?
+
+        Both tested in the tracking image's own coordinates, since that is what
+        `frame` is; the stored corners are in capture space, so they come back
+        down by the same scale that took the candidate up.
+        """
+        middle = (frame.shape[1] / 2.0, frame.shape[0] / 2.0)
+        if not contains(candidate / self.scale, middle):
+            return False
+        if contains(self.quad / self.scale, middle):
+            return False        # already on it; nothing to correct
+        return same_shape(candidate, self.calibrated)
+
+    def start_over(self):
+        """Forget where the screen has got to, and go back to the calibration.
+
+        The escape hatch for when the automatic recovery cannot be sure. It puts
+        the corners back where calibration left them and drops every piece of
+        accumulated evidence, so the next screen argues for itself from nothing
+        rather than against a history that has gone wrong.
+        """
+        self.quad = self.calibrated.copy()
+        self.agreeing = 0
+        self._candidate = None
+        self.misses = 0
+        self.resets += 1
+        self._forget_stall()
 
     def _forget_stall(self):
         self._stuck_on = None
@@ -370,6 +426,8 @@ class QuadTracker:
                 'drift': round(self.drift, 1),
                 'wander': round(distance(self.quad, self.calibrated), 1),
                 'rebaselines': self.rebaselines,
+                'centred': self.centred,
+                'resets': self.resets,
                 'lost': self.misses >= 3,
                 # Being stuck is not being lost, and it used to look identical
                 # from out here: a candidate was found on every check, so
@@ -453,6 +511,12 @@ def same_shape(a, b):
     """
     ratio = aspect(a) / max(aspect(b), 0.01)
     return ASPECT_BAND[0] <= ratio <= ASPECT_BAND[1]
+
+
+def contains(quad, point):
+    """Is this point inside the quad?"""
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    return cv2.pointPolygonTest(q, (float(point[0]), float(point[1])), False) >= 0
 
 
 def near(a, b, tolerance):

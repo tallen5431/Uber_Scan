@@ -51,8 +51,24 @@ DEFAULT_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'liv
 # Pi 4's loop thread per frame. At this rate that is an eighth of that one
 # thread, which measured against the reads is affordable: the Pi 4 has four
 # cores and the reads leave most of them idle.
-SNAPSHOT_FAST = 0.10
+SNAPSHOT_FAST = 0.07
 SNAPSHOT_IDLE = 3.0
+
+# The live view is a *view*, not a read. It exists so the driver can see what
+# the camera is pointed at, and it is looked at on a phone over the car's wifi —
+# so what limits it is bytes on the link, not pixels on the Pi. Composing and
+# encoding one costs a few milliseconds either way; a 640px frame at quality 80
+# is about 136kB, which at ten a second is 1.4MB/s of wifi and is why the
+# picture lagged.
+#
+# 480px at quality 60 is about 50kB, near a third of that, and it is still twice
+# the resolution anything in this picture is judged at: the aim is read from a
+# green outline and the focus from the inset, which is the reader's own image
+# and is pasted in rather than resampled here. None of it touches what the
+# scanner reads — that is warped from the full sensor frame at OCR_CARD_HEIGHT
+# and never goes near this path.
+SNAPSHOT_WIDTH = 480
+SNAPSHOT_QUALITY = 60
 
 # The motion gate fires once per offer, because a card sitting still is not a
 # change. One frame is therefore the only sample there would ever be, and one
@@ -64,6 +80,31 @@ RESAMPLE_EVERY = 0.5
 
 WATCH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.viewing')
 WATCH_WINDOW = 10.0
+
+# Touched by the web side when the driver asks for the outline to be re-found.
+# A file rather than a signal or a socket, for the same reason .viewing is one:
+# the scanner is sometimes a child of the web server and sometimes a systemd
+# unit that has never heard of it, and a file works identically either way.
+#
+# It exists because the automatic recovery cannot always be sure. Corners that
+# have drifted off to one side are unambiguous — the card is in the middle of
+# the frame and they are not — but corners sitting concentric with the screen
+# at the wrong size are not: that is equally "the phone was re-seated" and "the
+# outline is on part of the screen", and no amount of looking tells them apart.
+# The driver can see which it is in one glance at the live view, so the honest
+# answer is to let them say.
+RESET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.recalibrate')
+
+
+def reset_requested():
+    """True once per request, and never fatal if the file cannot be removed."""
+    try:
+        if not os.path.exists(RESET_PATH):
+            return False
+        os.remove(RESET_PATH)
+        return True
+    except OSError:
+        return False
 
 
 def snapshot_interval():
@@ -201,11 +242,12 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None):
         if quad is None:
             quad = np.array(cfg['quad'], dtype=np.float32)
         view = PL.snapshot(frame, quad, roi,
-                           cfg.get('cardHeight', 900), card=card)
+                           cfg.get('cardHeight', 900),
+                           width=SNAPSHOT_WIDTH, card=card)
     except Exception as e:
         message = str(e)
     else:
-        message = PL.write_jpeg(path, view)
+        message = PL.write_jpeg(path, view, quality=SNAPSHOT_QUALITY)
     # This runs several times a second; repeating one broken thing that often
     # buries everything else in the log.
     if message and message != _snapshot_error:
@@ -602,6 +644,19 @@ def main():
                 # as much, almost entirely in shrinking the frame down to this
                 # size. Blurred frames are skipped: a smeared edge is a worse
                 # guess than the corners already held.
+                if reset_requested():
+                    if tracker is not None:
+                        tracker.start_over()
+                        scanner.quad = tracker.quad
+                        cfg.pop('trackedQuad', None)
+                        save_config(args.config, cfg)
+                        log('outline reset: back to the calibrated corners, and '
+                            'the next screen in the middle of the frame will be '
+                            'taken as the phone')
+                    else:
+                        log('outline reset asked for, but tracking is off '
+                            '(--no-track), so the corners are already fixed')
+
                 if tracker is not None and scanner.settled:
                     jumps_before, lost_before = tracker.jumps, tracker.status()['lost']
                     rebased_before = tracker.rebaselines

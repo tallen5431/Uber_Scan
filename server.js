@@ -180,6 +180,7 @@ function startScanner() {
 }
 
 var WATCH_PATH = path.join(ROOT, 'rpi', '.viewing');
+var RESET_PATH = path.join(ROOT, 'rpi', '.recalibrate');
 var lastTouch = 0;
 
 function touchWatchFile() {
@@ -310,6 +311,17 @@ function handler(req, res) {
 }
 
 function route(req, res) {
+  // The one thing on this server that is not a read. It asks the scanner to
+  // forget where it thinks the phone is; POST because it changes something, and
+  // because a GET would be followed by anything that prefetches links.
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/recalibrate') {
+    return fs.writeFile(RESET_PATH, '', function (err) {
+      if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
+                           { 'Content-Type': 'application/json; charset=utf-8' });
+      send(res, 200, JSON.stringify({ ok: true }),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return send(res, 405, 'method not allowed', { 'Content-Type': 'text/plain' });
   }
