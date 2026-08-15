@@ -48,6 +48,26 @@ CARD_HEIGHT = 1100         # canonical warp height; the decimal point needs this
 # shift's reads are of something that is not an offer.
 OCR_CONFIG = '--oem 1 --psm 6 -c tessedit_do_invert=0'
 
+# ...and what to try when that reading came back with a journey but no payout.
+#
+# psm 6 is told the image is one uniform block of text. An offer card is not:
+# the payout is set two or three times the size of every other line, and layout
+# analysis sometimes decides an outlier that large is not part of the block and
+# drops it. The rest of the card reads perfectly, so the failure is silent — a
+# close, clean, well-lit mount returned "Guaranteed (incl. tip) / 6 items /
+# 34 min (3.6 mi) total" with no money on it at all. Measured over rendered
+# cards at eight mount distances, psm 6 lost the payout on 6 of 32 otherwise
+# perfect frames.
+#
+# psm 4 is "a single column of text of variable sizes", which is exactly what an
+# offer card is, and it read all 32. It is not the default only because that is
+# a bigger claim than this evidence supports: on frames degraded the way a
+# windscreen degrades them — banding, glare, defocus, a dimmed screen — the two
+# measure the same, and none of this was checked against real captures. So the
+# second mode is used as a *retry*, on the one shape of failure it is known to
+# fix, where it cannot regress any read that works today.
+RECOVER_CONFIG = '--oem 1 --psm 4 -c tessedit_do_invert=0'
+
 # How tall the card image handed to tesseract should be, whatever the mount
 # gives us. This is the single highest-value number in the file.
 #
@@ -620,6 +640,10 @@ class Scanner:
         self._sig = None
         self._agree = 0
         self.dropped = 0
+        # Reads where the payout was only found on the second look. Worth a
+        # counter: if this climbs on a rig, the mount is producing the exact
+        # shape of frame the default segmentation mishandles.
+        self.recovered = 0
         self.locked = False
         self.last = None
 
@@ -757,8 +781,29 @@ class Scanner:
         # where the payout landed is the only way to tell a crop that read
         # nothing from a crop that read half of something.
         text, lines = ocr_lines(prepped, self.config)
-        t3 = time.perf_counter()
         parsed = OP.parse(text)
+
+        # A journey but no money is the one failure worth paying to re-read.
+        # It means the card was in front of the reader and legible — the times
+        # and distances came back — and only the single field the whole rig
+        # exists for went missing, which is what psm 6 does to a payout set much
+        # larger than the text around it. Reading it again under RECOVER_CONFIG
+        # costs about 200ms and only ever on a read that was otherwise going to
+        # report nothing, so no working read pays for it.
+        #
+        # The retry has to win on its own merits: it is taken only if it finds a
+        # payout AND still agrees about the journey. A second opinion that also
+        # rewrites the minutes is not a recovered payout, it is a different
+        # reading, and there is nothing here to say which of the two is right.
+        if parsed['pay'] is None and parsed['minutes']:
+            again, again_lines = ocr_lines(prepped, RECOVER_CONFIG)
+            second = OP.parse(again)
+            if (second['pay'] is not None
+                    and second['minutes'] == parsed['minutes']
+                    and second['miles'] == parsed['miles']):
+                text, lines, parsed = again, again_lines, second
+                self.recovered += 1
+        t3 = time.perf_counter()
 
         # A payout hard against the cut edge is half a number, and half a
         # number still reads as a number: a "4.95" rating with its top shaved

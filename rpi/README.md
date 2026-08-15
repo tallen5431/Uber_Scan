@@ -973,6 +973,7 @@ python3 rpi/test_exposure.py    # 61 checks on flicker, brightness and gain
 python3 rpi/test_track.py       # 71 checks on following the phone
 python3 rpi/test_journal.py     # 49 checks on keeping one row per offer
 python3 rpi/test_calibrate.py   # 30 checks on what calibration may overwrite
+python3 rpi/test_money.py       # 144 checks from a picture of a card to a $/hr
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
