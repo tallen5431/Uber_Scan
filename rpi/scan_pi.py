@@ -750,13 +750,21 @@ def main():
             signature = (parsed['pay'], parsed['minutes'], parsed['miles'])
             whole = parsed['complete'] and (parsed.get('hasTotal')
                                             or (parsed.get('legs') or 0) >= 2)
-            # Held on to, because `settled_on` is overwritten a few lines below
-            # and the journal wants this answer further down still. Asking again
-            # after the overwrite compares the signature with itself, which is
-            # true on every read — so every row was stored as settled and the
-            # flag said nothing about anything.
-            settled = whole and signature == settled_on
-            if settled:
+            # Two different questions, kept apart.
+            #
+            # `stable` is the merged reading holding still across two reads, and
+            # nothing else — which is what the journal's field of that name says
+            # it stores. It has to be taken here because `settled_on` is
+            # overwritten a few lines below; asking again after the overwrite
+            # compares the signature with itself and is true on every read, so
+            # every row was being stored as settled and the flag said nothing.
+            #
+            # Whether to STOP resampling is a stricter question: a reading that
+            # holds still while a leg is still missing has not finished, it has
+            # only stopped changing. Conjoining the two into the stored flag
+            # made it redundant with `whole` instead of independent of it.
+            stable = signature == settled_on
+            if whole and stable:
                 resample_until = 0.0
             elif parsed.get('pay'):
                 resample_until = time.time() + RESAMPLE_WINDOW
@@ -837,7 +845,7 @@ def main():
             if offer_log is not None and rate['ready'] and out['locked']:
                 offer_log.consider(parsed, rate, ms=out['ms']['total'],
                                    locked=out['locked'], whole=whole,
-                                   settled=settled)
+                                   settled=stable)
 
             if args.display:
                 cv2.imshow('uber-scan', render_panel(rate, parsed))
