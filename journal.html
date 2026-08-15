@@ -52,6 +52,47 @@
   /* The rate before running costs, under the one the verdict was made on. */
   .hist .big em { display: block; font-style: normal; font-size: 11px;
                   font-weight: 600; color: var(--muted); line-height: 1.3; }
+
+  /* The log. Grouped by day because that is how a shift is remembered, and how
+     it is checked against a statement. */
+  .day { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+         margin: 18px 0 2px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .day b { font-size: 13px; letter-spacing: .02em; }
+  .day span { font-size: 11px; color: var(--muted); }
+
+  .offer { border-bottom: 1px solid var(--line); }
+  .offer > summary {
+    display: flex; align-items: center; gap: 10px; padding: 10px 0;
+    cursor: pointer; list-style: none; font-variant-numeric: tabular-nums;
+  }
+  .offer > summary::-webkit-details-marker { display: none; }
+  .offer .big { font-size: 19px; font-weight: 800; min-width: 84px; }
+  .offer .big em { display: block; font-style: normal; font-size: 11px;
+                   font-weight: 600; color: var(--muted); line-height: 1.3; }
+  .offer .meta { font-size: 12px; color: var(--muted); min-width: 0;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .offer .when { margin-left: auto; padding-left: 6px; font-size: 11px;
+                 color: var(--muted); flex: none; }
+  /* Set aside: still listed, because an offer missing from the record is the
+     thing that makes a record impossible to check against. */
+  /* Dim, not hidden, and still legible — these are exactly the rows a driver
+     goes looking for when a job they remember is not in the figures. */
+  .offer.aside > summary { opacity: .62; }
+  .offer .tag { flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
+                text-transform: uppercase; color: var(--warn);
+                border: 1px solid currentColor; border-radius: 4px; padding: 1px 4px; }
+  .offer .why { font-size: 11px; color: var(--warn); padding: 0 0 8px 20px; }
+
+  /* One row per fact, so a figure can be found by running a finger down it. */
+  .facts { margin: 0 0 12px; padding: 0 0 0 20px; font-size: 12.5px; }
+  .facts h3 { font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
+              color: var(--muted); margin: 10px 0 4px; font-weight: 700; }
+  .facts div { display: flex; justify-content: space-between; gap: 12px;
+               padding: 2px 0; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums;
+              text-align: right; }
+  .facts .quiet dd { font-weight: 500; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -84,8 +125,9 @@
   <h2>Rides and shop orders <em>· median $/hr</em></h2>
   <div id="kinds"></div>
 
-  <h2>Recent offers <em id="recentNote">· $/hr, and the card it came from</em></h2>
-  <ul class="hist" id="recent"></ul>
+  <h2>Every offer <em id="recentNote">· tap one to see everything that was read</em></h2>
+  <div id="log"></div>
+  <p class="hint" id="more"></p>
 
   <p class="note" id="caveats"></p>
 
@@ -101,8 +143,8 @@
   'use strict';
 
   var el = {};
-  ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds', 'recent',
-   'caveats', 'ranges', 'csv', 'recentNote'].forEach(function (id) {
+  ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds',
+   'caveats', 'ranges', 'csv', 'recentNote', 'log', 'more'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -137,6 +179,107 @@
     Array.prototype.forEach.call(unitTags, function (u) { u.hidden = !on; });
   }
 
+  // Enough to find one shift in, without building a DOM nobody scrolls to the
+  // bottom of. Past this the CSV is the right tool and the note says so.
+  var LOG_MAX = 300;
+
+  // A reading good enough to shift a percentile. Kept as one function because
+  // the summary above and the day totals below have to agree about it, and two
+  // copies of a rule like this drift.
+  function counted(r) {
+    return typeof r.perHour === 'number' && !r.suspect && r.whole !== false;
+  }
+
+  function whyAside(r) {
+    if (r.whole === false) {
+      return 'The scanner never saw the whole card — only part of the journey '
+           + 'was in the crop, so this reads better than the offer was.';
+    }
+    if (r.suspect) {
+      return 'Outside the range a real offer falls in, so it is kept but not '
+           + 'counted. A fare summary left on the screen looks like this.';
+    }
+    return 'No rate could be worked out from this reading.';
+  }
+
+  function row(label, value, quiet) {
+    if (value === null || value === undefined || value === '') return '';
+    return '<div' + (quiet ? ' class="quiet"' : '') + '><dt>' + label
+         + '</dt><dd>' + value + '</dd></div>';
+  }
+
+  function num(n, dp) {
+    return (typeof n === 'number' && isFinite(n)) ? n.toFixed(dp === undefined ? 1 : dp) : null;
+  }
+
+  function offerRow(r, when, target, band) {
+    var aside = !counted(r);
+    var mins = r.minutes === null ? '--' : Math.round(r.minutes);
+    var gross = (typeof r.grossPerHour === 'number'
+                 && Math.round(r.grossPerHour) !== Math.round(r.perHour))
+      ? '<em>' + money(r.grossPerHour, 0) + ' raw</em>' : '';
+
+    // The billed time is the one number a driver cannot reconstruct from the
+    // card, and the one that explains a rate that looks wrong: it is the card's
+    // minutes plus a pad plus a shopping allowance, and it is what the rate was
+    // actually divided by.
+    var billed = (typeof r.billedMinutes === 'number') ? r.billedMinutes : null;
+    var padded = (billed !== null && r.minutes !== null
+                  && Math.abs(billed - r.minutes) >= 0.5);
+
+    var read = [];
+    if (r.legs) read.push(r.legs + (r.legs === 1 ? ' leg' : ' legs'));
+    if (r.hasTotal) read.push('a total line');
+    if (r.mergedFrom) read.push(r.mergedFrom + (r.mergedFrom === 1 ? ' frame' : ' frames'));
+
+    var flags = [];
+    if (r.milesCorrected) flags.push('a decimal was put back in the distance');
+    if (r.milesUncertain) flags.push('the distance was not trusted, so no running cost was charged');
+    if (r.settled === false) flags.push('the reading was still changing when it was stored');
+    if (r.whole === false) flags.push('only part of the card was in view');
+    if (r.suspect) flags.push('outside the range a real offer falls in');
+
+    return '<details class="offer' + (aside ? ' aside' : '') + '">'
+      + '<summary>'
+      + '<span class="dot ' + (aside ? '' : verdictFor(r.perHour, target, band)) + '"></span>'
+      + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i>' + gross + '</span>'
+      + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
+      + (r.miles === null ? '' : ' · ' + r.miles + ' mi')
+      + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
+      + (aside ? '<span class="tag">' + (r.whole === false ? 'partial' : 'odd') + '</span>' : '')
+      + '<span class="when">' + when.toLocaleTimeString(undefined,
+          { hour: 'numeric', minute: '2-digit' }) + '</span>'
+      + '</summary>'
+      + (aside ? '<p class="why">' + whyAside(r) + '</p>' : '')
+      + '<dl class="facts">'
+      + '<h3>Off the card</h3>'
+      + row('Payout', money(r.pay, 2))
+      + row('Time on the card', r.minutes === null ? null : num(r.minutes, 0) + ' min')
+      + row('Distance', r.miles === null ? null : r.miles + ' mi')
+      + row('Items', r.items || null)
+      + '<h3>How the rate was worked out</h3>'
+      + row('Billed time', billed === null ? null
+            : num(billed, 0) + ' min' + (padded ? ' — incl. your pad and shopping' : ''))
+      + row('Running cost taken off', typeof r.cost === 'number' && r.cost > 0
+            ? money(r.cost, 2) + ' at ' + money(r.costPerMile, 2) + '/mi' : null)
+      + row('Before running costs', typeof r.grossPerHour === 'number'
+            ? money(r.grossPerHour, 2) + '/hr' : null)
+      + row('After running costs', typeof r.perHour === 'number'
+            ? money(r.perHour, 2) + '/hr' : null)
+      + row('Per mile', typeof r.perMile === 'number' ? money(r.perMile, 2) + '/mi' : null)
+      + '<h3>The verdict, and what it was judged against</h3>'
+      + row('Called it', ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' })[r.state] || '--')
+      + row('Your target', typeof r.target === 'number'
+            ? money(r.target, 0) + '/hr' + (typeof r.band === 'number'
+              ? ', amber within ' + r.band + '%' : '') : null)
+      + '<h3>How it was read</h3>'
+      + row('Seen as', read.join(', ') || null, true)
+      + row('Read at', when.toLocaleString(), true)
+      + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, true)
+      + (flags.length ? row('Worth knowing', flags.join('; '), true) : '')
+      + '</dl></details>';
+  }
+
   function verdictFor(rate, target, band) {
     if (rate === null) return '';
     var floor = target * (1 - band / 100);
@@ -152,17 +295,22 @@
     // figure on this page. `whole` is absent from rows written before it
     // existed, and those were only ever written when whole, so undefined counts
     // as true.
-    var offers = (data.offers || []).filter(function (r) {
-      return typeof r.perHour === 'number' && !r.suspect && r.whole !== false;
-    });
-    var setAside = (data.offers || []).length - offers.length;
+    // Two different lists on purpose. `kept` is everything recorded, and it is
+    // what the log below shows, because the reason to open that log is to find
+    // one offer and check it against what the shift paid — and an offer missing
+    // from it, with nothing saying why, is what makes a record uncheckable.
+    // `offers` is the subset good enough to move a statistic.
+    var kept = data.offers || [];
+    var offers = kept.filter(counted);
+    var setAside = kept.length - offers.length;
 
     if (!offers.length) {
-      el.headline.innerHTML = data.offers && data.offers.length
+      el.headline.innerHTML = kept.length
         ? 'Nothing usable in this stretch — <b>' + setAside + '</b> set aside as doubtful.'
         : 'No offers recorded yet. The scanner keeps one line per offer it is sure of.';
       el.blocks.innerHTML = el.kinds.innerHTML = '';
-      el.recent.innerHTML = '';
+      el.log.innerHTML = '';
+      el.more.textContent = '';
       el.p25.textContent = el.p50.textContent = el.p75.textContent = '--';
       // "--/hr" is not a rate, it is a dash wearing a unit.
       showUnits(false);
@@ -239,53 +387,49 @@
            + '<span class="n">' + k.rates.length + '</span></div>';
     }).join('');
 
-    // --- the last few, so a number can be traced back to an offer ---
-    // Only promise the second rate when there is one. With no running cost set
-    // the two are the same number and the raw line is correctly absent, so a
-    // heading announcing it would be describing a column that is not there.
-    var anyGross = offers.some(function (r) {
-      return typeof r.grossPerHour === 'number'
-        && Math.round(r.grossPerHour) !== Math.round(r.perHour);
-    });
-    el.recentNote.textContent = anyGross
-      ? '· net $/hr, raw beneath, and the card it came from'
-      : '· $/hr, and the card it came from';
+    // --- the log ---
+    // Everything in the window, not a sample of it, because the reason to look
+    // at this list is to find one particular offer and check it against what
+    // the shift actually paid. A list that stops at twelve cannot do that.
+    //
+    // The ones set aside are here too, greyed and with the reason attached. An
+    // offer missing from the record with nothing to say why is precisely what
+    // makes a record impossible to reconcile — the driver would be left
+    // wondering whether they mis-remembered the job or the scanner lost it.
+    var shown = kept.slice(-LOG_MAX).reverse();
+    el.more.textContent = kept.length > shown.length
+      ? 'Showing the most recent ' + shown.length + ' of ' + kept.length
+        + '. Use the CSV for the rest.' : '';
 
-    el.recent.innerHTML = offers.slice(-12).reverse().map(function (r) {
+    var out = [];
+    var currentDay = null;
+    shown.forEach(function (r) {
       var when = new Date(r.at);
-      var mins = r.minutes === null ? '--' : Math.round(r.minutes);
-      // The rate leads and carries its unit; the card's own figures follow as
-      // the working behind it. The payout alone is the number that flatters a
-      // long job and punishes a short one, which is the whole reason this rig
-      // exists — so it is never the figure the eye lands on first.
-      //
-      // The raw rate sits under the net one rather than beside it. Beside it
-      // would cost the distance its place on the same line, and these two
-      // belong together anyway: one figure and the same figure after the car
-      // has been paid for. It is left off entirely when the two are equal —
-      // no running cost set, or a distance too doubtful to charge for — since
-      // printing a number twice says only that it was printed twice.
-      var gross = (typeof r.grossPerHour === 'number'
-                   && Math.round(r.grossPerHour) !== Math.round(r.perHour))
-        ? '<em>' + money(r.grossPerHour, 0) + ' raw</em>' : '';
-      return '<li><span class="dot ' + verdictFor(r.perHour, target, band) + '"></span>'
-           + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i>'
-           + gross + '</span>'
-           + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
-           + (r.miles === null ? '' : ' · ' + r.miles + ' mi')
-           + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
-           + '<span class="when">' + when.toLocaleDateString(undefined,
-               { month: 'short', day: 'numeric' }) + ' '
-           + when.toLocaleTimeString(undefined,
-               { hour: 'numeric', minute: '2-digit' }) + '</span></li>';
-    }).join('');
+      var day = when.toDateString();
+      if (day !== currentDay) {
+        currentDay = day;
+        var ofDay = kept.filter(function (o) {
+          return new Date(o.at).toDateString() === day;
+        });
+        var usable = ofDay.filter(counted).map(function (o) { return o.perHour; })
+                          .sort(function (a, b) { return a - b; });
+        var offered = ofDay.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
+        out.push('<div class="day"><b>' + when.toLocaleDateString(undefined,
+                   { weekday: 'short', month: 'short', day: 'numeric' }) + '</b>'
+               + '<span>' + ofDay.length + ' offer' + (ofDay.length === 1 ? '' : 's')
+               + (usable.length ? ' · median ' + money(percentile(usable, 0.5), 0) + '/hr' : '')
+               + ' · ' + money(offered, 2) + ' offered</span></div>');
+      }
+      out.push(offerRow(r, when, target, band));
+    });
+    el.log.innerHTML = out.join('');
 
     var notes = ['These are offers the scanner read, not trips taken — it cannot '
                  + 'see which ones were accepted.'];
     if (setAside) {
       notes.push(setAside + ' reading' + (setAside === 1 ? '' : 's')
-                 + ' set aside — the scanner never saw the whole card, so they '
-                 + 'would read better than they were.');
+                 + ' left out of the figures above — they are still in the list '
+                 + 'below, greyed, with the reason on each.');
     }
     // Only when something was actually deducted. "Rates are after $0.00/mi of
     // running costs" is a sentence about nothing, and it invites the reader to

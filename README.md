@@ -168,9 +168,16 @@ So the Pi scanner keeps one line per offer it was confident about, in
 * **by time of day**, in three-hour blocks, each bar drawn on the same scale so
   the halfway mark is always your target.
 * **rides against shop orders**.
-* the last dozen offers — each led by its rate, with the same rate before
-  running costs beneath it, and the card's own pay, time and distance
-  alongside so a figure can be traced back to the offer it came from.
+* **every offer**, grouped by day, with the day's count, median and total
+  offered. Tap one and it opens to the whole record: what was on the card, what
+  the rate was divided by and why it differs from the card's own minutes, what
+  came off for the car, the verdict and the target it was judged against, and
+  how the reading was made — which is what you need to hold an offer up against
+  what the shift actually paid.
+* readings the scanner was not sure of are **in that list too**, greyed and
+  tagged, with the reason on each. They are left out of the figures above, but
+  an offer missing from the record with nothing saying why is exactly what makes
+  a record impossible to check.
 * a **CSV** of everything, for a spreadsheet.
 
 Two things it is careful about:
