@@ -221,6 +221,34 @@ eq('...and says so once', broken.journal._error is not None, True)
 eq('...and reading it back is empty, not an explosion',
    broken.journal.rows(), [])
 
+# --- annotations from the web side must not be mistaken for offers ----------
+# The file is written by two things now: the scanner adds offers, and the web
+# side adds notes about them — which were taken, which to hide. A note carries a
+# `kind` and an offer never does. Reading one back as an offer would have the
+# scanner resume from it after a restart and record the card in front of it a
+# second time, which is the one thing resume() exists to prevent.
+path = os.path.join(work, 'annotated.jsonl')
+if os.path.exists(path):
+    os.remove(path)
+log = JR.OfferLog(JR.Journal(path))
+feed(log, [OFFER] * 2)
+log.journal.append({'v': 1, 'kind': 'mark', 'id': 'whatever', 'at': JR.now_ms(),
+                    'accepted': True})
+log.journal.append({'v': 1, 'kind': 'rule', 'at': JR.now_ms(),
+                    'match': {'pay': 7.09, 'minutes': 34, 'miles': 3.6}, 'hidden': True})
+eq('every line is still readable', len(log.journal.rows()), 3)
+last = log.journal.last()
+eq('...but the last *offer* is the offer', last['pay'], 12.45)
+ok_('...not the annotation', not last.get('kind'))
+
+# ...so a restart under the same card still resumes rather than duplicating.
+after = JR.OfferLog(JR.Journal(path))
+ok_('a restart still resumes past the annotations',
+    after.resume(now=1_700_000_006.0) is not None)
+feed(after, [OFFER] * 2, start=1_700_000_006.0)
+offers = [r for r in after.journal.rows() if not r.get('kind')]
+eq('...and does not record the card twice', len(offers), 1)
+
 # --- a torn line survives a power cut ---------------------------------------
 path = os.path.join(work, 'torn.jsonl')
 with open(path, 'w') as fh:

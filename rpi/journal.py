@@ -17,6 +17,12 @@ further row carrying the same `id`. **Anything reading this file takes the last
 row of each id.** Nothing is ever edited in place, which is what makes the file
 safe to append to from a process that can be killed at any moment.
 
+The web side appends here as well — which offers the driver took, and which ones
+to hide — and it does it the same way, by adding a line rather than rewriting
+one. Those rows carry a `kind`; an offer never does. That is the whole of the
+distinction, and it is what lets two processes write one file without either
+needing to know when the other is running.
+
 Three things this deliberately does not do:
 
   * it does not record what the driver decided. The scanner cannot see the
@@ -129,9 +135,18 @@ class Journal:
             return []
 
     def last(self):
-        """The final row, or None."""
-        rows = self.rows()
-        return rows[-1] if rows else None
+        """The final *offer*, or None.
+
+        Not simply the last line. The web side appends annotations here too —
+        what the driver accepted, what they hid — and those carry a `kind` while
+        an offer does not. Handing one of those back would have the scanner
+        resume from an annotation on restart and record the card in front of it
+        a second time, which is the one thing resume() exists to prevent.
+        """
+        for row in reversed(self.rows()):
+            if not row.get('kind'):
+                return row
+        return None
 
     def _roll_if_huge(self):
         if self.cap and os.path.exists(self.path) \

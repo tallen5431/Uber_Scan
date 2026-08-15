@@ -225,7 +225,37 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    'perHour', 'grossPerHour', 'perMile', 'cost', 'state',
                    'target', 'band', 'costPerMile', 'legs', 'mergedFrom', 'hasTotal',
                    'milesCorrected', 'milesUncertain', 'whole', 'settled',
-                   'suspect', 'ms'];
+                   'suspect', 'accepted', 'ms'];
+
+function numOrNull(v) {
+  return (typeof v === 'number' && isFinite(v)) ? v : null;
+}
+
+// Small on purpose. Nothing this server accepts is bigger than a couple of
+// numbers, so a body that keeps arriving is not a large request, it is a client
+// that should be hung up on.
+var MAX_BODY = 4096;
+
+function readJsonBody(req, done) {
+  var text = '';
+  var over = false;
+  req.on('data', function (chunk) {
+    if (over) return;
+    text += chunk;
+    if (text.length > MAX_BODY) { over = true; req.destroy(); done(new Error('too big')); }
+  });
+  req.on('error', function () { if (!over) { over = true; done(new Error('aborted')); } });
+  req.on('end', function () {
+    if (over) return;
+    over = true;
+    try {
+      var parsed = JSON.parse(text || '{}');
+      done(null, (parsed && typeof parsed === 'object') ? parsed : null);
+    } catch (e) {
+      done(e);
+    }
+  });
+}
 
 function clampNumber(raw, low, high, fallback) {
   var n = parseInt(raw, 10);
@@ -236,15 +266,49 @@ function clampNumber(raw, low, high, fallback) {
 // The scanner appends a further row for the same offer when the reading
 // improves, so the last row of each id is the one that is true. Rows written
 // before ids existed, or by something else, keep their own identity.
+//
+// Annotations live in the same file and are told apart by carrying a `kind`,
+// which an offer never does. They are applied over the offers here rather than
+// stored on them, because the file is append-only in both directions: the
+// scanner adds offers while this adds notes, and neither can safely rewrite a
+// line the other might be reading.
 function latestPerOffer(rows) {
   var byId = Object.create(null);
   var out = [];
+  var marks = Object.create(null);
+  var rules = [];
+
   rows.forEach(function (r) {
     if (!r || typeof r !== 'object') return;
+    if (r.kind === 'mark') {
+      if (r.id) marks[r.id] = Object.assign(marks[r.id] || {}, r);
+      return;
+    }
+    if (r.kind === 'rule') { rules.push(r); return; }
+    if (r.kind) return;                       // something newer than this reader
     if (!r.id) { out.push(r); return; }
     if (!(r.id in byId)) { byId[r.id] = out.length; out.push(r); return; }
     out[byId[r.id]] = r;
   });
+
+  out.forEach(function (o) {
+    // A rule hides every reading of one card. The test offer a driver keeps
+    // presenting to check the rig still works would otherwise need hiding again
+    // after every check.
+    rules.forEach(function (rule) {
+      var m = rule.match || {};
+      if (m.pay === o.pay && m.minutes === o.minutes && m.miles === o.miles
+          && rule.hidden !== undefined) {
+        o.hidden = rule.hidden;
+      }
+    });
+    var mark = o.id && marks[o.id];
+    if (mark) {
+      if (mark.accepted !== undefined) o.accepted = mark.accepted;
+      if (mark.hidden !== undefined) o.hidden = mark.hidden;   // an id beats a rule
+    }
+  });
+
   return out.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
 }
 
@@ -311,6 +375,55 @@ function handler(req, res) {
 }
 
 function route(req, res) {
+  // Noting what happened to an offer: which ones were taken, and which to hide.
+  //
+  // It appends a line and can do nothing else. There is no field here for free
+  // text and no way to reach an existing row, because this server has no
+  // authentication and sits on whatever wifi the car is near — so the worst a
+  // stranger can do with it is add a note to a journal they cannot read the
+  // addresses out of, and nothing they add can destroy a reading.
+  //
+  // Hiding is a note too, for the same reason. A mis-tap on a phone in a moving
+  // car should cost an entry in a list, not a row of data that took a shift to
+  // collect.
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/offers/mark') {
+    return readJsonBody(req, function (err, body) {
+      if (err || !body) return send(res, 400, JSON.stringify({ ok: false, error: 'bad body' }),
+                                    { 'Content-Type': 'application/json; charset=utf-8' });
+      var note = { v: 1, at: Date.now() };
+      if (typeof body.id === 'string' && body.id.length && body.id.length < 80) {
+        note.kind = 'mark';
+        note.id = body.id;
+      } else if (body.match && typeof body.match === 'object') {
+        note.kind = 'rule';
+        note.match = {
+          pay: numOrNull(body.match.pay),
+          minutes: numOrNull(body.match.minutes),
+          miles: numOrNull(body.match.miles)
+        };
+        if (note.match.pay === null || note.match.minutes === null) {
+          return send(res, 400, JSON.stringify({ ok: false, error: 'a rule needs a pay and a time' }),
+                      { 'Content-Type': 'application/json; charset=utf-8' });
+        }
+      } else {
+        return send(res, 400, JSON.stringify({ ok: false, error: 'no offer named' }),
+                    { 'Content-Type': 'application/json; charset=utf-8' });
+      }
+      if (typeof body.accepted === 'boolean') note.accepted = body.accepted;
+      if (typeof body.hidden === 'boolean') note.hidden = body.hidden;
+      if (note.accepted === undefined && note.hidden === undefined) {
+        return send(res, 400, JSON.stringify({ ok: false, error: 'nothing to note' }),
+                    { 'Content-Type': 'application/json; charset=utf-8' });
+      }
+      fs.appendFile(JOURNAL_PATH, JSON.stringify(note) + '\n', function (writeErr) {
+        if (writeErr) return send(res, 500, JSON.stringify({ ok: false, error: writeErr.message }),
+                                  { 'Content-Type': 'application/json; charset=utf-8' });
+        send(res, 200, JSON.stringify({ ok: true, note: note }),
+             { 'Content-Type': 'application/json; charset=utf-8' });
+      });
+    });
+  }
+
   // The one thing on this server that is not a read. It asks the scanner to
   // forget where it thinks the phone is; POST because it changes something, and
   // because a GET would be followed by anything that prefetches links.
@@ -408,8 +521,17 @@ function route(req, res) {
     // figures, and only the browser knows where the driver is and therefore
     // when their day began.
     var since = clampNumber(q.since, 0, 4102444800000, 0);
+    var withHidden = q.hidden === '1';
     return readJournal(function (rows) {
       var offers = latestPerOffer(rows);
+      var hidden = offers.filter(function (r) { return r.hidden; }).length;
+      // Hidden rows are still on disk — nothing here deletes — but they are out
+      // of every figure and every export unless asked for by name. The test card
+      // a driver presents to check the rig is not an offer they were made, and
+      // leaving it in quietly drags the median toward whatever that card says.
+      if (!withHidden) {
+        offers = offers.filter(function (r) { return !r.hidden; });
+      }
       var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
       if (floor) {
         offers = offers.filter(function (r) { return (r.at || 0) >= floor; });
@@ -421,7 +543,8 @@ function route(req, res) {
           'Content-Disposition': 'attachment; filename="uber-scan-offers.csv"'
         });
       }
-      send(res, 200, JSON.stringify({ count: offers.length, days: days, offers: offers }),
+      send(res, 200, JSON.stringify({ count: offers.length, days: days,
+                                      hidden: hidden, offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }

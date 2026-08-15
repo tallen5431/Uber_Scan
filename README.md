@@ -178,6 +178,19 @@ So the Pi scanner keeps one line per offer it was confident about, in
   tagged, with the reason on each. They are left out of the figures above, but
   an offer missing from the record with nothing saying why is exactly what makes
   a record impossible to check.
+* **tick the ones you took.** The scanner cannot see the Accept button and never
+  touches it, so it cannot know — but you can tell it, and once you do the page
+  shows what you actually worked against what you were offered, per day and
+  overall.
+* **hide the ones that were not offers.** The test card you present to check the
+  rig still works is not a job you were given, and left in it drags every median
+  toward whatever that card says. Hide one, or hide *every* reading of that card
+  — now and in future — so checking the rig costs nothing.
+
+Nothing is ever deleted. Ticking and hiding are appended as their own lines, the
+same way the offers are, so a mis-tap on a phone in a moving car costs an entry
+in a list rather than a row of data that took a shift to collect. Hidden offers
+are out of every figure and every export, and `?hidden=1` brings them back.
 * a **CSV** of everything, for a spreadsheet.
 
 Two things it is careful about:

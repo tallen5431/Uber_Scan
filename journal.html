@@ -83,6 +83,21 @@
                 border: 1px solid currentColor; border-radius: 4px; padding: 1px 4px; }
   .offer .why { font-size: 11px; color: var(--warn); padding: 0 0 8px 20px; }
 
+  /* Taken. A tick in the summary so the list can be read for what was actually
+     worked, without opening anything. */
+  .offer .took { flex: none; font-size: 13px; color: var(--go); font-weight: 800; }
+  .offer.mine > summary .big { color: var(--go); }
+
+  .acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px 20px; }
+  .acts button {
+    font: inherit; font-size: 12px; font-weight: 700; padding: 7px 10px;
+    color: var(--muted); background: var(--panel); border: 1px solid transparent;
+    border-radius: 8px; cursor: pointer;
+  }
+  .acts button.on { color: var(--go); border-color: var(--go); }
+  .acts button.danger { color: var(--no); }
+  .acts button:disabled { opacity: .5; }
+
   /* One row per fact, so a figure can be found by running a finger down it. */
   .facts { margin: 0 0 12px; padding: 0 0 0 20px; font-size: 12.5px; }
   .facts h3 { font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
@@ -212,6 +227,17 @@
     return (typeof n === 'number' && isFinite(n)) ? n.toFixed(dp === undefined ? 1 : dp) : null;
   }
 
+  // What "this card" means for a hide-every rule. Taken from the row's own data
+  // attributes rather than parsed back out of the text, which would break the
+  // moment the wording changed.
+  function cardOf(offer) {
+    var pay = parseFloat(offer.getAttribute('data-pay'));
+    var minutes = parseFloat(offer.getAttribute('data-minutes'));
+    var miles = parseFloat(offer.getAttribute('data-miles'));
+    if (!isFinite(pay) || !isFinite(minutes)) return null;
+    return { pay: pay, minutes: minutes, miles: isFinite(miles) ? miles : null };
+  }
+
   function offerRow(r, when, target, band) {
     var aside = !counted(r);
     var mins = r.minutes === null ? '--' : Math.round(r.minutes);
@@ -239,13 +265,18 @@
     if (r.whole === false) flags.push('only part of the card was in view');
     if (r.suspect) flags.push('outside the range a real offer falls in');
 
-    return '<details class="offer' + (aside ? ' aside' : '') + '">'
+    return '<details class="offer' + (aside ? ' aside' : '')
+      + (r.accepted ? ' mine' : '') + '" data-id="' + (r.id || '') + '"'
+      + ' data-pay="' + (r.pay === null ? '' : r.pay) + '"'
+      + ' data-minutes="' + (r.minutes === null ? '' : r.minutes) + '"'
+      + ' data-miles="' + (r.miles === null ? '' : r.miles) + '">'
       + '<summary>'
       + '<span class="dot ' + (aside ? '' : verdictFor(r.perHour, target, band)) + '"></span>'
       + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i>' + gross + '</span>'
       + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
       + (r.miles === null ? '' : ' · ' + r.miles + ' mi')
       + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
+      + (r.accepted ? '<span class="took" title="you took this">\u2713</span>' : '')
       + (aside ? '<span class="tag">' + (r.whole === false ? 'partial' : 'odd') + '</span>' : '')
       + '<span class="when">' + when.toLocaleTimeString(undefined,
           { hour: 'numeric', minute: '2-digit' }) + '</span>'
@@ -277,7 +308,17 @@
       + row('Read at', when.toLocaleString(), true)
       + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, true)
       + (flags.length ? row('Worth knowing', flags.join('; '), true) : '')
-      + '</dl></details>';
+      + '</dl>'
+      + '<div class="acts">'
+      + '<button type="button" data-act="took"' + (r.accepted ? ' class="on"' : '')
+        + '>' + (r.accepted ? '\u2713 you took this' : 'I took this') + '</button>'
+      + '<button type="button" class="danger" data-act="hide">Hide this one</button>'
+      + (r.pay !== null && r.minutes !== null
+         ? '<button type="button" class="danger" data-act="hideCard">Hide every '
+           + money(r.pay, 2) + ' \u00b7 ' + Math.round(r.minutes) + ' min'
+           + (r.miles === null ? '' : ' \u00b7 ' + r.miles + ' mi') + '</button>'
+         : '')
+      + '</div></details>';
   }
 
   function verdictFor(rate, target, band) {
@@ -333,9 +374,23 @@
     el.p75.textContent = money(percentile(rates, 0.75), 0);
 
     var cleared = offers.filter(function (r) { return r.perHour >= target; }).length;
-    el.headline.innerHTML = 'At ' + money(target) + '/hr you would have taken <b>'
+    var mine = offers.filter(function (r) { return r.accepted; });
+    var lines = ['At ' + money(target) + '/hr you would have taken <b>'
       + Math.round(cleared / offers.length * 100) + '%</b> of <b>'
-      + offers.length + '</b> offer' + (offers.length === 1 ? '' : 's') + '.';
+      + offers.length + '</b> offer' + (offers.length === 1 ? '' : 's') + '.'];
+    // Once anything is ticked, the comparison the whole page is for: what the
+    // offers said against what was actually worked. Nothing is shown until then,
+    // because a "0 taken" on an untagged log reads as a claim rather than an
+    // absence of one.
+    if (mine.length) {
+      var mineRates = mine.map(function (r) { return r.perHour; })
+                          .sort(function (a, b) { return a - b; });
+      var minePay = mine.reduce(function (t, r) { return t + (r.pay || 0); }, 0);
+      lines.push('You marked <b>' + mine.length + '</b> as taken, worth <b>'
+        + money(minePay, 2) + '</b> at a typical <b>'
+        + money(percentile(mineRates, 0.5), 0) + '/hr</b>.');
+    }
+    el.headline.innerHTML = lines.join('<br>');
 
     // --- by time of day ---
     var blocks = BLOCK_NAMES.map(function (name) {
@@ -414,18 +469,24 @@
         var usable = ofDay.filter(counted).map(function (o) { return o.perHour; })
                           .sort(function (a, b) { return a - b; });
         var offered = ofDay.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
+        var tookToday = ofDay.filter(function (o) { return o.accepted; });
+        var tookPay = tookToday.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
         out.push('<div class="day"><b>' + when.toLocaleDateString(undefined,
                    { weekday: 'short', month: 'short', day: 'numeric' }) + '</b>'
                + '<span>' + ofDay.length + ' offer' + (ofDay.length === 1 ? '' : 's')
                + (usable.length ? ' · median ' + money(percentile(usable, 0.5), 0) + '/hr' : '')
-               + ' · ' + money(offered, 2) + ' offered</span></div>');
+               + ' · ' + money(offered, 2) + ' offered'
+               + (tookToday.length ? ' · took ' + tookToday.length + ' for '
+                  + money(tookPay, 2) : '')
+               + '</span></div>');
       }
       out.push(offerRow(r, when, target, band));
     });
     el.log.innerHTML = out.join('');
 
     var notes = ['These are offers the scanner read, not trips taken — it cannot '
-                 + 'see which ones were accepted.'];
+                 + 'see the Accept button and never touches it, so tick the ones '
+                 + 'you took and it will keep the tally.'];
     if (setAside) {
       notes.push(setAside + ' reading' + (setAside === 1 ? '' : 's')
                  + ' left out of the figures above — they are still in the list '
@@ -434,6 +495,11 @@
     // Only when something was actually deducted. "Rates are after $0.00/mi of
     // running costs" is a sentence about nothing, and it invites the reader to
     // hunt for a subtraction that never happened.
+    if (data.hidden) {
+      notes.push(data.hidden + ' offer' + (data.hidden === 1 ? ' is' : 's are')
+                 + ' hidden and left out of everything here — the CSV takes '
+                 + '?hidden=1 if you want them back.');
+    }
     notes.push(newest.costPerMile > 0
       ? 'Rates are after ' + money(newest.costPerMile, 2) + '/mi of running costs.'
       : 'No running cost is set, so these are what the offers paid before the car.');
@@ -460,6 +526,48 @@
         el.headline.textContent = 'Could not reach the scanner.';
       });
   }
+
+  // One handler for the whole log, because the rows are rebuilt on every load
+  // and per-row listeners would be re-attached each time for nothing.
+  el.log.addEventListener('click', function (e) {
+    var button = e.target.closest('button[data-act]');
+    if (!button) return;
+    var offer = button.closest('.offer');
+    var id = offer && offer.getAttribute('data-id');
+    var act = button.getAttribute('data-act');
+    var body;
+
+    if (act === 'took') {
+      body = { id: id, accepted: !button.classList.contains('on') };
+    } else if (act === 'hide') {
+      body = { id: id, hidden: true };
+    } else if (act === 'hideCard') {
+      // Every reading of one card, now and in future. The test offer a driver
+      // presents to check the rig still works comes back every time they check
+      // it, so hiding them one at a time is a chore that never ends.
+      var card = cardOf(offer);
+      if (!card) return;
+      body = { match: card, hidden: true };
+    } else {
+      return;
+    }
+
+    Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
+      b.disabled = true;
+    });
+    fetch('/api/offers/mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(load)
+      .catch(function () {
+        button.textContent = 'could not save';
+        Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
+          b.disabled = false;
+        });
+      });
+  });
 
   el.ranges.addEventListener('click', function (e) {
     var button = e.target.closest('button');
