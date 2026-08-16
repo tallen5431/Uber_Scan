@@ -213,6 +213,136 @@ def _pick(contours, shape, min_area_frac, max_area_frac):
     return min(fits, key=score)
 
 
+# Thresholds for the second pass, as percentiles of how far each pixel is from
+# the cabin — see _different_from_cabin.
+DIFFERENCE_LEVELS = (60, 70, 78, 85, 90, 94)
+
+# How much of the frame's edge is taken as surround rather than subject.
+CABIN_BORDER = 0.10
+
+
+def _cabin_level(gray, border=CABIN_BORDER):
+    """The surround's own brightness, taken from the frame's outer ring.
+
+    The driver aims the card at the middle of the frame, so the edge of it is
+    the one part that is nearly always car rather than phone. Median rather than
+    mean, because a ring that clips the corner of a bright screen should not
+    drag the answer with it.
+    """
+    h, w = gray.shape[:2]
+    bh, bw = max(1, int(h * border)), max(1, int(w * border))
+    ring = np.concatenate([gray[:bh].ravel(), gray[-bh:].ravel(),
+                           gray[:, :bw].ravel(), gray[:, -bw:].ravel()])
+    return float(np.median(ring))
+
+
+def _search(gray, kernel, shape, min_area_frac, max_area_frac, masks):
+    for values, cut in masks:
+        mask = (values > cut).astype(np.uint8) * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best = _pick(contours, shape, min_area_frac, max_area_frac)
+        if best is not None:
+            return best
+    return None
+
+
+def _brighter_than_the_car(gray, kernel, shape, min_area_frac, max_area_frac):
+    """The original search: the screen is the bright thing in a dark cabin."""
+    masks = []
+    otsu, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    masks.append((gray, otsu))
+    # All of them in one call, which is one sort rather than eight. Measured at
+    # 1.13ms each against 1.3ms for the lot, and this runs every 0.4s on a Pi
+    # while it is also trying to read.
+    for cut in np.percentile(gray, BRIGHT_LEVELS):
+        # Nothing left to separate: every remaining step would only crop the
+        # same blob smaller.
+        if float(cut) >= 254.0:
+            break
+        masks.append((gray, float(cut)))
+    return _search(gray, kernel, shape, min_area_frac, max_area_frac, masks)
+
+
+def _different_from_the_car(gray, kernel, shape, min_area_frac, max_area_frac):
+    """The screen is whatever does not look like the cabin, either way up.
+
+    A dark-mode offer card breaks the brightness premise outright, and not by
+    being dim — by *straddling* the cabin. Measured on a rendered dark card, the
+    map above the sheet sits at grey 44 and the sheet itself at 19, so with a
+    car interior anywhere between them no single threshold can hold both halves
+    of one screen. What the brightness ladder returns in that case is not
+    nothing, which would at least be honest: it is the map, at the full width of
+    the phone and 47% of its height, on every check, indefinitely. The crop is a
+    fraction of the corners, so the reader is then handed a piece of the map and
+    the card is never looked at.
+
+    Distance from the cabin holds both halves, because neither of them looks
+    like upholstery. It is a weaker assumption than the brightness one and true
+    more often — but not always: it needs the frame's edge to actually *be*
+    cabin, which stops being true on a very close mount, and it has nothing to
+    measure against when the whole frame is blown-out windscreen. So it does not
+    replace the brightness search. See _detect_quad for how the two are put
+    together.
+    """
+    diff = np.abs(gray.astype(np.float32) - _cabin_level(gray))
+    masks = []
+    seen = set()
+    for cut in np.percentile(diff, DIFFERENCE_LEVELS):
+        # A cut of zero is kept, not skipped. It looked like the degenerate case
+        # — "nothing here differs from the cabin" — and it is the opposite: an
+        # evenly-lit interior puts most of this image at exactly nought, so every
+        # percentile below the phone's own share lands on zero, and `differs from
+        # the cabin at all` is then precisely the right question to ask. Skipping
+        # it threw away the only level that worked and left the search finding
+        # the map again. If there really is nothing there, the mask comes out
+        # empty and the search moves on by itself.
+        key = round(float(cut), 3)
+        if key in seen:
+            continue
+        seen.add(key)
+        masks.append((diff, float(cut)))
+    return _search(gray, kernel, shape, min_area_frac, max_area_frac, masks)
+
+
+# How much of the smaller answer has to lie inside the bigger one before the two
+# searches count as having found the same screen.
+#
+# Overlap rather than containment, which was the first thing tried and was too
+# strict to be useful: on a dark card at a mid-grey cabin the brightness search
+# returned a box 826 wide against the difference search's 762, because it bled a
+# little into the upholstery either side. Same phone, 90% of one sitting inside
+# the other, and neither containing it — so the test said "different things",
+# the tie went to seniority, and the answer was the map again.
+SAME_SCREEN_OVERLAP = 0.70
+
+
+def _same_screen(a, b):
+    """Do these two answers describe one screen, one of them clipped?"""
+    ax, ay, aw, ah = cv2.boundingRect(a)
+    bx, by, bw, bh = cv2.boundingRect(b)
+    ix = max(0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0, min(ay + ah, by + bh) - max(ay, by))
+    smaller = min(aw * ah, bw * bh)
+    return smaller > 0 and (ix * iy) / float(smaller) >= SAME_SCREEN_OVERLAP
+
+
+# How much taller the second opinion has to be before it is preferred.
+#
+# Not "taller at all", which was the first attempt and cost accuracy on every
+# ordinary frame: the difference mask carries a small halo from the blur, so on
+# a plainly-lit phone it returns a box about 1% bigger than the brightness
+# search's — which is exact — and preferring it moved every detected corner a
+# few pixels out. The thing this rule is for is not a few pixels, it is half a
+# screen: a dark card gives 780 against 1647, and a close mount gives 1747
+# against 1135. Both are far outside a halo, and nothing measured lands between.
+MATERIALLY_TALLER = 1.15
+
+
+def _height(contour):
+    return cv2.boundingRect(contour)[3]
+
+
 def _detect_quad(frame, min_area_frac, max_area_frac):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
     gray = cv2.GaussianBlur(gray, (7, 7), 0)
@@ -220,23 +350,30 @@ def _detect_quad(frame, min_area_frac, max_area_frac):
     # whether this ran on the sensor image or a thumbnail of it.
     k = max(3, (int(frame.shape[1] * 0.011) | 1))
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+    shape = frame.shape
 
-    for level in (None,) + BRIGHT_LEVELS:
-        if level is None:
-            _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        else:
-            cut = float(np.percentile(gray, level))
-            # Nothing left to separate: every remaining step would only crop the
-            # same blob smaller.
-            if cut >= 254.0:
-                break
-            _, mask = cv2.threshold(gray, cut, 255, cv2.THRESH_BINARY)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        best = _pick(contours, frame.shape, min_area_frac, max_area_frac)
-        if best is not None:
-            return _quad_of(best)
-    return None
+    lit = _brighter_than_the_car(gray, kernel, shape, min_area_frac, max_area_frac)
+    other = _different_from_the_car(gray, kernel, shape, min_area_frac, max_area_frac)
+    if lit is None and other is None:
+        return None
+    if lit is None or other is None:
+        return _quad_of(lit if other is None else other)
+
+    # Two answers. When they overlap they are one screen with one of them
+    # clipped, and the taller is the right one — a sub-region is never a better
+    # answer than the whole, because every fraction downstream is measured
+    # against these corners. That single rule covers both ways this has been got
+    # wrong, in opposite directions: on a dark card the brightness search returns
+    # the map above the sheet, and on a very close mount the difference search
+    # goes short because the frame's edge is screen rather than cabin, so there
+    # is no sound cabin to measure from.
+    #
+    # When they do not overlap they are looking at different things, and the
+    # brightness search wins on seniority: it is the one with a shift's worth of
+    # road behind it, and the disagreement is rare enough not to guess at.
+    if _same_screen(lit, other) and _height(other) >= _height(lit) * MATERIALLY_TALLER:
+        return _quad_of(other)
+    return _quad_of(lit)
 
 
 # A screen this close to the frame edge is probably continuing past it.
@@ -389,13 +526,44 @@ def crop(image, roi):
     return image[y0:y1, x0:x1]
 
 
+def is_dark_mode(gray):
+    """True when this card is light text on a dark ground.
+
+    Decided from the picture rather than from a setting, because the phone's own
+    theme can follow the time of day and nobody is going to tell the rig.
+
+    The card is mostly background, so the median IS the background — and the
+    question is which end of the card's own range that background sits at. Doing
+    it that way rather than against a fixed level is what makes it survive the
+    camera: an absolute `median < 128` gets a badly underexposed *light* card
+    wrong, and inverting a light card does not degrade the reading, it destroys
+    it. Measured over twelve renderings — both themes, windscreen glare, gain
+    pushed, exposure starved, half-cards — the relative test got 12 of 12 and
+    `median < 128` got 11.
+    """
+    lo, hi = np.percentile(gray, (5, 95))
+    return float(np.median(gray)) < (float(lo) + float(hi)) / 2.0
+
+
 def preprocess(card):
-    """Grey, even out the glare gradient, and stretch contrast.
+    """Grey, put the ink dark side up, even out the glare, stretch contrast.
 
     CLAHE rather than a global stretch because a windshield puts a bright band
     across part of the screen and leaves the rest dim.
+
+    The inversion is what makes a dark-mode card readable at all. Tesseract is
+    run with tessedit_do_invert=0 — see OCR_CONFIG — which switches off its own
+    white-on-black retry, and that was a sound trade for as long as this handed
+    it dark text on a light card every single time. A phone in dark mode breaks
+    that premise silently: measured on a rendered card the reader returned
+    'Ee y Piece ek te | So | - - ee ee ne ee oo' and the offer was simply never
+    seen. Letting tesseract do the flip instead costs a whole second pass over
+    every dark page (255ms against 359ms measured); deciding it here costs a
+    median and two percentiles, and leaves the light path exactly as it was.
     """
     gray = cv2.cvtColor(card, cv2.COLOR_BGR2GRAY) if card.ndim == 3 else card
+    if is_dark_mode(gray):
+        gray = cv2.bitwise_not(gray)
     return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
 
 

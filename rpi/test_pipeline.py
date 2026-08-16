@@ -183,6 +183,77 @@ band = np.full((900, 1200, 3), 20, np.uint8)
 band[300:520, 40:1160] = 250
 eq('a bright horizontal band is not a phone', PL.detect_screen_quad(band), None)
 
+# --- a phone in dark mode, which is not a bright thing at all ---------------
+# The brightness search assumes the screen is the bright object in a dim cabin.
+# A dark-mode offer card does not merely break that, it *straddles* it: the map
+# above the sheet renders around grey 44 and the sheet itself around 19, so with
+# a car interior anywhere between them no single threshold can hold both halves
+# of one screen. What came back was not "no screen", which would at least be
+# honest — it was the map, at the full width of the phone and 47% of its height,
+# on every check. The crop is a fraction of the corners, so the reader was then
+# handed a piece of a map and the offer was never looked at.
+def phone_in_two_tones(top_tone, card_tone, cabin, W=1200, H=900):
+    """A screen whose upper half and lower half sit either side of the cabin."""
+    f = np.full((H, W, 3), cabin, np.uint8)
+    x, y, w, h = 470, 100, 260, 700
+    f[y:y + h, x:x + w] = top_tone                       # the map
+    f[y + int(h * 0.48):y + h, x:x + w] = card_tone      # the offer sheet
+    # text on the sheet, which is the only bright thing on a dark card
+    for i in range(5):
+        r = y + int(h * 0.56) + i * 24
+        f[r:r + 8, x + 20:x + w - 20] = 245
+    return f, (x, y, w, h)
+
+
+for cabin in (8, 30, 55, 90):
+    frame, (px, py, pw, ph) = phone_in_two_tones(44, 19, cabin)
+    quad = PL.detect_screen_quad(frame)
+    ok_('a dark-mode screen is found at all, cabin %d' % cabin, quad is not None)
+    if quad is None:
+        continue
+    tall = quad[:, 1].max() - quad[:, 1].min()
+    ok_('...and it is the whole screen, not the map on top of it, cabin %d' % cabin,
+        tall > ph * 0.8)
+    ok_('...on a thumbnail too, cabin %d' % cabin,
+        PL.detect_screen_quad(frame, work_width=PL.DETECT_WIDTH) is not None)
+
+# The two searches disagreeing must not cost the case that already worked: a
+# plain lit phone on a dark ground is still found, and a frame with no darker
+# surround is still refused rather than "found" frame-sized.
+ok_('an ordinary lit phone is still found',
+    PL.detect_screen_quad(phone_frame(300, 620, 400, 140)) is not None)
+eq('a frame that is all screen is still refused',
+   PL.detect_screen_quad(np.full((900, 1200, 3), 240, np.uint8)), None)
+
+# --- and the reader has to know which way up the ink is ---------------------
+# Tesseract runs with tessedit_do_invert=0, which switches off its own
+# white-on-black retry. That is a sound trade only while preprocess() hands it
+# dark text on a light card every time, and a phone in dark mode breaks that
+# premise silently — the reader returned 'Ee y Piece ek te | So | - - ee ee' and
+# the offer was never seen.
+light_card = np.full((400, 300), 245, np.uint8)
+light_card[100:130, 40:260] = 20
+dark_card = cv2.bitwise_not(light_card)
+ok_('a light card is not called dark mode', not PL.is_dark_mode(light_card))
+ok_('a dark card is', PL.is_dark_mode(dark_card))
+# Both come out of preprocess the same way up, which is the whole point.
+eq('preprocess leaves a light card alone',
+   bool(PL.preprocess(light_card).mean() > 128), True)
+eq('...and turns a dark one over to match',
+   bool(PL.preprocess(dark_card).mean() > 128), True)
+
+# The decision is relative to the card's own range, not to a fixed level, and
+# that is not a detail: inverting a light card does not degrade the reading, it
+# destroys it, and a badly underexposed light card is exactly what a fixed level
+# gets wrong.
+starved = (light_card.astype(np.float32) * 0.32).astype(np.uint8)
+ok_('a badly underexposed light card is still light mode', not PL.is_dark_mode(starved))
+ok_('...and its median really is below the halfway point',
+    float(np.median(starved)) < 128.0)
+# ...and the mirror image: a dark card the gain has pushed up is still dark mode.
+lifted = np.clip(dark_card.astype(np.float32) * 2.4, 0, 255).astype(np.uint8)
+ok_('a gain-pushed dark card is still dark mode', PL.is_dark_mode(lifted))
+
 # --- read height: warp once, at the size the reader wants ------------------
 sc = PL.Scanner(quad=None, card_height=900, ocr_height=900)
 eq('a half-card quad warps to double', sc.read_height, 1800)
