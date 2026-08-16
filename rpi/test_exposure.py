@@ -243,6 +243,101 @@ for i in range(1, 31):
     g.update(lit_card(g.gain), 100.0 + i * 6.0)
 ok_('a blown-out card still pulls gain down', g.gain < 2.0)
 
+# --- daylight: when the gain runs out, the exposure has to give way ---------
+# Through a windscreen the card blows out with the gain already on its floor,
+# and then there is nothing left but the exposure. The corners are found
+# perfectly the whole time — this is not a detection failure, it is a picture
+# with no detail left in it: on a rendered sunset the payout read "$7.09", then
+# "7.09", then "wiaVvwyw" as the clipping climbed past 80%.
+MEASURED = 16667
+
+
+def at(gain, exposure, light):
+    """A card lit by `light`, seen at this gain and exposure.
+
+    A rig with no exposure to manage still takes a picture; it is simply the
+    one calibration measured, which is what `None` means here.
+    """
+    v = 150.0 * gain * ((MEASURED if exposure is None else exposure) / 16667.0) * light
+    return np.clip(np.full((60, 40), v, np.float32), 0, 255).astype(np.uint8)
+
+
+def a_day(g, light, steps=80, t0=0.0):
+    t = t0
+    for _ in range(steps):
+        t += 6.0
+        g.update(at(g.gain, g.exposure, light), t)
+    return t
+
+
+for name, light in(('a dark car', 0.35), ('an overcast day', 2.0),
+                    ('sun through the screen', 5.0), ('glare off the bonnet', 12.0)):
+    g = EX.AutoGain(gain=1.5, every=6.0, exposure=MEASURED)
+    a_day(g, light)
+    lit = at(g.gain, g.exposure, light)
+    ok_('%s is not blown out' % name, EX.clipped_fraction(lit) <= EX.CLIPPED_FRACTION)
+    ok_('%s is bright enough to read' % name, EX.brightness(lit) > 120)
+    ok_('%s never exposes longer than calibration measured' % name,
+        g.exposure <= MEASURED)
+
+# The exposure is borrowed, not taken: a rig that drives out of daylight has to
+# give it back, or it spends the night on a picture eight times too dark and
+# cannot tell that from an empty mount — which is exactly what happened when the
+# repayment sat below the darkness guard.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=MEASURED)
+t = a_day(g, 12.0)
+ok_('daylight borrows exposure', g.exposure < MEASURED)
+t = a_day(g, 0.35, steps=120, t0=t)
+eq('...and nightfall gives all of it back', g.exposure, MEASURED)
+ok_('...leaving a readable card', EX.brightness(at(g.gain, g.exposure, 0.35)) > 150)
+
+# Exposure is spent before gain, because exposure up to the measured value is
+# free and gain is noise. Not *instead of* gain: the candidates are a factor of
+# two apart, so the exposure can only ever get the card close and the gain has
+# to walk the last stretch. What is being asserted is the order.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=MEASURED)
+t = a_day(g, 12.0)
+short, noisy = g.exposure, g.gain
+first = None
+for _ in range(40):
+    t += 6.0
+    g.update(at(g.gain, g.exposure, 2.0), t)
+    if first is None and (g.exposure != short or abs(g.gain - noisy) > 0.01):
+        first = 'exposure' if g.exposure != short else 'gain'
+eq('coming out of glare lengthens the exposure before it raises the gain',
+   first, 'exposure')
+ok_('...and does end up longer', g.exposure > short)
+ok_('...on a card that reads', 120 < EX.brightness(at(g.gain, g.exposure, 2.0)) < 250)
+
+# The lengthening looks before it steps. Doubling a card that is merely a little
+# dark blows it out, which shortens it straight back, which is a limit cycle —
+# and it ran at six-second intervals through a windscreen.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=MEASURED)
+t = a_day(g, 5.0)
+seen = set()
+for _ in range(30):
+    t += 6.0
+    g.update(at(g.gain, g.exposure, 5.0), t)
+    seen.add(g.exposure)
+eq('a settled exposure stays settled', len(seen), 1)
+
+# None of it may let an empty mount wind the gain up, which is what the darkness
+# guard is for.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=MEASURED)
+t = 0.0
+for _ in range(60):
+    t += 6.0
+    g.update(np.clip(np.full((60, 40), 6.0 * g.gain, np.float32), 0, 255).astype(np.uint8),
+             t, has_screen=False)
+eq('an empty mount still holds the gain', g.gain, 1.5)
+eq('...and the exposure', g.exposure, MEASURED)
+
+# And a rig with no exposure to manage behaves exactly as it did before.
+g = EX.AutoGain(gain=1.0, every=6.0)
+a_day(g, 5.0, steps=20)
+eq('without an exposure to manage, nothing is invented', g.exposure, None)
+eq('...and the gain still backs off a blown card', g.gain, EX.GAIN_LIMITS[0])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d exposure checks passed' % ok)
 sys.exit(1 if bad else 0)

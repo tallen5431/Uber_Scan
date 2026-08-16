@@ -132,6 +132,57 @@ ok_('...on a thumbnail too',
 off = phone_frame(300, 620, 60, 140)
 ok_('a phone nowhere near the middle is still found', PL.detect_screen_quad(off) is not None)
 
+# --- a windscreen at sunset, which is not a dark car ------------------------
+# Everything above assumes the phone is the bright thing in a dim cabin. Driving
+# into the sun it is the dimmest bright thing in the frame: the sky is blown out,
+# the glass is blown out and the bonnet is a mirror. Otsu splits light from dark
+# whatever it is given, so it answered with one blob covering four fifths of the
+# picture, the frame-shaped guard threw that away, and the rig reported "screen
+# not visible" with the offer plainly in view.
+#
+# The screen here is built the way a real one looks — a grey map panel above a
+# white offer card — because that is what makes it hard. A threshold high enough
+# to lose the sky is very nearly high enough to lose the map too, and if it does,
+# what gets locked on is the card rather than the screen.
+SCREEN_TOP, SCREEN_HEIGHT = 270, 600
+
+
+def windscreen(W=1200, H=900):
+    f = np.full((H, W, 3), 26, np.uint8)             # dark dash
+    f[0:int(H * 0.26)] = 247                         # sky, blown out
+    f[int(H * 0.26):int(H * 0.39)] = 196             # hazy glass
+    f[int(H * 0.39):int(H * 0.49)] = 168             # bonnet reflection
+    x, w = 470, 260
+    y, h = SCREEN_TOP, SCREEN_HEIGHT
+    f[y:y + h, x:x + w] = 233                        # the map panel: grey
+    f[y + h // 2:y + h, x:x + w] = 255               # the offer card: white
+    return f
+
+
+# The share of blown-out sky is chosen so the 70th percentile of this frame lands
+# at 247 — above the map's 233. That is not a contrivance, it is the case the low
+# rungs exist for: at that cut the map is gone and the only thing left of the
+# phone is the white card, so the detector locks onto the card and every fraction
+# measured against the quad is measured against the wrong rectangle.
+for name, quad in (('at full size', PL.detect_screen_quad(windscreen())),
+                   ('on a thumbnail, which is the path the loop takes',
+                    PL.detect_screen_quad(windscreen(), work_width=PL.DETECT_WIDTH))):
+    ok_('a phone against a blown-out windscreen is found %s' % name, quad is not None)
+    if quad is None:
+        continue
+    tall = quad[:, 1].max() - quad[:, 1].min()
+    wide = quad[:, 0].max() - quad[:, 0].min()
+    ok_('...and it is the screen, not the white card on it %s' % name,
+        tall > SCREEN_HEIGHT * 0.9)
+    ok_('...nor the sky above it %s' % name, quad[:, 1].min() > SCREEN_TOP * 0.8)
+    ok_('...and it is phone-shaped %s' % name, tall > wide)
+
+# The bonnet and the strip of sky are both wider than they are tall, and both are
+# brighter than the card. Shape is what rules them out, so state it directly.
+band = np.full((900, 1200, 3), 20, np.uint8)
+band[300:520, 40:1160] = 250
+eq('a bright horizontal band is not a phone', PL.detect_screen_quad(band), None)
+
 # --- read height: warp once, at the size the reader wants ------------------
 sc = PL.Scanner(quad=None, card_height=900, ocr_height=900)
 eq('a half-card quad warps to double', sc.read_height, 1800)

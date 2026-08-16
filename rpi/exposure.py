@@ -30,6 +30,16 @@ FLICKER_SAFE = (8333, 16667, 20000, 25000, 33333, 40000, 50000)
 # commonest family and bright enough for a dimmed screen at night.
 DEFAULT_EXPOSURE = 16667
 
+# Shorter whole-cycle exposures, for daylight only. 4167us is one cycle of
+# 240Hz, 2083 of 480, 1042 of 960 — all of them still cancel the panel families
+# they name, and all of them are far too dark for a car at night, which is why
+# they are not in the list calibration chooses from. They are reachable only by
+# AutoGain, and only when the card is blown out with the gain already on its
+# floor: at that point the choice is not between a clean read and a rippling one,
+# it is between a rippling read and no read at all. Through a windscreen at noon
+# even 8333us leaves the card 100% blown.
+DAYLIGHT_SAFE = (1042, 2083, 4167)
+
 # What a well-exposed card looks like. Measured on the bright part of the
 # picture — the card is white, so its own brightness is the thing to aim.
 TARGET_BRIGHT = 205.0
@@ -176,12 +186,20 @@ class AutoGain:
     """
 
     def __init__(self, gain=1.5, target=TARGET_BRIGHT, every=6.0,
-                 step=GAIN_STEP, limits=GAIN_LIMITS):
+                 step=GAIN_STEP, limits=GAIN_LIMITS, exposure=None,
+                 candidates=DAYLIGHT_SAFE + FLICKER_SAFE):
         self.gain = float(gain)
         self.target = target
         self.every = every
         self.step = step
         self.limits = limits
+        # The exposure measured at calibration, and the ceiling this may never
+        # go above: that value was chosen because it stops the screen rippling,
+        # and there is never a reason to spend longer than it.
+        self.measured = exposure
+        self.exposure = exposure
+        self.candidates = tuple(sorted(candidates))
+        self.shortened = 0
         self.last = None
         self.moves = 0
 
@@ -224,17 +242,87 @@ class AutoGain:
         # dim stretch left it, and the card washes out with the one control that
         # could fix it switched off.
         if clipped_fraction(gray) > CLIPPED_FRACTION:
-            return self._set(self.gain / self.step)
+            lowered = self._set(self.gain / self.step)
+            if lowered is None:
+                # Gain is on its floor and the card is still blown out. In a
+                # dark car that never happens; through a windscreen in daylight
+                # it is the ordinary state, and there is nothing left to give
+                # but the exposure.
+                #
+                # Which the rest of this module exists to keep fixed, so this is
+                # the one place it may move and it only ever moves *down*. The
+                # trade is deliberate: a shorter exposure risks the screen
+                # rippling, and a rippling card is often still readable because
+                # the bands sit in a different place each frame and the reader
+                # gets several. A card at 90% blown out is not readable at all,
+                # by anything, ever. Measured on a rendered sunset the payout
+                # went from "$7.09" to "7.09" to "wiaVvwyw" as the clipping
+                # climbed, with the corners found perfectly the whole time.
+                self._shorten()
+            return lowered
 
-        # Only *raising* it needs a screen to aim at. The window handed here is
-        # wherever the phone was last seen, so with the phone gone it is dark
-        # upholstery, and this dutifully wound the gain up chasing a card that
-        # was not there.
+        # Repay any exposure borrowed for a bright stretch, and do it before the
+        # darkness guard rather than after. Two reasons, and the second is the
+        # one that was got wrong:
+        #
+        #   * it is free. Anything up to the measured value was chosen because
+        #     it does not ripple, so taking it back costs nothing, cannot rail,
+        #     and cannot band — unlike raising gain, which costs noise.
+        #   * a card this rig has *itself* underexposed looks exactly like an
+        #     empty mount. Below the darkness guard, a rig that came out of
+        #     daylight on a 2083us exposure met a night-time card reading 6,
+        #     decided there was no screen there, and drove the rest of the shift
+        #     on an exposure eight times too short — unable to recover, because
+        #     the thing keeping the picture dark was the thing being guarded.
+        if bright < self.target and self._lengthen(bright):
+            return None
+
+        # Only *raising the gain* needs a screen to aim at. The window handed
+        # here is wherever the phone was last seen, so with the phone gone it is
+        # dark upholstery, and this dutifully wound the gain up chasing a card
+        # that was not there.
         if not has_screen or bright < LIT_ENOUGH:
             return None
         if abs(bright - self.target) / self.target <= GAIN_TOLERANCE:
             return None
         return self._set(self.gain * (self.step if bright < self.target else 1 / self.step))
+
+    def _shorten(self):
+        """The next shorter flicker-safe exposure, if there is one."""
+        if self.exposure is None:
+            return False
+        shorter = [c for c in self.candidates if c < self.exposure]
+        if not shorter:
+            return False
+        self.exposure = shorter[-1]
+        self.shortened += 1
+        return True
+
+    def _lengthen(self, bright):
+        """Back toward the exposure calibration measured, never past it.
+
+        The candidates are a factor of two apart, so "the card is below target"
+        is not on its own a reason to lengthen — doubling a card at 187 lands it
+        at 374, which is blown out, which shortens it straight back. That is a
+        limit cycle, and it ran forever: through a windscreen at 4167us the rig
+        alternated between a readable card and a white rectangle every six
+        seconds, one of which the driver was going to be looking at.
+
+        So the step is checked before it is taken. Brightness is linear in
+        exposure, which makes the check simple arithmetic: take the longest
+        candidate whose predicted brightness still lands at or under target, and
+        if that is none of them, leave the exposure alone and let gain — which
+        moves in 18% steps and can stop where it likes — cover the rest.
+        """
+        if self.exposure is None or self.measured is None:
+            return False
+        usable = [c for c in self.candidates
+                  if self.exposure < c <= self.measured
+                  and bright * c / self.exposure <= self.target]
+        if not usable:
+            return False
+        self.exposure = usable[-1]
+        return True
 
     def _set(self, gain):
         gain = max(self.limits[0], min(self.limits[1], gain))

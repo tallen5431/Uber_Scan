@@ -289,6 +289,10 @@ class Health:
         self.gain = None
         self.bright = None
         self.banding = None
+        # What the exposure is now, and what calibration measured it at. Only
+        # worth a line when they differ — see report().
+        self.exposure = None
+        self.measured_exposure = None
 
     def reset(self, now):
         # None rather than time.time(): the window starts when the first read
@@ -335,6 +339,12 @@ class Health:
                                             ' (rippling)' if self.banding > 4.0 else ''))
         if self.gain is not None:
             bits.append('gain %.2f' % self.gain)
+        # A shortened exposure is the one thing that can make the screen ripple
+        # on a rig that measured a flicker-safe one, so if the banding number
+        # above is high, the reason for it belongs on the same line.
+        if self.exposure is not None and self.exposure != self.measured_exposure:
+            bits.append('exposure %dus, borrowed against %dus for daylight'
+                        % (self.exposure, self.measured_exposure))
         bits.append('crop %s' % _fmt_roi(scanner.crop_box))
         if tracker is not None:
             status = tracker.status()
@@ -550,7 +560,8 @@ def main():
     exposure_us = (args.exposure if args.exposure is not None
                    else cfg.get('exposureTime') or EX.DEFAULT_EXPOSURE)
     gain = args.gain if args.gain is not None else cfg.get('analogueGain') or 1.5
-    auto_gain = None if (args.no_auto_gain or args.gain is not None) else EX.AutoGain(gain)
+    auto_gain = (None if (args.no_auto_gain or args.gain is not None)
+                 else EX.AutoGain(gain, exposure=exposure_us))
     cam = start_camera(cfg, exposure_us, gain, lens)
     if args.save_misses:
         os.makedirs(args.save_misses, exist_ok=True)
@@ -718,11 +729,28 @@ def main():
                         if scanner.quad is not None else luma
                     have_screen = True if tracker is None \
                         else not tracker.status()['lost']
+                    was_exposure = auto_gain.exposure
                     new_gain = auto_gain.update(lit, now, has_screen=have_screen)
                     if new_gain is not None:
                         cam.set_controls({'AnalogueGain': float(new_gain)})
                         cfg['analogueGain'] = round(new_gain, 3)
                         health.gain = new_gain
+                    # Daylight through a windscreen can blow the card out with
+                    # the gain already on its floor, and then the exposure is
+                    # the only thing left. It is given back the moment the light
+                    # drops, and never goes above what calibration measured.
+                    if auto_gain.exposure != was_exposure:
+                        cam.set_controls({'ExposureTime': int(auto_gain.exposure)})
+                        log('exposure %s to %dus: the card was blown out with '
+                            'the gain already at its floor'
+                            % ('shortened' if auto_gain.exposure < was_exposure
+                               else 'given back', auto_gain.exposure))
+                    # Deliberately not written to cfg: the borrowed value is a
+                    # response to the light right now, and persisting it would
+                    # start a night shift on a noon exposure with nothing to
+                    # tell it that is wrong. cfg keeps what calibration measured.
+                    health.exposure = auto_gain.exposure
+                    health.measured_exposure = auto_gain.measured
 
                 # Keep sampling for a short while after a card appears, so a leg
                 # missed by one frame can still be picked up by the next.

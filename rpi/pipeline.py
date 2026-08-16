@@ -120,52 +120,123 @@ def detect_screen_quad(frame, min_area_frac=0.05, max_area_frac=0.90, work_width
     return None if quad is None else quad / scale
 
 
-def _detect_quad(frame, min_area_frac, max_area_frac):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-    gray = cv2.GaussianBlur(gray, (7, 7), 0)
-    _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # The closing kernel is a fraction of the frame so it means the same thing
-    # whether this ran on the sensor image or a thumbnail of it.
-    k = max(3, (int(frame.shape[1] * 0.011) | 1))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
-                            cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+# How much taller than wide a candidate has to be. A phone in portrait is about
+# 2:1; a windscreen, a bonnet reflection and the strip of sky above the dash are
+# all far wider than they are tall. Generous enough for a phone clipped by the
+# frame or seen at an angle, which is why it is not near 2.0.
+UPRIGHT = 0.90
 
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
+# Thresholds to try, in order, as percentiles of the frame's own brightness.
+#
+# Otsu first, because in the case this rig was built for — a lit phone in a dark
+# car — it is exactly right and nothing beats it. But Otsu splits whatever it is
+# given into light and dark, and through a windscreen at sunset the bright half
+# is the sky, the glass, the bonnet AND the phone, all one blob: measured on a
+# rendered sunset it chose 120 on a frame averaging 170 and returned a single
+# contour covering 80% of the picture, which the frame-shaped guard then threw
+# away. The rig reported "screen not visible" with the offer plainly in view.
+#
+# So when Otsu's answer is not shaped like a phone, the threshold climbs. Each
+# step keeps only a brighter slice, and a phone card — which is white — survives
+# further up than sky, glass or paintwork.
+# The low rungs are not padding. The gap between Otsu and the 70th percentile is
+# where a whole phone gets lost: on the rendered sunset Otsu chose 120 and the
+# 70th chose 233, and 233 is a hair above the grey of the map panel at the top of
+# an offer screen. So the ladder skipped from "the sky, the glass and the phone,
+# all one blob" straight to "the white card only" with nothing in between, and
+# what it locked onto was the card panel rather than the screen. Every fraction
+# downstream is measured against the quad, so a quad that is the card is not a
+# smaller error than no quad — it is a crop placed from the wrong rectangle, and
+# it read the journey off the card and lost the payout. With 55 and 62 in the
+# ladder the same scene finds the whole phone at every mount distance tried.
+BRIGHT_LEVELS = (55, 62, 70, 80, 86, 91, 95, 97)
 
-    h, w = frame.shape[:2]
-    # The biggest bright thing that the middle of the frame is inside — and
-    # only failing that, the biggest bright thing.
-    #
-    # "Biggest" alone is a guess about the scene, and it is wrong whenever
-    # something in the car is brighter and larger than the phone: a lit
-    # dashboard panel, a window at dusk, a passenger's own screen. Aiming the
-    # card at the middle is a thing the driver can actually do and does, so it
-    # is better evidence than size, and preferring it means the outline stops
-    # wandering off onto scenery.
-    centre = (w / 2.0, h / 2.0)
-    inside = [c for c in contours if cv2.pointPolygonTest(c, centre, False) >= 0]
-    best = max(inside or contours, key=cv2.contourArea)
-    area = cv2.contourArea(best)
+
+def _looks_like_a_phone(contour, shape, min_area_frac, max_area_frac):
+    """Could this contour be a phone screen, on size and proportion alone?"""
+    h, w = shape[:2]
+    area = cv2.contourArea(contour)
     if area < h * w * min_area_frac or area > h * w * max_area_frac:
-        return None
-
+        return False
+    bx, by, bw, bh = cv2.boundingRect(contour)
     # A phone stood in portrait can fill the frame's height, but it cannot also
     # fill its width — the frame is 4:3 and the phone is about 1:2. Something
     # spanning both dimensions is the picture itself, not a screen in it, which
     # is what Otsu returns when the scene has no darker surround to split off.
-    bx, by, bw, bh = cv2.boundingRect(best)
     if bw > w * 0.95 and bh > h * 0.95:
-        return None
+        return False
+    # ...and it is taller than it is wide, which the sky above a dashboard and
+    # the Accept bar below the card both are not.
+    return bh >= bw * UPRIGHT
 
-    peri = cv2.arcLength(best, True)
+
+def _quad_of(contour):
+    peri = cv2.arcLength(contour, True)
     for eps in (0.02, 0.03, 0.05, 0.08):
-        approx = cv2.approxPolyDP(best, eps * peri, True)
+        approx = cv2.approxPolyDP(contour, eps * peri, True)
         if len(approx) == 4:
             return order_quad(approx.reshape(4, 2).astype(np.float32))
     # Not a clean quadrilateral: fall back to the rotated bounding box.
-    return order_quad(cv2.boxPoints(cv2.minAreaRect(best)).astype(np.float32))
+    return order_quad(cv2.boxPoints(cv2.minAreaRect(contour)).astype(np.float32))
+
+
+def _pick(contours, shape, min_area_frac, max_area_frac):
+    """The candidate most likely to be the card the driver is holding up.
+
+    Nearest the middle, not biggest. The driver aims the card at the centre of
+    the frame — it is the one thing about the scene they control — so distance
+    from the centre is better evidence than area, and it is evidence that does
+    not go stale the way a stored position does. Preferring size instead is what
+    let the outline wander onto a lit dashboard panel, a window at dusk, or a
+    passenger's own screen, every one of which can be bigger than the phone.
+    """
+    h, w = shape[:2]
+    centre = np.array([w / 2.0, h / 2.0], dtype=np.float32)
+    fits = [c for c in contours
+            if _looks_like_a_phone(c, shape, min_area_frac, max_area_frac)]
+    if not fits:
+        return None
+
+    def score(contour):
+        m = cv2.moments(contour)
+        if m['m00'] <= 0:
+            return 1e9
+        middle = np.array([m['m10'] / m['m00'], m['m01'] / m['m00']], dtype=np.float32)
+        # As a fraction of the frame, so it means the same on a thumbnail as on
+        # a sensor frame. A candidate the centre actually falls inside is
+        # preferred outright, since that is a stronger statement than being
+        # merely close to it.
+        away = float(np.linalg.norm(middle - centre)) / max(w, h)
+        holds = cv2.pointPolygonTest(contour, (centre[0], centre[1]), False) >= 0
+        return away - (1.0 if holds else 0.0)
+
+    return min(fits, key=score)
+
+
+def _detect_quad(frame, min_area_frac, max_area_frac):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    gray = cv2.GaussianBlur(gray, (7, 7), 0)
+    # The closing kernel is a fraction of the frame so it means the same thing
+    # whether this ran on the sensor image or a thumbnail of it.
+    k = max(3, (int(frame.shape[1] * 0.011) | 1))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+
+    for level in (None,) + BRIGHT_LEVELS:
+        if level is None:
+            _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        else:
+            cut = float(np.percentile(gray, level))
+            # Nothing left to separate: every remaining step would only crop the
+            # same blob smaller.
+            if cut >= 254.0:
+                break
+            _, mask = cv2.threshold(gray, cut, 255, cv2.THRESH_BINARY)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best = _pick(contours, frame.shape, min_area_frac, max_area_frac)
+        if best is not None:
+            return _quad_of(best)
+    return None
 
 
 # A screen this close to the frame edge is probably continuing past it.
