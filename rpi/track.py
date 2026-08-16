@@ -130,6 +130,9 @@ RECOVER_AFTER = 30.0
 # shorter than the recovery itself.
 STALL_VISIBLE = 5.0
 
+# Consecutive checks finding no screen at all before the phone counts as gone.
+LOST_AFTER = 3
+
 # How long a disputed outline is worth waiting for before reading anyway.
 #
 # While the detector can see a screen that is not where the corners are, the
@@ -201,6 +204,7 @@ class QuadTracker:
         self.agreeing = 0
         self._candidate = None
         self._disputed_since = None  # when the corners were last visibly wrong
+        self._off_since = None       # ...and how long they have been off the screen
         self._last_check = None     # None, not 0, so the first check is always due
         self._last_save = 0.0
         # The screen the corners are *not* on, and how long that has been true.
@@ -223,6 +227,13 @@ class QuadTracker:
             self._candidate = None
             self._disputed_since = None
             self._forget_stall()
+            # One check finding nothing is not evidence that the corners are
+            # right — it is no evidence at all, and clearing the clock on it let
+            # an intermittent detector hide a stuck outline the same way an
+            # alternating one did. A screen that is genuinely gone does clear
+            # it, because then there is nothing for the corners to be off.
+            if self.misses >= LOST_AFTER:
+                self._off_since = None
             return False
         candidate = candidate * self.scale
 
@@ -241,6 +252,21 @@ class QuadTracker:
             self._disputed_since = None
         elif self._disputed_since is None:
             self._disputed_since = now
+
+        # ...and a second, blunter clock, for reporting rather than for deciding.
+        #
+        # It has to be separate from both of the others, because each of those is
+        # switched off by the very thing being reported. `_disputed_since` is
+        # cleared when the shape gate refuses a candidate, and `_stuck_since`
+        # needs a candidate that matches the calibrated shape — so in the case
+        # where the detector can only ever find the white card panel, neither
+        # clock runs and the outline freezes without a word. This one asks only
+        # "are the corners on whatever the camera can see?", which stays a fair
+        # question no matter what any gate thinks of the answer.
+        if distance(candidate, self.quad) <= SETTLE * max(span(candidate), 1.0):
+            self._off_since = None
+        elif self._off_since is None:
+            self._off_since = now
 
         # Before the gate, because the gate is one of the things that can be
         # wrong. See _stalled.
@@ -381,6 +407,7 @@ class QuadTracker:
         self.agreeing = 0
         self._candidate = None
         self._disputed_since = None
+        self._off_since = None
         self.misses = 0
         self.resets += 1
         self._forget_stall()
@@ -388,6 +415,7 @@ class QuadTracker:
     def _forget_stall(self):
         self._stuck_on = None
         self._stuck_since = None
+        self._off_since = None
 
     def _stalled(self, candidate, now):
         """Have the corners been sitting off the screen for far too long?
@@ -424,6 +452,27 @@ class QuadTracker:
         The agreement tolerance is the right scale, and against the candidate's
         own size, so it means the same thing at any distance from the phone.
         """
+        # Shape first, and — this is the part that was wrong — a candidate that
+        # fails it leaves the clock exactly as it found it, rather than resetting
+        # it.
+        #
+        # A detector does not always give the same answer twice. In bright light
+        # the threshold that loses the sky is very nearly the threshold that
+        # loses the grey map panel too, so consecutive checks can alternate
+        # between the whole screen and just the white offer card on it. Those
+        # are not two opinions about where the screen is; the second is not an
+        # opinion about the screen at all. Treating it as one reset the anchor on
+        # every other check, so the clock never got past a single interval: a
+        # simulated rig ran 100 seconds with moves 0, jumps 0 — and `stalled`
+        # never even became true, so nothing was reported either. A permanent,
+        # silent freeze, which is exactly what "it gets stuck and never adapts"
+        # looks like from the driver's seat.
+        #
+        # Only the size test is given up in here, never the shape one, because
+        # size is what legitimately changes when a phone is re-seated and shape
+        # is what tells a screen from the card panel on it.
+        if not same_shape(candidate, self.calibrated):
+            return False
         if distance(candidate, self.quad) <= SETTLE * max(span(candidate), 1.0):
             self._forget_stall()
             return False
@@ -436,8 +485,7 @@ class QuadTracker:
             self._stuck_on = candidate
             self._stuck_since = now
             return False
-        return (now - self._stuck_since >= self.recover_after
-                and same_shape(candidate, self.calibrated))
+        return now - self._stuck_since >= self.recover_after
 
     def looks_like_the_screen(self, candidate):
         """Is this the phone, judged against the screen that was calibrated?
@@ -499,14 +547,21 @@ class QuadTracker:
                 'rebaselines': self.rebaselines,
                 'centred': self.centred,
                 'resets': self.resets,
-                'lost': self.misses >= 3,
+                'lost': self.misses >= LOST_AFTER,
                 # Being stuck is not being lost, and it used to look identical
                 # from out here: a candidate was found on every check, so
                 # `misses` stayed at zero and nothing distinguished corners
                 # tracking a screen from corners frozen beside one.
-                'stalled': (self._stuck_since is not None
+                #
+                # Read off `_off_since` rather than the recovery anchor. The
+                # anchor only advances on candidates that match the calibrated
+                # shape, which is right for deciding whether to adopt one and
+                # useless for saying whether anything is wrong: the worst case
+                # is precisely the one where nothing the detector offers matches,
+                # and reporting from the anchor there reported nothing at all.
+                'stalled': (self._off_since is not None
                             and self._last_check is not None
-                            and self._last_check - self._stuck_since >= STALL_VISIBLE)}
+                            and self._last_check - self._off_since >= STALL_VISIBLE)}
 
 
 # --- geometry ---------------------------------------------------------------

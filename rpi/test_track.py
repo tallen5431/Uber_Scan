@@ -458,6 +458,66 @@ settle(tr, frame_with_phone(460, 180), 10, t0=100.0, step=0.5)
 ok_('and it tracks again afterwards',
     T.distance(tr.quad, quad_at(460, 180)) < 15.0)
 
+# --- the outline must never freeze silently ---------------------------------
+# A detector does not give the same answer twice. In bright light the threshold
+# that loses the sky is very nearly the one that loses the grey map panel too,
+# so consecutive checks can alternate between the whole screen and just the
+# white offer card on it. Those are not two opinions about where the screen is —
+# the second is not an opinion about the screen at all — and treating it as one
+# reset the recovery anchor on every other check. The clock never got past a
+# single interval: 100 seconds with moves 0, jumps 0, and `stalled` never true,
+# so nothing was reported either.
+def card_panel_only(x, y, size=PHONE):
+    """A screen where only the white offer card is bright enough to find."""
+    frame = np.full((H, W, 3), 22, np.uint8)
+    w, h = size
+    cv2.rectangle(frame, (x, y + h // 2), (x + w, y + h), (250, 250, 250), -1)
+    cv2.rectangle(frame, (x + 8, y + h // 2 + 14), (x + w - 8, y + h // 2 + 30),
+                  (40, 40, 40), -1)
+    return frame
+
+
+# A mount knocked *closer*, so the screen is bigger than the calibration knows
+# and the size gate refuses it every time — which is the state the watchdog
+# exists for. Bigger rather than smaller so the card panel on its own still
+# clears the detector's own area floor; a panel below that floor is not found at
+# all, which is a different failure with a different name (`lost`).
+RESEATED = (300, 30)
+RESEATED_SIZE = (int(PHONE[0] * 1.35), int(PHONE[1] * 1.35))
+ok_('the re-seated screen is a size the gate refuses',
+    not T.same_size(quad_at(*RESEATED, size=RESEATED_SIZE), start))
+tr = T.QuadTracker(start.copy(), calibrated=start.copy())
+panel = card_panel_only(*RESEATED, size=RESEATED_SIZE)
+whole = frame_with_phone(*RESEATED, size=RESEATED_SIZE)
+ok_('...and both the screen and its card panel are found at all',
+    PL.detect_screen_quad(whole, work_width=PL.DETECT_WIDTH) is not None
+    and PL.detect_screen_quad(panel, work_width=PL.DETECT_WIDTH) is not None)
+t = 0.0
+for i in range(200):
+    t += 0.5
+    tr.update(whole if i % 2 else panel, now=t)
+ok_('a wobbling detector still lets the corners recover', tr.rebaselines >= 1)
+ok_('...onto the screen',
+    T.distance(tr.quad, quad_at(*RESEATED, size=RESEATED_SIZE)) < 60.0)
+
+# ...and when nothing adoptable is ever offered, it must at least *say* so.
+# Adopting the card panel is not the answer: the crop is a fraction of the
+# corners, so corners drawn round the card read the journey and lose the payout.
+tr = T.QuadTracker(start.copy(), calibrated=start.copy())
+t = 0.0
+for _ in range(60):
+    t += 0.5
+    tr.update(panel, now=t)
+eq('a card panel is never adopted as the screen', tr.moves, 0)
+ok_('...but being stuck on it is reported', tr.status()['stalled'])
+ok_('...and not as being lost, which it is not', not tr.status()['lost'])
+
+# The report must not fire on an ordinary re-lock, which looks the same for the
+# couple of seconds it spends gathering agreement.
+tr = T.QuadTracker(start.copy(), calibrated=start.copy())
+settle(tr, frame_with_phone(*MOVED), T.AGREE, step=0.5)
+ok_('a routine re-lock is not called stuck', not tr.status()['stalled'])
+
 # --- saying when the outline is visibly on the wrong thing -------------------
 # The caller's question is "should I read right now?", and while a re-lock is
 # being argued the answer is no. A read is several hundred milliseconds of the

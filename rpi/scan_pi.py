@@ -684,7 +684,9 @@ def main():
                             '(--no-track), so the corners are already fixed')
 
                 if tracker is not None and scanner.settled:
-                    jumps_before, lost_before = tracker.jumps, tracker.status()['lost']
+                    was = tracker.status()
+                    jumps_before, lost_before = tracker.jumps, was['lost']
+                    stalled_before = was['stalled']
                     rebased_before = tracker.rebaselines
                     if tracker.update(luma, now):
                         scanner.quad = tracker.quad
@@ -725,6 +727,25 @@ def main():
                     if lost_now != lost_before:
                         log('screen %s' % ('not visible — is the phone lit and in frame?'
                                            if lost_now else 'visible again'))
+                    # Being stuck used to be one word in a health line every two
+                    # minutes, which is not where anybody was looking. The
+                    # automatic recovery handles a phone that has been re-seated;
+                    # what it deliberately will not do is adopt a candidate of
+                    # the wrong shape, and the commonest wrong shape is the white
+                    # offer card on its own — the crop is a fraction of the
+                    # corners, so corners drawn round the card read the journey
+                    # and lose the payout. That case cannot be fixed by moving
+                    # the box, only by the person who can see the screen.
+                    stalled_now = tracker.status()['stalled']
+                    if stalled_now != stalled_before:
+                        log('outline stuck: the corners have been off the screen '
+                            'the camera can see for %ds. If the box is drawn '
+                            'round part of the offer card rather than the whole '
+                            'phone, the screen is probably washed out — shade it '
+                            'or dim it. Otherwise press reset on the live page, '
+                            'or re-run calibration.' % TR.STALL_VISIBLE
+                            if stalled_now else 'outline unstuck: the corners are '
+                            'back on the screen')
                     if tracker.needs_save(now):
                         save_config(args.config, cfg)
                         tracker.mark_saved(now)
