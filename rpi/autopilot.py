@@ -212,6 +212,8 @@ def _measure_exposure(source, quad, as_json):
     import exposure as EX
     import pipeline as PL
 
+    polarity = {'dark': None}
+
     def grab(exposure_us):
         try:
             source.cam.set_controls({'AeEnable': False, 'ExposureTime': int(exposure_us)})
@@ -222,7 +224,16 @@ def _measure_exposure(source, quad, as_json):
         for _ in range(3):
             frame = source.frame()
             warped = PL.warp(frame, quad, 400)
-            frames.append(PL.preprocess(warped))
+            # Every frame of every candidate turned the same way up. This
+            # function's whole output is a comparison between frames — banding
+            # is what changes from one to the next — and a card that decided it
+            # was dark on one frame and light on the next would score 200
+            # against a threshold of 4, condemning a perfectly good exposure.
+            # Settled on the first screen seen and held for the whole
+            # measurement, since `bright` is compared across candidates too.
+            if polarity['dark'] is None:
+                polarity['dark'] = PL.is_dark_mode(PL.to_grey(warped))
+            frames.append(PL.preprocess(warped, dark=polarity['dark']))
         return frames
 
     if source.cam is None:

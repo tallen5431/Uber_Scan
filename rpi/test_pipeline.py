@@ -225,6 +225,52 @@ ok_('an ordinary lit phone is still found',
 eq('a frame that is all screen is still refused',
    PL.detect_screen_quad(np.full((900, 1200, 3), 240, np.uint8)), None)
 
+# ...and the second search must not run away with the phone's *body*.
+# A phone sits in a case, in a cradle, and the case is as unlike the upholstery
+# as the screen is — so the difference search finds the whole handset while the
+# brightness search finds the screen exactly. The case is taller, and on height
+# alone it won every time: measured on a screen at 240x619 inside a case at
+# 306x766, detection went from the screen to the case, 25% too tall and 28% too
+# wide, with every crop fraction downstream then measured off plastic. What
+# separates the two is not size, it is that a screen has writing on it.
+def phone_in_a_case(case_tone=18, seat=95, case=(447, 87, 306, 766)):
+    f = np.full((900, 1200, 3), seat, np.uint8)
+    cx, cy, cw, ch = case
+    f[cy:cy + ch, cx:cx + cw] = case_tone
+    x, y, w, h = 480, 151, 240, 619
+    f[y:y + h, x:x + w] = 238
+    for i in range(6):
+        t = y + int(h * (0.52 + i * 0.07))
+        f[t:t + 7, x + 16:x + w - 16] = 60
+    return f
+
+
+for name, frame in (('a black case', phone_in_a_case()),
+                    ('a thick cradle', phone_in_a_case(case=(430, 60, 340, 820))),
+                    ('dark upholstery', phone_in_a_case(seat=35)),
+                    ('a bright cabin', phone_in_a_case(seat=180))):
+    quad = PL.detect_screen_quad(frame)
+    ok_('a phone in %s is found' % name, quad is not None)
+    if quad is None:
+        continue
+    tall = quad[:, 1].max() - quad[:, 1].min()
+    ok_('...and it is the screen, not the handset, in %s' % name, tall < 619 * 1.1)
+    ok_('...and not a piece of the screen either, in %s' % name, tall > 619 * 0.9)
+
+# The rule that tells them apart, stated on its own: what one answer adds to the
+# other has to have ink in it.
+gray = cv2.cvtColor(phone_in_a_case(), cv2.COLOR_BGR2GRAY)
+gray = cv2.GaussianBlur(gray, (7, 7), 0)
+kern = cv2.getStructuringElement(cv2.MORPH_RECT, (13, 13))
+screen_c = PL._brighter_than_the_car(gray, kern, gray.shape, 0.05, 0.90)
+body_c = PL._different_from_the_car(gray, kern, gray.shape, 0.05, 0.90)
+ok_('the two searches really do disagree here', screen_c is not None and body_c is not None)
+if screen_c is not None and body_c is not None:
+    ok_('...with the body taller enough to have won on height alone',
+        PL._height(body_c) >= PL._height(screen_c) * PL.MATERIALLY_TALLER)
+    ok_('...but blank, so it does not win',
+        PL._writing_in_the_difference(gray, body_c, screen_c) < PL.INK_SHARE)
+
 # --- and the reader has to know which way up the ink is ---------------------
 # Tesseract runs with tessedit_do_invert=0, which switches off its own
 # white-on-black retry. That is a sound trade only while preprocess() hands it
@@ -253,6 +299,45 @@ ok_('...and its median really is below the halfway point',
 # ...and the mirror image: a dark card the gain has pushed up is still dark mode.
 lifted = np.clip(dark_card.astype(np.float32) * 2.4, 0, 255).astype(np.uint8)
 ok_('a gain-pushed dark card is still dark mode', PL.is_dark_mode(lifted))
+
+# ...and it must not change its mind frame to frame, because the frames either
+# side of a change get subtracted from one another. Two frames of one still
+# picture judged opposite ways score 200.7 on banding_score against 0.7 for two
+# judged alike, where 4.0 already means "rippling" — and exposure is chosen by
+# ranking candidates on exactly that number, so one flip inside a candidate's
+# three frames condemns the right exposure and writes another to config.json.
+halves = np.zeros((400, 240), np.uint8)
+halves[:200] = 20
+halves[200:] = 250
+rng = np.random.RandomState(9)
+verdicts = []
+for _ in range(40):
+    noisy = np.clip(halves.astype(np.float32) + rng.normal(0, 3, halves.shape),
+                    0, 255).astype(np.uint8)
+    verdicts.append(PL.is_dark_mode(noisy))
+ok_('a picture that is genuinely half and half is not decidable', len(set(verdicts)) == 2)
+held = []
+was = None
+for _ in range(40):
+    noisy = np.clip(halves.astype(np.float32) + rng.normal(0, 3, halves.shape),
+                    0, 255).astype(np.uint8)
+    was = PL.is_dark_mode(noisy, was=was)
+    held.append(was)
+eq('...so with a previous answer to hold onto it never changes its mind',
+   len(set(held)), 1)
+# The hysteresis must not make it stubborn about a card that really is the other
+# way round — a phone whose theme changed between offers has to be followed.
+eq('a real light card overrides a remembered dark one',
+   PL.is_dark_mode(light_card, was=True), False)
+eq('...and a real dark card overrides a remembered light one',
+   PL.is_dark_mode(dark_card, was=False), True)
+
+# preprocess takes the answer when it is given one, so a batch of frames being
+# compared with each other are all turned the same way up.
+eq('preprocess obeys an explicit polarity',
+   bool(PL.preprocess(light_card, dark=True).mean() < 128), True)
+eq('...in both directions',
+   bool(PL.preprocess(dark_card, dark=False).mean() < 128), True)
 
 # --- read height: warp once, at the size the reader wants ------------------
 sc = PL.Scanner(quad=None, card_height=900, ocr_height=900)

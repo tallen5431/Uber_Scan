@@ -285,7 +285,15 @@ def _different_from_the_car(gray, kernel, shape, min_area_frac, max_area_frac):
     replace the brightness search. See _detect_quad for how the two are put
     together.
     """
-    diff = np.abs(gray.astype(np.float32) - _cabin_level(gray))
+    # absdiff against a constant image rather than a float subtract, so this
+    # stays in uint8 and does it in one pass. Worth having but not worth much:
+    # the cost of this search is the percentile (1.3ms) and the threshold and
+    # contour rounds, not the subtraction. What the whole second search costs,
+    # measured on the 640px thumbnail the loop uses, is 2.6ms against the
+    # brightness search's 3.6ms, plus 0.4ms for the ink test when both find
+    # something — about 3ms on top of a 9.6ms check, of which 6.3ms is the
+    # resize that happens either way.
+    diff = cv2.absdiff(gray, np.full_like(gray, int(round(_cabin_level(gray)))))
     masks = []
     seen = set()
     for cut in np.percentile(diff, DIFFERENCE_LEVELS):
@@ -327,20 +335,65 @@ def _same_screen(a, b):
     return smaller > 0 and (ix * iy) / float(smaller) >= SAME_SCREEN_OVERLAP
 
 
-# How much taller the second opinion has to be before it is preferred.
+# How much taller the second opinion has to be before it is worth considering.
 #
 # Not "taller at all", which was the first attempt and cost accuracy on every
 # ordinary frame: the difference mask carries a small halo from the blur, so on
 # a plainly-lit phone it returns a box about 1% bigger than the brightness
 # search's — which is exact — and preferring it moved every detected corner a
-# few pixels out. The thing this rule is for is not a few pixels, it is half a
-# screen: a dark card gives 780 against 1647, and a close mount gives 1747
-# against 1135. Both are far outside a halo, and nothing measured lands between.
+# few pixels out.
 MATERIALLY_TALLER = 1.15
+
+# ...and how much of the disputed region has to be ink before it is believed.
+#
+# Height alone is not enough, and this is the case that proves it: a phone sits
+# in a black case in a cradle, and the difference search does not find the
+# screen at all — it finds the *phone*, body and all. Measured on a lit screen
+# at 240x619 inside a case at 306x766, the brightness search returned the screen
+# exactly and the difference search returned the case, 25% taller, which sailed
+# past a height test and took over. Every crop fraction downstream is measured
+# off those corners, so that is not a near miss, it is reading a rectangle a
+# quarter of which is plastic.
+#
+# So the question is not "is the other answer bigger" but "is what it adds more
+# screen?" — and a screen, dark mode or not, has writing on it while a phone
+# case does not. Measured over the region one answer claims and the other does
+# not, eroded away from the seam so the boundary between them is not what gets
+# measured: a case scores 0.000 whatever colour it or the upholstery is, and a
+# dark offer sheet scores 0.116 to 0.145. There is nothing in between to worry
+# about, so this sits low enough to be safe from a card with little text on it
+# and high enough that a highlight on glossy plastic cannot reach it.
+INK_SHARE = 0.04
+INK_ABOVE = 55          # levels above the disputed region's own background
+INK_SEAM = 0.02         # how far to pull back from the boundary, as frame width
 
 
 def _height(contour):
     return cv2.boundingRect(contour)[3]
+
+
+def _writing_in_the_difference(gray, outer, inner):
+    """How much of what `outer` adds to `inner` is ink rather than blank.
+
+    Returns 0.0 when there is not enough of it to judge, which keeps the
+    brightness answer — the conservative direction, since that is the one with a
+    shift's worth of road behind it.
+    """
+    claimed = np.zeros(gray.shape[:2], np.uint8)
+    cv2.drawContours(claimed, [outer], -1, 255, -1)
+    held = np.zeros_like(claimed)
+    cv2.drawContours(held, [inner], -1, 255, -1)
+    extra = cv2.bitwise_and(claimed, cv2.bitwise_not(held))
+    # The seam between two answers of the same thing is all boundary, and a
+    # boundary has all the contrast in the picture across it. Without this the
+    # case scored 75 levels of range and looked a lot like a card.
+    e = max(3, (int(gray.shape[1] * INK_SEAM) | 1))
+    extra = cv2.erode(extra, cv2.getStructuringElement(cv2.MORPH_RECT, (e, e)))
+    pixels = gray[extra > 0]
+    if pixels.size < 400:
+        return 0.0
+    background = float(np.median(pixels))
+    return float(np.count_nonzero(pixels > background + INK_ABOVE)) / pixels.size
 
 
 def _detect_quad(frame, min_area_frac, max_area_frac):
@@ -359,19 +412,17 @@ def _detect_quad(frame, min_area_frac, max_area_frac):
     if lit is None or other is None:
         return _quad_of(lit if other is None else other)
 
-    # Two answers. When they overlap they are one screen with one of them
-    # clipped, and the taller is the right one — a sub-region is never a better
-    # answer than the whole, because every fraction downstream is measured
-    # against these corners. That single rule covers both ways this has been got
-    # wrong, in opposite directions: on a dark card the brightness search returns
-    # the map above the sheet, and on a very close mount the difference search
-    # goes short because the frame's edge is screen rather than cabin, so there
-    # is no sound cabin to measure from.
+    # Two answers about one screen, one of them clipped. The brightness search
+    # keeps it unless the other is both materially taller AND what it adds has
+    # writing on it — the second half being what tells a dark offer sheet, which
+    # is more screen, from a phone case, which is not.
     #
-    # When they do not overlap they are looking at different things, and the
-    # brightness search wins on seniority: it is the one with a shift's worth of
-    # road behind it, and the disagreement is rare enough not to guess at.
-    if _same_screen(lit, other) and _height(other) >= _height(lit) * MATERIALLY_TALLER:
+    # When they do not overlap at all they are looking at different things, and
+    # the brightness search wins on seniority: it is the one with a shift's worth
+    # of road behind it, and the disagreement is rare enough not to guess at.
+    if (_same_screen(lit, other)
+            and _height(other) >= _height(lit) * MATERIALLY_TALLER
+            and _writing_in_the_difference(gray, other, lit) >= INK_SHARE):
         return _quad_of(other)
     return _quad_of(lit)
 
@@ -526,7 +577,28 @@ def crop(image, roi):
     return image[y0:y1, x0:x1]
 
 
-def is_dark_mode(gray):
+def to_grey(card):
+    return cv2.cvtColor(card, cv2.COLOR_BGR2GRAY) if card.ndim == 3 else card
+
+
+# How far from the halfway point the background has to sit before a *change* of
+# mind is allowed, as a share of the card's own range. Below this it is too
+# close to call and the previous answer stands.
+#
+# Only reached by a picture that is genuinely half one thing and half the other,
+# which an offer card is not: measured over 60 noisy frames each, all four cards
+# in the corpus decided the same way every single time, dark and light. A
+# contrived half-and-half image flipped 16 times in 60 — and a flip is not a
+# small error, because the frames either side of one are compared. Two frames of
+# the same still picture judged opposite ways score 200.7 on banding_score
+# against 0.7 for two judged alike, where 4.0 already means "rippling". Exposure
+# is chosen by ranking candidates on exactly that number, so one flip inside a
+# candidate's three frames makes the right exposure look like the worst on offer
+# and writes a different one to config.json for the rest of the shift.
+POLARITY_MARGIN = 0.06
+
+
+def is_dark_mode(gray, was=None):
     """True when this card is light text on a dark ground.
 
     Decided from the picture rather than from a setting, because the phone's own
@@ -540,12 +612,19 @@ def is_dark_mode(gray):
     it. Measured over twelve renderings — both themes, windscreen glare, gain
     pushed, exposure starved, half-cards — the relative test got 12 of 12 and
     `median < 128` got 11.
+
+    `was` is the last answer, when there is one. Given it, a picture too close to
+    call keeps that answer rather than changing its mind on sensor noise.
     """
     lo, hi = np.percentile(gray, (5, 95))
-    return float(np.median(gray)) < (float(lo) + float(hi)) / 2.0
+    middle = (float(lo) + float(hi)) / 2.0
+    background = float(np.median(gray))
+    if was is not None and abs(background - middle) < POLARITY_MARGIN * max(1.0, float(hi - lo)):
+        return was
+    return background < middle
 
 
-def preprocess(card):
+def preprocess(card, dark=None):
     """Grey, put the ink dark side up, even out the glare, stretch contrast.
 
     CLAHE rather than a global stretch because a windshield puts a bright band
@@ -560,9 +639,17 @@ def preprocess(card):
     seen. Letting tesseract do the flip instead costs a whole second pass over
     every dark page (255ms against 359ms measured); deciding it here costs a
     median and two percentiles, and leaves the light path exactly as it was.
+
+    `dark` settles the question for callers that compare one prepared card with
+    another — the health line's banding number, and calibration's choice of
+    exposure. Both of those subtract consecutive frames, so both need every
+    frame in a batch turned the same way up whatever each one would have decided
+    on its own.
     """
-    gray = cv2.cvtColor(card, cv2.COLOR_BGR2GRAY) if card.ndim == 3 else card
-    if is_dark_mode(gray):
+    gray = to_grey(card)
+    if dark is None:
+        dark = is_dark_mode(gray)
+    if dark:
         gray = cv2.bitwise_not(gray)
     return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
 
@@ -889,6 +976,9 @@ class Scanner:
         # whole screen or just the part of it that fitted.
         self.card_share = CARD_SHARE if card_share is None else float(card_share)
 
+        # Which way up the ink was last time, so the answer is steady across
+        # reads. None until the first card has been looked at.
+        self.dark_mode = None
         self._prev = None
         self._dirty = True      # first frame always reads
         self.last_diff = 0.0    # how much the picture moved, for callers that care
@@ -1030,7 +1120,12 @@ class Scanner:
             self.card_share = card_share_of_quad(self.quad, frame.shape)
         screen = warp(frame, self.quad, self.read_height) if self.quad is not None else frame
         t1 = time.perf_counter()
-        prepped = preprocess(fit_for_ocr(crop(screen, self.crop_box), self.ocr_height))
+        # Decided here rather than inside preprocess, and remembered, so two
+        # consecutive reads of one still card cannot come back turned opposite
+        # ways up — which is what the health line's banding number subtracts.
+        fitted = to_grey(fit_for_ocr(crop(screen, self.crop_box), self.ocr_height))
+        self.dark_mode = is_dark_mode(fitted, was=self.dark_mode)
+        prepped = preprocess(fitted, dark=self.dark_mode)
         t2 = time.perf_counter()
         # Asked for its layout as well as its text, at no extra cost, because
         # where the payout landed is the only way to tell a crop that read
