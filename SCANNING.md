@@ -49,6 +49,22 @@ Installing the authority once removes the warning and the restriction together:
 Re-running `npm run cert` reuses the existing authority, so the phone only ever
 has to trust one.
 
+## The box decides everything
+
+Only what is inside the box is read, so a card that does not sit in it is not
+read at all — and nothing on screen says the box is why. The starting rectangle
+suits one phone at one distance; press **▣ Box** and it becomes draggable:
+
+- drag anywhere inside it to move it;
+- drag near a corner to resize;
+- press **▣ Done** when it sits on the offer card.
+
+Reading carries on while you do it, so the verdict is the feedback. The box is
+kept in the browser's storage, as fractions of the preview rather than pixels,
+so it means the same thing after a rotation or on a different phone; **Reset**
+in ⚙︎ puts it back. Turning on *Scan whole frame* ignores the box entirely and
+reads everything, which is slower and needs no aiming.
+
 ## Does it work?
 
 Yes, on a simulated camera capture of a real offer card. Test frames are
@@ -119,6 +135,7 @@ real offers before mounting anything.
 ```sh
 node tests/parser.test.js     # 60 checks, no browser needed
 node tests/corpus.test.js     # 97 checks shared with the Pi parser
+node tests/crop.test.js       # the Pi's hand-drawn box, server to scanner
 ```
 
 The browser tests live in the session scratchpad and need Playwright plus a

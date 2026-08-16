@@ -16,18 +16,72 @@ body.scanning { overflow: hidden; }
   object-fit: cover;
 }
 
-/* The box the driver lines up with the offer card on the other phone. */
+/* The box the driver lines up with the offer card on the other phone.
+   Draggable: the starting rectangle suits a phone held upright at arm's length
+   and nothing else, and a card that will not sit inside it cannot be read at
+   all. Dragging it beats asking the driver to move the phone to suit the box.
+   A custom box is written as inline left/top/width/height, which is why the
+   defaults here are stated the same way rather than as left/right insets. */
 #reticle {
   position: absolute;
   left: 7%;
-  right: 7%;
   top: 34%;
-  bottom: 22%;
+  width: 86%;
+  height: 44%;
   border-radius: 14px;
   box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45);
+  touch-action: none;
+  /* Moving the box is a deliberate act, so it only listens while the driver has
+     said so — otherwise a thumb resting on the screen mid-shift moves the crop
+     and nothing on screen explains why the reads stopped. */
   pointer-events: none;
 }
-#reticle.full { left: 2%; right: 2%; top: 8%; bottom: 14%; }
+#reticle.full { left: 2%; top: 8%; width: 96%; height: 78%; }
+body.adjusting #reticle { pointer-events: auto; cursor: move; }
+body.adjusting .corner {
+  border-color: #17c964;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5);
+}
+/* A 30px corner is a fiddly target on glass in a moving car, so the part that
+   answers to a finger is bigger than the part that is drawn. */
+body.adjusting .corner::after {
+  content: '';
+  position: absolute;
+  inset: -18px;
+}
+#adjustNote {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(env(safe-area-inset-bottom) + 96px);
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #cfe1ff;
+  background: rgba(20, 27, 36, .92);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px 10px;
+}
+#adjustNote[hidden] { display: none; }
+
+/* The verdict panel sits over the top third of the preview, which is where a
+   box being dragged upwards ends up. While adjusting it gets out of the way —
+   faded and untouchable — so the box can be seen and grabbed under it. */
+body.adjusting #stage > .verdict { opacity: .3; pointer-events: none; }
+
+/* The sheet's rows are label + control, and this control is a button. */
+.row button {
+  appearance: none;
+  flex: none;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 11px 16px;
+  font: inherit;
+  font-weight: 600;
+}
 .corner {
   position: absolute;
   width: 30px;
@@ -84,8 +138,8 @@ body.locked .corner { border-color: var(--go); }
   right: 8px;
   bottom: calc(env(safe-area-inset-bottom) + 10px);
   display: grid;
-  grid-template-columns: 1fr 1fr 56px 1fr;
-  gap: 8px;
+  grid-template-columns: 1fr 1fr 1fr 46px 1fr;
+  gap: 6px;
 }
 .scanbar button, .scanbar .filebtn, .scanbar .linkbtn {
   appearance: none;
@@ -93,9 +147,9 @@ body.locked .corner { border-color: var(--go); }
   background: rgba(20, 27, 36, .9);
   color: var(--text);
   border-radius: 12px;
-  padding: 13px 4px;
+  padding: 13px 2px;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   text-align: center;
   text-decoration: none;
@@ -104,3 +158,4 @@ body.locked .corner { border-color: var(--go); }
 .scanbar .filebtn { position: relative; overflow: hidden; }
 .scanbar .filebtn input { position: absolute; inset: 0; opacity: 0; }
 body.frozen #btnFreeze { background: #1d3a6b; color: #cfe1ff; }
+body.adjusting #btnBox { background: #0d5c31; color: #d7ffe6; }

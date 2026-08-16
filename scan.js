@@ -17,6 +17,15 @@
   var MISSES_TO_RESET = 3;
   var MAX_OCR_WIDTH = 1400;   // beyond this the engine slows with no gain
 
+  // Smallest box worth reading, as a fraction of the preview. Below this there
+  // is no room for a payout at a size the engine can resolve, and a box that
+  // small is a stray tap rather than an intention.
+  var MIN_BOX = 0.08;
+  // How near a corner counts as grabbing it rather than the box itself. A
+  // finger is about 10mm across on glass; 44px is the smallest target that does
+  // not need a second attempt.
+  var GRAB = 44;
+
   var settings = load();
   var worker = null;
   var running = false, frozen = false, busy = false;
@@ -25,7 +34,8 @@
 
   var el = {};
   ['video', 'frame', 'reticle', 'verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin',
-   'vMile', 'warn', 'statusline', 'btnFreeze', 'photo', 'btnSettings', 'engineNote'
+   'vMile', 'warn', 'statusline', 'btnFreeze', 'photo', 'btnSettings', 'engineNote',
+   'stage', 'btnBox', 'adjustNote'
   ].forEach(function (id) { el[id] = document.getElementById(id); });
 
   var ctx = el.frame.getContext('2d', { willReadFrequently: true });
@@ -37,7 +47,24 @@
     try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) {}
     var out = {};
     for (var k in DEFAULTS) out[k] = (typeof s[k] === typeof DEFAULTS[k]) ? s[k] : DEFAULTS[k];
+    // Kept out of DEFAULTS because its absence is meaningful — no box saved
+    // means the one in the stylesheet — and because `typeof null` is 'object',
+    // which would let any old object through the check above.
+    out.box = validBox(s.box);
     return out;
+  }
+
+  // A box as [x, y, w, h] fractions of the preview, or null. Anything that is
+  // not four usable numbers is treated as no box at all rather than repaired:
+  // a half-understood crop reads half a card, which looks like a bad camera.
+  function validBox(b) {
+    if (!Array.isArray(b) || b.length !== 4) return null;
+    for (var i = 0; i < 4; i++) {
+      if (typeof b[i] !== 'number' || !isFinite(b[i])) return null;
+    }
+    if (b[2] < MIN_BOX || b[3] < MIN_BOX) return null;
+    if (b[0] < 0 || b[1] < 0 || b[0] + b[2] > 1.001 || b[1] + b[3] > 1.001) return null;
+    return [b[0], b[1], b[2], b[3]];
   }
 
   function save() {
@@ -335,9 +362,120 @@
   document.getElementById('setFullFrame').addEventListener('change', function (e) {
     settings.fullFrame = e.target.checked;
     el.reticle.classList.toggle('full', settings.fullFrame);
+    applyBox();
     save();
     if (worker) applyPsm();
   });
+
+  document.getElementById('setResetBox').addEventListener('click', function () {
+    settings.box = null;
+    applyBox();
+    save();
+    status('box back to its default');
+  });
+
+  /* ---------- the box ----------
+   *
+   * The reticle decides what gets read, and until now it was 7% in from each
+   * side, 34% down — a rectangle that suits one phone at one distance and
+   * cannot be argued with. A card that does not sit inside it is not read at
+   * all: the crop is what the engine sees, so a box on the wrong part of the
+   * screen returns the wrong text, or none, with nothing on screen to say the
+   * box is why. Every other knob in here is adjustable and this was the one
+   * that decides whether any of them get a number to work on.
+   *
+   * Stored as fractions of the preview rather than pixels, because the same
+   * phone rotated is a different pixel size and the box means the same thing in
+   * both. sourceRect() already maps the reticle's own rectangle back through
+   * the object-fit: cover crop, so moving the element is all this has to do.
+   */
+  function applyBox() {
+    var custom = settings.box && !settings.fullFrame;
+    ['left', 'top', 'width', 'height'].forEach(function (prop, i) {
+      el.reticle.style[prop] = custom ? (settings.box[i] * 100) + '%' : '';
+    });
+  }
+
+  function stageRect() { return el.stage.getBoundingClientRect(); }
+
+  // Where the box is now, in fractions — read off the element so the CSS
+  // default and a stored box are the same kind of thing to drag.
+  function currentBox() {
+    if (settings.box && !settings.fullFrame) return settings.box.slice();
+    var s = stageRect(), r = el.reticle.getBoundingClientRect();
+    return [(r.left - s.left) / s.width, (r.top - s.top) / s.height,
+            r.width / s.width, r.height / s.height];
+  }
+
+  function adjusting() { return document.body.classList.contains('adjusting'); }
+
+  function setAdjusting(on) {
+    document.body.classList.toggle('adjusting', on);
+    el.adjustNote.hidden = !on;
+    el.btnBox.textContent = on ? '▣ Done' : '▣ Box';
+    if (on) {
+      el.adjustNote.textContent = settings.fullFrame
+        ? 'Whole-frame scanning is on, so the box is not used. Turn it off in ⚙︎ to read a box.'
+        : 'Drag the box onto the offer card, or a corner to resize. Reading carries on.';
+    }
+  }
+
+  el.btnBox.addEventListener('click', function () { setAdjusting(!adjusting()); });
+
+  var drag = null;
+
+  el.reticle.addEventListener('pointerdown', function (e) {
+    if (!adjusting() || settings.fullFrame) return;
+    e.preventDefault();
+    el.reticle.setPointerCapture(e.pointerId);
+    var r = el.reticle.getBoundingClientRect();
+    // Which corner, if any, is being held. Nearest wins, and only within
+    // reach — anywhere else in the box moves the whole thing.
+    var edgeX = (e.clientX - r.left < GRAB) ? -1 : (r.right - e.clientX < GRAB) ? 1 : 0;
+    var edgeY = (e.clientY - r.top < GRAB) ? -1 : (r.bottom - e.clientY < GRAB) ? 1 : 0;
+    drag = {
+      id: e.pointerId, x: e.clientX, y: e.clientY,
+      box: currentBox(), edgeX: edgeX, edgeY: edgeY
+    };
+    buzz(8);
+  });
+
+  el.reticle.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var s = stageRect();
+    var dx = (e.clientX - drag.x) / s.width;
+    var dy = (e.clientY - drag.y) / s.height;
+    var b = drag.box;
+    var next;
+
+    if (!drag.edgeX && !drag.edgeY) {
+      // Moving: the size is fixed, so the position is simply clamped to the
+      // preview rather than allowed to run off it.
+      next = [Math.min(1 - b[2], Math.max(0, b[0] + dx)),
+              Math.min(1 - b[3], Math.max(0, b[1] + dy)), b[2], b[3]];
+    } else {
+      var x0 = b[0], y0 = b[1], x1 = b[0] + b[2], y1 = b[1] + b[3];
+      if (drag.edgeX < 0) x0 = Math.min(x1 - MIN_BOX, Math.max(0, x0 + dx));
+      if (drag.edgeX > 0) x1 = Math.max(x0 + MIN_BOX, Math.min(1, x1 + dx));
+      if (drag.edgeY < 0) y0 = Math.min(y1 - MIN_BOX, Math.max(0, y0 + dy));
+      if (drag.edgeY > 0) y1 = Math.max(y0 + MIN_BOX, Math.min(1, y1 + dy));
+      next = [x0, y0, x1 - x0, y1 - y0];
+    }
+    settings.box = next;
+    applyBox();
+  });
+
+  function endDrag(e) {
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    drag = null;
+    // Saved on release rather than on every move: a drag is one decision, and
+    // localStorage is synchronous.
+    settings.box = validBox(settings.box) || null;
+    applyBox();
+    save();
+  }
+  el.reticle.addEventListener('pointerup', endDrag);
+  el.reticle.addEventListener('pointercancel', endDrag);
 
   /* ---------- boot ---------- */
 
@@ -360,6 +498,7 @@
       return;
     }
     el.reticle.classList.toggle('full', settings.fullFrame);
+    applyBox();
     try {
       await startEngine();
     } catch (e) {

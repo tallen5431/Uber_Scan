@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cropbox as CX
 import exposure as EX
 import offer_parser as OP
 import pipeline as PL
@@ -105,6 +106,21 @@ def reset_requested():
         return True
     except OSError:
         return False
+
+
+def use_manual_box(scanner, quad_px):
+    """Read exactly the box a person drew, and stop deriving one inside it.
+
+    Three settings, and they only make sense together. The corners are the box.
+    The crop is pinned to all of it, because a crop derived from the box would
+    trim the top off the very thing the driver framed. And the card's share of
+    the quad is 1.0 — the box *is* the card — which keeps the warp at the height
+    the reader wants instead of twice it.
+    """
+    scanner.quad = np.array(quad_px, dtype=np.float32)
+    scanner.roi = list(CX.PIN_WHOLE)
+    scanner.fixed_card_share = 1.0
+    scanner.card_share = 1.0
 
 
 def snapshot_interval():
@@ -535,6 +551,14 @@ def main():
     cfg = load_config(args.config)
     health = Health()
 
+    # Corners a person drew, rather than ones the detector found. They change
+    # three things at once — see use_manual_box — and they turn tracking off,
+    # because a tracker judges candidates against a calibrated *screen* and
+    # would move a hand-drawn box back onto whatever it believes that is. The
+    # driver overrode the detector; letting the tracker overrule them would put
+    # the rig straight back where it was.
+    manual = bool(cfg.get(CX.MANUAL_KEY))
+
     # Start tracking from where the last run ended, if it wrote that down —
     # a fixed mount usually has not moved between runs, so resuming saves
     # re-converging. `quad` stays the calibration; see QuadTracker.calibrated.
@@ -542,8 +566,8 @@ def main():
         # Resume where the last run ended — but only when tracking is on to
         # pull it back. --no-track promises the calibrated corners exactly, and
         # pinning a position no run can correct is the opposite of that.
-        quad=np.array((None if args.no_track else cfg.get('trackedQuad')) or cfg['quad'],
-                      dtype=np.float32),
+        quad=np.array((None if (args.no_track or manual) else cfg.get('trackedQuad'))
+                      or cfg['quad'], dtype=np.float32),
         card_height=cfg.get('cardHeight', 900),
         # A pin has to be asked for, under a key only a pin is written to.
         # `roi` cannot serve: every config.json written before the crop became
@@ -552,6 +576,11 @@ def main():
         # slow), [0,0.40,1,0.60], and [0.02,0.48,0.96,0.50] — the old tight
         # crop, which lost the payout on 13 of 42 test cards.
         roi=cfg.get('cropBox'),
+        # A hand-drawn box is all card. Measured as half a screen it would be
+        # warped twice as tall as the reader can use, then shrunk back down
+        # against the pixel budget — same text, three times the work, smaller
+        # by the time it is read.
+        card_share=1.0 if manual else None,
         settings=cfg.get('settings', {}),
     )
     # The tracker works in the small stream's coordinates and reports in the
@@ -559,9 +588,10 @@ def main():
     cap = cfg.get('capture', {})
     track_scale = (cap.get('width', 2328) / float(LORES[0]),
                    cap.get('height', 1748) / float(LORES[1]))
+    capture_size = (cap.get('width', 2328), cap.get('height', 1748))
     # Start from where the last run left off, but judge candidates against the
     # calibration itself — see QuadTracker.calibrated.
-    tracker = None if args.no_track else TR.QuadTracker(
+    tracker = None if (args.no_track or manual) else TR.QuadTracker(
         scanner.quad, scale=track_scale,
         calibrated=np.array(cfg['quad'], dtype=np.float32))
 
@@ -607,7 +637,9 @@ def main():
            _fmt_roi(scanner.crop_box),
            scanner.read_height, scanner.ocr_height,
            ('%.2f dioptres' % lens) if lens else 'fixed',
-           '' if tracker is not None else ', corner tracking OFF'))
+           '' if tracker is not None else
+           (', reading a box set by hand — corner tracking OFF' if manual
+            else ', corner tracking OFF')))
     log('setup: reads %s'
         % ('paired — the confirming frame is read alongside the first'
            if pair_reads else 'one at a time (--no-parallel)'))
@@ -671,7 +703,37 @@ def main():
                 # size. Blurred frames are skipped: a smeared edge is a worse
                 # guess than the corners already held.
                 if reset_requested():
-                    if tracker is not None:
+                    if manual:
+                        # Re-find is also the way *out* of a hand-drawn box, and
+                        # it has to find something before it throws one away:
+                        # dropping the box first would leave the rig reading
+                        # corners nobody has checked, which is the state the
+                        # driver drew the box to escape.
+                        found = PL.detect_screen_quad(luma, work_width=PL.DETECT_WIDTH)
+                        if found is None:
+                            log('re-find asked for, but there is no screen in view to '
+                                'find — the box you drew is still in use. Try again '
+                                'with the phone lit and a darker border around it.')
+                        else:
+                            quad_px = (np.asarray(found, dtype=np.float32)
+                                       * np.asarray(track_scale, dtype=np.float32))
+                            manual = False
+                            scanner.quad = quad_px
+                            scanner.roi = None
+                            scanner.fixed_card_share = None
+                            cfg['quad'] = [[float(x), float(y)] for x, y in quad_px]
+                            CX.clear_in_config(cfg)
+                            save_config(args.config, cfg)
+                            tracker = None if args.no_track else TR.QuadTracker(
+                                quad_px, scale=track_scale, calibrated=quad_px)
+                            # Same reason as the box below: the corners and the
+                            # crop both just changed under a still picture.
+                            moved = do_read = True
+                            log('back to finding the phone automatically: the screen '
+                                'in view now is the calibration, the crop is derived '
+                                'from it again, and tracking is %s'
+                                % ('off (--no-track)' if tracker is None else 'on'))
+                    elif tracker is not None:
                         tracker.start_over()
                         scanner.quad = tracker.quad
                         cfg.pop('trackedQuad', None)
@@ -682,6 +744,27 @@ def main():
                     else:
                         log('outline reset asked for, but tracking is off '
                             '(--no-track), so the corners are already fixed')
+
+                # A box drawn on the live view. It arrives as fractions of the
+                # frame, which is the only form that survives the trip: what the
+                # driver drew on was a 480px JPEG of a 2328px sensor frame.
+                drawn = CX.take_request()
+                if drawn is not None:
+                    manual = True
+                    use_manual_box(scanner, CX.in_pixels(drawn, capture_size))
+                    CX.apply_to_config(cfg, drawn, capture_size)
+                    save_config(args.config, cfg)
+                    tracker = None
+                    # Read it now. The whole crop just changed, and the motion
+                    # gate cannot tell — it watches the frame, and the frame is
+                    # a card sitting still, which is exactly what it looks like
+                    # while somebody draws a box round it. Without this, pressing
+                    # "read this box" does nothing visible until the picture next
+                    # moves, which reads as the button not having worked.
+                    moved = do_read = True
+                    log('crop box set by hand to [%s] of the frame: reading exactly '
+                        'that, with corner tracking off until re-find is pressed'
+                        % CX.describe(drawn))
 
                 if tracker is not None and scanner.settled:
                     was = tracker.status()

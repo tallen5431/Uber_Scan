@@ -18,6 +18,7 @@ import sys
 import cv2
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cropbox as CX
 import pipeline as PL
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
@@ -179,6 +180,11 @@ def main():
     ap.add_argument('--card-height', type=int, default=900,
                     help='warp height; 900 is the measured speed/accuracy sweet spot')
     ap.add_argument('--corners', help='manual override: x1,y1,x2,y2,x3,y3,x4,y4 clockwise from top-left')
+    ap.add_argument('--box', help='manual override in fractions of the frame: x,y,w,h '
+                                  '(0.1,0.3,0.8,0.4 is a wide band across the middle). '
+                                  'Reads exactly that box and stops looking for the '
+                                  'screen — the same thing ▣ Set box does on /live.html, '
+                                  'for when you would rather type it than draw it')
     ap.add_argument('--full-screen', action='store_true',
                     help='pin the crop to the whole visible screen instead of '
                          'letting the scanner place it per read')
@@ -208,7 +214,21 @@ def main():
     if frame is None:
         sys.exit('could not read a frame')
 
-    if args.corners:
+    # What the corners are, and what that makes them mean. A box given in
+    # fractions is a person saying "read this and nothing else", so it pins the
+    # crop and is recorded as their choice; corners in pixels are still a
+    # correction to where the *screen* is, and the crop is placed inside them
+    # per read as usual.
+    drawn = None
+    if args.box:
+        try:
+            drawn = CX.parse_request(
+                {'box': [float(n) for n in args.box.replace(' ', '').split(',')]})
+        except ValueError as e:
+            sys.exit('--box: %s' % e)
+        quad = __import__('numpy').array(CX.in_pixels(drawn, (width, height)),
+                                         dtype='float32')
+    elif args.corners:
         nums = [float(n) for n in args.corners.replace(' ', '').split(',')]
         if len(nums) != 8:
             sys.exit('--corners needs 8 numbers')
@@ -216,11 +236,17 @@ def main():
     else:
         quad = PL.detect_screen_quad(frame)
         if quad is None:
-            sys.exit('no screen found — is the phone lit and in frame? else pass --corners')
+            sys.exit('no screen found — is the phone lit and in frame? '
+                     'else pass --corners, or --box to read a box of your own')
 
-    pin = WHOLE_VIEW if args.full_screen else DEFAULT_ROI
+    pin = CX.PIN_WHOLE if drawn else (WHOLE_VIEW if args.full_screen else DEFAULT_ROI)
+    share = 1.0 if drawn else None
     config = calibrated_config(load_existing(args.config), quad, pin,
                                args.card_height, (width, height), lens_position)
+    if drawn:
+        CX.apply_to_config(config, drawn, (width, height))
+    else:
+        config.pop(CX.MANUAL_KEY, None)
     with open(args.config, 'w') as fh:
         json.dump(config, fh, indent=2)
 
@@ -228,7 +254,7 @@ def main():
     # obvious before it costs a shift's worth of missed offers. Taken from a
     # real read rather than rebuilt, because the crop is placed per read now
     # and a rebuild would show a composition the scanner never uses.
-    probe = PL.Scanner(quad=quad, roi=pin, card_height=args.card_height)
+    probe = PL.Scanner(quad=quad, roi=pin, card_height=args.card_height, card_share=share)
     checked = probe.read(frame)
     preview = checked['card']
     preview_path = os.path.splitext(args.config)[0] + '-preview.png'
@@ -236,6 +262,10 @@ def main():
 
     print('wrote %s' % args.config)
     print('corners: %s' % config['quad'])
+    if drawn:
+        print('reading the box you gave ([%s] of the frame) and nothing else; '
+              'corner tracking is off until the scanner is asked to re-find'
+              % CX.describe(drawn))
     print('preview: %s  (%dx%d — the exact image tesseract will read)'
           % (preview_path, preview.shape[1], preview.shape[0]))
 
@@ -243,7 +273,12 @@ def main():
     # all. 2328x1748 is 2x2 binned, so the card has half the pixel density the
     # sensor's headline resolution suggests, and no amount of upscaling later
     # recovers detail the mount never captured.
-    card_px = card_source_pixels(quad, frame.shape)
+    # Half a screen is the card when a screen was detected; all of it is the
+    # card when a person drew the box round one, so halving that would report a
+    # hand-drawn box as half the size it is and send the driver closer for no
+    # reason.
+    card_px = (int(round(PL.screen_height_px(quad, frame.shape))) if drawn
+               else card_source_pixels(quad, frame.shape))
     print('\ncard height on the sensor: %d px' % card_px)
     if card_px < MIN_CARD_PIXELS:
         print('  TOO SMALL — reading stops working below about %d px.' % MIN_CARD_PIXELS)

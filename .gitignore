@@ -2,6 +2,11 @@
 *.pyc
 __pycache__/
 rpi/.viewing
+# Requests in flight between the web side and the camera side: someone is
+# looking, re-find the phone, read this box. All three exist for seconds.
+rpi/.recalibrate
+rpi/.cropbox.json
+rpi/.cropbox.json.part
 rpi/config-preview.png
 rpi/config.json
 rpi/live-frame.jpg

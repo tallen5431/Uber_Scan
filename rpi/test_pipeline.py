@@ -536,6 +536,49 @@ one._agree = 1
 out = one.read(blank, now=3.0)
 eq('the reported lock is current', out['locked'], one.locked)
 
+# --- a box drawn by hand reads what is inside it ---------------------------
+#
+# The whole point of letting a driver draw the box is the case where nothing
+# automatic works, so this is checked against a frame the detector gives up on:
+# a card on a dark background with no phone-shaped bright region to find. What
+# the driver drew has to be read exactly, which means the crop pinned to all of
+# it and the quad counted as all card — treat it as half a screen, the way a
+# detected quad is, and the derived crop takes 15% off the top, which is where
+# the payout is.
+import cropbox as CX
+
+W, H = 2328, 1748
+scene = np.full((H, W, 3), 18, np.uint8)
+cx0, cy0, cx1, cy1 = 300, 700, 1500, 1300
+cv2.rectangle(scene, (cx0, cy0), (cx1, cy1), (245, 245, 245), -1)
+cv2.putText(scene, '$7.09', (cx0 + 40, cy0 + 180), cv2.FONT_HERSHEY_SIMPLEX, 4.0, (10, 10, 10), 9)
+cv2.putText(scene, '34 min (3.6 mi)', (cx0 + 40, cy0 + 380), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (10, 10, 10), 5)
+cv2.putText(scene, 'Deliver to Main St', (cx0 + 40, cy0 + 520), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (60, 60, 60), 3)
+
+eq('the detector finds nothing here, which is why the box exists',
+   PL.detect_screen_quad(scene), None)
+
+drawn = CX.parse_request({'box': [cx0 / float(W), cy0 / float(H),
+                                  (cx1 - cx0) / float(W), (cy1 - cy0) / float(H)]})
+hand = PL.Scanner(quad=np.array(CX.in_pixels(drawn, (W, H)), dtype=np.float32),
+                  roi=CX.PIN_WHOLE, card_height=900, card_share=1.0)
+read = hand.read(scene)['parsed']
+eq('the payout inside a hand-drawn box is read', read['pay'], 7.09)
+eq('...with the time', read['minutes'], 34.0)
+eq('...and the distance', read['miles'], 3.6)
+eq('the crop is all of what was drawn', hand.crop_box, CX.PIN_WHOLE)
+eq('and the warp is the height the reader wants, not twice it',
+   hand.read_height, 900)
+
+# The same corners taken for a screen rather than a card: this is what the
+# hand-drawn path must not do, and it is not a small difference.
+as_screen = PL.Scanner(quad=np.array(CX.in_pixels(drawn, (W, H)), dtype=np.float32),
+                       roi=None, card_height=900)
+eq('treated as half a screen it reads nothing at all',
+   as_screen.read(scene)['parsed']['pay'], None)
+eq('...because the derived crop cuts the top off', [round(v, 2) for v in as_screen.crop_box],
+   [0.0, 0.15, 1.0, 0.7])
+
 # --- the motion gate still gates ------------------------------------------
 sc = PL.Scanner(quad=None, roi=None)
 still = np.full((480, 640), 100, np.uint8)

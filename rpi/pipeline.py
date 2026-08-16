@@ -695,13 +695,20 @@ class Scanner:
 
     def __init__(self, quad=None, settings=None, agree_to_lock=2,
                  card_height=CARD_HEIGHT, config=OCR_CONFIG, roi=None,
-                 ocr_height=OCR_CARD_HEIGHT):
+                 ocr_height=OCR_CARD_HEIGHT, card_share=None):
         self.quad = None if quad is None else np.asarray(quad, dtype=np.float32)
         # A fixed override for the crop, as fractional (x, y, w, h) of the
         # warped screen. Left None — which is the normal case — the crop is
         # derived per read from the measured geometry, which is what stops it
         # wandering. See centred_roi.
         self.roi = roi
+        # And an override for what the quad *is*. Measured per read normally,
+        # because the quad is a phone screen and the card is half of one — but
+        # a box someone drew by hand around the card is all card, and measuring
+        # it as half a screen warps it twice as tall as the reader can use,
+        # only to shrink it back down again against MAX_OCR_PIXELS. Same text,
+        # three times the work, and smaller by the time it is read.
+        self.fixed_card_share = card_share
         self.settings = settings or {}
         self.agree_to_lock = agree_to_lock
         self.card_height = card_height
@@ -712,7 +719,7 @@ class Scanner:
         # whole screen is in frame. Measured from the first frame that arrives,
         # because it takes the frame's shape to know whether the quad is the
         # whole screen or just the part of it that fitted.
-        self.card_share = CARD_SHARE
+        self.card_share = CARD_SHARE if card_share is None else float(card_share)
 
         self._prev = None
         self._dirty = True      # first frame always reads
@@ -848,7 +855,7 @@ class Scanner:
         """
         now = time.time() if now is None else now
         t0 = time.perf_counter()
-        if self.quad is not None:
+        if self.quad is not None and self.fixed_card_share is None:
             # Before anything is sized, work out what this quad actually is. A
             # tracked quad moves and a re-locked one can change shape, so this
             # is re-measured per read rather than settled once at startup.
