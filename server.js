@@ -181,6 +181,10 @@ function startScanner() {
 
 var WATCH_PATH = path.join(ROOT, 'rpi', '.viewing');
 var RESET_PATH = path.join(ROOT, 'rpi', '.recalibrate');
+// Where a box drawn on the live view is left for the camera side to pick up.
+// A file, like the two above, because the scanner is sometimes a child of this
+// process and sometimes a systemd unit that has never heard of it.
+var CROP_PATH = path.join(ROOT, 'rpi', '.cropbox.json');
 var lastTouch = 0;
 
 function touchWatchFile() {
@@ -229,6 +233,65 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
 
 function numOrNull(v) {
   return (typeof v === 'number' && isFinite(v)) ? v : null;
+}
+
+// Smaller than this either way and it is a mis-tap, not a box: at 5% of a
+// 2328px frame the card would be 116px tall against a 380px floor, so there is
+// nothing readable inside it. Kept in step with rpi/cropbox.py, which checks
+// the same thing again on the way in — this side is here so a bad drag comes
+// back as a 400 rather than sitting in a file the scanner then ignores.
+var MIN_CROP_SIDE = 0.05;
+
+function fractionOrNull(v) {
+  if (typeof v !== 'number' || !isFinite(v)) return null;
+  return Math.min(1, Math.max(0, v));
+}
+
+// A crop request as four corners in fractions of the frame, ordered top-left,
+// top-right, bottom-right, bottom-left — or a string saying what was wrong
+// with it. Takes a dragged rectangle (`box`) or four corners (`quad`), for a
+// box that has to be skewed onto an off-axis screen.
+function cropQuad(body) {
+  var points;
+  if (Array.isArray(body.quad)) {
+    if (body.quad.length !== 4) return 'a quad needs four corners';
+    points = [];
+    for (var i = 0; i < 4; i++) {
+      var p = body.quad[i];
+      if (!Array.isArray(p) || p.length !== 2) return 'each corner is an [x, y] pair';
+      var x = fractionOrNull(p[0]), y = fractionOrNull(p[1]);
+      if (x === null || y === null) return 'corners must be numbers';
+      points.push([x, y]);
+    }
+  } else if (Array.isArray(body.box)) {
+    if (body.box.length !== 4) return 'a box needs x, y, w, h';
+    var b = body.box.map(fractionOrNull);
+    if (b.indexOf(null) !== -1) return 'corners must be numbers';
+    points = [[b[0], b[1]], [Math.min(1, b[0] + b[2]), b[1]],
+              [Math.min(1, b[0] + b[2]), Math.min(1, b[1] + b[3])],
+              [b[0], Math.min(1, b[1] + b[3])]];
+  } else {
+    return 'expected a box or a quad';
+  }
+
+  var xs = points.map(function (p) { return p[0]; });
+  var ys = points.map(function (p) { return p[1]; });
+  if (Math.max.apply(null, xs) - Math.min.apply(null, xs) < MIN_CROP_SIDE ||
+      Math.max.apply(null, ys) - Math.min.apply(null, ys) < MIN_CROP_SIDE) {
+    return 'that box is too small to read anything from — drag a bigger one';
+  }
+  // Ordered here rather than trusted: the same drag started from the bottom
+  // right is the same box, and the scanner warps whatever order it is given.
+  var by = function (score, pick) {
+    return points.reduce(function (best, p) {
+      return pick(score(p), score(best)) ? p : best;
+    });
+  };
+  var sum = function (p) { return p[0] + p[1]; };
+  var diff = function (p) { return p[1] - p[0]; };
+  var lower = function (a, b) { return a < b; };
+  var higher = function (a, b) { return a > b; };
+  return [by(sum, lower), by(diff, lower), by(sum, higher), by(diff, higher)];
 }
 
 // Small on purpose. Nothing this server accepts is bigger than a couple of
@@ -435,6 +498,46 @@ function route(req, res) {
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }
+
+  // The box to read, drawn by hand on the live view.
+  //
+  // The scanner finds the phone by looking for it, which is right almost always
+  // and useless in the cases where it is wrong: a windscreen reflection, a
+  // second lit screen, a phone with nothing darker around it to be told apart
+  // from. There is no aiming your way out of those — the rig reads a strip of
+  // the car forever — and the only fix used to be ssh and eight pixel
+  // coordinates guessed off a photograph. So the person looking at the picture
+  // can draw the answer instead.
+  //
+  // Fractions of the frame, never pixels: what they drew on is a 480px JPEG of
+  // a 2328px sensor frame, and corners measured against one size and read
+  // against another are refused on every check forever, silently.
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/crop') {
+    return readJsonBody(req, function (err, body) {
+      var bad = function (why) {
+        send(res, 400, JSON.stringify({ ok: false, error: why }),
+             { 'Content-Type': 'application/json; charset=utf-8' });
+      };
+      if (err || !body) return bad('bad body');
+      var quad = cropQuad(body);
+      if (typeof quad === 'string') return bad(quad);
+      // Written to a temporary name and renamed, because the scanner may be
+      // reading this exact path at this exact moment and half a JSON object
+      // parses as nothing at all.
+      var tmp = CROP_PATH + '.part';
+      fs.writeFile(tmp, JSON.stringify({ quad: quad }), function (writeErr) {
+        if (writeErr) return send(res, 500, JSON.stringify({ ok: false, error: writeErr.message }),
+                                  { 'Content-Type': 'application/json; charset=utf-8' });
+        fs.rename(tmp, CROP_PATH, function (renameErr) {
+          if (renameErr) return send(res, 500, JSON.stringify({ ok: false, error: renameErr.message }),
+                                     { 'Content-Type': 'application/json; charset=utf-8' });
+          send(res, 200, JSON.stringify({ ok: true, quad: quad }),
+               { 'Content-Type': 'application/json; charset=utf-8' });
+        });
+      });
+    });
+  }
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return send(res, 405, 'method not allowed', { 'Content-Type': 'text/plain' });
   }

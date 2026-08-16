@@ -46,6 +46,51 @@
   #viewNote { font-size: 11px; color: var(--muted); text-align: center; padding: 6px 0 0; }
   #viewWrap.gone img { display: none; }
 
+  /* Drawing the box to read. The scanner finds the phone by looking for it,
+     which is right almost always and useless when it is not — a reflection, a
+     second lit screen, a phone with nothing darker around it. There is no
+     aiming your way out of those, so the person looking at the picture can say
+     where the card is instead. */
+  #viewWrap { position: relative; }
+  #viewWrap.drawing img { touch-action: none; cursor: crosshair; }
+  #drawn {
+    position: absolute;
+    border: 2px solid #17c964;          /* the outline the scanner draws, same green */
+    border-radius: 4px;
+    /* A tint rather than a hole punched in a full-page dim: this page keeps the
+       verdict above and the buttons below usable while the box is being drawn. */
+    background: rgba(23, 201, 100, .14);
+    pointer-events: none;
+  }
+  #drawn[hidden] { display: none; }
+  #drawTools { display: none; gap: 8px; padding: 8px 0 0; }
+  #viewWrap.drawing #drawTools { display: flex; }
+  /* .linkbtn is only styled inside .bottombar, and these two are not there. */
+  #drawTools button {
+    flex: 1;
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    border-radius: 12px;
+    padding: 12px 6px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  #drawTools #drawUse:not([disabled]) { background: #0d5c31; border-color: #17c964; color: #d7ffe6; }
+  #drawTools button[disabled] { opacity: .45; }
+  #drawHint { font-size: 12px; color: var(--muted); text-align: center; padding: 6px 0 0; }
+  /* Four slots here, not the shared three: the box is set from the same bar
+     that re-finds the phone, because they are the two halves of one decision. */
+  .bottombar { grid-template-columns: repeat(4, 1fr); }
+  .bottombar button, .bottombar .linkbtn {
+    font-size: 13px; padding: 10px 4px; white-space: nowrap;
+  }
+  #setBox.on {
+    background: #0d5c31; border-color: #17c964; color: #d7ffe6;
+  }
+
   /* What the reader actually saw. Folded away by default, because it is only
      ever wanted after a wrong answer — and after a wrong answer it is the only
      thing that explains it. */
@@ -91,7 +136,14 @@
          handed to the reader, so aim and focus are both visible here. -->
     <figure id="viewWrap">
       <img id="view" alt="live camera view">
+      <!-- Where the driver says the card is, when the scanner cannot find it. -->
+      <div id="drawn" hidden></div>
       <figcaption id="viewNote">camera view · inset is what the reader sees</figcaption>
+      <div id="drawHint" hidden>drag a box around the offer card on the phone</div>
+      <div id="drawTools">
+        <button type="button" class="linkbtn" id="drawUse" disabled>✓ Read this box</button>
+        <button type="button" class="linkbtn" id="drawCancel">✕ Cancel</button>
+      </div>
     </figure>
 
     <details id="raw" hidden>
@@ -108,6 +160,7 @@
   <nav class="bottombar">
     <a class="linkbtn" href="index.html">⌨ Type</a>
     <a class="linkbtn" href="journal.html">▤ Offers</a>
+    <button type="button" class="linkbtn" id="setBox">▣ Set box</button>
     <button type="button" class="linkbtn" id="reset">⟳ Re-find</button>
   </nav>
 </main>
@@ -368,6 +421,155 @@
           resetBtn.textContent = '⟳ Re-find';
         }, 2500);
       });
+  });
+
+  // --- drawing the box to read -------------------------------------------
+  //
+  // The scanner locates the phone by looking for the brightest quadrilateral,
+  // which is right almost always and useless in the cases where it is wrong: a
+  // windscreen reflection, a second lit screen, a phone filling the frame with
+  // nothing darker to be told apart from. None of those can be aimed out of —
+  // the rig reads a strip of the car indefinitely and reports corners held —
+  // and the only fix was ssh and eight pixel coordinates guessed off a
+  // photograph. The person holding the phone can see exactly where the card is,
+  // so they can draw it.
+  //
+  // Sent as fractions of the picture, never pixels. This is a 480px JPEG of a
+  // 2328px sensor frame, and corners measured against one size and read against
+  // another are refused on every check, silently, for as long as the rig runs.
+  var setBox = document.getElementById('setBox');
+  var drawn = document.getElementById('drawn');
+  var drawUse = document.getElementById('drawUse');
+  var drawCancel = document.getElementById('drawCancel');
+  var drawHint = document.getElementById('drawHint');
+  var box = null;             // {x, y, w, h} as fractions, or null
+  var dragFrom = null;
+
+  function drawingMode(on) {
+    viewWrap.classList.toggle('drawing', on);
+    drawHint.hidden = !on;
+    // The label stays put and the button lights up instead: "▣ Drawing" wraps
+    // onto two lines in a four-slot bar on a phone, and a bar that changes
+    // height mid-drag moves the picture out from under the finger.
+    setBox.classList.toggle('on', on);
+    if (!on) {
+      box = dragFrom = null;
+      drawn.hidden = true;
+      drawUse.disabled = true;
+      drawUse.textContent = '✓ Read this box';
+    }
+  }
+
+  function at(e) {
+    var r = view.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+    };
+  }
+
+  function showBox() {
+    if (!box) { drawn.hidden = true; return; }
+    // Positioned against the picture rather than the figure, which also holds
+    // the caption and the buttons.
+    var r = view.getBoundingClientRect();
+    var wrap = viewWrap.getBoundingClientRect();
+    drawn.style.left = (r.left - wrap.left + box.x * r.width) + 'px';
+    drawn.style.top = (r.top - wrap.top + box.y * r.height) + 'px';
+    drawn.style.width = (box.w * r.width) + 'px';
+    drawn.style.height = (box.h * r.height) + 'px';
+    drawn.hidden = false;
+  }
+
+  // 5% each way, the same floor the server and the scanner apply: at 5% of a
+  // 2328px frame the card would be 116px tall against a 380px floor, so there
+  // is nothing readable inside a box that small.
+  function bigEnough(b) { return b && b.w >= 0.05 && b.h >= 0.05; }
+
+  view.addEventListener('pointerdown', function (e) {
+    if (!viewWrap.classList.contains('drawing')) return;
+    var p = at(e);
+    if (!p) return;
+    e.preventDefault();
+    view.setPointerCapture(e.pointerId);
+    dragFrom = p;
+    box = { x: p.x, y: p.y, w: 0, h: 0 };
+    showBox();
+  });
+
+  view.addEventListener('pointermove', function (e) {
+    if (!dragFrom) return;
+    var p = at(e);
+    if (!p) return;
+    box = {
+      x: Math.min(dragFrom.x, p.x), y: Math.min(dragFrom.y, p.y),
+      w: Math.abs(p.x - dragFrom.x), h: Math.abs(p.y - dragFrom.y)
+    };
+    showBox();
+    drawUse.disabled = !bigEnough(box);
+  });
+
+  function endDrag() {
+    if (!dragFrom) return;
+    dragFrom = null;
+    drawUse.disabled = !bigEnough(box);
+    drawHint.textContent = bigEnough(box)
+      ? 'drag again to change it, or read this box'
+      : 'that box is too small to read — drag a bigger one';
+  }
+  view.addEventListener('pointerup', endDrag);
+  view.addEventListener('pointercancel', endDrag);
+  // The picture is replaced several times a second, and a box measured against
+  // one layout is wrong in the next if the image changed size.
+  window.addEventListener('resize', showBox);
+  view.addEventListener('load', showBox);
+
+  setBox.addEventListener('click', function () {
+    var on = !viewWrap.classList.contains('drawing');
+    // The box is drawn on the picture, so there has to be one. Without this the
+    // hidden image measures zero and every drag is silently ignored, which
+    // reads as a broken button rather than a scanner that has not sent a frame.
+    if (on && viewWrap.classList.contains('gone')) {
+      drawHint.hidden = false;
+      drawHint.textContent = 'no camera view yet — the box is drawn on the picture, '
+        + 'which appears within a few seconds of the scanner starting';
+      return;
+    }
+    drawingMode(on);
+    if (on) {
+      drawHint.textContent = 'drag a box around the offer card on the phone';
+      viewWrap.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  });
+
+  drawCancel.addEventListener('click', function () { drawingMode(false); });
+
+  drawUse.addEventListener('click', function () {
+    if (!bigEnough(box)) return;
+    var sent = box;
+    drawUse.disabled = true;
+    drawUse.textContent = '✓ sending…';
+    fetch('/api/crop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ box: [sent.x, sent.y, sent.w, sent.h] })
+    }).then(function (r) {
+      return r.json().catch(function () { return { ok: r.ok }; });
+    }).then(function (out) {
+      if (!out || !out.ok) throw new Error((out && out.error) || 'refused');
+      drawingMode(false);
+      // No confirmation dialog: the green outline in the picture below moves
+      // onto the box within a second or two, which is the same news and is the
+      // thing worth looking at anyway.
+      drawHint.hidden = false;
+      drawHint.textContent = 'box sent — the green outline moves onto it in a moment';
+      setTimeout(function () { drawHint.hidden = true; }, 6000);
+    }).catch(function (e) {
+      drawUse.disabled = false;
+      drawUse.textContent = '✓ Read this box';
+      drawHint.textContent = 'could not set the box: ' + e.message;
+    });
   });
 
   connect();

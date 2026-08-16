@@ -81,11 +81,21 @@ def check(as_json):
 def aim(as_json, port, timeout, min_card=None):
     """Serve the preview and wait for the mount to be good enough, then stop.
 
-    Returns True once the frame has been big enough and sharp enough for several
-    readings in a row.
+    Returns (source, drawn) once the frame has been big enough and sharp enough
+    for several readings in a row — or as soon as the driver draws the box
+    themselves, which is `drawn` and which skips the wait entirely. (None, None)
+    if the camera never came good.
+
+    The hand-drawn box has to work from *here*, not only once scanning: the
+    failure it exists for is a detector that never finds the phone, and this is
+    the phase that never ends when that happens. Nothing gets written, the
+    scanner never starts, and the live page says AIM THE CAMERA until the
+    timeout — with no amount of moving the mount able to fix a reflection the
+    detector prefers to the phone.
     """
     import cv2
     import camera as CAM
+    import cropbox as CX
     import pipeline as PL
     import preview as PV
     from calibrate import MIN_CARD_PIXELS, SHARP_ROI
@@ -94,7 +104,7 @@ def aim(as_json, port, timeout, min_card=None):
         source = PV.Source()
     except CAM.CameraBusy as e:
         emit({'phase': 'error', 'message': str(e)}, as_json)
-        return None
+        return None, None
     focus = getattr(source, 'focus', None)
     if focus and not focus.get('supported'):
         emit({'phase': 'aim', 'message': 'no working autofocus: ' + focus['reason']}, as_json)
@@ -106,9 +116,10 @@ def aim(as_json, port, timeout, min_card=None):
     thread.start()
 
     emit({'phase': 'aim', 'message': 'not calibrated — open /live.html and move the mount '
-          'until this says good. The camera view there is live during aiming; port %d '
+          'until this says good, or draw the box to read yourself with ▣ Set box. '
+          'The camera view there is live during aiming; port %d '
           'serves the same thing as a plain MJPEG stream if you want it full size.'
-          % port, 'previewPort': port}, as_json)
+          % port, 'previewPort': port, 'canDrawBox': True}, as_json)
 
     floor = min_card or MIN_CARD_PIXELS
     good = 0
@@ -116,6 +127,12 @@ def aim(as_json, port, timeout, min_card=None):
     last_report = 0
     try:
         while time.time() - started < timeout:
+            drawn = CX.take_request()
+            if drawn is not None:
+                emit({'phase': 'aim', 'message': 'box drawn by hand — calibrating on it'},
+                     as_json)
+                return source, drawn
+
             frame = source.frame()
             shown, card_px = PV.annotate(frame, source.scale_to_capture, source.lens_position)
 
@@ -153,14 +170,16 @@ def aim(as_json, port, timeout, min_card=None):
 
             if good >= STABLE_READINGS:
                 emit({'phase': 'aim', 'message': 'mount looks good — calibrating'}, as_json)
-                return source
+                return source, None
             time.sleep(STABLE_INTERVAL)
     finally:
         server.shutdown()
 
-    emit({'phase': 'error', 'message': 'gave up waiting for a good frame after %ds' % timeout}, as_json)
+    emit({'phase': 'error', 'message': 'gave up waiting for a good frame after %ds. '
+          'If the outline never sat on the phone, draw the box to read yourself '
+          'with ▣ Set box on /live.html.' % timeout}, as_json)
     source.close()
-    return None
+    return None, None
 
 
 def _aim_hint(card_px, sharp, min_px, min_sharp, spill=()):
@@ -222,18 +241,29 @@ def _measure_exposure(source, quad, as_json):
     return int(chosen), detail
 
 
-def calibrate_from(source, as_json):
-    """Write config.json from the frame the preview is already looking at."""
+def calibrate_from(source, as_json, drawn=None):
+    """Write config.json from the frame the preview is already looking at.
+
+    `drawn` is a box a person put on the live view, as fractions of the frame.
+    Given one, nothing is detected: those corners are the calibration, the crop
+    is pinned to all of them, and the file records that a person chose it so the
+    scanner does not track the box back onto whatever it thinks the screen is.
+    """
     import cv2
+    import numpy as np
+    import cropbox as CX
     import pipeline as PL
     from calibrate import DEFAULT_ROI, card_source_pixels, load_existing
 
     frame = source.frame()
-    quad = PL.detect_screen_quad(frame)
-    if quad is None:
-        emit({'phase': 'error', 'message': 'lost the screen while calibrating'}, as_json)
-        return False
-
+    if drawn is not None:
+        quad = np.array(CX.in_pixels(drawn, (frame.shape[1], frame.shape[0])),
+                        dtype=np.float32)
+    else:
+        quad = PL.detect_screen_quad(frame)
+        if quad is None:
+            emit({'phase': 'error', 'message': 'lost the screen while calibrating'}, as_json)
+            return False
 
     # The preview runs smaller than the scanner captures, so the corners have to
     # be scaled into capture coordinates or every read would be cropped wrong.
@@ -260,6 +290,16 @@ def calibrate_from(source, as_json):
     # Where the screen had drifted to is measured against corners that no
     # longer exist, so it cannot survive a re-aim.
     config.pop('trackedQuad', None)
+    # A box drawn by hand pins the crop and says so, which is three keys that
+    # only make sense together — so they are written in one place, by the module
+    # that also reads them back.
+    roi = DEFAULT_ROI
+    share = None
+    if drawn is not None:
+        CX.apply_to_config(config, drawn, source.capture_size)
+        roi, share = CX.PIN_WHOLE, 1.0
+    else:
+        config.pop(CX.MANUAL_KEY, None)
     with open(CONFIG, 'w') as fh:
         json.dump(config, fh, indent=2)
 
@@ -271,10 +311,17 @@ def calibrate_from(source, as_json):
     # being true when the crop started being placed per read, and this file is
     # the one thing a driver is told to look at before trusting the mount.
     preview_path = os.path.join(HERE, 'config-preview.png')
-    probe = PL.Scanner(quad=quad, roi=DEFAULT_ROI, card_height=900)
+    probe = PL.Scanner(quad=quad, roi=roi, card_height=900, card_share=share)
     checked = probe.read(frame)
     cv2.imwrite(preview_path, checked['card'])
     read = checked['parsed']
+
+    # How much of the sensor the text sits on. Half a screen is the card when
+    # the detector found a screen; all of it is the card when a person drew the
+    # box round one, and putting the same halving on both would report a
+    # hand-drawn box as half the size it is.
+    card_px = int(round((PL.screen_height_px(quad, frame.shape) if drawn is not None
+                         else card_source_pixels(quad, frame.shape)) * scale))
 
     # Say whether the calibration can actually read, while the driver is still
     # standing at the car. "wrote config.json" is not the same claim.
@@ -282,9 +329,11 @@ def calibrate_from(source, as_json):
            % (read['pay'], read['minutes'], read['miles']) if read['complete']
            else 'no offer on the screen to test against — check the preview by eye')
     emit({'phase': 'calibrated',
-          'cardPixels': int(round(card_source_pixels(quad, frame.shape) * scale)),
+          'cardPixels': card_px,
           'read': read['complete'],
-          'message': 'wrote config.json (preview at rpi/config-preview.png); %s' % got}, as_json)
+          'manualBox': drawn is not None,
+          'message': 'wrote config.json (preview at rpi/config-preview.png)%s; %s'
+                     % (' from the box you drew' if drawn is not None else '', got)}, as_json)
     return True
 
 
@@ -338,10 +387,10 @@ def main():
     # preserve settings that are still there to read. Forcing the branch
     # directly leaves the file, and its settings, in place.
     if args.recalibrate or not os.path.exists(CONFIG):
-        source = aim(args.json, args.preview_port, args.aim_timeout, args.min_card)
+        source, drawn = aim(args.json, args.preview_port, args.aim_timeout, args.min_card)
         if source is None:
             return 1
-        ok = calibrate_from(source, args.json)
+        ok = calibrate_from(source, args.json, drawn)
         # The scanner needs the camera, and only one process may hold it.
         source.close()
         time.sleep(1.0)

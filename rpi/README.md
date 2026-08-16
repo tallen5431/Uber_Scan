@@ -41,6 +41,12 @@ It prints what it is doing at each step:
 $10.61/hr PASS  (pay $7.09, 34 min, 3.6 mi)
 ```
 
+**If it never gets past `[aim]`,** the detector cannot see your phone — a
+reflection, a second lit screen, or no dark border to tell the screen from the
+room. Open `/live.html`, press **▣ Set box** and drag a box around the offer
+card: that calibrates the rig on what you drew and starts it scanning. See
+[Draw the box yourself](#draw-the-box-yourself).
+
 Only one process can hold the camera, which is why this is one process rather
 than four scripts to run in the right order. The individual steps still exist —
 `doctor.py`, `preview.py`, `calibrate.py`, `scan_pi.py` — for when you want to
@@ -596,7 +602,7 @@ off-Pi.
 
 | | |
 |---|---|
-| **Green outline** | where the corners are *now* — calibration as the tracker has since moved it, not as it was written down. If it is not hugging the phone's screen, see below. |
+| **Green outline** | where the corners are *now* — calibration as the tracker has since moved it, not as it was written down. If it is not hugging the phone's screen, see below, or draw it yourself with ▣ Set box. |
 | **White inset** | the exact image handed to the reader: de-skewed, cropped to the card, contrast boosted. Literally the reader's own last picture rather than a re-creation of it, so it can lag the outline by a read. If the pay, minutes and miles are legible there, the reader has everything it needs. |
 
 The view refreshes about **seven times a second** while the page is open. That
@@ -676,6 +682,10 @@ Get as close as you like, but leave a margin of something darker down at least
 two opposite sides. On a good mount that is the left and right — the phone runs
 off the top and bottom, and those edges are the map you wanted rid of.
 
+**When no amount of aiming helps, draw the box.** ▣ Set box on `/live.html`
+takes the detector out of it entirely: what you drag is what gets read. See
+[Draw the box yourself](#draw-the-box-yourself).
+
 The view drops to a frame every three seconds when nothing is watching, because
 a live picture is only worth CPU while someone is looking at it. That rate is
 the *preview*; verdicts
@@ -720,6 +730,56 @@ python3 rpi/calibrate.py --corners 135,229,830,134,838,1979,70,1874
 Targets live in the same file — edit `settings` for your `target`, `costPerMile`,
 `pad` and `secondsPerItem`.
 
+## Draw the box yourself
+
+The detector is right almost always and useless in the cases where it is not: a
+windscreen reflection brighter than the phone, a second lit screen, a phone with
+nothing darker around it to be told apart from. None of those can be aimed out
+of. The rig reads a strip of the car indefinitely, reports `corners held` while
+it does, and the fix used to be ssh and eight pixel coordinates guessed off a
+photograph — which is not a fix anyone makes at the roadside.
+
+So say where the card is instead. On **`/live.html`**, press **▣ Set box**, drag
+a box around the offer card in the camera view, and press **✓ Read this box**.
+The green outline moves onto it within a second or two, which is the
+confirmation worth having.
+
+It works during aiming as well as while scanning, and that is the point: when
+the detector never finds the phone, the aiming phase is the one that never ends,
+so a box drawn there is what gets the rig calibrated and scanning at all.
+
+Three things change together, and they only make sense together:
+
+- the corners become the box you drew;
+- **`cropBox` is pinned to all of it** — the automatic path derives a crop
+  *inside* the quad, because it knows the quad is a whole phone screen and cards
+  differ in height. Nothing knows that about a hand-drawn box, and a derived
+  crop would take 15% off the top, which is where the payout is;
+- **corner tracking goes off**, and `config.json` records `manualBox: true` so it
+  stays off across restarts. A tracker judges candidates against a calibrated
+  *screen*; left on, it would refuse everything or, once its stall watchdog
+  fired, move the box back onto whatever it believes the screen is. Undoing the
+  override is the one thing an override must not do.
+
+**⟳ Re-find is the way back.** With a hand-drawn box in force it looks for the
+screen on the next frame and, if it finds one, makes that the calibration and
+turns tracking back on. If it finds nothing it says so and keeps your box —
+throwing it away first would leave the rig reading corners nobody has checked,
+which is the state you drew the box to escape.
+
+Same thing from the command line, for a rig you are already ssh'd into — as
+fractions of the frame, `x,y,w,h`:
+
+```sh
+python3 rpi/calibrate.py --box 0.1,0.35,0.8,0.3
+```
+
+Fractions rather than pixels throughout, deliberately. What you drew on is a
+480px JPEG of a 2328px sensor frame, and corners measured against one size and
+read against another are refused on every check, forever, while the health line
+goes on saying the corners are held — see the note under **Calibrate** about a
+still of the wrong size.
+
 Three keys in `config.json` are about where to look, and they mean different
 things.
 
@@ -732,6 +792,9 @@ things.
   read from the measured geometry. `calibrate.py --full-screen` writes one, and
   you can put a `[x, y, w, h]` box there by hand — the escape hatch if the
   automatic placement ever misbehaves on a mount nobody anticipated.
+- **`manualBox`** says a person drew the corners. Written by ▣ Set box and by
+  `calibrate.py --box`, and it turns corner tracking off for as long as it is
+  there. ⟳ Re-find removes it, along with the `cropBox` pin that came with it.
 
 A pin lives under its own key rather than under `roi` deliberately. Every
 `config.json` written before the crop became derived carries an `roi`, and
@@ -998,11 +1061,13 @@ The Pi parser is a port of the browser one. Both run the same corpus:
 node tests/corpus.test.js       # 130 checks
 python3 rpi/test_parser.py      # the same corpus, plus 146 in all
 python3 rpi/test_accumulate.py  # 65 checks on merging across frames
-python3 rpi/test_pipeline.py    # 116 checks on where, how big, and what to log
+python3 rpi/test_pipeline.py    # 133 checks on where, how big, and what to log
 python3 rpi/test_exposure.py    # 61 checks on flicker, brightness and gain
 python3 rpi/test_track.py       # 71 checks on following the phone
 python3 rpi/test_journal.py     # 49 checks on keeping one row per offer
 python3 rpi/test_calibrate.py   # 30 checks on what calibration may overwrite
+python3 rpi/test_cropbox.py     # 32 checks on a box drawn by hand
+node tests/crop.test.js         # 16 checks on the trip from a drag to that box
 python3 rpi/test_money.py       # 144 checks from a picture of a card to a $/hr
 
 The live view is deliberately smaller than what the scanner reads: 480px at

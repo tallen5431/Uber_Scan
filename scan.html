@@ -14,9 +14,12 @@
   <video id="video" playsinline muted autoplay></video>
   <canvas id="frame" hidden></canvas>
 
-  <!-- Align this box over the offer card on the other phone -->
+  <!-- Align this box over the offer card on the other phone. Drag it, or a
+       corner of it, once ▣ Box has been pressed. -->
   <div id="reticle"><div class="corner tl"></div><div class="corner tr"></div>
     <div class="corner bl"></div><div class="corner br"></div></div>
+
+  <div id="adjustNote" hidden></div>
 
   <section id="verdict" class="verdict empty">
     <div class="verdict-label" id="verdictLabel">POINT AT THE OFFER</div>
@@ -34,6 +37,7 @@
   <nav class="scanbar">
     <button id="btnFreeze" type="button">⏸ Hold</button>
     <label class="filebtn">📷 Photo<input type="file" id="photo" accept="image/*"></label>
+    <button id="btnBox" type="button">▣ Box</button>
     <button id="btnSettings" type="button">⚙︎</button>
     <a class="linkbtn" href="index.html">⌨ Type</a>
   </nav>
@@ -48,6 +52,7 @@
     <label class="row"><span>Pickup padding (min)</span><input type="number" inputmode="numeric" id="setPad" step="1" min="0"></label>
     <label class="row"><span>Seconds per item<small>Shop &amp; Deliver: time the card never counts</small></span><input type="number" inputmode="numeric" id="setItemSecs" step="10" min="0"></label>
     <label class="row"><span>Scan whole frame<small>Off = read only inside the box</small></span><input type="checkbox" id="setFullFrame"></label>
+    <div class="row"><span>Reading box<small>Press ▣ Box, then drag it onto the card</small></span><button type="button" id="setResetBox">Reset</button></div>
     <p class="note" id="engineNote">Reading happens entirely on this device.</p>
   </div>
 </div>
