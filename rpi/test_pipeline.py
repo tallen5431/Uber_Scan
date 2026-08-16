@@ -381,6 +381,54 @@ eq('and it is reused, not multiplied',
 back = cv2.imread(staged, cv2.IMREAD_GRAYSCALE)
 eq('the staged image survives the round trip', back.shape, (90, 40))
 
+# --- the live view, which no longer costs a sensor frame -------------------
+# A preview is a 480px thumbnail of a car interior with a box drawn on it, and
+# it was being made by copying twelve megabytes of sensor and throwing 99% of it
+# away, up to fourteen times a second. The preview stream is already in hand and
+# already about the right size — but the corners are stored in capture
+# coordinates, so the box only lands in the right place if they come down by the
+# same ratio. Getting that wrong would draw a wandering outline on a rig whose
+# tracking was perfectly fine, so the two paths are compared directly.
+sensor = np.full((1748, 2328, 3), 30, np.uint8)
+sensor[300:1500, 700:1400] = 220
+small = cv2.cvtColor(cv2.resize(sensor, (640, 480), interpolation=cv2.INTER_AREA),
+                     cv2.COLOR_BGR2GRAY)
+sensor_quad = np.float32([[700, 300], [1400, 300], [1400, 1500], [700, 1500]])
+preview_scale = np.float32([2328 / 640.0, 1748 / 480.0])
+
+from_sensor = PL.snapshot(sensor, sensor_quad, [0, 0.2, 1, 0.6], width=480)
+from_preview = PL.snapshot(cv2.cvtColor(small, cv2.COLOR_GRAY2BGR),
+                           sensor_quad / preview_scale, [0, 0.2, 1, 0.6],
+                           width=480, warp_card=False)
+eq('both paths make the same size of picture', from_preview.shape, from_sensor.shape)
+
+
+def green_box(view):
+    """Where the outline was drawn, as (x0, x1, y0, y1)."""
+    g = (view[:, :, 1].astype(int)
+         - np.maximum(view[:, :, 0], view[:, :, 2]).astype(int)) > 40
+    ys, xs = np.nonzero(g)
+    return xs.min(), xs.max(), ys.min(), ys.max()
+
+
+ok_('the preview draws its outline in the same place as the sensor would',
+    all(abs(a - b) <= 1 for a, b in zip(green_box(from_preview), green_box(from_sensor))))
+# ...and it does not invent an inset. The inset is the one part of this picture
+# anybody reads detail from, so a soft one warped out of a 640px preview looks
+# exactly like a focus problem that is not there.
+ok_('the sensor path insets the card it warped', from_sensor[-20:, -20:].std() > 0)
+inset = from_preview[-40:, -40:]
+ok_('the preview path leaves the inset off until a real read has made one',
+    inset.std() < 1.0)
+# But it will show one it is *given*, since that came from the reader.
+card = np.full((900, 600), 200, np.uint8)
+card[100:200] = 20
+with_card = PL.snapshot(cv2.cvtColor(small, cv2.COLOR_GRAY2BGR),
+                        sensor_quad / preview_scale, [0, 0.2, 1, 0.6],
+                        width=480, card=card, warp_card=False)
+ok_("...but does show the reader's own picture when there is one",
+    with_card[-40:, -40:].std() > 1.0)
+
 # --- the live picture, written where a server may be reading it ------------
 import tempfile                                               # noqa: E402
 

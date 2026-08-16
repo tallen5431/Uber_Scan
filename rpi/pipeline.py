@@ -459,7 +459,8 @@ def resize_height(image, height):
                       interpolation=cv2.INTER_CUBIC if scale > 1 else cv2.INTER_AREA)
 
 
-def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640, card=None):
+def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640, card=None,
+             warp_card=True):
     """One image that answers "is it looking at the right thing?".
 
     The whole frame with the calibrated corners drawn on it, and inset, the
@@ -489,6 +490,14 @@ def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640, card=None):
 
     if quad is not None:
         if card is None:
+            # `warp_card` is False when the frame handed here is the preview
+            # stream rather than the sensor. Warping that would produce an inset
+            # at a fraction of the reader's resolution, and the inset is the one
+            # part of this picture a person reads detail from — a soft one looks
+            # exactly like a focus problem, so the honest thing is no inset at
+            # all until a real read has made one.
+            if not warp_card:
+                return view
             card = preprocess(crop(warp(frame, quad, card_height), roi))
         if card.ndim == 2:
             card = cv2.cvtColor(card, cv2.COLOR_GRAY2BGR)

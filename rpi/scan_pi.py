@@ -230,20 +230,34 @@ def _read_failed(exc):
 _snapshot_error = None
 
 
-def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None):
+def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None):
     """Write what the camera sees, for the live page. Never fatally.
 
     `quad` overrides the calibrated corners so the outline follows the tracker
     rather than lagging behind it, `roi` is the box being read, and `card` is
     the reader's own last picture, which saves warping another one.
+
+    `scale` says the frame is the preview stream rather than the sensor, and by
+    how much — the corners are stored in capture coordinates, so they have to
+    come down onto the smaller picture. See the call site for why that is worth
+    doing: the sensor frame exists to be read, and copying twelve megabytes of
+    it to make a 480px thumbnail is most of what the live view costs.
     """
     global _snapshot_error
     try:
         if quad is None:
             quad = np.array(cfg['quad'], dtype=np.float32)
+        if scale is not None:
+            quad = np.asarray(quad, dtype=np.float32) / np.asarray(scale, dtype=np.float32)
+        if frame.ndim == 2:
+            # The outline is drawn in green and the preview stream is luma, so
+            # it has to become a colour picture before anything coloured goes on
+            # it — otherwise the box comes out grey on grey.
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
         view = PL.snapshot(frame, quad, roi,
                            cfg.get('cardHeight', 900),
-                           width=SNAPSHOT_WIDTH, card=card)
+                           width=SNAPSHOT_WIDTH, card=card,
+                           warp_card=scale is None)
     except Exception as e:
         message = str(e)
     else:
@@ -644,6 +658,7 @@ def main():
                                      count=LORES[0] * LORES[1]).reshape((LORES[1], LORES[0]))
                 now = time.time()
                 do_read = scanner.should_read(luma)
+                moved = False           # did the corners shift on this frame?
 
                 # Re-find the phone on this same small frame. A mount is not a
                 # clamp, and corners a centimetre out slide the crop off the
@@ -677,6 +692,21 @@ def main():
                         # which is the calibration and is written only by
                         # calibrate.py / autopilot.py.
                         cfg['trackedQuad'] = [[float(x), float(y)] for x, y in tracker.quad]
+                    # A re-lock is a different rectangle, so it is a different
+                    # picture to read as surely as a different picture would be
+                    # — and the motion gate cannot see it, because it watches
+                    # the frame and the frame did not change. Without this the
+                    # read that finally uses the corrected box waits for the
+                    # resample tick, or for the driver to move something.
+                    #
+                    # Only a re-lock. The ordinary path eases 35% of the way to
+                    # the candidate on each check and reports every one of those
+                    # steps as a move, so treating "moved" as "read again" put
+                    # fourteen reads through one stationary card where two had
+                    # done. A few pixels of drift does not invalidate the read
+                    # that just happened; being on a different phone does.
+                    if tracker.jumps > jumps_before or tracker.rebaselines > rebased_before:
+                        moved = do_read = True
                     if tracker.rebaselines > rebased_before:
                         health.rebaselines += 1
                         log('corners un-stuck: the screen in front of the camera '
@@ -757,14 +787,50 @@ def main():
                 if not do_read and now < resample_until and (now - last_resample) > RESAMPLE_EVERY:
                     do_read = True
                     last_resample = now
+
+                # ...but not while the outline is visibly on the wrong thing.
+                #
+                # This is the loop's one real inefficiency, and it is a feedback
+                # loop rather than a waste: a read costs several hundred
+                # milliseconds during which nothing else in this loop runs —
+                # including the tracker, whose 0.4s recheck is what would fix
+                # the corners. So reading a crop taken from corners the detector
+                # can already see are wrong does not merely throw the read away,
+                # it postpones the correction that would have made the next one
+                # good. A rig reached its verdict after 5.7 seconds and eight
+                # reads, seven of them of the rectangle being replaced.
+                #
+                # A move above overrides this, because the whole point of
+                # waiting is to read the moment the corners arrive.
+                if do_read and not moved and tracker is not None \
+                        and tracker.disputing(now):
+                    do_read = False
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.
                 due = args.snapshot and (now - last_snapshot) > snapshot_interval()
                 if not do_read and not due:
                     continue
-                # picamera2's "RGB888" hands back B, G, R ordered arrays, which
-                # is exactly what OpenCV expects. The name is the odd one out.
-                frame = request.make_array('main')
+                # The sensor frame is copied only when something is going to
+                # *read* it. A live view is a 480px thumbnail of a car interior
+                # with a box drawn on it, and it was being made by copying
+                # twelve megabytes of sensor and throwing 99% of it away — 8ms
+                # of pure memory traffic on this machine, and a good deal more
+                # on a Pi, at up to fourteen frames a second. The preview stream
+                # is already in hand, already the right sort of size, and the
+                # only thing lost is colour in a picture nobody reads colour
+                # from. The reader still gets the sensor, at full resolution.
+                if do_read:
+                    # picamera2's "RGB888" hands back B, G, R ordered arrays,
+                    # which is exactly what OpenCV expects. The name is the odd
+                    # one out.
+                    frame, preview_scale = request.make_array('main'), None
+                else:
+                    # Copied, because `luma` is a view onto the request's own
+                    # buffer and the request is released a few lines below —
+                    # after which that memory goes back to the camera to be
+                    # filled again. 300KB, against the 12MB this branch exists
+                    # to avoid.
+                    frame, preview_scale = luma.copy(), track_scale
             finally:
                 request.release()
 
@@ -785,7 +851,8 @@ def main():
 
             if args.snapshot and (due or do_read):
                 write_snapshot(frame, cfg, args.snapshot, quad=scanner.quad,
-                               roi=scanner.crop_box, card=previous_card)
+                               roi=scanner.crop_box, card=previous_card,
+                               scale=preview_scale)
                 last_snapshot = time.time()
 
             if not do_read:

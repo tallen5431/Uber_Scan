@@ -64,6 +64,23 @@ RECHECK_EVERY = 0.4
 # work harder to be believed, not less.
 AGREE = 5
 
+# ...except on the centre path, which does not need five, and where the wait is
+# most of what a driver feels as "slow".
+#
+# That path fires on three independent conditions at once: the candidate holds
+# the middle of the frame, the corners do not, and the shape still matches the
+# calibration. To fool it you would need a phone-shaped bright thing dead centre,
+# holding still, at a moment when the outline is already off the middle — and
+# being off the middle is itself the fault being corrected. It is also
+# self-limiting: the move puts the corners on the centre, and the path's second
+# condition then refuses to fire again, so it cannot oscillate.
+#
+# Five checks on top of that is evidence bought twice. Measured against a
+# simulated loop with a Pi's read costs, dropping to two takes a re-lock from
+# 3.6s to 2.0s — and the greater part of that saving is not the 1.2s of waiting,
+# it is the reads that no longer happen on the old rectangle while it waits.
+CENTRE_AGREE = 2
+
 # How far a candidate may sit from the current corners and still count as the
 # same screen, as a fraction of the screen's own diagonal.
 MAX_JUMP = 0.22
@@ -113,6 +130,19 @@ RECOVER_AFTER = 30.0
 # shorter than the recovery itself.
 STALL_VISIBLE = 5.0
 
+# How long a disputed outline is worth waiting for before reading anyway.
+#
+# While the detector can see a screen that is not where the corners are, the
+# crop is being taken from a rectangle already known to be wrong, and reading it
+# is not merely wasted — a read blocks the loop, and the loop is what runs the
+# tracker, so it delays the correction it is waiting on. A rig took eight reads
+# to produce one verdict and seven of them were of the old rectangle.
+#
+# Bounded, because "the detector can see something" is not proof it is the
+# phone, and a scanner that will not read until it is happy is worse than one
+# that reads a bad crop. Two seconds is about one re-lock; past that, read.
+DISPUTE_PATIENCE = 2.0
+
 
 class QuadTracker:
     """Follows the phone screen, starting from a calibrated quad.
@@ -127,7 +157,8 @@ class QuadTracker:
 
     def __init__(self, quad, scale=1.0, recheck=RECHECK_EVERY, agree=AGREE, ease=EASE,
                  save_drift=SAVE_DRIFT, save_every=SAVE_EVERY, calibrated=None,
-                 recover_after=RECOVER_AFTER):
+                 recover_after=RECOVER_AFTER, centre_agree=CENTRE_AGREE,
+                 dispute_patience=DISPUTE_PATIENCE):
         self.quad = np.asarray(quad, dtype=np.float32).reshape(4, 2)
         self.saved = self.quad.copy()
         # The screen as *calibrated*, which is not always where tracking starts.
@@ -153,6 +184,8 @@ class QuadTracker:
             self.scale = np.array([self.scale[0], self.scale[0]], dtype=np.float32)
         self.recheck = recheck
         self.agree = agree
+        self.centre_agree = min(centre_agree, agree)
+        self.dispute_patience = dispute_patience
         self.ease = ease
         self.save_drift = save_drift
         self.save_every = save_every
@@ -167,6 +200,7 @@ class QuadTracker:
         self.resets = 0         # times the driver asked for a fresh start
         self.agreeing = 0
         self._candidate = None
+        self._disputed_since = None  # when the corners were last visibly wrong
         self._last_check = None     # None, not 0, so the first check is always due
         self._last_save = 0.0
         # The screen the corners are *not* on, and how long that has been true.
@@ -187,6 +221,7 @@ class QuadTracker:
             self.misses += 1
             self.agreeing = 0
             self._candidate = None
+            self._disputed_since = None
             self._forget_stall()
             return False
         candidate = candidate * self.scale
@@ -196,6 +231,16 @@ class QuadTracker:
                       and near(candidate, self._candidate, SETTLE))
         self.agreeing = self.agreeing + 1 if consistent else 1
         self._candidate = candidate
+
+        # "There is a screen there, and it is not where the corners are." Noted
+        # here rather than derived by the caller, because the caller would have
+        # to reach into the candidate to ask — and because this is precisely the
+        # window in which reading the crop reads a rectangle already known to be
+        # wrong. See disputing().
+        if near(candidate, self.quad, MAX_JUMP):
+            self._disputed_since = None
+        elif self._disputed_since is None:
+            self._disputed_since = now
 
         # Before the gate, because the gate is one of the things that can be
         # wrong. See _stalled.
@@ -226,7 +271,7 @@ class QuadTracker:
         # screen from the Accept bar under it — but size deliberately does not,
         # since a size the calibration refuses is exactly the state that leaves
         # the corners stuck with no way out.
-        if self._holds_the_centre(candidate, frame) and self.agreeing >= self.agree:
+        if self._holds_the_centre(candidate, frame) and self.agreeing >= self.centre_agree:
             self.quad = np.asarray(candidate, dtype=np.float32)
             self.calibrated = self.quad.copy()
             self.agreeing = 0
@@ -249,6 +294,11 @@ class QuadTracker:
         if not self.looks_like_the_screen(candidate):
             self.agreeing = 0
             self._candidate = None
+            # Nor is there anything to dispute: a candidate the gate refuses is
+            # not evidence that the corners are wrong, and holding reads on it
+            # would stall the scanner every time a bright thing crossed the
+            # frame — which is the whole reason the gate exists.
+            self._disputed_since = None
             return False
 
         if near(candidate, self.quad, MAX_JUMP):
@@ -299,6 +349,26 @@ class QuadTracker:
             return False        # already on it; nothing to correct
         return same_shape(candidate, self.calibrated)
 
+    def disputing(self, now=None):
+        """True while a re-lock is being argued, and worth waiting out.
+
+        The caller's question is "should I read right now?", and while this is
+        true the answer is no: the crop is a fraction of the corners, the
+        detector can see that the corners are on the wrong thing, and a read
+        takes several hundred milliseconds of a small computer's whole
+        attention. Worse than wasted — the loop that would fix the corners is
+        the loop the read is blocking, so each wasted read pushes the correction
+        further out. A rig produced one verdict from eight reads, seven of them
+        of the rectangle it was in the middle of replacing.
+
+        Bounded by dispute_patience, so a detector that never converges costs a
+        couple of seconds rather than the whole shift.
+        """
+        if self._disputed_since is None:
+            return False
+        now = time.time() if now is None else now
+        return now - self._disputed_since < self.dispute_patience
+
     def start_over(self):
         """Forget where the screen has got to, and go back to the calibration.
 
@@ -310,6 +380,7 @@ class QuadTracker:
         self.quad = self.calibrated.copy()
         self.agreeing = 0
         self._candidate = None
+        self._disputed_since = None
         self.misses = 0
         self.resets += 1
         self._forget_stall()

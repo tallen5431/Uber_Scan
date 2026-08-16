@@ -458,6 +458,80 @@ settle(tr, frame_with_phone(460, 180), 10, t0=100.0, step=0.5)
 ok_('and it tracks again afterwards',
     T.distance(tr.quad, quad_at(460, 180)) < 15.0)
 
+# --- saying when the outline is visibly on the wrong thing -------------------
+# The caller's question is "should I read right now?", and while a re-lock is
+# being argued the answer is no. A read is several hundred milliseconds of the
+# loop that would fix the corners, so reading a rectangle already known to be
+# wrong does not merely waste the read — it postpones the correction. A rig
+# reached one verdict from eight reads, seven of them of the old rectangle.
+tr = T.QuadTracker(start.copy(), calibrated=start.copy())
+ok_('nothing is disputed before anything has been seen', not tr.disputing(0.0))
+tr.update(frame_with_phone(400, 140), now=1.0)
+ok_('...nor when the phone is where the corners are', not tr.disputing(1.0))
+
+far = (400 + int(T.MAX_JUMP * SPAN) + 60, 140)
+tr = T.QuadTracker(start.copy(), calibrated=start.copy())
+tr.update(frame_with_phone(*far), now=1.0)
+ok_('a screen well away from the corners is a dispute', tr.disputing(1.0))
+ok_('...and it does not last forever', not tr.disputing(1.0 + T.DISPUTE_PATIENCE))
+
+# An empty mount is not a dispute — there is nothing to argue with.
+tr.update(np.full((H, W, 3), 22, np.uint8), now=2.0)
+ok_('no screen at all is not a dispute', not tr.disputing(2.0))
+
+# Nor is a candidate the shape gate refuses. Holding reads on one of those would
+# stall the scanner every time something bright crossed the frame, which is the
+# whole reason the gate exists.
+tr = T.QuadTracker(start.copy(), calibrated=start.copy())
+tr.update(frame_with_phone(far[0], far[1], size=(PHONE[0] // 3, PHONE[1] // 3)), now=1.0)
+ok_('a candidate the gate refuses is not a dispute', not tr.disputing(1.0))
+
+# And once the corners are on it, the argument is over.
+tr = T.QuadTracker(start.copy(), calibrated=start.copy())
+settle(tr, frame_with_phone(*far), 10, step=0.5)
+ok_('the corners followed the phone', T.distance(tr.quad, quad_at(*far)) < 30.0)
+ok_('...and nothing is disputed any more', not tr.disputing(5.0))
+
+# --- the centre path does not need five checks -------------------------------
+# It fires on three independent conditions at once — the candidate holds the
+# middle of the frame, the corners do not, and the shape still matches the
+# calibration — and it cannot oscillate, because the move puts the corners on
+# the centre and the second condition then refuses to fire again. Five checks on
+# top of that is evidence bought twice, and the wait is most of what a driver
+# feels as "slow".
+ok_('the centre bar is lower than the general one', T.CENTRE_AGREE < T.AGREE)
+
+middle = ((W - PHONE[0]) // 2, (H - PHONE[1]) // 2)
+corner = quad_at(20, 20)
+tr = T.QuadTracker(corner.copy(), calibrated=corner.copy())
+centred = frame_with_phone(*middle)
+checks = 0
+while checks < 10:
+    checks += 1
+    if tr.update(centred, now=0.5 * checks):
+        break
+eq('a phone in the middle is taken after CENTRE_AGREE checks', checks, T.CENTRE_AGREE)
+eq('...and it is recorded as the centre rule', tr.centred, 1)
+ok_('...landing on the phone', T.distance(tr.quad, quad_at(*middle)) < 30.0)
+# Self-limiting: the corners now hold the centre, so the rule has nothing left
+# to correct and cannot keep firing.
+before = tr.centred
+settle(tr, centred, 6, t0=100.0, step=0.5)
+eq('...and then stops firing, because the corners hold the centre now',
+   tr.centred, before)
+
+# The lower bar must not become a way for a general re-lock to sneak through on
+# two checks: a phone that does *not* hold the centre still argues its case in
+# full.
+off = quad_at(20, 20)
+tr = T.QuadTracker(off.copy(), calibrated=off.copy())
+away = (W - PHONE[0] - 20, H - PHONE[1] - 20)
+moves = 0
+for i in range(T.CENTRE_AGREE):
+    if tr.update(frame_with_phone(*away), now=0.5 * (i + 1)):
+        moves += 1
+eq('a phone nowhere near the middle still needs the full agreement', moves, 0)
+
 # --- geometry ---------------------------------------------------------------
 eq('distance of a quad to itself', T.distance(start, start), 0.0)
 eq('shifting by 10px reads as 10px', round(T.distance(start, quad_at(410, 140))), 10.0)
