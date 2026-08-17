@@ -377,44 +377,71 @@
     }
     el.advice.hidden = false;
 
-    var suggested = a.suggested;
-    var earns = a.suggestedEarns;
-    var now = a.current;
-    var gap = (now && earns) ? earns.earned - now.earned : null;
+    var band = a.low === a.high ? money(a.low) : money(a.low) + '–' + money(a.high);
+    var inRange = target >= a.low && target <= a.high;
 
     var lead;
-    if (Math.abs(suggested - target) < 1) {
-      lead = 'Your target of <b>' + money(target) + '/hr</b> is about right for '
-           + 'what this market has been offering.';
+    if (a.currentTakesNothing) {
+      // The strongest thing this can ever say, and it must not be softened. A
+      // line nothing clears is not a strict standard, it is a parked car.
+      lead = '<b>Nothing in this stretch cleared ' + money(target) + '/hr.</b> '
+           + 'A line nothing reaches is not a high standard, it is a shift spent '
+           + 'waiting. These offers point at <b>' + band + '/hr</b>.';
+    } else if (inRange) {
+      lead = 'Your target of <b>' + money(target) + '/hr</b> sits inside the best '
+           + 'range these offers point at — <b>' + band + '/hr</b>. Nothing to change.';
     } else {
-      lead = 'These offers suggest a target nearer <b>' + money(suggested) + '/hr</b>'
-           + ' than <b>' + money(target) + '/hr</b>.';
-      // Only claimed when it is worth acting on. Below a dollar an hour this is
-      // arithmetic noise dressed up as advice, and telling somebody to change
-      // how they work for it would be worse than saying nothing.
-      if (gap !== null && gap >= 1) {
-        lead += ' Holding out for ' + money(target) + ' would have earned about <b>'
-              + money(now.earned) + '/hr</b>; drawing the line at ' + money(suggested)
-              + ', about <b>' + money(earns.earned) + '/hr</b>.';
+      lead = 'These offers point at <b>' + band + '/hr</b> rather than <b>'
+           + money(target) + '/hr</b>.';
+      // Claimed only when it is worth acting on. Under 5% is arithmetic noise
+      // dressed as advice, and telling somebody to change how they work for it
+      // would be worse than saying nothing.
+      if (a.gain !== null && a.gain >= 0.05) {
+        lead += ' Replayed against these offers that is about <b>+'
+              + Math.round(a.gain * 100) + '%</b> an hour.';
       }
-      if (suggested < target) {
-        lead += ' The offers above your line really are better — there are not '
-              + 'enough of them to fill a shift, and the waiting is not free.';
-      }
+      lead += target > a.high
+        ? ' The offers above your line really are better — there are not enough '
+          + 'of them to fill the time, and the waiting is not free.'
+        : ' You are taking work that is holding you up: a cheap job occupies the '
+          + 'slot a better one would have arrived in.';
     }
     el.adviceLead.innerHTML = lead;
 
-    el.adviceWorking.innerHTML =
-      'From <b>' + a.offers + '</b> offers over <b>' + a.hours.toFixed(1)
-      + '</b> hours of scanning, arriving about <b>' + Math.round(a.offersPerHour)
-      + '</b> an hour. At ' + money(suggested) + ' you would take <b>'
-      + Math.round(earns.takes * 100) + '%</b> of them, waiting about <b>'
-      + Math.round(earns.waitMinutes) + '</b> min between trips of <b>'
-      + Math.round(earns.tripMinutes) + '</b> min.'
-      + ' Some of those offers arrived while you were already carrying somebody '
-      + 'and were never yours to take — that cannot be told apart here, and it '
-      + 'is why this leans low. On the optimistic reading the line would be '
-      + money(a.optimistic.target) + '.';
+    // The working, and the two things it is careful not to claim: an hourly
+    // figure, and that this was one continuous shift.
+    var runs = a.runs === 1 ? '1 run of scanning'
+                            : a.runs + ' separate runs of scanning';
+    var working =
+      'From <b>' + a.offers + '</b> offers across <b>' + runs + '</b>, <b>'
+      + a.hours.toFixed(1) + '</b> hours in total — not one continuous shift, and '
+      + 'not all of it driving. Replaying those offers in the order they arrived '
+      + 'and taking the first one at or above ' + money(a.suggested)
+      + ' whenever free gives <b>' + a.trips + '</b> trips.';
+
+    working += a.stable
+      ? ' The same answer comes out however the recording is split into runs '
+        + '(checked from ' + A_MIN(a) + ' to ' + A_MAX(a) + ' minutes), which is '
+        + 'why it is worth acting on.'
+      : ' <b>The answer moves depending on how the recording is split</b>, so '
+        + 'treat it as a hint rather than a finding — more shifts will settle it.';
+
+    // Deliberately no dollars-per-hour. It depends entirely on how much of the
+    // recorded time was really driving, which nothing here knows: on the data
+    // this was built from that figure ranged from $26 to $78 while the line it
+    // recommends never moved off $20.
+    working += ' The <em>line</em> is what this can tell you; what you would '
+             + 'actually earn an hour depends on how much of that time was '
+             + 'driving rather than parked, which the scanner cannot see.';
+
+    el.adviceWorking.innerHTML = working;
+  }
+
+  function A_MIN(a) {
+    return Math.min.apply(null, a.checkedAt.map(function (c) { return c.minutes; }));
+  }
+  function A_MAX(a) {
+    return Math.max.apply(null, a.checkedAt.map(function (c) { return c.minutes; }));
   }
 
   function render(data) {
