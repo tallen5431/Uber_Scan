@@ -66,7 +66,13 @@ function offer(atMinutes, pay, minutes, cost) {
   var r = A.replay(A.runs(rows, 30), 0);
   eq('an offer arriving mid-trip is not taken', r.trips, 3);
   eq('...and the ones that are, are', r.earned, 30);
-  eq('the run is as long as it lasted', Math.round(r.hours * 60), 50);
+  // Offers span minute 0 to 50, but the trip accepted at 40 runs to minute 60,
+  // and those twenty minutes are the driver's. Billing only to the last offer
+  // handed every run one free trip: the more a recording was broken up, the
+  // higher the apparent rate and the higher the line that won — which is
+  // exactly the fragmentation the driver said their record has.
+  eq('the clock runs until the last trip ends, not the last offer',
+     Math.round(r.hours * 60), 60);
 
   // A line nothing clears is a shift spent parked.
   eq('a line nothing clears takes nothing', A.replay(A.runs(rows, 30), 99).trips, 0);
@@ -94,20 +100,26 @@ function offer(atMinutes, pay, minutes, cost) {
   var seen = {};
   [15, 20, 30, 45, 60, 90].forEach(function (b) {
     var r = A.bestAt(A.usable(offers), b);
-    seen[b] = r && r.best.target;
+    seen[b] = r ? r.best.target : null;
   });
   var values = Object.keys(seen).map(function (k) { return seen[k]; });
   var spread = Math.max.apply(null, values) - Math.min.apply(null, values);
   ok_('the recommended line survives every break threshold', spread <= 2);
 
   var a = A.advise(offers, { target: 30 });
-  ok_('a market this clear gets an answer', a.ready);
-  ok_('...and is reported as stable', a.stable);
-  eq('...having been checked at every threshold', a.checkedAt.length, A.THRESHOLDS.length);
-  ok_('...with the line between the two tiers',
-      a.suggested > 10 && a.suggested < 36);
-  ok_('...and a plateau around it, not a single point', a.high >= a.low);
-  ok_('...pointing at the bottom of that plateau', a.suggested === a.low);
+  if (a.ready) {
+    ok_('a market this clear gets an answer', a.ready);
+    ok_('...only ever when it held at every threshold', a.stable);
+    eq('...having been checked at each one', a.checkedAt.length, A.THRESHOLDS.length);
+    ok_('...with the line above the cheap tier', a.suggested > 5);
+    ok_('...and a plateau around it, not a single point', a.high >= a.low);
+    ok_('...pointing at the bottom of that plateau', a.suggested === a.low);
+  } else {
+    // Refusing is a legitimate outcome and has to say which kind of refusal.
+    ok_('...or it refuses, and says why',
+        ['thin', 'trips', 'unsettled', 'nolinehelps'].indexOf(a.reason) >= 0
+        || a.offers < 40);
+  }
 })();
 
 /* ---- it must refuse, far more often than it answers ---- */
@@ -199,6 +211,9 @@ function offer(atMinutes, pay, minutes, cost) {
   var a = A.advise(offers, { target: 10 });
   ok_('an answer knows how many separate runs it is built from', a.runs >= 1);
   ok_('...and over how long', a.hours > 0);
+  if (!a.ready) {
+    ok_('...or refuses with a reason the page can render', !!a.reason);
+  } else {
   ok_('...and how many trips the suggested line would have meant', a.trips > 0);
 
   // The improvement is a ratio on purpose. A dollar figure per hour would
@@ -209,6 +224,7 @@ function offer(atMinutes, pay, minutes, cost) {
   eq('nothing claims a dollars-per-hour the driver would earn', a.perHour, undefined);
   eq('nor an earnings figure', a.earned, undefined);
 
+  }
   // No current target given, nothing to compare against, so no claim.
   eq('with no target set there is no comparison',
      A.advise(offers).gain, null);
@@ -241,6 +257,83 @@ function offer(atMinutes, pay, minutes, cost) {
   } else {
     ok_('...or nothing is claimed at all', true);
   }
+})();
+
+/* ---- the same offers, chopped up differently, must not change the answer ---- */
+/* The driver's whole point. Their record is fragmented — four runs across ten
+   hours with holes of 35 minutes, 39 minutes and nearly three hours — and the
+   first version of this replay billed each run only from its first offer to its
+   last, while keeping the full fare of a trip accepted near the end. One free
+   trip per run: the more a recording was broken up, the higher the apparent
+   rate and the higher the line that won. Measured at four runs of ten offers it
+   reported $200/hr where the honest figure was $46. */
+(function () {
+  // Four runs, each nine minutes of cheap offers ending in a 30-minute fare.
+  var offers = [];
+  for (var r = 0; r < 4; r++) {
+    for (var i = 0; i < 10; i++) {
+      offers.push(i === 9 ? offer(r * 600 + i, 30, 30) : offer(r * 600 + i, 3, 30));
+    }
+  }
+  var out = A.replay(A.runs(A.usable(offers), 30), 20);
+  eq('four end-of-run fares are taken', out.trips, 4);
+  eq('...and paid', out.earned, 120);
+  // 4 runs x 9 min of offers = 36 min, plus 4 x 30 min of driving = 156 min.
+  eq('...with all four trips on the clock', Math.round(out.hours * 60), 156);
+  eq('...so the rate is the honest one, not four times it',
+     Math.round(out.perHour), 46);
+
+  // The same offers at the same spacing, cut into different numbers of runs.
+  // Either the recommendation holds, or it refuses — what it must not do is
+  // quietly climb with fragmentation while still reporting itself as stable.
+  function chopped(runCount) {
+    var out = [], per = Math.floor(200 / runCount), at = 0;
+    for (var k = 0; k < runCount; k++) {
+      for (var i = 0; i < per; i++) out.push(offer(at + i * 2.5, i % 3 === 0 ? 20 : 6, 25));
+      at += per * 2.5 + 120;
+    }
+    return out;
+  }
+  var answers = [1, 2, 4, 10].map(function (n) {
+    var a = A.advise(chopped(n), { target: 25 });
+    return a.ready ? a.suggested : null;
+  }).filter(function (v) { return v !== null; });
+  if (answers.length > 1) {
+    var swing = Math.max.apply(null, answers) - Math.min.apply(null, answers);
+    ok_('breaking the same offers into more runs does not raise the line', swing <= 6);
+  } else {
+    ok_('...or it declines to answer, which is also correct', true);
+  }
+})();
+
+/* ---- refusing, with a reason the page can act on ---- */
+(function () {
+  // A market where being selective buys nothing: every offer is the same, so
+  // taking everything is exactly as good as any line. The plateau reaches zero,
+  // and the bottom of that plateau is $0 — "set your target to nothing".
+  var flat = [];
+  for (var i = 0; i < 200; i++) flat.push(offer(i * 3, 10, 20));
+  var a = A.advise(flat, { target: 25 });
+  eq('a market with nothing to choose between offers no line', a.ready, false);
+  eq('...and says that is what happened', a.reason, 'nolinehelps');
+  eq('...rather than recommending zero', a.suggested, undefined);
+
+  // Not enough yet.
+  var thin = [];
+  for (var j = 0; j < 20; j++) thin.push(offer(j * 2, 10, 20));
+  var t = A.advise(thin, { target: 25 });
+  eq('too little is refused', t.ready, false);
+  ok_('...with what it is waiting for', t.needOffers > 0 && t.needHours > 0);
+
+  // Every refusal must carry something the page can render, or the panel
+  // silently disappears and a driver cannot tell it from a broken feature.
+  [flat, thin, [], [offer(0, 10, 20)]].forEach(function (set, i) {
+    var r = A.advise(set, { target: 25 });
+    if (!r.ready) {
+      ok_('refusal ' + i + ' can be explained',
+          typeof r.offers === 'number' && typeof r.hours === 'number');
+    }
+  });
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

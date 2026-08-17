@@ -998,20 +998,42 @@ earned per hour  =   average net pay of the offers at or above the line
                      average wait for one   +   average trip length
 ```
 
-Raising the line raises the top and the wait underneath it. **Where to draw the
-line** on the offers page works this out from the journal and shows the answer,
-its working, and what your current target is costing. From one 6.5-hour run of
-231 offers it put the line at $19 rather than $25 — about $2/hr.
+Estimating that wait is where the first version of this went wrong, and the way
+it went wrong is worth recording. It fitted a renewal-reward model, which needs
+an arrival rate, which needs a number of minutes separating "waiting for an
+offer" from "not driving". On one real 234-offer recording that constant moved
+the answer from 30 offers/hour to 88 as it went from 45 minutes to 5. Everything
+downstream inherited it.
 
-It leans low on purpose. Some of the offers it counted arrived while the car was
-already carrying somebody and were never available; nothing can tell those apart
-here, and the error runs one way — it makes the market look busier, waiting look
-cheaper, and the line look higher than it should be. So it computes the answer
-at the observed rate and again at half of it, and recommends the lower. Where
-the two agree, the answer does not depend on the thing that cannot be measured.
+The gaps say why. Half are under thirty seconds and ninety per cent under two
+and a half minutes; then a cliff, and thirteen gaps of fifteen to forty minutes.
+That second group is not the market going quiet — it is the length of a trip,
+with no card on the screen to read.
 
-It says nothing below 40 offers or two hours of scanning, and nothing when the
-difference is under a dollar an hour.
+So **Where to draw the line** estimates nothing. It replays the real stream of
+offers in the order they arrived: when free, take the first at or above the
+line, then be busy exactly as long as that offer said, ignoring what arrives
+meanwhile — which is what actually happened to the offers that came in during a
+trip. The clock runs until the last trip *finishes*, not until the last offer
+appeared; without that, every run got one free trip and a recording broken into
+more pieces produced a higher line from the same offers.
+
+**It refuses far more often than it answers,** and each refusal says which:
+
+| | |
+|---|---|
+| not enough yet | under 40 offers, two hours, or six trips |
+| unsettled | the line moves by more than $6 depending on how the recording is split — it shows the range and waits for more shifts |
+| nothing to choose | taking everything earned within 5% of any line, so there is no line to draw |
+
+On one 10-hour recording of 231 offers it refuses: split at 15 minutes the best
+line is $33, at 45 minutes it is $20. That spread *is* the finding — one
+recording is not enough — and an earlier build reported $20 confidently because
+of the free-trip bug above.
+
+What it will never report is a dollars-per-hour you would earn. That depends
+entirely on how much of the recorded time was driving rather than parked, which
+the scanner cannot see: on the same data it ranged from $22 to $78.
 
 ### When the reading cannot be true
 

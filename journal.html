@@ -30,8 +30,16 @@
   .block .amount { flex: none; width: 58px; text-align: right; font-size: 13px;
                    font-weight: 700; font-variant-numeric: tabular-nums; }
   .block .n { flex: none; width: 30px; text-align: right; font-size: 11px; color: var(--muted); }
+  /* Two lines inside the same 62px the other rows use, rather than a fifth
+     column that would narrow these bars and stop them being comparable. */
+  .runlabel { line-height: 1.25; }
+  .runlabel em { display: block; font-style: normal; font-size: 10px; opacity: .8; }
   /* The target line, drawn where the eye needs it rather than described. */
-  .scale { position: relative; height: 12px; margin-left: 70px; margin-right: 92px; }
+  /* Exactly the bar's own box: label 62 + gap 8 on the left; gap 8 + amount 58
+     + gap 8 + count 30 on the right. It was 92px, so the target tick — the
+     line every bar on the page is read against — sat 6px off the middle of
+     the bars it was labelling. */
+  .scale { position: relative; height: 12px; margin-left: 70px; margin-right: 104px; }
   .scale span { position: absolute; top: 0; transform: translateX(-50%);
                 font-size: 10px; color: var(--muted); letter-spacing: .04em; }
   /* Set apart from the figures above it, because it is a different kind of
@@ -45,9 +53,11 @@
   .advice b { font-variant-numeric: tabular-nums; }
   .advice .note { margin-top: 8px; }
   .rangebtns { display: flex; gap: 6px; justify-content: center; margin: 0 0 14px; }
-  .rangebtns button { flex: 1; padding: 8px 0; font: inherit; font-size: 13px;
-                      font-weight: 700; color: var(--muted); background: var(--panel);
-                      border: 1px solid transparent; border-radius: 8px; }
+  /* 44px, like everything else meant to be hit one-handed after parking. */
+  .rangebtns button { flex: 1; min-height: 44px; padding: 8px 0; font: inherit;
+                      font-size: 13px; font-weight: 700; color: var(--muted);
+                      background: var(--panel); border: 1px solid transparent;
+                      border-radius: 8px; }
   .rangebtns button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
   h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
        color: var(--muted); margin: 22px 0 8px; font-weight: 700; }
@@ -96,12 +106,24 @@
 
   /* Taken. A tick in the summary so the list can be read for what was actually
      worked, without opening anything. */
+  /* The dot was styled only under `.hist`, which is the settings sheet's history
+     list on the other page. On an offer row it matched nothing: no width, no
+     height, no colour — an empty inline span. Every row on this page has been
+     carrying an invisible verdict since it was written. */
+  .offer .dot { flex: none; width: 10px; height: 10px; border-radius: 50%;
+                background: var(--line); }
+  .offer .dot.go   { background: var(--go); }
+  .offer .dot.warn { background: var(--warn); }
+  .offer .dot.no   { background: var(--no); }
   .offer .took { flex: none; font-size: 13px; color: var(--go); font-weight: 800; }
   .offer.mine > summary .big { color: var(--go); }
 
   .acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px 20px; }
+  /* These are the destructive ones — 'I took this', 'hide every offer like
+     this' — so they are the last place a mis-tap should be easy. */
   .acts button {
-    font: inherit; font-size: 12px; font-weight: 700; padding: 7px 10px;
+    font: inherit; font-size: 13px; font-weight: 700;
+    min-height: 44px; padding: 8px 14px;
     color: var(--muted); background: var(--panel); border: 1px solid transparent;
     border-radius: 8px; cursor: pointer;
   }
@@ -378,8 +400,43 @@
   function showAdvice(kept, target) {
     var a;
     try { a = Advice.advise(kept, { target: target }); } catch (e) { a = null; }
-    if (!a || !a.ready) {
-      el.advice.hidden = true;
+    if (!a) { el.advice.hidden = true; return; }
+
+    // Not ready is not nothing. advise() says what it is short of, and hiding
+    // that leaves a driver wondering whether the feature is broken, whether
+    // they have not driven enough, or whether the question has no answer here —
+    // three different situations with three different things to do about them.
+    if (!a.ready) {
+      el.advice.hidden = false;
+      el.adviceWorking.textContent = '';
+      if (a.reason === 'unsettled') {
+        el.adviceLead.innerHTML =
+          'Not enough here to name a line yet. Depending on how this recording '
+          + 'is split into runs, the best line comes out anywhere between <b>'
+          + money(a.low) + '</b> and <b>' + money(a.high) + '/hr</b> — a '
+          + money(a.spread) + ' swing, which is the recording being short '
+          + 'rather than the market being strange. A few more shifts will '
+          + 'settle it.';
+      } else if (a.reason === 'nolinehelps') {
+        el.adviceLead.innerHTML =
+          'Over this stretch, being picky made no measurable difference: taking '
+          + 'everything earned about as much as any line would have. That is '
+          + 'worth knowing on its own — it usually means the offers were all '
+          + 'much of a muchness, or the scanner saw too few of the good ones.';
+      } else if (a.reason === 'trips') {
+        el.adviceLead.innerHTML =
+          'Only <b>' + (a.runs || 0) + '</b> run' + (a.runs === 1 ? '' : 's')
+          + ' of scanning here, and too few trips in them to argue from. '
+          + 'The line this would recommend would rest on a handful of '
+          + 'coincidences.';
+      } else {
+        el.adviceLead.innerHTML =
+          '<b>' + a.offers + '</b> offer' + (a.offers === 1 ? '' : 's') + ' over <b>'
+          + (a.hours || 0).toFixed(1) + '</b> hours so far. This needs about <b>'
+          + a.needOffers + '</b> across <b>' + a.needHours + '</b> hours before '
+          + 'it will suggest a target — a line drawn from one afternoon gets '
+          + 'acted on exactly as confidently as one drawn from a season.';
+      }
       return;
     }
     el.advice.hidden = false;
@@ -426,12 +483,11 @@
       + 'and taking the first one at or above ' + money(a.suggested)
       + ' whenever free gives <b>' + a.trips + '</b> trips.';
 
-    working += a.stable
-      ? ' The same answer comes out however the recording is split into runs '
-        + '(checked from ' + A_MIN(a) + ' to ' + A_MAX(a) + ' minutes), which is '
-        + 'why it is worth acting on.'
-      : ' <b>The answer moves depending on how the recording is split</b>, so '
-        + 'treat it as a hint rather than a finding — more shifts will settle it.';
+    // Only ever reached when the answer held at every threshold — an unsettled
+    // one is refused above rather than printed with a retraction underneath.
+    working += ' The same line comes out however the recording is split into '
+             + 'runs (checked from ' + A_MIN(a) + ' to ' + A_MAX(a)
+             + ' minutes), which is why it is worth acting on.';
 
     // Deliberately no dollars-per-hour. It depends entirely on how much of the
     // recorded time was really driving, which nothing here knows: on the data
@@ -481,15 +537,16 @@
       var length = mins >= 60
         ? (mins / 60).toFixed(1) + 'h'
         : Math.round(mins) + 'm';
-      return '<div class="block"><span class="label">'
+      // Date, time and length in the one label column, so these bars are the
+      // same width as every other bar on the page and can be read against them.
+      return '<div class="block"><span class="label runlabel">'
            + from.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-           + ' ' + from.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-           + '</span>'
+           + '<em>' + from.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+           + ' · ' + length + '</em></span>'
            + '<span class="bar ' + verdictFor(mid, target, band) + '" style="background-size:'
            + Math.max(1, Math.min(100, mid / full * 100)).toFixed(1) + '% 100%"></span>'
            + '<span class="amount">' + money(mid, 0) + '</span>'
-           + '<span class="n">' + g.length + '</span>'
-           + '<span class="n">' + length + '</span></div>';
+           + '<span class="n">' + g.length + '</span></div>';
     }).join('');
   }
 

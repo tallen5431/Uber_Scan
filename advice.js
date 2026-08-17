@@ -79,6 +79,16 @@
   // and no single answer should be given.
   var UNSTABLE_SPREAD = 6;
 
+  // A wide plateau is not itself a problem: in a market with cheap offers and
+  // good ones and nothing in between, every line between the two tiers behaves
+  // identically, and "anywhere in this range" is a true and useful answer.
+  //
+  // The pathology is a plateau that reaches all the way down to zero. That says
+  // taking everything earned within five per cent of the best line available —
+  // being selective bought nothing measurable — and the bottom of that band is
+  // $0, which is how "set your target to nothing" gets recommended with a
+  // straight face. There is no line to draw; say so.
+
   // Below these there is not enough to say anything. A recommendation drawn from
   // one afternoon would be acted on exactly as confidently as one drawn from a
   // season, and this project's rule is that a confident wrong number is worse
@@ -152,7 +162,7 @@
     var earned = 0, seconds = 0, trips = 0, seen = 0;
     for (var r = 0; r < theRuns.length; r++) {
       var run = theRuns[r];
-      seconds += (run[run.length - 1].at - run[0].at) / 1000;
+      var lastAt = run[run.length - 1].at;
       var busyUntil = -Infinity;
       for (var i = 0; i < run.length; i++) {
         var o = run[i];
@@ -164,6 +174,15 @@
           busyUntil = o.at + o.mins * 60000;
         }
       }
+      // The clock runs until the last trip finishes, not until the last offer
+      // appeared. Without this a run of two offers thirty seconds apart could
+      // be credited with a whole thirty-minute fare over a thirty-second
+      // denominator — thousands of dollars an hour, from two rows — and a
+      // handful of those is enough to move which line comes out best. A trip
+      // accepted at the end of a run really does occupy the driver for its
+      // whole length; the scanner simply stops seeing offers during it.
+      seconds += (Math.max(lastAt, isFinite(busyUntil) ? busyUntil : lastAt)
+                  - run[0].at) / 1000;
     }
     return {
       target: target,
@@ -195,11 +214,17 @@
     var plateau = steps.filter(function (s) {
       return s.trips >= 1 && s.perHour >= best.perHour * PLATEAU;
     }).map(function (s) { return s.target; });
+    var inRuns = 0;
+    for (var k = 0; k < theRuns.length; k++) inRuns += theRuns[k].length;
     return {
       best: best,
       low: Math.min.apply(null, plateau),
       high: Math.max.apply(null, plateau),
       runs: theRuns.length,
+      // Offers the replay actually walked. Rows dropped with their single-offer
+      // run are not evidence it used, and counting them in the headline made
+      // the answer look better supported than it was.
+      offers: inRuns,
       hours: best.hours,
       steps: steps
     };
@@ -228,6 +253,12 @@
       shortfall.reason = 'trips';
       return shortfall;
     }
+    if (shown.low <= 0) {
+      shortfall.reason = 'nolinehelps';
+      shortfall.low = shown.low;
+      shortfall.high = shown.high;
+      return shortfall;
+    }
 
     // The same question asked at thresholds chosen to disagree. If they do not,
     // the answer is not an artefact of the one that was picked.
@@ -237,10 +268,34 @@
       if (b) elsewhere.push({ minutes: THRESHOLDS[i], target: b.best.target,
                               low: b.low, high: b.high });
     }
-    var targets = elsewhere.map(function (e) { return e.target; });
-    var spread = targets.length
-      ? Math.max.apply(null, targets) - Math.min.apply(null, targets) : 0;
-    var stable = targets.length > 1 && spread <= UNSTABLE_SPREAD;
+    // Checked on the number that is actually recommended, which is the bottom
+    // of the plateau, not the argmax. Those are different numbers: on one
+    // recording the argmax agreed at every threshold while the recommended low
+    // swung from $18 to $26, and the page printed "the same answer comes out
+    // however the recording is split, which is why it is worth acting on" over
+    // an $8 spread. A check that guards a number nobody sees is worse than no
+    // check, because it is believed.
+    var lows = elsewhere.map(function (e) { return e.low; });
+    var highs = elsewhere.map(function (e) { return e.high; });
+    var spread = lows.length
+      ? Math.max.apply(null, lows) - Math.min.apply(null, lows) : 0;
+    var bandSpread = highs.length
+      ? Math.max.apply(null, highs) - Math.min.apply(null, highs) : 0;
+    var stable = lows.length > 1
+      && spread <= UNSTABLE_SPREAD && bandSpread <= UNSTABLE_SPREAD;
+    if (!stable) {
+      // Printing the number and retracting it in smaller type underneath is not
+      // a caveat, it is a number with an excuse attached — and the number is
+      // what gets acted on. What the recording can honestly support is the
+      // range the thresholds actually produced, and that a longer record will
+      // settle it.
+      shortfall.reason = 'unsettled';
+      shortfall.low = lows.length ? Math.min.apply(null, lows) : null;
+      shortfall.high = highs.length ? Math.max.apply(null, highs) : null;
+      shortfall.spread = spread;
+      shortfall.checkedAt = elsewhere;
+      return shortfall;
+    }
 
     // The improvement over the driver's current line, as a share rather than a
     // rate. A rate here would be a dollar figure per hour, and that depends
@@ -270,7 +325,12 @@
 
     return {
       ready: true,
-      offers: rows.length,
+      offers: shown.offers,
+      // Rows that were read but fell outside any counted run — a stray offer in
+      // a driveway, the last one before the rig was switched off. Named rather
+      // than silently dropped, because "231 offers" against a journal holding
+      // 234 is the kind of gap that makes a reader distrust the rest.
+      setAside: rows.length - shown.offers,
       runs: shown.runs,
       hours: shown.hours,
       from: rows[0].at,

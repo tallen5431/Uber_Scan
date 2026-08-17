@@ -5,15 +5,25 @@
   --line: #26313f;
   --text: #eef4fb;
   --muted: #8ea1b8;
-  --go: #17c964;
-  --go-dim: #0d5c31;
-  --warn: #f5a524;
-  --warn-dim: #6b4708;
-  --no: #f0324b;
-  --no-dim: #6b1220;
-  /* Not a verdict at all: the rig saying it does not believe what it read. */
-  --doubt: #b39ddb;
-  --doubt-dim: #3a2d5c;
+  /* The four verdicts, as a deliberate ladder from brightest to darkest.
+     They used to be four hues at one luminance: the ACCEPT and CLOSE CALL
+     panels measured 1.02:1 against each other and PASS against doubt 1.01:1,
+     which means the panel colour carried the verdict entirely in hue — and hue
+     is the channel red-green colour blindness removes, in roughly one man in
+     twelve, on a screen looked at while driving. The ladder is the fallback:
+     even with no colour at all, take-it is the brightest and leave-it is the
+     darkest. The glyph below is the real fix. */
+  --go: #2ee87c;
+  --go-dim: #127540;
+  --warn: #ffc247;
+  --warn-dim: #7a5208;
+  --no: #ff5468;
+  --no-dim: #520f1a;
+  /* Not a verdict at all: the rig saying it does not believe what it read.
+     Off the ladder in hue as well as position, because it is not a degree of
+     good or bad. */
+  --doubt: #c9b6f2;
+  --doubt-dim: #403159;
   --pad: 10px;
 }
 
@@ -65,6 +75,20 @@ html, body {
 .verdict.warn .verdict-label { color: var(--warn); }
 .verdict.no .verdict-label   { color: var(--no); }
 .verdict.doubt .verdict-label { color: var(--doubt); }
+
+/* A mark that is not a colour.
+   Everything else distinguishing these four states — the fill, the border, the
+   label colour — is hue, and a driver who cannot separate red from green gets
+   one signal from all three. The word beside it is the other non-colour
+   channel, but a word has to be read and this does not: it is the same shape
+   at any distance, in sunlight, at a glance, and in a photograph of the screen.
+   Decorative in the accessibility sense — the label states the verdict in
+   words either way — so nothing is lost if a reader skips it. */
+.verdict-label::before { content: ''; }
+.verdict.go .verdict-label::before    { content: '\2713\00a0'; }
+.verdict.warn .verdict-label::before  { content: '\2248\00a0'; }
+.verdict.no .verdict-label::before    { content: '\2715\00a0'; }
+.verdict.doubt .verdict-label::before { content: '\003F\00a0'; }
 
 .rate {
   display: flex;
@@ -349,4 +373,46 @@ html, body {
 
 @media (min-width: 620px) {
   #app { max-width: 480px; margin: 0 auto; }
+}
+
+/* ---------- Reachable without a touchscreen ---------- */
+/* There were no focus styles anywhere in this project. Everything here is a
+   <button>, so a keyboard or a switch device can reach all of it — and could
+   not see where it was. `-webkit-tap-highlight-color: transparent` at the top
+   of this file removes the one affordance a touch device gives back, which is
+   right for a rig in a moving car and leaves nothing for anyone else.
+
+   :focus-visible rather than :focus, so a finger tap does not leave a ring
+   behind on a screen glanced at while driving. */
+:focus-visible {
+  outline: 3px solid #7fb0ff;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---------- Motion ---------- */
+/* Reduced motion is a stated preference, not a nicety, and this file animates
+   on every keypress and every verdict change. Colour and opacity still change
+   — those carry meaning here — but nothing moves or scales. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .key:active { transform: none; }
+  #toast, #toast.show { transform: translate(-50%, 0); }
+}
+
+/* ---------- Big enough to hit in a moving car ---------- */
+/* 44px is the floor both platform guidelines give, and it is not a design
+   preference here: these controls are used one-handed, at arm's length, by
+   somebody who has just parked. The keypad already had it; the bars of small
+   buttons around the edges of every page did not. */
+.bottombar button, .bottombar .linkbtn {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
