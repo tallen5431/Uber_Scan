@@ -62,10 +62,18 @@ echo "trying it once..."
 if ! sudo -u "$RUN_AS" "$PYTHON" "$REPO/rpi/sync.py" --to "$SYNC_TO" \
         ${SYNC_TOKEN:+--token "$SYNC_TOKEN"}; then
     echo
-    echo "That did not work, so the timer is not being installed — fix the above"
-    echo "first. If it says the far end did not answer, check that the machine"
-    echo "keeping the copy is running with SCANNER=0 and is reachable at"
-    echo "$SYNC_TO from this Pi." >&2
+    cat >&2 <<EOF
+That did not work, so the timer is not being installed — a timer whose job has
+never succeeded once is a timer that fails quietly. Fix the above first.
+
+  did not answer          the machine keeping the copy is not running, is not
+                          running with SCANNER=0, or is not reachable at
+                          $SYNC_TO from this Pi
+  could not create ...    JOURNAL there points somewhere that account cannot
+                          write. Either give it the directory, or point JOURNAL
+                          inside its home, where it will make it itself
+  older build             it has its own checkout: git pull and restart it there
+EOF
     exit 1
 fi
 echo

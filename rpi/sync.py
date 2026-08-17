@@ -106,6 +106,18 @@ def send_config(base, path, token=None, timeout=TIMEOUT):
     try:
         with urllib.request.urlopen(request, timeout=timeout) as fh:
             return json.loads(fh.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        # The far end said no and said why in the body. Without this the driver
+        # gets 'HTTP Error 500: Internal Server Error' — true, and useless — and
+        # has to go and read a log on the other machine to learn that a
+        # directory was not writable. The offers already report the reason; the
+        # calibration was doing the older, worse thing beside them.
+        detail = e.read()[:200].decode('utf-8', 'replace')
+        try:
+            detail = json.loads(detail).get('error') or detail
+        except ValueError:
+            pass
+        return {'ok': False, 'error': 'HTTP %s %s' % (e.code, detail)}
     except (urllib.error.URLError, OSError, ValueError) as e:
         return {'ok': False, 'error': str(e)}
 

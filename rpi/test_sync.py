@@ -279,6 +279,20 @@ try:
         eq('a write that cannot happen is refused', e.code, 500)
         ok_('...and says which errno, not just that it failed',
             'ENOTDIR' in detail or 'EACCES' in detail or 'ENOENT' in detail)
+
+    # The calibration rides along with the offers and used to report the same
+    # failure as a bare 'HTTP Error 500: Internal Server Error', which sends
+    # somebody to read a log on the other machine to learn what the offers had
+    # already said in plain words on this one.
+    cfg3 = os.path.join(work, 'cfg3.json')
+    with open(cfg3, 'w') as fh:
+        json.dump({'quad': [[1, 1], [2, 1], [2, 2], [1, 2]]}, fh)
+    refused = SY.send_config(stuck.base, cfg3)
+    ok_('a calibration that cannot be stored is not reported as stored',
+        not refused.get('ok'))
+    ok_('...and says why, like the offers do',
+        any(e in (refused.get('error') or '')
+            for e in ('ENOTDIR', 'EACCES', 'ENOENT')))
 finally:
     stuck.close()
 
