@@ -208,7 +208,11 @@ cam = run_uberx['cam']
 # The lifecycle first, because a leaked request stalls the camera a few frames
 # later and everything after that is a symptom rather than the fault.
 ok_('the camera was opened', run_uberx['started'] == 1)
-ok_('the loop actually ran', cam.taken > 20)
+# A floor rather than a count: the run now stops as soon as the offer is in the
+# journal, so how many frames that took is a property of the machine and not of
+# the code. What matters is that it looped at all, and then that every request
+# it took came back — which is the next three checks.
+ok_('the loop actually ran', cam.taken >= 3)
 eq('every capture request was given back', cam.outstanding, 0)
 eq('...exactly once each', cam.double_released, 0)
 eq('...and the totals agree', cam.given_back, cam.taken)

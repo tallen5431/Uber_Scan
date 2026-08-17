@@ -223,6 +223,12 @@
          + '</dt><dd>' + value + '</dd></div>';
   }
 
+  // Distances come off the card with one decimal and are *summed* across legs,
+  // and binary floating point does not add them the way the card wrote them:
+  // a 1.1 mi pickup plus a 2.2 mi trip stores as 3.3000000000000003. Printed
+  // raw that is what the driver reads. Rounding it at the parser was the other
+  // option and was not taken — the two parsers are held to a shared corpus
+  // precisely so they cannot drift, and this is a display problem.
   function num(n, dp) {
     return (typeof n === 'number' && isFinite(n)) ? n.toFixed(dp === undefined ? 1 : dp) : null;
   }
@@ -274,7 +280,7 @@
       + '<span class="dot ' + (aside ? '' : verdictFor(r.perHour, target, band)) + '"></span>'
       + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i>' + gross + '</span>'
       + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
-      + (r.miles === null ? '' : ' · ' + r.miles + ' mi')
+      + (r.miles === null ? '' : ' · ' + num(r.miles) + ' mi')
       + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
       + (r.accepted ? '<span class="took" title="you took this">\u2713</span>' : '')
       + (aside ? '<span class="tag">' + (r.whole === false ? 'partial' : 'odd') + '</span>' : '')
@@ -286,7 +292,7 @@
       + '<h3>Off the card</h3>'
       + row('Payout', money(r.pay, 2))
       + row('Time on the card', r.minutes === null ? null : num(r.minutes, 0) + ' min')
-      + row('Distance', r.miles === null ? null : r.miles + ' mi')
+      + row('Distance', r.miles === null ? null : num(r.miles) + ' mi')
       + row('Items', r.items || null)
       + '<h3>How the rate was worked out</h3>'
       + row('Billed time', billed === null ? null
@@ -316,7 +322,7 @@
       + (r.pay !== null && r.minutes !== null
          ? '<button type="button" class="danger" data-act="hideCard">Hide every '
            + money(r.pay, 2) + ' \u00b7 ' + Math.round(r.minutes) + ' min'
-           + (r.miles === null ? '' : ' \u00b7 ' + r.miles + ' mi') + '</button>'
+           + (r.miles === null ? '' : ' \u00b7 ' + num(r.miles) + ' mi') + '</button>'
          : '')
       + '</div></details>';
   }

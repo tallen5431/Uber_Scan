@@ -85,6 +85,11 @@ var scanner = {
 
 var listeners = [];    // open server-sent-event responses
 
+// How long a scanner has to stay up before its next exit counts as a fresh
+// problem rather than another rung of the same one. Comfortably longer than the
+// camera takes to open and fail, comfortably shorter than a shift.
+var HEALTHY_RUN_MS = 60000;
+
 // The autopilot calibrates itself, so it runs whenever the Pi scanner code is
 // present — waiting for a config file would mean waiting for a manual step that
 // no longer exists.
@@ -187,9 +192,19 @@ function startScanner() {
   // names this exact failure and only half of it was handled.
   scanner.proc.on('close', function (code, signal) {
     console.error('scanner: exited (' + (signal || code) + ')');
+    var ranFor = Date.now() - scanner.started;
     scanner.proc = null;
     if (shuttingDown) return;
     // Back off so a camera that is missing or busy does not spin the CPU.
+    //
+    // The count is of *consecutive* failures, which is what a backoff is for,
+    // and it used to be a lifetime tally. A rig that had scanned all day and hit
+    // four unrelated hiccups was thereafter 48 seconds from restarting after any
+    // of them — 48 seconds of a shift with the camera off, because of things
+    // that had gone right hours earlier. A child that stayed up long enough to
+    // be doing its job did not fail to start, so the ladder resets.
+    if (ranFor > HEALTHY_RUN_MS) scanner.restarts = 0;
+    scanner.lifetimeRestarts = (scanner.lifetimeRestarts || 0) + 1;
     var delay = Math.min(60000, 3000 * Math.pow(2, Math.min(scanner.restarts, 4)));
     scanner.restarts++;
     console.error('scanner: retrying in ' + Math.round(delay / 1000) + 's');
@@ -203,6 +218,7 @@ var RESET_PATH = path.join(ROOT, 'rpi', '.recalibrate');
 // A file, like the two above, because the scanner is sometimes a child of this
 // process and sometimes a systemd unit that has never heard of it.
 var CROP_PATH = path.join(ROOT, 'rpi', '.cropbox.json');
+var cropSeq = 0;
 var lastTouch = 0;
 
 function touchWatchFile() {
@@ -572,13 +588,23 @@ function route(req, res) {
       // Written to a temporary name and renamed, because the scanner may be
       // reading this exact path at this exact moment and half a JSON object
       // parses as nothing at all.
-      var tmp = CROP_PATH + '.part';
+      //
+      // A name of its own per request, because one shared `.part` defeats the
+      // very thing the rename is for: two drags landing together — a double tap
+      // on a laggy link is all it takes — have both writes interleaving into one
+      // file, and the rename then publishes whichever mixture won. Unique names
+      // make each rename genuinely atomic with respect to the other.
+      var tmp = CROP_PATH + '.' + process.pid + '.' + (cropSeq++) + '.part';
+      var failed = function (err) {
+        fs.unlink(tmp, function () {});     // never leave a .part behind
+        send(res, 500, JSON.stringify({ ok: false, error: 'could not save the box' }),
+             { 'Content-Type': 'application/json; charset=utf-8' });
+        console.error('crop box: ' + err.message);
+      };
       fs.writeFile(tmp, JSON.stringify({ quad: quad }), function (writeErr) {
-        if (writeErr) return send(res, 500, JSON.stringify({ ok: false, error: writeErr.message }),
-                                  { 'Content-Type': 'application/json; charset=utf-8' });
+        if (writeErr) return failed(writeErr);
         fs.rename(tmp, CROP_PATH, function (renameErr) {
-          if (renameErr) return send(res, 500, JSON.stringify({ ok: false, error: renameErr.message }),
-                                     { 'Content-Type': 'application/json; charset=utf-8' });
+          if (renameErr) return failed(renameErr);
           send(res, 200, JSON.stringify({ ok: true, quad: quad }),
                { 'Content-Type': 'application/json; charset=utf-8' });
         });
