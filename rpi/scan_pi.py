@@ -140,6 +140,39 @@ RESAMPLE_EVERY = 0.5
 # there, which is a confidently wrong number about a different job.
 VERIFY_EVERY = 2.5
 
+# ...and how far that beat backs off while the answer keeps coming back the
+# same, up to a ceiling.
+#
+# A read costs about 1.4 seconds of a Pi 4, of which 91% is inside tesseract,
+# and a card sits on the screen for tens of seconds. Re-reading it every 2.5s
+# for all of that is the loop's largest single expense and it buys almost
+# nothing: one real recording has the same card read four times in seventy
+# seconds, every reading identical, four rows in the journal.
+#
+# The beat exists because a *replacement* offer does not move the motion gate,
+# so the only way to notice one is to look. That is still true — this only
+# changes how often, and only while nothing has changed. Every read that comes
+# back different resets it to VERIFY_EVERY immediately, so the case it was
+# written for costs exactly what it did before: one beat.
+VERIFY_BACKOFF = 1.6
+VERIFY_MAX = 12.0
+
+
+def next_verify(every, was, now, card_on_screen):
+    """How long to wait before looking again, and what that answer was.
+
+    Returns (seconds, signature-to-compare-next-time). Lifted out of the loop
+    because the property that matters is a sentence about a sequence — a
+    changed reading is always looked at again at the fast beat, however long
+    the beat had grown before it — and that cannot be checked against a loop
+    that needs a camera to turn over.
+    """
+    if not card_on_screen:
+        return VERIFY_EVERY, None
+    if now == was:
+        return min(VERIFY_MAX, every * VERIFY_BACKOFF), was
+    return VERIFY_EVERY, now
+
 WATCH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.viewing')
 WATCH_WINDOW = 10.0
 
@@ -801,6 +834,8 @@ def main():
     resample_until = 0.0
     last_resample = 0.0
     last_verify = 0.0
+    verify_every = VERIFY_EVERY
+    verify_signature = None
     card_on_screen = False
     settled_on = None
 
@@ -1037,7 +1072,7 @@ def main():
                 # See VERIFY_EVERY: a new offer arriving in place of the old one
                 # does not move the motion gate, so the only way to know the
                 # verdict still belongs to the card on screen is to look.
-                if not do_read and card_on_screen and (now - last_verify) > VERIFY_EVERY:
+                if not do_read and card_on_screen and (now - last_verify) > verify_every:
                     do_read = True
                     last_verify = now
 
@@ -1182,6 +1217,13 @@ def main():
             card_on_screen = parsed.get('pay') is not None
             if not card_on_screen:
                 last_verify = 0.0
+            # The same card saying the same thing needs looking at less often
+            # the longer it goes on saying it. Anything different — a
+            # replacement offer, a leg that finally read, a figure that moved —
+            # drops straight back to the fast beat, which is the case this
+            # whole mechanism exists for.
+            verify_every, verify_signature = next_verify(
+                verify_every, verify_signature, signature, card_on_screen)
 
             if whole and stable:
                 resample_until = 0.0

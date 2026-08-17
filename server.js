@@ -466,9 +466,10 @@ function clampNumber(raw, low, high, fallback) {
   return Math.max(low, Math.min(high, n));
 }
 
-// The scanner appends a further row for the same offer when the reading
-// improves, so the last row of each id is the one that is true. Rows written
-// before ids existed, or by something else, keep their own identity.
+// The scanner appends a further row for the same offer every time it looks
+// again, so an id arrives as several readings and one of them has to be picked
+// — see bestReading. Rows written before ids existed, or by something else,
+// keep their own identity.
 //
 // Annotations live in the same file and are told apart by carrying a `kind`,
 // which an offer never does. They are applied over the offers here rather than
@@ -523,11 +524,58 @@ function syncKey(row) {
   return key([row.kind ? 'k' + row.kind : 'o', row.id, row.seq]);
 }
 
+/* Which reading of one card to believe, out of the several the rig took.
+ *
+ * It used to be simply the last: a later row about the same id supersedes the
+ * earlier one, on the reasoning that a reading improves as the accumulator
+ * collects the legs a single frame missed. That is usually true and it is not
+ * always true — the scanner also re-reads a card every few seconds for as long
+ * as it is on the screen, and any one of those can be the bad one. Being last
+ * is not evidence of being right.
+ *
+ * So they vote. One real card read four times gave 31min/15.1mi, then a lost
+ * decimal point in the payout, then a bad merge at 40min/23.6mi, then
+ * 31min/15.1mi again — and the majority is the right answer, whichever order
+ * they arrived in.
+ *
+ * A whole row is chosen rather than a field-by-field composite. A row is
+ * internally consistent — its $/hr was worked out from its own pay, minutes and
+ * miles — and stitching the best of each together would produce a row whose
+ * headline does not follow from the figures printed beside it, which is exactly
+ * the kind of number this project refuses to show.
+ */
+function bestReading(rows) {
+  if (rows.length === 1) return rows[0];
+  var best = null, bestScore = -1;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var score = 0;
+    for (var j = 0; j < rows.length; j++) {
+      if (i === j) continue;
+      var o = rows[j];
+      if (o.pay === r.pay) score += 3;          // the field the card leads with
+      if (o.minutes === r.minutes) score += 2;
+      if (o.miles === r.miles) score += 2;
+    }
+    // A reading that cannot be true never wins, however many times the same
+    // misreading happened to repeat.
+    if (r.suspect) score -= 1000;
+    // Nor does half a card: a fragment is the same pay over less time, which
+    // always reads better than the offer was.
+    if (r.whole === false) score -= 100;
+    // Ties go to the later row, which is the old behaviour and the right one
+    // when there is nothing to choose between them.
+    if (score >= bestScore) { bestScore = score; best = r; }
+  }
+  return best;
+}
+
 function latestPerOffer(rows) {
   var byId = Object.create(null);
   var out = [];
   var marks = Object.create(null);
   var rules = [];
+  var readings = Object.create(null);
 
   rows.forEach(function (r) {
     if (!r || typeof r !== 'object') return;
@@ -538,8 +586,9 @@ function latestPerOffer(rows) {
     if (r.kind === 'rule') { rules.push(r); return; }
     if (r.kind) return;                       // something newer than this reader
     if (!r.id) { out.push(r); return; }
-    if (!(r.id in byId)) { byId[r.id] = out.length; out.push(r); return; }
-    out[byId[r.id]] = r;
+    if (!(r.id in byId)) { byId[r.id] = out.length; out.push(r); readings[r.id] = [r]; return; }
+    readings[r.id].push(r);
+    out[byId[r.id]] = bestReading(readings[r.id]);
   });
 
   out.forEach(function (o) {

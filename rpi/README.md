@@ -292,6 +292,28 @@ Between offers the cost is the motion gate plus corner tracking, measured
 together at **0.6ms per frame** — the scanner is asleep almost all of the time,
 which is the only reason a Pi 4 can do this at all.
 
+### While a card is up
+
+The motion gate cannot help here, and that is the expensive part. A *replacement*
+offer redraws a few digits inside an otherwise identical card, which moves the
+frame difference to 0.33 against a threshold of 6.0 — indistinguishable from
+nothing happening. So the only way to know the verdict on screen still belongs
+to the card in front of the driver is to look, on a timer.
+
+That timer used to be a flat 2.5s. At ~1.4s a read on a Pi 4, that is **56% of
+wall clock inside tesseract** for as long as an offer sits there, and the live
+view is frozen for every one of those reads — which is the picture the driver is
+using to decide. It also bought almost nothing: the recording above spends
+seventy seconds re-reading a card that says the same thing every time.
+
+So the beat **backs off while nothing changes** — ×1.6 per identical read, up to
+a 12s ceiling — and snaps straight back to 2.5s the instant a reading differs or
+the screen empties. The case the timer exists for costs exactly what it did
+before, one beat; the case it was wasting on settles at **12% duty instead of
+56%**. The ceiling is reached after four identical reads running (2.5 → 4.0 →
+6.4 → 10.2 → 12.0), and it is also the worst case for how long a replacement
+offer can sit unnoticed.
+
 Card height 900 with the card crop and a 900px read size is the recommended
 starting point: near the floor for speed, with real margin before reading
 collapses.
@@ -1275,10 +1297,59 @@ accumulator says the card changed.
 
 A reading can improve after the scanner is first sure of it — a leg arriving
 late, an item count two frames behind. That is worth keeping rather than hiding,
-so the better reading is appended as another row with the same `id`. **Anything
-reading the file takes the last row of each `id`.** Nothing is ever rewritten in
-place, which is what makes it safe to append to from a process that can be
-killed at any moment.
+so the better reading is appended as another row with the same `id`. Nothing is
+ever rewritten in place, which is what makes it safe to append to from a process
+that can be killed at any moment.
+
+### One card, one offer
+
+Which readings share an `id` is decided by the **payout**. It is the figure the
+card leads with, the one this reader gets right most often, and the one a driver
+would use to say "that is the same offer"; the rest of the card moves while the
+accumulator collects the legs, which is exactly when the `id` must not change.
+Same payout, inside ninety seconds, is the same card.
+
+That rule used to be "an identical reading", which OCR defeats by its nature.
+One real Uber card in Chattanooga, seventy seconds, four rows:
+
+| time | pay | minutes | miles | rate |
+| --- | --- | --- | --- | --- |
+| 19:50:37 | $10.30 | 31 | 15.1 | $11.17/hr |
+| 19:51:28 | $1030 | 31 | 15.1 | **$1,984.78/hr** |
+| 19:51:41 | $10.30 | 40 | 23.6 | $4.83/hr |
+| 19:51:47 | $10.30 | 31 | 15.1 | $11.17/hr |
+
+Four offers, as far as anything downstream could tell — four rows in the export,
+four points in the median. There was one card. The middle two are a lost decimal
+point and a stale leg merged into a fresh one, and the second of those was
+caused by the first: `$1030` declared itself a new offer *and* became the payout
+the next reading was compared against, so the correct `$10.30` that followed
+looked like a third card.
+
+So a reading the parser already calls impossible cannot claim an identity of its
+own and cannot become the one others are matched against. It is still written —
+it is evidence, and a gap is worse than a bad row — it just attaches to the card
+in front of it.
+
+### Which reading to believe
+
+**Readings of one `id` vote; the majority wins.** This replaced "take the last
+row", which is right when a reading improves and wrong when it degrades — the
+scanner also re-reads a card every few seconds for as long as it is on screen,
+and any one of those can be the bad one. Being last is not evidence of being
+right. Above, the majority answer is $10.30/31min/15.1mi whatever order the four
+arrive in.
+
+Agreement on the payout counts for more than agreement on minutes or miles. A
+row flagged `suspect` never wins however often the same misreading repeats, and
+a `whole: false` row loses to any whole one. A tie goes to the later row, which
+is the old behaviour and the right one for a reading that genuinely improved.
+
+A whole row is chosen rather than the best of each field stitched together: a
+row is internally consistent — its `$/hr` was worked out from its own pay,
+minutes and miles — and a composite would have a headline that does not follow
+from the figures printed beside it, which is the one thing this project refuses
+to show.
 
 A reading the scanner never saw *whole* — a single leg whose "total" the reader
 mangled, or a two-leg card no frame caught both halves of — is written with
@@ -1465,7 +1536,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 14 suites, 1226 checks
+npm test                # all 17 suites, 1642 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1479,20 +1550,23 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 130 checks, the shared corpus
-node tests/parser.test.js       #  68 on the browser side alone
+node tests/corpus.test.js       # 267 checks, the shared corpus
+node tests/parser.test.js       #  83 on the browser side alone
+node tests/advice.test.js       #  64 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 146 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 300 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  68 on merging readings across frames
 python3 rpi/test_pipeline.py    # 180 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    #  84 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
 python3 rpi/test_journal.py     #  54 on keeping one row per offer
+python3 rpi/test_repeats.py     #  36 on one card read many times
 python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     #  41 on the loop that holds the camera
-python3 rpi/test_sync.py        #  37 on getting the offers off the car
+python3 rpi/test_scan_pi.py     #  77 on the loop that holds the camera
+python3 rpi/test_sync.py        #  67 on getting the offers off the car
+python3 rpi/test_liveview.py    #  18 on the picture the driver watches
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

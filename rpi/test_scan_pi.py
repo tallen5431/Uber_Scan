@@ -496,6 +496,49 @@ _ride = OP2.parse('$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip')
 eq('a ride card needs no clock',
    OP2.rate(_ride, {'target': 25, 'costPerMile': 0.3})['ready'], True)
 
+# --- how often to look again at a card that is not changing -----------------
+# The slow beat exists because a replacement offer does not move the motion
+# gate, so the only way to notice one is to look. But a read is 1.4 seconds of
+# a Pi 4, 91% of it inside tesseract, and one real recording spends seventy of
+# those seconds re-reading a card that says the same thing every time.
+#
+# So the beat backs off while nothing changes. What must not break is the case
+# it was written for: a reading that comes back different is looked at again at
+# the fast beat, no matter how patient the loop had become.
+A, B = ('$10.30', 31, 15.1), ('$8.75', 20, 6.1)
+
+every, sig = SP.next_verify(SP.VERIFY_EVERY, None, A, True)
+eq('the first sight of a card sets the fast beat', every, SP.VERIFY_EVERY)
+eq('...and remembers what it said', sig, A)
+
+every, sig = SP.next_verify(every, sig, A, True)
+ok_('the same answer again earns a longer wait', every > SP.VERIFY_EVERY)
+first_backoff = every
+for _ in range(20):
+    every, sig = SP.next_verify(every, sig, A, True)
+eq('...but only up to a ceiling', every, SP.VERIFY_MAX)
+ok_('...which is reached in a handful of reads, not one',
+    first_backoff < SP.VERIFY_MAX)
+
+# The whole point: patience is not paid for by the offer that replaces this one.
+every, sig = SP.next_verify(every, sig, B, True)
+eq('a different reading drops straight back to the fast beat',
+   every, SP.VERIFY_EVERY)
+eq('...and it is the new reading that is remembered', sig, B)
+
+# An empty screen is not a card saying the same thing. Coming back to the fast
+# beat here is what makes the next offer's first look prompt.
+every, sig = SP.next_verify(SP.VERIFY_MAX, A, None, False)
+eq('an empty screen resets the beat', every, SP.VERIFY_EVERY)
+eq('...and forgets the card that was there', sig, None)
+every, sig = SP.next_verify(every, sig, A, True)
+eq('...so a card appearing is read at the fast beat', every, SP.VERIFY_EVERY)
+
+# Worst case, stated as a number: how long a replacement offer can sit unread.
+ok_('a stale verdict cannot outlive the ceiling', SP.VERIFY_MAX <= 15.0)
+ok_('...and the ceiling is a real saving over the fast beat',
+    SP.VERIFY_MAX >= SP.VERIFY_EVERY * 3)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

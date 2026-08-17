@@ -202,6 +202,12 @@ class OfferLog:
         self.id = None
         self.seq = 0
         self.content = None
+        # What the card on screen pays, as last read believably. This is what
+        # says "the same card again", and it is kept apart from `content` on
+        # purpose: content is every field, and it moves every time the
+        # accumulator picks up another leg, which is precisely when the id must
+        # not change.
+        self.pay = None
         self.first_at = None
         self.last_at = None
         self.written = 0
@@ -229,6 +235,10 @@ class OfferLog:
         self.first_at = row.get('firstAt') or at
         self.last_at = at
         self.content = tuple(row.get('content') or ()) or None
+        # A row the reader itself flagged as impossible is not an identity to
+        # come back to; leaving the anchor empty lets the first believable
+        # reading after the restart adopt this id rather than start a new one.
+        self.pay = None if row.get('suspect') else row.get('pay')
         # The episode is left as None so the next reading of this same card is
         # matched on content, not on a counter that restarted at zero with the
         # process.
@@ -251,17 +261,50 @@ class OfferLog:
         # payout as a correction to the last one would file two offers as one,
         # keeping only the second. Cheap to rule out, and it makes this correct
         # against any caller rather than only the one in the scan loop.
-        if self.content is not None and parsed.get('pay') != self.content[0]:
+        #
+        # Except that a reading which cannot be true is not evidence of
+        # anything, least of all that the card changed. One real recording has
+        # $10.30 read as $1030 with the decimal point lost, and that one
+        # misreading did the damage twice over: it declared itself a new offer,
+        # and then it became the payout the *next* reading was compared
+        # against, so the correct $10.30 that followed looked like a third card.
+        # Four rows, one card, and a $1,985/hr entry in the middle of them.
+        impossible = OP.doubt(parsed.get('pay'), parsed.get('minutes'),
+                              parsed.get('miles')) is not None
+        if (not impossible and self.pay is not None
+                and parsed.get('pay') != self.pay):
             self.episode = None
 
         if episode != self.episode:
             # A different card — or the same one after the accumulator's window
             # rolled over, or after a restart. Those two look identical from
-            # here and must not become two offers, so an unchanged reading
+            # here and must not become two offers, so a reading of the same card
             # arriving soon enough keeps the id it already had.
+            #
+            # "The same card" used to mean an identical reading, which is a test
+            # OCR defeats by its nature: one real card read four times in
+            # seventy seconds gave $10.30/31min/15.1mi, then $1030 with a lost
+            # decimal point, then a bad merge at 40min/23.6mi, then the right
+            # answer again — four rows, four offers, one card, and a $1,985/hr
+            # entry among them.
+            #
+            # The payout is what identifies an offer. It is the figure the app
+            # itself leads with, the one this reader gets right most often, and
+            # the one a driver would use to say "that is the same offer". Two
+            # genuinely different offers paying the same to the cent inside the
+            # window is possible and rare; four rows for one card was neither.
+            # Nothing is lost either way — every reading is still written, and
+            # the reader picks between them by agreement rather than by
+            # arrival order.
+            #
+            # A reading that cannot be true matches whatever is already there,
+            # and an anchor that is still empty matches anything: neither one
+            # can say the card changed, and both are better attached to the
+            # offer in front of them than filed as an offer of their own.
             seen_at = self.last_at if self.last_at is not None else self.first_at
-            same_card_again = (self.content is not None
-                               and content == self.content
+            same_pay = (impossible or self.pay is None
+                        or parsed.get('pay') == self.pay)
+            same_card_again = (self.content is not None and same_pay
                                and seen_at is not None
                                and at - seen_at <= RESUME_WINDOW_MS)
             self.episode = episode
@@ -270,8 +313,11 @@ class OfferLog:
                 self.seq = 0
                 self.first_at = at
                 self.content = None
+                self.pay = None
 
         self.last_at = at
+        if not impossible and parsed.get('pay') is not None:
+            self.pay = parsed.get('pay')
         if content == self.content:
             return None                     # nothing new to say about this card
 
