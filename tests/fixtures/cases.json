@@ -294,6 +294,49 @@
         "miles": 3.6,
         "complete": true
       }
+    },
+    {
+      "name": "a leg whose minutes have rubbish stuck to them is not a leg",
+      "text": "$47.53 9 min (3.1 mi) trip 53L min (18.6 mi) away",
+      "expect": {
+        "pay": 47.53,
+        "minutes": 9.0,
+        "miles": 3.1,
+        "legs": 1,
+        "complete": true
+      }
+    },
+    {
+      "name": "...nor is one whose distance has",
+      "text": "$16.05 25 min (11.q5 mi) away 17 min (3.7 mi) trip",
+      "expect": {
+        "pay": 16.05,
+        "minutes": 42.0,
+        "miles": 3.7,
+        "legs": 2,
+        "complete": true
+      }
+    },
+    {
+      "name": "a payout with a stray mark in it is refused, not half-read",
+      "text": "$16\".l87 12 min (3.0 mi) total",
+      "expect": {
+        "pay": 16.0,
+        "minutes": 12.0,
+        "miles": 3.0,
+        "legs": 1,
+        "complete": true
+      }
+    },
+    {
+      "name": "trailing rubbish after a clean number is still rubbish",
+      "text": "$12.50 20 min (4.5# mi) total",
+      "expect": {
+        "pay": 12.5,
+        "minutes": 20.0,
+        "legs": 1,
+        "complete": true
+      }
     }
   ],
   "rate": [
