@@ -79,6 +79,32 @@ SNAPSHOT_QUALITY = 60
 RESAMPLE_WINDOW = 4.0
 RESAMPLE_EVERY = 0.5
 
+# ...and how often to look again once a card *has* been read whole.
+#
+# Not resampling — that is the burst above, which exists to collect a leg one
+# frame missed. This is the slow beat that keeps the answer honest while a card
+# is on screen, and it exists because the motion gate cannot see a new offer
+# arrive.
+#
+# The gate compares one frame against the last as a mean absolute difference
+# over a 160x120 thumbnail, which is the right question for "has the phone
+# changed at all" and the wrong one for "is this a different offer". Measured on
+# two cards of the same layout with different numbers, a whole new offer scores
+# **0.33** against a threshold of 6.0 — and cropping the comparison to the card
+# only takes it to 0.73, because a few digits are a tiny share of any area. A
+# statistic that counts changed pixels instead does no better: a new offer moves
+# 0.45% of them and an ordinary band of windscreen glare moves 0.42%, so
+# separating the two would cost a false read on every passing reflection and
+# still miss offers.
+#
+# So the gate is left alone and this is answered by looking. The cost is bounded
+# and only paid while a card is up: one read every few seconds for the ten or
+# twenty seconds an offer is on screen. What it buys is that the verdict on
+# screen belongs to the card in front of the driver. Without it, an offer
+# replaced in place by the next one left the previous card's ACCEPT sitting
+# there, which is a confidently wrong number about a different job.
+VERIFY_EVERY = 2.5
+
 WATCH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.viewing')
 WATCH_WINDOW = 10.0
 
@@ -673,6 +699,8 @@ def main():
     last_snapshot = 0.0
     resample_until = 0.0
     last_resample = 0.0
+    last_verify = 0.0
+    card_on_screen = False
     settled_on = None
 
     # Every offer the scanner is sure of, kept so a shift can be looked at
@@ -902,6 +930,14 @@ def main():
                     do_read = True
                     last_resample = now
 
+                # ...and the slow beat, for as long as there is a card there.
+                # See VERIFY_EVERY: a new offer arriving in place of the old one
+                # does not move the motion gate, so the only way to know the
+                # verdict still belongs to the card on screen is to look.
+                if not do_read and card_on_screen and (now - last_verify) > VERIFY_EVERY:
+                    do_read = True
+                    last_verify = now
+
                 # ...but not while the outline is visibly on the wrong thing.
                 #
                 # This is the loop's one real inefficiency, and it is a feedback
@@ -1028,6 +1064,14 @@ def main():
             # only stopped changing. Conjoining the two into the stored flag
             # made it redundant with `whole` instead of independent of it.
             stable = signature == settled_on
+            # Whether there is still a card in front of the camera, which is
+            # what the slow beat above is gated on. Taken from the payout rather
+            # than from `complete`, because a card whose journey was lost is
+            # still a card and is exactly the reading worth looking at again.
+            card_on_screen = parsed.get('pay') is not None
+            if not card_on_screen:
+                last_verify = 0.0
+
             if whole and stable:
                 resample_until = 0.0
             elif parsed.get('pay'):

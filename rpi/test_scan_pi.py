@@ -116,8 +116,17 @@ class FakeCam(object):
         pass
 
 
-def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0):
-    """Drive scan_pi.main() over a fake camera and collect what came out."""
+def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
+        until=None):
+    """Drive scan_pi.main() over a fake camera and collect what came out.
+
+    `until(state)` ends the run as soon as the thing being tested has happened,
+    with `seconds` only as a backstop. Stopping on evidence rather than on the
+    clock is what makes this survive a loaded machine: a read that normally
+    takes 250ms took 34 SECONDS while other work had the cores, the fixed
+    deadline expired before the confirming read, and the suite failed for a
+    reason that had nothing to do with the code.
+    """
     import scan_pi as SP
 
     offer = TC.mount(screen, 1200)
@@ -154,11 +163,18 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0):
                 '--journal', journal] + list(extra_argv)
     deadline = time.time() + seconds
 
+    def state():
+        return dict(verdicts=verdicts,
+                    rows=(sum(1 for _ in open(journal))
+                          if os.path.exists(journal) else 0))
+
     def bounded_sleep(s):
         # The loop's own sleeps are how it yields; shortening them makes the
-        # test quick, and raising at the deadline is how it is stopped, since
-        # the loop is deliberately infinite.
+        # test quick, and raising is how it is stopped, since the loop is
+        # deliberately infinite.
         if time.time() > deadline:
+            raise KeyboardInterrupt
+        if until is not None and until(state()):
             raise KeyboardInterrupt
         real_sleep(min(s, 0.01))
 
@@ -185,7 +201,8 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0):
 
 
 # --- a ride offer, end to end ----------------------------------------------
-run_uberx = run(TC.uberx_screen(), extra_argv=['--no-parallel'])
+run_uberx = run(TC.uberx_screen(), seconds=90.0, extra_argv=['--no-parallel'],
+                until=lambda st: st['rows'] >= 1)
 cam = run_uberx['cam']
 
 # The lifecycle first, because a leaked request stalls the camera a few frames
@@ -266,7 +283,8 @@ if rows:
     ok_('...and rows are numbered', last.get('seq', 0) >= 1)
 
 # --- a shop order, which is a different shape of card ----------------------
-run_shop = run(TC.shop_screen(), extra_argv=['--no-parallel'])
+run_shop = run(TC.shop_screen(), seconds=90.0, extra_argv=['--no-parallel'],
+               until=lambda st: st['rows'] >= 1)
 eq('the shop order also released every request', run_shop['cam'].outstanding, 0)
 ok_('...and produced a verdict', len(run_shop['ready']) > 0)
 if run_shop['ready']:
@@ -279,7 +297,8 @@ if run_shop['ready']:
 # The paired path has its own request handling — it takes a second capture
 # outside the first one's `with` — so it is the one most likely to leak.
 os.environ.setdefault('OMP_THREAD_LIMIT', '1')
-run_paired = run(TC.uberx_screen(), seconds=7.0)
+run_paired = run(TC.uberx_screen(), seconds=90.0,
+                 until=lambda st: st['rows'] >= 1)
 eq('the paired path releases every request too', run_paired['cam'].outstanding, 0)
 eq('...exactly once each', run_paired['cam'].double_released, 0)
 ok_('...and still reads the card', len(run_paired['ready']) > 0)
@@ -293,8 +312,96 @@ eq('an empty mount records no offers', len(run_empty['rows']), 0)
 eq('...and leaks nothing', run_empty['cam'].outstanding, 0)
 ok_('...and keeps running', run_empty['cam'].taken > 10)
 
+# --- one offer replaced by another, with no gap between them ----------------
+# The motion gate cannot see this. It compares whole frames as a mean absolute
+# difference, and two cards of the same layout with different numbers score
+# 0.33 against a threshold of 6.0 — so without a slow re-read the verdict on
+# screen stays with the card that is no longer there, which is a confident
+# number about a different job.
+class SwappingCam(FakeCam):
+    def __init__(self, first, second, empty, swap_at=4.0):
+        self.second = second
+        self.swap_at = swap_at
+        FakeCam.__init__(self, first, empty, appear_at=0.6, vanish_at=1e9)
+
+    def _show(self):
+        t = time.time() - self.started
+        if t < self.appear_at:
+            self.frame = self.empty
+        else:
+            self.frame = self.second if t >= self.swap_at else self.offer
+        grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
+        small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
+        self.lores = np.concatenate([small.ravel(),
+                                     np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
+
+
+def run_swap(seconds=120.0):
+    import scan_pi as SP
+    # The same layout with different figures, which is the case the motion
+    # gate is blind to. Swapping one card *type* for another proves nothing:
+    # a different layout is a change the gate spots easily.
+    first = TC.mount(TC.uberx_screen(), 1200)
+    second = TC.mount(TC.uberx_screen(pay='$8.20', trip=('12', '3.1')), 1200)
+    empty = TC.blank()
+    quad = PL.detect_screen_quad(first)
+    workdir = tempfile.mkdtemp()
+    config = os.path.join(workdir, 'config.json')
+    journal = os.path.join(workdir, 'journal.jsonl')
+    with open(config, 'w') as fh:
+        json.dump({'quad': [[float(x), float(y)] for x, y in quad],
+                   'cardHeight': 900,
+                   'capture': {'width': CAP[0], 'height': CAP[1]},
+                   'lensPosition': 10.0, 'exposureTime': 16667,
+                   'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                                'pad': 0, 'secondsPerItem': 0}}, fh)
+    cam = SwappingCam(first, second, empty, swap_at=4.5)
+    real_start, real_emit, real_sleep = SP.start_camera, SP.emit, time.sleep
+    SP.start_camera = lambda *a, **k: cam
+    seen = []
+    SP.emit = lambda *a, **k: (seen.append(a), real_emit(*a, **k))[1]
+    argv = sys.argv
+    sys.argv = ['scan_pi', '--config', config, '--json', '--snapshot', '',
+                '--no-parallel', '--journal', journal]
+    deadline = time.time() + seconds
+
+    def paid():
+        return [a[1]['pay'] for a in seen
+                if a and isinstance(a[0], dict) and a[0].get('ready')]
+
+    def bounded_sleep(s):
+        # Stop once the second card has been seen, not after a fixed stretch of
+        # clock — the swap is scheduled in wall time and a loaded machine can
+        # spend all of it inside one read.
+        if time.time() > deadline:
+            raise KeyboardInterrupt
+        if 8.20 in paid():
+            raise KeyboardInterrupt
+        real_sleep(min(s, 0.01))
+
+    time.sleep = bounded_sleep
+    try:
+        SP.main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        time.sleep = real_sleep
+        sys.argv = argv
+        SP.start_camera, SP.emit = real_start, real_emit
+    return cam, paid()
+
+
+swap_cam, swap_pays = run_swap()
+eq('the swap run leaks nothing', swap_cam.outstanding, 0)
+ok_('the first offer was read', 16.05 in swap_pays)
+ok_('...and so was the one that replaced it, with no gap between them',
+    8.20 in swap_pays)
+ok_('...and the last word is the card actually on screen',
+    swap_pays and swap_pays[-1] == 8.20)
+
 # --- a dark-mode card, through the whole loop -------------------------------
-run_dark = run(TC.uberx_screen(TC.DARK), extra_argv=['--no-parallel'])
+run_dark = run(TC.uberx_screen(TC.DARK), seconds=90.0, extra_argv=['--no-parallel'],
+               until=lambda st: st['rows'] >= 1)
 eq('a dark-mode card leaks nothing', run_dark['cam'].outstanding, 0)
 ok_('...and is read', len(run_dark['ready']) > 0)
 if run_dark['ready']:

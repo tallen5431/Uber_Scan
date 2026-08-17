@@ -83,8 +83,14 @@ def _bgr(im):
     return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
 
 
-def uberx_screen(pal=LIGHT):
+def uberx_screen(pal=LIGHT, pay='$16.05', pickup=('3', '1.1'), trip=('20', '7.3')):
     """A ride offer: two legs, no total line, no item count.
+
+    The numbers are arguments so a caller can render a *second* offer in the
+    same layout. That is not decoration: two cards that differ only in their
+    figures are what the motion gate cannot see, and a test that swaps one card
+    type for another proves nothing about it, because a different layout is a
+    change the gate spots easily.
 
     The chips and the rating line are not decoration: they are what sits between
     the top of the card and the payout on a real offer, and leaving them out
@@ -99,12 +105,12 @@ def uberx_screen(pal=LIGHT):
     d.text((72, top + 62), 'UberX', font=font(30), fill=pal['chip_fg'])
     d.rounded_rectangle([224, top + 54, 388, top + 104], radius=25, fill=pal['chip'])
     d.text((250, top + 62), 'Exclusive', font=font(30), fill=pal['chip_fg'])
-    d.text((46, top + 130), '$16.05', font=font(86), fill=pal['fg'])
+    d.text((46, top + 130), pay, font=font(86), fill=pal['fg'])
     d.text((46, top + 246), '4.95', font=font(30), fill=pal['sub'])
     d.text((190, top + 246), 'Verified', font=font(30), fill=pal['sub'])
-    d.text((66, top + 330), '3 min (1.1 mi) away', font=font(40), fill=pal['fg'])
+    d.text((66, top + 330), '%s min (%s mi) away' % pickup, font=font(40), fill=pal['fg'])
     d.text((66, top + 386), 'E 61 St & S Rhodes Ave, IL', font=font(32, False), fill=pal['sub'])
-    d.text((66, top + 452), '20 min (7.3 mi) trip', font=font(40), fill=pal['fg'])
+    d.text((66, top + 452), '%s min (%s mi) trip' % trip, font=font(40), fill=pal['fg'])
     d.text((66, top + 508), 'S Cottage Grove Ave, IL', font=font(32, False), fill=pal['sub'])
     d.rounded_rectangle([46, top + 590, W - 46, top + 700], radius=26, fill=(23, 74, 232))
     d.text((440, top + 620), 'Accept', font=font(42), fill=(255, 255, 255))
