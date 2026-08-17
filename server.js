@@ -494,6 +494,16 @@ function latestPerOffer(rows) {
   return out.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
 }
 
+// Make sure the directory a file is about to be written into exists.
+//
+// Cheap enough to do on every write: mkdir with recursive succeeds silently
+// when the directory is already there, which it is after the first one.
+function withDirectory(file, done) {
+  fs.mkdir(path.dirname(file), { recursive: true }, function (err) {
+    done(err && err.code !== 'EEXIST' ? err : null);
+  });
+}
+
 function readJournal(done) {
   fs.readFile(JOURNAL_PATH, 'utf8', function (err, text) {
     if (err) return done([]);           // nothing recorded yet is not an error
@@ -682,10 +692,27 @@ function route(req, res) {
         }
         // Appended, like the scanner does it: O_APPEND, one write, so a reader
         // part way through never sees half a row.
-        fs.appendFile(JOURNAL_PATH, fresh.join('\n') + '\n', function (writeErr) {
+        //
+        // The directory is made first, because the commonest way this fails is
+        // that nobody made it. JOURNAL is usually pointed somewhere outside the
+        // checkout — /var/lib/uberscan is the obvious choice — and setting the
+        // variable is the memorable half of that; mkdir is the half that gets
+        // forgotten, and the rig then gets HTTP 500 with the reason sitting in
+        // a log it cannot see.
+        withDirectory(JOURNAL_PATH, function (dirErr) {
+          if (dirErr) {
+            console.error('journal ingest: ' + dirErr.message);
+            return fail('could not create ' + path.dirname(JOURNAL_PATH)
+                        + ' (' + dirErr.code + ')', 500);
+          }
+          fs.appendFile(JOURNAL_PATH, fresh.join('\n') + '\n', function (writeErr) {
           if (writeErr) {
             console.error('journal ingest: ' + writeErr.message);
-            return fail('could not append', 500);
+            // The errno, because 'could not append' is not something anyone can
+            // act on and this is the only message that reaches the machine that
+            // needs to act. ENOENT is a directory nobody made; EACCES is a
+            // process that cannot write where it was pointed.
+            return fail('could not append (' + writeErr.code + ')', 500);
           }
           console.log('journal ingest: +' + fresh.length + ' row(s), '
                       + (existing.length + fresh.length) + ' total');
@@ -693,6 +720,7 @@ function route(req, res) {
                                           malformed: malformed,
                                           have: existing.length + fresh.length }),
                { 'Content-Type': 'application/json; charset=utf-8' });
+          });
         });
       });
     });
@@ -735,11 +763,19 @@ function route(req, res) {
       fs.readFile(dest, 'utf8', function (readErr, before) {
         if (!readErr && before === body) return reply(200, { ok: true, changed: false });
         var tmp = dest + '.part';
-        fs.writeFile(tmp, body, function (writeErr) {
+        withDirectory(dest, function (dirErr) {
+          if (dirErr) {
+            console.error('config backup: ' + dirErr.message);
+            return reply(500, { ok: false,
+                                error: 'could not create ' + path.dirname(dest)
+                                       + ' (' + dirErr.code + ')' });
+          }
+          fs.writeFile(tmp, body, function (writeErr) {
           if (writeErr) {
             fs.unlink(tmp, function () {});
             console.error('config backup: ' + writeErr.message);
-            return reply(500, { ok: false, error: 'could not save' });
+            return reply(500, { ok: false,
+                                error: 'could not save (' + writeErr.code + ')' });
           }
           fs.rename(tmp, dest, function (renameErr) {
             if (renameErr) {
@@ -749,6 +785,7 @@ function route(req, res) {
             }
             console.log('config backup: updated ' + dest);
             reply(200, { ok: true, changed: true });
+          });
           });
         });
       });

@@ -216,6 +216,72 @@ try:
 finally:
     far.close()
 
+# --- a far end whose journal directory nobody made ---------------------------
+# The commonest way this fails in practice, and it failed twice over: JOURNAL is
+# usually pointed somewhere outside the checkout, setting the variable is the
+# memorable half of that and mkdir is the half that gets forgotten — and the rig
+# then got HTTP 500 'could not append' with the actual reason (ENOENT) sitting
+# in a log on the other machine.
+class FarEndAt(FarEnd):
+    def __init__(self, journal):
+        self.dir = os.path.dirname(journal)
+        self.journal = journal
+        self.port = free_port()
+        env = dict(os.environ, SCANNER='0', PORT=str(self.port), JOURNAL=journal)
+        env.pop('SYNC_TOKEN', None)
+        self.proc = subprocess.Popen(
+            ['node', os.path.join(ROOT, 'server.js')], env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.base = 'http://127.0.0.1:%d' % self.port
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(self.base + '/api/journal/newest', timeout=1).read()
+                return
+            except Exception:
+                time.sleep(0.1)
+        raise RuntimeError('the far end never came up')
+
+    def close(self):
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=5)
+        except Exception:
+            self.proc.kill()
+
+
+missing = os.path.join(work, 'never', 'made', 'this', 'journal.jsonl')
+fresh = FarEndAt(missing)
+try:
+    ok_('a directory nobody made is not an error',
+        SY.send(fresh.base, [offer(1, now)])['added'] == 1)
+    eq('...the offers are stored anyway', len(lines(missing)), 1)
+
+    cfg2 = os.path.join(work, 'cfg2.json')
+    with open(cfg2, 'w') as fh:
+        json.dump({'quad': [[1, 1], [2, 1], [2, 2], [1, 2]]}, fh)
+    ok_('...and so is the calibration', SY.send_config(fresh.base, cfg2).get('ok'))
+finally:
+    fresh.close()
+
+# When a write really cannot happen, the reason has to reach the machine that
+# can act on it. 'could not append' is not something anyone can do anything
+# with, and it is the only message the rig ever sees.
+blocked = os.path.join(work, 'blocker')
+with open(blocked, 'w') as fh:
+    fh.write('a file, not a directory\n')
+stuck = FarEndAt(os.path.join(blocked, 'journal.jsonl'))
+try:
+    try:
+        SY.send(stuck.base, [offer(1, now)])
+        eq('a write that cannot happen is refused', 'accepted', 'refused')
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', 'replace')
+        eq('a write that cannot happen is refused', e.code, 500)
+        ok_('...and says which errno, not just that it failed',
+            'ENOTDIR' in detail or 'EACCES' in detail or 'ENOENT' in detail)
+finally:
+    stuck.close()
+
 # --- out of range, which is most of a shift ---------------------------------
 dead = 'http://127.0.0.1:%d' % free_port()
 eq('an unreachable far end reports nothing rather than raising',

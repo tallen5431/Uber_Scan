@@ -1141,6 +1141,16 @@ So `rpi/sync.py` pushes it to a machine that stays at home. That machine runs
 SCANNER=0 JOURNAL=/var/lib/uberscan/journal.jsonl npm start
 ```
 
+`JOURNAL` wants to point *outside* the checkout — left at the default the copy
+lands in `rpi/journal.jsonl` inside the clone, which works but stands your only
+backup next to a `git clean`. The directory is created if it is not there, and
+`config-backup.json` lands beside it.
+
+`SCANNER=0` is not optional on that machine. Without it the server tries to
+start the camera scanner, fails on the missing picamera2, and restart-loops
+every few seconds forever — harmless to the ingest endpoint but a spinning child
+process and a log full of nothing.
+
 That is the whole install. `SCANNER=0` is already a supported mode — it exists
 so the site keeps working when the camera does not — and it gives the offers
 page, the JSON API and the CSV export with no camera, no picamera2 and no OCR.
@@ -1254,7 +1264,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 14 suites, 1221 checks
+npm test                # all 14 suites, 1226 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1281,7 +1291,7 @@ python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
 python3 rpi/test_scan_pi.py     #  41 on the loop that holds the camera
-python3 rpi/test_sync.py        #  32 on getting the offers off the car
+python3 rpi/test_sync.py        #  37 on getting the offers off the car
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
