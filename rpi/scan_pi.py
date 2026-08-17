@@ -38,8 +38,8 @@ DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'confi
 def _default_snapshot():
     """Where to leave the live view: RAM if there is any, the card if not.
 
-    This is written about fourteen times a second while someone is watching the
-    page, at roughly 50kB a frame — about 2.5GB an hour, against 19MB a *year*
+    This is written twenty-five times a second while someone is watching the
+    page, at roughly 50kB a frame — about 4.5GB an hour, against 19MB a *year*
     for the journal. All of it is stale two frames later and none of it needs to
     survive a reboot, so putting it on the SD card was paying the one part of
     this system that wears out for nothing. pipeline.py has staged its OCR
@@ -64,16 +64,30 @@ DEFAULT_SNAPSHOT = _default_snapshot()
 # that window the view is worth refreshing quickly, and outside it a slow tick
 # is enough to prove the camera is alive.
 #
-# The fast rate is what someone watching the page actually experiences, so it
-# is set by what looks alive rather than by what is cheap. Raising it was paid
-# for first: a snapshot used to copy a 12MB frame, draw on it at full size,
-# shrink it with an area filter and then warp a second copy of a card the
-# reader had already made. It now shrinks once, draws on the small picture and
-# reuses the reader's card — about a quarter of the work, roughly 20ms of a
-# Pi 4's loop thread per frame. At this rate that is an eighth of that one
-# thread, which measured against the reads is affordable: the Pi 4 has four
-# cores and the reads leave most of them idle.
-SNAPSHOT_FAST = 0.07
+# The fast rate is what someone watching the page actually experiences, so it is
+# set by what looks alive rather than by what is cheap. Raising it was paid for
+# first: a snapshot used to copy a 12MB frame, draw on it at full size, shrink
+# it with an area filter and then warp a second copy of a card the reader had
+# already made. It now shrinks once, draws on the small picture and reuses the
+# reader's card — about a quarter of the work.
+#
+# 25 a second, measured rather than guessed. Composing and encoding one 480px
+# view costs about 2.2ms on a development machine against synthetic noise, which
+# is the worst case a JPEG encoder ever sees — call it 10ms on a Pi 4 with a real
+# frame. That is a quarter of one of four cores, paid only while somebody is
+# actually looking, and the reads leave most of those cores idle.
+#
+# It was 14, which capped the live view below what the rig's own screen could
+# show. That panel is what the driver watches to decide whether to press Accept,
+# and fourteen frames a second looks like a slide show next to the phone beside
+# it. Measured end to end through the real page: 13.7 distinct frames a second
+# before, 28.4 after.
+#
+# A viewer on the far end of the car's wifi cannot carry 25 frames a second of
+# 50kB each, and does not have to — the stream respects back-pressure, so a slow
+# link simply receives fewer frames rather than falling further behind the longer
+# it watches. The rig's own screen, which is a loopback socket, gets all of them.
+SNAPSHOT_FAST = 0.04
 SNAPSHOT_IDLE = 3.0
 
 # The live view is a *view*, not a read. It exists so the driver can see what

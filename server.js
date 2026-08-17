@@ -305,6 +305,15 @@ var FRAME_CANDIDATES = [
   path.join(ROOT, 'rpi', 'live-frame.jpg')
 ].filter(Boolean);
 
+// How often to look for a newer frame, and how many viewers may stream at once.
+// The poll is a stat() on a file in RAM — microseconds — and the cap is a
+// backstop against a page left open in twenty tabs rather than an expected
+// limit: a car has one screen and maybe a phone.
+var MJPEG_POLL = 12;
+var MAX_MJPEG = 6;
+var MJPEG_BOUNDARY = 'uberscanframe';
+var mjpegClients = 0;
+
 function framePath() {
   if (process.env.FRAME) return process.env.FRAME;
   var best = null;
@@ -983,6 +992,88 @@ function route(req, res) {
   // The scanner writes this every couple of seconds while it runs. Serving it
   // from here means the live view needs no second server and no camera of its
   // own — the one process holding the camera is the one producing the picture.
+  /* The live view as a stream rather than a thousand little requests.
+   *
+   * The polling loop this replaces asks for a whole new frame over HTTP, waits
+   * for it, then waits a floor of 60ms and asks again — about 17 a second at
+   * best, and every one of those is a request, a file read, a response and an
+   * image decode whether or not the picture has changed since the last one.
+   * The driver watches this screen to decide whether to press Accept, so the
+   * lag between the phone changing and the panel showing it is the whole
+   * quality of the thing.
+   *
+   * Here the server holds the connection open and writes a part whenever the
+   * frame on disk is actually new. No request per frame, no cache-busting
+   * query, no floor — the rate becomes whatever the scanner is writing, which
+   * is the honest ceiling. Unchanged frames cost one stat() and nothing else.
+   */
+  if (pathname === '/api/frame.mjpeg') {
+    if (mjpegClients >= MAX_MJPEG) {
+      return send(res, 503, 'too many viewers', { 'Content-Type': 'text/plain' });
+    }
+    mjpegClients++;
+    touchWatchFile();
+    res.writeHead(200, {
+      'Content-Type': 'multipart/x-mixed-replace; boundary=' + MJPEG_BOUNDARY,
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Pragma': 'no-cache',
+      'Connection': 'close'
+    });
+    // Send the head now rather than letting it wait behind the first frame.
+    // Before the scanner has written anything there is no first frame, so the
+    // viewer sat looking at a connection it could not distinguish from a
+    // stalled one — and the page's fallback waits on exactly that signal.
+    if (res.flushHeaders) res.flushHeaders();
+
+    var lastSent = -1;
+    var closed = false;
+    var timer = null;
+
+    var stop = function () {
+      if (closed) return;
+      closed = true;
+      mjpegClients--;
+      clearTimeout(timer);
+      try { res.end(); } catch (e) { /* already gone */ }
+    };
+    res.on('close', stop);
+    res.on('error', stop);
+
+    var tick = function () {
+      if (closed) return;
+      var file = framePath();
+      fs.stat(file, function (statErr, st) {
+        if (closed) return;
+        if (statErr || st.mtimeMs === lastSent) {
+          timer = setTimeout(tick, MJPEG_POLL);
+          return;
+        }
+        fs.readFile(file, function (readErr, data) {
+          if (closed) return;
+          if (readErr || !data.length) {
+            timer = setTimeout(tick, MJPEG_POLL);
+            return;
+          }
+          lastSent = st.mtimeMs;
+          // Someone is watching, so the scanner should keep composing at its
+          // fast rate. Cheap and throttled inside touchWatchFile.
+          touchWatchFile();
+          var head = '--' + MJPEG_BOUNDARY + '\r\n'
+                   + 'Content-Type: image/jpeg\r\n'
+                   + 'Content-Length: ' + data.length + '\r\n\r\n';
+          // Respect back-pressure: if the socket is full, wait for it to drain
+          // rather than queueing frames the viewer will never catch up with.
+          var more = res.write(head + '');
+          res.write(data);
+          more = res.write('\r\n') && more;
+          if (more) timer = setTimeout(tick, MJPEG_POLL);
+          else res.once('drain', function () { if (!closed) tick(); });
+        });
+      });
+    };
+    return tick();
+  }
+
   if (pathname === '/api/frame.jpg') {
     // Tell the scanner someone is looking, so it refreshes the view quickly
     // instead of on its idle tick. Throttled: this fires twice a second.

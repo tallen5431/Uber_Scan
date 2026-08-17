@@ -810,6 +810,41 @@ reader. Aim problems show up in the first, focus and glare in the second. It is
 written every couple of seconds even when nothing is happening, so a blank
 stretch between offers still proves the camera is alive.
 
+### How fast the live view actually is
+
+The picture on the rig's own screen is what a driver watches to decide whether
+to press Accept, so the lag between the phone changing and the panel showing it
+is the whole quality of it. Measured end to end through the real page, against a
+writer producing 30 frames a second:
+
+| | distinct frames/s | http requests in 5s |
+|---|---|---|
+| before — polling a still, 60ms floor | **13.7** | 216 |
+| polling, 30ms floor | 25.6 | 162 |
+| **streaming (`/api/frame.mjpeg`)** | **28.4** | **1** |
+
+Two ceilings had to move. The scanner was composing a view 14 times a second, so
+the page could not show more than that however often it asked; it is 25 now.
+Composing and encoding one 480px view costs about 2.2ms on a development machine
+against synthetic noise — the worst case a JPEG encoder ever sees — so call it
+10ms on a Pi 4 with a real frame, a quarter of one of four cores, and only while
+somebody is looking.
+
+The other was the page, which fetched a whole still over HTTP, waited, waited a
+further 60ms and fetched again — a request, a file read, a response and a decode
+for every frame whether or not the picture had changed. The server now holds one
+connection open and writes a part only when the frame on disk is genuinely new.
+
+**A viewer on the far end of the car's wifi cannot carry 25 frames a second of
+50kB each, and does not have to.** The stream respects back-pressure, so a slow
+link receives fewer frames rather than falling further behind the longer it
+watches. The rig's own screen is a loopback socket and gets all of them.
+
+Polling is kept as the fallback. A stream is one more thing that can fail — a
+proxy that buffers it, a browser that will not render it — and a still that
+arrives slowly beats a picture that never appears; the page switches over on its
+own after four seconds without a frame.
+
 ## Calibrate
 
 Put a live offer — or any bright screen — on the phone, then:
