@@ -466,6 +466,36 @@ ok_('a doubt this build has no words for still says something',
 ok_('...and never says a number',
     '90' not in SP.spoken(_rate('doubt', 90.0, 'newer-reason')))
 
+# --- a clock that has not been set ------------------------------------------
+# A Pi 4 has no real-time clock: with no network it boots in 1970 and jumps
+# forward whenever it first reaches an NTP server, which in a car may be minutes
+# into a shift or never. That did not matter until a delivery card's duration
+# started coming from "Deliver by 7:15 PM" minus the current time — where an
+# hour of skew turns a 45-minute job into a 105-minute one, or into a deadline
+# already passed that wraps to twenty-three hours, and the verdict looks exactly
+# as confident either way.
+eq('a clock still in 1970 is not used', SP.clock_minutes(0), None)
+eq('...nor one an hour into 1970', SP.clock_minutes(3600), None)
+ok_('...but a real one is', SP.clock_minutes() is not None)
+ok_('...and reads as minutes since midnight',
+    0 <= (SP.clock_minutes() or -1) < 24 * 60)
+
+# The consequence, end to end: with no believable clock a delivery card has no
+# duration, so it gets no verdict — which is the right answer for an offer whose
+# length nothing here knows.
+import offer_parser as OP2                                     # noqa: E402
+_dd = OP2.parse('$41.11 Guaranteed 9.8 mi Deliver by 7:15 PM Pickup Papa Johns')
+eq('a delivery card is complete on its own', _dd['complete'], True)
+eq('...but unjudged without a clock',
+   OP2.rate(_dd, {'target': 25, 'costPerMile': 0.3})['ready'], False)
+eq('...and judged with one',
+   OP2.rate(_dd, {'target': 25, 'costPerMile': 0.3,
+                  'nowMinutes': 18 * 60 + 29})['ready'], True)
+# A ride card states its own minutes and is unaffected either way.
+_ride = OP2.parse('$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip')
+eq('a ride card needs no clock',
+   OP2.rate(_ride, {'target': 25, 'costPerMile': 0.3})['ready'], True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -1061,6 +1061,15 @@ stated duration.
 | `Deliver by 6:39 PM Cherry Cricket 4 items 0.6 mi $8.00` | $8.00, 0.6 mi, 4 items, 10 min left, *Cherry Cricket* |
 | `UberX $10.30 19 min (8.5 mi) Mae Dell Rd & Riggins Dr … 12 mins (6.6 mi) Camp Jordan Pkwy` | $10.30, 31 min, 15.1 mi, both addresses |
 
+A Pi 4 has **no real-time clock**. With no network it boots somewhere in 1970 and
+jumps forward when it first reaches an NTP server, which in a car can be minutes
+into a shift or not at all — and an hour of skew turns a 45-minute delivery into
+a 105-minute one, or into a deadline already passed that wraps to twenty-three
+hours, with the verdict looking exactly as confident either way. So the clock has
+to earn the right to be used: anything before 2025 is treated as unset, and a
+delivery card then goes **unjudged** rather than judged on a guess. Ride cards
+state their own minutes and are unaffected.
+
 **Places are stored now**, which reverses something this project used to refuse
 on purpose. Without somewhere named, an offer read months ago is a row of
 figures that cannot be matched to any job you remember — and a record you

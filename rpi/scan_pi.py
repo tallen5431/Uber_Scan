@@ -144,6 +144,32 @@ WATCH_WINDOW = 10.0
 RESET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.recalibrate')
 
 
+# A Pi 4 has no real-time clock. With no network it boots somewhere in 1970 and
+# jumps forward whenever it first reaches an NTP server, which in a car can be
+# minutes into a shift or not at all.
+#
+# That did not matter until a delivery card's duration started coming from
+# "Deliver by 7:15 PM" minus the current time. A clock an hour out turns a
+# 45-minute job into a 105-minute one, or into a deadline that has already
+# passed and wraps to twenty-three hours — and the verdict looks exactly as
+# confident either way.
+#
+# So the clock has to earn the right to be used. Anything before this and it is
+# obviously unset rather than merely wrong; a delivery card then goes unjudged,
+# which is the correct outcome for an offer whose duration nothing here knows.
+# Ride cards state their own minutes and are unaffected.
+CLOCK_BELIEVABLE_AFTER = 1735689600.0        # 2025-01-01, well before this code
+
+
+def clock_minutes(now=None):
+    """Minutes since midnight, or None if the clock cannot be trusted."""
+    now = time.time() if now is None else now
+    if not now or now < CLOCK_BELIEVABLE_AFTER:
+        return None
+    local = time.localtime(now)
+    return local.tm_hour * 60 + local.tm_min
+
+
 def reset_requested():
     """True once per request, and never fatal if the file cannot be removed."""
     try:
@@ -1088,8 +1114,9 @@ def main():
             # has to stay a pure function of the text it was given so it can be
             # held to a fixed corpus.
             settings = dict(cfg.get('settings', {}))
-            now_local = time.localtime()
-            settings['nowMinutes'] = now_local.tm_hour * 60 + now_local.tm_min
+            minutes_now = clock_minutes()
+            if minutes_now is not None:
+                settings['nowMinutes'] = minutes_now
             rate = OP.rate(parsed, settings)
             out['parsed'], out['rate'] = parsed, rate
             # Anything with a payout is worth a second look; anything without is
