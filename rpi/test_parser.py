@@ -62,6 +62,20 @@ for c in cases.get('coerce', {}).get('doubt', []):
        P.doubt(_value(c['pay']), _value(c['minutes']), _value(c['miles'])),
        c['expect'])
 
+# --- where an offer went, and the deadline that stands in for a duration ----
+# Both are shapes the reader had to learn from real DoorDash cards, and both are
+# the kind of thing that drifts silently between two implementations.
+for c in cases.get('places', []):
+    eq('places / ' + c['name'], P.parse(c['text'])['places'], c['expect'])
+
+for c in cases.get('deadline', []):
+    eq('deadline / ' + c['name'], P.parse(c['text'])['deliverBy'], c['expect'])
+
+for c in cases.get('until', []):
+    got = P.minutes_until(c['deadline'], c['now'])
+    eq('minutes left / ' + c['name'],
+       None if got is None else int(got), c['expect'])
+
 # --- a rate has to be able to explain itself ------------------------------
 # Working $7.09 over 34 minutes by hand gives $12.51/hr. The screen said
 # $10.61 and gave no hint that $1.08 of running costs came off first, so the

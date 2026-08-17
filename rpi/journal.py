@@ -28,10 +28,22 @@ Three things this deliberately does not do:
   * it does not record what the driver decided. The scanner cannot see the
     Accept button being pressed and must never touch it, so an accept column
     here would be a guess presented as a record.
-  * it does not record the OCR text. The useful part is already parsed into
-    numbers; what is left is pickup addresses — where the driver was and when —
-    which earns nothing towards a $/hour and would sit in a file served over the
-    LAN. The reader's text stays in the log, where it is transient.
+  * it does not record the OCR text. The useful part is parsed into numbers and
+    into `places`; what is left is map furniture. The reader's text stays in the
+    log, where it is transient.
+
+    `places` is a deliberate exception to what this paragraph used to say, made
+    at the driver's request and worth stating plainly. Without somewhere named,
+    an offer read months ago is a row of figures that cannot be matched to any
+    job a person remembers — which makes the record hard to check, and checking
+    it is the entire point. So the merchant behind a "Pickup" label, and the
+    address printed after a leg, are kept: only what the card printed, only
+    against an anchor the card also printed, never free text off the map.
+
+    It is a real trade. This is a record of where the driver was and when, it
+    lives on a card in a vehicle, and it is copied to a machine at home. Setting
+    `"keepPlaces": false` alongside the other settings turns it off and changes
+    nothing else.
   * it does not fail. A full card, a read-only filesystem or a missing directory
     costs the journal and nothing else: the scanner exists to read offers, and
     it keeps reading them.
@@ -180,8 +192,12 @@ class OfferLog:
     the scanner restarts — and none of those can be tested through a camera.
     """
 
-    def __init__(self, journal):
+    def __init__(self, journal, keep_places=True):
         self.journal = journal
+        # Whether to store where an offer went. On by default because a record
+        # nobody can match to a remembered job is hard to check, and checking it
+        # is the point; `"keepPlaces": false` in the settings turns it off.
+        self.keep_places = keep_places
         self.episode = None          # the accumulator's episode being recorded
         self.id = None
         self.seq = 0
@@ -263,7 +279,7 @@ class OfferLog:
         self.seq += 1
         row = row_for(parsed, rate, at, first_at=self.first_at,
                       offer_id=self.id, seq=self.seq, ms=ms, locked=locked,
-                      settled=settled, whole=whole)
+                      settled=settled, whole=whole, keep_places=self.keep_places)
         if self.journal.append(row):
             self.written += 1
             return row
@@ -285,7 +301,7 @@ def content_of(parsed):
 
 
 def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
-            locked=None, settled=False, whole=True):
+            locked=None, settled=False, whole=True, keep_places=True):
     """One offer, as it will be stored.
 
     Numbers only, and each one either read off the card or derived from the
@@ -294,9 +310,16 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
     unreadable a month after the target moved, with no way to tell a verdict
     that was right then from one that would be wrong now.
     """
-    pay, minutes, miles = (parsed.get('pay'), parsed.get('minutes'),
-                           parsed.get('miles'))
+    pay, miles = parsed.get('pay'), parsed.get('miles')
+    # The minutes the verdict was actually made over. On a delivery card that
+    # is the time left until the deadline, which parse() cannot work out on its
+    # own — so it comes back from rate(), and only falls back to the card's own
+    # figure for a row written before that existed.
+    minutes = rate.get('cardMinutes')
+    if minutes is None:
+        minutes = parsed.get('minutes')
     why = OP.doubt(pay, minutes, miles)
+    places = parsed.get('places') if keep_places else []
     return {
         # Rows outlive the code that wrote them. One integer buys a reader that
         # can tell a schema change from corruption.
@@ -355,6 +378,24 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # is a reader bug, an implied 120mph is a misread time, and a receipt on
         # the screen is not an offer at all.
         'doubt': why,
+        # --- where it went ----------------------------------------------------
+        # The one thing this file used to refuse on purpose, and the driver
+        # asked for it: without somewhere named, an offer months later is a row
+        # of numbers that cannot be matched to a job anybody remembers.
+        #
+        # Only what the card printed against an anchor it prints too — a
+        # merchant behind "Pickup", an address after a leg — never free text off
+        # the map. It stays a fair trade to be aware of: this is a record of
+        # where the driver was and when, it lives on a card in a vehicle and is
+        # copied to a machine at home, and `"keepPlaces": false` in the settings
+        # turns it off without touching anything else.
+        'places': list(places or []),
+        # A delivery deadline, as minutes since midnight, and whether the time
+        # this offer was judged over came from that rather than from a stated
+        # duration. Different claims about the same field, and a record that
+        # cannot tell them apart cannot be argued with later.
+        'deliverBy': parsed.get('deliverBy'),
+        'fromDeadline': bool(rate.get('fromDeadline')),
         'ms': _round(ms, 0),
         'content': list(content_of(parsed)),
     }

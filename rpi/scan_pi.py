@@ -762,7 +762,9 @@ def main():
     # same offer and recording it twice.
     offer_log = None
     if not args.no_journal:
-        offer_log = JR.OfferLog(JR.Journal(args.journal))
+        offer_log = JR.OfferLog(
+            JR.Journal(args.journal),
+            keep_places=cfg.get('settings', {}).get('keepPlaces', True) is not False)
         kept = offer_log.journal.rows()
         resumed = offer_log.resume()
         log('journal: %s (%d offer%s so far)%s'
@@ -1081,7 +1083,14 @@ def main():
                 _read_failed(e)
                 continue
             parsed = accumulator.add(out['parsed'])
-            rate = OP.rate(parsed, cfg.get('settings', {}))
+            # The clock, for a delivery card that states a deadline instead of
+            # a duration. Passed in rather than read inside the parser, which
+            # has to stay a pure function of the text it was given so it can be
+            # held to a fixed corpus.
+            settings = dict(cfg.get('settings', {}))
+            now_local = time.localtime()
+            settings['nowMinutes'] = now_local.tm_hour * 60 + now_local.tm_min
+            rate = OP.rate(parsed, settings)
             out['parsed'], out['rate'] = parsed, rate
             # Anything with a payout is worth a second look; anything without is
             # not an offer and should not hold the loop open.

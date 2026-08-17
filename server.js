@@ -334,7 +334,11 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    // that export is a spreadsheet with the driver's own test
                    // card silently mixed into it and no way to tell which row
                    // it is — which is the entire reason they hid it.
-                   'suspect', 'doubt', 'accepted', 'hidden', 'ms'];
+                   'suspect', 'doubt', 'accepted', 'hidden',
+                   // Where it went, joined with a semicolon so one cell holds
+                   // both ends of a ride without breaking the comma-separated
+                   // file it sits in.
+                   'places', 'deliverBy', 'fromDeadline', 'ms'];
 
 function numOrNull(v) {
   return (typeof v === 'number' && isFinite(v)) ? v : null;
@@ -584,6 +588,9 @@ function toCsv(offers) {
       if (v === null || v === undefined) return '';
       if (typeof v === 'boolean') return v ? '1' : '0';
       if (typeof v === 'number') return String(v);
+      // A list — the places an offer went — as one cell. Semicolons, because
+      // the separator here is a comma and an address is full of them.
+      if (Array.isArray(v)) v = v.join('; ');
       return '"' + String(v).replace(/"/g, '""') + '"';
     });
     // A second, human-readable stamp. A spreadsheet will not turn epoch

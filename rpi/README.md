@@ -1035,6 +1035,54 @@ What it will never report is a dollars-per-hour you would earn. That depends
 entirely on how much of the recorded time was driving rather than parked, which
 the scanner cannot see: on the same data it ranged from $22 to $78.
 
+### Delivery cards, and where an offer went
+
+Uber states a journey as legs — `19 min (8.5 mi)` — and the reader was built
+around that. DoorDash does not state a duration at all. It gives a deadline
+(`Deliver by 7:15 PM`), a distance on its own, and the merchant.
+
+Three real DoorDash cards parsed to **nothing**: no minutes, so no legs; no
+legs, so no miles; and with no minutes the offer is incomplete, gets no verdict
+and never reaches the journal. Every delivery offer that driver was shown was
+invisible to the rig.
+
+The deadline is the honest denominator for one of these. It is not the drive
+time — it is how long the job occupies you, waiting at the counter included,
+which is what an hourly rate is meant to divide by. `parse()` reports it as a
+clock time and `rate()` does the subtraction, because a parser that reads the
+clock cannot be held to a fixed corpus. A row says which it used:
+`fromDeadline` is true when the minutes came from a deadline rather than from a
+stated duration.
+
+| card | reads as |
+|---|---|
+| `$41.11 … 9.8 mi … Deliver by 7:15 PM … Pickup Papa John's Store 3317` | $41.11, 9.8 mi, 46 min left, *Papa John's Store 3317* |
+| `+$16.00 … Additional 6.9 mi … Deliver by 7:08 PM … Pickup Buffalo Wild Wings` | $16.00, 6.9 mi, 39 min left, *Buffalo Wild Wings* |
+| `Deliver by 6:39 PM Cherry Cricket 4 items 0.6 mi $8.00` | $8.00, 0.6 mi, 4 items, 10 min left, *Cherry Cricket* |
+| `UberX $10.30 19 min (8.5 mi) Mae Dell Rd & Riggins Dr … 12 mins (6.6 mi) Camp Jordan Pkwy` | $10.30, 31 min, 15.1 mi, both addresses |
+
+**Places are stored now**, which reverses something this project used to refuse
+on purpose. Without somewhere named, an offer read months ago is a row of
+figures that cannot be matched to any job you remember — and a record you
+cannot check is not much of a record. The offers page searches on them: type
+`papa john` or `chattanooga` into the find box.
+
+Only what the card printed, and only against an anchor the card also printed —
+the merchant behind a `Pickup` label, the merchant under a deadline, the address
+after a leg. Never free text off the map: the `4 mi from fast charger` badge and
+the `(2 orders)` after a store name are both things a looser reader would have
+swallowed, and a journal full of half-read map furniture would be worse than one
+that cannot be searched by place.
+
+It is a real trade and worth stating plainly. This is a record of where you were
+and when, it lives on a card in a vehicle, and it is copied to a machine at home.
+
+```json
+"settings": { "keepPlaces": false }
+```
+
+turns it off and changes nothing else.
+
 ### When the reading cannot be true
 
 Not every misread is noise. In one shift of 234 offers, three had lost a decimal

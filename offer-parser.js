@@ -131,6 +131,98 @@
 
   var ITEMS = new RegExp('(' + DC + '{1,3})\\s*items?\\b', 'i');
 
+  /* --- the shape a delivery card uses instead of a duration ---
+   *
+   * Uber states a journey as legs: "19 min (8.5 mi)". DoorDash does not state a
+   * duration at all. It gives a deadline — "Deliver by 7:15 PM" — a distance on
+   * its own, and the merchant. Three real cards off a driver's phone parsed to
+   * nothing: no minutes, so no legs; no legs, so no miles; and with no minutes
+   * the offer is incomplete, gets no verdict, and never reaches the journal.
+   * Every DoorDash offer that driver was shown was invisible to the rig.
+   *
+   * The deadline is the honest denominator for one of these. It is not the
+   * drive time — it is how long the job occupies the driver, waiting at the
+   * counter included, which is what an hourly rate is supposed to divide by. */
+  var DELIVER_BY = /deliver(?:ed|y)?\s*by\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?/i;
+
+  /* A distance with no leg around it. Only consulted when no leg was found, so
+     it cannot double-count a ride card — and never the "4 mi from fast charger"
+     badge, which is a fact about the map rather than about the job. */
+  var LONE_MILES = new RegExp(
+    '(?:^|[^\\d.])(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*mi(?:les?)?\\b(?!\\s*from)', 'i');
+
+  var PICKUP = /\bpick\s?up\b[\s:.-]*([\s\S]{2,60}?)(?=\s*\(\s*\d+\s*orders?\s*\)|\s+customer\b|\s+dropoff\b|\s+accept\b|\s+add\s+to\b|\s+decline\b|$)/i;
+
+  /* An address as these cards write one: a junction, or a street with a town
+     after it. Deliberately narrow — a line that is not clearly a place is not
+     stored, because a journal full of half-read map furniture is worse than one
+     that cannot be searched by where an offer went. */
+  var LOOKS_LIKE_A_PLACE = /^[A-Za-z].*(?:,\s*[A-Za-z]|\s&\s|\b(?:st|street|rd|road|ave|avenue|blvd|pkwy|parkway|dr|drive|ln|lane|way|ct|court|hwy|highway|pl|place|ter|terrace|cir|circle)\b)/i;
+
+  var PLACE_JUNK = /^(?:pickup|dropoff|customer|accept|decline|add\s+to\s+route|deliver(?:ed|y)?\s*by.*|verified|exclusive|guaranteed)\b[\s:.-]*/i;
+  var PLACE_STOP = /\b(?:accept|decline|verified|exclusive|guaranteed|add\s+to\s+route|\d+\s*mi\b)/i;
+  var AFTER_DEADLINE_STOP = /\d|\b(?:accept|decline|pickup|customer|dropoff)\b/i;
+
+  /* "Deliver by 7:15 PM" as minutes since midnight, or null. */
+  function findDeadline(text) {
+    var m = text.match(DELIVER_BY);
+    if (!m) return null;
+    var hour = parseInt(m[1], 10);
+    var minute = parseInt(m[2], 10);
+    if (!(hour >= 1 && hour <= 12) || minute > 59) return null;
+    hour = hour % 12;
+    if (m[3].toLowerCase() === 'p') hour += 12;
+    return hour * 60 + minute;
+  }
+
+  /* How long is left, wrapping across midnight. A deadline already past is not
+     a short job, it is a stale card. */
+  function minutesUntil(deadline, nowMinutes) {
+    if (deadline === null || deadline === undefined) return null;
+    if (typeof nowMinutes !== 'number' || !isFinite(nowMinutes)) return null;
+    var left = deadline - nowMinutes;
+    if (left < 0) left += 24 * 60;
+    return left;
+  }
+
+  /* Where the job goes, as the card writes it. Never invented — three anchors,
+     each something the card actually prints. */
+  function findPlaces(text, legs) {
+    var out = [];
+    function keep(value) {
+      value = String(value || '').replace(PLACE_JUNK, '');
+      value = value.replace(/^[\s.,\-;:|()]+|[\s.,\-;:|()]+$/g, '');
+      if (value.length < 3 || value.length > 60) return;
+      if (!/[A-Za-z]{2}/.test(value)) return;
+      for (var i = 0; i < out.length; i++) {
+        if (out[i].toLowerCase() === value.toLowerCase()) return;
+      }
+      out.push(value);
+    }
+
+    var m = text.match(PICKUP);
+    if (m) keep(m[1]);
+
+    /* A delivery card without a "Pickup" label puts the merchant straight after
+       the deadline: "Deliver by 6:39 PM / Cherry Cricket / 4 items 0.6 mi". */
+    var d = DELIVER_BY.exec(text);
+    if (d) {
+      var after = text.slice(d.index + d[0].length, d.index + d[0].length + 60);
+      keep(after.split(AFTER_DEADLINE_STOP)[0]);
+    }
+
+    for (var j = 0; j < legs.length; j++) {
+      if (typeof legs[j].end !== 'number') continue;
+      var stop = (j + 1 < legs.length && typeof legs[j + 1].start === 'number')
+        ? legs[j + 1].start : text.length;
+      var tail = text.slice(legs[j].end, stop).slice(0, 80);
+      tail = tail.split(PLACE_STOP)[0];
+      tail = tail.replace(/^[\s.,\-;:|()]+|[\s.,\-;:|()]+$/g, '');
+      if (LOOKS_LIKE_A_PLACE.test(tail)) keep(tail);
+    }
+    return out.slice(0, 4);
+  }
+
   function findLegs(text) {
     var legs = [], m;
     LEG.lastIndex = 0;
@@ -162,7 +254,10 @@
       var tail = text.slice(m.index + m[0].length, m.index + m[0].length + 14).toLowerCase();
       legs.push({
         minutes: minutes, miles: miles, hadDecimal: hadDecimal || fixed.corrected,
-        isTotal: /\btota?l\b/.test(tail), corrected: fixed.corrected
+        isTotal: /\btota?l\b/.test(tail), corrected: fixed.corrected,
+        // Where this leg sat in the text, so the address printed after it can
+        // be found without searching the whole card again.
+        start: m.index, end: m.index + m[0].length
       });
 
       if (m.index === LEG.lastIndex) LEG.lastIndex++;
@@ -245,10 +340,29 @@
 
     var pay = findPay(text);
 
+    // A delivery card states no duration and puts its distance on its own, so
+    // neither reaches the sum above. Consulted only when the legs found
+    // nothing, which is what keeps it from double-counting a ride card.
+    var deadline = findDeadline(text);
+    if (miles === null && !used.length) {
+      var lone = text.match(LONE_MILES);
+      if (lone) {
+        var v = toNumber(lone[1]);
+        if (v !== null && v > 0 && v <= 500) miles = Math.round(v * 100) / 100;
+      }
+    }
+
     return {
       pay: pay,
       minutes: minutes,
       miles: miles,
+      // Minutes since midnight, not a duration: converting one to the other
+      // needs to know the time, and a parser that reads the clock cannot be
+      // checked against a fixed corpus. rate() does the subtraction.
+      deliverBy: deadline,
+      // Where it goes, for finding this offer again months later. Empty unless
+      // the card printed something anchored enough to trust.
+      places: findPlaces(text, legs),
       // The legs behind the sum, so a caller holding readings from several
       // frames can merge the ones a single frame missed.
       legDetail: used.map(function (l) {
@@ -259,7 +373,11 @@
       milesCorrected: dist.corrected,
       milesUncertain: dist.uncertain,
       // Enough to act on: without pay and time there is no rate to show.
-      complete: pay !== null && pay > 0 && minutes !== null && minutes > 0,
+      // A delivery card is complete without a duration, because its deadline is
+      // one — but only once something has told it what time it is. rate() fills
+      // that in; parse() must stay a pure function of its text.
+      complete: pay !== null && pay > 0
+                && ((minutes !== null && minutes > 0) || deadline !== null),
       text: text
     };
   }
@@ -357,8 +475,24 @@
 
     if (!parsed.complete) return { ready: false, state: 'empty' };
 
+    // A delivery card gives a deadline where a ride card gives a duration. The
+    // subtraction happens here rather than in parse(), because it needs to know
+    // the time and a parser that reads the clock cannot be held to a fixed
+    // corpus. `nowMinutes` is minutes since midnight; without it a card that
+    // only has a deadline stays unjudged rather than being guessed at.
+    var cardMinutes = parsed.minutes;
+    var fromDeadline = false;
+    if ((cardMinutes === null || cardMinutes === undefined)
+        && parsed.deliverBy !== null && parsed.deliverBy !== undefined) {
+      cardMinutes = minutesUntil(parsed.deliverBy, setting(s.nowMinutes, null));
+      fromDeadline = cardMinutes !== null;
+    }
+    if (cardMinutes === null || cardMinutes === undefined || !(cardMinutes > 0)) {
+      return { ready: false, state: 'empty' };
+    }
+
     var shopMinutes = (parsed.items || 0) * secondsPerItem / 60;
-    var minutes = parsed.minutes + pad + shopMinutes;
+    var minutes = cardMinutes + pad + shopMinutes;
     // A trip that takes no time pays infinitely well, which is the kind of
     // arithmetic that ends in an ACCEPT on nonsense. parse() will not produce
     // a zero-minute offer, but `pad` is a number a driver edits by hand and a
@@ -376,7 +510,7 @@
     // Judged on what the card said, not on what the arithmetic made of it:
     // `pad` and the shopping allowance are the driver's own additions and a
     // card is not misread for having them applied.
-    var why = doubt(parsed.pay, parsed.minutes, parsed.miles);
+    var why = doubt(parsed.pay, cardMinutes, parsed.miles);
 
     return {
       ready: true,
@@ -406,6 +540,12 @@
       perMile: (parsed.miles && !parsed.milesUncertain) ? net / parsed.miles : null,
       milesUncertain: !!parsed.milesUncertain,
       milesCorrected: !!parsed.milesCorrected,
+      // The minutes the arithmetic used from the card, and whether they were a
+      // stated duration or the time left until a delivery deadline. Those are
+      // different claims and a record that cannot tell them apart cannot be
+      // argued with later.
+      cardMinutes: cardMinutes,
+      fromDeadline: fromDeadline,
       // `ready` stays true and every number is still here, because the row has
       // to reach the journal: a reading this project got wrong is the most
       // useful row in the file, and one that is quietly dropped cannot be
@@ -423,5 +563,7 @@
   // test.
   return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
            setting: setting, doubt: doubt, DEFAULT_SETTINGS: DEFAULT_SETTINGS,
+           findDeadline: findDeadline, minutesUntil: minutesUntil,
+           findPlaces: findPlaces,
            SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH };
 }));

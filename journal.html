@@ -154,6 +154,10 @@
                    font-weight: 600; color: var(--muted); line-height: 1.3; }
   .offer .meta { font-size: 12px; color: var(--muted); min-width: 0;
                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The place on its own line under the figures, dimmer than them: it is what
+     you scan down to recognise a job, not what you judge it by. */
+  .offer .meta em { display: block; font-style: normal; font-size: 11px;
+                    opacity: .8; overflow: hidden; text-overflow: ellipsis; }
   .offer .when { margin-left: auto; padding-left: 6px; font-size: 11px;
                  color: var(--muted); flex: none; }
   /* Set aside: still listed, because an offer missing from the record is the
@@ -342,6 +346,16 @@
 
   function dayKey(at) { return dayOf(at).toDateString(); }
 
+  // Everything else this page prints is a number it worked out. A place is
+  // text an OCR engine read off a photograph of a phone, which is the first
+  // free-form string to reach innerHTML here — and a card that happens to
+  // contain a '<' should change the colour of nothing.
+  function esc(text) {
+    return String(text === null || text === undefined ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   function money(n, dp) {
     if (n === null || n === undefined || !isFinite(n)) return '--';
     var neg = n < 0;
@@ -485,7 +499,13 @@
       + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i>' + gross + '</span>'
       + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
       + (r.miles === null ? '' : ' · ' + num(r.miles) + ' mi')
-      + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
+      + (r.items ? ' · ' + r.items + ' items' : '')
+      // Where it went, on the row rather than only inside it. This is what
+      // turns the log from a list of figures into something a driver can read
+      // down and recognise.
+      + ((r.places && r.places.length)
+         ? '<em>' + esc(r.places.join(' → ')) + '</em>' : '')
+      + '</span>'
       + (r.accepted ? '<span class="took" title="you took this">\u2713</span>' : '')
       + (r.hidden ? '<span class="tag">hidden</span>' : '')
       + (aside && !r.hidden
@@ -528,6 +548,11 @@
       + row('Your target', typeof r.target === 'number'
             ? money(r.target, 0) + '/hr' + (typeof r.band === 'number'
               ? ', amber within ' + r.band + '%' : '') : null)
+      + ((r.places && r.places.length)
+         ? row('Where', esc(r.places.join(' → '))) : '')
+      + (r.fromDeadline
+         ? row('Time from', 'the delivery deadline, not a stated duration')
+         : '')
       + '</dl><h3>How it was read</h3>'
       + '<dl class="facts">'
       + row('Seen as', read.join(', ') || null, true)
@@ -568,7 +593,13 @@
 
   function termMatches(r, term) {
     var m = term.match(/^([$]?)\s*(-?[\d.]+)\s*(\/hr|hr|min|mins|mi|miles|m)?$/);
-    if (!m) return false;
+    // Anything that is not a figure is a place. "papa john", "chattanooga",
+    // "camp jordan" — the way a driver actually remembers a job, and the
+    // reason the addresses are stored at all.
+    if (!m) {
+      var where = (r.places || []).join(' ').toLowerCase();
+      return where.indexOf(term) !== -1;
+    }
     var n = parseFloat(m[2]);
     if (!isFinite(n)) return false;
     var unit = m[3] || '';

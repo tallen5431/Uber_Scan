@@ -337,6 +337,52 @@
         "legs": 1,
         "complete": true
       }
+    },
+    {
+      "name": "doordash, deadline instead of a duration",
+      "text": "Decline High paying offer! Your Platinum status gave you priority for this offer. $41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa John's Store 3317 (2 orders) Customer dropoff Customer dropoff Accept 27",
+      "expect": {
+        "pay": 41.11,
+        "minutes": null,
+        "miles": 9.8,
+        "deliverBy": 1155,
+        "complete": true
+      }
+    },
+    {
+      "name": "doordash, a stacked order added to a route",
+      "text": "Decline High pay order! Your high ratings gave you priority for this order. +$16.00 Guaranteed Additional 6.9 mi Deliver by 7:08 PM Pickup Buffalo Wild Wings Customer dropoff Add to route 82",
+      "expect": {
+        "pay": 16.0,
+        "minutes": null,
+        "miles": 6.9,
+        "deliverBy": 1148,
+        "complete": true
+      }
+    },
+    {
+      "name": "doordash, merchant under the deadline",
+      "text": "Decline Deliver by 6:39 PM Cherry Cricket 32 4 items 0.6 mi $8.00 Includes DoorDash pay and customer tip (Total may be higher) Accept",
+      "expect": {
+        "pay": 8.0,
+        "minutes": null,
+        "miles": 0.6,
+        "items": 4,
+        "deliverBy": 1119,
+        "complete": true
+      }
+    },
+    {
+      "name": "uber dark mode, two legs with addresses",
+      "text": "UberX Exclusive $10.30 5.00 19 min (8.5 mi) Mae Dell Rd & Riggins Dr, Chattanooga 12 mins (6.6 mi) Camp Jordan Pkwy, Chattanooga 4 mi from fast charger Accept",
+      "expect": {
+        "pay": 10.3,
+        "minutes": 31,
+        "miles": 15.1,
+        "deliverBy": null,
+        "legs": 2,
+        "complete": true
+      }
     }
   ],
   "rate": [
@@ -816,5 +862,139 @@
         "expect": 0.0
       }
     ]
-  }
+  },
+  "_places_comment": "Where an offer went, so it can be found again months later. Checked as an exact list because the risk is not missing one, it is inventing one: a journal full of half-read map furniture is worse than one that cannot be searched by place. The 'from fast charger' badge on the Uber card and the '(2 orders)' after the Papa John's name are both things a looser reader would have swallowed.",
+  "places": [
+    {
+      "name": "a delivery merchant behind a Pickup label",
+      "text": "Decline High paying offer! Your Platinum status gave you priority for this offer. $41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa John's Store 3317 (2 orders) Customer dropoff Customer dropoff Accept 27",
+      "expect": [
+        "Papa John's Store 3317"
+      ]
+    },
+    {
+      "name": "...and one on a stacked order",
+      "text": "Decline High pay order! Your high ratings gave you priority for this order. +$16.00 Guaranteed Additional 6.9 mi Deliver by 7:08 PM Pickup Buffalo Wild Wings Customer dropoff Add to route 82",
+      "expect": [
+        "Buffalo Wild Wings"
+      ]
+    },
+    {
+      "name": "...and one printed under the deadline instead",
+      "text": "Decline Deliver by 6:39 PM Cherry Cricket 32 4 items 0.6 mi $8.00 Includes DoorDash pay and customer tip (Total may be higher) Accept",
+      "expect": [
+        "Cherry Cricket"
+      ]
+    },
+    {
+      "name": "both addresses off a ride card",
+      "text": "UberX Exclusive $10.30 5.00 19 min (8.5 mi) Mae Dell Rd & Riggins Dr, Chattanooga 12 mins (6.6 mi) Camp Jordan Pkwy, Chattanooga 4 mi from fast charger Accept",
+      "expect": [
+        "Mae Dell Rd & Riggins Dr, Chattanooga",
+        "Camp Jordan Pkwy, Chattanooga"
+      ]
+    },
+    {
+      "name": "a card with nowhere named",
+      "text": "$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip",
+      "expect": []
+    },
+    {
+      "name": "nothing at all",
+      "text": "",
+      "expect": []
+    }
+  ],
+  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
+  "deadline": [
+    {
+      "name": "an evening deadline",
+      "text": "Deliver by 7:15 PM",
+      "expect": 1155
+    },
+    {
+      "name": "a morning one",
+      "text": "Deliver by 7:15 AM",
+      "expect": 435
+    },
+    {
+      "name": "noon",
+      "text": "Deliver by 12:30 PM",
+      "expect": 750
+    },
+    {
+      "name": "midnight",
+      "text": "Deliver by 12:05 AM",
+      "expect": 5
+    },
+    {
+      "name": "lower case, no space",
+      "text": "deliver by 6:39pm",
+      "expect": 1119
+    },
+    {
+      "name": "a dot for the colon",
+      "text": "Deliver by 6.39 PM",
+      "expect": 1119
+    },
+    {
+      "name": "an impossible hour",
+      "text": "Deliver by 19:15 PM",
+      "expect": null
+    },
+    {
+      "name": "an impossible minute",
+      "text": "Deliver by 7:75 PM",
+      "expect": null
+    },
+    {
+      "name": "no half of the day stated",
+      "text": "Deliver by 7:15",
+      "expect": null
+    },
+    {
+      "name": "no deadline at all",
+      "text": "23 min (8.4 mi) trip",
+      "expect": null
+    }
+  ],
+  "_until_comment": "Minutes left, wrapping midnight. A deadline already past is a stale card, not a short job, and the sanity bounds refuse what wrapping turns it into.",
+  "until": [
+    {
+      "name": "later today",
+      "deadline": 1155,
+      "now": 1109,
+      "expect": 46
+    },
+    {
+      "name": "ten minutes away",
+      "deadline": 1119,
+      "now": 1109,
+      "expect": 10
+    },
+    {
+      "name": "across midnight",
+      "deadline": 15,
+      "now": 1430,
+      "expect": 25
+    },
+    {
+      "name": "exactly now",
+      "deadline": 600,
+      "now": 600,
+      "expect": 0
+    },
+    {
+      "name": "no deadline",
+      "deadline": null,
+      "now": 600,
+      "expect": null
+    },
+    {
+      "name": "no clock",
+      "deadline": 600,
+      "now": null,
+      "expect": null
+    }
+  ]
 }

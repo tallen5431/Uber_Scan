@@ -50,5 +50,29 @@ function value(v) {
      P.doubt(value(c.pay), value(c.minutes), value(c.miles)), c.expect);
 });
 
+/* Where an offer went, and the delivery deadline that stands in for a duration.
+   Both are new shapes the reader had to learn from real DoorDash cards, and both
+   are the kind of thing that drifts silently between two implementations. */
+function sameList(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+(cases.places || []).forEach(function (c) {
+  var got = P.parse(c.text).places;
+  if (sameList(got, c.expect)) ok++;
+  else { bad++; console.log('FAIL  places / ' + c.name + ': got ' + JSON.stringify(got)
+                            + ' want ' + JSON.stringify(c.expect)); }
+});
+
+(cases.deadline || []).forEach(function (c) {
+  eq('deadline / ' + c.name, P.parse(c.text).deliverBy, c.expect);
+});
+
+(cases.until || []).forEach(function (c) {
+  eq('minutes left / ' + c.name, P.minutesUntil(c.deadline, c.now), c.expect);
+});
+
 console.log(bad ? '\n' + ok + ' passed, ' + bad + ' FAILED' : '\nAll ' + ok + ' shared-corpus checks passed (js)');
 process.exit(bad ? 1 : 0);

@@ -49,6 +49,51 @@ LEG = re.compile(
 HAS_DIGIT = re.compile(r'\d')
 
 ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE)
+
+# --- the shape a delivery card uses instead of a duration ---------------------
+#
+# Uber states a journey as legs: "19 min (8.5 mi)". DoorDash does not state a
+# duration at all. It gives a deadline — "Deliver by 7:15 PM" — a distance on
+# its own, and the merchant. Three real cards off a driver's phone parsed to
+# nothing at all: no minutes, so no legs; no legs, so no miles; and with no
+# minutes the offer is incomplete, gets no verdict, and never reaches the
+# journal. Every DoorDash offer that driver was shown was invisible to the rig.
+#
+# The deadline is the honest denominator for one of these. It is not the drive
+# time — it is how long the job occupies the driver, waiting at the counter
+# included, which is the thing an hourly rate is supposed to divide by.
+DELIVER_BY = re.compile(
+    r'deliver(?:ed|y)?\s*by\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?', re.IGNORECASE)
+
+# A distance with no leg around it. Only ever consulted when no leg was found,
+# so it cannot double-count an Uber card — and never the "4 mi from fast
+# charger" badge, which is a fact about the map rather than about the job.
+LONE_MILES = re.compile(
+    r'(?<![\d.])(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*mi(?:les?)?\b(?!\s*from)',
+    re.IGNORECASE)
+
+# Where the job goes. Two shapes, both anchored to something the card prints
+# rather than guessed from free text: what follows "Pickup" on a delivery card,
+# and what follows a leg's distance on a ride card.
+PICKUP = re.compile(
+    r'\bpick\s?up\b[\s:.-]*(.{2,60}?)'
+    r'(?=\s*\(\s*\d+\s*orders?\s*\)|\s+customer\b|\s+dropoff\b'
+    r'|\s+accept\b|\s+add\s+to\b|\s+decline\b|$)', re.IGNORECASE)
+
+# An address as these cards write one: a junction, or a street with a town after
+# it. Deliberately narrow — a line that is not clearly a place is not stored,
+# because a journal full of half-read map furniture is worse than one with a
+# few offers that cannot be searched by where they went.
+LOOKS_LIKE_A_PLACE = re.compile(
+    r'[A-Za-z].*(?:,\s*[A-Za-z]|\s&\s|\b(?:st|street|rd|road|ave|avenue|blvd|'
+    r'pkwy|parkway|dr|drive|ln|lane|way|ct|court|hwy|highway|pl|place|ter|'
+    r'terrace|cir|circle)\b)', re.IGNORECASE)
+
+# Words a card puts near a place that are not part of its name.
+PLACE_JUNK = re.compile(
+    r'^(?:pickup|dropoff|customer|accept|decline|add\s+to\s+route|'
+    r'deliver(?:ed|y)?\s*by.*|verified|exclusive|guaranteed)\b[\s:.-]*',
+    re.IGNORECASE)
 TOTAL_TAIL = re.compile(r'\btota?l\b')
 
 # No offer averages highway speed door to door once pickup, lights and parking
@@ -145,6 +190,9 @@ def find_legs(text):
         legs.append({
             'minutes': minutes, 'miles': miles, 'hadDecimal': had_decimal or leg_corrected,
             'isTotal': bool(TOTAL_TAIL.search(tail)), 'corrected': leg_corrected,
+            # Where this leg sat in the text, so the address printed after it
+            # can be found without searching the whole card again.
+            'start': m.start(), 'end': m.end(),
         })
     return legs
 
@@ -187,6 +235,91 @@ def check_distance(minutes, miles, had_decimal):
     return miles, False, True
 
 
+def find_deadline(text):
+    """"Deliver by 7:15 PM" as minutes since midnight, or None."""
+    m = DELIVER_BY.search(text)
+    if not m:
+        return None
+    hour = int(m.group(1))
+    minute = int(m.group(2))
+    if not (1 <= hour <= 12) or minute > 59:
+        return None
+    half = m.group(3).lower()
+    hour = hour % 12
+    if half == 'p':
+        hour += 12
+    return hour * 60 + minute
+
+
+def minutes_until(deadline, now_minutes):
+    """How long is left, wrapping across midnight. None if either is missing.
+
+    A deadline that has already passed is not a short job, it is a stale card —
+    a screenshot, or a shift left running. Wrapping treats "deliver by 00:15"
+    read at 23:50 as twenty-five minutes, which is right, and leaves anything
+    beyond a normal delivery window for the sanity bounds to refuse.
+    """
+    if deadline is None or now_minutes is None:
+        return None
+    left = deadline - now_minutes
+    if left < 0:
+        left += 24 * 60
+    return float(left)
+
+
+def find_places(text, legs):
+    """Where the job goes, as the card writes it. Never invented.
+
+    Two anchors only. What follows "Pickup" on a delivery card is the merchant;
+    what follows a leg's distance on a ride card is the address for that leg.
+    Anything that does not sit against one of those anchors is left alone —
+    a journal full of half-read map furniture would be worse than one that
+    cannot be searched by where an offer went.
+    """
+    out = []
+
+    def keep(value):
+        value = PLACE_JUNK.sub('', (value or '').strip())
+        value = value.strip(' .,-;:|')
+        if len(value) < 3 or len(value) > 60:
+            return
+        if not re.search(r'[A-Za-z]{2}', value):
+            return
+        if value.lower() not in [v.lower() for v in out]:
+            out.append(value)
+
+    m = PICKUP.search(text)
+    if m:
+        keep(m.group(1))
+
+    # A delivery card without a "Pickup" label puts the merchant straight after
+    # the deadline: "Deliver by 6:39 PM / Cherry Cricket / 4 items 0.6 mi". The
+    # deadline is the anchor; the name ends where the figures begin.
+    d = DELIVER_BY.search(text)
+    if d:
+        after = text[d.end():d.end() + 60]
+        after = re.split(r'\d|\b(?:accept|decline|pickup|customer|dropoff)\b',
+                         after, maxsplit=1, flags=re.IGNORECASE)[0]
+        keep(after)
+
+    # The tail of each leg, up to whatever comes next.
+    for i, leg in enumerate(legs):
+        start = leg.get('end')
+        if start is None:
+            continue
+        stop = legs[i + 1].get('start') if i + 1 < len(legs) else len(text)
+        tail = text[start:stop][:80]
+        # Cut at the first thing that is plainly not part of an address.
+        tail = re.split(r'\b(?:accept|decline|verified|exclusive|guaranteed'
+                        r'|add\s+to\s+route|\d+\s*mi\b)', tail,
+                        maxsplit=1, flags=re.IGNORECASE)[0]
+        tail = tail.strip(' .,-;:|()')
+        if LOOKS_LIKE_A_PLACE.match(tail):
+            keep(tail)
+
+    return out[:4]
+
+
 def parse(raw_text):
     text = normalize(raw_text)
     legs = find_legs(text)
@@ -224,10 +357,28 @@ def parse(raw_text):
 
     pay = find_pay(text)
 
+    # A delivery card states no duration and puts its distance on its own, so
+    # neither reaches the sum above. Consulted only when the legs found nothing,
+    # which is what keeps it from double-counting a ride card.
+    deadline = find_deadline(text)
+    if miles is None and not used:
+        lone = LONE_MILES.search(text)
+        if lone:
+            v = to_number(lone.group(1))
+            if v is not None and 0 < v <= 500:
+                miles = round2(v)
+
     return {
         'pay': pay,
         'minutes': minutes,
         'miles': miles,
+        # Minutes since midnight, not a duration: converting one to the other
+        # needs to know the time, and a parser that reads the clock cannot be
+        # checked against a fixed corpus. rate() does the subtraction.
+        'deliverBy': deadline,
+        # Where it goes, for finding this offer again months later. Empty
+        # unless the card actually printed something anchored enough to trust.
+        'places': find_places(text, legs),
         # The legs behind the sum, so a caller holding readings from several
         # frames can merge the ones a single frame missed.
         'legDetail': [{'minutes': l['minutes'], 'miles': l['miles'],
@@ -236,7 +387,12 @@ def parse(raw_text):
         'legs': len(used),
         'milesCorrected': corrected,
         'milesUncertain': uncertain,
-        'complete': pay is not None and pay > 0 and minutes is not None and minutes > 0,
+        # A delivery card is complete without a duration, because its deadline
+        # is one — but only once something has told it what time it is. rate()
+        # fills that in; parse() must stay a pure function of its text.
+        'complete': (pay is not None and pay > 0
+                     and ((minutes is not None and minutes > 0)
+                          or deadline is not None)),
         'text': text,
     }
 
@@ -330,8 +486,22 @@ def rate(parsed, settings=None):
     if not parsed['complete']:
         return {'ready': False, 'state': 'empty'}
 
+    # A delivery card gives a deadline where a ride card gives a duration. The
+    # subtraction happens here rather than in parse(), because it needs to know
+    # the time and a parser that reads the clock cannot be held to a fixed
+    # corpus. `nowMinutes` is minutes since midnight; without it a card that
+    # only has a deadline stays unjudged rather than being guessed at.
+    card_minutes = parsed['minutes']
+    from_deadline = False
+    if card_minutes is None and parsed.get('deliverBy') is not None:
+        card_minutes = minutes_until(parsed['deliverBy'],
+                                     setting(s.get('nowMinutes'), None))
+        from_deadline = card_minutes is not None
+    if card_minutes is None or card_minutes <= 0:
+        return {'ready': False, 'state': 'empty'}
+
     shop_minutes = (parsed['items'] or 0) * seconds_per_item / 60.0
-    minutes = parsed['minutes'] + pad + shop_minutes
+    minutes = card_minutes + pad + shop_minutes
     # A trip that takes no time pays infinitely well, which is the kind of
     # arithmetic that ends in an ACCEPT on nonsense. parse() will not produce a
     # zero-minute offer, but `pad` is a number a driver edits by hand in
@@ -350,7 +520,7 @@ def rate(parsed, settings=None):
     # Judged on what the card said, not on what the arithmetic made of it: `pad`
     # and the shopping allowance are the driver's own additions and a card is
     # not misread for having them applied.
-    why = doubt(parsed['pay'], parsed['minutes'], parsed['miles'])
+    why = doubt(parsed['pay'], card_minutes, parsed['miles'])
 
     return {
         'ready': True,
@@ -381,6 +551,12 @@ def rate(parsed, settings=None):
                     if parsed['miles'] and not parsed['milesUncertain'] else None),
         'milesUncertain': parsed['milesUncertain'],
         'milesCorrected': parsed['milesCorrected'],
+        # The minutes the arithmetic used from the card, and whether they were
+        # a stated duration or the time left until a delivery deadline. Those
+        # are different claims and a record that cannot tell them apart cannot
+        # be argued with later.
+        'cardMinutes': card_minutes,
+        'fromDeadline': from_deadline,
         # `ready` stays true and every number is still here, because the row has
         # to reach the journal: a reading this project got wrong is the most
         # useful row in the file, and one that is quietly dropped cannot be
