@@ -454,6 +454,39 @@ function clampNumber(raw, low, high, fallback) {
 // stored on them, because the file is append-only in both directions: the
 // scanner adds offers while this adds notes, and neither can safely rewrite a
 // line the other might be reading.
+// What makes a row the same row, so sending it twice changes nothing.
+//
+// A reading of an offer carries an `id` and a `seq`, and that pair is its
+// identity: a better read of a card already seen is the same id at a higher
+// seq. That was once the only shape a row came in, so the sync simply demanded
+// both — and threw away, quietly and under a `malformed` count nobody reads,
+// the one kind of row a driver produces by hand. A mark ("I took this one") has
+// an id but no seq. A rule ("stop showing me my own test card") has neither,
+// because on the machine that wrote it there is one journal and nothing to
+// de-duplicate against.
+//
+// So a note is identified by when it was written and what it said. Both are
+// fixed the moment it lands on disk and neither is rewritten, which makes it
+// survive being sent again exactly as cleanly as a reading does — and means
+// notes already sitting in a journal sync across without being touched.
+function syncKey(row) {
+  if (!row || typeof row !== 'object') return null;
+  if (row.kind === 'mark') {
+    if (typeof row.id !== 'string' || !row.id) return null;
+    return 'm/' + row.id + '/' + row.at + '/' + row.accepted + '/' + row.hidden;
+  }
+  if (row.kind === 'rule') {
+    var m = row.match || {};
+    return 'r/' + row.at + '/' + m.pay + '/' + m.minutes + '/' + m.miles
+         + '/' + row.accepted + '/' + row.hidden;
+  }
+  // Anything else needs the pair. A kind this build has never heard of is
+  // carried across rather than dropped, as long as it can say which row it is:
+  // the copy is meant to outlive the build that filled it.
+  if (row.id === undefined || row.seq === undefined) return null;
+  return (row.kind ? 'k' + row.kind : 'o') + '/' + row.id + '/' + row.seq;
+}
+
 function latestPerOffer(rows) {
   var byId = Object.create(null);
   var out = [];
@@ -643,12 +676,12 @@ function route(req, res) {
   // 19MB a year, and until now there was exactly one of it, on an SD card, in a
   // car.
   //
-  // Idempotent on purpose, and that is the whole design. Every row carries an
-  // `id` and a `seq`, so the same batch can arrive twice — or ten times — and
-  // only the pairs this file has never seen get appended. That removes the
-  // bookkeeping that normally breaks a sync: there is no stored offset to drift
-  // out of step, no resume logic, nothing to repair after a connection drops
-  // mid-upload. The sender can be crude and still be correct.
+  // Idempotent on purpose, and that is the whole design. Every row can say what
+  // makes it itself (see syncKey), so the same batch can arrive twice — or ten
+  // times — and only what this file has never seen gets appended. That removes
+  // the bookkeeping that normally breaks a sync: there is no stored offset to
+  // drift out of step, no resume logic, nothing to repair after a connection
+  // drops mid-upload. The sender can be crude and still be correct.
   //
   // Deliberately unauthenticated by default, because the deployment this was
   // written for keeps the whole machine behind a VPN. SYNC_TOKEN turns on a
@@ -666,7 +699,10 @@ function route(req, res) {
       if (err) return fail(err.message);
       readJournal(function (existing) {
         var seen = {};
-        existing.forEach(function (r) { seen[r.id + '/' + r.seq] = true; });
+        existing.forEach(function (r) {
+          var k = syncKey(r);
+          if (k) seen[k] = true;
+        });
         var fresh = [];
         var malformed = 0;
         text.split('\n').forEach(function (line) {
@@ -674,12 +710,11 @@ function route(req, res) {
           if (!line) return;
           var row;
           try { row = JSON.parse(line); } catch (e) { malformed++; return; }
-          // An id and a seq are what make this idempotent, so a row without
-          // them cannot be stored — there would be no way to avoid writing it
-          // again on the next upload.
-          if (!row || typeof row !== 'object' || row.id === undefined
-              || row.seq === undefined) { malformed++; return; }
-          var key = row.id + '/' + row.seq;
+          var key = syncKey(row);
+          // Nothing that can be sent twice without being recognised can be
+          // stored, because there would be no way to avoid writing it again on
+          // the next upload.
+          if (!key) { malformed++; return; }
           if (seen[key]) return;
           seen[key] = true;
           fresh.push(JSON.stringify(row));

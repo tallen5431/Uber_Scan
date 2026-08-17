@@ -166,6 +166,49 @@ try:
     eq('a row with no id is refused', bad_rows['added'], 0)
     eq('...and counted as malformed', bad_rows['malformed'], 1)
 
+    # --- what the driver typed, rather than what the camera read -------
+    # The rows a person makes by hand: 'I took this one', and 'stop showing me
+    # my own test card'. They are the only rows in the journal that carry
+    # judgement rather than measurement, and they were the ones being dropped —
+    # a mark has an id but no seq, a rule has neither, and the sync demanded
+    # both. A shift's worth of tags went nowhere, silently, under a malformed
+    # count nobody looks at.
+    mark = {'v': 1, 'at': now + 1, 'kind': 'mark', 'id': 'off99', 'accepted': True}
+    rule = {'v': 1, 'at': now + 2, 'kind': 'rule', 'hidden': True,
+            'match': {'pay': 3.0, 'minutes': 30.0, 'miles': 12.0}}
+    tags = SY.send(far.base, [mark, rule])
+    eq('an offer marked as taken crosses over', tags['added'], 2)
+    eq('...with nothing refused', tags['malformed'], 0)
+    stored = lines(far.journal)
+    ok_('...and the mark is there', any(r.get('kind') == 'mark'
+                                        and r.get('accepted') is True
+                                        for r in stored))
+    ok_('...and so is the rule', any(r.get('kind') == 'rule' for r in stored))
+
+    # Tags are re-sent on every tick alongside the offers, so a second run must
+    # not double them — a card marked taken twice is a card counted twice.
+    eq('sending the tags again adds nothing', SY.send(far.base, [mark, rule])['added'], 0)
+    eq('...and does not duplicate them', len(lines(far.journal)), len(stored))
+
+    # Changing your mind is a new note, not the same one.
+    undo = dict(mark, at=now + 3, accepted=False)
+    eq('...but changing your mind is new', SY.send(far.base, [undo])['added'], 1)
+
+    # A mark names an offer; a reading of that offer is a different row that
+    # happens to share the id. Neither may stand in for the other.
+    eq('a mark does not stand in for a reading of the same offer',
+       SY.send(far.base, [offer(99, now, seq=1)])['added'], 1)
+
+    # A kind this build has never heard of is carried across rather than
+    # dropped, as long as it says which row it is: the copy outlives the build.
+    eq('a row from a newer build is kept, not discarded',
+       SY.send(far.base, [{'v': 2, 'kind': 'weather', 'id': 'w1', 'seq': 1,
+                           'at': now}])['added'], 1)
+
+    # A mark with no offer to name cannot be de-duplicated or applied.
+    eq('a mark naming nothing is still refused',
+       SY.send(far.base, [{'v': 1, 'at': now, 'kind': 'mark', 'accepted': True}])['malformed'], 1)
+
     # The whole file, resent. Costs a few hundred kilobytes and changes nothing.
     eq('--all is safe', SY.send(far.base, SY.rows_since(pi, 0))['added'], 0)
 
