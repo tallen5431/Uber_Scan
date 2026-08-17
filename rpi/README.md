@@ -1146,19 +1146,34 @@ so the site keeps working when the camera does not — and it gives the offers
 page, the JSON API and the CSV export with no camera, no picamera2 and no OCR.
 
 ```sh
-# on the rig, once, to check it works
-python3 rpi/sync.py --to http://nuc.lan:8080
+# on the rig
+cd ~/Uber_Scan && git pull
+bash tools/install-sync.sh http://nuc.lan:8081
+```
 
-# then leave it to the timer
-sudo cp tools/systemd/uberscan-sync.* /etc/systemd/system/
-sudo systemctl edit uberscan-sync.service     # set SYNC_TO
-sudo systemctl enable --now uberscan-sync.timer
+That works out where the checkout is, which account owns it, and where python3
+lives, rather than assuming any of them — **and it runs the sync once before
+installing anything.** If that fails it stops and says why, because a timer that
+has never succeeded once is a timer that fails quietly forever.
+
+The first version of this shipped ready-made unit files with `User=pi` and
+`/home/pi/Uber_Scan` written into them. That is the default on a fresh Raspberry
+Pi OS image and wrong the moment anyone names their account something else — and
+it fails at `systemctl enable` with a message about a missing unit file, which
+points nowhere near the actual problem.
+
+```sh
+systemctl list-timers uberscan-sync.timer    # when it next runs
+sudo systemctl start uberscan-sync.service   # run it now
+journalctl -u uberscan-sync.service -n 20    # what it said
 ```
 
 **The rig pushes; nothing pulls.** A car is behind cellular NAT and cannot be
 reached from outside, so the direction is not a preference. It also means the
 sync works the same on the driveway and on the motorway rather than only when
-parked.
+parked — *if* you give it an address that works from the road. A Tailscale or
+WireGuard name does; a `192.168.x.x` one only syncs when the car is at home,
+which is the one time the data was never really at risk.
 
 **It is idempotent, and that is the entire design.** Every row carries an `id`
 and a `seq`, and the far end appends only the pairs it has never seen — so the
