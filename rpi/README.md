@@ -227,7 +227,7 @@ Not from tuning the OCR engine. From refusing to run it:
 | **Settle wait** | After a change, it waits for the picture to stop moving. Reading a frame mid-transition just wastes a read on motion blur. |
 | **Warp to the screen** | Tesseract's cost scales with pixels. Feeding it a card instead of a 16MP frame is worth more than every other optimisation combined. |
 | **Crop to the card** | The card is aimed at the middle of the frame, so the crop is the middle of the quad, sized to the card. On the rig's own health lines this is worth about **200ms of a 1100ms read** — real, but far less than the old self-fitting crop cost by wandering. |
-| **Never look at the page upside down** | When a page scores badly, tesseract runs the whole thing a second time inverted, in case it was white-on-black. `preprocess()` hands it dark text on a light card every time, so that pass can never help — and it is charged exactly where it hurts, on the reads that fail. A map costs **282ms with it and 211 without**, a dark screen **199 against 154**. Half a shift's reads are of something that is not an offer, so over a realistic mix the median read goes **586ms → 438ms** with no change in what it reads. `-c tessedit_do_invert=0`. |
+| **Never look at the page upside down** | When a page scores badly, tesseract runs the whole thing a second time inverted, in case it was white-on-black. `preprocess()` hands it dark text on a light card every time, so that pass can never help — and it is charged exactly where it hurts, on the reads that fail. A map costs **282ms with it and 211 without**, a dark screen **199 against 154**. Half a shift's reads are of something that is not an offer, so over a realistic mix the median read goes **586ms → 438ms** with no change in what it reads. `-c tessedit_do_invert=0`. That "every time" is a promise `preprocess` now has to keep rather than assume — a phone in dark mode falsifies it, and [it turns the picture over](#when-the-phone-is-in-dark-mode) so the switch stays honest. |
 | **Hand over a file, not an array** | pytesseract's array path routes the image through PIL, whose PNG encoder measured **93ms** — over a third of a read, spent compressing a picture tesseract immediately decompresses. An uncompressed PGM encodes in 0.1ms and reads identically: **262ms → 157ms**. It goes in `/dev/shm`, so the SD card is never in the hot path. |
 | **Look in the middle first** | The screen is the biggest bright thing *that the middle of the frame is inside*, falling back to plain biggest. Size alone is a guess about the scene and it loses to a lit dashboard panel or a window at dusk; with a panel larger and brighter than the phone beside it, the old rule locked onto the panel and read nothing while this one reads the card. |
 | **Track on the small stream** | Re-finding the corners uses the 640×480 luma the motion gate already has, not a shrunk-down sensor frame: **0.96ms against 6.98ms**, almost all of the difference being the shrinking. It also means tracking needs no full-resolution capture at all, so it keeps working at full rate while the scanner is otherwise idle. |
@@ -469,6 +469,86 @@ when calibration measured it. Rippling fails reads, failed reads trigger
 whole-screen searches, and a search costs a second read — so a diluted
 brightness measurement shows up at the far end as the scanner being slow.
 
+## When the phone is in dark mode
+
+A phone set to dark mode — and a DoorDash card, which looks the same — breaks
+two assumptions at once, in different places, and only one of them is the
+obvious one.
+
+**The reader could not read it.** Tesseract is run with
+`tessedit_do_invert=0`, which switches off its own white-on-black retry. That
+was a sound trade for as long as `preprocess()` handed it dark text on a light
+card *every* time, and dark mode falsifies that silently: the reader returned
+`Ee y Piece ek te | So | — — ee ee ne ee oo` and the offer was simply never
+seen. So `preprocess` decides which way up the ink is and turns the picture over
+when it has to, which keeps the promise the engine switch was made on.
+
+Decided from the picture, not from a setting — a phone's theme follows the time
+of day and nobody is going to tell the rig. The card is mostly background, so
+its median *is* its background, and the question is which end of the card's own
+range that sits at. Relative rather than absolute, because inverting a light
+card does not degrade the reading, it destroys it, and a badly underexposed
+light card is exactly what a fixed `median < 128` gets wrong: over twelve
+renderings — both themes, windscreen glare, gain pushed, exposure starved,
+half-cards — the relative test got 12 of 12 and the fixed one 11. Letting
+tesseract do the flip instead also works and costs a whole second pass over
+every dark page, 255ms against 359ms.
+
+It holds its previous answer when a picture is too close to call. Real cards
+never waver — all four in the corpus decided the same way over 60 noisy frames
+each — but a picture that is genuinely half one thing and half the other flipped
+16 times in 60, and the frames either side of a flip get *subtracted from one
+another*. Two frames of one still picture judged opposite ways score **200.7**
+on `banding_score` against 0.7 for two judged alike, where 4.0 already means
+"rippling" — and the exposure is chosen by ranking candidates on exactly that
+number, so a single flip during calibration condemns the right exposure and
+writes another to `config.json` for the whole shift.
+
+**The detector could not find it**, which is what made this look like a reading
+fault rather than a locating one. The brightness search assumes the screen is
+the bright object in a dim cabin. A dark-mode screen does not merely break that,
+it *straddles* it: the map above the sheet renders around grey 44 and the sheet
+itself around 19, so with a car interior anywhere between them no single
+threshold can hold both halves of one screen. What came back was not "no
+screen", which would at least have been honest — it was **the map**, at the full
+width of the phone and 47% of its height, on every check, with the crop then
+taken as a fraction of it. The reader was being handed a piece of a map.
+
+So a second search asks how far each pixel is from the *cabin* — measured from
+the frame's outer ring, since the card is aimed at the middle — rather than how
+bright it is. Neither half of a dark screen looks like upholstery, so that one
+holds both. It does not replace the brightness search: it needs the frame's edge
+to actually be cabin, which stops being true on a very close mount, and it has
+nothing to measure against on a windscreen that fills the frame.
+
+Both run, and where they overlap the taller wins — but only if it is
+*materially* taller **and** what it adds has writing on it.
+
+Both halves of that rule were bought the hard way. Height alone cost accuracy on
+every ordinary frame, because the difference mask carries a blur halo and
+returns a box about 1% bigger than the brightness search's exact one. And height
+plus materiality was still wrong, in the other direction: a phone sits in a
+case, in a cradle, and a case is as unlike upholstery as a screen is — so the
+difference search finds the *handset*, 25% taller than the screen, and won.
+Detection went from 240x619 to 306x766 with every crop fraction downstream
+measured off plastic. What separates a dark offer sheet from a phone case is not
+size, it is that one has writing on it: measured over the disputed region,
+eroded away from the seam so the boundary between the two answers is not what
+gets measured, a case scores **0.000** whatever colour it or the upholstery is,
+and a dark offer sheet scores **0.116 to 0.145**.
+
+Measured over 16 cabin brightnesses × 4 cards, detection is right in 62 of 64.
+The two misses are the cabin rendering at the same grey as the card itself — one
+level wide, where no threshold can separate them and the behaviour is what it
+already was. Reading is right in 16 of 16. Detection costs about 3ms more on the
+thumbnail the tracker uses every 0.4s, on top of 9.6ms of which 6.3ms is the
+resize that happens either way.
+
+**Known limit:** a phone in a *white* case is detected as the case rather than
+the screen. A white case against upholstery is the bright thing in the frame and
+the screen is only a few levels above it, so the brightness search returns it —
+and did long before any of this. Draw the box yourself if you have one.
+
 ## Hardware setup
 
 **Sensor mode — the one setting that can quietly ruin framing.** `rpicam-hello
@@ -612,6 +692,21 @@ copy of a card the reader had already made. It now shrinks once with a linear
 filter, draws on the small picture and reuses the reader's card — about a
 quarter of the work, so nearly three times the frame rate still costs less than
 the old rate did.
+
+It is also composed from the *preview* stream rather than the sensor. A preview
+is a 480px thumbnail of a car interior with a box on it, and making one used to
+mean copying twelve megabytes of sensor frame and discarding 99% of it — 8ms of
+pure memory traffic, at up to fourteen frames a second. The sensor frame is now
+copied only when something is going to *read* it. The reader still gets full
+resolution; the only thing lost is colour in a picture nobody reads colour from.
+
+The view is deliberately smaller than what the scanner reads: 480px at quality
+60, about 50kB a frame against 136kB at the old 640/80. What limits it is bytes
+over the car's wifi, not pixels on the Pi — composing and encoding one costs a
+few milliseconds either way. The page also asks for the next frame only once the
+last has arrived, so a weak signal makes it slow rather than making it lag
+further behind the longer you watch. None of this touches the read: that is
+warped from the full sensor frame and never goes near this path.
 
 **A green outline that ends up too small** was possible, and it was worse than
 it looked. Three things had to be true at once, and all three were.
@@ -1055,32 +1150,50 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 
 ## Correctness
 
-The Pi parser is a port of the browser one. Both run the same corpus:
+All of it, in one command:
 
 ```sh
-node tests/corpus.test.js       # 130 checks
-python3 rpi/test_parser.py      # the same corpus, plus 146 in all
-python3 rpi/test_accumulate.py  # 65 checks on merging across frames
-python3 rpi/test_pipeline.py    # 133 checks on where, how big, and what to log
-python3 rpi/test_exposure.py    # 61 checks on flicker, brightness and gain
-python3 rpi/test_track.py       # 71 checks on following the phone
-python3 rpi/test_journal.py     # 49 checks on keeping one row per offer
-python3 rpi/test_calibrate.py   # 30 checks on what calibration may overwrite
-python3 rpi/test_cropbox.py     # 32 checks on a box drawn by hand
-node tests/crop.test.js         # 16 checks on the trip from a drag to that box
-python3 rpi/test_money.py       # 144 checks from a picture of a card to a $/hr
+npm test                # all 13 suites, 1106 checks
+npm run test:quick      # ...minus the two that run tesseract
+```
 
-The live view is deliberately smaller than what the scanner reads: 480px at
-quality 60, about 50kB a frame against 136kB at the old 640/80. What limits the
-preview is bytes over the car's wifi, not pixels on the Pi — composing and
-encoding one costs a few milliseconds either way. The page also asks for the
-next frame only once the last has arrived, so a weak signal makes it slow
-instead of making it lag further behind the longer you watch. None of it touches
-the read: that is warped from the full sensor frame and never goes near this
-path.
+That command did not exist for a long time. `npm test` ran the three JavaScript
+suites and the Python ones could be run only by knowing to loop over
+`rpi/test_*.py`, so the eight hundred checks covering the camera, the reader,
+the tracker and the money were in practice run by whoever remembered them.
+`tools/test.sh` runs the lot, prints a line each, and exits non-zero if any of
+them fails.
+
+The Pi parser is a port of the browser one, and both run the same corpus:
+
+```sh
+node tests/corpus.test.js       # 130 checks, the shared corpus
+node tests/parser.test.js       #  68 on the browser side alone
+node tests/crop.test.js         #  16 on the trip from a drag to a crop box
+python3 rpi/test_parser.py      # 146 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  #  68 on merging readings across frames
+python3 rpi/test_pipeline.py    # 180 on where to look, how big, and what to log
+python3 rpi/test_exposure.py    #  84 on flicker, brightness, gain and exposure
+python3 rpi/test_track.py       # 122 on following the phone as it drifts
+python3 rpi/test_journal.py     #  54 on keeping one row per offer
+python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
+python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
+python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
+python3 rpi/test_scan_pi.py     #  32 on the loop that holds the camera
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
+
+`test_scan_pi.py` is the one that runs the whole thing. It drives the real
+`main()` over a fake camera — nothing else is stubbed — and the camera is fake
+so that it can hold the loop to account: it counts every capture request handed
+out and every one given back, and notices a double release as well as a leak.
+Every other suite covers a piece; this covers what they add up to, which is
+where lifecycle faults live and nowhere else.
+
+`rpi/testcards.py` draws the cards those two use. It is test-only and is not
+imported by anything on the rig. It renders in either theme, so the same card
+that checks the money in daylight checks it in dark mode.
 
 The corpus includes the false positives that cost real money, because they read
 as perfectly ordinary text. Each of these came off a real rig:
