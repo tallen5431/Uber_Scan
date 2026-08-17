@@ -291,8 +291,15 @@
   // differently.
   function setting(value, fallback) {
     if (typeof value === 'boolean') return fallback;
-    if (value === null || value === undefined || value === '') return fallback;
+    if (value === null || value === undefined) return fallback;
     if (typeof value !== 'number' && typeof value !== 'string') return fallback;
+    // `Number('')` and `Number('  ')` are both 0, and 0 is a finite number, so
+    // a target left as whitespace in config.json became a target of zero — every
+    // offer an ACCEPT — while the Python read the same file and fell back to 25.
+    // One config, two rigs, opposite verdicts, and nothing on either screen
+    // saying which line it was using. Python's float() strips whitespace and
+    // raises on what is left, so this has to do the same.
+    if (typeof value === 'string' && value.trim() === '') return fallback;
     var n = Number(value);
     return isFinite(n) ? n : fallback;
   }
@@ -324,9 +331,16 @@
   // recoverable one, and the next offer is thirty seconds away. A reading that
   // overstates it puts them in a car for forty minutes for six dollars.
   function doubt(pay, minutes, miles) {
-    if (typeof pay !== 'number' || !isFinite(pay)) return null;
+    // Not `isFinite`: Infinity and NaN are numbers, they are the two most
+    // impossible values a pay can take, and guarding them out here returned
+    // "nothing wrong with this reading" for both. The Python compared them
+    // against the bounds and correctly called them doubtful, so the same card
+    // was a query on the rig and a verdict on the phone. The bound checks below
+    // reject them on their own — every comparison against NaN is false — which
+    // is exactly how the Python does it.
+    if (typeof pay !== 'number') return null;
     if (!(pay >= SANE_PAY[0] && pay <= SANE_PAY[1])) return 'pay';
-    if (typeof minutes !== 'number' || !isFinite(minutes)) return null;
+    if (typeof minutes !== 'number') return null;
     if (!(minutes >= SANE_MINUTES[0] && minutes <= SANE_MINUTES[1])) return 'time';
     if (typeof miles === 'number' && isFinite(miles) && miles >= 1.0
         && minutes > 0 && miles / (minutes / 60) > SANE_MPH) return 'speed';
@@ -403,7 +417,11 @@
     };
   }
 
+  // `setting` is exported so the cross-language corpus can check it. It is the
+  // function that decides what target an offer is judged against, it had
+  // drifted, and nothing could see that because it was not reachable from a
+  // test.
   return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
-           doubt: doubt, SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES,
-           SANE_MPH: SANE_MPH };
+           setting: setting, doubt: doubt, DEFAULT_SETTINGS: DEFAULT_SETTINGS,
+           SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH };
 }));

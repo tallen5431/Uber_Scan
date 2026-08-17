@@ -24,5 +24,27 @@ cases.rate.forEach(function (c) {
   });
 });
 
+/* The three functions that decide what an offer is judged against.
+   All three had drifted, and none of it was reachable from a test. */
+function value(v) {
+  if (v === '@inf') return Infinity;
+  if (v === '@-inf') return -Infinity;
+  if (v === '@nan') return NaN;
+  return v;
+}
+
+(cases.coerce ? cases.coerce.toNumber : []).forEach(function (c) {
+  eq('toNumber / ' + c.name, P.toNumber(value(c.in)), c.expect);
+});
+
+(cases.coerce ? cases.coerce.setting : []).forEach(function (c) {
+  eq('setting / ' + c.name, P.setting(value(c.in), c.fallback), c.expect);
+});
+
+(cases.coerce ? cases.coerce.doubt : []).forEach(function (c) {
+  eq('doubt / ' + c.name,
+     P.doubt(value(c.pay), value(c.minutes), value(c.miles)), c.expect);
+});
+
 console.log(bad ? '\n' + ok + ' passed, ' + bad + ' FAILED' : '\nAll ' + ok + ' shared-corpus checks passed (js)');
 process.exit(bad ? 1 : 0);

@@ -289,7 +289,15 @@
     // Secondary on purpose: $/hr is what decides an offer, because an hour is
     // the thing actually being spent. $/mi is the number most drivers carry a
     // rule of thumb for, so it is worth showing beside it.
-    el.vPerMile.textContent = (r.perMile === null || r.perMile === undefined)
+    //
+    // Except on a reading that cannot be true. The card's own pay, time and
+    // distance stay — the driver is holding the same card and those are what
+    // they check against it — but $/mi is not on the card, it is worked out
+    // from the figure that is wrong. Hiding the headline rate and leaving
+    // "$303/mi" underneath it withholds nothing: it is the same impossible
+    // number, smaller.
+    el.vPerMile.textContent = (r.state === 'doubt' || r.perMile === null
+                               || r.perMile === undefined)
       ? '--' : money(r.perMile, 2);
     el.lPerMile.textContent = deducted ? 'net $/mi' : '$/mi';
 

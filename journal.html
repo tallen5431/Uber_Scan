@@ -154,6 +154,13 @@
     <p class="note" id="adviceWorking"></p>
   </section>
 
+  <!-- A recording is not a shift. It is stretches of scanning separated by
+       gaps, and a gap can be a break, a trip, or the rig left switched on in a
+       driveway. Every figure above pools them, which is right for a median and
+       wrong to imply. So they are named. -->
+  <h2 id="runsHead">Runs of scanning</h2>
+  <div id="runs"></div>
+
   <h2>By time of day <em>· median $/hr</em></h2>
   <div id="blocks"></div>
   <div class="scale" id="blockScale"></div>
@@ -181,7 +188,7 @@
   var el = {};
   ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds',
    'caveats', 'ranges', 'csv', 'recentNote', 'log', 'more',
-   'advice', 'adviceLead', 'adviceWorking'].forEach(function (id) {
+   'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -437,6 +444,55 @@
     el.adviceWorking.innerHTML = working;
   }
 
+  function full0(target) { return target * 2; }
+
+  // What the recording is actually made of.
+  //
+  // "6.5 hours" on its own reads as a shift, and this one was four separate
+  // stretches with holes of 35 minutes, 39 minutes and nearly three hours in
+  // between — some of which was driving and some of which was a rig left
+  // switched on. Every figure above pools them, which is right for a median and
+  // misleading to leave unsaid. Naming them also makes an odd one findable: a
+  // run of nine offers in eight minutes is a rig pointed at a screenshot, and
+  // it is dragging the medians without anything else on this page showing it.
+  function showRuns(kept, target, band, full) {
+    var rows;
+    try { rows = Advice.usable(kept); } catch (e) { rows = []; }
+    var groups = rows.length ? Advice.runs(rows, Advice.SHOWN_AT) : [];
+    if (groups.length < 2) {
+      // One run is not a finding, it is the ordinary case, and a section
+      // announcing it would be noise on every short window.
+      el.runs.innerHTML = '';
+      el.runsHead.hidden = true;
+      return;
+    }
+    el.runsHead.hidden = false;
+    var hours = groups.reduce(function (t, g) {
+      return t + (g[g.length - 1].at - g[0].at) / 3600000;
+    }, 0);
+    el.runsHead.innerHTML = 'Runs of scanning <em>· ' + groups.length + ' of them, '
+      + hours.toFixed(1) + ' hours in total, not one shift</em>';
+
+    el.runs.innerHTML = groups.map(function (g) {
+      var from = new Date(g[0].at);
+      var mins = (g[g.length - 1].at - g[0].at) / 60000;
+      var mid = percentile(g.map(function (r) { return r.perHour; })
+                            .sort(function (a, b) { return a - b; }), 0.5);
+      var length = mins >= 60
+        ? (mins / 60).toFixed(1) + 'h'
+        : Math.round(mins) + 'm';
+      return '<div class="block"><span class="label">'
+           + from.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+           + ' ' + from.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+           + '</span>'
+           + '<span class="bar ' + verdictFor(mid, target, band) + '" style="background-size:'
+           + Math.max(1, Math.min(100, mid / full * 100)).toFixed(1) + '% 100%"></span>'
+           + '<span class="amount">' + money(mid, 0) + '</span>'
+           + '<span class="n">' + g.length + '</span>'
+           + '<span class="n">' + length + '</span></div>';
+    }).join('');
+  }
+
   function A_MIN(a) {
     return Math.min.apply(null, a.checkedAt.map(function (c) { return c.minutes; }));
   }
@@ -474,6 +530,8 @@
       showUnits(false);
       el.caveats.textContent = '';
       el.advice.hidden = true;
+      el.runs.innerHTML = '';
+      el.runsHead.hidden = true;
       return;
     }
     showUnits(true);
@@ -514,6 +572,9 @@
     // Fed `kept`, not `offers`: Advice does its own filtering, and doing it
     // twice would be two places to keep in step about what counts.
     showAdvice(kept, target);
+
+    // --- runs of scanning ---
+    showRuns(kept, target, band, full0(target));
 
     // --- by time of day ---
     var blocks = BLOCK_NAMES.map(function (name) {

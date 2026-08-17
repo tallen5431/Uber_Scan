@@ -117,12 +117,17 @@
   function calc() {
     var pay = num(entry.pay);
     var miles = num(entry.miles);
-    var minutes = num(entry.minutes) + settings.pad;
+    // The time on the card, kept separate from the time the arithmetic uses.
+    // `ready` was tested against the padded total, so with a pickup pad set and
+    // nothing typed in the minutes field the app had a complete offer: pay, no
+    // time, and a confident rate worked out from the pad alone.
+    var typedMinutes = num(entry.minutes);
+    var minutes = typedMinutes + settings.pad;
 
     var cost = miles * settings.costPerMile;
     var net = pay - cost;
 
-    var ready = pay > 0 && minutes > 0;
+    var ready = pay > 0 && typedMinutes > 0 && minutes > 0;
     var perHour = ready ? net / (minutes / 60) : null;
     var perMin = ready ? net / minutes : null;
     // Net, like perHour, so the two agree about what a dollar means. This was
@@ -130,16 +135,31 @@
     // here and $1.67/mi on the Pi, and neither screen said why.
     var perMile = (pay > 0 && miles > 0) ? net / miles : null;
 
+    // The same impossibility test the camera's readings get, on the figures as
+    // typed. A slipped decimal point is not only an OCR failure: $1184 is two
+    // keys away from $11.84 on this pad, and the app answered it with a green
+    // ACCEPT and a congratulatory buzz. The two screens now agree about what
+    // cannot be true, which matters most for a driver checking one against the
+    // other.
+    var why = (typeof OfferParser !== 'undefined' && OfferParser.doubt)
+      ? OfferParser.doubt(pay > 0 ? pay : null,
+                          typedMinutes > 0 ? typedMinutes : null,
+                          miles > 0 ? miles : null)
+      : null;
+
     var state = 'empty';
     if (perHour !== null) {
       var floor = settings.target * (1 - settings.band / 100);
-      state = perHour >= settings.target ? 'go' : (perHour >= floor ? 'warn' : 'no');
+      state = why ? 'doubt'
+        : perHour >= settings.target ? 'go' : (perHour >= floor ? 'warn' : 'no');
     }
 
     return {
       ready: ready, pay: pay, miles: miles, minutes: minutes,
+      typedMinutes: typedMinutes,
       cost: cost, net: net,
       perHour: perHour, perMin: perMin, perMile: perMile,
+      doubt: why,
       state: state
     };
   }
@@ -182,7 +202,10 @@
   function render() {
     var r = calc();
 
-    el.perHour.textContent = rateText(r.perHour);
+    // Withheld on a reading that cannot be true, as on the two camera screens.
+    // The typed pay, time and distance stay below it — they are what the driver
+    // goes back and corrects.
+    el.perHour.textContent = r.state === 'doubt' ? '--' : rateText(r.perHour);
     el.perMile.textContent = r.perMile === null ? '--' : money(r.perMile, 2);
     el.perMin.textContent = r.perMin === null ? '--' : money(r.perMin, 2);
     el.netPay.textContent = r.pay > 0 ? money(r.net, 2) : '--';
@@ -190,12 +213,15 @@
     el.perMileLabel.textContent = settings.costPerMile > 0 ? 'net per mile' : 'per mile';
 
     el.verdict.className = 'verdict ' + r.state;
-    el.verdictLabel.textContent = {
-      go: 'ACCEPT',
-      warn: 'CLOSE CALL',
-      no: 'PASS',
-      empty: 'ENTER OFFER'
-    }[r.state];
+    el.verdictLabel.textContent = r.state === 'doubt'
+      ? ({ pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
+           speed: 'CHECK THE DISTANCE' }[r.doubt] || 'CHECK THAT AGAIN')
+      : ({
+          go: 'ACCEPT',
+          warn: 'CLOSE CALL',
+          no: 'PASS',
+          empty: 'ENTER OFFER'
+        }[r.state] || '');
 
     // A distinct buzz the moment the answer flips, so a glance is optional.
     if (r.state !== lastState && r.state !== 'empty') {

@@ -59,11 +59,25 @@ def fix_digits(token):
     return ''.join(DIGIT_FIX.get(c, c) for c in token)
 
 
+# Digits, one decimal point, an optional sign. Nothing else.
+#
+# `float()` is far more accommodating than that: it takes '1e3' as 1000, '1_0'
+# as 10, 'nan' as a float that compares false against every bound it is later
+# checked against, and 'Infinity' as one that clears them all. None of those can
+# come off an offer card, and the JavaScript reader has never accepted them —
+# `parseFloat` behind this same guard — so a token like `1_0` was a silent
+# disagreement between the rig in the car and the phone in the hand.
+NUMERIC = re.compile(r'^[+-]?(\d+(\.\d*)?|\.\d+)$')
+
+
 def to_number(token):
     if token is None:
         return None
+    s = fix_digits(str(token)).replace(',', '.').strip()
+    if not NUMERIC.match(s):
+        return None
     try:
-        return float(fix_digits(str(token)).replace(',', '.'))
+        return float(s)
     except ValueError:
         return None
 

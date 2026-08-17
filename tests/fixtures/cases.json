@@ -488,5 +488,286 @@
         "band": 15
       }
     }
-  ]
+  ],
+  "_coerce_comment": "The three functions that decide what an offer is judged against, checked in both languages from one list. Every one of these had drifted: Number('  ') is 0 in JavaScript so a whitespace target meant every offer was an ACCEPT while Python fell back to 25; float() takes '1e3' and '1_0' and parseFloat does not; and Infinity and NaN were guarded out of doubt() in JavaScript and compared against the bounds in Python. None of it was reachable from a test. '@inf', '@-inf' and '@nan' stand in for values JSON cannot hold.",
+  "coerce": {
+    "toNumber": [
+      {
+        "name": "a plain figure",
+        "in": "25",
+        "expect": 25.0
+      },
+      {
+        "name": "a decimal",
+        "in": "1.5",
+        "expect": 1.5
+      },
+      {
+        "name": "a comma read for a point",
+        "in": "1,5",
+        "expect": 1.5
+      },
+      {
+        "name": "a leading point",
+        "in": ".5",
+        "expect": 0.5
+      },
+      {
+        "name": "a signed figure",
+        "in": "-3",
+        "expect": -3.0
+      },
+      {
+        "name": "surrounding space",
+        "in": " 25 ",
+        "expect": 25.0
+      },
+      {
+        "name": "scientific notation",
+        "in": "1e3",
+        "expect": null
+      },
+      {
+        "name": "a digit separator",
+        "in": "1_0",
+        "expect": null
+      },
+      {
+        "name": "the word nan",
+        "in": "nan",
+        "expect": null
+      },
+      {
+        "name": "the word Infinity",
+        "in": "Infinity",
+        "expect": null
+      },
+      {
+        "name": "letters",
+        "in": "abc",
+        "expect": null
+      },
+      {
+        "name": "nothing at all",
+        "in": "",
+        "expect": null
+      },
+      {
+        "name": "only space",
+        "in": "   ",
+        "expect": null
+      },
+      {
+        "name": "two points",
+        "in": "1.2.3",
+        "expect": null
+      },
+      {
+        "name": "a trailing point",
+        "in": "12.",
+        "expect": 12.0
+      }
+    ],
+    "setting": [
+      {
+        "name": "a number",
+        "in": 30,
+        "fallback": 25,
+        "expect": 30.0
+      },
+      {
+        "name": "a numeric string",
+        "in": "30",
+        "fallback": 25,
+        "expect": 30.0
+      },
+      {
+        "name": "an empty string",
+        "in": "",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "whitespace",
+        "in": "  ",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "a tab",
+        "in": "\t",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "letters",
+        "in": "abc",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "nothing",
+        "in": null,
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "a boolean",
+        "in": true,
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "a list",
+        "in": [],
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "zero",
+        "in": 0,
+        "fallback": 25,
+        "expect": 0.0
+      },
+      {
+        "name": "a negative",
+        "in": -5,
+        "fallback": 25,
+        "expect": -5.0
+      },
+      {
+        "name": "not a number",
+        "in": "@nan",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "infinity",
+        "in": "@inf",
+        "fallback": 25,
+        "expect": 25.0
+      }
+    ],
+    "doubt": [
+      {
+        "name": "an ordinary offer",
+        "pay": 16.05,
+        "minutes": 23,
+        "miles": 8.4,
+        "expect": null
+      },
+      {
+        "name": "a lost decimal point",
+        "pay": 1184,
+        "minutes": 20,
+        "miles": 3.9,
+        "expect": "pay"
+      },
+      {
+        "name": "another lost point",
+        "pay": 1251,
+        "minutes": 11,
+        "miles": 2.1,
+        "expect": "pay"
+      },
+      {
+        "name": "pay under a dollar",
+        "pay": 0.5,
+        "minutes": 20,
+        "miles": 4,
+        "expect": "pay"
+      },
+      {
+        "name": "a card read as one minute",
+        "pay": 10,
+        "minutes": 1,
+        "miles": 0.5,
+        "expect": "time"
+      },
+      {
+        "name": "a card read as two",
+        "pay": 10,
+        "minutes": 2,
+        "miles": 0.5,
+        "expect": null
+      },
+      {
+        "name": "a five-hour trip",
+        "pay": 100,
+        "minutes": 300,
+        "miles": 200,
+        "expect": "time"
+      },
+      {
+        "name": "110 mph",
+        "pay": 56.65,
+        "minutes": 63,
+        "miles": 115.6,
+        "expect": "speed"
+      },
+      {
+        "name": "120 mph",
+        "pay": 60.86,
+        "minutes": 60,
+        "miles": 120.0,
+        "expect": "speed"
+      },
+      {
+        "name": "the same trip read right",
+        "pay": 56.65,
+        "minutes": 123,
+        "miles": 115.6,
+        "expect": null
+      },
+      {
+        "name": "crawling in traffic",
+        "pay": 7.09,
+        "minutes": 34,
+        "miles": 3.6,
+        "expect": null
+      },
+      {
+        "name": "a short hop",
+        "pay": 5,
+        "minutes": 3,
+        "miles": 0.9,
+        "expect": null
+      },
+      {
+        "name": "no distance read",
+        "pay": 12,
+        "minutes": 20,
+        "miles": null,
+        "expect": null
+      },
+      {
+        "name": "a pay that is infinite",
+        "pay": "@inf",
+        "minutes": 20,
+        "miles": 4,
+        "expect": "pay"
+      },
+      {
+        "name": "a pay that is not a number",
+        "pay": "@nan",
+        "minutes": 20,
+        "miles": 4,
+        "expect": "pay"
+      },
+      {
+        "name": "a time that is infinite",
+        "pay": 12,
+        "minutes": "@inf",
+        "miles": 4,
+        "expect": "time"
+      },
+      {
+        "name": "a distance that is not a number",
+        "pay": 12,
+        "minutes": 20,
+        "miles": "@nan",
+        "expect": null
+      }
+    ]
+  }
 }

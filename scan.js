@@ -289,7 +289,12 @@
            speed: 'CHECK THE DISTANCE' }[r.doubt] || 'READ AGAIN')
       : ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] + (locked ? '' : ' ?'));
 
-    el.perHour.textContent = r.ready
+    // The headline is withheld on a reading that cannot be true, exactly as on
+    // the Pi's screen. This page is the same decision made on a phone, and it
+    // was printing the $3548/hr the other one had just been taught to hide —
+    // which is worse than never having hidden it, because a driver checking one
+    // screen against the other would believe the one showing a number.
+    el.perHour.textContent = (r.ready && r.state !== 'doubt')
       ? '$' + (Math.abs(r.perHour) >= 100 ? Math.round(r.perHour) : r.perHour.toFixed(1))
       : '--';
 

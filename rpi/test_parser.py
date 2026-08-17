@@ -32,6 +32,33 @@ for c in cases['rate']:
             got = round(got, 2)
         eq(c['name'] + ' / ' + key, got, want)
 
+# --- the three functions that decide what an offer is judged against -------
+# All three had drifted between the two languages, and none of it was reachable
+# from a test. Driven from the same list the JavaScript runs.
+def _value(v):
+    # `.get(v, v)` on a dict cannot be used here: one of the settings cases is a
+    # list, and an unhashable key raises rather than missing.
+    if v == '@inf':
+        return float('inf')
+    if v == '@-inf':
+        return float('-inf')
+    if v == '@nan':
+        return float('nan')
+    return v
+
+
+for c in cases.get('coerce', {}).get('toNumber', []):
+    eq('toNumber / ' + c['name'], P.to_number(_value(c['in'])), c['expect'])
+
+for c in cases.get('coerce', {}).get('setting', []):
+    eq('setting / ' + c['name'],
+       P.setting(_value(c['in']), c['fallback']), c['expect'])
+
+for c in cases.get('coerce', {}).get('doubt', []):
+    eq('doubt / ' + c['name'],
+       P.doubt(_value(c['pay']), _value(c['minutes']), _value(c['miles'])),
+       c['expect'])
+
 # --- a rate has to be able to explain itself ------------------------------
 # Working $7.09 over 34 minutes by hand gives $12.51/hr. The screen said
 # $10.61 and gave no hint that $1.08 of running costs came off first, so the
