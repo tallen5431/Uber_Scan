@@ -7,8 +7,10 @@
   "scripts": {
     "start": "node server.js",
     "serve": "node server.js",
-    "test": "node tests/corpus.test.js && node tests/parser.test.js && node tests/crop.test.js",
-    "cert": "bash tools/make-cert.sh"
+    "test": "bash tools/test.sh",
+    "cert": "bash tools/make-cert.sh",
+    "test:quick": "bash tools/test.sh --quick",
+    "test:js": "node tests/corpus.test.js && node tests/parser.test.js && node tests/crop.test.js"
   },
   "engines": {
     "node": ">=14"
