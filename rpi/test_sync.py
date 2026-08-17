@@ -282,6 +282,85 @@ try:
 finally:
     stuck.close()
 
+# --- which end is out of date -----------------------------------------------
+# The rig lost two rounds to this. The copy machine was running a build from
+# before the directory was created for it, and the only evidence was that the
+# error said 'could not append' where the current build says 'could not append
+# (ENOENT)'. Nobody should have to diff error strings across two machines, so
+# the far end now states what it can do and the sender says which end is behind.
+class OldBuild(object):
+    """A far end from before any of this: no capabilities, no errno."""
+
+    def __init__(self):
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def _json(self, code, body):
+                raw = json.dumps(body).encode('utf-8')
+                self.send_response(code)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def do_GET(self):
+                self._json(200, {'ok': True, 'newest': 0, 'have': 0})
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length') or 0))
+                self._json(500, {'ok': False, 'error': 'could not append'})
+
+            def log_message(self, *a):
+                pass
+
+        self.httpd = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+        self.base = 'http://127.0.0.1:%d' % self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def run_main(base, journal, extra=()):
+    """SY.main() as the timer runs it, with whatever it complained about."""
+    import io
+    argv, err = sys.argv, sys.stderr
+    sys.argv = ['sync', '--to', base, '--journal', journal, '--quiet',
+                '--no-config'] + list(extra)
+    sys.stderr = io.StringIO()
+    try:
+        return SY.main(), sys.stderr.getvalue()
+    finally:
+        sys.argv, sys.stderr = argv, err
+
+
+old = OldBuild()
+try:
+    eq('an old far end has no capabilities to report',
+       SY.far_end(old.base).get('can'), None)
+    code, said = run_main(old.base, pi)
+    eq('a refused upload is worth a non-zero exit', code, 1)
+    ok_('...and the refusal is quoted', 'could not append' in said)
+    ok_('...and it says which machine is behind', 'older build' in said)
+finally:
+    old.close()
+
+# The same failure against a current build must not blame the far end for being
+# old, or the message sends somebody to update a machine that is already current.
+stuck2 = FarEndAt(os.path.join(blocked, 'journal.jsonl'))
+try:
+    ok_('a current far end says what it can do',
+        'mkdir' in (SY.far_end(stuck2.base).get('can') or []))
+    code, said = run_main(stuck2.base, pi)
+    eq('...a refusal from it still exits non-zero', code, 1)
+    ok_('...and does not send anyone to update it', 'older build' not in said)
+finally:
+    stuck2.close()
+
 # --- out of range, which is most of a shift ---------------------------------
 dead = 'http://127.0.0.1:%d' % free_port()
 eq('an unreachable far end reports nothing rather than raising',

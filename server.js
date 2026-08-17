@@ -798,7 +798,13 @@ function route(req, res) {
     return readJournal(function (rows) {
       var newest = 0;
       rows.forEach(function (r) { if ((r.at || 0) > newest) newest = r.at; });
-      send(res, 200, JSON.stringify({ ok: true, newest: newest, have: rows.length }),
+      // What this build can do, so the sender can tell "I am misconfigured"
+      // from "the far end is old" without a human having to compare error
+      // strings. A rig spent two rounds on that: the copy machine had not been
+      // updated, the only symptom was an error message missing a detail the new
+      // build adds, and nothing said so.
+      send(res, 200, JSON.stringify({ ok: true, newest: newest, have: rows.length,
+                                      can: ['ingest', 'config', 'mkdir'] }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }

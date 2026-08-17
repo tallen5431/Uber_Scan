@@ -54,15 +54,24 @@ FIRST_RUN_DAYS = 30
 TIMEOUT = 20.0
 
 
-def newest_at(base, timeout=TIMEOUT):
-    """What the far end already holds, in epoch ms. None if it will not say."""
+def far_end(base, timeout=TIMEOUT):
+    """What the far end holds and what it can do. None when it will not say."""
     try:
         with urllib.request.urlopen(base.rstrip('/') + '/api/journal/newest',
                                     timeout=timeout) as fh:
             body = json.loads(fh.read().decode('utf-8'))
-        return int(body.get('newest') or 0)
     except (urllib.error.URLError, ValueError, OSError):
         return None
+    # Something answered on that port that is not this server — a router's login
+    # page, another project's API. Treat it as silence rather than reading
+    # fields off it.
+    return body if isinstance(body, dict) else None
+
+
+def newest_at(base, timeout=TIMEOUT):
+    """What the far end already holds, in epoch ms. None if it will not say."""
+    body = far_end(base, timeout)
+    return None if body is None else int(body.get('newest') or 0)
 
 
 def rows_since(path, floor_ms):
@@ -143,7 +152,8 @@ def main():
         say('no journal at %s yet — nothing to send' % args.journal)
         return 0
 
-    newest = newest_at(args.to)
+    far = far_end(args.to)
+    newest = None if far is None else int(far.get('newest') or 0)
     if newest is None:
         # Unreachable, or something there that is not this server. Normal in a
         # car; not worth a non-zero exit that a timer will report as a fault.
@@ -175,10 +185,20 @@ def main():
         result = send(args.to, rows, token=args.token)
     except urllib.error.HTTPError as e:
         # A real answer that says no — a token that does not match, a body over
-        # the cap. Worth a non-zero exit, because retrying will not fix it.
-        print('%s refused the upload: HTTP %s %s'
-              % (args.to, e.code, e.read()[:200].decode('utf-8', 'replace')),
+        # the cap, somewhere it cannot write. Worth a non-zero exit, because
+        # retrying will not fix any of them.
+        detail = e.read()[:200].decode('utf-8', 'replace')
+        print('%s refused the upload: HTTP %s %s' % (args.to, e.code, detail),
               file=sys.stderr)
+        # Say which end is behind, rather than leaving somebody to notice that an
+        # error message is missing a detail. An older build cannot create the
+        # directory its journal lives in and does not name the errno when it
+        # fails, so the two symptoms arrive together and neither explains itself.
+        if 'mkdir' not in (far.get('can') or []):
+            print('  the machine keeping the copy is running an older build of '
+                  'this server: it cannot create the directory JOURNAL points '
+                  'at. Pull and restart it there, then run this again.',
+                  file=sys.stderr)
         return 1
     except (urllib.error.URLError, OSError) as e:
         say('lost the connection to %s (%s) — will try again next time'
