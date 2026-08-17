@@ -434,7 +434,7 @@ def show(frame_text, rate, parsed, ms, locked):
              ms['total'], '  LOCKED' if locked else ''))
 
 
-def emit(rate, parsed, ms, locked, tracker=None, scanner=None):
+def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
     """One JSON object per line, flushed, so a parent process sees reads live."""
     payload = {
         'track': tracker.status() if tracker is not None else None,
@@ -472,6 +472,16 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None):
         'legs': parsed.get('legs'),
         'mergedFrom': parsed.get('mergedFrom', 1),
         'grew': bool(parsed.get('grew')),
+        # Whether the reading is finished, which is not the same claim as
+        # `locked` and is the one the driver needs. `locked` means two
+        # consecutive frames parsed the same — and two frames that both lose the
+        # pickup leg to the same glare agree perfectly with each other. This
+        # loop already knows the difference: it is what decides whether to keep
+        # resampling and whether to speak, and it was the only consumer. The
+        # page was left to infer a finished reading from `locked` and drew a
+        # plain ACCEPT on a card missing half its journey, which reads as a much
+        # better offer than it is.
+        'whole': None if whole is None else bool(whole),
     }
     sys.stdout.write(json.dumps(payload) + '\n')
     sys.stdout.flush()
@@ -1042,7 +1052,7 @@ def main():
             health.report(now, tracker, scanner)
 
             if args.json:
-                emit(rate, parsed, out['ms'], out['locked'], tracker, scanner)
+                emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole)
             else:
                 show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
 

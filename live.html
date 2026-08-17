@@ -240,8 +240,20 @@
 
     var stale = Date.now() - r.at > STALE_MS;
     el.verdict.className = 'verdict ' + r.state + (stale ? ' stale' : '');
+    // `whole` and `locked` are two different claims and only one of them is the
+    // one to act on. `locked` means two consecutive frames parsed the same —
+    // and two frames that both lose the pickup leg to the same glare agree
+    // perfectly with each other, so a fragment can be locked. `whole` means the
+    // reading is finished: a total, or both legs of a two-leg card.
+    //
+    // Which way it errs matters. A card missing a leg always reads *better*
+    // than it is — the same pay over less time — so an unqualified ACCEPT on
+    // half a card is the one mistake this screen must not make. The scanner has
+    // known the difference all along and used it to decide whether to keep
+    // reading and whether to speak; it just never told the page.
+    var settled = r.locked && r.whole !== false;
     el.verdictLabel.textContent =
-      ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '') + (r.locked ? '' : ' ?');
+      ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '') + (settled ? '' : ' ?');
     // The headline is net of running costs when a cost per mile is set, and
     // saying so is not optional: a driver who checks 7.09 over 34 minutes gets
     // $12.51/hr, the screen said $10.61, and nothing here explained the gap.
@@ -306,6 +318,14 @@
     var notes = [];
     if (r.milesUncertain) notes.push('Distance unreadable — pay shown before mileage cost.');
     else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
+    // Said out loud, because a fragment is not a small error in a safe
+    // direction: the same pay divided by less time always looks better. The
+    // scanner is still resampling when this is showing, so it is a "wait" and
+    // not a "no".
+    if (r.whole === false) {
+      notes.push('Still reading this card — the journey may not be all there yet, '
+                 + 'which makes it look better than it is.');
+    }
     el.warn.textContent = notes.join(' ');
     el.warn.hidden = !notes.length;
 

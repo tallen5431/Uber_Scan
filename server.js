@@ -128,6 +128,24 @@ function startScanner() {
     console.error('scanner: ' + scanner.error);
   });
 
+  // ...and the pipes are not guaranteed to exist. When the process runs out of
+  // file descriptors there are none left to build them from, so spawn returns a
+  // child whose `stdout` and `stderr` are undefined, and reading `.on` off that
+  // throws a TypeError right here — synchronously, inside the caller, taking
+  // down the web server that was about to report the problem.
+  //
+  // That is not a hypothetical pairing. Until the fix a few hundred lines below
+  // this, every download a phone abandoned leaked a descriptor, so a rig that
+  // had been up long enough arrived at exactly this state and then died on its
+  // next scanner restart. The 'close' handler underneath already knows what to
+  // do about EMFILE — it names it — and it only ever needed the chance to run.
+  if (!scanner.proc.stdout || !scanner.proc.stderr) {
+    scanner.error = 'could not attach to ' + bin + ': no pipes (out of file '
+                  + 'descriptors?). Retrying.';
+    console.error('scanner: ' + scanner.error);
+    return;
+  }
+
   var buffered = '';
   scanner.proc.stdout.on('data', function (chunk) {
     buffered += chunk.toString();
@@ -205,6 +223,30 @@ function broadcast(read) {
     }
   });
 }
+
+// A throw nobody caught costs one request, not the shift.
+//
+// Node's advice is to let the process die here, and for a server behind a
+// supervisor with load balanced away from it that is right. This is not that.
+// This is a single box velcroed into a car with no supervisor above it, and the
+// thing it is doing at the moment it dies is the reason the driver is looking
+// at it. Coming back up wrong is better than not coming back.
+//
+// It also cannot be replaced by wrapping the handlers, and that is the point:
+// most of this server's work happens in fs callbacks, and by the time one of
+// those runs the request's stack — and any try/catch on it — is long gone. One
+// journal row stamped 1e20 took the whole server down from inside readFile,
+// with the request-level try/catch two frames too far away to see it.
+//
+// Deliberately not a recovery mechanism. It logs loudly and carries on so the
+// fault is findable, rather than swallowing it into a shrug.
+process.on('uncaughtException', function (err) {
+  console.error('uncaught: ' + ((err && err.stack) || err));
+  console.error('  the request that caused it is lost; the server is still up.');
+});
+process.on('unhandledRejection', function (reason) {
+  console.error('unhandled rejection: ' + ((reason && reason.stack) || reason));
+});
 
 var shuttingDown = false;
 ['SIGTERM', 'SIGINT'].forEach(function (sig) {
@@ -404,7 +446,13 @@ function toCsv(offers) {
     // A second, human-readable stamp. A spreadsheet will not turn epoch
     // milliseconds into a date on its own, and the whole point of exporting is
     // to ask when things happened.
-    cells.push('"' + new Date(r.at || 0).toISOString() + '"');
+    // Defensively, because `new Date(x).toISOString()` throws rather than
+    // returning anything for a value it cannot represent — and `r.at || 0` only
+    // catches the falsy ones. A row stamped 1e20 sailed through that guard and
+    // through the day filter and then took the whole server down from inside an
+    // fs callback, where no request-level try/catch can reach it.
+    var when = new Date(r.at || 0);
+    cells.push('"' + (isFinite(when.getTime()) ? when.toISOString() : '') + '"');
     lines.push(cells.join(','));
   });
   return lines.join('\n') + '\n';
@@ -688,6 +736,21 @@ function serveFile(req, res, file) {
     res.writeHead(200, headers);
     var stream = fs.createReadStream(file);
     stream.on('error', function () { res.destroy(); });
+    // The client going away has to close the file, and pipe() will not do it.
+    // `Readable.pipe` unpipes when the destination errors but never destroys
+    // the source, and an fs.ReadStream only tidies itself up on its own 'end'
+    // or 'error' — so a half-read file paused by a vanished socket keeps its
+    // descriptor for the life of the process. Measured: 25 aborted downloads,
+    // 25 descriptors, never returned.
+    //
+    // That is the ordinary case here, not an edge one. This is served over a
+    // car's wifi to a phone: /scan.html pulls a 3.9MB wasm reader and a 2.9MB
+    // language model on a cold load, and the screen locking or the driver
+    // walking out of range part way through is a Tuesday. The failure at the
+    // far end is worse than a crash because nothing announces it — /api/status
+    // keeps answering `running: true`, so the page keeps its green dot while
+    // every new request fails to open anything.
+    res.on('close', function () { stream.destroy(); });
     stream.pipe(res);
   });
 }

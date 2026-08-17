@@ -144,7 +144,10 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0):
     SP.start_camera = lambda *a, **k: (started.append(1), cam)[1]
 
     verdicts = []
-    SP.emit = lambda *a, **k: (verdicts.append(a), real_emit(*a, **k))[1]
+    # Both halves of the call. `whole` travels as a keyword, so recording only
+    # the positional arguments would have quietly asserted nothing about it —
+    # which is exactly what the first version of this test did.
+    SP.emit = lambda *a, **k: (verdicts.append((a, k)), real_emit(*a, **k))[1]
 
     argv = sys.argv
     sys.argv = ['scan_pi', '--config', config, '--json', '--snapshot', '',
@@ -175,9 +178,10 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0):
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
-    ready = [v for v in verdicts if v and isinstance(v[0], dict) and v[0].get('ready')]
-    return dict(cam=cam, rows=rows, ready=ready, config=config, journal=journal,
-                started=len(started))
+    ready = [a for a, _ in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
+    ready_kw = [k for a, k in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
+    return dict(cam=cam, rows=rows, ready=ready, ready_kw=ready_kw,
+                config=config, journal=journal, started=len(started))
 
 
 # --- a ride offer, end to end ----------------------------------------------
@@ -210,6 +214,44 @@ if run_uberx['ready']:
     ok_('...by about the mileage cost',
         abs((rate['grossPerHour'] - rate['perHour'])
             - (8.4 * 0.30) / (23.0 / 60.0)) < 0.6)
+
+# --- the page has to be told when a reading is only half a card -------------
+# `locked` means two consecutive frames parsed the same, which a fragment can
+# satisfy perfectly: two frames that both lose the pickup leg to the same glare
+# agree with each other. `whole` is the different and more useful claim, and it
+# always errs the same way when it is missing — the same pay over less time
+# reads as a better offer — so the page must get it rather than infer it.
+kw = run_uberx['ready_kw']
+ok_('every verdict is told whether the reading is whole',
+    kw and all('whole' in k for k in kw))
+ok_('...and this card, read in full, says so',
+    kw and kw[-1].get('whole') is True)
+
+import scan_pi as SP                                          # noqa: E402
+import io                                                     # noqa: E402
+
+
+def emitted(rate, parsed, whole):
+    out = io.StringIO()
+    real, sys.stdout = sys.stdout, out
+    try:
+        SP.emit(rate, parsed, {'total': 10}, True, whole=whole)
+    finally:
+        sys.stdout = real
+    return json.loads(out.getvalue())
+
+
+sample_rate = {'ready': True, 'state': 'go', 'perHour': 32.5, 'grossPerHour': 35.0,
+               'minutes': 19.0, 'perMile': 1.2, 'cost': 0.5, 'costPerMile': 0.3}
+sample_parsed = {'pay': 10.30, 'minutes': 19.0, 'miles': 8.5, 'items': None,
+                 'milesCorrected': False, 'milesUncertain': False,
+                 'text': '', 'legs': 1, 'mergedFrom': 1}
+eq('a fragment is reported as not whole',
+   emitted(sample_rate, sample_parsed, False)['whole'], False)
+eq('...and a finished reading as whole',
+   emitted(sample_rate, sample_parsed, True)['whole'], True)
+eq('...and a caller that does not say leaves it unstated',
+   emitted(sample_rate, sample_parsed, None)['whole'], None)
 
 # --- the journal -----------------------------------------------------------
 rows = run_uberx['rows']
