@@ -972,6 +972,78 @@ over the life of the car.
 
 `0` gives the gross rate, which is pay divided by time and nothing else.
 
+### Picking the target, from your own offers
+
+`target` was the one number here nobody checked. It gets picked once — $25/hr
+sounds like a reasonable wage — and every verdict after that is measured
+against it.
+
+A target is not a wage. It is a decision about **how long to wait**, and whether
+it is right depends on what the next offer is likely to be and how soon it
+comes. That is a local fact about a market and a set of hours, not something
+that can be reasoned out in advance.
+
+Set it too low and every hour goes on work that barely clears its own costs.
+Set it too high and the car sits still: the offers that clear the line really
+are better, and there are not enough of them to fill a shift. The first failure
+is loud. The second is silent — a screen full of PASS looks like discipline —
+and it is the one that keeps being made.
+
+A shift is a chain of cycles: wait for something worth taking, drive it, wait
+again. So for a candidate line:
+
+```
+earned per hour  =   average net pay of the offers at or above the line
+                    -------------------------------------------------
+                     average wait for one   +   average trip length
+```
+
+Raising the line raises the top and the wait underneath it. **Where to draw the
+line** on the offers page works this out from the journal and shows the answer,
+its working, and what your current target is costing. From one 6.5-hour run of
+231 offers it put the line at $19 rather than $25 — about $2/hr.
+
+It leans low on purpose. Some of the offers it counted arrived while the car was
+already carrying somebody and were never available; nothing can tell those apart
+here, and the error runs one way — it makes the market look busier, waiting look
+cheaper, and the line look higher than it should be. So it computes the answer
+at the observed rate and again at half of it, and recommends the lower. Where
+the two agree, the answer does not depend on the thing that cannot be measured.
+
+It says nothing below 40 offers or two hours of scanning, and nothing when the
+difference is under a dollar an hour.
+
+### When the reading cannot be true
+
+Not every misread is noise. In one shift of 234 offers, three had lost a decimal
+point — `$11.84` read as `$1184` — and two had a misread time that put the trip
+at 110 and 120 mph. Each was shown in green as **ACCEPT** and spoken aloud:
+*"accept, three thousand five hundred an hour."*
+
+A reading outside what a real offer does now gets **no verdict at all**: a colour
+that is deliberately none of the other three, the name of the figure to check —
+the pay, the time, the distance — and the card's own numbers underneath. The
+headline rate is withheld, because at that size it is read before the label
+above it.
+
+| | flagged when |
+|---|---|
+| pay | outside $1 – $300 |
+| time | outside 2 – 240 min |
+| speed | miles ÷ time over 75 mph, on trips of a mile or more |
+
+Only the direction that produces a wrong ACCEPT is checked. A reading that
+*understates* an offer costs a decline, and the next offer is under two minutes
+away; one that overstates it puts you in the car for forty minutes for six
+dollars. Crawling through traffic at 6 mph is a real thing that happens and gets
+a PASS, not a query.
+
+The bounds sit clear of anything genuine in that data — the best real offer was
+$45/hr, and the fastest real trip averaged 56 mph over a 115-mile highway run —
+so a card has to be misread rather than unusual to trip them. The row is still
+written, still complete, and now carries a `doubt` field naming the figure. A
+reading this project got wrong is the most useful row in the file.
+
 ## Run
 
 ```sh
@@ -1185,13 +1257,28 @@ parked — *if* you give it an address that works from the road. A Tailscale or
 WireGuard name does; a `192.168.x.x` one only syncs when the car is at home,
 which is the one time the data was never really at risk.
 
-**It is idempotent, and that is the entire design.** Every row carries an `id`
-and a `seq`, and the far end appends only the pairs it has never seen — so the
-same batch can arrive twice, or ten times, and nothing duplicates. There is no
-stored offset to drift out of step, no resume logic, and no state on the rig
-beyond the journal itself. A connection dropped half way through costs nothing:
-the next run sends the same rows again and they land. The sender is allowed to
-be crude because the receiver cannot be fooled.
+**It is idempotent, and that is the entire design.** Every row can say what makes
+it itself, and the far end appends only what it has never seen — so the same
+batch can arrive twice, or ten times, and nothing duplicates. There is no stored
+offset to drift out of step, no resume logic, and no state on the rig beyond the
+journal itself. A connection dropped half way through costs nothing: the next run
+sends the same rows again and they land. The sender is allowed to be crude
+because the receiver cannot be fooled.
+
+A reading of an offer is identified by its `id` and `seq` — a better read of a
+card already seen is the same id at a higher seq. **The rows you make by hand are
+not shaped like that**, and for a while they did not cross at all: a mark ("I
+took this one") has an id but no seq, and a rule ("stop showing me my own test
+card") has neither, because on the machine that writes them there is one journal
+and nothing to de-duplicate against. Every tag was refused and counted under a
+`malformed` total nobody reads, while the offers around them went across and the
+copy looked complete. A note is now identified by when it was written and what it
+said — both fixed when it lands on disk, neither ever rewritten — so tags already
+sitting in a journal cross over on the next run without anything being changed.
+
+A row of a `kind` the receiving build has never heard of is carried across rather
+than dropped, as long as it can say which row it is. The copy is meant to outlive
+the build that filled it.
 
 Each run asks what the far end already has and sends from an hour before that.
 The overlap is deliberate — two machines do not share a clock, and a row can be

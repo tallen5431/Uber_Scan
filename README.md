@@ -56,7 +56,7 @@ may cost you more than it gains. Try split screen first.
 
 | Setting | What it does |
 |---|---|
-| Target $/hour | The green line. Default $25. |
+| Target $/hour | The green line. Default $25 — but see **where to draw the line** on the offers page, which works out from your own offers what that line is costing you. |
 | Near-miss band | How far below target still counts as amber. Default 15%. |
 | Cost per mile | Gas and wear, subtracted from the offer before the rate is figured. Set it to `0` to see gross pay; the 2025 IRS rate is `0.70`. |
 | Pickup padding | Minutes added to every offer, since the quoted time usually ignores the drive to the rider. |
@@ -142,6 +142,7 @@ it read `package.json`, and it will serve instead.
 | `ui.js` | All of the app logic — browser only, never run under Node |
 | `server.js` | Zero-dependency static server; the Node entry point |
 | `journal.html` | Every offer the scanner kept, and what it adds up to |
+| `advice.js` | What target the offers themselves argue for — shared, and tested on its own |
 | `sw.js` | Offline cache — bump `CACHE` when you change files |
 | `manifest.webmanifest` | Home-screen install metadata |
 | `tools/make_icons.py` | Regenerates the icons in `icons/` |
@@ -165,6 +166,13 @@ So the Pi scanner keeps one line per offer it was confident about, in
   ratio with a small noisy denominator and one misread leg produces exactly the
   long tail an average cannot survive.
 * what share of offers your target would have had you take.
+* **where to draw the line.** A target is not a wage — it is a decision about how
+  long to wait, and setting it too high fails silently, because a screen full of
+  PASS looks like discipline. This works out from your own journal what each
+  candidate line would actually have earned, once the waiting between offers is
+  counted, and says what your current target is costing. It shows its working, it
+  leans deliberately low, and it says nothing at all until there is enough behind
+  it to be worth acting on.
 * **by time of day**, in three-hour blocks, each bar drawn on the same scale so
   the halfway mark is always your target.
 * **rides against shop orders**.
