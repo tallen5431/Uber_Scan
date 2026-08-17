@@ -1220,19 +1220,42 @@ def main():
             cv2.destroyAllWindows()
 
 
-COLOURS = {'go': (100, 201, 23), 'warn': (36, 165, 245), 'no': (75, 50, 240), 'empty': (36, 27, 20)}
+# BGR. 'doubt' is deliberately none of the other three and not a near-miss of
+# any of them: at arm's length the colour is read before the word is.
+COLOURS = {'go': (100, 201, 23), 'warn': (36, 165, 245), 'no': (75, 50, 240),
+           'doubt': (92, 45, 58), 'empty': (36, 27, 20)}
+LABELS = {'go': 'ACCEPT', 'warn': 'CLOSE', 'no': 'PASS'}
+DOUBT_LABELS = {'pay': 'CHECK PAY', 'time': 'CHECK TIME', 'speed': 'CHECK MILES'}
 
 
 def render_panel(rate, parsed, size=(800, 480)):
     """Big, flat, readable at a glance and at arm's length."""
     panel = np.zeros((size[1], size[0], 3), dtype=np.uint8)
-    panel[:] = COLOURS[rate['state'] if rate['ready'] else 'empty']
+    # `.get`, not `[...]`: this is the scan loop, and a state this function has
+    # not been taught about must cost a dull panel rather than a KeyError that
+    # takes the whole rig down mid-shift. Adding 'doubt' to the parser did
+    # exactly that here, twice, in a file the parser's own tests never touch.
+    panel[:] = COLOURS.get(rate['state'] if rate['ready'] else 'empty',
+                           COLOURS['empty'])
     if not rate['ready']:
         cv2.putText(panel, 'waiting', (40, 260), cv2.FONT_HERSHEY_SIMPLEX, 2.2, (200, 200, 200), 4)
         return panel
 
-    label = {'go': 'ACCEPT', 'warn': 'CLOSE', 'no': 'PASS'}[rate['state']]
-    cv2.putText(panel, label, (40, 90), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 5)
+    # A reading that cannot be true gets the figure to look at and the card's
+    # own numbers, and not the rate — $3548/hr at this size is the most
+    # convincing thing on the rig and the most wrong.
+    if rate['state'] == 'doubt':
+        cv2.putText(panel, DOUBT_LABELS.get(rate.get('doubt'), 'READ AGAIN'),
+                    (40, 150), cv2.FONT_HERSHEY_SIMPLEX, 2.6, (255, 255, 255), 6)
+        cv2.putText(panel, '$%.2f  %s min  %s mi'
+                    % (parsed['pay'], parsed['minutes'], parsed['miles']),
+                    (40, 300), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (255, 255, 255), 4)
+        cv2.putText(panel, 'that is not what a real offer looks like',
+                    (40, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (210, 210, 210), 2)
+        return panel
+
+    cv2.putText(panel, LABELS.get(rate['state'], ''), (40, 90),
+                cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 5)
     cv2.putText(panel, '$%.0f/hr' % rate['perHour'], (36, 300),
                 cv2.FONT_HERSHEY_SIMPLEX, 6.0, (255, 255, 255), 12)
     cv2.putText(panel, '$%.2f  %s min  %s mi' % (parsed['pay'], parsed['minutes'], parsed['miles']),

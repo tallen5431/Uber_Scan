@@ -327,7 +327,14 @@
             ? money(r.perHour, 2) + '/hr' : null)
       + row('Per mile', typeof r.perMile === 'number' ? money(r.perMile, 2) + '/mi' : null)
       + '<h3>The verdict, and what it was judged against</h3>'
-      + row('Called it', ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' })[r.state] || '--')
+      // A row the scanner refused to judge says so, rather than showing a dash
+      // that reads as "this was not recorded". Not judging it was the decision.
+      + row('Called it', r.state === 'doubt'
+            ? ('no verdict — '
+               + ({ pay: 'the pay', time: 'the time', speed: 'the distance' }[r.doubt]
+                  || 'the reading')
+               + ' is outside anything a real offer does')
+            : (({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' })[r.state] || '--'))
       + row('Your target', typeof r.target === 'number'
             ? money(r.target, 0) + '/hr' + (typeof r.band === 'number'
               ? ', amber within ' + r.band + '%' : '') : null)

@@ -413,6 +413,59 @@ if run_dark['ready']:
     eq('...to the same numbers as the light one',
        (parsed['pay'], parsed['minutes'], parsed['miles']), (16.05, 23.0, 8.4))
 
+# --- what the driver is shown and told --------------------------------------
+# These had no checks at all, and adding a fourth verdict to the parser broke
+# both of them at once: two dictionary lookups indexed with `[...]` on a state
+# they had never been taught. Not a wrong colour — a KeyError, raised inside the
+# scan loop, on the first misread card of a shift.
+#
+# Neither lives in a file the parser's own tests touch, which is the whole point
+# of checking them here: the parser is free to grow a state, and nothing that
+# renders one may fall over when it does.
+import scan_pi as SP                                           # noqa: E402
+
+
+def _rate(state, per_hour=30.0, why=None):
+    return {'ready': True, 'state': state, 'perHour': per_hour, 'doubt': why}
+
+
+_card = {'pay': 12.51, 'minutes': 20.0, 'miles': 4.2}
+
+for _state in ('go', 'warn', 'no', 'doubt', 'empty', 'something-new'):
+    try:
+        _panel = SP.render_panel(_rate(_state, why='pay' if _state == 'doubt' else None),
+                                 _card)
+        eq('the panel draws a %s verdict' % _state, _panel.shape, (480, 800, 3))
+    except Exception as e:                                     # noqa: BLE001
+        eq('the panel draws a %s verdict' % _state, 'raised %r' % e, 'drawn')
+
+eq('a card with nothing on it is still a panel',
+   SP.render_panel({'ready': False, 'state': 'empty'}, _card).shape, (480, 800, 3))
+
+# The doubt panel must not put the rate on the screen. $1184 over twenty minutes
+# is $3548/hr, and at that size it is the most convincing thing on the rig.
+_doubt = SP.render_panel(_rate('doubt', 3548.49, 'pay'),
+                         {'pay': 1184.0, 'minutes': 20.0, 'miles': 3.9})
+_go = SP.render_panel(_rate('go', 3548.49), {'pay': 1184.0, 'minutes': 20.0, 'miles': 3.9})
+ok_('a doubted card is not drawn like an accepted one',
+    not np.array_equal(_doubt, _go))
+
+# And the voice, which is the whole of what a driver gets while watching the
+# road. "accept, three thousand five hundred an hour" was what this said.
+eq('an ordinary offer is priced', SP.spoken(_rate('go', 31.4)), 'accept. 31 an hour.')
+eq('a close one too', SP.spoken(_rate('warn', 22.0)), 'close. 22 an hour.')
+eq('a poor one too', SP.spoken(_rate('no', 8.0)), 'pass. 8 an hour.')
+eq('a lost decimal point is named, not priced',
+   SP.spoken(_rate('doubt', 3548.49, 'pay')), 'check the pay.')
+eq('...and so is a misread time', SP.spoken(_rate('doubt', 90.0, 'time')),
+   'check the time.')
+eq('...and a misread distance', SP.spoken(_rate('doubt', 90.0, 'speed')),
+   'check the distance.')
+ok_('a doubt this build has no words for still says something',
+    SP.spoken(_rate('doubt', 90.0, 'newer-reason')))
+ok_('...and never says a number',
+    '90' not in SP.spoken(_rate('doubt', 90.0, 'newer-reason')))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)
