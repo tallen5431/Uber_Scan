@@ -279,6 +279,45 @@ var shuttingDown = false;
 // happily writes somewhere else.
 var JOURNAL_PATH = process.env.JOURNAL || path.join(ROOT, 'rpi', 'journal.jsonl');
 
+/* Where the scanner leaves the live view.
+ *
+ * It belongs in RAM, not on the card. The view refreshes about fourteen times a
+ * second while someone is watching, at ~50kB a frame — roughly 2.5GB an hour
+ * written to the SD card, against about 19MB a *year* for the journal. Every
+ * byte of it is stale two frames later and none of it needs to survive a
+ * reboot, so writing it to the one part of this system that wears out was
+ * paying a real cost for nothing. pipeline.py already stages its OCR images in
+ * /dev/shm for exactly this reason; the live frame simply never got the same
+ * treatment.
+ *
+ * Resolved per request rather than once, and by mtime rather than existence,
+ * because the two sides pick their path independently — this file is JavaScript
+ * and the scanner is Python, and nothing detects a mismatch: the page would
+ * simply say "no camera view yet" while the scanner wrote happily somewhere
+ * else. Taking whichever candidate is freshest means the view keeps working
+ * whichever the scanner chose, including on a rig running an old scanner
+ * against a new server. Two stats per request, at fourteen requests a second,
+ * against reading a 50kB JPEG — not worth caching.
+ */
+var FRAME_CANDIDATES = [
+  process.env.FRAME,
+  '/dev/shm/uberscan-live.jpg',
+  path.join(ROOT, 'rpi', 'live-frame.jpg')
+].filter(Boolean);
+
+function framePath() {
+  if (process.env.FRAME) return process.env.FRAME;
+  var best = null;
+  var newest = -1;
+  FRAME_CANDIDATES.forEach(function (candidate) {
+    try {
+      var stat = fs.statSync(candidate);
+      if (stat.mtimeMs > newest) { newest = stat.mtimeMs; best = candidate; }
+    } catch (e) { /* not there; try the next */ }
+  });
+  return best || FRAME_CANDIDATES[FRAME_CANDIDATES.length - 1];
+}
+
 // Columns worth putting in a spreadsheet, in the order a person reads them.
 // Not every field in the row: `content` is an internal fingerprint and `v`,
 // `seq` and `id` only matter to whatever is collapsing the rows, which has
@@ -659,6 +698,63 @@ function route(req, res) {
     });
   }
 
+  // The rig's calibration, kept beside the offers.
+  //
+  // 400 bytes, and it is the corners, the lens, the flicker-safe exposure and
+  // the driver's own target and running costs. None of it is irreplaceable the
+  // way the journal is — it can all be measured again — but re-aiming a camera
+  // and re-deriving an exposure at the roadside is an afternoon nobody wants,
+  // and it is small enough that there is no reason not to keep a copy.
+  //
+  // Stored beside the journal rather than over this machine's own config: the
+  // host keeping the copy is not a scanner and must not be turned into one by a
+  // backup landing on it.
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/config/backup') {
+    if (SYNC_TOKEN && req.headers['x-sync-token'] !== SYNC_TOKEN) {
+      return send(res, 403, JSON.stringify({ ok: false, error: 'bad token' }),
+                  { 'Content-Type': 'application/json; charset=utf-8' });
+    }
+    return readBody(req, MAX_BODY * 16, function (err, text) {
+      var reply = function (code, body) {
+        send(res, code, JSON.stringify(body),
+             { 'Content-Type': 'application/json; charset=utf-8' });
+      };
+      if (err) return reply(400, { ok: false, error: err.message });
+      var parsed;
+      try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
+      // Refused rather than stored if it is not a config: a backup that cannot
+      // be restored is worse than none, because it is believed.
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+          || !parsed.quad) {
+        return reply(400, { ok: false, error: 'not a calibration' });
+      }
+      var dest = path.join(path.dirname(JOURNAL_PATH), 'config-backup.json');
+      var body = JSON.stringify(parsed, null, 2) + '\n';
+      // Only when it changed. This arrives on every sync tick and a calibration
+      // changes a handful of times in a rig's life.
+      fs.readFile(dest, 'utf8', function (readErr, before) {
+        if (!readErr && before === body) return reply(200, { ok: true, changed: false });
+        var tmp = dest + '.part';
+        fs.writeFile(tmp, body, function (writeErr) {
+          if (writeErr) {
+            fs.unlink(tmp, function () {});
+            console.error('config backup: ' + writeErr.message);
+            return reply(500, { ok: false, error: 'could not save' });
+          }
+          fs.rename(tmp, dest, function (renameErr) {
+            if (renameErr) {
+              fs.unlink(tmp, function () {});
+              console.error('config backup: ' + renameErr.message);
+              return reply(500, { ok: false, error: 'could not save' });
+            }
+            console.log('config backup: updated ' + dest);
+            reply(200, { ok: true, changed: true });
+          });
+        });
+      });
+    });
+  }
+
   // What the far end already has, so a sender knows where to start. Cheap
   // enough to call every few minutes and the only thing the rig needs to ask.
   if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/newest') {
@@ -765,8 +861,7 @@ function route(req, res) {
     // Tell the scanner someone is looking, so it refreshes the view quickly
     // instead of on its idle tick. Throttled: this fires twice a second.
     touchWatchFile();
-    var framePath = path.join(ROOT, 'rpi', 'live-frame.jpg');
-    return fs.readFile(framePath, function (err, data) {
+    return fs.readFile(framePath(), function (err, data) {
       if (err) {
         return send(res, 404, 'no frame yet', { 'Content-Type': 'text/plain' });
       }

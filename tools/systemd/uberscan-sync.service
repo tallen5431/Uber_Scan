@@ -24,6 +24,8 @@ Environment=SYNC_TO=http://nuc.lan:8080
 # Only needed if the far end sets SYNC_TOKEN. Behind a VPN it does not have to.
 #Environment=SYNC_TOKEN=
 
+# Sends the offers and, alongside them, the 400-byte calibration. --no-config
+# drops the second if you would rather it did not leave the car.
 ExecStart=/usr/bin/python3 rpi/sync.py --quiet
 
 # It reads one file and writes nothing locally, so it needs almost nothing.

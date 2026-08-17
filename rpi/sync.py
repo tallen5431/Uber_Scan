@@ -37,6 +37,9 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import journal as JR                                          # noqa: E402
 
+DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              'config.json')
+
 # How far back to start from, relative to what the far end already has.
 #
 # Overlap rather than an exact watermark, because the two clocks are not the
@@ -68,6 +71,36 @@ def rows_since(path, floor_ms):
             if isinstance(r, dict) and (r.get('at') or 0) >= floor_ms]
 
 
+def send_config(base, path, token=None, timeout=TIMEOUT):
+    """Keep a copy of the calibration beside the offers. Never fatal.
+
+    400 bytes: the corners, the lens, the flicker-safe exposure and the driver's
+    own target and running costs. Not irreplaceable the way the journal is —
+    every number in it can be measured again — but re-aiming a camera at the
+    roadside is an afternoon, and it is small enough that there is no reason to
+    make anyone spend one.
+
+    Failures here are reported and shrugged off. The journal is the thing worth
+    a non-zero exit; this is a convenience riding along with it.
+    """
+    try:
+        with open(path, 'rb') as fh:
+            body = fh.read()
+        json.loads(body.decode('utf-8'))      # do not upload something unreadable
+    except (IOError, OSError, ValueError, UnicodeDecodeError) as e:
+        return {'ok': False, 'error': str(e)}
+    request = urllib.request.Request(
+        base.rstrip('/') + '/api/config/backup', data=body, method='POST',
+        headers={'Content-Type': 'application/json'})
+    if token:
+        request.add_header('X-Sync-Token', token)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as fh:
+            return json.loads(fh.read().decode('utf-8'))
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return {'ok': False, 'error': str(e)}
+
+
 def send(base, rows, token=None, timeout=TIMEOUT):
     """POST rows as newline-delimited JSON. Returns the far end's summary."""
     body = ('\n'.join(json.dumps(r, sort_keys=True) for r in rows) + '\n').encode('utf-8')
@@ -92,6 +125,10 @@ def main():
                     help='how far back to go when the far end has nothing')
     ap.add_argument('--all', action='store_true',
                     help='send the whole journal; safe, just slower')
+    ap.add_argument('--config', default=DEFAULT_CONFIG,
+                    help='calibration to keep a copy of alongside the offers')
+    ap.add_argument('--no-config', action='store_true',
+                    help='send only the offers')
     ap.add_argument('--quiet', action='store_true')
     args = ap.parse_args()
 
@@ -119,6 +156,14 @@ def main():
         floor = newest - OVERLAP_MS
     else:
         floor = JR.now_ms() - args.days * 86400000
+
+    if not args.no_config and os.path.exists(args.config):
+        backup = send_config(args.to, args.config, token=args.token)
+        if backup.get('ok') and backup.get('changed'):
+            say('calibration copied across')
+        elif not backup.get('ok'):
+            say('could not copy the calibration (%s) — the offers still went'
+                % backup.get('error'))
 
     rows = rows_since(args.journal, floor)
     if not rows:

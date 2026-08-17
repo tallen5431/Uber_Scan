@@ -168,6 +168,51 @@ try:
 
     # The whole file, resent. Costs a few hundred kilobytes and changes nothing.
     eq('--all is safe', SY.send(far.base, SY.rows_since(pi, 0))['added'], 0)
+
+    # --- the calibration rides along ------------------------------------
+    # 400 bytes, and every number in it can be measured again — but re-aiming a
+    # camera at the roadside is an afternoon nobody wants to spend twice.
+    cfg = os.path.join(work, 'config.json')
+    calibration = {'quad': [[100, 50], [900, 50], [900, 1700], [100, 1700]],
+                   'cardHeight': 900, 'lensPosition': 10.0, 'exposureTime': 16667,
+                   'settings': {'target': 32, 'band': 15, 'costPerMile': 0.62}}
+    with open(cfg, 'w') as fh:
+        json.dump(calibration, fh)
+    backup = os.path.join(os.path.dirname(far.journal), 'config-backup.json')
+
+    first = SY.send_config(far.base, cfg)
+    ok_('the calibration is taken', first.get('ok'))
+    ok_('...and written', first.get('changed'))
+    eq('...intact', json.load(open(backup))['settings']['target'], 32)
+
+    # It is sent on every tick and a calibration changes a handful of times in a
+    # rig's life, so an unchanged one must not rewrite the file.
+    eq('an unchanged calibration is not rewritten',
+       SY.send_config(far.base, cfg).get('changed'), False)
+
+    calibration['settings']['target'] = 40
+    with open(cfg, 'w') as fh:
+        json.dump(calibration, fh)
+    eq('...but a changed one is', SY.send_config(far.base, cfg).get('changed'), True)
+    eq('...with the new value', json.load(open(backup))['settings']['target'], 40)
+
+    # A backup that cannot be restored is worse than none, because it is
+    # believed. Anything that is not a calibration is refused rather than stored.
+    junk = os.path.join(work, 'junk.json')
+    with open(junk, 'w') as fh:
+        fh.write('{"not": "a calibration"}')
+    ok_('something that is not a calibration is refused',
+        not SY.send_config(far.base, junk).get('ok'))
+    with open(junk, 'w') as fh:
+        fh.write('not even json')
+    ok_('...and so is something that is not JSON',
+        not SY.send_config(far.base, junk).get('ok'))
+    eq('...neither of which touched the good copy',
+       json.load(open(backup))['settings']['target'], 40)
+
+    # A missing config is simply nothing to do, not a failure.
+    ok_('a config that is not there is not an error',
+        not SY.send_config(far.base, os.path.join(work, 'nope.json')).get('ok'))
 finally:
     far.close()
 

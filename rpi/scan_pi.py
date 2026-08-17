@@ -33,7 +33,28 @@ import track as TR
 from accumulate import OfferAccumulator
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
-DEFAULT_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'live-frame.jpg')
+
+
+def _default_snapshot():
+    """Where to leave the live view: RAM if there is any, the card if not.
+
+    This is written about fourteen times a second while someone is watching the
+    page, at roughly 50kB a frame — about 2.5GB an hour, against 19MB a *year*
+    for the journal. All of it is stale two frames later and none of it needs to
+    survive a reboot, so putting it on the SD card was paying the one part of
+    this system that wears out for nothing. pipeline.py has staged its OCR
+    images in /dev/shm all along for the same reason.
+
+    The web side resolves its own path and picks whichever candidate is
+    freshest, so the two cannot silently disagree — see framePath in server.js.
+    """
+    shm = '/dev/shm'
+    if os.path.isdir(shm) and os.access(shm, os.W_OK):
+        return os.path.join(shm, 'uberscan-live.jpg')
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'live-frame.jpg')
+
+
+DEFAULT_SNAPSHOT = _default_snapshot()
 
 # The motion gate means whole minutes can pass with no read, so the snapshot is
 # refreshed on a timer as well. Cheap: a warp and a resize, no OCR.

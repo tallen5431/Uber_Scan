@@ -693,6 +693,22 @@ filter, draws on the small picture and reuses the reader's card — about a
 quarter of the work, so nearly three times the frame rate still costs less than
 the old rate did.
 
+It does not live on the SD card. The view refreshes about fourteen times a
+second while someone is watching, at ~50kB a frame — roughly **2.5GB an hour
+written to the card**, against about 19MB a *year* for the journal. Every byte
+of it is stale two frames later and none of it needs to survive a reboot, so it
+goes to `/dev/shm`, which is RAM. `pipeline.py` has staged its OCR images there
+all along for exactly this reason; the live frame simply never got the same
+treatment, and it was writing fifty thousand times more to the one part of the
+system that wears out than the data worth keeping does.
+
+The two sides pick that path independently — this is Python and the web side is
+JavaScript — and nothing detects a mismatch, so the server takes whichever
+candidate is *freshest* rather than whichever exists. That keeps the view
+working whichever the scanner chose, including a rig running an old scanner
+against a new server. `FRAME=/some/path.jpg` overrides it, the way `JOURNAL`
+does for the offers.
+
 It is also composed from the *preview* stream rather than the sensor. A preview
 is a 480px thumbnail of a car interior with a box on it, and making one used to
 mean copying twelve megabytes of sensor frame and discarding 99% of it — 8ms of
@@ -1170,8 +1186,15 @@ the rig, and the ingest endpoint starts requiring it. Unset, it costs one
 comparison. Note that this is the only part of the project that accepts writes
 from off the machine; everything else is a read.
 
-What it does **not** sync is `config.json`, which is 400 bytes of calibration
-and targets. It is worth copying too, and a line in the same timer will do it.
+`config.json` goes across too, into `config-backup.json` beside the journal —
+400 bytes holding the corners, the lens, the flicker-safe exposure and your own
+target and running costs. None of it is irreplaceable the way the offers are;
+every number can be measured again. But re-aiming a camera and re-deriving an
+exposure at the roadside is an afternoon, and it is small enough that there is
+no reason to make anyone spend one. It is written only when it changes, and
+something that is not a calibration is refused rather than stored — a backup
+that cannot be restored is worse than none, because it is believed.
+`--no-config` turns it off.
 
 ## Tuning
 
@@ -1216,7 +1239,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 14 suites, 1211 checks
+npm test                # all 14 suites, 1221 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1243,7 +1266,7 @@ python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
 python3 rpi/test_scan_pi.py     #  41 on the loop that holds the camera
-python3 rpi/test_sync.py        #  22 on getting the offers off the car
+python3 rpi/test_sync.py        #  32 on getting the offers off the car
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
