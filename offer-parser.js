@@ -291,6 +291,42 @@
     return isFinite(n) ? n : fallback;
   }
 
+  // What a real offer looks like from the outside, used to catch a reading that
+  // cannot be true rather than a ride that is merely unusual.
+  //
+  // These come from 234 offers off a real rig. Three of them had lost a decimal
+  // point — $11.84 read as $1184, $12.51 as $1251 — and two more had a misread
+  // time that put the trip at 110 and 120 mph. All five were shown as ACCEPT,
+  // in green, with a spoken "accept, three thousand five hundred an hour". The
+  // journal flagged the first three afterwards and said nothing about the other
+  // two, which is the wrong end of the problem: by then the driver has already
+  // looked at the screen and decided.
+  //
+  // The bounds sit well clear of anything genuine in that data — the best real
+  // offer was $45/hr, the fastest real trip averaged 56 mph over a 115-mile
+  // highway run — so a card has to be misread, not just unusual, to trip them.
+  var SANE_PAY = [1.0, 300.0];
+  var SANE_MINUTES = [2.0, 240.0];
+  var SANE_MPH = 75.0;
+
+  // Why this reading cannot be true, or null if it might be. Written the same
+  // way as offer_parser.doubt so the two cannot answer differently.
+  //
+  // Only the direction that produces a wrong ACCEPT is checked. A reading that
+  // understates what an offer pays makes it look worse than it is, and the
+  // driver declines something they might have taken — a real cost, but a
+  // recoverable one, and the next offer is thirty seconds away. A reading that
+  // overstates it puts them in a car for forty minutes for six dollars.
+  function doubt(pay, minutes, miles) {
+    if (typeof pay !== 'number' || !isFinite(pay)) return null;
+    if (!(pay >= SANE_PAY[0] && pay <= SANE_PAY[1])) return 'pay';
+    if (typeof minutes !== 'number' || !isFinite(minutes)) return null;
+    if (!(minutes >= SANE_MINUTES[0] && minutes <= SANE_MINUTES[1])) return 'time';
+    if (typeof miles === 'number' && isFinite(miles) && miles >= 1.0
+        && minutes > 0 && miles / (minutes / 60) > SANE_MPH) return 'speed';
+    return null;
+  }
+
   function rate(parsed, settings) {
     var s = settings || {};
     var target = setting(s.target, DEFAULT_SETTINGS.target);
@@ -317,6 +353,10 @@
 
     var perHour = net / (minutes / 60);
     var floor = target * (1 - band / 100);
+    // Judged on what the card said, not on what the arithmetic made of it:
+    // `pad` and the shopping allowance are the driver's own additions and a
+    // card is not misread for having them applied.
+    var why = doubt(parsed.pay, parsed.minutes, parsed.miles);
 
     return {
       ready: true,
@@ -346,9 +386,18 @@
       perMile: (parsed.miles && !parsed.milesUncertain) ? net / parsed.miles : null,
       milesUncertain: !!parsed.milesUncertain,
       milesCorrected: !!parsed.milesCorrected,
-      state: perHour >= target ? 'go' : (perHour >= floor ? 'warn' : 'no')
+      // `ready` stays true and every number is still here, because the row has
+      // to reach the journal: a reading this project got wrong is the most
+      // useful row in the file, and one that is quietly dropped cannot be
+      // studied or counted. What is withheld is only the verdict.
+      doubt: why,
+      state: why ? 'doubt'
+           : perHour >= target ? 'go'
+           : perHour >= floor ? 'warn' : 'no'
     };
   }
 
-  return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber };
+  return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
+           doubt: doubt, SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES,
+           SANE_MPH: SANE_MPH };
 }));

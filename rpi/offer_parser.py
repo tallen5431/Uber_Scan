@@ -240,6 +240,49 @@ def setting(value, fallback):
     return n
 
 
+# What a real offer looks like from the outside, used to catch a reading that
+# cannot be true rather than a ride that is merely unusual.
+#
+# These come from 234 offers off a real rig. Three of them had lost a decimal
+# point — $11.84 read as $1184, $12.51 as $1251 — and two more had a misread
+# time that put the trip at 110 and 120 mph. All five were shown as ACCEPT, in
+# green, with a spoken "accept, three thousand five hundred an hour". The
+# journal flagged the first three afterwards and said nothing about the other
+# two, which is the wrong end of the problem: by then the driver has already
+# looked at the screen and decided.
+#
+# The bounds sit well clear of anything genuine in that data — the best real
+# offer was $45/hr, the fastest real trip averaged 56 mph over a 115-mile
+# highway run — so a card has to be misread, not just unusual, to trip them.
+SANE_PAY = (1.0, 300.0)
+SANE_MINUTES = (2.0, 240.0)
+SANE_MPH = 75.0
+
+
+def doubt(pay, minutes, miles=None):
+    """Why this reading cannot be true, or None if it might be.
+
+    Only the direction that produces a wrong ACCEPT is checked. A reading that
+    understates what an offer pays makes it look worse than it is, and the
+    driver declines something they might have taken — a real cost, but a
+    recoverable one, and the next offer is thirty seconds away. A reading that
+    overstates it puts them in a car for forty minutes for six dollars.
+    """
+    if not isinstance(pay, (int, float)) or isinstance(pay, bool):
+        return None
+    if not (SANE_PAY[0] <= pay <= SANE_PAY[1]):
+        return 'pay'
+    if not isinstance(minutes, (int, float)) or isinstance(minutes, bool):
+        return None
+    if not (SANE_MINUTES[0] <= minutes <= SANE_MINUTES[1]):
+        return 'time'
+    if (isinstance(miles, (int, float)) and not isinstance(miles, bool)
+            and miles >= 1.0 and minutes > 0
+            and miles / (minutes / 60.0) > SANE_MPH):
+        return 'speed'
+    return None
+
+
 def rate(parsed, settings=None):
     s = settings or {}
     target = setting(s.get('target'), DEFAULT_SETTINGS['target'])
@@ -268,6 +311,10 @@ def rate(parsed, settings=None):
 
     per_hour = net / (minutes / 60.0)
     floor = target * (1 - band / 100.0)
+    # Judged on what the card said, not on what the arithmetic made of it: `pad`
+    # and the shopping allowance are the driver's own additions and a card is
+    # not misread for having them applied.
+    why = doubt(parsed['pay'], parsed['minutes'], parsed['miles'])
 
     return {
         'ready': True,
@@ -298,5 +345,12 @@ def rate(parsed, settings=None):
                     if parsed['miles'] and not parsed['milesUncertain'] else None),
         'milesUncertain': parsed['milesUncertain'],
         'milesCorrected': parsed['milesCorrected'],
-        'state': 'go' if per_hour >= target else ('warn' if per_hour >= floor else 'no'),
+        # `ready` stays true and every number is still here, because the row has
+        # to reach the journal: a reading this project got wrong is the most
+        # useful row in the file, and one that is quietly dropped cannot be
+        # studied or counted. What is withheld is only the verdict.
+        'doubt': why,
+        'state': ('doubt' if why else
+                  'go' if per_hour >= target else
+                  'warn' if per_hour >= floor else 'no'),
     }

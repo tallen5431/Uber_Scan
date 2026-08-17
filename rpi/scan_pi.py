@@ -457,6 +457,14 @@ def say(text):
 
 
 def spoken(rate):
+    # A reading that cannot be true gets named, not priced. Saying "accept,
+    # three thousand five hundred an hour" out loud is worse than saying
+    # nothing: the driver is looking at the road, the voice is the whole of
+    # what they get, and a number that confident is one they will act on.
+    if rate['state'] == 'doubt':
+        return {'pay': 'check the pay.', 'time': 'check the time.',
+                'speed': 'check the distance.'}.get(rate.get('doubt'),
+                                                    'read that again.')
     dollars = int(round(rate['perHour']))
     word = {'go': 'accept', 'warn': 'close', 'no': 'pass'}[rate['state']]
     return '%s. %d an hour.' % (word, dollars)
@@ -467,6 +475,9 @@ def show(frame_text, rate, parsed, ms, locked):
         print('%s  no offer' % frame_text)
         return
     flags = []
+    if rate.get('doubt'):
+        flags.append('%s outside anything a real offer does — no verdict'
+                     % rate['doubt'])
     if parsed['milesCorrected']:
         flags.append('decimal recovered')
     if parsed['milesUncertain']:
@@ -488,6 +499,11 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
         'ready': rate['ready'],
         'locked': locked,
         'state': rate['state'],
+        # Which figure is impossible, so the page can name it rather than just
+        # refusing to say anything. The numbers below are still sent: the driver
+        # is looking at the same card and is the one who can tell which of them
+        # the camera got wrong.
+        'doubt': rate.get('doubt'),
         'perHour': round(rate['perHour'], 2) if rate['ready'] else None,
         # Both rates, and the time they were both divided by. The card's own
         # minutes are below as `minutes`, for checking against the phone; these

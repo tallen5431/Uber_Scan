@@ -39,7 +39,11 @@ Three things this deliberately does not do:
 
 import json
 import os
+import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import offer_parser as OP                                     # noqa: E402
 
 # A backstop, not a retention policy. A working shift produces on the order of a
 # hundred offers, so a year of driving is a few megabytes and there is nothing
@@ -62,8 +66,13 @@ RESUME_WINDOW_MS = 90 * 1000
 # which are set to keep noise out of a spoken verdict, not to keep junk out of a
 # year of data. Nothing is dropped for failing these — a missing offer makes a
 # driver wonder what else is missing — it is flagged so it can be filtered.
-SANE_PAY = (1.0, 300.0)
-SANE_MINUTES = (2.0, 240.0)
+# The bounds themselves now live beside the verdict, in offer_parser, because
+# the verdict is the place they matter first: a reading that cannot be true
+# should never have been shown as an ACCEPT, and flagging it here only helps
+# whoever reads the file afterwards. They are imported rather than repeated so
+# the two can never drift into disagreeing about what a real offer looks like.
+SANE_PAY = OP.SANE_PAY
+SANE_MINUTES = OP.SANE_MINUTES
 
 SCHEMA = 1
 
@@ -285,7 +294,9 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
     unreadable a month after the target moved, with no way to tell a verdict
     that was right then from one that would be wrong now.
     """
-    pay, minutes = parsed.get('pay'), parsed.get('minutes')
+    pay, minutes, miles = (parsed.get('pay'), parsed.get('minutes'),
+                           parsed.get('miles'))
+    why = OP.doubt(pay, minutes, miles)
     return {
         # Rows outlive the code that wrote them. One integer buys a reader that
         # can tell a schema change from corruption.
@@ -297,7 +308,7 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # --- as read off the card -------------------------------------------
         'pay': pay,
         'minutes': minutes,
-        'miles': parsed.get('miles'),
+        'miles': miles,
         'items': parsed.get('items'),
         # --- what the scanner made of it ------------------------------------
         'perHour': _round(rate.get('perHour'), 2),
@@ -332,11 +343,18 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # reading worth studying later, and refusing to write it would leave
         # the hardest offers missing from the data with nothing to say so.
         'settled': bool(settled),
-        # A ride, or a receipt someone left on the screen? parse() has no
-        # offer-card token to check, so a fare summary can satisfy it. Flagged,
-        # never dropped: a hole in the record is worse than a row with a
-        # question against it.
-        'suspect': not (_within(pay, SANE_PAY) and _within(minutes, SANE_MINUTES)),
+        # A ride, or a receipt someone left on the screen, or a card the camera
+        # simply got wrong? parse() has no offer-card token to check, so a fare
+        # summary can satisfy it. Flagged, never dropped: a hole in the record
+        # is worse than a row with a question against it.
+        'suspect': not (_within(pay, SANE_PAY) and _within(minutes, SANE_MINUTES)
+                        and why is None),
+        # Which figure was impossible, when one was. `suspect` alone says a row
+        # is not to be trusted without saying what to go and look at, and the
+        # three kinds are not the same problem: a lost decimal point in the pay
+        # is a reader bug, an implied 120mph is a misread time, and a receipt on
+        # the screen is not an offer at all.
+        'doubt': why,
         'ms': _round(ms, 0),
         'content': list(content_of(parsed)),
     }

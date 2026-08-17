@@ -326,7 +326,11 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    'perHour', 'grossPerHour', 'perMile', 'cost', 'state',
                    'target', 'band', 'costPerMile', 'legs', 'mergedFrom', 'hasTotal',
                    'milesCorrected', 'milesUncertain', 'whole', 'settled',
-                   'suspect', 'accepted', 'ms'];
+                   // `suspect` says not to trust a row; `doubt` says which
+                   // figure to go and look at. A spreadsheet full of rows
+                   // flagged 1 with nothing saying why is a column people learn
+                   // to ignore.
+                   'suspect', 'doubt', 'accepted', 'ms'];
 
 function numOrNull(v) {
   return (typeof v === 'number' && isFinite(v)) ? v : null;

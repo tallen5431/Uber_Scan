@@ -26,6 +26,12 @@
      Between offers the panel says only what it knows, which is the phase. */
   .verdict.novalue .rate,
   .verdict.novalue .submetrics { display: none; }
+  /* The headline is the one number that cannot be shown here. $1184 over twenty
+     minutes is $3548/hr, and at that size, in that position, it is read before
+     the label above it is. The card's own pay, time and distance stay below,
+     because those are what the driver checks against the phone in their hand. */
+  .verdict.doubt .rate,
+  .verdict.doubt .working { display: none; }
   .stale { opacity: .35; }
   /* Diagnostics, not a heading. It was uppercase with wide tracking, which
      made a line of read timings shout louder than the verdict above it. */
@@ -251,8 +257,21 @@
     // known the difference all along and used it to decide whether to keep
     // reading and whether to speak; it just never told the page.
     var settled = r.locked && r.whole !== false;
-    el.verdictLabel.textContent =
-      ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '') + (settled ? '' : ' ?');
+    // A reading that cannot be true gets no verdict at all, and says which
+    // figure to go and look at. The alternative is what this screen used to do
+    // with a lost decimal point: a green ACCEPT on $1184 for a twenty-minute
+    // ride, which is the most confident this display has ever been and the most
+    // wrong. The numbers stay on screen underneath — the driver is holding the
+    // same card and is the one who can see which of them is off.
+    if (r.state === 'doubt') {
+      el.verdictLabel.textContent =
+        { pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
+          speed: 'CHECK THE DISTANCE' }[r.doubt] || 'READ AGAIN';
+    } else {
+      el.verdictLabel.textContent =
+        ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '')
+        + (settled ? '' : ' ?');
+    }
     // The headline is net of running costs when a cost per mile is set, and
     // saying so is not optional: a driver who checks 7.09 over 34 minutes gets
     // $12.51/hr, the screen said $10.61, and nothing here explained the gap.

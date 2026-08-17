@@ -279,8 +279,14 @@
     el.verdict.className = 'verdict ' + r.state;
     document.body.classList.toggle('locked', locked);
 
+    // A reading that cannot be true gets no verdict, and names the figure to
+    // look at instead. Indexing the three-verdict map with anything else put
+    // the word "undefined" on screen where ACCEPT or PASS belongs.
     el.verdictLabel.textContent = !r.ready
       ? 'POINT AT THE OFFER'
+      : r.state === 'doubt'
+      ? ({ pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
+           speed: 'CHECK THE DISTANCE' }[r.doubt] || 'READ AGAIN')
       : ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] + (locked ? '' : ' ?'));
 
     el.perHour.textContent = r.ready

@@ -11,6 +11,9 @@
   --warn-dim: #6b4708;
   --no: #f0324b;
   --no-dim: #6b1220;
+  /* Not a verdict at all: the rig saying it does not believe what it read. */
+  --doubt: #b39ddb;
+  --doubt-dim: #3a2d5c;
   --pad: 10px;
 }
 
@@ -47,6 +50,10 @@ html, body {
 .verdict.go   { background: var(--go-dim);   border-color: var(--go); }
 .verdict.warn { background: var(--warn-dim); border-color: var(--warn); }
 .verdict.no   { background: var(--no-dim);   border-color: var(--no); }
+/* Deliberately none of the three. This is not a worse ACCEPT or a softer PASS —
+   it is the rig declining to answer, and a driver glancing across at a colour
+   they know should not read it as any kind of verdict. */
+.verdict.doubt { background: var(--doubt-dim); border-color: var(--doubt); }
 
 .verdict-label {
   font-size: clamp(15px, 4.5vw, 20px);
@@ -57,6 +64,7 @@ html, body {
 .verdict.go .verdict-label   { color: var(--go); }
 .verdict.warn .verdict-label { color: var(--warn); }
 .verdict.no .verdict-label   { color: var(--no); }
+.verdict.doubt .verdict-label { color: var(--doubt); }
 
 .rate {
   display: flex;
@@ -96,6 +104,7 @@ html, body {
 .verdict.go .working b   { color: var(--go); }
 .verdict.warn .working b { color: var(--warn); }
 .verdict.no .working b   { color: var(--no); }
+.verdict.doubt .working b { color: var(--doubt); }
 
 /* Four across on a phone held in one hand. auto-fit rather than a fixed count
    so a narrow screen wraps to two rows instead of squeezing the digits. */
