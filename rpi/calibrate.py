@@ -103,8 +103,22 @@ def load_existing(path):
         return {}
 
 
-DEFAULT_SETTINGS = {'target': 25, 'band': 15, 'costPerMile': 0.30,
-                    'pad': 0, 'secondsPerItem': 0}
+# What a *new* config.json is seeded with, which is not the same thing as what
+# the parser falls back to.
+#
+# offer_parser.DEFAULT_SETTINGS has costPerMile 0, and that is deliberate: it
+# means "nobody has told me what this car costs, so do not invent a deduction".
+# This is the other question — "what should a driver start from" — and 30c a
+# mile is a petrol midsize with some depreciation in it.
+#
+# The two are easy to confuse and were written out by hand in three places, one
+# of which was a diagnostic that hardcoded 0.30 while the parser it was
+# diagnosing used 0. Everything that seeds a config now reads this one.
+SEED_SETTINGS = {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                 'pad': 0, 'secondsPerItem': 0}
+
+# The old name, kept because it is what the rest of this module says.
+DEFAULT_SETTINGS = SEED_SETTINGS
 
 
 def calibrated_config(existing, quad, pin, card_height, capture, lens_position):

@@ -109,9 +109,13 @@ def main():
     # The parser is pure python and must pass regardless of any hardware.
     if has_cv2 and has_pytesseract:
         try:
+            import calibrate as CAL
             import offer_parser as OP
             p = OP.parse('$7.09 6 items (6 units) 34 min (3.6 mi) total')
-            r = OP.rate(p, {'target': 25, 'costPerMile': 0.30})
+            # The seed a fresh config.json gets, rather than a rate typed in
+            # here. This was a third hand-written copy of the same figure, in
+            # the one file whose job is to tell you the rig is set up right.
+            r = OP.rate(p, CAL.SEED_SETTINGS)
             good = p['pay'] == 7.09 and p['minutes'] == 34 and round(r['perHour'], 2) == 10.61
             check('parser self-test', good, '$7.09 / 34 min -> $%.2f/hr' % r['perHour'])
         except Exception as e:

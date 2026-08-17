@@ -175,7 +175,11 @@
   'use strict';
 
   // An offer the scanner stopped seeing this long ago is history, not news.
-  var STALE_MS = 90000;
+  // The scanner emits several times a second while a card is on screen and
+  // keeps emitting between cards, so silence is not a lull, it is a fault.
+  // Ninety seconds was long enough to sit through most of an offer's life
+  // showing a verdict that had stopped being about anything.
+  var STALE_MS = 12000;
 
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
@@ -201,6 +205,10 @@
 
   var last = null;
   var phase = null;      // setup progress, before any offer exists
+  // When this page last heard anything at all, by its own clock.
+  var seenAt = Date.now();
+  var socketUp = false;
+  var scannerState = null;
 
   var PHASE_LABEL = {
     check: 'CHECKING',
@@ -218,10 +226,18 @@
       // Before the first offer the useful thing to show is setup progress, so
       // the page doubles as the aiming instructions.
       var p = phase || {};
-      el.verdict.className = 'verdict ' + (p.phase === 'error' ? 'no' : 'empty');
+      // Not `no`. A fault is not a verdict, and painting the panel in the PASS
+      // red means a glance at a dead scanner reads as "decline this offer" —
+      // the driver acts on a decision nothing made.
+      el.verdict.className = 'verdict ' + (p.phase === 'error' ? 'fault' : 'empty');
       el.verdictLabel.textContent = PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER';
-      setRate(p.cardPixels ? String(p.cardPixels) : '--',
-              p.phase === 'aim' ? 'px' : '/hr');
+      // Only while aiming, where the number means pixels and says so. On any
+      // other phase this put a four-digit camera measurement in the position
+      // and size of the headline rate, under the label "/hr" — the single most
+      // prominent number on a screen read while driving, saying $1847 an hour.
+      var aimingNow = p.phase === 'aim';
+      setRate(aimingNow && p.cardPixels ? String(p.cardPixels) : '--',
+              aimingNow ? 'px' : '/hr');
       el.vPay.textContent = el.vMin.textContent = el.vMile.textContent = '--';
 
       var aiming = p.phase === 'aim';
@@ -235,15 +251,20 @@
       }
       el.warn.textContent = p.message || '';
       el.warn.hidden = !p.message;
+      var quiet = Date.now() - seenAt;
       el.detail.textContent = aiming
         ? 'the view below is live — move the mount until this says good'
-        : (r ? 'scanner running, no offer on screen' + trackNote(r) : '');
+        : (quiet > STALE_MS
+            ? 'nothing from the scanner for ' + Math.round(quiet / 1000)
+              + 's — it may have stopped'
+            : (r ? 'scanner running, no offer on screen' + trackNote(r) : ''));
+      el.verdict.classList.toggle('stale', quiet > STALE_MS);
       el.working.hidden = true;
       showRaw(r && r.text);
       return;
     }
 
-    var stale = Date.now() - r.at > STALE_MS;
+    var stale = Date.now() - seenAt > STALE_MS;
     el.verdict.className = 'verdict ' + r.state + (stale ? ' stale' : '');
     // `whole` and `locked` are two different claims and only one of them is the
     // one to act on. `locked` means two consecutive frames parsed the same —
@@ -355,7 +376,7 @@
     el.warn.textContent = notes.join(' ');
     el.warn.hidden = !notes.length;
 
-    el.detail.textContent = (stale ? 'last seen ' + Math.round((Date.now() - r.at) / 1000) + 's ago · ' : '')
+    el.detail.textContent = (stale ? 'last seen ' + Math.round((Date.now() - seenAt) / 1000) + 's ago · ' : '')
       + (deducted ? 'after $' + Number(r.costPerMile).toFixed(2) + '/mi costs · ' : '')
       + r.ms + 'ms'
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
@@ -376,22 +397,65 @@
     return bits.length ? ' · ' + bits.join(' · ') : '';
   }
 
+  // What the dot means.
+  //
+  // It used to mean "this page has a socket to the web server", which is true
+  // whenever the page is loaded at all — so it sat green and said "scanner
+  // connected" over a camera that had crashed twenty minutes earlier. The one
+  // fact a driver needs from it is whether anything is still reading offers.
+  // The socket only decides whether that answer is current.
+  function showConnection() {
+    var quiet = Date.now() - seenAt;
+    var alive = socketUp && quiet <= STALE_MS;
+    // The camera view is the most convincing thing on this page and the last
+    // to look wrong: a frozen JPEG of a phone showing an offer is
+    // indistinguishable from a live one. The rule to dim it had been written
+    // and never wired to anything, so the picture was served at full strength
+    // however long the scanner had been dead. Dimming is not decoration here —
+    // it is the only cue that what is on screen is a photograph of the past.
+    var img = document.getElementById('view');
+    if (img) img.classList.toggle('stalefeed', quiet > STALE_MS);
+    if (!socketUp) {
+      el.conn.textContent = 'reconnecting to the server…';
+    } else if (scannerState && !scannerState.enabled) {
+      el.conn.textContent = 'no Pi scanner on this machine';
+    } else if (scannerState && !scannerState.running) {
+      el.conn.textContent = 'scanner not running'
+        + (scannerState.error ? ': ' + scannerState.error : '');
+    } else if (quiet > STALE_MS) {
+      el.conn.textContent = 'nothing from the scanner for '
+        + Math.round(quiet / 1000) + 's';
+    } else {
+      el.conn.textContent = 'scanner reading';
+    }
+    el.dot.classList.toggle('on', alive
+      && !(scannerState && (!scannerState.enabled || !scannerState.running)));
+  }
+
   function connect() {
     var src = new EventSource('/api/events');
     src.onopen = function () {
-      el.conn.textContent = 'scanner connected';
-      el.dot.classList.add('on');
+      socketUp = true;
+      showConnection();
     };
     src.onmessage = function (e) {
       var msg;
       try { msg = JSON.parse(e.data); } catch (err) { return; }
+      // Stamped here, on the clock this page is going to compare it against.
+      // `at` comes off the Pi, and a Pi 4 has no real-time clock: it boots in
+      // 1970 and jumps when the network arrives. Subtracting one machine's
+      // clock from another's is how "12 seconds old" became "fifty-six years
+      // old" — or, worse, a negative age that never trips the stale test at
+      // all, leaving a frozen verdict on screen looking live.
+      seenAt = Date.now();
       if (msg.phase) phase = msg;
       if (msg.ready !== undefined) last = msg;
       render();
+      showConnection();
     };
     src.onerror = function () {
-      el.conn.textContent = 'reconnecting…';
-      el.dot.classList.remove('on');
+      socketUp = false;
+      showConnection();
     };
   }
 
@@ -399,12 +463,9 @@
   fetch('/api/status').then(function (r) { return r.json(); }).then(function (s) {
     if (s.last) last = s.last;
     if (s.status) phase = s.status;
+    scannerState = s.scanner || null;
     render();
-    if (!s.scanner.enabled) {
-      el.conn.textContent = 'Pi scanner not present on this machine';
-    } else if (!s.scanner.running) {
-      el.conn.textContent = 'scanner not running' + (s.scanner.error ? ': ' + s.scanner.error : '');
-    }
+    showConnection();
   }).catch(function () {});
 
   // Poll the still rather than streaming: the scanner writes it every couple of
@@ -619,7 +680,10 @@
   });
 
   connect();
-  setInterval(render, 1000);   // keeps the "last seen" counter honest
+  // Keeps the "last seen" counter honest, and — since silence is exactly the
+  // condition worth noticing — is the only thing that can ever discover the
+  // scanner has gone quiet. Nothing arrives to trigger that discovery.
+  setInterval(function () { render(); showConnection(); }, 1000);
 })();
 </script>
 </body>

@@ -64,6 +64,13 @@ html, body {
    it is the rig declining to answer, and a driver glancing across at a colour
    they know should not read it as any kind of verdict. */
 .verdict.doubt { background: var(--doubt-dim); border-color: var(--doubt); }
+/* Not a verdict either, and not allowed to look like one. A scanner fault used
+   to paint this panel in the PASS red, so a glance at a dead camera read as
+   "decline this offer" — a decision nothing had made. Dashed, because no solid
+   border on this screen means anything other than a verdict. */
+.verdict.fault { background: var(--panel-2); border-color: var(--muted);
+                 border-style: dashed; }
+.verdict.fault .verdict-label { color: var(--text); }
 
 .verdict-label {
   font-size: clamp(15px, 4.5vw, 20px);

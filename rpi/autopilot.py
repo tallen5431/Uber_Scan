@@ -296,8 +296,11 @@ def calibrate_from(source, as_json, drawn=None):
         'exposureTime': exposure_us,
         'exposureWhy': why,
     })
-    config.setdefault('settings', {'target': 25, 'band': 15, 'costPerMile': 0.30,
-                                   'pad': 0, 'secondsPerItem': 0})
+    # One definition, in calibrate. Written out by hand in both places these
+    # could drift apart, and the only symptom would be a driver's money quietly
+    # changing depending on which path first wrote their config.
+    import calibrate as CAL
+    config.setdefault('settings', dict(CAL.SEED_SETTINGS))
     # Where the screen had drifted to is measured against corners that no
     # longer exist, so it cannot survive a re-aim.
     config.pop('trackedQuad', None)
