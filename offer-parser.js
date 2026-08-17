@@ -229,6 +229,12 @@
       }
     }
 
+    // A card gives distances to one decimal place, so a sum of them has one
+    // decimal place. Binary floating point disagrees: 3.5 + 6.1 is
+    // 9.600000000000001, and that went into the journal, into the CSV export
+    // and into anything reading either. Rounded here rather than at each
+    // display, so the stored number and the shown number are the same number.
+    if (miles !== null) miles = Math.round(miles * 100) / 100;
     var dist = checkDistance(minutes, miles, hadDecimal);
     miles = dist.miles;
     dist.corrected = dist.corrected || correctedLeg;

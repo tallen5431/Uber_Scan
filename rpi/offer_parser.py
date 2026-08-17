@@ -178,6 +178,13 @@ def parse(raw_text):
             if leg.get('corrected'):
                 corrected_leg = True
 
+    # A card gives distances to one decimal place, so a sum of them has one
+    # decimal place. Binary floating point disagrees: 3.5 + 6.1 is
+    # 9.600000000000001, and that went into the journal, into the CSV export and
+    # into anything reading either. Rounded here rather than at each display, so
+    # the stored number and the shown number are the same number.
+    if miles is not None:
+        miles = round(miles, 2)
     miles, corrected, uncertain = check_distance(minutes, miles, had_decimal)
     corrected = corrected or corrected_leg
 
