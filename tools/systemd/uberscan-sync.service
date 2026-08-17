@@ -1,0 +1,37 @@
+# One upload attempt. Started by the timer beside it, never by hand in normal
+# use, and deliberately not part of the scanner: the scan loop's budget is a few
+# hundred milliseconds and it must never spend any of it waiting on a network.
+#
+#   sudo cp tools/systemd/uberscan-sync.* /etc/systemd/system/
+#   sudo systemctl edit uberscan-sync.service     # set SYNC_TO for your machine
+#   sudo systemctl enable --now uberscan-sync.timer
+[Unit]
+Description=Copy this rig's offers to the machine that keeps them
+Documentation=file:///home/pi/Uber_Scan/rpi/README.md
+# No network dependency on purpose. Being out of range is the normal state in a
+# car, and sync.py treats it as such — it says so and exits 0.
+After=network.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/Uber_Scan
+# Where the copy lives. Override this rather than editing the file:
+#   sudo systemctl edit uberscan-sync.service
+#   [Service]
+#   Environment=SYNC_TO=http://nuc.lan:8080
+Environment=SYNC_TO=http://nuc.lan:8080
+# Only needed if the far end sets SYNC_TOKEN. Behind a VPN it does not have to.
+#Environment=SYNC_TOKEN=
+
+ExecStart=/usr/bin/python3 rpi/sync.py --quiet
+
+# It reads one file and writes nothing locally, so it needs almost nothing.
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/Uber_Scan/rpi
+
+[Install]
+WantedBy=multi-user.target

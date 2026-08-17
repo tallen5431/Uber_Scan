@@ -1110,6 +1110,69 @@ somewhere else.
 Rows carry the `target`, `band` and `costPerMile` in force when they were
 written, because a stored "PASS" is unreadable a month after the target moved.
 
+### Getting them off the car
+
+The journal is the only thing this rig produces that cannot be made again. The
+scanner can be reflashed in an afternoon; a year of what the work actually paid
+cannot. Until there is a second copy it lives on one SD card, in a vehicle,
+which is the least durable place in the system.
+
+So `rpi/sync.py` pushes it to a machine that stays at home. That machine runs
+**this same server** with the camera side switched off:
+
+```sh
+# on the machine keeping the copy
+SCANNER=0 JOURNAL=/var/lib/uberscan/journal.jsonl npm start
+```
+
+That is the whole install. `SCANNER=0` is already a supported mode — it exists
+so the site keeps working when the camera does not — and it gives the offers
+page, the JSON API and the CSV export with no camera, no picamera2 and no OCR.
+
+```sh
+# on the rig, once, to check it works
+python3 rpi/sync.py --to http://nuc.lan:8080
+
+# then leave it to the timer
+sudo cp tools/systemd/uberscan-sync.* /etc/systemd/system/
+sudo systemctl edit uberscan-sync.service     # set SYNC_TO
+sudo systemctl enable --now uberscan-sync.timer
+```
+
+**The rig pushes; nothing pulls.** A car is behind cellular NAT and cannot be
+reached from outside, so the direction is not a preference. It also means the
+sync works the same on the driveway and on the motorway rather than only when
+parked.
+
+**It is idempotent, and that is the entire design.** Every row carries an `id`
+and a `seq`, and the far end appends only the pairs it has never seen — so the
+same batch can arrive twice, or ten times, and nothing duplicates. There is no
+stored offset to drift out of step, no resume logic, and no state on the rig
+beyond the journal itself. A connection dropped half way through costs nothing:
+the next run sends the same rows again and they land. The sender is allowed to
+be crude because the receiver cannot be fooled.
+
+Each run asks what the far end already has and sends from an hour before that.
+The overlap is deliberate — two machines do not share a clock, and a row can be
+written while a request is in flight. Re-sending an hour costs a few kilobytes;
+missing a row loses an offer permanently.
+
+**Being out of range is not a fault.** A car is offline most of the time, so a
+failed connection prints one line and exits 0. A timer that reports a problem
+every ten minutes for a normal condition is a timer nobody reads. A *refusal* —
+a token that does not match, a body over the cap — exits non-zero, because
+retrying will not fix it.
+
+There is no authentication by default, on the assumption that the machine
+keeping the copy is somewhere only you can reach — a LAN, or behind a VPN. If
+that stops being true, set `SYNC_TOKEN` on the far end and pass `--token` from
+the rig, and the ingest endpoint starts requiring it. Unset, it costs one
+comparison. Note that this is the only part of the project that accepts writes
+from off the machine; everything else is a read.
+
+What it does **not** sync is `config.json`, which is 400 bytes of calibration
+and targets. It is worth copying too, and a line in the same timer will do it.
+
 ## Tuning
 
 ```sh
@@ -1153,7 +1216,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 13 suites, 1106 checks
+npm test                # all 14 suites, 1211 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1179,7 +1242,8 @@ python3 rpi/test_journal.py     #  54 on keeping one row per offer
 python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     #  32 on the loop that holds the camera
+python3 rpi/test_scan_pi.py     #  41 on the loop that holds the camera
+python3 rpi/test_sync.py        #  22 on getting the offers off the car
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

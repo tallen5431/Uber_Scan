@@ -357,6 +357,28 @@ function cropQuad(body) {
 // that should be hung up on.
 var MAX_BODY = 4096;
 
+// ...except a journal upload, which is a batch of rows rather than a couple of
+// numbers. A week of driving is about 400KB; this is the ceiling that stops a
+// mistake filling the disk, not a target.
+var MAX_SYNC_BODY = 8 * 1024 * 1024;
+
+// Unset by default: the rig this was written for keeps the whole machine behind
+// a VPN, so the upload has no secret to carry. Set it and the ingest endpoint
+// starts requiring an X-Sync-Token header that matches.
+var SYNC_TOKEN = process.env.SYNC_TOKEN || '';
+
+function readBody(req, cap, done) {
+  var text = '';
+  var over = false;
+  req.on('data', function (chunk) {
+    if (over) return;
+    text += chunk;
+    if (text.length > cap) { over = true; req.destroy(); done(new Error('too big')); }
+  });
+  req.on('error', function () { if (!over) { over = true; done(new Error('aborted')); } });
+  req.on('end', function () { if (!over) { over = true; done(null, text); } });
+}
+
 function readJsonBody(req, done) {
   var text = '';
   var over = false;
@@ -559,6 +581,91 @@ function route(req, res) {
       if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
                            { 'Content-Type': 'application/json; charset=utf-8' });
       send(res, 200, JSON.stringify({ ok: true }),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
+
+  // Rows arriving from a scanner that is not this machine.
+  //
+  // The rig lives in a car behind cellular NAT, so nothing here can reach it —
+  // it has to push, and it pushes to whatever host is running this file with
+  // SCANNER=0 and JOURNAL pointed at the copy. That copy is the reason this
+  // exists: the journal is the one irreplaceable thing the rig produces, about
+  // 19MB a year, and until now there was exactly one of it, on an SD card, in a
+  // car.
+  //
+  // Idempotent on purpose, and that is the whole design. Every row carries an
+  // `id` and a `seq`, so the same batch can arrive twice — or ten times — and
+  // only the pairs this file has never seen get appended. That removes the
+  // bookkeeping that normally breaks a sync: there is no stored offset to drift
+  // out of step, no resume logic, nothing to repair after a connection drops
+  // mid-upload. The sender can be crude and still be correct.
+  //
+  // Deliberately unauthenticated by default, because the deployment this was
+  // written for keeps the whole machine behind a VPN. SYNC_TOKEN turns on a
+  // check if that ever stops being true; unset, this costs one comparison.
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/journal/ingest') {
+    if (SYNC_TOKEN && req.headers['x-sync-token'] !== SYNC_TOKEN) {
+      return send(res, 403, JSON.stringify({ ok: false, error: 'bad token' }),
+                  { 'Content-Type': 'application/json; charset=utf-8' });
+    }
+    return readBody(req, MAX_SYNC_BODY, function (err, text) {
+      var fail = function (why, code) {
+        send(res, code || 400, JSON.stringify({ ok: false, error: why }),
+             { 'Content-Type': 'application/json; charset=utf-8' });
+      };
+      if (err) return fail(err.message);
+      readJournal(function (existing) {
+        var seen = {};
+        existing.forEach(function (r) { seen[r.id + '/' + r.seq] = true; });
+        var fresh = [];
+        var malformed = 0;
+        text.split('\n').forEach(function (line) {
+          line = line.trim();
+          if (!line) return;
+          var row;
+          try { row = JSON.parse(line); } catch (e) { malformed++; return; }
+          // An id and a seq are what make this idempotent, so a row without
+          // them cannot be stored — there would be no way to avoid writing it
+          // again on the next upload.
+          if (!row || typeof row !== 'object' || row.id === undefined
+              || row.seq === undefined) { malformed++; return; }
+          var key = row.id + '/' + row.seq;
+          if (seen[key]) return;
+          seen[key] = true;
+          fresh.push(JSON.stringify(row));
+        });
+        if (!fresh.length) {
+          return send(res, 200, JSON.stringify({ ok: true, added: 0,
+                                                 malformed: malformed,
+                                                 have: existing.length }),
+                      { 'Content-Type': 'application/json; charset=utf-8' });
+        }
+        // Appended, like the scanner does it: O_APPEND, one write, so a reader
+        // part way through never sees half a row.
+        fs.appendFile(JOURNAL_PATH, fresh.join('\n') + '\n', function (writeErr) {
+          if (writeErr) {
+            console.error('journal ingest: ' + writeErr.message);
+            return fail('could not append', 500);
+          }
+          console.log('journal ingest: +' + fresh.length + ' row(s), '
+                      + (existing.length + fresh.length) + ' total');
+          send(res, 200, JSON.stringify({ ok: true, added: fresh.length,
+                                          malformed: malformed,
+                                          have: existing.length + fresh.length }),
+               { 'Content-Type': 'application/json; charset=utf-8' });
+        });
+      });
+    });
+  }
+
+  // What the far end already has, so a sender knows where to start. Cheap
+  // enough to call every few minutes and the only thing the rig needs to ask.
+  if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/newest') {
+    return readJournal(function (rows) {
+      var newest = 0;
+      rows.forEach(function (r) { if ((r.at || 0) > newest) newest = r.at; });
+      send(res, 200, JSON.stringify({ ok: true, newest: newest, have: rows.length }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }
