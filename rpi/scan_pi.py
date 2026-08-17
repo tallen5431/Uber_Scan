@@ -546,6 +546,15 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
                     if rate.get('perMile') is not None else None),
         'pay': parsed['pay'],
         'minutes': parsed['minutes'],
+        # The minutes the verdict was made over, and where they came from. On a
+        # ride card this is the card's own figure; on a delivery card the card
+        # states none and this is the time left until its deadline. Sent
+        # separately from `billedMinutes`, which has the driver's own pad and
+        # shopping allowance added and is a different claim again.
+        'cardMinutes': rate.get('cardMinutes'),
+        'fromDeadline': bool(rate.get('fromDeadline')),
+        'deliverBy': parsed.get('deliverBy'),
+        'places': parsed.get('places') or [],
         'miles': parsed['miles'],
         'items': parsed['items'],
         'milesCorrected': parsed['milesCorrected'],

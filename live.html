@@ -402,7 +402,14 @@
     // be worse than useless.
     el.lPay.textContent = 'pay';
     el.vPay.textContent = money(r.pay, 2);
-    el.vMin.textContent = r.minutes === null ? '--' : Math.round(r.minutes);
+    // The card's own minutes where it states them, the time left to a delivery
+    // deadline where it does not. Not the billed minutes: this row is what a
+    // driver checks against the phone in front of them, and a figure with
+    // their own pad added to it would never match.
+    var shown = (typeof r.cardMinutes === 'number') ? r.cardMinutes : r.minutes;
+    el.vMin.textContent = (shown === null || shown === undefined)
+      ? '--' : Math.round(shown);
+    el.lMin.textContent = r.fromDeadline ? 'min left' : 'minutes';
     el.vMile.textContent = r.miles === null ? '--' : Number(r.miles).toFixed(1);
     // Secondary on purpose: $/hr is what decides an offer, because an hour is
     // the thing actually being spent. $/mi is the number most drivers carry a

@@ -309,7 +309,13 @@
       ? rateText(r.perHour) : '--';
 
     el.vPay.textContent = p && p.pay !== null ? money(p.pay, 2) : '--';
-    el.vMin.textContent = r.ready ? Math.round(r.minutes) : (p && p.minutes ? p.minutes : '--');
+    // The card's own minutes, not the billed ones. `r.minutes` has the pickup
+    // pad and the shopping allowance added, so with either of those set this
+    // screen and the rig's showed different numbers under the same label for
+    // the same card — and this row exists to be checked against the phone.
+    var shownMinutes = (typeof r.cardMinutes === 'number') ? r.cardMinutes
+      : (p && typeof p.minutes === 'number' ? p.minutes : null);
+    el.vMin.textContent = shownMinutes === null ? '--' : Math.round(shownMinutes);
     el.vMile.textContent = p && p.miles !== null ? p.miles.toFixed(1) : '--';
 
     // A read can warrant more than one note at once — a recovered decimal and

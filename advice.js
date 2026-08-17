@@ -146,9 +146,17 @@
       var mins = typeof o.billedMinutes === 'number' ? o.billedMinutes : o.minutes;
       if (typeof o.pay !== 'number' || !isFinite(o.pay)) continue;
       if (typeof mins !== 'number' || !isFinite(mins) || !(mins > 0)) continue;
-      if (typeof o.at !== 'number' || !isFinite(o.at)) continue;
+      // When the offer *appeared*, not when the last correction to it was
+      // written. A card read at 18:00 and re-read better at 18:01 carries
+      // `at` 18:01, and the replay is a simulation of a shift in the order
+      // things arrived — so the arrival is the honest field. The difference is
+      // seconds and it has never changed an answer; it is the right one to
+      // divide a shift by all the same.
+      var seenAt = (typeof o.firstAt === 'number' && isFinite(o.firstAt))
+        ? o.firstAt : o.at;
+      if (typeof seenAt !== 'number' || !isFinite(seenAt)) continue;
       var net = o.pay - (typeof o.cost === 'number' && isFinite(o.cost) ? o.cost : 0);
-      out.push({ at: o.at, net: net, mins: mins, perHour: net / (mins / 60) });
+      out.push({ at: seenAt, net: net, mins: mins, perHour: net / (mins / 60) });
     }
     out.sort(function (a, b) { return a.at - b.at; });
     return out;
