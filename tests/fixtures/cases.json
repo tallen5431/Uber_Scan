@@ -768,6 +768,53 @@
         "miles": "@nan",
         "expect": null
       }
+    ],
+    "round2": [
+      {
+        "name": "a half rounds away from zero",
+        "in": 2.675,
+        "expect": 2.68
+      },
+      {
+        "name": "...not to the nearest even",
+        "in": 8.845,
+        "expect": 8.85
+      },
+      {
+        "name": "and again",
+        "in": 3.345,
+        "expect": 3.35
+      },
+      {
+        "name": "a value below the half",
+        "in": 0.145,
+        "expect": 0.14
+      },
+      {
+        "name": "float noise from a sum",
+        "in": 9.600000000000001,
+        "expect": 9.6
+      },
+      {
+        "name": "...and the other direction",
+        "in": 17.299999999999997,
+        "expect": 17.3
+      },
+      {
+        "name": "an exact value is left alone",
+        "in": 2.5,
+        "expect": 2.5
+      },
+      {
+        "name": "a whole number",
+        "in": 12.0,
+        "expect": 12.0
+      },
+      {
+        "name": "zero",
+        "in": 0,
+        "expect": 0.0
+      }
     ]
   }
 }

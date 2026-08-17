@@ -183,7 +183,7 @@
   <h2 id="runsHead">Runs of scanning</h2>
   <div id="runs"></div>
 
-  <h2>By time of day <em>· median $/hr</em></h2>
+  <h2 id="blocksHead">By time of day <em>· median $/hr</em></h2>
   <div id="blocks"></div>
   <div class="scale" id="blockScale"></div>
 
@@ -210,11 +210,36 @@
   var el = {};
   ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds',
    'caveats', 'ranges', 'csv', 'recentNote', 'log', 'more',
-   'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead'].forEach(function (id) {
+   'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead',
+   'blocksHead'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
   var days = 7;
+
+  // When a driver's day starts, which is not when the calendar's does.
+  //
+  // This one's own record runs 16:47 to 03:18 — one shift, and midnight falls
+  // in the middle of it. Grouping by calendar date split it into two rows,
+  // neither of which describes an evening's work, and "Today" cut it in half
+  // from the other side: the fix for folding last night into this morning
+  // created the mirror image of the same problem.
+  //
+  // 4am is the conventional boundary for shift work, and it is the right shape
+  // of answer here: nobody is driving then, so no shift can straddle it. It is
+  // deliberately not configurable yet — one number that is right for almost
+  // everybody beats a setting nobody finds.
+  var DAY_STARTS_AT = 4;
+
+  // The day a moment belongs to, as a Date at that day's start.
+  function dayOf(at) {
+    var d = new Date(at);
+    d.setHours(d.getHours() - DAY_STARTS_AT);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  function dayKey(at) { return dayOf(at).toDateString(); }
 
   function money(n, dp) {
     if (n === null || n === undefined || !isFinite(n)) return '--';
@@ -657,10 +682,18 @@
     var blocks = BLOCK_NAMES.map(function (name) {
       return { name: name, rates: [] };
     });
+    var daysSeen = {};
     offers.forEach(function (r) {
       var hour = new Date(r.at).getHours();
       blocks[Math.floor(hour / 3)].rates.push(r.perHour);
+      daysSeen[dayKey(r.at)] = true;
     });
+    // How many days are behind each bar. "Evenings pay $22" is a different
+    // claim depending on whether it rests on eleven evenings or on one, and
+    // the chart said the same thing either way.
+    var dayCount = Object.keys(daysSeen).length;
+    el.blocksHead.innerHTML = 'By time of day <em>· median $/hr, across '
+      + dayCount + ' day' + (dayCount === 1 ? '' : 's') + '</em>';
     // A fixed scale at twice the target puts the target itself at the halfway
     // point of every bar, so the line being judged against is the same line in
     // every row instead of moving with whatever the best block happened to be.
@@ -732,18 +765,16 @@
     var currentDay = null;
     shown.forEach(function (r) {
       var when = new Date(r.at);
-      var day = when.toDateString();
+      var day = dayKey(r.at);
       if (day !== currentDay) {
         currentDay = day;
-        var ofDay = kept.filter(function (o) {
-          return new Date(o.at).toDateString() === day;
-        });
+        var ofDay = kept.filter(function (o) { return dayKey(o.at) === day; });
         var usable = ofDay.filter(counted).map(function (o) { return o.perHour; })
                           .sort(function (a, b) { return a - b; });
         var offered = ofDay.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
         var tookToday = ofDay.filter(function (o) { return o.accepted; });
         var tookPay = tookToday.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
-        out.push('<div class="day"><b>' + when.toLocaleDateString(undefined,
+        out.push('<div class="day"><b>' + dayOf(r.at).toLocaleDateString(undefined,
                    { weekday: 'short', month: 'short', day: 'numeric' }) + '</b>'
                + '<span>' + ofDay.length + ' offer' + (ofDay.length === 1 ? '' : 's')
                + (usable.length ? ' · median ' + money(percentile(usable, 0.5), 0) + '/hr' : '')
@@ -784,9 +815,13 @@
   // for them, so the browser says.
   function windowQuery() {
     if (days !== 1) return 'days=' + days;
-    var midnight = new Date();
-    midnight.setHours(0, 0, 0, 0);
-    return 'days=2&since=' + midnight.getTime();
+    // The start of the day currently being driven — 4am today, or 4am
+    // yesterday if it is currently the small hours and the shift is still
+    // running. Midnight put the two halves of one night either side of the
+    // filter, so at 2am "Today" showed two hours of work and called it a day.
+    var start = dayOf(Date.now());
+    start.setHours(start.getHours() + DAY_STARTS_AT);
+    return 'days=2&since=' + start.getTime();
   }
 
   function load() {

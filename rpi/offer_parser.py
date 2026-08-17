@@ -4,6 +4,7 @@ Both implementations run tests/fixtures/cases.json, so if this drifts from the
 JavaScript the shared corpus fails. Keep the two in step when editing either.
 """
 
+import math
 import re
 
 # Characters OCR routinely swaps for digits, only ever applied inside a token
@@ -68,6 +69,20 @@ def fix_digits(token):
 # `parseFloat` behind this same guard — so a token like `1_0` was a silent
 # disagreement between the rig in the car and the phone in the hand.
 NUMERIC = re.compile(r'^[+-]?(\d+(\.\d*)?|\.\d+)$')
+
+
+def round2(value):
+    """Two decimal places, rounded the way the JavaScript rounds.
+
+    `round()` in Python rounds a half to the nearest *even* digit — 2.675
+    becomes 2.67 — while `Math.round` rounds it away from zero, giving 2.68.
+    Both are defensible and they are not the same, so the rig in the car and
+    the phone in the hand could store a distance that differed in the second
+    decimal, and every figure worked out from it would differ too. Nothing a
+    card can print reaches that case today, which is exactly the kind of
+    agreement that is worth pinning down before something changes and it does.
+    """
+    return math.floor(value * 100 + 0.5) / 100.0
 
 
 def to_number(token):
@@ -198,7 +213,7 @@ def parse(raw_text):
     # into anything reading either. Rounded here rather than at each display, so
     # the stored number and the shown number are the same number.
     if miles is not None:
-        miles = round(miles, 2)
+        miles = round2(miles)
     miles, corrected, uncertain = check_distance(minutes, miles, had_decimal)
     corrected = corrected or corrected_leg
 

@@ -41,6 +41,10 @@ function value(v) {
   eq('setting / ' + c.name, P.setting(value(c.in), c.fallback), c.expect);
 });
 
+(cases.coerce && cases.coerce.round2 ? cases.coerce.round2 : []).forEach(function (c) {
+  eq('round2 / ' + c.name, Math.round(value(c.in) * 100) / 100, c.expect);
+});
+
 (cases.coerce ? cases.coerce.doubt : []).forEach(function (c) {
   eq('doubt / ' + c.name,
      P.doubt(value(c.pay), value(c.minutes), value(c.miles)), c.expect);

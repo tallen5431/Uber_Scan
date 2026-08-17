@@ -103,9 +103,22 @@ body.locked .corner { border-color: var(--go); }
   background: rgba(20, 27, 36, .93);
   backdrop-filter: blur(6px);
 }
-#stage > .verdict.go   { background: rgba(13, 92, 49, .95); }
-#stage > .verdict.warn { background: rgba(107, 71, 8, .95); }
-#stage > .verdict.no   { background: rgba(107, 18, 32, .95); }
+/* These overlay a camera picture, so they need to be opaque enough to read
+   against it — which is why they are written out here rather than inherited.
+   That also means they are a second copy of the palette, and they were left
+   behind when the shared one changed: still the old flat-luminance greens and
+   reds, and with no case for `doubt` at all, so a reading the scanner refused
+   to judge came out the same colour as "searching for a card". The one state
+   whose whole purpose is to look like nothing else looked like nothing.
+
+   Kept in step with styles.css by hand. If those change, change these. */
+#stage > .verdict.go    { background: rgba(18, 117, 64, .95); }
+#stage > .verdict.warn  { background: rgba(122, 82, 8, .95); }
+#stage > .verdict.no    { background: rgba(82, 15, 26, .95); }
+#stage > .verdict.doubt { background: rgba(64, 49, 89, .96);
+                          border: 2px solid var(--doubt); }
+#stage > .verdict.fault { background: rgba(28, 38, 50, .96);
+                          border: 2px dashed var(--muted); }
 
 .warn {
   margin-top: 8px;

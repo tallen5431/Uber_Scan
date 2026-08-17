@@ -54,6 +54,9 @@ for c in cases.get('coerce', {}).get('setting', []):
     eq('setting / ' + c['name'],
        P.setting(_value(c['in']), c['fallback']), c['expect'])
 
+for c in cases.get('coerce', {}).get('round2', []):
+    eq('round2 / ' + c['name'], P.round2(_value(c['in'])), c['expect'])
+
 for c in cases.get('coerce', {}).get('doubt', []):
     eq('doubt / ' + c['name'],
        P.doubt(_value(c['pay']), _value(c['minutes']), _value(c['miles'])),

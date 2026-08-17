@@ -228,7 +228,7 @@ class OfferAccumulator:
         # one shift's 234 offers reached the journal as 9.600000000000001 or
         # 17.299999999999997, and from there the CSV export and everything
         # reading it. A card gives one decimal place; so does a sum of them.
-        merged['miles'] = (round(miles, 2) if miles is not None
+        merged['miles'] = (OP.round2(miles) if miles is not None
                            else parsed.get('miles'))
 
         # The sum is a different distance from any frame's, so it needs judging
