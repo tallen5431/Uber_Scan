@@ -81,9 +81,8 @@
   #drawTools #drawUse:not([disabled]) { background: #0d5c31; border-color: #17c964; color: #d7ffe6; }
   #drawTools button[disabled] { opacity: .45; }
   #drawHint { font-size: 12px; color: var(--muted); text-align: center; padding: 6px 0 0; }
-  /* Four slots here, not the shared three: the box is set from the same bar
-     that re-finds the phone, because they are the two halves of one decision. */
-  .bottombar { grid-template-columns: repeat(4, 1fr); }
+  /* Four buttons here, and the bar sizes itself to them. Tighter type because
+     four labels in a phone's width is the tightest this bar ever gets. */
   .bottombar button, .bottombar .linkbtn {
     font-size: 13px; padding: 10px 4px; white-space: nowrap;
   }

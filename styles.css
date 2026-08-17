@@ -187,7 +187,11 @@ html, body {
 .key.flash { filter: brightness(1.6); }
 
 /* ---------- Bottom bar ---------- */
-.bottombar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+/* Equal slots for however many buttons the page has, rather than a fixed three
+   that every page then has to override. It also means a button hidden because
+   this machine has no camera closes its gap instead of leaving a hole. */
+.bottombar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }
+.bottombar [hidden] { display: none; }
 .bottombar button, .bottombar .linkbtn {
   appearance: none;
   border: 1px solid var(--line);
