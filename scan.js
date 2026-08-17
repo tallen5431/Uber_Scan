@@ -272,6 +272,13 @@
 
   function money(n, d) { return n === null || !isFinite(n) ? '--' : '$' + n.toFixed(d); }
 
+  function rateText(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return '--';
+    var big = Math.abs(n) >= 100;
+    return (n < 0 ? '-$' : '$') + (big ? Math.round(Math.abs(n))
+                                       : Math.abs(n).toFixed(1));
+  }
+
   function render(ms) {
     var p = lastResult;
     var r = p ? OfferParser.rate(p, settings) : { ready: false, state: 'empty' };
@@ -294,9 +301,12 @@
     // was printing the $3548/hr the other one had just been taught to hide —
     // which is worse than never having hidden it, because a driver checking one
     // screen against the other would believe the one showing a number.
+    // "-$12.50", not "$-12.5". The minus belongs outside the currency: wedged
+    // between the dollar and the digits it reads as a dash at arm's length,
+    // and the keypad and the offers page already write it the other way — so
+    // the same offer read as a loss on two screens and as a number on two.
     el.perHour.textContent = (r.ready && r.state !== 'doubt')
-      ? '$' + (Math.abs(r.perHour) >= 100 ? Math.round(r.perHour) : r.perHour.toFixed(1))
-      : '--';
+      ? rateText(r.perHour) : '--';
 
     el.vPay.textContent = p && p.pay !== null ? money(p.pay, 2) : '--';
     el.vMin.textContent = r.ready ? Math.round(r.minutes) : (p && p.minutes ? p.minutes : '--');

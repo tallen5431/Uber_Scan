@@ -52,6 +52,39 @@
   .advice p { margin: 0; font-size: 14px; line-height: 1.5; }
   .advice b { font-variant-numeric: tabular-nums; }
   .advice .note { margin-top: 8px; }
+  /* Sits above the bottom bar rather than over the content, so it never covers
+     the row that was just acted on — which is the row the driver is deciding
+     about. */
+  #nothing { border: 1px solid var(--line); border-radius: 12px;
+             background: var(--panel); padding: 18px 16px; margin: 4px 0 8px;
+             font-size: 14px; line-height: 1.55; }
+  #nothing[hidden] { display: none; }
+  #nothing b { display: block; font-size: 16px; margin-bottom: 6px; }
+  #nothing code { font-size: 13px; color: var(--text); background: var(--panel-2);
+                  padding: 1px 5px; border-radius: 4px; }
+  .find { display: block; margin: 0 0 10px; }
+  .find input { width: 100%; min-height: 44px; padding: 10px 12px; font: inherit;
+                font-size: 15px; color: var(--text); background: var(--panel);
+                border: 1px solid var(--line); border-radius: 10px;
+                -webkit-appearance: none; appearance: none; }
+  .find input::placeholder { color: var(--muted); }
+  #showHidden { font: inherit; font-size: 12px; font-weight: 700;
+                min-height: 44px; padding: 6px 12px; color: var(--muted);
+                background: transparent; border: 1px solid var(--line);
+                border-radius: 8px; cursor: pointer; }
+  #showHidden[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+  .offer.hiddenrow > summary { opacity: .5; }
+  #undo { position: sticky; bottom: 8px; z-index: 5;
+          display: flex; align-items: center; gap: 12px;
+          margin: 12px 0 4px; padding: 10px 12px;
+          background: var(--panel-2); border: 1px solid var(--line);
+          border-radius: 12px; font-size: 13px; }
+  #undo[hidden] { display: none; }
+  #undoWhat { flex: 1; min-width: 0; }
+  #undoGo { flex: none; min-height: 44px; padding: 8px 16px; font: inherit;
+            font-size: 13px; font-weight: 800; color: var(--text);
+            background: var(--panel); border: 1px solid var(--muted);
+            border-radius: 8px; cursor: pointer; }
   .rangebtns { display: flex; gap: 6px; justify-content: center; margin: 0 0 14px; }
   /* 44px, like everything else meant to be hit one-handed after parking. */
   .rangebtns button { flex: 1; min-height: 44px; padding: 8px 0; font: inherit;
@@ -70,14 +103,25 @@
   .unit { font-style: normal; font-size: 11px; font-weight: 700;
           color: var(--muted); letter-spacing: 0; }
   .stats .unit { font-size: 12px; }
+  /* Three numbers, one of which is the answer and two of which are the shape
+     around it. They were the same size, the same weight and the same colour,
+     so the eye had to read all three labels to find out which was which. */
+  .stats > div { opacity: .68; }
+  .stats > div.answer { opacity: 1; }
+  .stats > div.answer span { font-size: 1.35em; }
+  .stats > div.answer small { color: var(--text); }
   /* The rate before running costs, under the one the verdict was made on. */
   .hist .big em { display: block; font-style: normal; font-size: 11px;
                   font-weight: 600; color: var(--muted); line-height: 1.3; }
 
   /* The log. Grouped by day because that is how a shift is remembered, and how
      it is checked against a statement. */
+  /* Sticky, because it used to scroll away — and halfway down three hundred
+     rows every one of them was an offer on an unknown day. */
   .day { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-         margin: 18px 0 2px; padding-top: 10px; border-top: 1px solid var(--line); }
+         position: sticky; top: 0; z-index: 2; background: var(--bg);
+         margin: 18px 0 2px; padding: 10px 0 4px;
+         border-top: 1px solid var(--line); }
   .day b { font-size: 13px; letter-spacing: .02em; }
   .day span { font-size: 11px; color: var(--muted); }
 
@@ -87,6 +131,24 @@
     cursor: pointer; list-style: none; font-variant-numeric: tabular-nums;
   }
   .offer > summary::-webkit-details-marker { display: none; }
+  /* The marker was removed for a tidier row and nothing replaced it, so three
+     hundred rows gave no sign that any of them opened — and what is inside is
+     the whole reason to keep the log: what the card said, what the scanner
+     made of it, and the buttons to tick or hide it. */
+  .offer > summary::after {
+    content: '\203A';
+    flex: none;
+    margin-left: 2px;
+    font-size: 17px;
+    line-height: 1;
+    color: var(--muted);
+    transform: rotate(90deg);
+    transition: transform .12s ease;
+  }
+  .offer[open] > summary::after { transform: rotate(-90deg); }
+  @media (prefers-reduced-motion: reduce) {
+    .offer > summary::after { transition: none; }
+  }
   .offer .big { font-size: 19px; font-weight: 800; min-width: 84px; }
   .offer .big em { display: block; font-style: normal; font-size: 11px;
                    font-weight: 600; color: var(--muted); line-height: 1.3; }
@@ -146,12 +208,24 @@
 <body>
 <main id="app">
 
-  <div class="rangebtns" id="ranges">
-    <button type="button" data-days="1">Today</button>
+  <!-- A group, named, with the pressed one announced. It was four unlabelled
+       buttons whose selected state existed only as a border colour. -->
+  <div class="rangebtns" id="ranges" role="group" aria-label="How far back to look">
+    <button type="button" data-days="1" aria-pressed="false">Today</button>
     <button type="button" data-days="7" aria-pressed="true">7 days</button>
-    <button type="button" data-days="30">30 days</button>
-    <button type="button" data-days="0">All</button>
+    <button type="button" data-days="30" aria-pressed="false">30 days</button>
+    <button type="button" data-days="0" aria-pressed="false">All</button>
   </div>
+  <!-- What changed, said once, for a reader who cannot see the page redraw. -->
+  <p class="sr-only" id="live" role="status" aria-live="polite"></p>
+
+  <!-- Hiding is the one action here that can be set once and keep acting for
+       weeks — a rule hides every future offer matching a card. Being able to
+       do that and never see the result is how a driver ends up with a quiet
+       hole in their record and no idea it is there. Hidden offers stay out of
+       every figure either way; this only decides whether they are listed. -->
+  <p class="hint"><button type="button" id="showHidden" aria-pressed="false">
+    show hidden offers</button></p>
 
   <!-- Percentiles, not an average. $/hour is a ratio with a small noisy
        denominator, and the characteristic failure here — a leg lost to glare —
@@ -160,11 +234,15 @@
        here actually pay". -->
   <div class="stats" id="ladder">
     <div><span id="p25">--</span><i class="unit">/hr</i><small>quarter below</small></div>
-    <div><span id="p50">--</span><i class="unit">/hr</i><small>typical</small></div>
+    <div class="answer"><span id="p50">--</span><i class="unit">/hr</i><small>typical</small></div>
     <div><span id="p75">--</span><i class="unit">/hr</i><small>quarter above</small></div>
   </div>
 
   <p class="hint" id="headline">Reading the journal…</p>
+  <!-- Shown instead of the charts when there is nothing to chart, or nothing
+       to chart *with*. Three labelled empty axes and an 11px sentence is a
+       page that looks broken; so is a stale one with a grey line under it. -->
+  <div id="nothing" hidden></div>
 
   <!-- The target is the one number here that was never checked against
        anything. It was picked once, and every verdict since has been measured
@@ -191,10 +269,32 @@
   <div id="kinds"></div>
 
   <h2>Every offer <em id="recentNote">· tap one to see everything that was read</em></h2>
+  <!-- The reason to open this list is to find one particular offer and check it
+       against what the shift actually paid. At three hundred rows that is
+       scrolling and remembering, which is the opposite of checking. Anything
+       written here is matched against the figures on the row — a payout, a
+       duration, a distance, a rate — because those are what a driver remembers
+       about a job, not its id or its address. -->
+  <label class="find"><span class="sr-only">Find an offer</span>
+    <input type="search" id="find" inputmode="decimal" autocomplete="off"
+           placeholder="find an offer — 12.50, 34 min, 8.4 mi, 25/hr">
+  </label>
+  <p class="hint" id="findNote" hidden></p>
   <div id="log"></div>
   <p class="hint" id="more"></p>
 
   <p class="note" id="caveats"></p>
+
+  <!-- Every action on this page is one tap and none of them could be taken
+       back. "Hide every $12.50 · 34 min" is the worst of them: permanent,
+       retroactive, and prospective — it keeps hiding offers that have not
+       happened yet — and it sits next to "I took this" on a phone held in a
+       parked car. The journal is append-only, so undoing is not a deletion,
+       it is the opposite note appended after it. -->
+  <div id="undo" hidden>
+    <span id="undoWhat"></span>
+    <button type="button" id="undoGo">Undo</button>
+  </div>
 
   <nav class="bottombar">
     <a class="linkbtn" id="toLive" href="live.html">◂ Live</a>
@@ -211,7 +311,8 @@
   ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds',
    'caveats', 'ranges', 'csv', 'recentNote', 'log', 'more',
    'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead',
-   'blocksHead'].forEach(function (id) {
+   'blocksHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
+   'find', 'findNote', 'live', 'nothing', 'ladder'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -277,8 +378,15 @@
   // A reading good enough to shift a percentile. Kept as one function because
   // the summary above and the day totals below have to agree about it, and two
   // copies of a rule like this drift.
+  // One definition of a row worth counting, in advice.js, plus the one extra
+  // thing this page needs to draw a bar: a rate to draw.
+  //
+  // This used to be a second copy of the test, under a comment saying it was
+  // the same one. It was not — it never excluded hidden rows, and only the
+  // server filtering them out kept them from every median on the page. That
+  // held exactly as long as nobody asked the server for them.
   function counted(r) {
-    return typeof r.perHour === 'number' && !r.suspect && r.whole !== false;
+    return Advice.trustworthy(r) && typeof r.perHour === 'number';
   }
 
   function whyAside(r) {
@@ -367,6 +475,7 @@
     if (r.suspect) flags.push('outside the range a real offer falls in');
 
     return '<details class="offer' + (aside ? ' aside' : '')
+      + (r.hidden ? ' hiddenrow' : '')
       + (r.accepted ? ' mine' : '') + '" data-id="' + (r.id || '') + '"'
       + ' data-pay="' + (r.pay === null ? '' : r.pay) + '"'
       + ' data-minutes="' + (r.minutes === null ? '' : r.minutes) + '"'
@@ -378,7 +487,9 @@
       + (r.miles === null ? '' : ' · ' + num(r.miles) + ' mi')
       + (r.items ? ' · ' + r.items + ' items' : '') + '</span>'
       + (r.accepted ? '<span class="took" title="you took this">\u2713</span>' : '')
-      + (aside ? '<span class="tag">' + (r.whole === false ? 'partial' : 'odd') + '</span>' : '')
+      + (r.hidden ? '<span class="tag">hidden</span>' : '')
+      + (aside && !r.hidden
+         ? '<span class="tag">' + (r.whole === false ? 'partial' : 'odd') + '</span>' : '')
       + '<span class="when">' + when.toLocaleTimeString(undefined,
           { hour: 'numeric', minute: '2-digit' }) + '</span>'
       + '</summary>'
@@ -427,13 +538,55 @@
       + '<div class="acts">'
       + '<button type="button" data-act="took"' + (r.accepted ? ' class="on"' : '')
         + '>' + (r.accepted ? '\u2713 you took this' : 'I took this') + '</button>'
-      + '<button type="button" class="danger" data-act="hide">Hide this one</button>'
+      + (r.hidden
+         ? '<button type="button" data-act="unhide">Put this back</button>'
+         : '<button type="button" class="danger" data-act="hide">Hide this one</button>')
       + (r.pay !== null && r.minutes !== null
          ? '<button type="button" class="danger" data-act="hideCard">Hide every '
            + money(r.pay, 2) + ' \u00b7 ' + Math.round(r.minutes) + ' min'
            + (r.miles === null ? '' : ' \u00b7 ' + num(r.miles) + ' mi') + '</button>'
          : '')
       + '</div></details>';
+  }
+
+  // What the driver typed, against the figures on the row.
+  //
+  // A driver remembers a job as "the twelve-fifty one" or "that 34-minute
+  // run" — not as an id, and not as an address, which this file deliberately
+  // never stores. So every number on the row is searchable and nothing else
+  // is. Bare numbers match any field, because somebody typing 8.4 knows what
+  // they mean and should not have to say which column it is in; a unit
+  // narrows it when two fields could both match.
+  function matching(rows) {
+    var q = (el.find.value || '').trim().toLowerCase();
+    if (!q) return rows;
+    var terms = q.split(/\s*,\s*|\s+and\s+/).filter(Boolean);
+    return rows.filter(function (r) {
+      return terms.every(function (t) { return termMatches(r, t); });
+    });
+  }
+
+  function termMatches(r, term) {
+    var m = term.match(/^([$]?)\s*(-?[\d.]+)\s*(\/hr|hr|min|mins|mi|miles|m)?$/);
+    if (!m) return false;
+    var n = parseFloat(m[2]);
+    if (!isFinite(n)) return false;
+    var unit = m[3] || '';
+    // Close enough to be the same figure. A driver typing 12.5 means the
+    // $12.50 offer, and typing 34 min means the 34-minute one however the
+    // rounding fell.
+    var near = function (v, tol) {
+      return typeof v === 'number' && isFinite(v) && Math.abs(v - n) <= tol;
+    };
+    if (unit === 'min' || unit === 'mins') return near(r.minutes, 0.5);
+    if (unit === 'mi' || unit === 'miles' || unit === 'm') return near(r.miles, 0.05);
+    if (unit === '/hr' || unit === 'hr') {
+      return near(r.perHour, 0.5) || near(r.grossPerHour, 0.5);
+    }
+    if (m[1] === '$') return near(r.pay, 0.005);
+    // No unit: any of them.
+    return near(r.pay, 0.005) || near(r.minutes, 0.5) || near(r.miles, 0.05)
+        || near(r.perHour, 0.5);
   }
 
   function verdictFor(rate, target, band) {
@@ -608,7 +761,10 @@
     return Math.max.apply(null, a.checkedAt.map(function (c) { return c.minutes; }));
   }
 
+  var lastData = null;
+
   function render(data) {
+    lastData = data;
     // Rows the scanner was not sure of are kept in the file on purpose, and
     // must not shift a percentile. `whole` is the one that matters most: a
     // reading missing a leg is not merely noisy, it is biased upwards — the
@@ -632,6 +788,16 @@
         : 'No offers recorded yet. The scanner keeps one line per offer it is sure of.';
       el.blocks.innerHTML = el.kinds.innerHTML = '';
       el.more.textContent = '';
+      el.nothing.hidden = false;
+      el.nothing.innerHTML = kept.length
+        ? '<b>Nothing here can be counted.</b>Every offer in this stretch was '
+          + 'set aside — a partial read, or a figure outside anything a real '
+          + 'offer does. They are listed below with the reason on each.'
+        : '<b>No offers recorded yet.</b>The scanner writes one line per offer '
+          + 'it is sure of, so this fills up as you drive. If you have been '
+          + 'driving and it is still empty, the rig is reading nothing — '
+          + '<a href="live.html">the live view</a> will say why.';
+      el.ladder.hidden = true;
       el.p25.textContent = el.p50.textContent = el.p75.textContent = '--';
       // "--/hr" is not a rate, it is a dash wearing a unit.
       showUnits(false);
@@ -656,6 +822,8 @@
       return;
     }
     showUnits(true);
+    el.nothing.hidden = true;
+    el.ladder.hidden = false;
 
     // The target is whatever the scanner was actually using, taken from the
     // most recent row rather than assumed — it lives in the Pi's config and
@@ -777,7 +945,7 @@
     // offer missing from the record with nothing to say why is precisely what
     // makes a record impossible to reconcile — the driver would be left
     // wondering whether they mis-remembered the job or the scanner lost it.
-    var shown = kept.slice(-LOG_MAX).reverse();
+    var shown = matching(kept).slice(-LOG_MAX).reverse();
     // Two truncations, and the driver has to be told about both. This page cuts
     // the *list* to LOG_MAX so a phone can render it, and the server cuts the
     // *window* to its own limit before the page ever sees it — and the second
@@ -819,6 +987,21 @@
     });
     el.log.innerHTML = out.join('');
 
+    // Say what the filter did, because an empty list and a list with nothing
+    // matching look identical, and one of them means "you have no offers".
+    var q = (el.find.value || '').trim();
+    if (q) {
+      var found = matching(kept).length;
+      el.findNote.hidden = false;
+      el.findNote.textContent = found
+        ? found + ' of ' + kept.length + ' offer'
+          + (kept.length === 1 ? '' : 's') + ' match "' + q + '"'
+        : 'Nothing in this stretch matches "' + q
+          + '". Try a wider range, or just the number.';
+    } else {
+      el.findNote.hidden = true;
+    }
+
     var notes = ['These are offers the scanner read, not trips taken — it cannot '
                  + 'see the Accept button and never touches it, so tick the ones '
                  + 'you took and it will keep the tally.'];
@@ -832,20 +1015,31 @@
     // hunt for a subtraction that never happened.
     if (data.hidden) {
       notes.push(data.hidden + ' offer' + (data.hidden === 1 ? ' is' : 's are')
-                 + ' hidden and left out of everything here — the CSV takes '
-                 + '?hidden=1 if you want them back.');
+                 + ' hidden and left out of every figure here.');
     }
     notes.push(newest.costPerMile > 0
       ? 'Rates are after ' + money(newest.costPerMile, 2) + '/mi of running costs.'
       : 'No running cost is set, so these are what the offers paid before the car.');
     el.caveats.textContent = notes.join(' ');
+
+    // Said rather than only drawn. Everything above this point is a redraw
+    // with no event a screen reader can notice.
+    el.live.textContent = offers.length + ' offer'
+      + (offers.length === 1 ? '' : 's') + ' counted, typical '
+      + money(percentile(rates, 0.5), 0) + ' an hour.';
   }
 
   // "Today" has to mean today where the driver is. A trailing 24 hours folds
   // last night's shift into this morning's percentiles and puts its offers in
   // the wrong time-of-day block — and the Pi cannot work out when the day began
   // for them, so the browser says.
+  var showingHidden = false;
+
   function windowQuery() {
+    return baseWindow() + (showingHidden ? '&hidden=1' : '');
+  }
+
+  function baseWindow() {
     if (days !== 1) return 'days=' + days;
     // The start of the day currently being driven — 4am today, or 4am
     // yesterday if it is currently the small hours and the shift is still
@@ -867,7 +1061,25 @@
       .then(function (r) { return r.json(); })
       .then(render)
       .catch(function () {
-        el.headline.textContent = 'Could not reach the scanner.';
+        // Clear the figures. Leaving the previous window's numbers on screen
+        // under a grey apology is worse than showing nothing: they are real
+        // numbers about a different question, and nothing marks them stale.
+        el.headline.textContent = '';
+        el.blocks.innerHTML = el.kinds.innerHTML = el.log.innerHTML = '';
+        el.runs.innerHTML = '';
+        el.runsHead.hidden = true;
+        el.advice.hidden = true;
+        el.ladder.hidden = true;
+        el.caveats.textContent = '';
+        el.more.textContent = '';
+        el.nothing.hidden = false;
+        el.nothing.innerHTML =
+          '<b>Cannot reach the scanner.</b>This page reads the journal over the '
+          + 'network, so it needs the machine keeping it to be running and '
+          + 'reachable. If that is the Pi, check it is powered and on the same '
+          + 'network; if it is the machine at home, check the server is up. '
+          + 'Nothing has been lost either way — the journal is a file on disk '
+          + 'and this page only reads it.';
       });
   }
 
@@ -881,10 +1093,26 @@
     var act = button.getAttribute('data-act');
     var body;
 
+    // Each action carries its own opposite. The journal is append-only, so
+    // undoing is not a deletion — it is the note that says the other thing,
+    // added after it. Both stay on the record, which is the point: a driver
+    // who un-hides something a week later can still see that they hid it.
+    var was, undo, what;
     if (act === 'took') {
-      body = { id: id, accepted: !button.classList.contains('on') };
+      was = button.classList.contains('on');
+      body = { id: id, accepted: !was };
+      undo = { id: id, accepted: was };
+      what = was ? 'Unmarked as taken.' : 'Marked as taken.';
     } else if (act === 'hide') {
       body = { id: id, hidden: true };
+      undo = { id: id, hidden: false };
+      what = 'Hidden from the figures.';
+    } else if (act === 'unhide') {
+      // An id beats a rule, so this puts back one offer even when a rule is
+      // still hiding the rest of its kind.
+      body = { id: id, hidden: false };
+      undo = { id: id, hidden: true };
+      what = 'Back in the figures.';
     } else if (act === 'hideCard') {
       // Every reading of one card, now and in future. The test offer a driver
       // presents to check the rig still works comes back every time they check
@@ -892,6 +1120,9 @@
       var card = cardOf(offer);
       if (!card) return;
       body = { match: card, hidden: true };
+      undo = { match: card, hidden: false };
+      what = 'Hiding every ' + money(card.pay, 2) + ' · '
+           + Math.round(card.minutes) + ' min offer, including future ones.';
     } else {
       return;
     }
@@ -899,18 +1130,80 @@
     Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
       b.disabled = true;
     });
-    fetch('/api/offers/mark', {
+    mark(body).then(function () {
+      offerUndo(what, undo);
+      load();
+    }).catch(function () {
+      button.textContent = 'could not save';
+      Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
+        b.disabled = false;
+      });
+    });
+  });
+
+  function mark(body) {
+    return fetch('/api/offers/mark', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    }).then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      .then(load)
-      .catch(function () {
-        button.textContent = 'could not save';
-        Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
-          b.disabled = false;
-        });
-      });
+    }).then(function (r) { return r.ok ? r.json() : Promise.reject(); });
+  }
+
+  // The offer to put it back, and how long it stays offered.
+  //
+  // Not a few seconds. This page is read in a parked car, often one-handed,
+  // and the action worth taking back is the one whose effect is not visible
+  // yet — a rule that will hide offers next week. A minute is long enough to
+  // notice the list changed and work out why.
+  var UNDO_MS = 60000;
+  var undoTimer = null;
+  var undoBody = null;
+
+  function offerUndo(what, body) {
+    undoBody = body;
+    el.undoWhat.textContent = what;
+    el.undo.hidden = false;
+    el.undoGo.disabled = false;
+    el.undoGo.textContent = 'Undo';
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(hideUndo, UNDO_MS);
+  }
+
+  function hideUndo() {
+    clearTimeout(undoTimer);
+    el.undo.hidden = true;
+    undoBody = null;
+  }
+
+  // Re-filters what is already loaded rather than re-fetching: the rows are in
+  // hand, and a request per keystroke over a car's connection would make the
+  // box useless exactly where it is most wanted.
+  var findTimer = null;
+  el.find.addEventListener('input', function () {
+    clearTimeout(findTimer);
+    findTimer = setTimeout(function () { if (lastData) render(lastData); }, 120);
+  });
+
+  el.showHidden.addEventListener('click', function () {
+    showingHidden = !showingHidden;
+    el.showHidden.setAttribute('aria-pressed', showingHidden ? 'true' : 'false');
+    el.showHidden.textContent = showingHidden
+      ? 'hide them again' : 'show hidden offers';
+    load();
+  });
+
+  el.undoGo.addEventListener('click', function () {
+    if (!undoBody) return;
+    var body = undoBody;
+    el.undoGo.disabled = true;
+    el.undoGo.textContent = 'undoing…';
+    mark(body).then(function () {
+      hideUndo();
+      load();
+    }).catch(function () {
+      el.undoGo.disabled = false;
+      el.undoGo.textContent = 'could not undo';
+    });
   });
 
   el.ranges.addEventListener('click', function (e) {

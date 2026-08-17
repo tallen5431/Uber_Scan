@@ -113,16 +113,36 @@
      mixing the two is how a comparison stops meaning anything. Billed minutes
      rather than the card's, because a shopping order really does occupy the
      time the allowance describes. */
+  /* Whether a row is evidence about the market, as opposed to a row worth
+     keeping.
+   *
+   * Every figure in this project that is derived from more than one offer has
+   * to agree about this, and for a while two places did not: the page had its
+   * own copy alongside a comment claiming they were the same test. They were
+   * not, and whichever happened to be stricter silently governed a different
+   * set of figures from the other.
+   *
+   * Three exclusions, and each is a different kind of "no":
+   *   hidden — the driver said this was not an offer they were made. The test
+   *            card presented to check the rig is not a job.
+   *   suspect — the reading cannot be true, so it is evidence about the camera
+   *            rather than about the market.
+   *   whole === false — only part of the journey was read, and a fragment
+   *            always flatters: the same pay over less time. Left in, it pulls
+   *            every figure and every recommendation upwards.
+   *
+   * `whole` is absent on rows written before it existed, and those were only
+   * ever written when whole — so undefined counts as true. */
+  function trustworthy(row) {
+    return !!row && typeof row === 'object'
+      && !row.hidden && !row.suspect && row.whole !== false;
+  }
+
   function usable(offers) {
     var out = [];
     for (var i = 0; i < (offers || []).length; i++) {
       var o = offers[i];
-      if (!o || typeof o !== 'object' || o.hidden) continue;
-      // The same exclusions the medians on the page use. A misread offer is
-      // worth keeping in the file and worth keeping out of a decision; a
-      // half-read card always looks better than it is, so leaving it in would
-      // pull the recommended line upwards for no reason.
-      if (o.suspect || o.whole === false) continue;
+      if (!trustworthy(o)) continue;
       var mins = typeof o.billedMinutes === 'number' ? o.billedMinutes : o.minutes;
       if (typeof o.pay !== 'number' || !isFinite(o.pay)) continue;
       if (typeof mins !== 'number' || !isFinite(mins) || !(mins > 0)) continue;
@@ -377,5 +397,6 @@
   }
 
   return { advise: advise, usable: usable, runs: runs, replay: replay,
-           bestAt: bestAt, THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT };
+           bestAt: bestAt, trustworthy: trustworthy,
+           THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT };
 }));

@@ -30,8 +30,9 @@
      minutes is $3548/hr, and at that size, in that position, it is read before
      the label above it is. The card's own pay, time and distance stay below,
      because those are what the driver checks against the phone in their hand. */
-  .verdict.doubt .rate,
+  /* The working goes; the rate keeps its box and shows nothing. */
   .verdict.doubt .working { display: none; }
+  .verdict.doubt .rate-value { color: var(--doubt); }
   .stale { opacity: .35; }
   /* Diagnostics, not a heading. It was uppercase with wide tracking, which
      made a line of read timings shout louder than the verdict above it. */
@@ -160,6 +161,11 @@
   <!-- The status link lives here rather than in the bottom bar, which has three
        slots and now spends one on something needed mid-shift. This is raw JSON
        for diagnosing a rig, so it belongs next to the connection state anyway. -->
+  <!-- The verdict is the content of this page and it changes without a
+       navigation, a focus move or anything else assistive tech notices.
+       `atomic` because "ACCEPT $25.3" is one statement, not two updates. -->
+  <p class="sr-only" id="spoken" role="status" aria-live="polite" aria-atomic="true"></p>
+
   <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a></div>
 
   <nav class="bottombar">
@@ -184,17 +190,58 @@
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'working']
+   'working', 'spoken']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
   // with it: while aiming, that number is a pixel count, and labelling a pixel
   // count "/hr" made a mount measurement read as a fantastic offer.
-  function setRate(text, unit) {
+  // The headline, at a size that does not move.
+  //
+  // Sizing to the exact character count meant $9.8 rendered about 25% larger
+  // than $25.3, so the number visibly jumped every time the rate crossed ten —
+  // on a screen being glanced at from a moving car, where the one thing that
+  // should be still is the digit you are trying to read. Five characters is
+  // the width of everything from "$9.8" to "$1234", so within any rate this
+  // rig can produce the size is now constant.
+  var RATE_CHARS = 5;
+
+  function setRate(text, unit, keepLayout) {
     el.rateUnit.textContent = unit || '/hr';
     el.perHour.textContent = text;
-    el.perHour.style.setProperty('--chars', Math.max(3, text.length));
-    el.verdict.classList.toggle('novalue', text === '--');
+    el.perHour.style.setProperty('--chars', Math.max(RATE_CHARS, text.length));
+    el.verdict.classList.toggle('novalue', text === '--' && !keepLayout);
+  }
+
+  // "-$10.60", not "$-10.6". A minus sign wedged between the dollar and the
+  // digits is a dash at a glance, and the two parked screens already write it
+  // the other way — so the same offer read as a loss on one screen and,
+  // briefly, as a number on the other.
+  function rateText(n) {
+    if (n === null || n === undefined || !isFinite(n)) return '--';
+    var big = Math.abs(n) >= 100;
+    return (n < 0 ? '-$' : '$') + (big ? Math.round(Math.abs(n))
+                                       : Math.abs(n).toFixed(1));
+  }
+
+  // One sentence, only when it changes.
+  //
+  // The scanner emits several times a second, and a live region that is
+  // rewritten on every frame is read continuously and tells you nothing. What
+  // matters is the verdict and the rate it was made on, so that is the whole
+  // announcement and it is silent until one of them moves.
+  var saidLast = '';
+
+  function announce(r) {
+    var say = r.state === 'doubt'
+      ? ({ pay: 'Check the pay.', time: 'Check the time.',
+           speed: 'Check the distance.' }[r.doubt] || 'Read that again.')
+      : (({ go: 'Accept', warn: 'Close call', no: 'Pass' }[r.state] || '')
+         + ', ' + rateText(r.perHour) + ' an hour'
+         + (r.locked && r.whole !== false ? '.' : ', still reading.'));
+    if (say === saidLast) return;
+    saidLast = say;
+    el.spoken.textContent = say;
   }
 
   function showRaw(text) {
@@ -218,7 +265,10 @@
     error: 'SCANNER PROBLEM'
   };
 
-  function money(n, d) { return (n === null || n === undefined) ? '--' : '$' + Number(n).toFixed(d); }
+  function money(n, d) {
+    if (n === null || n === undefined || !isFinite(n)) return '--';
+    return (n < 0 ? '-$' : '$') + Math.abs(Number(n)).toFixed(d);
+  }
 
   function render() {
     var r = last;
@@ -278,6 +328,7 @@
     // known the difference all along and used it to decide whether to keep
     // reading and whether to speak; it just never told the page.
     var settled = r.locked && r.whole !== false;
+    announce(r);
     // A reading that cannot be true gets no verdict at all, and says which
     // figure to go and look at. The alternative is what this screen used to do
     // with a lost decimal point: a green ACCEPT on $1184 for a twenty-minute
@@ -297,8 +348,12 @@
     // saying so is not optional: a driver who checks 7.09 over 34 minutes gets
     // $12.51/hr, the screen said $10.61, and nothing here explained the gap.
     var deducted = r.cost > 0;
-    setRate('$' + (Math.abs(r.perHour) >= 100
-      ? Math.round(r.perHour) : Number(r.perHour).toFixed(1)));
+    // A reading that cannot be true gets no rate, but it keeps the rate's
+    // space. Collapsing it moved everything below by about 140px, so the
+    // submetrics a driver is being asked to check jumped up the screen at the
+    // exact moment they were told to look at them.
+    setRate(r.state === 'doubt' ? '--' : rateText(r.perHour), '/hr',
+            r.state === 'doubt');
 
     // Raw, always. This row is checked against the phone, so it has to be what
     // the card says — a "net pay" here would never match and the check would

@@ -430,3 +430,21 @@ html, body {
    never show anything. A rule that silently stops applying because another rule
    was added below it is worse than not having written it. */
 .bottombar button[hidden], .bottombar .linkbtn[hidden] { display: none; }
+
+/* ---------- Said, not shown ---------- */
+/* Text for a screen reader and not for the eye. Used for the label on a search
+   box that only has a placeholder — a placeholder is not a label, it vanishes
+   the moment anything is typed — and for the live regions that announce a
+   verdict changing, which on these pages happens with no navigation, no focus
+   move and nothing else assistive tech would notice on its own. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
