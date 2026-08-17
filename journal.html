@@ -286,6 +286,25 @@
       return 'The scanner never saw the whole card — only part of the journey '
            + 'was in the crop, so this reads better than the offer was.';
     }
+    // The row says which figure was impossible, so say that rather than the
+    // one generic cause. "A fare summary left on the screen looks like this"
+    // is a true sentence about some of these rows and a wrong explanation for
+    // the rest — and it is the sentence a driver reads when deciding whether
+    // the scanner made a mistake or they did.
+    if (r.doubt === 'pay') {
+      return 'The payout read as ' + money(r.pay, 2) + ', which is outside '
+           + 'anything a real offer pays — almost always a decimal point lost '
+           + 'in the reading. No verdict was given.';
+    }
+    if (r.doubt === 'time') {
+      return 'The time read as ' + num(r.minutes, 0) + ' min, which is outside '
+           + 'anything a real offer runs to. No verdict was given.';
+    }
+    if (r.doubt === 'speed') {
+      return 'The distance and the time together work out at '
+           + num(r.miles / (r.minutes / 60), 0) + ' mph, which no offer does — '
+           + 'one of the two was misread. No verdict was given.';
+    }
     if (r.suspect) {
       return 'Outside the range a real offer falls in, so it is kept but not '
            + 'counted. A fare summary left on the screen looks like this.';
@@ -612,7 +631,6 @@
         ? 'Nothing usable in this stretch — <b>' + setAside + '</b> set aside as doubtful.'
         : 'No offers recorded yet. The scanner keeps one line per offer it is sure of.';
       el.blocks.innerHTML = el.kinds.innerHTML = '';
-      el.log.innerHTML = '';
       el.more.textContent = '';
       el.p25.textContent = el.p50.textContent = el.p75.textContent = '--';
       // "--/hr" is not a rate, it is a dash wearing a unit.
@@ -621,6 +639,20 @@
       el.advice.hidden = true;
       el.runs.innerHTML = '';
       el.runsHead.hidden = true;
+      // The set-aside rows stay listed. The page has just said "3 set aside as
+      // doubtful", and the next thing it did was delete them — so the one
+      // screen that could show a driver *which* three, and why, showed nothing
+      // at all. These are the rows somebody opens this page to find: the job
+      // they remember working that is missing from the figures.
+      // The target these were judged against still comes off the rows
+      // themselves rather than a literal, so a row's own recorded verdict and
+      // what this page says about it cannot disagree.
+      var lastKept = kept.length ? kept[kept.length - 1] : null;
+      var t0 = lastKept && typeof lastKept.target === 'number' ? lastKept.target : 25;
+      var b0 = lastKept && typeof lastKept.band === 'number' ? lastKept.band : 15;
+      el.log.innerHTML = kept.slice(-LOG_MAX).reverse().map(function (r) {
+        return offerRow(r, new Date(r.at), t0, b0);
+      }).join('');
       return;
     }
     showUnits(true);
