@@ -587,6 +587,21 @@ def main():
     cfg = load_config(args.config)
     health = Health()
 
+    # Say so once, at the top, when a number in the settings block cannot be
+    # read as one. The parser falls back to the documented default either way —
+    # see offer_parser.setting — but silently using 25 when the driver typed
+    # something else is how a shift gets scanned against the wrong target. This
+    # block is hand-edited on the driver's instruction, so a stray quote or a
+    # deleted value is a keystroke away, and the log is the only place it can
+    # surface before the offers start.
+    for key, default in sorted(OP.DEFAULT_SETTINGS.items()):
+        given = (cfg.get('settings') or {}).get(key)
+        if given is not None and OP.setting(given, None) is None:
+            log('settings: %r is not a number I can use for %s, so %s is being '
+                'used instead. Check the settings block in %s.'
+                % (given, key, default, args.config))
+
+
     # Corners a person drew, rather than ones the detector found. They change
     # three things at once — see use_manual_box — and they turn tracking off,
     # because a tracker judges candidates against a calibrated *screen* and

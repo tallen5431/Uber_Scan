@@ -262,13 +262,42 @@
 
   // Mirrors the manual app, plus a per-item allowance because shop-and-deliver
   // offers quote a time that assumes the shopping itself is instant.
+  // The defaults, and the only values these ever take if what is in config.json
+  // cannot be read as a number.
+  var DEFAULT_SETTINGS = { target: 25, band: 15, costPerMile: 0, pad: 0,
+                           secondsPerItem: 0 };
+
+  // A number a person typed into config.json, or the default if it is not one.
+  //
+  // The driver is told to hand-edit this block, so `"target": "30"` with the
+  // quotes left on, or a value deleted to `null`, is a keystroke away — and the
+  // two languages got it wrong in opposite directions. Python multiplied a
+  // string by a float and raised, inside the read guard, which reports a
+  // permanent misconfiguration as one bad frame and suppresses the repeat: a
+  // whole shift of no verdicts and no journal rows behind a green dot. This
+  // side coerced silently, and `s.target || 25` turned a *deliberate* zero into
+  // 25 while a deleted target put the accept floor at zero — which makes every
+  // offer an ACCEPT.
+  //
+  // So a number is taken from anything that reads as one — "30" is what the
+  // driver meant — and anything else falls back to the documented default.
+  // Written the same way as offer_parser.setting so the two cannot answer
+  // differently.
+  function setting(value, fallback) {
+    if (typeof value === 'boolean') return fallback;
+    if (value === null || value === undefined || value === '') return fallback;
+    if (typeof value !== 'number' && typeof value !== 'string') return fallback;
+    var n = Number(value);
+    return isFinite(n) ? n : fallback;
+  }
+
   function rate(parsed, settings) {
     var s = settings || {};
-    var target = s.target || 25;
-    var band = s.band === undefined ? 15 : s.band;
-    var costPerMile = s.costPerMile || 0;
-    var pad = s.pad || 0;
-    var secondsPerItem = s.secondsPerItem || 0;
+    var target = setting(s.target, DEFAULT_SETTINGS.target);
+    var band = setting(s.band, DEFAULT_SETTINGS.band);
+    var costPerMile = setting(s.costPerMile, DEFAULT_SETTINGS.costPerMile);
+    var pad = setting(s.pad, DEFAULT_SETTINGS.pad);
+    var secondsPerItem = setting(s.secondsPerItem, DEFAULT_SETTINGS.secondsPerItem);
 
     if (!parsed.complete) return { ready: false, state: 'empty' };
 

@@ -205,13 +205,48 @@ def parse(raw_text):
     }
 
 
+# The defaults, and the only values these ever take if what is in config.json
+# cannot be read as a number.
+DEFAULT_SETTINGS = {'target': 25, 'band': 15, 'costPerMile': 0, 'pad': 0,
+                    'secondsPerItem': 0}
+
+
+def setting(value, fallback):
+    """A number a person typed into config.json, or the default if it is not one.
+
+    The driver is told to hand-edit this block, so `"target": "30"` with the
+    quotes left on, or a value deleted to `null`, is a keystroke away — and both
+    languages got it wrong in opposite directions. Python multiplied a string by
+    a float and raised, inside the read guard, which reports a permanent
+    misconfiguration as one bad frame and suppresses the repeat: the whole shift
+    then produced one log line, no verdicts and no journal rows while the page
+    kept a green dot and WAITING FOR AN OFFER. JavaScript coerced silently, and
+    for a deleted target that put the accept floor at zero, which makes every
+    offer an ACCEPT.
+
+    So a number is taken from anything that reads as one — "30" is what the
+    driver meant — and anything else falls back to the documented default rather
+    than to a crash or to nonsense. Written the same way in both languages so
+    the two cannot answer differently.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return fallback
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if n != n or n in (float('inf'), float('-inf')):
+        return fallback
+    return n
+
+
 def rate(parsed, settings=None):
     s = settings or {}
-    target = s.get('target', 25)
-    band = s.get('band', 15)
-    cost_per_mile = s.get('costPerMile', 0)
-    pad = s.get('pad', 0)
-    seconds_per_item = s.get('secondsPerItem', 0)
+    target = setting(s.get('target'), DEFAULT_SETTINGS['target'])
+    band = setting(s.get('band'), DEFAULT_SETTINGS['band'])
+    cost_per_mile = setting(s.get('costPerMile'), DEFAULT_SETTINGS['costPerMile'])
+    pad = setting(s.get('pad'), DEFAULT_SETTINGS['pad'])
+    seconds_per_item = setting(s.get('secondsPerItem'), DEFAULT_SETTINGS['secondsPerItem'])
 
     if not parsed['complete']:
         return {'ready': False, 'state': 'empty'}

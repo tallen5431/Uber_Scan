@@ -458,8 +458,19 @@
     // makes a record impossible to reconcile — the driver would be left
     // wondering whether they mis-remembered the job or the scanner lost it.
     var shown = kept.slice(-LOG_MAX).reverse();
-    el.more.textContent = kept.length > shown.length
+    // Two truncations, and the driver has to be told about both. This page cuts
+    // the *list* to LOG_MAX so a phone can render it, and the server cuts the
+    // *window* to its own limit before the page ever sees it — and the second
+    // one used to be invisible. The figures at the top said "All" over whatever
+    // survived, so a year's worth of offers was summarised over the last fifty
+    // shifts with nothing saying so.
+    var windowTotal = (data && data.total) || kept.length;
+    el.more.textContent = kept.length > shown.length || (data && data.truncated)
       ? 'Showing the most recent ' + shown.length + ' of ' + kept.length
+        + (data && data.truncated
+            ? ', and this window holds ' + windowTotal
+              + ' — the figures above cover the ' + kept.length + ' shown'
+            : '')
         + '. Use the CSV for the rest.' : '';
 
     var out = [];
@@ -524,7 +535,12 @@
   }
 
   function load() {
-    el.csv.href = '/api/journal.csv?' + windowQuery();
+    // The server's own ceiling, not its default. The JSON cap protects the
+    // DOM — a phone will not render 60000 rows — but the CSV is streamed
+    // straight to a file, and it is the thing this page points at for the rows
+    // the cap drops. Sending the same limit made the escape hatch stop exactly
+    // where the problem started.
+    el.csv.href = '/api/journal.csv?limit=20000&' + windowQuery();
     fetch('/api/journal?' + windowQuery())
       .then(function (r) { return r.json(); })
       .then(render)

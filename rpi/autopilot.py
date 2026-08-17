@@ -311,8 +311,8 @@ def calibrate_from(source, as_json, drawn=None):
         roi, share = CX.PIN_WHOLE, 1.0
     else:
         config.pop(CX.MANUAL_KEY, None)
-    with open(CONFIG, 'w') as fh:
-        json.dump(config, fh, indent=2)
+    from calibrate import write_config
+    write_config(CONFIG, config)
 
     # The preview has to be the reader's own picture, not a re-creation of it.
     # Composed the way the scanner composes it, using this frame and the
@@ -376,6 +376,15 @@ def scan(as_json, speak, extra_args):
     os.execv(sys.executable, args)
 
 
+def _usable_config(path):
+    """True when the config exists AND can be read back as an object."""
+    try:
+        with open(path) as fh:
+            return isinstance(json.load(fh), dict)
+    except (IOError, OSError, ValueError):
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--json', action='store_true', help='machine-readable output')
@@ -397,7 +406,12 @@ def main():
     # driver's target and running costs with it — calibrate_from can only
     # preserve settings that are still there to read. Forcing the branch
     # directly leaves the file, and its settings, in place.
-    if args.recalibrate or not os.path.exists(CONFIG):
+    # Readable, not merely present. A config.json that exists and does not
+    # parse used to be a permanent brick: this branch was skipped, scan_pi died
+    # on json.load, the supervisor restarted it forever, and the only repair was
+    # ssh. calibrate.load_existing has always treated unreadable as absent, and
+    # the aim/calibrate path below already handles absent perfectly well.
+    if args.recalibrate or not _usable_config(CONFIG):
         source, drawn = aim(args.json, args.preview_port, args.aim_timeout, args.min_card)
         if source is None:
             return 1

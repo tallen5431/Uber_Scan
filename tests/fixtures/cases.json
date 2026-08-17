@@ -416,6 +416,77 @@
         "perHour": 10.61,
         "state": "no"
       }
+    },
+    {
+      "name": "a target with the quotes left on is still that target",
+      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+      "settings": {
+        "target": "30",
+        "costPerMile": 0
+      },
+      "expect": {
+        "perHour": 12.51,
+        "state": "no",
+        "target": 30.0,
+        "band": 15
+      }
+    },
+    {
+      "name": "a target deleted falls back to the default, not to an accept-everything floor",
+      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+      "settings": {
+        "target": null,
+        "costPerMile": 0
+      },
+      "expect": {
+        "perHour": 12.51,
+        "state": "no",
+        "target": 25,
+        "band": 15
+      }
+    },
+    {
+      "name": "a deliberate zero target is a zero target",
+      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+      "settings": {
+        "target": 0,
+        "costPerMile": 0
+      },
+      "expect": {
+        "perHour": 12.51,
+        "state": "go",
+        "target": 0.0,
+        "band": 15
+      }
+    },
+    {
+      "name": "a running cost with the quotes left on still costs",
+      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+      "settings": {
+        "target": 25,
+        "costPerMile": "0.30"
+      },
+      "expect": {
+        "perHour": 10.61,
+        "state": "no",
+        "target": 25.0,
+        "band": 15
+      }
+    },
+    {
+      "name": "settings that are not numbers at all fall back rather than crash",
+      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+      "settings": {
+        "target": "abc",
+        "band": "",
+        "costPerMile": "nonsense"
+      },
+      "expect": {
+        "perHour": 12.51,
+        "state": "no",
+        "target": 25,
+        "band": 15
+      }
     }
   ]
 }

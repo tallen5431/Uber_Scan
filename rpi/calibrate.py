@@ -61,6 +61,31 @@ PHONE_ASPECT = PL.PHONE_ASPECT
 FULL_FOV_MODES = {'2328x1748': (2328, 1748), '4656x3496': (4656, 3496)}
 
 
+def write_config(path, config):
+    """Write the calibration where a reader may be looking at that instant.
+
+    To a temporary name and renamed, because a plain `open(path, 'w')` truncates
+    the live file before writing a byte — and this is a box velcroed into a car
+    where the ignition is the power switch. Lose power there, or fill the SD
+    card, and what is left is a config.json that exists and does not parse.
+
+    That used to be unrecoverable without ssh: autopilot decided the rig was
+    calibrated by asking whether the file *existed*, scan_pi opened it with a
+    bare json.load and died, the web server restarted it forever, and
+    /api/status went on reporting calibrated:true the whole time. Deleting the
+    file self-heals; corrupting it did not.
+
+    scan_pi.save_config has done it this way all along and says why. This is the
+    same thing on the two paths that create the file in the first place.
+    """
+    tmp = path + '.part'
+    with open(tmp, 'w') as fh:
+        json.dump(config, fh, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
 def load_existing(path):
     """Whatever is already in the config, or an empty dict.
 
@@ -247,8 +272,7 @@ def main():
         CX.apply_to_config(config, drawn, (width, height))
     else:
         config.pop(CX.MANUAL_KEY, None)
-    with open(args.config, 'w') as fh:
-        json.dump(config, fh, indent=2)
+    write_config(args.config, config)
 
     # Write what the OCR engine will actually be handed, so a bad mount is
     # obvious before it costs a shift's worth of missed offers. Taken from a

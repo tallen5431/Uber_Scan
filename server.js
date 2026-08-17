@@ -713,6 +713,11 @@ function route(req, res) {
       if (floor) {
         offers = offers.filter(function (r) { return (r.at || 0) >= floor; });
       }
+      // How many there really are in this window, kept before the cap. Without
+      // it the page cannot tell a window of 5000 offers from a window of
+      // 60000 truncated to 5000 — and it was labelling the second one "All",
+      // computing the median and the $/hr ladder over an unannounced subset.
+      var total = offers.length;
       if (limit && offers.length > limit) offers = offers.slice(-limit);
       if (pathname === '/api/journal.csv') {
         return send(res, 200, toCsv(offers), {
@@ -720,8 +725,10 @@ function route(req, res) {
           'Content-Disposition': 'attachment; filename="uber-scan-offers.csv"'
         });
       }
-      send(res, 200, JSON.stringify({ count: offers.length, days: days,
-                                      hidden: hidden, offers: offers }),
+      send(res, 200, JSON.stringify({ count: offers.length, total: total,
+                                      truncated: total > offers.length,
+                                      days: days, hidden: hidden,
+                                      offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }
