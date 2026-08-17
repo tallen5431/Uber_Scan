@@ -211,15 +211,32 @@
       if (!best || steps[i].perHour > best.perHour) best = steps[i];
     }
     if (!best || best.perHour <= 0) return null;
-    var plateau = steps.filter(function (s) {
-      return s.trips >= 1 && s.perHour >= best.perHour * PLATEAU;
-    }).map(function (s) { return s.target; });
+
+    // The unbroken stretch around the winner, not the outer edges of every line
+    // that happens to score well.
+    //
+    // A replay curve can have two peaks with a trough between them, and taking
+    // the min and max of the whole qualifying set then reports a range whose
+    // middle is excluded from it. On one real recording that produced "$20 to
+    // $35" where only $20, $33, $34 and $35 actually qualified: a driver told
+    // that range and setting $28 would have landed in the trough, on the
+    // authority of this file.
+    var good = {};
+    for (var i2 = 0; i2 < steps.length; i2++) {
+      if (steps[i2].trips >= 1 && steps[i2].perHour >= best.perHour * PLATEAU) {
+        good[steps[i2].target] = true;
+      }
+    }
+    var low = best.target, high = best.target;
+    while (good[low - 1]) low--;
+    while (good[high + 1]) high++;
+
     var inRuns = 0;
     for (var k = 0; k < theRuns.length; k++) inRuns += theRuns[k].length;
     return {
       best: best,
-      low: Math.min.apply(null, plateau),
-      high: Math.max.apply(null, plateau),
+      low: low,
+      high: high,
       runs: theRuns.length,
       // Offers the replay actually walked. Rows dropped with their single-offer
       // run are not evidence it used, and counting them in the headline made
@@ -297,17 +314,30 @@
       return shortfall;
     }
 
+    // Where in the plateau to point. The bottom of it: a lower line takes more
+    // work for the same money and leaves less riding on the recording being
+    // representative, and being too picky is the failure that hides itself.
+    //
+    // Declared before the comparison below, which measures against it. `var`
+    // hoists, so reading it from above would have quietly compared against
+    // `undefined` — a line no offer clears — and reported a gain of nothing.
+    var suggested = shown.low;
+
     // The improvement over the driver's current line, as a share rather than a
     // rate. A rate here would be a dollar figure per hour, and that depends
     // entirely on how much of the recorded time was really driving — the one
-    // thing this cannot know. The ratio is stable where the level is not: on
-    // the recording this was built from, +19% to +25% across every threshold
-    // while the underlying rates ranged from $22 to $78.
+    // thing this cannot know. The ratio is the stable part where the level is
+    // not.
     var gain = null, current = null, currentTakesNothing = false;
     if (typeof o.target === 'number' && isFinite(o.target)) {
       current = replay(runs(rows, o.breakMinutes || SHOWN_AT), o.target);
       if (current.perHour > 0) {
-        gain = (shown.best.perHour - current.perHour) / current.perHour;
+        // Measured at the line that is actually recommended, not at the
+        // argmax. Those are different lines — the recommendation is the bottom
+        // of the plateau — so quoting the argmax's improvement beside the
+        // recommended figure credits it with a gain it does not produce.
+        var atSuggested = replay(runs(rows, o.breakMinutes || SHOWN_AT), suggested);
+        gain = (atSuggested.perHour - current.perHour) / current.perHour;
       } else if (current.trips === 0) {
         // Not a missing comparison — the strongest finding this can make. A
         // line nothing clears is a shift spent parked, and the ratio is
@@ -317,11 +347,6 @@
         currentTakesNothing = true;
       }
     }
-
-    // Where in the plateau to point. The bottom of it: a lower line takes more
-    // work for the same money and leaves less riding on the recording being
-    // representative, and being too picky is the failure that hides itself.
-    var suggested = shown.low;
 
     return {
       ready: true,

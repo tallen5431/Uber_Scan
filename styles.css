@@ -416,3 +416,10 @@ html, body {
   align-items: center;
   justify-content: center;
 }
+/* ...which has to come after the `display: flex` above and out-specify it.
+   `.bottombar [hidden]` and `.bottombar .linkbtn` are both two selectors of the
+   same weight, so the later one simply won, and the Live link this page hides
+   on a machine with no camera stayed on screen pointing at a page that can
+   never show anything. A rule that silently stops applying because another rule
+   was added below it is worse than not having written it. */
+.bottombar button[hidden], .bottombar .linkbtn[hidden] { display: none; }

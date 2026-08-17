@@ -330,7 +330,11 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    // figure to go and look at. A spreadsheet full of rows
                    // flagged 1 with nothing saying why is a column people learn
                    // to ignore.
-                   'suspect', 'doubt', 'accepted', 'ms'];
+                   // `hidden` only ever appears with ?hidden=1, and without it
+                   // that export is a spreadsheet with the driver's own test
+                   // card silently mixed into it and no way to tell which row
+                   // it is — which is the entire reason they hid it.
+                   'suspect', 'doubt', 'accepted', 'hidden', 'ms'];
 
 function numOrNull(v) {
   return (typeof v === 'number' && isFinite(v)) ? v : null;
@@ -475,20 +479,35 @@ function clampNumber(raw, low, high, fallback) {
 // notes already sitting in a journal sync across without being touched.
 function syncKey(row) {
   if (!row || typeof row !== 'object') return null;
+  // JSON, not concatenation with a separator.
+  //
+  // Joining the parts with '/' meant a key could be forged by a value that
+  // contained one: id 'a/1' at seq 2 and id 'a' at seq '1/2' produced the
+  // identical string 'o/a/1/2', and the second row was then discarded as a
+  // duplicate of the first. Nothing this project writes contains a slash, but
+  // this endpoint takes rows from off the machine, and "our own writer happens
+  // not to do that" is not a property the receiver can rely on when what is at
+  // stake is silently dropping an offer.
+  var key = function (parts) { return JSON.stringify(parts); };
   if (row.kind === 'mark') {
     if (typeof row.id !== 'string' || !row.id) return null;
-    return 'm/' + row.id + '/' + row.at + '/' + row.accepted + '/' + row.hidden;
+    return key(['m', row.id, row.at, row.accepted, row.hidden]);
   }
   if (row.kind === 'rule') {
     var m = row.match || {};
-    return 'r/' + row.at + '/' + m.pay + '/' + m.minutes + '/' + m.miles
-         + '/' + row.accepted + '/' + row.hidden;
+    return key(['r', row.at, m.pay, m.minutes, m.miles, row.accepted, row.hidden]);
   }
   // Anything else needs the pair. A kind this build has never heard of is
   // carried across rather than dropped, as long as it can say which row it is:
   // the copy is meant to outlive the build that filled it.
-  if (row.id === undefined || row.seq === undefined) return null;
-  return (row.kind ? 'k' + row.kind : 'o') + '/' + row.id + '/' + row.seq;
+  //
+  // `undefined` was the only thing rejected, so `id: null` sailed through and
+  // every id-less row in a batch collapsed onto the one key "o/null/1" — the
+  // first was stored and the rest thrown away as duplicates of it. null is not
+  // an identity.
+  if (row.id === null || row.id === undefined || row.id === '') return null;
+  if (row.seq === null || row.seq === undefined) return null;
+  return key([row.kind ? 'k' + row.kind : 'o', row.id, row.seq]);
 }
 
 function latestPerOffer(rows) {
@@ -835,15 +854,33 @@ function route(req, res) {
   // enough to call every few minutes and the only thing the rig needs to ask.
   if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/newest') {
     return readJournal(function (rows) {
-      var newest = 0;
-      rows.forEach(function (r) { if ((r.at || 0) > newest) newest = r.at; });
+      // The newest *offer*, not the newest row.
+      //
+      // The sender resumes from an hour before this, so whatever it means has
+      // to be "how far through the offers I am". Every row counted equally,
+      // and the driver's own tags are rows: ticking "I took this" on the copy
+      // machine stamped a row with the current time, the rig then resumed from
+      // an hour before *that*, and every offer older than an hour that had not
+      // yet been sent was skipped — permanently, because nothing ever looks
+      // further back. Tagging one offer here could quietly cost a day of them.
+      var newest = 0, offers = 0;
+      rows.forEach(function (r) {
+        if (r.kind) return;                       // a tag, not an offer
+        offers++;
+        if ((r.at || 0) > newest) newest = r.at;
+      });
       // What this build can do, so the sender can tell "I am misconfigured"
       // from "the far end is old" without a human having to compare error
       // strings. A rig spent two rounds on that: the copy machine had not been
       // updated, the only symptom was an error message missing a detail the new
       // build adds, and nothing said so.
       send(res, 200, JSON.stringify({ ok: true, newest: newest, have: rows.length,
-                                      can: ['ingest', 'config', 'mkdir'] }),
+                                      // So the sender can notice it holds more
+                                      // than this copy does and repair the gap
+                                      // itself, rather than needing somebody to
+                                      // think of running --all.
+                                      offers: offers,
+                                      can: ['ingest', 'config', 'mkdir', 'count'] }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }
@@ -985,6 +1022,17 @@ function route(req, res) {
     var withHidden = q.hidden === '1';
     return readJournal(function (rows) {
       var offers = latestPerOffer(rows);
+      // The window first, then the count of what is hidden inside it.
+      //
+      // Counting before the filter meant the page said "3 offers are hidden and
+      // left out of everything here" while looking at today, where "here" is
+      // the window and the 3 were every hidden offer the journal has ever held.
+      // A number that does not describe what is on screen is worse than no
+      // number, because it is the one a driver checks their arithmetic against.
+      var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
+      if (floor) {
+        offers = offers.filter(function (r) { return (r.at || 0) >= floor; });
+      }
       var hidden = offers.filter(function (r) { return r.hidden; }).length;
       // Hidden rows are still on disk — nothing here deletes — but they are out
       // of every figure and every export unless asked for by name. The test card
@@ -992,10 +1040,6 @@ function route(req, res) {
       // leaving it in quietly drags the median toward whatever that card says.
       if (!withHidden) {
         offers = offers.filter(function (r) { return !r.hidden; });
-      }
-      var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
-      if (floor) {
-        offers = offers.filter(function (r) { return (r.at || 0) >= floor; });
       }
       // How many there really are in this window, kept before the cap. Without
       // it the page cannot tell a window of 5000 offers from a window of

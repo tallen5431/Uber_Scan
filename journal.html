@@ -339,13 +339,18 @@
           { hour: 'numeric', minute: '2-digit' }) + '</span>'
       + '</summary>'
       + (aside ? '<p class="why">' + whyAside(r) + '</p>' : '')
-      + '<dl class="facts">'
+      // One list per heading. `<h3>` inside a `<dl>` is not valid, and a screen
+      // reader walking the list loses the headings that say what each group of
+      // rows is — which on this panel is the difference between "what the card
+      // said" and "what the scanner made of it".
       + '<h3>Off the card</h3>'
+      + '<dl class="facts">'
       + row('Payout', money(r.pay, 2))
       + row('Time on the card', r.minutes === null ? null : num(r.minutes, 0) + ' min')
       + row('Distance', r.miles === null ? null : num(r.miles) + ' mi')
       + row('Items', r.items || null)
-      + '<h3>How the rate was worked out</h3>'
+      + '</dl><h3>How the rate was worked out</h3>'
+      + '<dl class="facts">'
       + row('Billed time', billed === null ? null
             : num(billed, 0) + ' min' + (padded ? ' — incl. your pad and shopping' : ''))
       + row('Running cost taken off', typeof r.cost === 'number' && r.cost > 0
@@ -355,7 +360,8 @@
       + row('After running costs', typeof r.perHour === 'number'
             ? money(r.perHour, 2) + '/hr' : null)
       + row('Per mile', typeof r.perMile === 'number' ? money(r.perMile, 2) + '/mi' : null)
-      + '<h3>The verdict, and what it was judged against</h3>'
+      + '</dl><h3>The verdict, and what it was judged against</h3>'
+      + '<dl class="facts">'
       // A row the scanner refused to judge says so, rather than showing a dash
       // that reads as "this was not recorded". Not judging it was the decision.
       + row('Called it', r.state === 'doubt'
@@ -367,7 +373,8 @@
       + row('Your target', typeof r.target === 'number'
             ? money(r.target, 0) + '/hr' + (typeof r.band === 'number'
               ? ', amber within ' + r.band + '%' : '') : null)
-      + '<h3>How it was read</h3>'
+      + '</dl><h3>How it was read</h3>'
+      + '<dl class="facts">'
       + row('Seen as', read.join(', ') || null, true)
       + row('Read at', when.toLocaleString(), true)
       + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, true)
@@ -596,7 +603,20 @@
     // The target is whatever the scanner was actually using, taken from the
     // most recent row rather than assumed — it lives in the Pi's config and
     // this page has no other way to know it.
-    var newest = offers[offers.length - 1];
+    // The most recent row that is not in the future.
+    //
+    // A Pi with no real-time clock comes up in 1970 and jumps forward when the
+    // network arrives, and a handful of rows can land the other way too. `at`
+    // is sorted, so one row stamped next March sat permanently at the end of
+    // the list and handed its target to every figure on the page — including
+    // days recorded long before that target existed. A clock that is wrong
+    // should cost the row it is on, not the page.
+    var now = Date.now();
+    var newest = null;
+    for (var n = offers.length - 1; n >= 0; n--) {
+      if ((offers[n].at || 0) <= now) { newest = offers[n]; break; }
+    }
+    if (!newest) newest = offers[offers.length - 1];
     var target = typeof newest.target === 'number' ? newest.target : 25;
     var band = typeof newest.band === 'number' ? newest.band : 15;
 

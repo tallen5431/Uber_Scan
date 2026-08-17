@@ -172,8 +172,24 @@ def main():
         say('%s did not answer — will try again next time' % args.to)
         return 0
 
-    if args.all:
+    # Every offer this rig holds, and every offer the copy holds. If the copy
+    # holds fewer, something was missed — a run that died half way, a clock that
+    # went backwards, a card restored from an older backup — and resuming from
+    # an hour before its newest row would step straight over the gap and never
+    # come back to it. Counting is the cheapest possible reconciliation: two
+    # integers, already in a reply the sync makes anyway, and it turns "somebody
+    # has to notice and run --all" into something that repairs itself on the
+    # next tick.
+    mine = [r for r in JR.Journal(args.journal).rows()
+            if isinstance(r, dict) and not r.get('kind')]
+    theirs = far.get('offers')
+    short = (isinstance(theirs, int) and len(mine) > theirs)
+
+    if args.all or short:
         floor = 0
+        if short and not args.all:
+            say('%s holds %d offers and this rig holds %d — sending everything '
+                'to close the gap' % (args.to, theirs, len(mine)))
     elif newest:
         floor = newest - OVERLAP_MS
     else:

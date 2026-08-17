@@ -339,6 +339,92 @@ try:
 finally:
     stuck.close()
 
+# --- a tag made on the copy machine must not skip the rig's offers -----------
+# The sender resumes from an hour before the far end's newest row, so "newest"
+# has to mean "how far through the offers I am". Every row counted equally, and
+# the driver's own tags are rows: ticking "I took this" on the copy machine
+# stamped a row with the current time, the rig resumed from an hour before
+# *that*, and every unsent offer older than an hour was stepped over —
+# permanently, because nothing ever looks further back. One tap could cost a
+# day of offers.
+tagged = FarEnd()
+try:
+    old_at = now - 6 * 3600000
+    SY.send(tagged.base, [offer(500, old_at)])
+    eq('the copy holds one old offer', len(lines(tagged.journal)), 1)
+
+    # The driver ticks it on the copy machine, right now.
+    mark_now = {'v': 1, 'at': now, 'kind': 'mark', 'id': 'off500', 'accepted': True}
+    SY.send(tagged.base, [mark_now])
+
+    eq('a tag made now does not become the offer watermark',
+       SY.newest_at(tagged.base), old_at)
+    ok_('...and the copy says how many offers it holds',
+        SY.far_end(tagged.base).get('offers') == 1)
+
+    # Offers from four hours ago, never sent. With the watermark at `now` these
+    # were skipped for good.
+    stranded = os.path.join(work, 'stranded.jsonl')
+    write(stranded, [offer(500, old_at)]
+                    + [offer(600 + i, now - 4 * 3600000 + i * 1000) for i in range(5)])
+    argv = sys.argv
+    sys.argv = ['sync', '--to', tagged.base, '--journal', stranded, '--quiet',
+                '--no-config']
+    try:
+        eq('the sync runs', SY.main(), 0)
+    finally:
+        sys.argv = argv
+    kept = [r for r in lines(tagged.journal) if not r.get('kind')]
+    eq('...and the offers the tag would have stranded arrive', len(kept), 6)
+finally:
+    tagged.close()
+
+# --- a copy that is behind repairs itself ------------------------------------
+# A run that died half way, a clock that went backwards, a card restored from an
+# older backup: the far end ends up holding fewer offers than the rig, and
+# resuming from an hour before its newest row steps straight over the gap. Two
+# integers already in a reply the sync makes anyway are enough to notice.
+behind = FarEnd()
+try:
+    gappy = os.path.join(work, 'gappy.jsonl')
+    rows = [offer(700 + i, now - (20 - i) * 60000) for i in range(20)]
+    write(gappy, rows)
+    # Only the newest three ever made it across.
+    SY.send(behind.base, rows[-3:])
+    eq('the copy is behind', SY.far_end(behind.base).get('offers'), 3)
+
+    argv = sys.argv
+    sys.argv = ['sync', '--to', behind.base, '--journal', gappy, '--quiet',
+                '--no-config']
+    try:
+        eq('the sync runs', SY.main(), 0)
+    finally:
+        sys.argv = argv
+    eq('...and closes the gap without anyone running --all',
+       len([r for r in lines(behind.journal) if not r.get('kind')]), 20)
+finally:
+    behind.close()
+
+# --- rows that cannot say which row they are ---------------------------------
+# `undefined` was the only thing refused, so `id: null` sailed through and every
+# id-less row in a batch collapsed onto one key: the first was stored and the
+# rest thrown away as duplicates of it.
+nulls = FarEnd()
+try:
+    two = [{'v': 1, 'id': None, 'seq': 1, 'at': now, 'pay': 10.0, 'minutes': 20.0},
+           {'v': 1, 'id': None, 'seq': 1, 'at': now + 1, 'pay': 99.0, 'minutes': 20.0}]
+    result = SY.send(nulls.base, two)
+    eq('a row with a null id is not stored', result['added'], 0)
+    eq('...and both are counted, not silently deduplicated', result['malformed'], 2)
+
+    # An id containing the separator the key used to be joined with.
+    forged = [{'v': 1, 'id': 'a/1', 'seq': 2, 'at': now, 'pay': 10.0},
+              {'v': 1, 'id': 'a', 'seq': '1/2', 'at': now + 1, 'pay': 99.0}]
+    eq('an id containing a slash cannot forge another row s key',
+       SY.send(nulls.base, forged)['added'], 2)
+finally:
+    nulls.close()
+
 # --- which end is out of date -----------------------------------------------
 # The rig lost two rounds to this. The copy machine was running a build from
 # before the directory was created for it, and the only evidence was that the
