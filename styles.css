@@ -448,3 +448,77 @@ html, body {
   white-space: nowrap;
   border: 0;
 }
+
+/* ---------- A screen bolted to a dashboard ---------- */
+/* Every layout above this assumes a phone: tall, narrow, held in one hand. The
+   rig's own screen is the opposite — a small HDMI panel, wide and short, 800x480
+   or less, mounted where a driver can reach it without leaning.
+ *
+ * Two things broke on it. `height: 100dvh` on a column that needs about 530px
+ * meant the content simply did not fit, and because the keypad's rows have a
+ * minimum height it overflowed its own box and painted *over* the bar of links
+ * beneath it — so the page a driver lands on had its navigation printed across
+ * the number keys, and the bottom row of keys off the screen entirely. At
+ * 480x320 the keypad and the links were both below the fold on a page that does
+ * not scroll comfortably.
+ *
+ * And the shared `max-width: 480px` above, written so a desktop browser does not
+ * stretch a phone layout across a monitor, applied here too: an 800px-wide
+ * dashboard screen drew a 480px column down the middle and left a third of the
+ * display black on either side, with the verdict small in the centre.
+ *
+ * So: fill the width, and lay the page out across it rather than down it. */
+@media (orientation: landscape) and (max-height: 560px) {
+  /* Never a fixed height. Whatever else is wrong on an unusual panel, nothing
+     may end up drawn on top of anything else — scrolling is a nuisance,
+     overlapping controls are a fault. */
+  #app {
+    max-width: none;
+    height: auto;
+    min-height: 100dvh;
+    padding: calc(env(safe-area-inset-top) + 6px) 8px calc(env(safe-area-inset-bottom) + 6px);
+    gap: 8px;
+  }
+
+  /* The verdict beside the controls rather than above them. */
+  body[data-page="keypad"] #app {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    grid-template-rows: auto auto 1fr auto;
+    align-content: start;
+  }
+  body[data-page="keypad"] #verdict   { grid-column: 1; grid-row: 1 / -1; align-self: start; }
+  body[data-page="keypad"] .fields    { grid-column: 2; grid-row: 1; }
+  body[data-page="keypad"] #hint      { grid-column: 2; grid-row: 2; }
+  body[data-page="keypad"] .keypad    { grid-column: 2; grid-row: 3; }
+  body[data-page="keypad"] .bottombar { grid-column: 2; grid-row: 4; }
+
+  /* Sized to the column it is now in, not to the whole screen. 20vw of an
+     800px panel is 160px, which overflowed a half-width panel on its own. */
+  .rate-value { font-size: clamp(30px, 8.5vw, 60px); }
+  .rate-unit  { font-size: clamp(14px, 2.6vw, 20px); }
+  .verdict-label { font-size: clamp(13px, 2.4vw, 17px); }
+  .sub { font-size: clamp(15px, 2.8vw, 20px); }
+  .verdict { padding: 8px 10px 10px; }
+
+  /* Still 44px — this is a touchscreen in a moving vehicle, which is the last
+     place to shave a target down. The keypad simply gets the room instead. */
+  .key { font-size: clamp(20px, 4vw, 30px); }
+  .field-value { font-size: clamp(18px, 3.4vw, 26px); }
+  .bottombar button, .bottombar .linkbtn { font-size: 13px; padding: 8px 4px; }
+}
+
+/* Narrower than a 5" panel and there is no room for two columns of anything.
+   One column, and it scrolls — which is honest about the space rather than
+   hiding half the keypad off the bottom of the glass. */
+@media (orientation: landscape) and (max-height: 380px) {
+  body[data-page="keypad"] #app { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
+  body[data-page="keypad"] #hint { display: none; }
+  .rate-value { font-size: clamp(26px, 7vw, 44px); }
+  /* Two rows of two rather than four across. In half of a 480px panel each of
+     four buttons gets about 58px, and "Camera" does not fit in that — it ran
+     off the right edge and took the whole page sideways with it. A page that
+     scrolls down is a small nuisance; a page that scrolls sideways is one
+     where the driver cannot find the controls at all. */
+  .bottombar { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+}

@@ -11,6 +11,48 @@
   #app { justify-content: center; }
   .live { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: var(--pad); }
 
+  /* On the rig's own dashboard screen — wide, short, 800x480 or less — the
+     verdict and the camera view sit side by side instead of stacked. Stacked,
+     each got half of 480px and the verdict ended up smaller on the dedicated
+     display than on a phone, which is exactly backwards: this panel exists to
+     be read from the driver's seat.
+
+     The camera view is the half that gives way. It matters while aiming the
+     mount and hardly at all afterwards, whereas the verdict is the entire
+     reason the screen is there. */
+  @media (orientation: landscape) and (max-height: 560px) {
+    #app { display: grid;
+           grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+           grid-template-rows: minmax(0, 1fr) auto auto;
+           align-content: start; }
+    .live { grid-column: 1; grid-row: 1; justify-content: flex-start; }
+    #viewWrap { grid-column: 2; grid-row: 1; margin: 0; min-height: 0; }
+    #viewWrap img { max-height: calc(100dvh - 132px); object-fit: contain; }
+    .connbar { grid-column: 1 / -1; grid-row: 2; }
+    .bottombar { grid-column: 1 / -1; grid-row: 3; }
+    /* When there is no camera frame to show — before the first one arrives, or
+       on a machine with no camera at all — the verdict takes the whole panel
+       rather than sitting in half of it beside a black rectangle. The view is
+       what gives way, because it matters while aiming the mount and the
+       verdict is why the screen is bolted to the dashboard. */
+    #app:has(#viewWrap.gone) { grid-template-columns: minmax(0, 1fr); }
+    #viewWrap.gone { display: none; }
+    /* The rate is sized against the panel it sits in, and that panel is now a
+       column rather than the whole width. */
+    #perHour { font-size: min(11vw, 92px,
+                              calc((100cqw - 40px) / (var(--chars) * 0.62))); }
+    #raw, #viewNote { display: none; }
+  }
+
+  /* Smaller again, and the arithmetic behind the headline is the first thing
+     to give up its room: the verdict, the rate and the figures off the card
+     are what a glance needs, and the sum that connects them can be checked on
+     a bigger screen when parked. */
+  @media (orientation: landscape) and (max-height: 380px) {
+    .working { display: none; }
+    #detail { display: none; }
+  }
+
   /* The number is sized to the panel and to how many characters it has to
      hold. A fixed 180px fits "$25" and runs "$41.6" off the edge — which is
      what a real offer did on a wide screen, pushing the "/hr" past the border.

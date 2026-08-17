@@ -448,6 +448,17 @@
   restoreDraft();
   render();
 
+  // Show the way to the rig's own screen, but only on the rig. Asked once; a
+  // failure to answer leaves the link hidden, which is right for the phone
+  // this page mostly runs on — there is no camera there to watch.
+  fetch('/api/status')
+    .then(function (r) { return r.json(); })
+    .then(function (s) {
+      var live = document.getElementById('toLive');
+      if (live && s && s.scanner && s.scanner.enabled) live.hidden = false;
+    })
+    .catch(function () {});
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function () {});

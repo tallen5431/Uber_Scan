@@ -15,7 +15,7 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body data-page="keypad">
 
 <main id="app">
 
@@ -78,6 +78,12 @@
     <button id="openSettings" type="button">⚙︎ Targets</button>
     <button id="openHistory" type="button">☰ History</button>
     <a class="linkbtn" href="journal.html">▤ Offers</a>
+    <!-- The rig's own verdict screen. This page is where you land, and on a
+         machine with a camera it was the one page with no way to reach it —
+         the only route was typing the URL on a touchscreen bolted to a
+         dashboard. Hidden where there is no camera, because there it leads to
+         a page that can never show anything. -->
+    <a class="linkbtn" id="toLive" href="live.html" hidden>◉ Live</a>
     <a class="linkbtn" href="scan.html">📷 Camera</a>
   </nav>
 </main>
