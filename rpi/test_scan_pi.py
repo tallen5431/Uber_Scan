@@ -539,6 +539,209 @@ ok_('a stale verdict cannot outlive the ceiling', SP.VERIFY_MAX <= 15.0)
 ok_('...and the ceiling is a real saving over the fast beat',
     SP.VERIFY_MAX >= SP.VERIFY_EVERY * 3)
 
+# --- the reader, on its own ------------------------------------------------
+# The queue between the loop and the OCR. Checked apart from the loop because
+# the interesting cases are the ones a camera cannot produce: a read that
+# throws, a reader closed with work still inside it, a thread left behind.
+import scan_pi as SPR                                          # noqa: E402
+import threading as _threading                                 # noqa: E402
+
+
+class StubScanner(object):
+    """Stands in for the Scanner: records what it was asked, answers slowly."""
+
+    def __init__(self, hold=0.0, blow_up=False):
+        self.hold, self.blow_up = hold, blow_up
+        self.seen = []
+        self.settled = []
+
+    def look_many(self, frames, now=None, geom=None):
+        if self.hold:
+            time.sleep(self.hold)
+        if self.blow_up:
+            raise RuntimeError('tesseract fell over')
+        self.seen.append((list(frames), geom))
+        return [{'parsed': {'pay': f}, 'dropped': 0, 'recovered': 0} for f in frames]
+
+    def settle(self, outs, geom=None):
+        self.settled.append(outs)
+        return outs
+
+
+def wait_for(reader, tries=300):
+    for _ in range(tries):
+        done = reader.take()
+        if done is not None:
+            return done
+        time.sleep(0.02)
+    return None
+
+
+for threaded in (False, True):
+    how = 'beside the loop' if threaded else 'on the loop'
+    stub = StubScanner()
+    r = SPR.Reader(stub, threaded=threaded)
+    ok_('%s: idle to begin with' % how, not r.busy)
+    eq('%s: nothing to take yet' % how, r.take(), None)
+
+    r.submit(['a', 'b'], 1.0, 'geom')
+    ok_('%s: busy once handed work' % how, r.busy)
+    done = wait_for(r)
+    ok_('%s: the read comes back' % how, done is not None)
+    eq('%s: ...with a reading per frame' % how, len(done['outs']), 2)
+    eq('%s: ...against the geometry it was given' % how, stub.seen[0][1], 'geom')
+    eq('%s: ...and the frames, for whoever wants the picture' % how,
+       done['frames'], ['a', 'b'])
+    eq('%s: ...folded back on this thread, once' % how, len(stub.settled), 1)
+    ok_('%s: free again' % how, not r.busy)
+    r.close()
+
+    # A read that throws comes back as a result, not as an exception. The
+    # engine is external, and a rig that dies on one bad frame costs the
+    # supervisor's backoff and a minute of not scanning.
+    boom = SPR.Reader(StubScanner(blow_up=True), threaded=threaded)
+    boom.submit(['a'], 1.0, None)
+    done = wait_for(boom)
+    ok_('%s: a read that throws still comes back' % how, done is not None)
+    ok_('%s: ...carrying the failure' % how, isinstance(done['error'], RuntimeError))
+    eq('%s: ...and no reading' % how, done['outs'], None)
+    ok_('%s: ...leaving the reader free for the next frame' % how, not boom.busy)
+    boom.close()
+
+# Closing waits for a read already in flight — that is deliberate, so nothing
+# is still writing while the next process starts — but the wait is bounded, and
+# the thread must be gone at the end of it. The rig is restarted on every crash,
+# and a strand of leftover readers is how a Pi runs out of memory overnight.
+before = _threading.active_count()
+slow = SPR.Reader(StubScanner(hold=1.5), threaded=True)
+slow.submit(['a'], 1.0, None)
+time.sleep(0.1)
+t0 = time.time()
+slow.close()
+spent = time.time() - t0
+ok_('closing waits for the read in flight', spent > 1.0)
+ok_('...but not indefinitely', spent < 3.5)
+for _ in range(120):
+    if _threading.active_count() <= before:
+        break
+    time.sleep(0.05)
+eq('...and leaves no thread behind', _threading.active_count(), before)
+
+# --- the live view does not stop while a card is being read -----------------
+# The whole point of moving the read off the loop, stated as the property
+# rather than as a number: how long the picture goes without a new frame must
+# not depend on how long a read takes. A read is ~1.4s on a Pi 4, and the
+# picture is what the driver is looking at to decide whether to press Accept.
+
+
+class BlinkCam(FakeCam):
+    """The card comes and goes, so the gate keeps firing."""
+
+    def __init__(self, offer, empty, period=1.6):
+        self.period = period
+        FakeCam.__init__(self, offer, empty)
+
+    def _show(self):
+        t = time.time() - self.started
+        self.frame = self.offer if (t % self.period) < self.period / 2 else self.empty
+        grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
+        small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
+        self.lores = np.concatenate([small.ravel(),
+                                     np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
+
+
+def worst_frame_gap(extra_argv, hold, seconds=9.0):
+    """Longest gap between live-view frames, with a read forced to take `hold`."""
+    import scan_pi as SP
+
+    offer = TC.mount(TC.uberx_screen(), 1200)
+    quad = PL.detect_screen_quad(offer)
+    work = tempfile.mkdtemp()
+    config = os.path.join(work, 'config.json')
+    with open(config, 'w') as fh:
+        json.dump({'quad': [[float(x), float(y)] for x, y in quad],
+                   'cardHeight': 900,
+                   'capture': {'width': CAP[0], 'height': CAP[1]},
+                   'lensPosition': 10.0, 'exposureTime': 16667,
+                   'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30}}, fh)
+
+    # Blinking, not a single appearance: the motion gate fires on the frame a
+    # moving picture settles, so one appearance is one read, and one read lands
+    # inside the warm-up and is not there to be measured.
+    cam = BlinkCam(offer, TC.blank(), period=1.6)
+    stamps = []
+    real_start, real_snap = SP.start_camera, SP.write_snapshot
+    real_sleep = time.sleep
+    real_look, real_watch = PL.Scanner.look_many, SP.WATCH_PATH
+    empty = OP2.parse('')
+
+    def slow_look(self, frames, now=None, geom=None):
+        # A read of a known duration and nothing else. What is being measured
+        # is the loop around it, so the OCR is exactly what must not run.
+        real_sleep(hold)
+        return [{'parsed': dict(empty), 'rate': OP2.rate(empty, {}), 'locked': False,
+                 'text': '', 'clipped': False, 'dropped': 0, 'recovered': 0,
+                 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+                 'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+                for _ in frames]
+
+    SP.start_camera = lambda *a, **k: cam
+    SP.write_snapshot = lambda *a, **k: stamps.append(time.time())
+    PL.Scanner.look_many = slow_look
+    # "Someone is watching" goes stale after ten seconds, and what would then
+    # be measured is the idle interval rather than the read.
+    SP.WATCH_PATH = os.path.join(work, '.viewing')
+    stop = _threading.Event()
+
+    def keep_watching():
+        while not stop.is_set():
+            open(SP.WATCH_PATH, 'w').close()
+            real_sleep(0.5)
+
+    watcher = _threading.Thread(target=keep_watching, daemon=True)
+    watcher.start()
+
+    argv, deadline = sys.argv, time.time() + seconds
+    sys.argv = ['scan_pi', '--config', config, '--json', '--no-journal',
+                '--snapshot', os.path.join(work, 'live.jpg')] + list(extra_argv)
+
+    def bounded(s):
+        if time.time() > deadline:
+            raise KeyboardInterrupt
+        real_sleep(min(s, 0.01))
+
+    time.sleep = bounded
+    try:
+        SP.main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop.set()
+        time.sleep, sys.argv = real_sleep, argv
+        SP.start_camera, SP.write_snapshot = real_start, real_snap
+        PL.Scanner.look_many, SP.WATCH_PATH = real_look, real_watch
+
+    # The first stretch is camera setup and screen detection, which is not what
+    # is being judged.
+    if len(stamps) < 6:
+        return None
+    live = [t for t in stamps if t >= stamps[0] + 1.5]
+    gaps = [b - a for a, b in zip(live, live[1:])]
+    return max(gaps) if gaps else None
+
+
+HOLD = 1.2
+on_loop = worst_frame_gap(['--no-thread'], HOLD)
+beside = worst_frame_gap([], HOLD)
+if on_loop is None or beside is None:
+    print('the live-view timing run produced too few frames — skipping those checks')
+else:
+    ok_('a read on the loop stops the live view for as long as it takes',
+        on_loop > HOLD * 0.8)
+    ok_('...and a read beside it does not stop the picture at all',
+        beside < HOLD * 0.35)
+    ok_('...by a wide margin, not a whisker', beside * 3 < on_loop)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

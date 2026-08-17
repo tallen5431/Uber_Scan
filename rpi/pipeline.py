@@ -945,6 +945,51 @@ def money_is_clipped(lines, image_height):
 MAX_READ_HEIGHT = 2200
 
 
+class Geometry:
+    """The corners and the crop one read is taken against, frozen.
+
+    The read runs on a thread of its own now, while the loop that holds the
+    camera keeps going — and that loop moves the corners. The tracker eases
+    them 35% toward a candidate every 0.4s, a re-lock replaces them outright,
+    and a box drawn on the live view replaces the crop as well. Reading
+    `scanner.quad` from inside the read would mean warping a frame captured at
+    one moment against corners measured at another, which is the one thing a
+    homography must never do: the crop lands somewhere the card is not, and
+    that reads exactly like no offer being on screen.
+
+    So the geometry is taken once, at the moment the frame is handed over, and
+    a read becomes a pure function of (frame, geometry). The two fields a read
+    *measures* — the card's share of the quad, and which way up the ink is —
+    are written here rather than on the Scanner, and folded back by whoever
+    collects the result. One writer, on the thread that owns the loop.
+    """
+
+    __slots__ = ('quad', 'roi', 'fixed_card_share', 'card_share',
+                 'card_height', 'ocr_height', 'dark_mode')
+
+    def __init__(self, quad=None, roi=None, fixed_card_share=None,
+                 card_share=CARD_SHARE, card_height=CARD_HEIGHT,
+                 ocr_height=OCR_CARD_HEIGHT, dark_mode=None):
+        self.quad = quad
+        self.roi = roi
+        self.fixed_card_share = fixed_card_share
+        self.card_share = card_share
+        self.card_height = card_height
+        self.ocr_height = ocr_height
+        self.dark_mode = dark_mode
+
+    @property
+    def crop_box(self):
+        return self.roi if self.roi else centred_roi(self.card_share)
+
+    @property
+    def read_height(self):
+        if not self.ocr_height:
+            return self.card_height
+        return int(min(max(self.card_height, round(self.ocr_height / self.card_share)),
+                       MAX_READ_HEIGHT))
+
+
 class Scanner:
     """Holds the motion gate and the agreement counter across frames."""
 
@@ -991,6 +1036,15 @@ class Scanner:
         self.recovered = 0
         self.locked = False
         self.last = None
+
+    def geometry(self):
+        """A frozen copy of everything a read is taken against. See Geometry."""
+        return Geometry(quad=self.quad, roi=self.roi,
+                        fixed_card_share=self.fixed_card_share,
+                        card_share=self.card_share,
+                        card_height=self.card_height,
+                        ocr_height=self.ocr_height,
+                        dark_mode=self.dark_mode)
 
     @property
     def crop_box(self):
@@ -1060,14 +1114,8 @@ class Scanner:
 
     def read(self, frame, now=None):
         """Full read of one frame, ignoring the motion gate."""
-        out = self._look(frame, now)
-        self._consider(out['parsed'])
-        # After, not during: _look runs before the agreement counter is
-        # updated, so the copy it took is the state as of the *previous* read.
-        # Reporting that would have said "not locked yet" on the very read that
-        # locked, which is the read the spoken verdict waits for.
-        out['locked'] = self.locked
-        return out
+        geom = self.geometry()
+        return self.settle([self._look(frame, now, geom)], geom)[0]
 
     def read_many(self, frames, now=None):
         """Read several frames of the same card at once. Returns one per frame.
@@ -1093,39 +1141,97 @@ class Scanner:
         in frame order, because "two reads said the same thing" has to mean the
         same thing every run.
         """
-        frames = list(frames)
-        if len(frames) == 1:
-            return [self.read(frames[0], now)]
+        geom = self.geometry()
+        return self.settle(self.look_many(frames, now, geom), geom)
 
+    def look_many(self, frames, now=None, geom=None):
+        """The reading half, with nothing in it that another thread owns.
+
+        Safe to call off the loop that holds the camera, which is the point:
+        an OCR pass is 1.4s of a Pi 4 and the live view is frozen for every
+        one of them if the loop waits for it. Pass the geometry captured with
+        the frames — see Geometry — and hand the result to settle() on the
+        thread that owns the Scanner.
+        """
+        frames = list(frames)
+        geom = self.geometry() if geom is None else geom
+        if len(frames) == 1:
+            return [self._look(frames[0], now, geom)]
         with futures.ThreadPoolExecutor(max_workers=len(frames)) as pool:
-            outs = list(pool.map(lambda f: self._look(f, now), frames))
+            return list(pool.map(lambda f: self._look(f, now, geom), frames))
+
+    def settle(self, outs, geom=None):
+        """Fold a batch of readings back into what the Scanner believes.
+
+        In frame order, on one thread, because "two reads said the same thing"
+        has to mean the same thing every run.
+        """
         for out in outs:
             self._consider(out['parsed'])
+            # After, not during: _look runs before the agreement counter is
+            # updated, so the copy it took is the state as of the *previous*
+            # read. Reporting that would have said "not locked yet" on the very
+            # read that locked, which is the read the spoken verdict waits for.
             out['locked'] = self.locked
+            self.dropped += out['dropped']
+            self.recovered += out['recovered']
+        # The two things a read measures rather than is given, brought back to
+        # where the next read will look for them. (The counters above are per
+        # read and added up here for the same reason: two frames read at once
+        # can lose an increment between them, which `self.dropped += 1` inside
+        # the pool quietly could.)
+        #
+        # The card's share is accepted unless somebody *set* it while the read
+        # was running. A read takes over a second, and in that second the driver
+        # can draw a box on the live view or press re-find — both of which pin
+        # the crop and the share deliberately. Folding a measurement taken
+        # against the old crop over the top of that would undo half of what the
+        # button did, and leave the crop somewhere neither the driver nor the
+        # code asked for.
+        #
+        # Deliberately not tested against the quad. The tracker allocates fresh
+        # corners on every ease, so an identity check there would refuse the
+        # measurement on almost every read while tracking is on — and a share
+        # measured against corners a few pixels stale is a better estimate than
+        # one measured a minute ago. The read itself is unaffected either way:
+        # _look measures the share from the frame it was given before it sizes
+        # anything, so a reading is always self-consistent.
+        if geom is not None:
+            if (geom.roi is self.roi
+                    and geom.fixed_card_share == self.fixed_card_share):
+                self.card_share = geom.card_share
+            # Which way up the ink is has nothing to do with the corners: it is
+            # a property of the screen, it is re-decided on every read with the
+            # last answer only as a hint, and it is worth carrying across a
+            # crop that moved.
+            self.dark_mode = geom.dark_mode
         return outs
 
-    def _look(self, frame, now=None):
+    def _look(self, frame, now=None, geom=None):
         """Everything a read does except change what the Scanner believes.
 
-        Split out so several can run at once. Nothing here touches state that
-        another reader could be touching: card_share is recomputed from the
-        quad and the frame, and both readers arrive at the same answer.
+        Split out so several can run at once, and so the whole of it can run on
+        a thread while the camera loop carries on. Nothing here touches state
+        another reader could be touching: the geometry is a snapshot, and the
+        two fields a read measures are written on that snapshot rather than on
+        the Scanner. Both readers of a pair arrive at the same answer for them.
         """
         now = time.time() if now is None else now
+        g = self.geometry() if geom is None else geom
         t0 = time.perf_counter()
-        if self.quad is not None and self.fixed_card_share is None:
+        if g.quad is not None and g.fixed_card_share is None:
             # Before anything is sized, work out what this quad actually is. A
             # tracked quad moves and a re-locked one can change shape, so this
             # is re-measured per read rather than settled once at startup.
-            self.card_share = card_share_of_quad(self.quad, frame.shape)
-        screen = warp(frame, self.quad, self.read_height) if self.quad is not None else frame
+            g.card_share = card_share_of_quad(g.quad, frame.shape)
+        screen = warp(frame, g.quad, g.read_height) if g.quad is not None else frame
         t1 = time.perf_counter()
         # Decided here rather than inside preprocess, and remembered, so two
         # consecutive reads of one still card cannot come back turned opposite
         # ways up — which is what the health line's banding number subtracts.
-        fitted = to_grey(fit_for_ocr(crop(screen, self.crop_box), self.ocr_height))
-        self.dark_mode = is_dark_mode(fitted, was=self.dark_mode)
-        prepped = preprocess(fitted, dark=self.dark_mode)
+        fitted = to_grey(fit_for_ocr(crop(screen, g.crop_box), g.ocr_height))
+        g.dark_mode = is_dark_mode(fitted, was=g.dark_mode)
+        prepped = preprocess(fitted, dark=g.dark_mode)
         t2 = time.perf_counter()
         # Asked for its layout as well as its text, at no extra cost, because
         # where the payout landed is the only way to tell a crop that read
@@ -1145,6 +1251,7 @@ class Scanner:
         # payout AND still agrees about the journey. A second opinion that also
         # rewrites the minutes is not a recovered payout, it is a different
         # reading, and there is nothing here to say which of the two is right.
+        recovered = 0
         if parsed['pay'] is None and parsed['minutes']:
             again, again_lines = ocr_lines(prepped, RECOVER_CONFIG)
             second = OP.parse(again)
@@ -1152,7 +1259,7 @@ class Scanner:
                     and second['minutes'] == parsed['minutes']
                     and second['miles'] == parsed['miles']):
                 text, lines, parsed = again, again_lines, second
-                self.recovered += 1
+                recovered = 1
         t3 = time.perf_counter()
 
         # A payout hard against the cut edge is half a number, and half a
@@ -1164,7 +1271,6 @@ class Scanner:
         clipped = money_is_clipped(lines, prepped.shape[0])
         if clipped:
             parsed = OP.parse('')
-            self.dropped += 1
 
         rate = OP.rate(parsed, self.settings)
         t4 = time.perf_counter()
@@ -1176,7 +1282,11 @@ class Scanner:
             'text': text,
             # Why a read was unsatisfying, for whoever has to explain it later.
             'clipped': clipped,
-            'crop': list(self.crop_box),
+            # Carried out rather than counted in place: settle() adds them up on
+            # one thread. See there.
+            'dropped': 1 if clipped else 0,
+            'recovered': recovered,
+            'crop': list(g.crop_box),
             # The exact picture the reader was given, so a caller can measure how
             # bright it was and whether it was rippling.
             'card': prepped,

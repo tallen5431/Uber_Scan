@@ -16,8 +16,10 @@ mid-offer costs more time than the OCR does.
 import argparse
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 
 import cv2
@@ -156,6 +158,105 @@ VERIFY_EVERY = 2.5
 # written for costs exactly what it did before: one beat.
 VERIFY_BACKOFF = 1.6
 VERIFY_MAX = 12.0
+
+
+class Reader:
+    """The OCR, moved off the loop that holds the camera.
+
+    A read is about 1.4 seconds on a Pi 4, 91% of it inside tesseract, and for
+    all of that the loop below used to be doing nothing whatever: no capture
+    requests serviced, so no frames written for the live view — the picture the
+    driver is looking at to decide whether to press Accept freezes for a second
+    and a half, every time, and it freezes hardest exactly when there is an
+    offer on screen to look at.
+
+    It cost more than the picture. The tracker's 0.4s recheck could not run
+    either, and that recheck is what corrects corners the read is about to use.
+    The loop already knew: "a read costs several hundred milliseconds during
+    which nothing else in this loop runs — including the tracker, whose recheck
+    is what would fix the corners", and a rig on record reached its verdict
+    after 5.7 seconds and eight reads, seven of them of a rectangle that was
+    being replaced.
+
+    So the read moves to a thread and the loop keeps its camera. What makes
+    that safe is that the two halves were already separable: `look_many` is a
+    pure function of the frames and a frozen Geometry, and `settle` — the
+    agreement counter, the measured card share, which way up the ink is —
+    stays on the loop's thread, in frame order, exactly as before. Nothing is
+    shared but a queue.
+
+    One read at a time. Two would be two tesseract instances fighting over a
+    Pi's four cores, which is the same mistake as an unpinned OMP_THREAD_LIMIT
+    and costs as much.
+    """
+
+    def __init__(self, scanner, threaded=True):
+        self.scanner = scanner
+        self.threaded = threaded
+        self.busy = False
+        self._work = queue.Queue(maxsize=1)
+        self._done = queue.Queue()
+        self._stop = threading.Event()
+        self._thread = None
+        if threaded:
+            self._thread = threading.Thread(target=self._serve, name='reader',
+                                            daemon=True)
+            self._thread.start()
+
+    def submit(self, frames, now, geom):
+        """Hand over frames to read. Call only when not busy."""
+        self.busy = True
+        if not self.threaded:
+            self._done.put(self._job(frames, now, geom))
+            return
+        self._work.put((frames, now, geom))
+
+    def take(self):
+        """The finished read, or None if there is not one yet.
+
+        Returns a dict with `outs` (settled, in frame order), `frames`, and
+        `error` — never raises, because a read is the one part of this loop
+        that touches an external engine and a rig that dies on one bad frame
+        costs a minute of not scanning.
+        """
+        try:
+            done = self._done.get_nowait()
+        except queue.Empty:
+            return None
+        self.busy = False
+        if done['error'] is None:
+            # On the loop's thread, deliberately. See Scanner.settle.
+            done['outs'] = self.scanner.settle(done['outs'], done['geom'])
+        return done
+
+    def _job(self, frames, now, geom):
+        try:
+            return {'outs': self.scanner.look_many(frames, now, geom=geom),
+                    'geom': geom, 'frames': frames, 'error': None}
+        except BaseException as e:                 # noqa: BLE001 — see take()
+            return {'outs': None, 'geom': geom, 'frames': frames, 'error': e}
+
+    def _serve(self):
+        while not self._stop.is_set():
+            try:
+                job = self._work.get(timeout=0.25)
+            except queue.Empty:
+                continue
+            if job is None:
+                return
+            self._done.put(self._job(*job))
+
+    def close(self):
+        self._stop.set()
+        if self._thread is None:
+            return
+        try:
+            self._work.put_nowait(None)
+        except queue.Full:
+            pass
+        # Bounded: the camera is being closed either way, and a reader still
+        # inside tesseract must not be what stops the process exiting.
+        self._thread.join(timeout=3.0)
 
 
 def next_verify(every, was, now, card_on_screen):
@@ -693,6 +794,11 @@ def main():
                          'of the wall clock for the same evidence')
     ap.add_argument('--no-track', action='store_true',
                     help='never re-find the phone; use the calibrated corners exactly')
+    ap.add_argument('--no-thread', action='store_true',
+                    help='read on the camera loop instead of beside it. The '
+                         'default keeps the live view and the corner tracking '
+                         'running through a read; this is the way back if a '
+                         'rig ever misbehaves with it')
     args = ap.parse_args()
 
     if args.list_modes:
@@ -810,9 +916,12 @@ def main():
            '' if tracker is not None else
            (', reading a box set by hand — corner tracking OFF' if manual
             else ', corner tracking OFF')))
-    log('setup: reads %s'
+    log('setup: reads %s, %s'
         % ('paired — the confirming frame is read alongside the first'
-           if pair_reads else 'one at a time (--no-parallel)'))
+           if pair_reads else 'one at a time (--no-parallel)',
+           'beside the camera loop, which keeps the live view and the corner '
+           'tracking going through one' if not args.no_thread
+           else 'on the camera loop (--no-thread)'))
     log('setup: exposure %dus (%s), gain %.2f (%s)'
         % (exposure_us,
            'a whole number of 60/120/240Hz cycles, so the screen should not band'
@@ -838,6 +947,11 @@ def main():
     verify_signature = None
     card_on_screen = False
     settled_on = None
+    # A read the gate asked for while the reader was still busy with the last
+    # one. Remembered rather than dropped: the gate fires once, on the frame a
+    # moving picture settles, so a trigger thrown away is a card never read.
+    read_wanted = False
+    reader = Reader(scanner, threaded=not args.no_thread)
 
     # Every offer the scanner is sure of, kept so a shift can be looked at
     # afterwards. Seeded from the file rather than from nothing: the scanner is
@@ -854,8 +968,198 @@ def main():
         log('journal: %s (%d offer%s so far)%s'
             % (args.journal, len(kept), '' if len(kept) == 1 else 's',
                ', still on the last one' if resumed else ''))
+    def digest(out, frame):
+        """Everything a read means, once the reading itself is done.
+
+        On the loop's thread, always — the accumulator, the journal, the voice
+        and the agreement counter are all order-sensitive, and none of them is
+        what made a read expensive. Only the OCR moved. Returns True when the
+        driver has asked the display window to close.
+        """
+        # Everything below that outlives one read. A name missed here becomes a
+        # local, silently, and the state it was carrying stops carrying — which
+        # is how a loop rewritten into a closure loses its memory without
+        # anything failing loudly enough to notice.
+        nonlocal failures, settled_on, resample_until, card_on_screen
+        nonlocal verify_every, verify_signature, last_verify, previous_card
+        nonlocal last_sample, spoke_for
+        parsed = accumulator.add(out['parsed'])
+        # The clock, for a delivery card that states a deadline instead of
+        # a duration. Passed in rather than read inside the parser, which
+        # has to stay a pure function of the text it was given so it can be
+        # held to a fixed corpus.
+        settings = dict(cfg.get('settings', {}))
+        minutes_now = clock_minutes()
+        if minutes_now is not None:
+            settings['nowMinutes'] = minutes_now
+        rate = OP.rate(parsed, settings)
+        out['parsed'], out['rate'] = parsed, rate
+        # Anything with a payout is worth a second look; anything without is
+        # not an offer and should not hold the loop open.
+        #
+        # But a second look is all it takes once the reading is whole — a
+        # total, or both legs of a two-leg card — and two reads running have
+        # said the same thing. Sampling on past that point re-reads a card
+        # nothing more can be learned from, which on a Pi is several seconds
+        # of a small computer's whole attention. What keeps sampling is the
+        # case that needs it: a single leg that is not a total, which is
+        # exactly the shape of a card with a leg still missing.
+        # Counted here because the Scanner stopped counting when the crop
+        # stopped moving, and the log line that says "N in a row" is the
+        # one that tells a bad frame from a broken mount. It had been
+        # printing 0 every time, on every rig.
+        failures = 0 if parsed['complete'] else failures + 1
+
+        signature = (parsed['pay'], parsed['minutes'], parsed['miles'])
+        whole = parsed['complete'] and (parsed.get('hasTotal')
+                                        or (parsed.get('legs') or 0) >= 2)
+        # Two different questions, kept apart.
+        #
+        # `stable` is the merged reading holding still across two reads, and
+        # nothing else — which is what the journal's field of that name says
+        # it stores. It has to be taken here because `settled_on` is
+        # overwritten a few lines below; asking again after the overwrite
+        # compares the signature with itself and is true on every read, so
+        # every row was being stored as settled and the flag said nothing.
+        #
+        # Whether to STOP resampling is a stricter question: a reading that
+        # holds still while a leg is still missing has not finished, it has
+        # only stopped changing. Conjoining the two into the stored flag
+        # made it redundant with `whole` instead of independent of it.
+        stable = signature == settled_on
+        # Whether there is still a card in front of the camera, which is
+        # what the slow beat above is gated on. Taken from the payout rather
+        # than from `complete`, because a card whose journey was lost is
+        # still a card and is exactly the reading worth looking at again.
+        card_on_screen = parsed.get('pay') is not None
+        if not card_on_screen:
+            last_verify = 0.0
+        # The same card saying the same thing needs looking at less often
+        # the longer it goes on saying it. Anything different — a
+        # replacement offer, a leg that finally read, a figure that moved —
+        # drops straight back to the fast beat, which is the case this
+        # whole mechanism exists for.
+        verify_every, verify_signature = next_verify(
+            verify_every, verify_signature, signature, card_on_screen)
+
+        if whole and stable:
+            resample_until = 0.0
+        elif parsed.get('pay'):
+            resample_until = time.time() + RESAMPLE_WINDOW
+        settled_on = signature
+        health.add(out, parsed, out.get('card'), previous_card)
+        previous_card = out.get('card')
+
+        # When a read comes back wrong, the one thing worth having is what
+        # the reader actually saw. Rate limited, because a screen with no
+        # offer on it fails constantly and correctly.
+        now = time.time()
+        if not parsed['complete'] and (now - last_sample) > SAMPLE_EVERY:
+            last_sample = now
+            why = ('the payout sat against the top edge of the crop'
+                   if out.get('clipped') else
+                   'no payout in the crop' if parsed['pay'] is None else
+                   'a payout but no journey')
+            log('read %d found nothing usable (%s, %d in a row). Reader saw: %r'
+                % (frames, why, failures,
+                   (out.get('text') or '').strip()[:220]))
+        health.report(now, tracker, scanner)
+
+        if args.json:
+            emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole)
+        else:
+            show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
+
+        if args.save_misses and not parsed['complete']:
+            cv2.imwrite(os.path.join(args.save_misses, 'miss-%d.png' % int(time.time())), frame)
+
+        # Speak once per offer, never per frame — and only once the
+        # reading is *whole*.
+        #
+        # `locked` means two consecutive raw frames parsed the same, which
+        # is not the same claim: two frames that both lose the pickup leg
+        # to the same glare agree perfectly with each other. The loop
+        # already computes `whole` for exactly this distinction and uses it
+        # to decide whether to keep resampling; speaking before it is
+        # announcing a number the scanner is still in the middle of
+        # correcting, and a two-leg card missing a leg reads as a much
+        # better offer than it is.
+        if args.speak and out['locked'] and whole and rate['ready']:
+            sig = (parsed['pay'], parsed['minutes'])
+            if sig != spoke_for:
+                spoke_for = sig
+                say(spoken(rate))
+        if not rate['ready']:
+            spoke_for = None
+
+        # Keep the offer. Same confidence the spoken verdict uses, so the
+        # file and the voice can never disagree about what was read.
+        #
+        # Unlike `spoke_for`, nothing here is cleared by a read that came
+        # back empty. Clearing on a bad read is right for speech — the next
+        # card should be announced even if it pays the same — but it is
+        # wrong for a file: a clipped payout parses as nothing at all, so
+        # one glare frame during the resample burst would re-arm the gate
+        # and record the same card twice. What separates one offer from the
+        # next here is the accumulator's own episode, which is the thing
+        # that actually knows.
+        #
+        # Whether the reading had settled is recorded rather than required.
+        # A card whose OCR never holds still is the marginal reading most
+        # worth studying afterwards, and refusing to write it would leave
+        # the hardest offers missing with nothing to say so.
+        #
+        # `whole` is recorded rather than required, for the same reason
+        # `settled` is. Requiring it dropped two real shapes without a
+        # word: a single-leg card whose "total" the reader mangled, and a
+        # two-leg card no single frame ever caught both halves of. Those
+        # readings are optimistic — a card's first leg alone looks like a
+        # much better job than the card is — so they must not reach a
+        # median. But dropping them makes the offer *vanish*, and a gap
+        # nothing accounts for is the worst thing to find in a file being
+        # read back months later. Written and flagged: the page sets them
+        # aside and says how many, and if a later frame does see the card
+        # whole it supersedes the partial row anyway.
+        if offer_log is not None and rate['ready'] and out['locked']:
+            offer_log.consider(parsed, rate, ms=out['ms']['total'],
+                               locked=out['locked'], whole=whole,
+                               settled=stable)
+
+        if args.display:
+            cv2.imshow('uber-scan', render_panel(rate, parsed))
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                return True
+        return False
+
+    def collect():
+        """Take a finished read, if there is one, and act on it."""
+        done = reader.take()
+        if done is None:
+            return False
+        if done['error'] is not None:
+            # A read is the one part of this loop that touches an external
+            # engine, a homography and a JPEG encoder, and any of them can
+            # throw on one bad frame: a degenerate quad, a tesseract
+            # invocation that fails, a full disk. Killing the process for it
+            # means the supervisor's backoff, a camera re-open, and roughly a
+            # minute of not scanning — for a frame that would have been
+            # replaced 30ms later.
+            _read_failed(done['error'])
+            return False
+        batch = done['outs']
+        # The earlier frame's reading is evidence too: the accumulator merges
+        # partial reads, and a leg lost to glare in one frame is often present
+        # in the other.
+        for earlier in batch[:-1]:
+            accumulator.add(earlier['parsed'])
+        return digest(batch[-1], done['frames'][0])
+
     try:
         while True:
+            # A read that finished while the camera kept running. Taken here,
+            # at the top, because everything below can `continue` past it.
+            if collect():
+                break
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate
@@ -1093,6 +1397,22 @@ def main():
                 if do_read and not moved and tracker is not None \
                         and tracker.disputing(now):
                     do_read = False
+
+                # One read at a time, and never a trigger thrown away.
+                #
+                # Two reads at once would be four tesseract instances on a Pi's
+                # four cores, which is the same mistake as an unpinned
+                # OMP_THREAD_LIMIT and costs as much. But the motion gate fires
+                # exactly once — on the frame where a moving picture settles —
+                # so a trigger dropped because the reader was busy is a card
+                # that is never read at all. It is remembered instead, and
+                # taken on the first frame the reader is free, which is a
+                # slightly later and slightly fresher frame of the same card.
+                if do_read and reader.busy:
+                    read_wanted, do_read = True, False
+                elif read_wanted and not reader.busy:
+                    read_wanted, do_read = False, True
+
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.
                 due = args.snapshot and (now - last_snapshot) > snapshot_interval()
@@ -1122,21 +1442,13 @@ def main():
             finally:
                 request.release()
 
-            # A verdict needs two reads that agree, so when one is due, take
-            # the frame after it as well and read both at once. The sensor is
-            # already producing them 33ms apart, and two reads together cost
-            # 56% of two in a row — so the confirmation stops costing a second
-            # of wall clock while an offer is timing out. It is the same
-            # evidence, gathered at the same time instead of one after the
-            # other. --no-parallel falls back to one at a time.
-            partner = None
-            if do_read and pair_reads:
-                partner_request = cam.capture_request()
-                try:
-                    partner = partner_request.make_array('main')
-                finally:
-                    partner_request.release()
-
+            # Before the partner capture below, not after it. Waiting for the
+            # next sensor frame and copying twelve megabytes of it is the
+            # longest thing left on this loop now that the reading has moved
+            # off — measured, it was the whole difference between a worst-case
+            # 61ms gap in the live view and a 113ms one. The picture costs the
+            # same either way; it just arrives at the start of that stretch
+            # instead of at the end of it.
             if args.snapshot and (due or do_read):
                 write_snapshot(frame, cfg, args.snapshot, quad=scanner.quad,
                                roi=scanner.crop_box, card=previous_card,
@@ -1146,175 +1458,36 @@ def main():
             if not do_read:
                 continue
 
+            # A verdict needs two reads that agree, so when one is due, take
+            # the frame after it as well and read both at once. The sensor is
+            # already producing them 33ms apart, and two reads together cost
+            # 56% of two in a row — so the confirmation stops costing a second
+            # of wall clock while an offer is timing out. It is the same
+            # evidence, gathered at the same time instead of one after the
+            # other. --no-parallel falls back to one at a time.
+            partner = None
+            if pair_reads:
+                partner_request = cam.capture_request()
+                try:
+                    partner = partner_request.make_array('main')
+                finally:
+                    partner_request.release()
+
             frames += 1
-            try:
-                batch = scanner.read_many(
-                    [frame] if partner is None else [frame, partner], now=time.time())
-                out = batch[-1]
-                # The earlier frame's reading is evidence too: the accumulator
-                # merges partial reads, and a leg lost to glare in one frame is
-                # often present in the other.
-                for earlier in batch[:-1]:
-                    accumulator.add(earlier['parsed'])
-            except Exception as e:
-                # A read is the one part of this loop that touches an external
-                # engine, a homography and a JPEG encoder, and any of them can
-                # throw on one bad frame: a degenerate quad, a tesseract
-                # invocation that fails, a full disk. Killing the process for
-                # it means the supervisor's backoff, a camera re-open, and
-                # roughly a minute of not scanning — for a frame that would
-                # have been replaced 30ms later.
-                _read_failed(e)
-                continue
-            parsed = accumulator.add(out['parsed'])
-            # The clock, for a delivery card that states a deadline instead of
-            # a duration. Passed in rather than read inside the parser, which
-            # has to stay a pure function of the text it was given so it can be
-            # held to a fixed corpus.
-            settings = dict(cfg.get('settings', {}))
-            minutes_now = clock_minutes()
-            if minutes_now is not None:
-                settings['nowMinutes'] = minutes_now
-            rate = OP.rate(parsed, settings)
-            out['parsed'], out['rate'] = parsed, rate
-            # Anything with a payout is worth a second look; anything without is
-            # not an offer and should not hold the loop open.
-            #
-            # But a second look is all it takes once the reading is whole — a
-            # total, or both legs of a two-leg card — and two reads running have
-            # said the same thing. Sampling on past that point re-reads a card
-            # nothing more can be learned from, which on a Pi is several seconds
-            # of a small computer's whole attention. What keeps sampling is the
-            # case that needs it: a single leg that is not a total, which is
-            # exactly the shape of a card with a leg still missing.
-            # Counted here because the Scanner stopped counting when the crop
-            # stopped moving, and the log line that says "N in a row" is the
-            # one that tells a bad frame from a broken mount. It had been
-            # printing 0 every time, on every rig.
-            failures = 0 if parsed['complete'] else failures + 1
+            # Handed over rather than done here. The geometry goes with the
+            # frames — see PL.Geometry — because by the time the read finishes
+            # the tracker may well have moved the corners, and a frame warped
+            # against corners measured after it was captured lands the crop
+            # somewhere the card is not.
+            reader.submit([frame] if partner is None else [frame, partner],
+                          time.time(), scanner.geometry())
+            if not reader.threaded and collect():
+                break
 
-            signature = (parsed['pay'], parsed['minutes'], parsed['miles'])
-            whole = parsed['complete'] and (parsed.get('hasTotal')
-                                            or (parsed.get('legs') or 0) >= 2)
-            # Two different questions, kept apart.
-            #
-            # `stable` is the merged reading holding still across two reads, and
-            # nothing else — which is what the journal's field of that name says
-            # it stores. It has to be taken here because `settled_on` is
-            # overwritten a few lines below; asking again after the overwrite
-            # compares the signature with itself and is true on every read, so
-            # every row was being stored as settled and the flag said nothing.
-            #
-            # Whether to STOP resampling is a stricter question: a reading that
-            # holds still while a leg is still missing has not finished, it has
-            # only stopped changing. Conjoining the two into the stored flag
-            # made it redundant with `whole` instead of independent of it.
-            stable = signature == settled_on
-            # Whether there is still a card in front of the camera, which is
-            # what the slow beat above is gated on. Taken from the payout rather
-            # than from `complete`, because a card whose journey was lost is
-            # still a card and is exactly the reading worth looking at again.
-            card_on_screen = parsed.get('pay') is not None
-            if not card_on_screen:
-                last_verify = 0.0
-            # The same card saying the same thing needs looking at less often
-            # the longer it goes on saying it. Anything different — a
-            # replacement offer, a leg that finally read, a figure that moved —
-            # drops straight back to the fast beat, which is the case this
-            # whole mechanism exists for.
-            verify_every, verify_signature = next_verify(
-                verify_every, verify_signature, signature, card_on_screen)
-
-            if whole and stable:
-                resample_until = 0.0
-            elif parsed.get('pay'):
-                resample_until = time.time() + RESAMPLE_WINDOW
-            settled_on = signature
-            health.add(out, parsed, out.get('card'), previous_card)
-            previous_card = out.get('card')
-
-            # When a read comes back wrong, the one thing worth having is what
-            # the reader actually saw. Rate limited, because a screen with no
-            # offer on it fails constantly and correctly.
-            now = time.time()
-            if not parsed['complete'] and (now - last_sample) > SAMPLE_EVERY:
-                last_sample = now
-                why = ('the payout sat against the top edge of the crop'
-                       if out.get('clipped') else
-                       'no payout in the crop' if parsed['pay'] is None else
-                       'a payout but no journey')
-                log('read %d found nothing usable (%s, %d in a row). Reader saw: %r'
-                    % (frames, why, failures,
-                       (out.get('text') or '').strip()[:220]))
-            health.report(now, tracker, scanner)
-
-            if args.json:
-                emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole)
-            else:
-                show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
-
-            if args.save_misses and not parsed['complete']:
-                cv2.imwrite(os.path.join(args.save_misses, 'miss-%d.png' % int(time.time())), frame)
-
-            # Speak once per offer, never per frame — and only once the
-            # reading is *whole*.
-            #
-            # `locked` means two consecutive raw frames parsed the same, which
-            # is not the same claim: two frames that both lose the pickup leg
-            # to the same glare agree perfectly with each other. The loop
-            # already computes `whole` for exactly this distinction and uses it
-            # to decide whether to keep resampling; speaking before it is
-            # announcing a number the scanner is still in the middle of
-            # correcting, and a two-leg card missing a leg reads as a much
-            # better offer than it is.
-            if args.speak and out['locked'] and whole and rate['ready']:
-                sig = (parsed['pay'], parsed['minutes'])
-                if sig != spoke_for:
-                    spoke_for = sig
-                    say(spoken(rate))
-            if not rate['ready']:
-                spoke_for = None
-
-            # Keep the offer. Same confidence the spoken verdict uses, so the
-            # file and the voice can never disagree about what was read.
-            #
-            # Unlike `spoke_for`, nothing here is cleared by a read that came
-            # back empty. Clearing on a bad read is right for speech — the next
-            # card should be announced even if it pays the same — but it is
-            # wrong for a file: a clipped payout parses as nothing at all, so
-            # one glare frame during the resample burst would re-arm the gate
-            # and record the same card twice. What separates one offer from the
-            # next here is the accumulator's own episode, which is the thing
-            # that actually knows.
-            #
-            # Whether the reading had settled is recorded rather than required.
-            # A card whose OCR never holds still is the marginal reading most
-            # worth studying afterwards, and refusing to write it would leave
-            # the hardest offers missing with nothing to say so.
-            #
-            # `whole` is recorded rather than required, for the same reason
-            # `settled` is. Requiring it dropped two real shapes without a
-            # word: a single-leg card whose "total" the reader mangled, and a
-            # two-leg card no single frame ever caught both halves of. Those
-            # readings are optimistic — a card's first leg alone looks like a
-            # much better job than the card is — so they must not reach a
-            # median. But dropping them makes the offer *vanish*, and a gap
-            # nothing accounts for is the worst thing to find in a file being
-            # read back months later. Written and flagged: the page sets them
-            # aside and says how many, and if a later frame does see the card
-            # whole it supersedes the partial row anyway.
-            if offer_log is not None and rate['ready'] and out['locked']:
-                offer_log.consider(parsed, rate, ms=out['ms']['total'],
-                                   locked=out['locked'], whole=whole,
-                                   settled=stable)
-
-            if args.display:
-                cv2.imshow('uber-scan', render_panel(rate, parsed))
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
+        reader.close()
         cam.stop()
         cam.close()
         if args.display:

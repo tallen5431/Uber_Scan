@@ -692,6 +692,72 @@ one._agree = 1
 out = one.read(blank, now=3.0)
 eq('the reported lock is current', out['locked'], one.locked)
 
+# --- a read taken beside the loop, against frozen corners -------------------
+# The read now runs on a thread while the loop that holds the camera keeps
+# going, and that loop moves the corners. So a read is a pure function of the
+# frames and a Geometry taken when they were captured, and what it measures is
+# folded back afterwards by whoever owns the Scanner.
+geo = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=200, ocr_height=0)
+snap = geo.geometry()
+eq('the snapshot carries the crop', list(snap.crop_box), [0.0, 0.0, 1.0, 1.0])
+eq('...and the warp height', snap.read_height, geo.read_height)
+snap.card_share = 0.9
+eq('...and changing it does not reach back into the Scanner', geo.card_share,
+   PL.CARD_SHARE)
+
+# Moving the corners mid-read must not change the read in flight: the frame was
+# captured against the corners that came with it.
+moving = PL.Scanner(quad=None, roi=[0.0, 0.0, 1.0, 1.0], card_height=200, ocr_height=0)
+held = moving.geometry()
+looked = moving.look_many([blank], now=4.0, geom=held)
+moving.roi = [0.1, 0.1, 0.5, 0.5]                 # the loop, while that ran
+eq('a reading is one per frame however it was taken', len(looked), 1)
+eq('...taken against the crop it was handed', looked[0]['crop'], [0.0, 0.0, 1.0, 1.0])
+
+# What a read measures is only accepted if the geometry it measured against is
+# still in use. A driver can draw a box on the live view during the second a
+# read takes, and folding a stale measurement over the top of that would undo
+# half of what the button did.
+drawn = PL.Scanner(quad=None, card_height=200, ocr_height=0)
+stale = drawn.geometry()
+stale.card_share = 0.42                            # as if measured mid-read
+drawn.roi = [0.0, 0.0, 1.0, 1.0]                   # the driver, meanwhile
+drawn.fixed_card_share = 1.0
+drawn.card_share = 1.0
+drawn.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0}], stale)
+eq('a box drawn during a read survives the read landing', drawn.card_share, 1.0)
+eq('...and so does the crop it pinned', drawn.roi, [0.0, 0.0, 1.0, 1.0])
+
+# With nothing moved, the measurement is exactly what the next read should use.
+steady = PL.Scanner(quad=None, card_height=200, ocr_height=0)
+fresh = steady.geometry()
+fresh.card_share = 0.42
+fresh.dark_mode = True
+steady.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0}], fresh)
+eq('an undisturbed measurement is kept', steady.card_share, 0.42)
+eq('...along with which way up the ink was', steady.dark_mode, True)
+
+# ...and corners that merely drifted are not "somebody moved it". The tracker
+# eases 35% toward its candidate every 0.4s and allocates a fresh array each
+# time, so refusing the measurement on that would refuse it on nearly every
+# read while tracking is on.
+eased = PL.Scanner(quad=[[0, 0], [10, 0], [10, 20], [0, 20]], card_height=200,
+                   ocr_height=0)
+drifted = eased.geometry()
+drifted.card_share = 0.37
+eased.quad = np.asarray([[1, 0], [11, 0], [11, 20], [1, 20]], dtype=np.float32)
+eased.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0}], drifted)
+eq('corners easing along does not throw the measurement away',
+   eased.card_share, 0.37)
+
+# The counters are per read and added up on one thread, so two frames read at
+# once cannot lose an increment between them.
+counted = PL.Scanner(quad=None, card_height=200, ocr_height=0)
+counted.settle([{'parsed': {'complete': False}, 'dropped': 1, 'recovered': 0},
+                {'parsed': {'complete': False}, 'dropped': 1, 'recovered': 1}])
+eq('both dropped frames are counted', counted.dropped, 2)
+eq('...and the recovered payout', counted.recovered, 1)
+
 # --- a box drawn by hand reads what is inside it ---------------------------
 #
 # The whole point of letting a driver draw the box is the case where nothing

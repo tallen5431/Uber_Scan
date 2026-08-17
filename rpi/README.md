@@ -233,6 +233,7 @@ Not from tuning the OCR engine. From refusing to run it:
 | **Track on the small stream** | Re-finding the corners uses the 640×480 luma the motion gate already has, not a shrunk-down sensor frame: **0.96ms against 6.98ms**, almost all of the difference being the shrinking. It also means tracking needs no full-resolution capture at all, so it keeps working at full rate while the scanner is otherwise idle. |
 | **Confirm in parallel, not in series** | A verdict waits for two reads that agree, and that confirmation earns its keep: over rippling, soft, glared and dim frames, one read claiming a whole offer was **wrong 1 time in 36**, and two agreeing were wrong none. So the checking is not what gets shortened — the waiting is. The frame after the trigger is captured too and both are read at once, which measured **56% of the cost of two in a row** and halves the time to a verdict for exactly the same evidence. Requires `OMP_THREAD_LIMIT=1`, which scan_pi sets: unpinned, two tesseract instances fight over all four cores and the same pair took **46 seconds** against 435ms. `--no-parallel` goes back to one at a time. |
 | **Stop when there is nothing left to learn** | Sampling continues after a card appears so a leg missed by one frame can be caught by the next — but it stops as soon as the reading is *whole* (a total, or both legs of a two-leg card) and two reads running agree. In a 30-frame run over one offer that is 2 reads instead of 9. What keeps sampling is the case that needs it: a single leg that is not a total, which is the shape of a card with a leg still missing. |
+| **Do not hold the camera while reading** | The read ran inline, so for its ~1.4s the loop serviced no capture requests: the live view froze, and the tracker's 0.4s recheck — the thing that corrects the corners the *next* read will use — could not run either. It now runs on a thread, with the geometry frozen and handed over alongside the frames so a read is a pure function of the two. Measured with the read pinned at 1.2s, the worst gap between live-view frames goes **1220ms → 67ms**, and the second number does not contain the read at all: it is the loop's own slowest step, so it stays put as the read gets slower. `--no-thread` is the way back. See [The read does not hold the camera](#the-read-does-not-hold-the-camera). |
 
 ...and then one place where it is worth spending, in the opposite direction:
 
@@ -301,10 +302,9 @@ nothing happening. So the only way to know the verdict on screen still belongs
 to the card in front of the driver is to look, on a timer.
 
 That timer used to be a flat 2.5s. At ~1.4s a read on a Pi 4, that is **56% of
-wall clock inside tesseract** for as long as an offer sits there, and the live
-view is frozen for every one of those reads — which is the picture the driver is
-using to decide. It also bought almost nothing: the recording above spends
-seventy seconds re-reading a card that says the same thing every time.
+wall clock inside tesseract** for as long as an offer sits there. It also bought
+almost nothing: the recording above spends seventy seconds re-reading a card
+that says the same thing every time.
 
 So the beat **backs off while nothing changes** — ×1.6 per identical read, up to
 a 12s ceiling — and snaps straight back to 2.5s the instant a reading differs or
@@ -313,6 +313,57 @@ before, one beat; the case it was wasting on settles at **12% duty instead of
 56%**. The ceiling is reached after four identical reads running (2.5 → 4.0 →
 6.4 → 10.2 → 12.0), and it is also the worst case for how long a replacement
 offer can sit unnoticed.
+
+### The read does not hold the camera
+
+Cutting how *often* a read happens does nothing about what happens *during* one,
+and that was the worse half. The read ran inline in the loop that holds the
+camera, so for its whole duration no capture request was serviced: the live view
+stopped, and it stopped hardest exactly when there was an offer on screen to look
+at. It cost more than the picture — the tracker's 0.4s recheck could not run
+either, and that recheck is what corrects the corners the *next* read will use.
+The loop already knew, in a comment: a rig on record reached its verdict after
+5.7 seconds and eight reads, seven of them of a rectangle that was being replaced.
+
+The read now runs on a thread of its own and the loop keeps its camera. What
+makes that safe is that the two halves were already separable:
+
+* **`look_many(frames, now, geom)`** is the reading, and is a pure function of
+  the frames and a frozen `Geometry` — the corners, the crop, the card's share
+  of the quad, which way up the ink is. The geometry travels *with* the frames,
+  because by the time a read finishes the tracker may well have eased the
+  corners along, and a frame warped against corners measured after it was
+  captured lands the crop where the card is not.
+* **`settle(outs, geom)`** is everything the Scanner believes — the agreement
+  counter, the measured card share, the dropped and recovered tallies — and it
+  stays on the loop's thread, in frame order, exactly as before. So "two reads
+  said the same thing" still means the same thing every run.
+
+Measured through the real loop over a fake camera, with the read held at a fixed
+1.2s, worst gap between live-view frames:
+
+| | worst gap |
+| --- | --- |
+| read on the loop (`--no-thread`) | **1220ms** — the read, exactly |
+| read beside it (default) | **67ms** — one and a half frames |
+
+The point is not the ratio, it is that the second number **does not contain the
+read at all**. It is the loop's own slowest step, so it stays where it is when
+the read gets slower; on a Pi 4, where a read is ~1.4s rather than the ~200ms of
+the machine these numbers came from, the first row grows and the second does not.
+
+Two smaller things fell out of measuring it. One read at a time, always — two
+would be four tesseract instances on four cores, the same mistake as an unpinned
+`OMP_THREAD_LIMIT` and about as expensive — so a motion-gate trigger arriving
+while the reader is busy is *remembered* rather than dropped; the gate fires once
+per settling, and a dropped trigger is a card never read. And the live-view frame
+is now written **before** the paired partner capture rather than after: waiting
+for the next sensor frame and copying twelve megabytes of it is the longest thing
+left on the loop, and that one reordering took the worst gap from 113ms to 67ms.
+
+`--no-thread` puts the read back on the loop. Nothing needs it; it is there
+because a threading change to the loop that holds the camera should ship with a
+way back.
 
 Card height 900 with the card crop and a 900px read size is the recommended
 starting point: near the floor for speed, with real margin before reading
@@ -1536,7 +1587,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 17 suites, 1642 checks
+npm test                # all 17 suites, 1686 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1556,7 +1607,7 @@ node tests/advice.test.js       #  64 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 300 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  68 on merging readings across frames
-python3 rpi/test_pipeline.py    # 180 on where to look, how big, and what to log
+python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    #  84 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
 python3 rpi/test_journal.py     #  54 on keeping one row per offer
@@ -1564,7 +1615,7 @@ python3 rpi/test_repeats.py     #  36 on one card read many times
 python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     #  77 on the loop that holds the camera
+python3 rpi/test_scan_pi.py     # 109 on the loop that holds the camera
 python3 rpi/test_sync.py        #  67 on getting the offers off the car
 python3 rpi/test_liveview.py    #  18 on the picture the driver watches
 ```
