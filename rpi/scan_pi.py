@@ -234,6 +234,25 @@ class Reader:
             return {'outs': self.scanner.look_many(frames, now, geom=geom),
                     'geom': geom, 'frames': frames, 'error': None}
         except BaseException as e:                 # noqa: BLE001 — see take()
+            # ...except the two that are not a failed read at all.
+            #
+            # Under --no-thread this runs on the loop's own thread, and a
+            # KeyboardInterrupt or the SystemExit that _stop_on_sigterm raises
+            # for a SIGTERM lands right here — a read is over a second long, so
+            # that is where a stop signal usually lands. Reporting it as a read
+            # failure means the log says "read failed: SystemExit" once, the
+            # rate limiter silences every one after it, and the loop carries on
+            # holding the camera until the supervisor gives up and SIGKILLs it
+            # — skipping cam.close() and the atexit that clears the scratch
+            # file in /dev/shm, which is the exact leak that handler exists to
+            # prevent. Ctrl-C behaves the same: it does nothing, silently.
+            #
+            # On the reader thread there is no such case. Signals are delivered
+            # to the main thread only, and there is nothing above this to
+            # unwind to: letting anything out would kill the reader, leaving
+            # `busy` stuck True and the rig alive but never reading again.
+            if not self.threaded and not isinstance(e, Exception):
+                raise
             return {'outs': None, 'geom': geom, 'frames': frames, 'error': e}
 
     def _serve(self):
@@ -1380,17 +1399,29 @@ def main():
                     do_read = True
                     last_verify = now
 
+                # ...and a trigger that was held back while the reader was busy.
+                #
+                # Taken here, above the gate below rather than under it, so a
+                # deferred read goes through exactly the same checks a fresh one
+                # does. Held back a few lines lower, it would be the one kind of
+                # read that could skip them.
+                if not do_read and read_wanted and not reader.busy:
+                    read_wanted, do_read = False, True
+
                 # ...but not while the outline is visibly on the wrong thing.
                 #
-                # This is the loop's one real inefficiency, and it is a feedback
-                # loop rather than a waste: a read costs several hundred
-                # milliseconds during which nothing else in this loop runs —
-                # including the tracker, whose 0.4s recheck is what would fix
-                # the corners. So reading a crop taken from corners the detector
-                # can already see are wrong does not merely throw the read away,
-                # it postpones the correction that would have made the next one
-                # good. A rig reached its verdict after 5.7 seconds and eight
-                # reads, seven of them of the rectangle being replaced.
+                # This used to be a feedback loop as well as a waste: a read
+                # costs several hundred milliseconds during which nothing else
+                # in this loop ran — including the tracker, whose 0.4s recheck
+                # is what would fix the corners — so reading a crop taken from
+                # corners the detector could already see were wrong postponed
+                # the correction that would have made the next read good. A rig
+                # reached its verdict after 5.7 seconds and eight reads, seven
+                # of them of the rectangle being replaced.
+                #
+                # The feedback half is gone now that the read runs beside the
+                # loop and the tracker keeps its slot through one. What is left
+                # is the plain waste, which is reason enough to keep it.
                 #
                 # A move above overrides this, because the whole point of
                 # waiting is to read the moment the corners arrive.
@@ -1405,13 +1436,11 @@ def main():
                 # OMP_THREAD_LIMIT and costs as much. But the motion gate fires
                 # exactly once — on the frame where a moving picture settles —
                 # so a trigger dropped because the reader was busy is a card
-                # that is never read at all. It is remembered instead, and
-                # taken on the first frame the reader is free, which is a
-                # slightly later and slightly fresher frame of the same card.
+                # that is never read at all. It is remembered instead, and taken
+                # on the first frame the reader is free, which is a slightly
+                # later and slightly fresher frame of the same card.
                 if do_read and reader.busy:
                     read_wanted, do_read = True, False
-                elif read_wanted and not reader.busy:
-                    read_wanted, do_read = False, True
 
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.

@@ -608,6 +608,47 @@ for threaded in (False, True):
     ok_('%s: ...leaving the reader free for the next frame' % how, not boom.busy)
     boom.close()
 
+
+class Stopped(StubScanner):
+    """A read interrupted by Ctrl-C, or by the SIGTERM handler's SystemExit."""
+
+    def __init__(self, how):
+        StubScanner.__init__(self)
+        self.how = how
+
+    def look_many(self, frames, now=None, geom=None):
+        raise self.how
+
+
+# Those two are not failed reads and must not be reported as ones.
+#
+# Under --no-thread the read runs on the loop's own thread, and a read is over
+# a second long, so a stop signal usually lands inside it. Swallowed, the log
+# says "read failed: SystemExit" once, the rate limiter silences every one
+# after it, and the rig keeps holding the camera until the supervisor gives up
+# and SIGKILLs it — skipping the cleanup that handler exists to run. Ctrl-C
+# does nothing at all, silently, which is worse.
+for how in (KeyboardInterrupt, SystemExit):
+    name = how.__name__
+    inline = SPR.Reader(Stopped(how()), threaded=False)
+    got = 'swallowed'
+    try:
+        inline.submit(['a'], 1.0, None)
+    except how:
+        got = 'raised'
+    eq('on the loop, %s is a stop and not a read failure' % name, got, 'raised')
+    inline.close()
+
+    # On the reader thread there is nothing above it to unwind to, and letting
+    # it out would kill the reader — leaving the rig alive and never reading
+    # again, which is the worst failure this project has.
+    off = SPR.Reader(Stopped(how()), threaded=True)
+    off.submit(['a'], 1.0, None)
+    done = wait_for(off)
+    ok_('...but beside the loop it is reported, not thrown', done is not None)
+    ok_('...and the reader lives to read again', not off.busy)
+    off.close()
+
 # Closing waits for a read already in flight — that is deliberate, so nothing
 # is still writing while the next process starts — but the wait is bounded, and
 # the thread must be gone at the end of it. The rig is restarted on every crash,
