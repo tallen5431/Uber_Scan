@@ -223,10 +223,19 @@
   'use strict';
 
   // An offer the scanner stopped seeing this long ago is history, not news.
-  // The scanner emits several times a second while a card is on screen and
-  // keeps emitting between cards, so silence is not a lull, it is a fault.
   // Ninety seconds was long enough to sit through most of an offer's life
   // showing a verdict that had stopped being about anything.
+  //
+  // What this is measured against is a *heartbeat*, not a reading. It used to
+  // be readings, on the reasoning that the scanner emits several times a second
+  // while a card is on screen and keeps emitting between cards — and neither
+  // half of that is true. A still picture moves the motion gate not at all, so
+  // between offers there can be minutes with no read; and a card sitting
+  // unchanged has its verify beat back off to twelve seconds, so with a 1.4s
+  // read on the end of it the silence reaches 13.4s. The page would dim the
+  // verdict and say the rig had stopped, at the moment the driver is reading it
+  // to decide. The loop now says "still here" every four seconds, which is what
+  // this is comparing against and is the thing actually worth knowing.
   var STALE_MS = 12000;
 
   var el = {};

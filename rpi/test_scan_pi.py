@@ -783,6 +783,131 @@ else:
         beside < HOLD * 0.35)
     ok_('...by a wide margin, not a whisker', beside * 3 < on_loop)
 
+import scan_pi as SP2                                          # noqa: E402
+RESAMPLE_SETTLE = 5.0
+
+# --- the loop says it is alive, whether or not it has anything to report -----
+# The driving page decides the scanner has stopped when it has heard nothing for
+# STALE_MS. It used to infer that from readings, and neither half of the
+# reasoning held: a still picture moves the motion gate not at all, so between
+# offers there can be minutes with no read; and a card sitting unchanged has its
+# verify beat back off to VERIFY_MAX, so with a read on the end of it the silence
+# exceeds twelve seconds. The page would dim the verdict and say the rig had
+# stopped at the moment the driver was reading it to decide.
+
+
+def drive(extra_argv, seconds, look=None, appear_at=0.4):
+    """Run the real main() over a fake camera. Returns when every message came.
+
+    `look` stands in for the OCR so a run can be about the loop rather than
+    about tesseract. Returns (message times, read times) in seconds.
+    """
+    import scan_pi as SP
+
+    offer = TC.mount(TC.uberx_screen(), 1200)
+    quad = PL.detect_screen_quad(offer)
+    work = tempfile.mkdtemp()
+    config = os.path.join(work, 'config.json')
+    with open(config, 'w') as fh:
+        json.dump({'quad': [[float(x), float(y)] for x, y in quad],
+                   'cardHeight': 900,
+                   'capture': {'width': CAP[0], 'height': CAP[1]},
+                   'lensPosition': 10.0, 'exposureTime': 16667,
+                   'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30}}, fh)
+
+    cam = FakeCam(offer, TC.blank(), appear_at=appear_at, vanish_at=10_000.0)
+    said, reads = [], []
+    real_start, real_emit, real_alive = SP.start_camera, SP.emit, SP.emit_alive
+    real_sleep = time.sleep
+    real_look = PL.Scanner.look_many
+
+    SP.start_camera = lambda *a, **k: cam
+    SP.emit = lambda *a, **k: (said.append(time.time()), reads.append(time.time()))
+    SP.emit_alive = lambda: said.append(time.time())
+    if look is not None:
+        PL.Scanner.look_many = look
+
+    argv, deadline = sys.argv, time.time() + seconds
+    sys.argv = ['scan_pi', '--config', config, '--json', '--no-journal',
+                '--snapshot', ''] + list(extra_argv)
+
+    def bounded(s):
+        if time.time() > deadline:
+            raise KeyboardInterrupt
+        real_sleep(min(s, 0.01))
+
+    time.sleep = bounded
+    try:
+        SP.main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        time.sleep, sys.argv = real_sleep, argv
+        SP.start_camera, SP.emit, SP.emit_alive = real_start, real_emit, real_alive
+        PL.Scanner.look_many = real_look
+    return said, reads
+
+
+def one_plain_leg(self, frames, now=None, geom=None):
+    """A card with a payout and a single leg that is not a total.
+
+    Never `whole`, so the resample burst's stopping condition is never met —
+    which is the shape that used to pin the reader at two reads a second for as
+    long as the card was on the screen. Eight of the owner's 245 rows are it.
+    """
+    parsed = OP2.parse('$16.05 20 min (7.3 mi) trip')
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': '', 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+# Judged on a blank screen, which is where the rig spends most of a shift and
+# where the old reasoning fails hardest: a still picture moves the motion gate
+# not at all, so there are no reads to infer life from and the silence is
+# unbounded. The card never appears in this run.
+QUIET_RUN = 9.0
+quiet_said, _ = drive([], QUIET_RUN, appear_at=10_000.0)
+
+# Asserted, not guarded. Producing almost nothing over nine seconds of blank
+# screen IS the fault, so a run that is too short to measure must fail here
+# rather than skip — which is what it did the first time this was written, and
+# a check that goes quiet exactly when the thing it watches does is no check.
+ok_('a rig with nothing to report still reports',
+    len(quiet_said) >= int(QUIET_RUN / SP2.ALIVE_EVERY))
+if len(quiet_said) >= 2:
+    quiet = max(b - a for a, b in zip(quiet_said, quiet_said[1:]))
+    ok_('...and is never silent for as long as the page waits', quiet * 1000 < 12000)
+    ok_('...keeping its own beat rather than the reader\'s',
+        quiet < SP2.ALIVE_EVERY * 2)
+
+said, reads = drive([], 9.0, look=one_plain_leg)
+if len(said) < 3:
+    print('the resample run produced too little to judge — skipping those checks')
+else:
+
+    # The constants have to be checked against each other, not just observed:
+    # the page's patience must clear a full verify beat plus the read on the end
+    # of it, or the fix above is one slow read away from coming back.
+    ok_('the heartbeat is well inside the page\'s patience',
+        SP2.ALIVE_EVERY * 2 < 12.0)
+    ok_('...and the verify ceiling alone would not have been',
+        SP2.VERIFY_MAX + 1.4 > 12.0)
+
+    # --- and the burst is armed once per card, not once per read ------------
+    # Each read inside the resample burst used to push its end four seconds
+    # further out, so a card that never reads whole held the reader at one read
+    # every half second for as long as it was on screen — the opposite of what
+    # the verify beat's backoff is for, and it won, because it is checked first.
+    settled = [t for t in reads if t > reads[0] + RESAMPLE_SETTLE]
+    span = (reads[-1] - reads[0] - RESAMPLE_SETTLE) if len(reads) > 1 else 0
+    if span > 2.0:
+        rate = len(settled) / span
+        ok_('a card that never reads whole stops being re-read every half second',
+            rate < 1.0 / SP2.RESAMPLE_EVERY * 0.6)
+        ok_('...though it is still looked at now and then', len(settled) >= 1)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -685,6 +685,29 @@ def show(frame_text, rate, parsed, ms, locked):
              ms['total'], '  LOCKED' if locked else ''))
 
 
+# How often to say "still here" when there is nothing to report.
+#
+# The driving page decides the scanner has stopped when it has not heard
+# anything for twelve seconds, and it used to infer that from reads — which was
+# always a little indirect and is now wrong. Between offers the motion gate can
+# hold a still picture for minutes without a single read, and *during* an offer
+# the verify beat backs off to twelve seconds, so a card sitting unchanged with
+# a 1.4s read on the end of the beat produces a 13.4s silence. The page would
+# dim the verdict and say the rig had stopped at the exact moment the driver is
+# reading it to decide.
+#
+# So the loop says so itself, on a beat well inside that window. It is one small
+# line of JSON: no verdict, no numbers, nothing that can overwrite a reading —
+# `ready` is absent, which is what the server and the page both key on. What it
+# proves is the thing actually worth proving, which is that the loop is turning.
+# A wedged loop stops sending it; a process that is merely idle does not.
+ALIVE_EVERY = 4.0
+
+
+def emit_alive():
+    print(json.dumps({'alive': True, 'at': int(time.time() * 1000)}), flush=True)
+
+
 def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
     """One JSON object per line, flushed, so a parent process sees reads live."""
     payload = {
@@ -967,6 +990,9 @@ def main():
     frames = 0
     last_snapshot = 0.0
     resample_until = 0.0
+    # Which card the burst above is for, so it is armed once per card rather
+    # than once per read. See where it is set.
+    resample_for = None
     last_resample = 0.0
     last_verify = 0.0
     verify_every = VERIFY_EVERY
@@ -977,6 +1003,7 @@ def main():
     # one. Remembered rather than dropped: the gate fires once, on the frame a
     # moving picture settles, so a trigger thrown away is a card never read.
     read_wanted = False
+    last_alive = 0.0
     reader = Reader(scanner, threaded=not args.no_thread)
 
     # Every offer the scanner is sure of, kept so a shift can be looked at
@@ -1006,7 +1033,7 @@ def main():
         # local, silently, and the state it was carrying stops carrying — which
         # is how a loop rewritten into a closure loses its memory without
         # anything failing loudly enough to notice.
-        nonlocal failures, settled_on, resample_until, card_on_screen
+        nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for
         parsed = accumulator.add(out['parsed'])
@@ -1068,9 +1095,21 @@ def main():
         verify_every, verify_signature = next_verify(
             verify_every, verify_signature, signature, card_on_screen)
 
+        # The short burst of extra looks after a card appears, so a leg one
+        # frame missed can be caught by the next.
+        #
+        # Armed once per card, not once per read. Re-arming on every read makes
+        # the burst self-sustaining: each read inside it pushes the end four
+        # seconds further out, so a card that never reads *whole* — a single
+        # plain leg with no total, which is eight of the owner's 245 rows —
+        # holds the reader at one read every half second for as long as it is on
+        # the screen. That is the opposite of what the verify beat's backoff is
+        # for, and it wins, because it is checked first.
         if whole and stable:
             resample_until = 0.0
-        elif parsed.get('pay'):
+            resample_for = None
+        elif parsed.get('pay') and parsed.get('episode') != resample_for:
+            resample_for = parsed.get('episode')
             resample_until = time.time() + RESAMPLE_WINDOW
         settled_on = signature
         health.add(out, parsed, out.get('card'), previous_card)
@@ -1186,6 +1225,19 @@ def main():
             # at the top, because everything below can `continue` past it.
             if collect():
                 break
+
+            # ...and a word to say the loop is turning, on a beat the driving
+            # page's staleness test comfortably clears. See ALIVE_EVERY: a
+            # verdict is not proof of life, because a still picture produces no
+            # reads and a card sitting unchanged produces one every twelve
+            # seconds. Emitted before the capture below, so a camera that has
+            # stopped delivering frames stops this too — which is exactly the
+            # fault worth showing.
+            if args.json:
+                now_alive = time.time()
+                if now_alive - last_alive > ALIVE_EVERY:
+                    last_alive = now_alive
+                    emit_alive()
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate
