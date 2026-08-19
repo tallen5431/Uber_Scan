@@ -66,6 +66,13 @@ function sameList(a, b) {
                             + ' want ' + JSON.stringify(c.expect)); }
 });
 
+(cases.whole || []).forEach(function (c) {
+  var got = P.isWhole(P.parse(c.text));
+  if (got === c.expect) ok++;
+  else { bad++; console.log('FAIL  whole / ' + c.name + ': got ' + got
+                            + ' want ' + c.expect); }
+});
+
 (cases.deadline || []).forEach(function (c) {
   eq('deadline / ' + c.name, P.parse(c.text).deliverBy, c.expect);
 });

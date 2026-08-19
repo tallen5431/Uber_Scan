@@ -1091,8 +1091,11 @@ def main():
         failures = 0 if parsed['complete'] else failures + 1
 
         signature = (parsed['pay'], parsed['minutes'], parsed['miles'])
-        whole = parsed['complete'] and (parsed.get('hasTotal')
-                                        or (parsed.get('legs') or 0) >= 2)
+        # See OP.is_whole. Called rather than restated: this rule was written
+        # out here and again in the browser scanner, both said "a total or two
+        # legs", and a delivery card has neither — so every one of them was
+        # permanently a fragment.
+        whole = OP.is_whole(parsed)
         # Two different questions, kept apart.
         #
         # `stable` is the merged reading holding still across two reads, and

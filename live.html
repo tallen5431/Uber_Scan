@@ -305,6 +305,25 @@
   var phase = null;      // setup progress, before any offer exists
   // When this page last heard anything at all, by its own clock.
   var seenAt = Date.now();
+
+  // ...and, separately, when a *reading* last arrived.
+  //
+  // These were one clock and had to become two the moment the loop started
+  // sending a heartbeat. A heartbeat proves the loop is turning, which is what
+  // the connection dot and the picture are about; it proves nothing whatever
+  // about the verdict on screen. Merged, the heartbeat kept the clock fresh
+  // while every read was failing — a degenerate quad, a tesseract that died, a
+  // full disk — and the page went on showing the last ACCEPT at full opacity,
+  // green dot, over a live picture of whatever card was actually in the mount.
+  // Measured on a rig with reads raising: 50 heartbeats, 2 verdicts, and
+  // nothing on the screen admitting it.
+  var readAt = Date.now();
+
+  // Longer than the verdict beat can legitimately be quiet: VERIFY_MAX is 12s
+  // and a read on the end of it is another 1.4s, more on a loaded Pi. Measured
+  // max healthy gap between verdicts on a still card was 12.1s with the read
+  // cost removed, so anything near 15 would dim a working rig.
+  var READ_STALE_MS = 20000;
   var socketUp = false;
   var scannerState = null;
 
@@ -365,7 +384,7 @@
       return;
     }
 
-    var stale = Date.now() - seenAt > STALE_MS;
+    var stale = Date.now() - readAt > READ_STALE_MS;
     el.verdict.className = 'verdict ' + r.state + (stale ? ' stale' : '');
     // `whole` and `locked` are two different claims and only one of them is the
     // one to act on. `locked` means two consecutive frames parsed the same —
@@ -489,7 +508,7 @@
     el.warn.textContent = notes.join(' ');
     el.warn.hidden = !notes.length;
 
-    el.detail.textContent = (stale ? 'last seen ' + Math.round((Date.now() - seenAt) / 1000) + 's ago · ' : '')
+    el.detail.textContent = (stale ? 'last read ' + Math.round((Date.now() - readAt) / 1000) + 's ago · ' : '')
       + (deducted ? 'after $' + Number(r.costPerMile).toFixed(2) + '/mi costs · ' : '')
       + r.ms + 'ms'
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
@@ -538,6 +557,13 @@
     } else if (quiet > STALE_MS) {
       el.conn.textContent = 'nothing from the scanner for '
         + Math.round(quiet / 1000) + 's';
+    } else if (Date.now() - readAt > READ_STALE_MS) {
+      // The loop is turning and the reader is not. Worth its own line: the two
+      // failures need different things done about them, and "scanner reading"
+      // is the one sentence that must not be printed over a verdict nothing
+      // has refreshed.
+      el.conn.textContent = 'the loop is running but nothing has been read for '
+        + Math.round((Date.now() - readAt) / 1000) + 's';
     } else {
       el.conn.textContent = 'scanner reading';
     }
@@ -561,6 +587,10 @@
       // old" — or, worse, a negative age that never trips the stale test at
       // all, leaving a frozen verdict on screen looking live.
       seenAt = Date.now();
+      // Only a reading moves the verdict's own clock. The guard is the same one
+      // the next line uses to decide whether this message replaces the verdict
+      // at all — a heartbeat carries no `ready`, and must not vouch for one.
+      if (msg.ready !== undefined) readAt = Date.now();
       if (msg.phase) phase = msg;
       if (msg.ready !== undefined) last = msg;
       render();

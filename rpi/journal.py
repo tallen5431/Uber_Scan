@@ -421,11 +421,14 @@ def content_of(parsed):
     a superseding row is that the payout held still while the journey got
     clearer. Distance and item count are in here because both move money —
     distance through running cost, items through the shopping allowance — with
-    the minutes untouched.
+    the minutes untouched. So is the deadline, which on a delivery card *is* the
+    duration: a card whose deadline is re-read differently is a different
+    reading, and without this it superseded nothing and the correction never
+    reached the file.
     """
     return (parsed.get('pay'), parsed.get('minutes'), parsed.get('miles'),
             parsed.get('items'), bool(parsed.get('hasTotal')),
-            bool(parsed.get('milesUncertain')))
+            bool(parsed.get('milesUncertain')), parsed.get('deliverBy'))
 
 
 def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,

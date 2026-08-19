@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the timer that copies this rig's offers to a machine outside the car.
 #
-#   bash tools/install-sync.sh http://nuc.lan:8081
+#   bash tools/install-sync.sh http://nuc.lan:8080
 #
 # Everything the unit needs is discovered rather than assumed. The first version
 # of this shipped units with `User=pi` and `/home/pi/Uber_Scan` written into
@@ -15,7 +15,7 @@ usage() {
     cat <<'EOF'
 usage: bash tools/install-sync.sh <url-of-the-machine-keeping-the-copy> [token]
 
-  bash tools/install-sync.sh http://nuc.lan:8081
+  bash tools/install-sync.sh http://nuc.lan:8080
   bash tools/install-sync.sh https://nuc.example.net secret-token
 
 Use the address that works from the *road*, not just the driveway. A Tailscale
@@ -56,8 +56,40 @@ echo "python     : $PYTHON"
 echo "sending to : $SYNC_TO"
 echo
 
-# Check it actually works before installing a timer that will do it every ten
-# minutes. A timer that has never succeeded once is a timer that fails quietly.
+# Check the destination answers at all, before anything else.
+#
+# The "try it once" run below cannot do this on its own, and that is deliberate
+# on sync.py's side rather than a bug: a car is out of range most of the time,
+# so a failure to connect is normal and exits 0. Which means this gate — whose
+# whole purpose is "do not install a timer that has never worked" — passed
+# happily on an address nothing was listening on, and the driver got a timer
+# quietly syncing to nowhere. Ask the question sync.py refuses to fail on, using
+# sync's own far_end so the check that a router login page is not the far end
+# stays in one place.
+echo "checking $SYNC_TO answers..."
+if ! sudo -u "$RUN_AS" "$PYTHON" -c "
+import sys
+sys.path.insert(0, '$REPO/rpi')
+import sync
+sys.exit(0 if isinstance(sync.far_end('$SYNC_TO'), dict) else 1)
+"; then
+    cat >&2 <<EOF
+
+Nothing answered at $SYNC_TO, so the timer is not being installed.
+
+The machine keeping the copy runs the same server as this one, with SCANNER=0
+so it does not try to open a camera it has not got. It listens on 8080 unless
+PORT says otherwise — 8081 is this Pi's aiming preview, which is a different
+thing and cannot receive a journal.
+
+  on the copy machine:  SCANNER=0 npm start
+  then from here:       curl $SYNC_TO/api/journal/newest
+EOF
+    exit 1
+fi
+
+# ...and then that a real send gets through: the far end may answer and still
+# refuse, for reasons worth naming separately below.
 echo "trying it once..."
 if ! sudo -u "$RUN_AS" "$PYTHON" "$REPO/rpi/sync.py" --to "$SYNC_TO" \
         ${SYNC_TOKEN:+--token "$SYNC_TOKEN"}; then
@@ -66,9 +98,6 @@ if ! sudo -u "$RUN_AS" "$PYTHON" "$REPO/rpi/sync.py" --to "$SYNC_TO" \
 That did not work, so the timer is not being installed — a timer whose job has
 never succeeded once is a timer that fails quietly. Fix the above first.
 
-  did not answer          the machine keeping the copy is not running, is not
-                          running with SCANNER=0, or is not reachable at
-                          $SYNC_TO from this Pi
   could not create ...    JOURNAL there points somewhere that account cannot
                           write. Either give it the directory, or point JOURNAL
                           inside its home, where it will make it itself

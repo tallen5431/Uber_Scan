@@ -285,6 +285,46 @@ def is_complete(pay, minutes, deliver_by=None):
     return deliver_by is not None
 
 
+def is_whole(parsed):
+    """Whether a reading has nothing further to gain from another frame.
+
+    Not the same question as is_complete, and the difference is what to do next:
+    complete means judgeable, whole means finished. A card missing a leg is the
+    same pay over less time, so it always reads *better* than the offer is —
+    which is why the loop keeps resampling until this is true, why the voice
+    waits for it, and why the offers page sets a partial reading aside.
+
+    Written out by hand in two places before this, and both said `hasTotal or
+    legs >= 2`. A delivery card has neither: it states a deadline instead of a
+    duration and no legs at all, so every DoorDash offer was permanently a
+    fragment — never spoken, always shown with a question mark, flagged with a
+    warning that said the opposite of the truth, and left out of every figure on
+    the offers page. It was invisible until the accumulator stopped losing those
+    cards entirely, and then it was merely wrong about them.
+
+    The deadline branch asks for the distance, which the legs branch gets for
+    free. A deadline card with no miles is judgeable — rate() charges no mileage
+    for a distance it does not have — and that is gross wearing net's clothes,
+    $53.62 against a true $49.79 on the corpus's own fixture. There is no second
+    leg to wait for on such a card, so the distance is the one thing another
+    frame can still add, and waiting for it is exactly what `whole` is for.
+    """
+    if not parsed.get('complete'):
+        return False
+    # Two shapes reach this. A raw parse() carries the legs themselves and no
+    # summary; a reading merged across frames carries `hasTotal` and has already
+    # trimmed the legs. Both are asked, because the browser scanner judges the
+    # first and the rig judges the second, and they must agree about one card.
+    if parsed.get('hasTotal') or any(
+            leg.get('isTotal') for leg in (parsed.get('legDetail') or [])):
+        return True
+    if (parsed.get('legs') or 0) >= 2:
+        return True
+    return (not (parsed.get('legs') or 0)
+            and parsed.get('deliverBy') is not None
+            and parsed.get('miles') is not None)
+
+
 def check_distance(minutes, miles, had_decimal):
     """Guards the one OCR failure that inverts the answer: losing the decimal in
     "3.6 mi" turns a 6 mph errand into a 63 mph one, and the phantom 32 miles

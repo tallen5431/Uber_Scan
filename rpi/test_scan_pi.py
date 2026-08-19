@@ -908,6 +908,32 @@ else:
             rate < 1.0 / SP2.RESAMPLE_EVERY * 0.6)
         ok_('...though it is still looked at now and then', len(settled) >= 1)
 
+# --- a heartbeat is not a reading -----------------------------------------
+# The loop says "still here" every four seconds so the page can tell a rig that
+# is turning from one that has stopped. What it must NOT do is vouch for the
+# verdict on screen: when every read is failing — a degenerate quad, a tesseract
+# that died, a full disk — the loop keeps turning and keeps beating, and a page
+# that measures verdict freshness on "any message" would hold the last ACCEPT at
+# full strength over whatever card is actually in the mount. Measured before the
+# fix: 50 reads attempted, 2 verdicts, 50 heartbeats, and nothing on screen
+# admitting it.
+
+
+def failing_look(self, frames, now=None, geom=None):
+    raise RuntimeError('tesseract failed: degenerate quad')
+
+
+beat_said, beat_reads = drive([], 9.0, look=failing_look)
+ok_('a rig whose reads all fail still says it is alive', len(beat_said) >= 2)
+eq('...but reports no verdict at all', len(beat_reads), 0)
+
+# The page keys verdict freshness on READ_STALE_MS and liveness on STALE_MS, so
+# the two constants have to leave room for a healthy verdict beat. Asserted here
+# because the constants live in two files and nothing else compares them.
+ok_('the verdict window clears a full verify beat and the read on the end of it',
+    SP2.VERIFY_MAX + 3.0 < 20.0)
+ok_('...and is longer than the liveness window it replaced', 20.0 > 12.0)
+
 # --- a fault that comes back is said again --------------------------------
 # The read-failure log is rate limited by message, and it never cleared that
 # message on a good read — so a fault that recurred an hour later matched the

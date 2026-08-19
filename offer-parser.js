@@ -339,6 +339,39 @@
     return deliverBy !== null && deliverBy !== undefined;
   }
 
+  /* Whether a reading has nothing further to gain from another frame.
+   *
+   * Not the same question as isComplete, and the difference is what to do next:
+   * complete means judgeable, whole means finished. A card missing a leg is the
+   * same pay over less time, so it always reads *better* than the offer is.
+   *
+   * Written out by hand in two places before this, and both said `hasTotal or
+   * legs >= 2`. A delivery card has neither — a deadline instead of a duration
+   * and no legs at all — so every DoorDash offer was permanently a fragment:
+   * never spoken, always question-marked, and left out of every figure on the
+   * offers page.
+   *
+   * The deadline branch asks for the distance, which the legs branch gets for
+   * free: rate() charges no mileage for a distance it does not have, so without
+   * it such a card shows gross wearing net's clothes. There is no second leg to
+   * wait for, so the distance is the one thing another frame can still add. */
+  function isWhole(parsed) {
+    if (!parsed || !parsed.complete) return false;
+    // Two shapes reach this. A raw parse() carries the legs themselves and no
+    // summary; a reading merged across frames carries `hasTotal` and has
+    // already trimmed the legs. Both are asked, because this scanner judges the
+    // first and the rig judges the second, and they must agree about one card.
+    if (parsed.hasTotal) return true;
+    var detail = parsed.legDetail || [];
+    for (var i = 0; i < detail.length; i++) {
+      if (detail[i] && detail[i].isTotal) return true;
+    }
+    if ((parsed.legs || 0) >= 2) return true;
+    return !(parsed.legs || 0)
+      && parsed.deliverBy !== null && parsed.deliverBy !== undefined
+      && parsed.miles !== null && parsed.miles !== undefined;
+  }
+
   function checkDistance(minutes, miles, hadDecimal) {
     if (miles === null || minutes === null || minutes <= 0) {
       return { miles: miles, corrected: false, uncertain: false };
@@ -627,7 +660,7 @@
   return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
            setting: setting, doubt: doubt, DEFAULT_SETTINGS: DEFAULT_SETTINGS,
            findDeadline: findDeadline, minutesUntil: minutesUntil,
-           findPlaces: findPlaces, isComplete: isComplete,
+           findPlaces: findPlaces, isComplete: isComplete, isWhole: isWhole,
            SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH,
            MAX_MPH: MAX_MPH, UNREADABLE_MPH: UNREADABLE_MPH };
 }));

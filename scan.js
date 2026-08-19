@@ -59,20 +59,11 @@
     return OfferParser.rate(parsed, withClock);
   }
 
-  /* Whether the reading is finished, as opposed to merely repeatable.
-   *
-   * The same rule the Pi's loop uses to decide whether to keep resampling and
-   * whether to speak: a total line is the whole journey by itself, and two legs
-   * are a whole ride card. One plain leg is half a card, and half a card is the
-   * same pay over less time. */
-  function isWhole(parsed) {
-    if (!parsed || !parsed.complete) return false;
-    var detail = parsed.legDetail || [];
-    for (var i = 0; i < detail.length; i++) {
-      if (detail[i] && detail[i].isTotal) return true;
-    }
-    return (parsed.legs || 0) >= 2;
-  }
+  /* Whether the reading is finished, as opposed to merely repeatable. The
+     parser owns the rule — see OfferParser.isWhole — because it was written out
+     here and again in the Pi's loop, both said "a total or two legs", and a
+     delivery card has neither. */
+  function isWhole(parsed) { return OfferParser.isWhole(parsed); }
 
   /* ---------- settings ---------- */
 

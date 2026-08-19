@@ -1500,7 +1500,7 @@ page, the JSON API and the CSV export with no camera, no picamera2 and no OCR.
 ```sh
 # on the rig
 cd ~/Uber_Scan && git pull
-bash tools/install-sync.sh http://nuc.lan:8081
+bash tools/install-sync.sh http://nuc.lan:8080
 ```
 
 That works out where the checkout is, which account owns it, and where python3
@@ -1621,7 +1621,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 17 suites, 1856 checks
+npm test                # all 17 suites, 1872 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1635,11 +1635,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 315 checks, the shared corpus
+node tests/corpus.test.js       # 321 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  84 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 348 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 354 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  78 on merging readings across frames
 python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    #  84 on flicker, brightness, gain and exposure
@@ -1649,7 +1649,7 @@ python3 rpi/test_repeats.py     #  48 on one card read many times
 python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 126 on the loop that holds the camera
+python3 rpi/test_scan_pi.py     # 130 on the loop that holds the camera
 python3 rpi/test_sync.py        #  67 on getting the offers off the car
 python3 rpi/test_liveview.py    #  18 on the picture the driver watches
 ```

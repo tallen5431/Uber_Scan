@@ -67,6 +67,13 @@ class OfferAccumulator:
         self.last_add = 0.0
         self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool, 'seen': n}]
         self.items = []
+        # Deadlines seen this window. A delivery card gives one instead of a
+        # duration, so it is the denominator of the whole verdict — and it was
+        # the only money-moving field taken from the last frame rather than
+        # voted on. One frame reading "7:15" as "9:15" moved a 46-minute job to
+        # 166 minutes, and the other way round it moves it the other way, which
+        # is a PASS shown as an ACCEPT.
+        self.deadlines = []
         self.samples = 0
         self.max_legs = 0
         self.corrected = False
@@ -216,6 +223,8 @@ class OfferAccumulator:
 
         if parsed.get('items') is not None:
             self.items.append(parsed['items'])
+        if parsed.get('deliverBy') is not None:
+            self.deadlines.append(parsed['deliverBy'])
 
         return self._merged(parsed)
 
@@ -276,6 +285,15 @@ class OfferAccumulator:
         # 56-minute job to 41 minutes and $17.75/hr PASS to $24.25/hr, on two
         # frames out of three that said 12.
         merged['items'] = _consensus(self.items) if self.items else parsed.get('items')
+        # Voted the same way, and for the stronger reason: this one *is* the
+        # duration. _consensus takes the majority and breaks a tie with the
+        # larger value, which for minutes-since-midnight is the later deadline —
+        # more minutes, a lower rate, the cautious side. It also stops a frame
+        # that mangled the deadline to nothing from erasing one the window
+        # already saw, which today drops the card to incomplete and blanks a
+        # verdict that was correct a frame ago.
+        merged['deliverBy'] = (_consensus(self.deadlines) if self.deadlines
+                               else parsed.get('deliverBy'))
         merged['legs'] = len(used)
         # A total is the whole journey in one line, so one of them is a complete
         # picture where one ordinary leg is only ever half of one.

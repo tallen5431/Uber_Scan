@@ -68,6 +68,9 @@ for c in cases.get('coerce', {}).get('doubt', []):
 for c in cases.get('places', []):
     eq('places / ' + c['name'], P.parse(c['text'])['places'], c['expect'])
 
+for c in cases.get('whole', []):
+    eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])
+
 for c in cases.get('deadline', []):
     eq('deadline / ' + c['name'], P.parse(c['text'])['deliverBy'], c['expect'])
 

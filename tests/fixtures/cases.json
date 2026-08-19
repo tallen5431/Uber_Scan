@@ -1178,5 +1178,38 @@
       "now": null,
       "expect": null
     }
+  ],
+  "_whole_comment": "Whether a reading is finished, as opposed to merely judgeable. Its own block because it is a function of the reading rather than a field on it, and because it was written out by hand in two places that both got delivery cards wrong.",
+  "whole": [
+    {
+      "name": "a total is a whole journey by itself",
+      "text": "$7.09 34 min (3.6 mi) total",
+      "expect": true
+    },
+    {
+      "name": "two legs are a whole ride card",
+      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
+      "expect": true
+    },
+    {
+      "name": "one plain leg is half a card",
+      "text": "$16.05 20 min (7.3 mi) trip",
+      "expect": false
+    },
+    {
+      "name": "a delivery card with a distance is finished",
+      "text": "$41.11 Guaranteed 9.8 mi Deliver by 7:15 PM Pickup Papa Johns",
+      "expect": true
+    },
+    {
+      "name": "...and without one it is not, since a later frame can add it",
+      "text": "$41.11 Guaranteed Deliver by 7:15 PM Pickup Papa Johns",
+      "expect": false
+    },
+    {
+      "name": "nothing readable is not whole",
+      "text": "blurry nonsense",
+      "expect": false
+    }
   ]
 }
