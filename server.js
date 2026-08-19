@@ -644,6 +644,30 @@ function withDirectory(file, done) {
   });
 }
 
+/* Append lines, starting a fresh one if the last never finished.
+ *
+ * A power cut mid-write leaves a partial line with no newline on it — one lost
+ * row, which readJournal skips and which this file is built to tolerate.
+ * Appending straight onto that stub fuses it to the next row and loses that one
+ * too, silently and for good. One torn row is the cost of a power cut; two is a
+ * missing byte. The same guard is in rpi/journal.py, for the writer at the
+ * other end of the sync. */
+function appendLines(text, done) {
+  fs.stat(JOURNAL_PATH, function (statErr, st) {
+    if (statErr || !st.size) return fs.appendFile(JOURNAL_PATH, text, done);
+    fs.open(JOURNAL_PATH, 'r', function (openErr, fd) {
+      if (openErr) return fs.appendFile(JOURNAL_PATH, text, done);
+      var last = Buffer.alloc(1);
+      fs.read(fd, last, 0, 1, st.size - 1, function (readErr) {
+        fs.close(fd, function () {
+          var torn = !readErr && last[0] !== 0x0a;
+          fs.appendFile(JOURNAL_PATH, torn ? '\n' + text : text, done);
+        });
+      });
+    });
+  });
+}
+
 function readJournal(done) {
   fs.readFile(JOURNAL_PATH, 'utf8', function (err, text) {
     if (err) return done([]);           // nothing recorded yet is not an error
@@ -756,7 +780,7 @@ function route(req, res) {
         return send(res, 400, JSON.stringify({ ok: false, error: 'nothing to note' }),
                     { 'Content-Type': 'application/json; charset=utf-8' });
       }
-      fs.appendFile(JOURNAL_PATH, JSON.stringify(note) + '\n', function (writeErr) {
+      appendLines(JSON.stringify(note) + '\n', function (writeErr) {
         if (writeErr) return send(res, 500, JSON.stringify({ ok: false, error: writeErr.message }),
                                   { 'Content-Type': 'application/json; charset=utf-8' });
         send(res, 200, JSON.stringify({ ok: true, note: note }),
@@ -850,7 +874,7 @@ function route(req, res) {
             return fail('could not create ' + path.dirname(JOURNAL_PATH)
                         + ' (' + dirErr.code + ')', 500);
           }
-          fs.appendFile(JOURNAL_PATH, fresh.join('\n') + '\n', function (writeErr) {
+          appendLines(fresh.join('\n') + '\n', function (writeErr) {
           if (writeErr) {
             console.error('journal ingest: ' + writeErr.message);
             // The errno, because 'could not append' is not something anyone can

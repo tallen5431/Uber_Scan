@@ -89,6 +89,27 @@ SANE_MINUTES = OP.SANE_MINUTES
 SCHEMA = 1
 
 
+def _ends_mid_line(fh):
+    """True when the file already has bytes and the last one is not a newline.
+
+    Asked of the handle that is about to append, so there is no window between
+    the check and the write. Costs one seek and one byte read per row, which is
+    once or twice per offer.
+    """
+    try:
+        if fh.tell() == 0:                 # opened 'a', so this is the end
+            return False
+        with open(fh.name, 'rb') as peek:
+            peek.seek(-1, os.SEEK_END)
+            return peek.read(1) != b'\n'
+    except (OSError, ValueError):
+        # Cannot tell — and guessing "yes" would put a blank line before every
+        # row on any platform where that fails. The reader skips blank lines,
+        # but a file that grows a stray newline per offer is worse than the
+        # rare torn tail this is guarding.
+        return False
+
+
 def now_ms(now=None):
     """Epoch milliseconds, matching what the web side already timestamps with."""
     return int((time.time() if now is None else now) * 1000)
@@ -118,6 +139,18 @@ class Journal:
         try:
             self._roll_if_huge()
             with open(self.path, 'a') as fh:
+                # Start a fresh line if the last one never finished.
+                #
+                # A power cut mid-write leaves a partial line with no newline on
+                # it — one lost row, which the reader skips and which this file
+                # is built to tolerate. Appending straight onto that stub fuses
+                # it to the next row and loses that one too, silently and for
+                # good: the reader sees one unparseable line and skips it, and
+                # the offer that was written after the car came back never
+                # existed. One torn row is the cost of a power cut; two is a
+                # missing byte.
+                if _ends_mid_line(fh):
+                    fh.write('\n')
                 fh.write(line)
             self.written += 1
             self._error = None
@@ -301,10 +334,20 @@ class OfferLog:
             # and an anchor that is still empty matches anything: neither one
             # can say the card changed, and both are better attached to the
             # offer in front of them than filed as an offer of their own.
+            #
+            # Unless the accumulator says otherwise. Matching on the payout is
+            # a guess, and it is wrong exactly when a replacement card pays the
+            # same to the cent — at which point this files two offers as one and
+            # the second is never written at all, which is the failure this
+            # whole file exists to prevent, arriving from the other direction.
+            # The accumulator is the only thing in the rig that looks at the
+            # legs, so it is the only thing that can tell a replacement card
+            # from a re-read; it says so in `newCard` and this believes it.
             seen_at = self.last_at if self.last_at is not None else self.first_at
             same_pay = (impossible or self.pay is None
                         or parsed.get('pay') == self.pay)
             same_card_again = (self.content is not None and same_pay
+                               and not parsed.get('newCard')
                                and seen_at is not None
                                and at - seen_at <= RESUME_WINDOW_MS)
             self.episode = episode

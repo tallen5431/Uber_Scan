@@ -122,16 +122,45 @@ def send_config(base, path, token=None, timeout=TIMEOUT):
         return {'ok': False, 'error': str(e)}
 
 
+# How many rows to put in one POST.
+#
+# The far end refuses a body over 8MB, and a row is a few hundred bytes, so a
+# journal of about twenty thousand rows is the point at which a whole-journal
+# send stops fitting — a year and a bit of driving. What made that worth
+# bounding rather than documenting is how it failed: the far end resets the
+# connection, a reset is indistinguishable here from being out of range, and
+# being out of range is normal in a car and exits 0. So the only backup of the
+# only irreplaceable thing on the rig would stop working, permanently, and say
+# it had worked.
+#
+# Two thousand rows is comfortably inside the cap with a large margin for rows
+# that carry addresses, and each POST is still idempotent on its own — the far
+# end appends only (id, seq) pairs it has never seen — so an interrupted run
+# leaves the copy consistent and the next tick picks up from there.
+CHUNK_ROWS = 2000
+
+
 def send(base, rows, token=None, timeout=TIMEOUT):
-    """POST rows as newline-delimited JSON. Returns the far end's summary."""
-    body = ('\n'.join(json.dumps(r, sort_keys=True) for r in rows) + '\n').encode('utf-8')
-    request = urllib.request.Request(
-        base.rstrip('/') + '/api/journal/ingest', data=body, method='POST',
-        headers={'Content-Type': 'application/x-ndjson'})
-    if token:
-        request.add_header('X-Sync-Token', token)
-    with urllib.request.urlopen(request, timeout=timeout) as fh:
-        return json.loads(fh.read().decode('utf-8'))
+    """POST rows as newline-delimited JSON, in chunks. Returns the summary."""
+    total = {'added': 0, 'malformed': 0, 'have': None}
+    for start in range(0, len(rows), CHUNK_ROWS):
+        part = rows[start:start + CHUNK_ROWS]
+        body = ('\n'.join(json.dumps(r, sort_keys=True) for r in part)
+                + '\n').encode('utf-8')
+        request = urllib.request.Request(
+            base.rstrip('/') + '/api/journal/ingest', data=body, method='POST',
+            headers={'Content-Type': 'application/x-ndjson'})
+        if token:
+            request.add_header('X-Sync-Token', token)
+        with urllib.request.urlopen(request, timeout=timeout) as fh:
+            result = json.loads(fh.read().decode('utf-8'))
+        total['added'] += result.get('added') or 0
+        total['malformed'] += result.get('malformed') or 0
+        # The last chunk's count is the one that is true, since each is applied
+        # before the next is sent.
+        if result.get('have') is not None:
+            total['have'] = result.get('have')
+    return total
 
 
 def main():
@@ -180,16 +209,28 @@ def main():
     # integers, already in a reply the sync makes anyway, and it turns "somebody
     # has to notice and run --all" into something that repairs itself on the
     # next tick.
+    #
+    # Counted against the same moment, though, or the count is not a
+    # reconciliation at all. `newest` was fetched at the top of this run, so it
+    # describes the copy as it was *then* — and during a shift this rig appends
+    # rows continuously, a median half a minute apart. Comparing every row held
+    # now against a count taken a moment ago makes this shift's own rows look
+    # like a gap, so every tick declared a shortfall and re-sent the entire
+    # journal. On a long enough history that body passes the far end's 8MB
+    # limit, the POST is reset, the reset is indistinguishable from being out of
+    # range, and the sync reports success and backs up nothing — for good, and
+    # silently, which is the worst way for the only backup to fail.
     mine = [r for r in JR.Journal(args.journal).rows()
             if isinstance(r, dict) and not r.get('kind')]
+    settled = sum(1 for r in mine if (r.get('at') or 0) <= newest)
     theirs = far.get('offers')
-    short = (isinstance(theirs, int) and len(mine) > theirs)
+    short = (isinstance(theirs, int) and settled > theirs)
 
     if args.all or short:
         floor = 0
         if short and not args.all:
-            say('%s holds %d offers and this rig holds %d — sending everything '
-                'to close the gap' % (args.to, theirs, len(mine)))
+            say('%s holds %d offers and this rig holds %d up to that point — '
+                'sending everything to close the gap' % (args.to, theirs, settled))
     elif newest:
         floor = newest - OVERLAP_MS
     else:

@@ -53,6 +53,14 @@ class OfferAccumulator:
 
     def reset(self):
         self.episode += 1
+        # Whether the reset was because a *different card* is on screen, as
+        # opposed to the window rolling over or a new payout arriving. Published
+        # beside `episode` because the journal needs it and cannot work it out:
+        # from there, two genuinely different offers paying the same to the cent
+        # are indistinguishable from one card read twice, and it files them as
+        # one offer with the second never written. This class is the only thing
+        # in the rig that looks at the legs, which is what can tell them apart.
+        self.new_card = False
         self.key = None
         self.started = 0.0
         self.last_add = 0.0
@@ -171,9 +179,14 @@ class OfferAccumulator:
         detail = [l for l in (parsed.get('legDetail') or []) if l.get('minutes') is not None]
 
         key = round(pay, 2)
-        if (key != self.key or (now - self.started) > self.window
-                or self._is_a_different_card(detail, now)):
+        # Asked before the `or` can short-circuit it, and before reset() throws
+        # away the leg slots it reads. The answer has to survive the reset, so
+        # it is stored after: this is the one signal that separates a
+        # replacement card from a re-read, and the journal has no other.
+        different = self._is_a_different_card(detail, now)
+        if (key != self.key or (now - self.started) > self.window or different):
             self.reset()
+            self.new_card = different
             self.key = key
             self.started = now
 
@@ -275,6 +288,10 @@ class OfferAccumulator:
                                             merged.get('deliverBy'))
         merged['mergedFrom'] = self.samples
         merged['episode'] = self.episode
+        # See reset(): true only while this episode was started by a card that
+        # replaced another paying the same, which is the case the journal cannot
+        # see for itself.
+        merged['newCard'] = self.new_card
         # True when the window supplied a leg this frame did not see, which is
         # the whole reason for keeping one.
         merged['grew'] = len(used) > len(parsed.get('legDetail') or [])

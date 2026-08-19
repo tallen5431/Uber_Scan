@@ -116,6 +116,27 @@ rows = feed(fresh('two.jsonl'),
 eq('a different payout is still a different offer',
    len({r['id'] for r in rows}), 2)
 
+# The other direction, and the one matching on the payout risks: a genuinely
+# different card that happens to pay the same to the cent, inside the window.
+# Matching on pay alone files those as one offer and the second is never written
+# — the same loss this file is about, arriving the other way round.
+#
+# The accumulator is the only thing in the rig that looks at the legs, so it is
+# the only thing that can tell a replacement card from a re-read. It says so,
+# and the journal believes it.
+rows = feed(fresh('same-pay-two-cards.jsonl'),
+            ['$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip',
+             '$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip',
+             '$12.45 3 min (0.7 mi) away 11 min (3.1 mi) trip',
+             '$12.45 3 min (0.7 mi) away 11 min (3.1 mi) trip'],
+            step=1.0)
+eq('a replacement card paying the same is a second offer',
+   len({r['id'] for r in rows}), 2)
+eq('...and its own journey is what is recorded', rows[-1]['minutes'], 14.0)
+eq('...at its own rate', rows[-1]['miles'], 3.8)
+ok_('...which is the better job, and would have been lost',
+    rows[-1]['perHour'] > rows[0]['perHour'])
+
 # Same payout, but long enough later that it cannot be the same card on the
 # same screen. Two $10.30 rides in an evening is ordinary.
 log = fresh('window.jsonl')

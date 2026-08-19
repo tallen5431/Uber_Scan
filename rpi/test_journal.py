@@ -258,6 +258,36 @@ book = JR.Journal(path)
 eq('the readable rows still read', len(book.rows()), 1)
 eq('...and the good one is intact', book.rows()[0]['pay'], 5.0)
 
+# ...and the next row written after the power cut is not eaten by the stub.
+#
+# A torn line has no newline on the end of it, so appending straight onto it
+# fuses the two into one unparseable line — and the reader skips unparseable
+# lines. One lost row is the price of a power cut and this file is built to pay
+# it; two is a missing byte, and the second one is the offer written after the
+# car came back, which nothing would ever have said was missing.
+eq('the next row after a torn line still lands', book.append(
+    {'v': 1, 'pay': 7.0, 'at': 3}), True)
+back = JR.Journal(path).rows()
+eq('...and reads back', len(back), 2)
+eq('...as itself', back[-1]['pay'], 7.0)
+eq('...with the row before it still there', back[0]['pay'], 5.0)
+
+# The ordinary case must not grow a blank line per row.
+path = os.path.join(work, 'tidy.jsonl')
+tidy = JR.Journal(path)
+for i in range(3):
+    tidy.append({'v': 1, 'at': i, 'pay': 1.0 + i})
+eq('an untorn journal gains no blank lines',
+   open(path).read().count('\n\n'), 0)
+eq('...and reads back whole', len(JR.Journal(path).rows()), 3)
+
+# A journal that does not exist yet is not a torn one.
+path = os.path.join(work, 'first.jsonl')
+first = JR.Journal(path)
+first.append({'v': 1, 'at': 1, 'pay': 2.0})
+eq('the very first row needs no newline before it',
+   open(path).read().startswith('{'), True)
+
 # --- the cap rolls rather than filling the card -----------------------------
 path = os.path.join(work, 'big.jsonl')
 book = JR.Journal(path, cap=200)
