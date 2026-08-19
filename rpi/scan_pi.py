@@ -908,13 +908,20 @@ def main():
         cv2.namedWindow('uber-scan', cv2.WND_PROP_FULLSCREEN)
         cv2.setWindowProperty('uber-scan', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
-    # Two reads at once need OpenMP pinned to one thread per instance, or the
-    # two tesseracts fight over all four cores: unpinned, a pair measured 46
-    # seconds against 435ms sequential. Pinning costs a single read nothing
-    # measurable. setdefault so an explicit setting still wins.
+    # OpenMP pinned to one thread per tesseract instance, always.
+    #
+    # Two reads at once need it or they fight over all four cores: unpinned, a
+    # pair measured 46 seconds against 435ms sequential. That is why this was
+    # here, and why it used to be conditional on paired reads.
+    #
+    # It is unconditional now because a single read is no longer alone on the
+    # machine either. The read runs beside the camera loop, which is capturing,
+    # gating, tracking and writing the live view throughout — so an unpinned
+    # tesseract spreading over all four cores takes them from the thing whose
+    # whole purpose is to keep going during a read. Pinning costs a single read
+    # nothing measurable. setdefault, so an explicit setting still wins.
+    os.environ.setdefault('OMP_THREAD_LIMIT', '1')
     pair_reads = not args.no_parallel
-    if pair_reads:
-        os.environ.setdefault('OMP_THREAD_LIMIT', '1')
 
     # Everything that decides what gets read, in one place, once. A log without
     # this is a log where every question starts with "what was it set to?".

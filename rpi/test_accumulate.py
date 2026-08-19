@@ -297,6 +297,41 @@ merged = acc.add(P.parse('$12.45 28 min (9.6 mi) total'), now=1600.5)
 eq('a total that supersedes the legs still reads right', merged['minutes'], 28.0)
 eq('...with the whole distance', merged['miles'], 9.6)
 
+# --- a delivery card survives the merge ------------------------------------
+# A DoorDash card states a deadline where an Uber card states a duration, and
+# the parser is careful about that: "Deliver by 7:15 PM" makes a card complete
+# without any minutes on it, because the deadline *is* the duration once
+# something has told it the time.
+#
+# That rule was then written out a second time here, and the second copy had no
+# deadline clause. So the card parsed complete, went through the accumulator,
+# and came back incomplete — and rate() refuses an incomplete reading, so a
+# whole shape of offer produced no verdict, no journal row and nothing on
+# screen. The rule now lives in one function that both call.
+DELIVERY = '$41.11 Guaranteed 9.8 mi Deliver by 7:15 PM Pickup Papa Johns'
+parsed = P.parse(DELIVERY)
+eq('a delivery card parses complete on its deadline', parsed['complete'], True)
+eq('...with no minutes at all', parsed['minutes'], None)
+
+acc = OfferAccumulator()
+merged = acc.add(dict(parsed), now=1700.0)
+eq('...and is still complete after the merge', merged['complete'], True)
+eq('...keeping the deadline the completeness rests on', merged['deliverBy'], 1155)
+eq('...and still no minutes', merged['minutes'], None)
+
+# End to end: with a clock, that reading is judgeable. Without the fix above it
+# was not, however many frames saw it.
+judged = P.rate(merged, {'target': 25, 'costPerMile': 0.30,
+                         'nowMinutes': 18 * 60 + 29})
+eq('a merged delivery card can be judged', judged['ready'], True)
+eq('...on minutes worked out from the deadline', judged['cardMinutes'], 46.0)
+eq('...and says so', judged['fromDeadline'], True)
+
+# Read twice, as it would be, it stays complete rather than degrading.
+again = acc.add(P.parse(DELIVERY), now=1700.5)
+eq('read again, still complete', again['complete'], True)
+eq('...and still one card', again['mergedFrom'], 2)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

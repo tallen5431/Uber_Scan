@@ -285,6 +285,51 @@ else:
         eq('...and the other untouched', by_id['b']['pay'], 8.75)
         eq('...without the vote mixing them', by_id['b']['minutes'], 20)
 
+        # A reading that lost the distance is not a reading that agrees about
+        # it. `null == null` said it was, so two readings that missed the miles
+        # out-voted the one that saw them — and rate() charges no mileage for a
+        # distance it does not have, so the winner's $/hr was gross wearing
+        # net's clothes, with no flag to say so.
+        write([reading('c', 1, T, 12.45, 28, None),
+               reading('c', 2, T + 4_000, 12.45, 28, 9.6),
+               reading('c', 3, T + 8_000, 12.45, 28, None)])
+        got = offers()
+        eq('two readings that lost the distance do not outvote one that has it',
+           got[0]['miles'], 9.6)
+
+        # ...and with the distance-less reading arriving last, which is the case
+        # the old later-wins tie-break decided the wrong way.
+        write([reading('c', 1, T, 12.45, 28, 9.6),
+               reading('c', 2, T + 4_000, 12.45, 28, None)])
+        eq('...nor does one arriving last', offers()[0]['miles'], 9.6)
+
+        # A card that genuinely has no distance is untouched: the penalty only
+        # applies when some other reading of the same card saw one.
+        write([reading('c', 1, T, 12.45, 28, None),
+               reading('c', 2, T + 4_000, 12.45, 28, None)])
+        got = offers()
+        eq('a card with no distance at all is still one offer', len(got), 1)
+        eq('...and is not made up', got[0]['miles'], None)
+
+        # Every reading impossible is still an offer, not a hole. Two misreads
+        # of one card both score about -993; the starting score used to be -1,
+        # nothing cleared it, the vote returned nothing, and the annotation pass
+        # then dereferenced that nothing — a 500 on /api/journal and a blank
+        # page, because one card was misread twice.
+        write([reading('c', 1, T, 1030.0, 31, 15.1, suspect=True),
+               reading('c', 2, T + 4_000, 1030.0, 31, 15.1, suspect=True)])
+        got = offers()
+        eq('a card misread twice still comes back as an offer', len(got), 1)
+        eq('...still flagged', got[0]['suspect'], True)
+
+        # The same, mixed: nothing here is a good reading and it must still
+        # answer.
+        write([reading('c', 1, T, 1030.0, 31, 15.1, suspect=True),
+               reading('c', 2, T + 4_000, 10.30, 12, 5.1, whole=False)])
+        got = offers()
+        eq('a suspect and a fragment still make one offer', len(got), 1)
+        eq('...and the fragment beats the impossible one', got[0]['pay'], 10.30)
+
         # The vote must not disturb what a driver said about the offer. A mark
         # is keyed on the id, not on a reading, so it applies to whichever
         # reading wins.

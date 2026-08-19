@@ -546,7 +546,8 @@ function syncKey(row) {
  */
 function bestReading(rows) {
   if (rows.length === 1) return rows[0];
-  var best = null, bestScore = -1;
+  var has = function (v) { return v !== null && v !== undefined; };
+  var best = null, bestScore = -Infinity;
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     var score = 0;
@@ -555,7 +556,10 @@ function bestReading(rows) {
       var o = rows[j];
       if (o.pay === r.pay) score += 3;          // the field the card leads with
       if (o.minutes === r.minutes) score += 2;
-      if (o.miles === r.miles) score += 2;
+      // Two readings that both lost the distance are not agreeing about it.
+      // `null === null` said they were, so a pair of readings that missed the
+      // miles out-voted the one reading that saw them.
+      if (has(o.miles) && o.miles === r.miles) score += 2;
     }
     // A reading that cannot be true never wins, however many times the same
     // misreading happened to repeat.
@@ -563,8 +567,26 @@ function bestReading(rows) {
     // Nor does half a card: a fragment is the same pay over less time, which
     // always reads better than the offer was.
     if (r.whole === false) score -= 100;
+    // Nor does a reading with no distance, when another reading of the same
+    // card has one. rate() charges no mileage cost for a distance it does not
+    // have, so such a row's $/hr is gross wearing net's clothes — $26.68
+    // against a true $20.51 on one real card — and unlike an uncertain
+    // distance it carries no flag to say so. Small enough that `whole` and
+    // `suspect` still outrank it; big enough to beat the later-row tie-break,
+    // which is what actually decided this before.
+    if (!has(r.miles) && rows.some(function (o) { return has(o.miles); })) {
+      score -= 3;
+    }
     // Ties go to the later row, which is the old behaviour and the right one
     // when there is nothing to choose between them.
+    //
+    // The starting score is -Infinity and not -1 for the reason the penalties
+    // above are large: two suspect readings of one card both score about -993,
+    // nothing cleared -1, and this returned null. That null went into the offer
+    // list, the annotation pass dereferenced it, and /api/journal answered 500
+    // — the whole offers page blank because one card was misread twice. Pay-
+    // based matching made it likelier, by filing a repeated misreading under
+    // one id instead of two.
     if (score >= bestScore) { bestScore = score; best = r; }
   }
   return best;

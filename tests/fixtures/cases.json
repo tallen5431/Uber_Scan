@@ -383,6 +383,35 @@
         "legs": 2,
         "complete": true
       }
+    },
+    {
+      "name": "a fast but real highway run keeps its distance",
+      "text": "$52.00 2 hr 5 min (115.0 mi) total",
+      "expect": {
+        "pay": 52.0,
+        "minutes": 125,
+        "miles": 115.0,
+        "milesCorrected": false,
+        "milesUncertain": false
+      }
+    },
+    {
+      "name": "...and so does one a shade under the unreadable line",
+      "text": "$40.00 40 min (49.0 mi) trip",
+      "expect": {
+        "miles": 49.0,
+        "milesCorrected": false,
+        "milesUncertain": false
+      }
+    },
+    {
+      "name": "past it, the distance is still called unreadable",
+      "text": "$12.00 20 min (61.0 mi) total",
+      "expect": {
+        "miles": 61.0,
+        "milesCorrected": false,
+        "milesUncertain": true
+      }
     }
   ],
   "rate": [
@@ -532,6 +561,19 @@
         "state": "no",
         "target": 25,
         "band": 15
+      }
+    },
+    {
+      "name": "a 56 mph highway run is charged for its miles, not excused them",
+      "text": "$52.00 2 hr 5 min (115.0 mi) total",
+      "settings": {
+        "target": 25,
+        "costPerMile": 0.3
+      },
+      "expect": {
+        "perHour": 8.4,
+        "cost": 34.5,
+        "state": "no"
       }
     }
   ],
@@ -905,7 +947,7 @@
       "expect": []
     }
   ],
-  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
+  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day \u2014 so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
   "deadline": [
     {
       "name": "an evening deadline",

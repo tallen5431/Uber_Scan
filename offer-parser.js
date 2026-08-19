@@ -268,8 +268,27 @@
   /* ---------- plausibility ---------- */
 
   // No offer averages highway speed door to door once pickup, lights and
-  // parking are in it. A reading above this means the distance was misread.
+  // parking are in it. A reading above this means the distance was misread —
+  // but see UNREADABLE_MPH: the line above which a reading is *treated* as
+  // unusable is a good deal higher, because the two questions are not the same.
   var MAX_MPH = 55;
+
+  // Above this a distance is not merely fast, it is not a distance.
+  //
+  // These were one constant, and conflating them cost real money. Losing a
+  // decimal multiplies apparent speed by exactly ten, so a 6 mph shopping
+  // errand comes back at 63 mph — which is why MAX_MPH sits at 55, well below
+  // it, and why three cases in the shared corpus depend on recovery firing at
+  // 63.5. But a reading that keeps its decimal cannot have lost one, and for
+  // those the same 55 was being read as "this distance is unusable", which
+  // makes rate() drop the mileage cost altogether and show gross as net.
+  //
+  // The owner's longest real offer is 115 miles in about two hours: 56 mph,
+  // genuine, one mile per hour the wrong side of the line. It was shown at
+  // $24.96/hr against a truth of $8.40 — a PASS dressed as a near-miss, on the
+  // largest commitment on the board. Between 55 and here a distance is at most
+  // a third out; ten times out is what zeroing the cost was written for.
+  var UNREADABLE_MPH = 75;
 
   // Deliberately narrower than checkDistance: only ever divides by ten, only
   // when the reading had no decimal at all, and only when that lands the leg
@@ -290,6 +309,24 @@
   // Guards against the one OCR failure that silently inverts the answer:
   // losing the decimal in "3.6 mi" turns a 6 mph errand into a 63 mph one, and
   // the phantom 32 extra miles can swallow the whole fare as mileage cost.
+  /* Whether a reading is enough to judge an offer on.
+   *
+   * A delivery card is complete without a duration, because its deadline is
+   * one — but only once something has told it what time it is. rate() fills
+   * that in; parse() must stay a pure function of its text.
+   *
+   * One function rather than the rule written out wherever it is needed. On the
+   * Pi it had been written out twice, and the second copy — in the accumulator,
+   * which recomputes it after merging frames — was missing the deadline clause,
+   * so every card that gives a deadline instead of a duration parsed complete
+   * and came back incomplete. Exported so the two ports cannot drift the same
+   * way. */
+  function isComplete(pay, minutes, deliverBy) {
+    if (pay === null || pay === undefined || !(pay > 0)) return false;
+    if (minutes !== null && minutes !== undefined && minutes > 0) return true;
+    return deliverBy !== null && deliverBy !== undefined;
+  }
+
   function checkDistance(minutes, miles, hadDecimal) {
     if (miles === null || minutes === null || minutes <= 0) {
       return { miles: miles, corrected: false, uncertain: false };
@@ -301,6 +338,14 @@
     // not have one to begin with. Recovering it must be visible, never silent.
     if (!hadDecimal && (mph / 10) <= MAX_MPH && (mph / 10) >= 0.5) {
       return { miles: miles / 10, corrected: true, uncertain: false };
+    }
+    // Nothing to recover, so the only question left is whether this is a fast
+    // trip or a broken number — and those get different answers. See
+    // UNREADABLE_MPH: calling a genuine 56 mph highway run unreadable makes
+    // rate() charge no mileage at all, which is the one direction that turns a
+    // PASS into an ACCEPT.
+    if (mph <= UNREADABLE_MPH) {
+      return { miles: miles, corrected: false, uncertain: false };
     }
     return { miles: miles, corrected: false, uncertain: true };
   }
@@ -373,11 +418,7 @@
       milesCorrected: dist.corrected,
       milesUncertain: dist.uncertain,
       // Enough to act on: without pay and time there is no rate to show.
-      // A delivery card is complete without a duration, because its deadline is
-      // one — but only once something has told it what time it is. rate() fills
-      // that in; parse() must stay a pure function of its text.
-      complete: pay !== null && pay > 0
-                && ((minutes !== null && minutes > 0) || deadline !== null),
+      complete: isComplete(pay, minutes, deadline),
       text: text
     };
   }
@@ -564,6 +605,7 @@
   return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
            setting: setting, doubt: doubt, DEFAULT_SETTINGS: DEFAULT_SETTINGS,
            findDeadline: findDeadline, minutesUntil: minutesUntil,
-           findPlaces: findPlaces,
-           SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH };
+           findPlaces: findPlaces, isComplete: isComplete,
+           SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH,
+           MAX_MPH: MAX_MPH, UNREADABLE_MPH: UNREADABLE_MPH };
 }));

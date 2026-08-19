@@ -266,8 +266,13 @@ class OfferAccumulator:
         # A total is the whole journey in one line, so one of them is a complete
         # picture where one ordinary leg is only ever half of one.
         merged['hasTotal'] = bool(totals)
-        merged['complete'] = (merged['pay'] is not None and merged['pay'] > 0
-                              and merged['minutes'] is not None and merged['minutes'] > 0)
+        # The parser's own rule, called rather than restated. Restated, it went
+        # stale: this copy had no deadline clause, so every delivery card that
+        # gives "Deliver by 7:15 PM" instead of a duration parsed as complete
+        # and came back out of here incomplete — no verdict, no journal row,
+        # nothing on screen, for a whole shape of offer.
+        merged['complete'] = OP.is_complete(merged['pay'], merged['minutes'],
+                                            merged.get('deliverBy'))
         merged['mergedFrom'] = self.samples
         merged['episode'] = self.episode
         # True when the window supplied a leg this frame did not see, which is

@@ -97,8 +97,27 @@ PLACE_JUNK = re.compile(
 TOTAL_TAIL = re.compile(r'\btota?l\b')
 
 # No offer averages highway speed door to door once pickup, lights and parking
-# are in it. Above this the distance was misread.
+# are in it. Above this the distance was misread — but see UNREADABLE_MPH: that
+# is the line above which a reading is *treated* as unreadable, and it is a good
+# deal higher, because the two questions are not the same one.
 MAX_MPH = 55.0
+
+# Above this a distance is not merely fast, it is not a distance.
+#
+# These were one constant, and conflating them cost real money. Losing a decimal
+# multiplies apparent speed by exactly ten, so a 6 mph shopping errand comes back
+# at 63 mph — which is why MAX_MPH sits at 55, well below it, and why three
+# cases in the shared corpus depend on recovery firing at 63.5. But a reading
+# that keeps its decimal cannot have lost one, and for those the same 55 was
+# being read as "this distance is unusable", which makes rate() drop the mileage
+# cost altogether and show gross as net.
+#
+# The owner's own longest real offer is 115 miles in about two hours: 56 mph,
+# genuine, and one mile per hour the wrong side of the line. It was being shown
+# at $24.96/hr against a truth of $8.40 — a PASS dressed as a near-miss, on the
+# largest commitment on the board. Between 55 and here a distance is at most a
+# third out; ten times out is what zeroing the cost was written for.
+UNREADABLE_MPH = 75.0
 
 
 def fix_digits(token):
@@ -217,6 +236,27 @@ def recover_decimal(minutes, miles, had_decimal):
     return miles, False
 
 
+def is_complete(pay, minutes, deliver_by=None):
+    """Whether a reading is enough to judge an offer on.
+
+    A delivery card is complete without a duration, because its deadline is
+    one — but only once something has told it what time it is. rate() fills
+    that in; parse() must stay a pure function of its text.
+
+    One function rather than the rule written out wherever it is needed. It had
+    been written out twice, and the second copy — in the accumulator, which
+    recomputes it after merging frames — was missing the deadline clause. So
+    every DoorDash card that gives a deadline instead of a duration parsed as
+    complete, went through the accumulator, and came back incomplete: no
+    verdict, no journal row, nothing on screen, for a whole shape of offer.
+    """
+    if pay is None or not (pay > 0):
+        return False
+    if minutes is not None and minutes > 0:
+        return True
+    return deliver_by is not None
+
+
 def check_distance(minutes, miles, had_decimal):
     """Guards the one OCR failure that inverts the answer: losing the decimal in
     "3.6 mi" turns a 6 mph errand into a 63 mph one, and the phantom 32 miles
@@ -232,6 +272,13 @@ def check_distance(minutes, miles, had_decimal):
     # not have one. Recovering it must be visible, never silent.
     if not had_decimal and 0.5 <= mph / 10.0 <= MAX_MPH:
         return miles / 10.0, True, False
+    # Nothing to recover, so the only question left is whether this is a fast
+    # trip or a broken number — and those get different answers. See
+    # UNREADABLE_MPH: calling a genuine 56 mph highway run unreadable makes
+    # rate() charge no mileage at all, which is the one direction that turns a
+    # PASS into an ACCEPT.
+    if mph <= UNREADABLE_MPH:
+        return miles, False, False
     return miles, False, True
 
 
@@ -387,12 +434,7 @@ def parse(raw_text):
         'legs': len(used),
         'milesCorrected': corrected,
         'milesUncertain': uncertain,
-        # A delivery card is complete without a duration, because its deadline
-        # is one — but only once something has told it what time it is. rate()
-        # fills that in; parse() must stay a pure function of its text.
-        'complete': (pay is not None and pay > 0
-                     and ((minutes is not None and minutes > 0)
-                          or deadline is not None)),
+        'complete': is_complete(pay, minutes, deadline),
         'text': text,
     }
 
