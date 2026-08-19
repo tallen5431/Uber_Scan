@@ -1126,18 +1126,52 @@ trip. The clock runs until the last trip *finishes*, not until the last offer
 appeared; without that, every run got one free trip and a recording broken into
 more pieces produced a higher line from the same offers.
 
+### A trip is not a break
+
+That paragraph above about the fifteen-to-forty-minute gaps sat in this file for
+a while as a diagnosis nothing acted on. Splitting the recording into runs still
+measured each gap from when the previous offer *appeared* — so a driver who
+accepted a thirty-minute job and saw nothing for thirty-one minutes was recorded
+as having taken a break.
+
+On the 245-offer recording, eight of the fifteen gaps over ten minutes came
+immediately after an accepted trip, and subtracting each trip's own length left
+between minus nine and plus twelve minutes of real waiting. Raw, those gaps
+smear evenly across 15–38 minutes and there is nowhere defensible to cut.
+Corrected, the tail is 12, 17, 20, 22, 28, 36 — and then 168 and 953, which are
+the actual breaks.
+
+The effect on the answer is the whole difference between having one and not:
+
+| | suggested line, by where the recording is cut |
+| --- | --- |
+| gaps measured raw | 15min → **$39**, 20 → $35, 30 → $19, 45 → $19, 60 → $19, 90 → $19 — refused as *unsettled*, $21 swing |
+| trip time subtracted | 15min → **$19**, 20 → $19, 30 → $19, 45 → $19, 60 → $19, 90 → $19 — **spread zero** |
+
+The same data that could not name a line now names $18–19 and does not care
+where you cut it. That is the stability check working as designed: it was
+failing not because the recording was short but because the arithmetic was
+counting the driver's own trips as time off.
+
+This only knows about trips the driver **tagged**. An untagged take still reads
+as a break, and it is not guessed at — so `unexplained()` counts the silences
+nothing accounts for, and when the answer is unsettled the page asks for those
+rather than for another shift. On this recording eleven trips were tagged out of
+233 offers, and tagging a few more of the long silences is worth more than a
+whole extra day of scanning.
+
+One honest limit, unfixable from here: while the driver was on a trip the
+scanner saw no offers, so periods of real work look like periods with no offers
+on the market. That biases the replay *against* low lines, which can't fill a
+gap it has no offers for — so the suggested line is, if anything, conservative.
+
 **It refuses far more often than it answers,** and each refusal says which:
 
 | | |
 |---|---|
 | not enough yet | under 40 offers, two hours, or six trips |
-| unsettled | the line moves by more than $6 depending on how the recording is split — it shows the range and waits for more shifts |
+| unsettled | the line moves by more than $6 depending on how the recording is split — it shows the range, and asks for tags on unaccounted silences if there are any, otherwise for more shifts |
 | nothing to choose | taking everything earned within 5% of any line, so there is no line to draw |
-
-On one 10-hour recording of 231 offers it refuses: split at 15 minutes the best
-line is $33, at 45 minutes it is $20. That spread *is* the finding — one
-recording is not enough — and an earlier build reported $20 confidently because
-of the free-trip bug above.
 
 What it will never report is a dollars-per-hour you would earn. That depends
 entirely on how much of the recorded time was driving rather than parked, which
@@ -1587,7 +1621,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 17 suites, 1692 checks
+npm test                # all 17 suites, 1704 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1603,7 +1637,7 @@ The Pi parser is a port of the browser one, and both run the same corpus:
 ```sh
 node tests/corpus.test.js       # 267 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
-node tests/advice.test.js       #  64 on what line to tell a driver to draw
+node tests/advice.test.js       #  76 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 300 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  68 on merging readings across frames

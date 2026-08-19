@@ -664,13 +664,26 @@
       el.advice.hidden = false;
       el.adviceWorking.textContent = '';
       if (a.reason === 'unsettled') {
+        // What settles this is not always more driving. The swing comes from
+        // not knowing which silences were breaks and which were trips, and the
+        // driver is the only one who knows — so when there are silences here
+        // that nothing accounts for, say that, because tagging a handful of
+        // them is worth more than another whole shift of scanning.
         el.adviceLead.innerHTML =
           'Not enough here to name a line yet. Depending on how this recording '
           + 'is split into runs, the best line comes out anywhere between <b>'
           + money(a.low) + '</b> and <b>' + money(a.high) + '/hr</b> — a '
-          + money(a.spread) + ' swing, which is the recording being short '
-          + 'rather than the market being strange. A few more shifts will '
-          + 'settle it.';
+          + money(a.spread) + ' swing.'
+          + (a.silences > 0
+             ? ' There ' + (a.silences === 1 ? 'is <b>1</b> quiet stretch'
+                                             : 'are <b>' + a.silences + '</b> quiet stretches')
+               + ' here that nothing accounts for'
+               + (a.tagged ? ', beyond the ' + a.tagged + ' you have marked as taken' : '')
+               + '. A quiet stretch is either a break or a trip you were driving, '
+               + 'and only you know which — mark the ones you took, below, and '
+               + 'that swing should close.'
+             : ' That is the recording being short rather than the market being '
+               + 'strange. A few more shifts will settle it.');
       } else if (a.reason === 'nolinehelps') {
         el.adviceLead.innerHTML =
           'Over this stretch, being picky made no measurable difference: taking '

@@ -56,6 +56,78 @@ function offer(atMinutes, pay, minutes, cost) {
   eq('nothing at all is no runs', A.runs([], 30).length, 0);
 })();
 
+/* ---- a trip is not a break ---- */
+/* The silence after an accepted offer is the driver driving it, and counting
+   that as time off is what stopped this answering at all. On one real recording
+   eight of the fifteen gaps over ten minutes came straight after a take; raw,
+   the gaps smeared evenly across 15-38 minutes with no defensible place to cut,
+   and the suggested line swung $39 to $19 depending where you cut. */
+(function () {
+  // Two offers, then a 39-minute silence, then two more. The silence is longer
+  // than the 30-minute break threshold either way; what changes is whether the
+  // job before it was one the driver drove.
+  function around(job) {
+    return A.usable([offer(0, 10, 20), job, offer(40, 10, 20), offer(42, 10, 20)]);
+  }
+
+  var took = offer(1, 30, 35); took.accepted = true;
+  eq('the silence while driving an accepted job is not a break',
+     A.runs(around(took), 30).length, 1);
+
+  var passed = offer(1, 30, 35); passed.accepted = false;
+  eq('...but the same silence after one that was passed up is',
+     A.runs(around(passed), 30).length, 2);
+
+  // A trip excuses its own length and not a minute more: a five-minute job
+  // cannot account for a thirty-nine-minute silence.
+  var brief = offer(1, 30, 5); brief.accepted = true;
+  eq('a trip only excuses its own length', A.runs(around(brief), 30).length, 2);
+
+  // An untagged take reads as a break, and must. Guessing which silences were
+  // really trips is the kind of invention this file exists to refuse.
+  eq('an untagged take is not guessed at',
+     A.runs(around(offer(1, 30, 35)), 30).length, 2);
+
+  // And the replay still ignores what was actually taken. It simulates a
+  // policy; what happened is the thing it is being compared against, not an
+  // input to it. Here the accepted offer is the one that misses the line and
+  // the declined one clears it, so the two answers cannot be confused.
+  var meagre = offer(0, 5, 20); meagre.accepted = true;      // $15/hr, taken
+  var rich = offer(30, 20, 20); rich.accepted = false;       // $60/hr, passed
+  var sim = A.replay(A.runs(A.usable([meagre, rich]), 30), 30);
+  eq('the replay takes what clears the line, not what was taken', sim.trips, 1);
+  eq('...which is the one that cleared it', sim.earned, 20);
+})();
+
+/* ---- saying what would settle it ---- */
+/* When the answer swings, "drive more" is often the wrong advice: the swing
+   comes from not knowing which silences were breaks and which were trips, and
+   the driver is the only one who can say. Counting the silences nothing
+   accounts for is what lets the page ask for the one thing that would help. */
+(function () {
+  var quiet = A.usable([offer(0, 10, 20), offer(1, 10, 20),
+                        offer(60, 10, 20), offer(61, 10, 20),
+                        offer(200, 10, 20), offer(201, 10, 20)]);
+  var bare = A.unexplained(quiet, 30);
+  eq('two long silences, nothing to account for either', bare.silences, 2);
+  eq('...and nothing marked as taken', bare.tagged, 0);
+
+  var withTag = A.usable([offer(0, 10, 20), (function () {
+    var t = offer(1, 10, 45); t.accepted = true; return t;
+  })(), offer(60, 10, 20), offer(61, 10, 20),
+    offer(200, 10, 20), offer(201, 10, 20)]);
+  var some = A.unexplained(withTag, 30);
+  eq('a marked trip accounts for the silence after it', some.silences, 1);
+  eq('...and is counted as marked', some.tagged, 1);
+
+  // The count is what the shortfall carries, so the page can ask for tags
+  // rather than for another shift.
+  var thin = A.advise([offer(0, 10, 20), offer(1, 10, 20), offer(90, 10, 20)],
+                      { target: 20 });
+  eq('the shortfall says how many silences are unaccounted for', thin.silences, 1);
+  eq('...and how many trips are marked', thin.tagged, 0);
+})();
+
 /* ---- the replay ---- */
 (function () {
   // Six offers, ten minutes apart, each a 20-minute trip paying $10. Taking

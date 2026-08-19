@@ -156,7 +156,12 @@
         ? o.firstAt : o.at;
       if (typeof seenAt !== 'number' || !isFinite(seenAt)) continue;
       var net = o.pay - (typeof o.cost === 'number' && isFinite(o.cost) ? o.cost : 0);
-      out.push({ at: seenAt, net: net, mins: mins, perHour: net / (mins / 60) });
+      // Whether the driver said they took this one. Used only to work out when
+      // they were busy — see runs(). The replay deliberately never looks at it:
+      // it is simulating a policy, and what actually happened is the thing it
+      // is being compared against.
+      out.push({ at: seenAt, net: net, mins: mins, perHour: net / (mins / 60),
+                 took: o.accepted === true });
     }
     out.sort(function (a, b) { return a.at - b.at; });
     return out;
@@ -168,13 +173,31 @@
      This is the honest name for what used to be called a shift. It is not one:
      a single run can be half a shift, and a rig left switched on in a driveway
      produces a run with two offers in three hours. Runs of one offer have no
-     span at all and are dropped rather than counted as an instant of driving. */
+     span at all and are dropped rather than counted as an instant of driving.
+
+     The gap is measured from when the previous offer's work *finished*, not
+     from when it appeared. A driver who accepts a twenty-minute job is not
+     shown another offer for twenty minutes, and counting that silence as a
+     break is the difference between an answer and no answer: on one real
+     recording, eight of the fifteen gaps over ten minutes came straight after
+     an accepted trip, and subtracting each trip's own length left between
+     minus nine and plus twelve minutes of actual waiting. Raw, the gaps smear
+     evenly across 15–38 minutes and there is no defensible place to cut, so
+     the suggested line swung from $39 to $19 depending on where you cut and
+     the whole thing was refused as unsettled. Corrected, the same data
+     answers $19 at every threshold from fifteen minutes to ninety.
+
+     This only knows about trips the driver *told* it about. An untagged take
+     still reads as a break — which is a reason to tag them, not a reason to
+     guess. */
   function runs(rows, breakMinutes) {
     if (!rows.length) return [];
     var gap = (breakMinutes || SHOWN_AT) * 60000;
     var out = [[rows[0]]];
     for (var i = 1; i < rows.length; i++) {
-      if (rows[i].at - rows[i - 1].at > gap) out.push([rows[i]]);
+      var prev = rows[i - 1];
+      var freeAgain = prev.took ? prev.at + prev.mins * 60000 : prev.at;
+      if (rows[i].at - freeAgain > gap) out.push([rows[i]]);
       else out[out.length - 1].push(rows[i]);
     }
     return out.filter(function (r) { return r.length > 1 && r[r.length - 1].at > r[0].at; });
@@ -226,6 +249,28 @@
     var out = [];
     for (var t = 0; t <= LADDER_MAX; t++) out.push(t);
     return out;
+  }
+
+  /* Silences nothing accounts for, and how many trips were tagged at all.
+   *
+   * A silence longer than the break threshold is either a break or a trip the
+   * driver did not tag, and those two are indistinguishable from here — which
+   * is the whole difficulty runs() is up against. Counting them is what lets
+   * the page say something better than "drive more": on the recording that
+   * prompted this, eleven trips were tagged out of two hundred and thirty-three
+   * offers, and tagging a few more of the long silences was worth more than
+   * another whole shift of scanning would have been. */
+  function unexplained(rows, breakMinutes) {
+    var gap = (breakMinutes || SHOWN_AT) * 60000;
+    var tagged = 0, silences = 0;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].took) tagged++;
+      if (i === 0) continue;
+      var prev = rows[i - 1];
+      if (prev.took) continue;               // accounted for, by the driver
+      if (rows[i].at - prev.at > gap) silences++;
+    }
+    return { tagged: tagged, silences: silences };
   }
 
   /* The best line at one threshold, and the plateau around it. */
@@ -281,10 +326,12 @@
   function advise(offers, opts) {
     var o = opts || {};
     var rows = usable(offers);
+    var counted = unexplained(rows, o.breakMinutes || SHOWN_AT);
     var shortfall = { ready: false, offers: rows.length,
                       needOffers: o.enoughOffers || ENOUGH_OFFERS,
                       needHours: o.enoughHours || ENOUGH_HOURS,
-                      hours: 0, runs: 0 };
+                      hours: 0, runs: 0,
+                      tagged: counted.tagged, silences: counted.silences };
     if (!rows.length) return shortfall;
 
     var shown = bestAt(rows, o.breakMinutes || SHOWN_AT);
@@ -405,6 +452,6 @@
   }
 
   return { advise: advise, usable: usable, runs: runs, replay: replay,
-           bestAt: bestAt, trustworthy: trustworthy,
+           bestAt: bestAt, trustworthy: trustworthy, unexplained: unexplained,
            THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT };
 }));
