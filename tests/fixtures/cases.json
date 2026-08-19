@@ -412,6 +412,62 @@
         "milesCorrected": false,
         "milesUncertain": true
       }
+    },
+    {
+      "name": "a non-ascii digit is not a digit, in either language",
+      "text": "$16.05 3 min (1.1 mi) away \u0662\u0660 min (7.3 mi) trip",
+      "expect": {
+        "legs": 1,
+        "miles": 1.1,
+        "minutes": 3,
+        "pay": 16.05
+      }
+    },
+    {
+      "name": "...on either leg",
+      "text": "$16.05 \u0663 min (1.1 mi) away 20 min (7.3 mi) trip",
+      "expect": {
+        "legs": 1,
+        "miles": 7.3,
+        "minutes": 20,
+        "pay": 16.05
+      }
+    },
+    {
+      "name": "...nor in a payout",
+      "text": "\u0664.50 8 min (2.0 mi) total",
+      "expect": {
+        "complete": false,
+        "minutes": 8,
+        "pay": null
+      }
+    },
+    {
+      "name": "an accent does not end a word for one port and not the other",
+      "text": "$7.09 34 min (3.6 mi) total\u00e9",
+      "expect": {
+        "miles": 3.6,
+        "minutes": 34,
+        "pay": 7.09
+      }
+    },
+    {
+      "name": "...before it either",
+      "text": "$7.09 34 min (3.6 mi) \u00e9total",
+      "expect": {
+        "miles": 3.6,
+        "minutes": 34,
+        "pay": 7.09
+      }
+    },
+    {
+      "name": "an accented unit is not the unit",
+      "text": "$16.05 3 m\u00edn (1.1 mi) away",
+      "expect": {
+        "legs": 0,
+        "minutes": null,
+        "pay": 16.05
+      }
     }
   ],
   "rate": [

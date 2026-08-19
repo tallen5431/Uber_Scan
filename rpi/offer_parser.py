@@ -18,11 +18,28 @@ DIGIT_FIX = {
     'g': '9', 'G': '6', 'T': '7',
 }
 
+# Every pattern below is compiled with re.ASCII, and that flag is load-bearing
+# rather than tidy.
+#
+# Python's \d and \b are Unicode-aware by default and JavaScript's are not, so
+# the two ports of this parser — which are held to one shared corpus precisely
+# so they cannot disagree — disagreed the moment a character outside ASCII
+# reached them. On "$16.05 3 min (1.1 mi) away ٢٠ min (7.3 mi) trip" the Pi read
+# both legs, 23 minutes, $41.87/hr; the browser matched only the first and read
+# 3 minutes, $321/hr. Tesseract with -l eng emits such characters rarely, but
+# "rarely" is not "never", and two screens giving one card two different
+# verdicts is the failure this project spends a whole shared corpus avoiding.
+#
+# Not on normalize()'s whitespace pattern, which is the one place the Unicode
+# reading is the correct one: JavaScript's \s matches non-breaking spaces and
+# the rest, so Python's must too.
+ASCII = re.ASCII
+
 # Digits as OCR may render them. Narrow on purpose: letters like G and T are
 # corrected inside a confirmed number but are too risky to match on.
 DC = r'[\dOoQlIiSsBbZz]'
 
-MONEY_STRICT = re.compile(r'\$\s*(' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)')
+MONEY_STRICT = re.compile(r'\$\s*(' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)', ASCII)
 
 # The fallback for a dollar sign that OCR read as an S or a 5, used only when no
 # real "$" was found anywhere. It insists on cents, which every Uber payout has,
@@ -31,7 +48,7 @@ MONEY_STRICT = re.compile(r'\$\s*(' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)')
 # a $45.00 offer — a confident ACCEPT on a $7 job. Guessing the currency symbol
 # is already one guess; allowing a digits-only amount on top of it is two, and
 # addresses are full of tokens that survive two guesses.
-MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'{2})')
+MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'{2})', ASCII)
 
 # The minute unit has to be spelled out. It was once allowed to be a bare "m",
 # and on a map full of street names that turns any two letters into a journey:
@@ -42,13 +59,13 @@ LEG = re.compile(
     r'(?:(\d{1,2})\s*h(?:r|rs|our|ours)?\s*)?'
     r'(' + DC + r'{1,3})\s*m[il1|]n(?:s|ute|utes)?\b'
     r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b\s*\)?)?',
-    re.IGNORECASE)
+    re.IGNORECASE | ASCII)
 
 # ...and the number in front of it has to contain a real digit. "SI min" is two
 # guesses stacked, and stacked guesses are how noise becomes data.
-HAS_DIGIT = re.compile(r'\d')
+HAS_DIGIT = re.compile(r'\d', ASCII)
 
-ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE)
+ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 
 # --- the shape a delivery card uses instead of a duration ---------------------
 #
@@ -63,14 +80,14 @@ ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE)
 # time — it is how long the job occupies the driver, waiting at the counter
 # included, which is the thing an hourly rate is supposed to divide by.
 DELIVER_BY = re.compile(
-    r'deliver(?:ed|y)?\s*by\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?', re.IGNORECASE)
+    r'deliver(?:ed|y)?\s*by\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?', re.IGNORECASE | ASCII)
 
 # A distance with no leg around it. Only ever consulted when no leg was found,
 # so it cannot double-count an Uber card — and never the "4 mi from fast
 # charger" badge, which is a fact about the map rather than about the job.
 LONE_MILES = re.compile(
     r'(?<![\d.])(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*mi(?:les?)?\b(?!\s*from)',
-    re.IGNORECASE)
+    re.IGNORECASE | ASCII)
 
 # Where the job goes. Two shapes, both anchored to something the card prints
 # rather than guessed from free text: what follows "Pickup" on a delivery card,
@@ -78,7 +95,7 @@ LONE_MILES = re.compile(
 PICKUP = re.compile(
     r'\bpick\s?up\b[\s:.-]*(.{2,60}?)'
     r'(?=\s*\(\s*\d+\s*orders?\s*\)|\s+customer\b|\s+dropoff\b'
-    r'|\s+accept\b|\s+add\s+to\b|\s+decline\b|$)', re.IGNORECASE)
+    r'|\s+accept\b|\s+add\s+to\b|\s+decline\b|$)', re.IGNORECASE | ASCII)
 
 # An address as these cards write one: a junction, or a street with a town after
 # it. Deliberately narrow — a line that is not clearly a place is not stored,
@@ -87,14 +104,14 @@ PICKUP = re.compile(
 LOOKS_LIKE_A_PLACE = re.compile(
     r'[A-Za-z].*(?:,\s*[A-Za-z]|\s&\s|\b(?:st|street|rd|road|ave|avenue|blvd|'
     r'pkwy|parkway|dr|drive|ln|lane|way|ct|court|hwy|highway|pl|place|ter|'
-    r'terrace|cir|circle)\b)', re.IGNORECASE)
+    r'terrace|cir|circle)\b)', re.IGNORECASE | ASCII)
 
 # Words a card puts near a place that are not part of its name.
 PLACE_JUNK = re.compile(
     r'^(?:pickup|dropoff|customer|accept|decline|add\s+to\s+route|'
     r'deliver(?:ed|y)?\s*by.*|verified|exclusive|guaranteed)\b[\s:.-]*',
-    re.IGNORECASE)
-TOTAL_TAIL = re.compile(r'\btota?l\b')
+    re.IGNORECASE | ASCII)
+TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 
 # No offer averages highway speed door to door once pickup, lights and parking
 # are in it. Above this the distance was misread — but see UNREADABLE_MPH: that
@@ -132,7 +149,7 @@ def fix_digits(token):
 # come off an offer card, and the JavaScript reader has never accepted them —
 # `parseFloat` behind this same guard — so a token like `1_0` was a silent
 # disagreement between the rig in the car and the phone in the hand.
-NUMERIC = re.compile(r'^[+-]?(\d+(\.\d*)?|\.\d+)$')
+NUMERIC = re.compile(r'^[+-]?(\d+(\.\d*)?|\.\d+)$', ASCII)
 
 
 def round2(value):
@@ -346,7 +363,7 @@ def find_places(text, legs):
     if d:
         after = text[d.end():d.end() + 60]
         after = re.split(r'\d|\b(?:accept|decline|pickup|customer|dropoff)\b',
-                         after, maxsplit=1, flags=re.IGNORECASE)[0]
+                         after, maxsplit=1, flags=re.IGNORECASE | ASCII)[0]
         keep(after)
 
     # The tail of each leg, up to whatever comes next.
@@ -359,7 +376,7 @@ def find_places(text, legs):
         # Cut at the first thing that is plainly not part of an address.
         tail = re.split(r'\b(?:accept|decline|verified|exclusive|guaranteed'
                         r'|add\s+to\s+route|\d+\s*mi\b)', tail,
-                        maxsplit=1, flags=re.IGNORECASE)[0]
+                        maxsplit=1, flags=re.IGNORECASE | ASCII)[0]
         tail = tail.strip(' .,-;:|()')
         if LOOKS_LIKE_A_PLACE.match(tail):
             keep(tail)

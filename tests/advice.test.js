@@ -120,6 +120,15 @@ function offer(atMinutes, pay, minutes, cost) {
   eq('a marked trip accounts for the silence after it', some.silences, 1);
   eq('...and is counted as marked', some.tagged, 1);
 
+  // ...for its own length and no more. A five-minute job followed by an hour of
+  // quiet is exactly the stretch worth asking about, and skipping the gap
+  // outright whenever the previous offer was taken hid it.
+  var brief = A.usable([offer(0, 10, 20), (function () {
+    var t = offer(1, 10, 5); t.accepted = true; return t;
+  })(), offer(60, 10, 20), offer(61, 10, 20)]);
+  eq('a short trip does not excuse a long silence',
+     A.unexplained(brief, 30).silences, 1);
+
   // The count is what the shortfall carries, so the page can ask for tags
   // rather than for another shift.
   var thin = A.advise([offer(0, 10, 20), offer(1, 10, 20), offer(90, 10, 20)],

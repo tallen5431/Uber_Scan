@@ -1032,14 +1032,23 @@
       if (day !== currentDay) {
         currentDay = day;
         var ofDay = kept.filter(function (o) { return dayKey(o.at) === day; });
-        var usable = ofDay.filter(counted).map(function (o) { return o.perHour; })
-                          .sort(function (a, b) { return a - b; });
-        var offered = ofDay.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
-        var tookToday = ofDay.filter(function (o) { return o.accepted; });
+        // One set for the whole line. The median already excluded the rows set
+        // aside; the money beside it did not, so a day carrying two misreads —
+        // $1,184 and $1,251 are both real, from one recording — announced two
+        // and a half thousand dollars offered next to a median of thirteen.
+        // Figures on one line that disagree about what they are counting are
+        // worse than one figure.
+        var day_counted = ofDay.filter(counted);
+        var usable = day_counted.map(function (o) { return o.perHour; })
+                                .sort(function (a, b) { return a - b; });
+        var offered = day_counted.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
+        var tookToday = day_counted.filter(function (o) { return o.accepted; });
         var tookPay = tookToday.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
+        var setAside = ofDay.length - day_counted.length;
         out.push('<div class="day"><b>' + dayOf(r.at).toLocaleDateString(undefined,
                    { weekday: 'short', month: 'short', day: 'numeric' }) + '</b>'
                + '<span>' + ofDay.length + ' offer' + (ofDay.length === 1 ? '' : 's')
+               + (setAside ? ' (' + setAside + ' set aside)' : '')
                + (usable.length ? ' · median ' + money(percentile(usable, 0.5), 0) + '/hr' : '')
                + ' · ' + money(offered, 2) + ' offered'
                + (tookToday.length ? ' · took ' + tookToday.length + ' for '

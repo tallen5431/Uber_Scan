@@ -1621,7 +1621,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 17 suites, 1704 checks
+npm test                # all 17 suites, 1807 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1635,26 +1635,39 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 267 checks, the shared corpus
+node tests/corpus.test.js       # 301 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
-node tests/advice.test.js       #  76 on what line to tell a driver to draw
+node tests/advice.test.js       #  77 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 300 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  #  68 on merging readings across frames
+python3 rpi/test_parser.py      # 334 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  #  78 on merging readings across frames
 python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    #  84 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     #  54 on keeping one row per offer
-python3 rpi/test_repeats.py     #  36 on one card read many times
+python3 rpi/test_journal.py     #  61 on keeping one row per offer
+python3 rpi/test_repeats.py     #  48 on one card read many times
 python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 115 on the loop that holds the camera
+python3 rpi/test_scan_pi.py     # 120 on the loop that holds the camera
 python3 rpi/test_sync.py        #  67 on getting the offers off the car
 python3 rpi/test_liveview.py    #  18 on the picture the driver watches
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
+
+One class of disagreement the corpus could not see, until it was given cases
+that reach it. **Python's `\d` and `\b` are Unicode-aware and JavaScript's are
+not** — `٢٠` is a number to one and not to the other, and an accented letter
+ends a word for one and not the other. On
+`$16.05 3 min (1.1 mi) away ٢٠ min (7.3 mi) trip` the Pi read both legs and
+reported 23 minutes at $41.87/hr; the browser matched only the first and
+reported 3 minutes at **$321/hr**. Every shared pattern in `offer_parser.py` is
+now compiled with `re.ASCII` — except `normalize()`'s whitespace pattern, which
+is the one place the Unicode reading is the right one, since JavaScript's `\s`
+matches non-breaking spaces too. Tesseract with `-l eng` emits such characters
+rarely; "rarely" is not "never", and two screens giving one card two different
+verdicts is the exact failure a shared corpus exists to prevent.
 
 `test_scan_pi.py` is the one that runs the whole thing. It drives the real
 `main()` over a fake camera — nothing else is stubbed — and the camera is fake

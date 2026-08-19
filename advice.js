@@ -266,9 +266,15 @@
     for (var i = 0; i < rows.length; i++) {
       if (rows[i].took) tagged++;
       if (i === 0) continue;
+      // The same arithmetic runs() uses, and for the same reason: a tagged trip
+      // accounts for its own length and not a minute more. Skipping the gap
+      // outright whenever the previous offer was taken — which this did — hides
+      // the case worth surfacing most, a five-minute job followed by an hour of
+      // silence, and so asked for tags on everything except the stretch that
+      // needed one.
       var prev = rows[i - 1];
-      if (prev.took) continue;               // accounted for, by the driver
-      if (rows[i].at - prev.at > gap) silences++;
+      var freeAgain = prev.took ? prev.at + prev.mins * 60000 : prev.at;
+      if (rows[i].at - freeAgain > gap) silences++;
     }
     return { tagged: tagged, silences: silences };
   }
