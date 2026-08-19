@@ -754,8 +754,16 @@
     // figure, and that this was one continuous shift.
     var runs = a.runs === 1 ? '1 run of scanning'
                             : a.runs + ' separate runs of scanning';
+    // `a.offers` is what the replay actually walked, which is fewer than the
+    // page's own count whenever a row fell outside every run of scanning — an
+    // offer on its own with nothing either side of it has no span to divide by
+    // and is dropped. Saying so reconciles two numbers that otherwise sit on
+    // one screen disagreeing about how many offers there are.
+    var dropped = (typeof a.setAside === 'number' && a.setAside > 0)
+      ? ' (' + a.setAside + ' more fell outside any run of scanning)' : '';
     var working =
-      'From <b>' + a.offers + '</b> offers across <b>' + runs + '</b>, <b>'
+      'From <b>' + a.offers + '</b> offers across <b>' + runs + '</b>'
+      + dropped + ', <b>'
       + a.hours.toFixed(1) + '</b> hours in total — not one continuous shift, and '
       + 'not all of it driving. Replaying those offers in the order they arrived '
       + 'and taking the first one at or above ' + money(a.suggested)
@@ -1008,13 +1016,25 @@
       + '<span style="left:100%">' + money(full) + '</span>';
 
     // --- rides against shop orders ---
+    // Split on what the card called itself, not on whether an item count was
+    // read. An item count is a fact about the OCR: 22 offers in one real
+    // recording ran at shopping speeds with no count on them, and every one was
+    // filed under Rides, so both medians were wrong and neither said so. A card
+    // whose top chip never made it into the crop is genuinely unclassified, and
+    // gets its own bar rather than being folded into whichever bucket is
+    // nearest — the whole point of a split is that each side is what it says.
     var kinds = [
       { name: 'Rides', rates: [] },
-      { name: 'Shop', rates: [] }
+      { name: 'Shop', rates: [] },
+      { name: 'Not stated', rates: [] }
     ];
     offers.forEach(function (r) {
-      kinds[r.items ? 1 : 0].rates.push(r.perHour);
+      var which = r.shop ? 1
+        : (r.legs >= 2 ? 0                 // two legs is a ride card's shape
+           : (typeof r.shop === 'boolean' || r.items ? 1 : 2));
+      kinds[which].rates.push(r.perHour);
     });
+    kinds = kinds.filter(function (k) { return k.rates.length; });
     el.kinds.innerHTML = kinds.map(function (k) {
       if (!k.rates.length) return '';
       var sorted = k.rates.slice().sort(function (x, y) { return x - y; });

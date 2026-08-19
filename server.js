@@ -333,7 +333,7 @@ function framePath() {
 // already happened by the time anything gets here.
 var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    'perHour', 'grossPerHour', 'perMile', 'cost', 'state',
-                   'target', 'band', 'costPerMile', 'legs', 'mergedFrom', 'hasTotal',
+                   'target', 'band', 'costPerMile', 'legs', 'mergedFrom', 'hasTotal', 'shop',
                    'milesCorrected', 'milesUncertain', 'whole', 'settled',
                    // `suspect` says not to trust a row; `doubt` says which
                    // figure to go and look at. A spreadsheet full of rows

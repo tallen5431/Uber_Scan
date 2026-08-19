@@ -264,7 +264,15 @@ class OfferLog:
         at = row.get('at')
         if not isinstance(at, (int, float)):
             return None
-        if now_ms(now) - at > RESUME_WINDOW_MS:
+        # Both directions. A Pi has no real-time clock: it boots in 1970 and
+        # jumps forward when the network arrives, so a row written before NTP
+        # carries a timestamp decades in the future relative to the clock now
+        # reading it, and a one-sided window welcomes that with open arms —
+        # `now - at` is hugely negative, the test passes, and the scanner adopts
+        # the identity of an offer from another era. Refusing to resume is
+        # always the safe answer: the cost is one offer recorded twice.
+        age = now_ms(now) - at
+        if age > RESUME_WINDOW_MS or age < -RESUME_WINDOW_MS:
             return None
         self.id = row.get('id')
         self.seq = row.get('seq') or 0
@@ -453,6 +461,10 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         'minutes': minutes,
         'miles': miles,
         'items': parsed.get('items'),
+        # What the card called itself. None when it never said, which is not
+        # the same as "a ride" and must not be folded into one — see the kinds
+        # split on the offers page.
+        'shop': True if parsed.get('shop') else None,
         # --- what the scanner made of it ------------------------------------
         'perHour': _round(rate.get('perHour'), 2),
         'grossPerHour': _round(rate.get('grossPerHour'), 2),

@@ -151,6 +151,13 @@
   var LONE_MILES = new RegExp(
     '(?:^|[^\\d.])(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*mi(?:les?)?\\b(?!\\s*from)', 'i');
 
+  /* What kind of job the card is offering, from the words it prints rather
+     than inferred from its numbers. The offers page split "Rides" from "Shop"
+     on whether an item count had been read, which is a fact about the OCR and
+     not about the job: 22 offers in one real recording ran at shopping speeds
+     with no item count, and all 22 were filed as rides. */
+  var SHOP_CARD = /\bshop\b[\s&+]*(?:and\s*)?\bdeliver/i;
+
   var PICKUP = /\bpick\s?up\b[\s:.-]*([\s\S]{2,60}?)(?=\s*\(\s*\d+\s*orders?\s*\)|\s+customer\b|\s+dropoff\b|\s+accept\b|\s+add\s+to\b|\s+decline\b|$)/i;
 
   /* An address as these cards write one: a junction, or a street with a town
@@ -424,6 +431,9 @@
       milesUncertain: dist.uncertain,
       // Enough to act on: without pay and time there is no rate to show.
       complete: isComplete(pay, minutes, deadline),
+      // Null when the card did not say — the top chip may simply not have been
+      // inside the crop — which is different from "not a shop order".
+      shop: SHOP_CARD.test(text) ? true : null,
       text: text
     };
   }

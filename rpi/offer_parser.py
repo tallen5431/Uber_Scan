@@ -113,6 +113,17 @@ PLACE_JUNK = re.compile(
     re.IGNORECASE | ASCII)
 TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 
+# What kind of job the card is offering, taken from the words the card prints
+# rather than inferred from its numbers.
+#
+# The offers page used to split "Rides" from "Shop" on whether an item count had
+# been read, which is a fact about the OCR and not about the job: 22 offers in
+# one real recording ran at shopping speeds with no item count on them, and all
+# 22 were filed as rides, so both medians were wrong and neither said so. An
+# item count is also not the same question — it buys shopping time, and a shop
+# order whose count was missed still shops.
+SHOP_CARD = re.compile(r'\bshop\b[\s&+]*(?:and\s*)?\bdeliver', re.IGNORECASE | ASCII)
+
 # No offer averages highway speed door to door once pickup, lights and parking
 # are in it. Above this the distance was misread — but see UNREADABLE_MPH: that
 # is the line above which a reading is *treated* as unreadable, and it is a good
@@ -452,6 +463,10 @@ def parse(raw_text):
         'milesCorrected': corrected,
         'milesUncertain': uncertain,
         'complete': is_complete(pay, minutes, deadline),
+        # What the card says it is. None when the card did not say — the top
+        # chip may simply not have been inside the crop — which is different
+        # from "not a shop order" and is kept different.
+        'shop': True if SHOP_CARD.search(text) else None,
         'text': text,
     }
 

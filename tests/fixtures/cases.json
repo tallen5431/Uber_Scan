@@ -468,6 +468,35 @@
         "minutes": null,
         "pay": 16.05
       }
+    },
+    {
+      "name": "a shop card says so, and is believed rather than inferred",
+      "text": "Shop & Deliver Exclusive $7.09 6 items (6 units) 34 min (3.6 mi) total",
+      "expect": {
+        "items": 6,
+        "shop": true
+      }
+    },
+    {
+      "name": "...however the ampersand came out",
+      "text": "Shop and Deliver $7.09 34 min (3.6 mi) total",
+      "expect": {
+        "shop": true
+      }
+    },
+    {
+      "name": "a ride card does not claim to be one",
+      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
+      "expect": {
+        "shop": null
+      }
+    },
+    {
+      "name": "and a card whose top never made it into the crop says nothing",
+      "text": "$7.09 34 min (3.6 mi) total",
+      "expect": {
+        "shop": null
+      }
     }
   ],
   "rate": [

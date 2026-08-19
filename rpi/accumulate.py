@@ -61,6 +61,7 @@ class OfferAccumulator:
         # one offer with the second never written. This class is the only thing
         # in the rig that looks at the legs, which is what can tell them apart.
         self.new_card = False
+        self.shop = None
         self.key = None
         self.started = 0.0
         self.last_add = 0.0
@@ -292,6 +293,12 @@ class OfferAccumulator:
         # replaced another paying the same, which is the case the journal cannot
         # see for itself.
         merged['newCard'] = self.new_card
+        # What the card said it was, kept once any frame has seen it. The chip
+        # sits at the top and a frame can miss it, so this is a union across the
+        # window in the same way the legs are.
+        if parsed.get('shop'):
+            self.shop = True
+        merged['shop'] = True if self.shop else None
         # True when the window supplied a leg this frame did not see, which is
         # the whole reason for keeping one.
         merged['grew'] = len(used) > len(parsed.get('legDetail') or [])
