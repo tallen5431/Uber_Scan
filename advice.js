@@ -388,9 +388,18 @@
       // range the thresholds actually produced, and that a longer record will
       // settle it.
       shortfall.reason = 'unsettled';
+      // The range of the line that would actually be *recommended*, which is
+      // the bottom of the plateau at each threshold. It used to report the
+      // lowest low against the highest high while quoting the lows-only spread
+      // beside them, so the page said "anywhere between $18 and $41 — a $21
+      // swing" about three numbers that do not make that sentence true. One
+      // quantity now: where the recommendation went, and how far.
       shortfall.low = lows.length ? Math.min.apply(null, lows) : null;
-      shortfall.high = highs.length ? Math.max.apply(null, highs) : null;
+      shortfall.high = lows.length ? Math.max.apply(null, lows) : null;
       shortfall.spread = spread;
+      // How much the top of the plateau moved. Not shown, but it is half of
+      // why this refused, so it should be possible to ask.
+      shortfall.bandSpread = bandSpread;
       shortfall.checkedAt = elsewhere;
       return shortfall;
     }

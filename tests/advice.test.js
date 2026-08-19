@@ -137,6 +137,49 @@ function offer(atMinutes, pay, minutes, cost) {
   eq('...and how many trips are marked', thin.tagged, 0);
 })();
 
+/* ---- a refusal has to be arithmetic somebody can check ---- */
+/* The page prints the range and the swing in one sentence, so they have to be
+   the same quantity. They were not: the low came from the bottom of the plateau
+   and the high from the *top* of it, while the swing was measured across the
+   bottoms alone — "anywhere between $18 and $41, a $21 swing", about three
+   numbers that cannot all be true together. */
+(function () {
+  // Bursts of offers separated by silences at 16, 24, 33 and 47 minutes, which
+  // is the shape that makes the answer depend on where the recording is cut —
+  // every threshold from 15 to 90 falls somewhere different among them.
+  function bursty(burst) {
+    var gaps = [16, 24, 33, 47], rows = [], t = 0;
+    for (var b = 0; b < 14; b++) {
+      for (var i = 0; i < burst; i++) {
+        rows.push(offer(t, 4 + ((b * 7 + i * 5) % 11) * 2, 20));
+        t += 1 + (i % 3);
+      }
+      t += gaps[b % gaps.length];
+    }
+    return rows;
+  }
+
+  var out = A.advise(bursty(7), { target: 25 });
+  eq('a recording split four ways refuses rather than picking one',
+     out.reason, 'unsettled');
+  eq('the swing is the distance between the two numbers printed beside it',
+     out.high - out.low, out.spread);
+  ok_('...and the range is a range', out.high >= out.low);
+  ok_('...drawn from the line that would actually be recommended',
+      out.checkedAt.every(function (e) {
+        return e.low >= out.low && e.low <= out.high;
+      }));
+
+  // And the case that reads as a bug if it is squeezed into that sentence: the
+  // recommended line does not move at all, and the plateau around it does. The
+  // page has to say something other than "anywhere between $43 and $43".
+  var steady = A.advise(bursty(3), { target: 25 });
+  eq('a plateau that moves under a line that does not still refuses',
+     steady.reason, 'unsettled');
+  eq('...with no swing in the line itself', steady.spread, 0);
+  ok_('...but a real one in the band, which is why', steady.bandSpread > 0);
+})();
+
 /* ---- the replay ---- */
 (function () {
   // Six offers, ten minutes apart, each a 20-minute trip paying $10. Taking

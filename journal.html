@@ -670,10 +670,21 @@
         // that nothing accounts for, say that, because tagging a handful of
         // them is worth more than another whole shift of scanning.
         el.adviceLead.innerHTML =
-          'Not enough here to name a line yet. Depending on how this recording '
-          + 'is split into runs, the best line comes out anywhere between <b>'
-          + money(a.low) + '</b> and <b>' + money(a.high) + '/hr</b> — a '
-          + money(a.spread) + ' swing.'
+          'Not enough here to name a line yet. '
+          + (a.spread > 0
+             ? 'Depending on how this recording is split into runs, the line to '
+               + 'draw comes out anywhere between <b>' + money(a.low)
+               + '</b> and <b>' + money(a.high) + '/hr</b> — a '
+               + money(a.spread) + ' swing.'
+             // The recommended line held and the plateau around it did not,
+             // which is a real reason to wait and reads as nonsense if it is
+             // squeezed into the sentence above: "anywhere between $43 and $43
+             // — a $0 swing" is a refusal that looks like a bug.
+             : 'The line itself comes out at <b>' + money(a.low) + '/hr</b> '
+               + 'however the recording is split, but the range of lines that '
+               + 'earn about the same moves by ' + money(a.bandSpread || 0)
+               + ' as it does — so which line is really best here is not '
+               + 'settled, even though one number keeps coming up.')
           + (a.silences > 0
              ? ' There ' + (a.silences === 1 ? 'is <b>1</b> quiet stretch'
                                              : 'are <b>' + a.silences + '</b> quiet stretches')
