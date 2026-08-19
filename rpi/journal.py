@@ -241,6 +241,9 @@ class OfferLog:
         # accumulator picks up another leg, which is precisely when the id must
         # not change.
         self.pay = None
+        # Whether this offer's row has already been superseded with a
+        # settled flag. See consider(): once per offer, never per look.
+        self.settled_written = False
         self.first_at = None
         self.last_at = None
         self.written = 0
@@ -362,9 +365,37 @@ class OfferLog:
         if not impossible and parsed.get('pay') is not None:
             self.pay = parsed.get('pay')
         if content == self.content:
-            return None                     # nothing new to say about this card
+            # Nothing new about the reading — but possibly something new about
+            # how much to believe it.
+            #
+            # `settled` means "this reading had stopped moving", and a row is
+            # only ever written on the read where the reading *changed*, so at
+            # that moment it is false by construction. 208 of 245 rows in one
+            # real journal said the reading was still changing, including cards
+            # read identically four times running, and the offers page printed
+            # that warning on 85% of everything in it. A flag that fires on
+            # nearly every row is not a flag, it is a description of the
+            # mechanism that wrote it.
+            #
+            # So the moment the same reading comes back a second time, the row
+            # is superseded once with the flag it has now earned. Once: the
+            # third and fourth identical reads have nothing further to add, and
+            # a journal that grows a row per look is a worse problem than the
+            # one being fixed.
+            if settled and not self.settled_written:
+                self.settled_written = True
+                self.seq += 1
+                upgrade = row_for(parsed, rate, at, first_at=self.first_at,
+                                  offer_id=self.id, seq=self.seq, ms=ms,
+                                  locked=locked, settled=True, whole=whole,
+                                  keep_places=self.keep_places)
+                if self.journal.append(upgrade):
+                    self.written += 1
+                    return upgrade
+            return None
 
         self.content = content
+        self.settled_written = False
         self.seq += 1
         row = row_for(parsed, rate, at, first_at=self.first_at,
                       offer_id=self.id, seq=self.seq, ms=ms, locked=locked,

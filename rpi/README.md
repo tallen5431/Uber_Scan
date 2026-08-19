@@ -1621,7 +1621,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 17 suites, 1807 checks
+npm test                # all 17 suites, 1833 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1635,16 +1635,16 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 301 checks, the shared corpus
+node tests/corpus.test.js       # 310 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  77 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 334 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 343 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  78 on merging readings across frames
 python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    #  84 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     #  61 on keeping one row per offer
+python3 rpi/test_journal.py     #  69 on keeping one row per offer
 python3 rpi/test_repeats.py     #  48 on one card read many times
 python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand

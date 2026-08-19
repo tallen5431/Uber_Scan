@@ -790,6 +790,54 @@
         "in": "@inf",
         "fallback": 25,
         "expect": 25.0
+      },
+      {
+        "name": "an underscore is not a thousands separator",
+        "in": "1_0",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "nor is hexadecimal a target",
+        "in": "0x10",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "nor exponent notation",
+        "in": "1e3",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "not-a-number spelled out",
+        "in": "nan",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "...nor infinity",
+        "in": "Infinity",
+        "fallback": 25,
+        "expect": 25.0
+      },
+      {
+        "name": "a signed number typed as text still counts",
+        "in": "+25",
+        "fallback": 99,
+        "expect": 25.0
+      },
+      {
+        "name": "...and a bare decimal point",
+        "in": ".5",
+        "fallback": 99,
+        "expect": 0.5
+      },
+      {
+        "name": "...and a trailing one",
+        "in": "25.",
+        "fallback": 99,
+        "expect": 25.0
       }
     ],
     "doubt": [
@@ -1001,6 +1049,13 @@
       "name": "nothing at all",
       "text": "",
       "expect": []
+    },
+    {
+      "name": "a branch address in brackets keeps its brackets",
+      "text": "Shop & Deliver $7.09 6 items (6 units) 34 min (3.6 mi) total Pickup Dollar General (925 Shiloh Rd Nw) Customer dropoff Accept",
+      "expect": [
+        "Dollar General (925 Shiloh Rd Nw)"
+      ]
     }
   ],
   "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day \u2014 so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",

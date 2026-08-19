@@ -191,7 +191,12 @@
     var out = [];
     function keep(value) {
       value = String(value || '').replace(PLACE_JUNK, '');
-      value = value.replace(/^[\s.,\-;:|()]+|[\s.,\-;:|()]+$/g, '');
+      // Parentheses are not trimmed, and the Pi's port never trimmed them.
+      // A branch address is printed inside them — "Dollar General (925 Shiloh
+      // Rd Nw)" — so taking the closing one off leaves a dangling open bracket
+      // and a name that reads as truncated, and the two ports stored the same
+      // merchant under two different strings.
+      value = value.replace(/^[\s.,\-;:|]+|[\s.,\-;:|]+$/g, '');
       if (value.length < 3 || value.length > 60) return;
       if (!/[A-Za-z]{2}/.test(value)) return;
       for (var i = 0; i < out.length; i++) {
@@ -459,6 +464,13 @@
     // saying which line it was using. Python's float() strips whitespace and
     // raises on what is left, so this has to do the same.
     if (typeof value === 'string' && value.trim() === '') return fallback;
+    // The same guard toNumber uses, for the same reason and now on the same
+    // pattern. `Number()` and `float()` are each generous and generous in
+    // *different* ways: this read "0x10" as sixteen and refused "1_0", while
+    // Python refused "0x10" and read "1_0" as ten. One config file grading the
+    // same card against two different targets, with nothing on either screen
+    // saying which, is the failure this function already exists to prevent.
+    if (typeof value === 'string' && !NUMERIC.test(value.trim())) return fallback;
     var n = Number(value);
     return isFinite(n) ? n : fallback;
   }

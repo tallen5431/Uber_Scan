@@ -40,6 +40,40 @@
 
   var ctx = el.frame.getContext('2d', { willReadFrequently: true });
 
+  /* The settings, with the time of day attached.
+   *
+   * A DoorDash card gives a deadline where an Uber card gives a duration —
+   * "Deliver by 7:15 PM" — and rate() turns that into minutes only if something
+   * tells it what time it is. The parser deliberately will not read the clock
+   * itself, so that it can be held to a fixed corpus. Without this every
+   * delivery card read here came back unjudgeable while the status line said
+   * "confirmed", which is the worst pairing available: a card the reader
+   * understood perfectly, showing no rate, next to a claim of confidence.
+   *
+   * Unlike the Pi, a browser has a real clock, so there is nothing to earn. */
+  function judged(parsed) {
+    var now = new Date();
+    var withClock = {};
+    for (var k in settings) withClock[k] = settings[k];
+    withClock.nowMinutes = now.getHours() * 60 + now.getMinutes();
+    return OfferParser.rate(parsed, withClock);
+  }
+
+  /* Whether the reading is finished, as opposed to merely repeatable.
+   *
+   * The same rule the Pi's loop uses to decide whether to keep resampling and
+   * whether to speak: a total line is the whole journey by itself, and two legs
+   * are a whole ride card. One plain leg is half a card, and half a card is the
+   * same pay over less time. */
+  function isWhole(parsed) {
+    if (!parsed || !parsed.complete) return false;
+    var detail = parsed.legDetail || [];
+    for (var i = 0; i < detail.length; i++) {
+      if (detail[i] && detail[i].isTotal) return true;
+    }
+    return (parsed.legs || 0) >= 2;
+  }
+
   /* ---------- settings ---------- */
 
   function load() {
@@ -245,9 +279,17 @@
     lastSig = sig;
 
     var wasLocked = locked;
-    locked = agree >= AGREE_TO_LOCK;
+    // Agreement is not enough on its own, and the driving screen has known that
+    // for a while: two frames that both lose the pickup leg to the same glare
+    // agree perfectly with each other, so a fragment can be locked. A card
+    // missing a leg is the same pay over less time and therefore always reads
+    // *better* than the offer is, which makes an unqualified ACCEPT on half a
+    // card the one mistake this screen must not make. Whole means finished — a
+    // total, or both legs of a two-leg card — and it is what clears the "?"
+    // and what earns the accept buzz.
+    locked = agree >= AGREE_TO_LOCK && isWhole(parsed);
     lastResult = parsed;
-    if (locked && !wasLocked) buzz(OfferParser.rate(parsed, settings).state === 'go' ? [18, 40, 18] : [45]);
+    if (locked && !wasLocked) buzz(judged(parsed).state === 'go' ? [18, 40, 18] : [45]);
   }
 
   async function loop() {
@@ -281,7 +323,7 @@
 
   function render(ms) {
     var p = lastResult;
-    var r = p ? OfferParser.rate(p, settings) : { ready: false, state: 'empty' };
+    var r = p ? judged(p) : { ready: false, state: 'empty' };
 
     el.verdict.className = 'verdict ' + r.state;
     document.body.classList.toggle('locked', locked);
@@ -348,10 +390,12 @@
       document.body.classList.add('frozen');
       el.btnFreeze.textContent = '▶ Scan';
       status('reading photo…');
-      // A still has no successive frames to agree with, so trust one good read.
+      // A still has no successive frames to agree with, so one good read is
+      // all the agreement there can be — but it still has to be a *whole* card,
+      // for the same reason a live one does.
       var out = await readOnce(img, null);
       lastResult = out.parsed;
-      locked = out.parsed.complete;
+      locked = isWhole(out.parsed);
       render(out.ms);
       URL.revokeObjectURL(img.src);
     };
@@ -508,6 +552,14 @@
 
   // A Pi running its own scanner has a camera this page can never reach, so
   // sending the driver to the browser camera API only produces NotFoundError.
+  //
+  // Asked *after* this device's own camera has failed, never before. Asked
+  // first, it answers a question about the server rather than about the browser
+  // in front of the driver: a phone opening this page over https has a working
+  // camera of its own and was being redirected away from it, so the browser
+  // scanner was unreachable from any device as soon as the rig existed. A
+  // NotFoundError with a Pi scanner on the other end is the one combination
+  // that actually means "you want the other page".
   async function piScannerPresent() {
     try {
       var res = await fetch('/api/status', { cache: 'no-store' });
@@ -520,10 +572,6 @@
   }
 
   (async function () {
-    if (await piScannerPresent()) {
-      location.replace('live.html');
-      return;
-    }
     el.reticle.classList.toggle('full', settings.fullFrame);
     applyBox();
     try {
@@ -542,6 +590,16 @@
       running = true;
       loop();
     } catch (e) {
+      // No camera here and a rig on the other end: the driver wants the page
+      // that shows what the rig can see. Anything else — permission refused,
+      // camera busy — is this device's own problem and is explained in place,
+      // because sending them away would hide the one message that can fix it.
+      var noCameraHere = (e.name === 'NotFoundError'
+                          || e.name === 'DevicesNotFoundError');
+      if (noCameraHere && await piScannerPresent()) {
+        location.replace('live.html');
+        return;
+      }
       explainCameraError(e);
     }
   })();
@@ -553,9 +611,9 @@
       await new Promise(function (r, j) { img.onload = r; img.onerror = j; img.src = src; });
       var out = await readOnce(img, null);
       lastResult = out.parsed;
-      locked = out.parsed.complete;
+      locked = isWhole(out.parsed);
       render(out.ms);
-      return { parsed: out.parsed, ms: out.ms, rate: OfferParser.rate(out.parsed, settings) };
+      return { parsed: out.parsed, ms: out.ms, rate: judged(out.parsed) };
     },
     ready: function () { return !!worker; }
   };

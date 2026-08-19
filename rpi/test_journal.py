@@ -249,6 +249,45 @@ feed(after, [OFFER] * 2, start=1_700_000_006.0)
 offers = [r for r in after.journal.rows() if not r.get('kind')]
 eq('...and does not record the card twice', len(offers), 1)
 
+# --- "settled" means the reading stopped moving, so it has to be able to -----
+# A row is only ever written on the read where the reading *changed*, so at that
+# moment "this reading has stopped moving" is false by construction. 208 of 245
+# rows in one real journal claimed the reading was still changing — including
+# cards read identically four times running — and the offers page printed that
+# warning on 85% of everything in it. A flag that fires on nearly every row is
+# not a flag, it is a description of the mechanism that wrote it.
+log = fresh('settling.jsonl')
+acc = OfferAccumulator()
+t = 1_700_000_000.0
+previous = None
+for i in range(6):
+    parsed = acc.add(P.parse(OFFER), now=t + i * 0.5)
+    sig = (parsed['pay'], parsed['minutes'], parsed['miles'])
+    log.consider(parsed, P.rate(parsed, MONEY), now=t + i * 0.5,
+                 settled=(sig == previous), whole=True)
+    previous = sig
+rows = log.journal.rows()
+eq('a card that settles is superseded once, not once per look', len(rows), 2)
+eq('...under the same id', len({r['id'] for r in rows}), 1)
+eq('the first row is honest that it had just changed', rows[0]['settled'], False)
+eq('...and the second says it stopped changing', rows[-1]['settled'], True)
+eq('...carrying the same reading', rows[-1]['pay'], rows[0]['pay'])
+eq('...and the same journey', rows[-1]['minutes'], rows[0]['minutes'])
+ok_('...as a later row, so the reader prefers it',
+    rows[-1]['seq'] > rows[0]['seq'])
+
+# A reading that never holds still is never upgraded, which is the whole point
+# of keeping the flag at all.
+log = fresh('never-settles.jsonl')
+acc = OfferAccumulator()
+for i, pay in enumerate(['$12.45', '$12.45', '$12.45']):
+    text = '%s 5 min (1.2 mi) away %d min (8.4 mi) trip' % (pay, 23 + i)
+    parsed = acc.add(P.parse(text), now=t + 100 + i * 0.5)
+    log.consider(parsed, P.rate(parsed, MONEY), now=t + 100 + i * 0.5,
+                 settled=False, whole=True)
+ok_('a reading that keeps moving is never marked settled',
+    not any(r['settled'] for r in log.journal.rows()))
+
 # --- a torn line survives a power cut ---------------------------------------
 path = os.path.join(work, 'torn.jsonl')
 with open(path, 'w') as fh:

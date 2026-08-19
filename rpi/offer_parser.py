@@ -482,6 +482,17 @@ def setting(value, fallback):
     """
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return fallback
+    # The same guard to_number uses, for the same reason and now on the same
+    # patterns. `float()` and `Number()` are each generous and generous in
+    # *different* ways: Python read "1_0" as ten and refused "0x10", JavaScript
+    # refused "1_0" and read "0x10" as sixteen. This block is hand-edited on the
+    # driver's instruction, so a stray character is a keystroke away, and one
+    # config file grading the same card against two different targets — with
+    # nothing on either screen saying which — is the failure this whole function
+    # already exists to prevent. Anything that is not plainly a number falls
+    # back to the documented default, in both languages, identically.
+    if isinstance(value, str) and not NUMERIC.match(value.strip()):
+        return fallback
     try:
         n = float(value)
     except (TypeError, ValueError):
