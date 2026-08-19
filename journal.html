@@ -925,11 +925,27 @@
     el.p50.textContent = money(percentile(rates, 0.50), 0);
     el.p75.textContent = money(percentile(rates, 0.75), 0);
 
+    // What cleared the line, and — separately — what could actually have been
+    // taken. Those are not the same number and this used to print the first
+    // under the second's name: an offer arriving while you are already carrying
+    // somebody is not an offer you can take, and on one real recording 26% of
+    // offers cleared $25/hr while the replay, which knows that, could only ever
+    // have taken 6%. Four times over, on the sentence at the top of the page.
     var cleared = offers.filter(function (r) { return r.perHour >= target; }).length;
     var mine = offers.filter(function (r) { return r.accepted; });
-    var lines = ['At ' + money(target) + '/hr you would have taken <b>'
+    var takeable = null;
+    try {
+      var sim = Advice.replay(Advice.runs(Advice.usable(kept)), target);
+      if (sim && sim.trips > 0) takeable = Math.round(sim.takes * 100);
+    } catch (e) { takeable = null; }
+    var lines = ['At ' + money(target) + '/hr, <b>'
       + Math.round(cleared / offers.length * 100) + '%</b> of <b>'
-      + offers.length + '</b> offer' + (offers.length === 1 ? '' : 's') + '.'];
+      + offers.length + '</b> offer' + (offers.length === 1 ? '' : 's')
+      + ' cleared the line'
+      + (takeable !== null
+         ? ' — though only about <b>' + takeable + '%</b> were yours to take, '
+           + 'since the rest arrived while you would already have been driving.'
+         : '.')];
     // Once anything is ticked, the comparison the whole page is for: what the
     // offers said against what was actually worked. Nothing is shown until then,
     // because a "0 taken" on an untagged log reads as a claim rather than an

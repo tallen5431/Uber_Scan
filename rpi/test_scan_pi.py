@@ -908,6 +908,40 @@ else:
             rate < 1.0 / SP2.RESAMPLE_EVERY * 0.6)
         ok_('...though it is still looked at now and then', len(settled) >= 1)
 
+# --- a fault that comes back is said again --------------------------------
+# The read-failure log is rate limited by message, and it never cleared that
+# message on a good read — so a fault that recurred an hour later matched the
+# suppressed one and was silent for the rest of the shift. A disk that filled,
+# was emptied and filled again would say so exactly once, in the morning.
+SPR._read_error = None
+SPR._read_failed(RuntimeError('disk full'))
+SPR._read_failed(RuntimeError('disk full'))
+eq('the same fault twice running is remembered once',
+   SPR._read_error, 'RuntimeError: disk full')
+SPR._read_ok()
+eq('a good read forgets it', SPR._read_error, None)
+SPR._read_failed(RuntimeError('disk full'))
+eq('...so its return is reported rather than suppressed',
+   SPR._read_error, 'RuntimeError: disk full')
+
+# --- and the health line still speaks when every read is failing -----------
+# The guard was `not self.reads`, which is exactly true when the reader is
+# broken: the two-minute summary went quiet at the moment it had the most to
+# say, and the log's last word was one suppressed failure line.
+said = []
+real_log = SPR.log
+SPR.log = lambda m: said.append(m)
+try:
+    h = SPR.Health()
+    h.reset(0.0)
+    h.failed = 12
+    h.report(SPR.HEALTH_EVERY + 1, None, None)
+finally:
+    SPR.log = real_log
+ok_('a health line appears even with no successful read', len(said) == 1)
+ok_('...and says every read failed', 'ALL FAILED' in (said[0] if said else ''))
+ok_('...and how many', '12' in (said[0] if said else ''))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

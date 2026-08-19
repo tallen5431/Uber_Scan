@@ -483,6 +483,19 @@ def _read_failed(exc):
         log('read failed (further identical errors suppressed): %s' % message)
 
 
+def _read_ok():
+    """Forget the last fault, so its return is reported rather than suppressed.
+
+    The rate limiter compares against the last message seen and never cleared
+    it, so a fault that came back an hour later — a full disk that was emptied
+    and filled again, a camera that recovered and failed once more — matched the
+    suppressed message and was silent for the rest of the shift. The other rate
+    limiters in this file clear on success for the same reason.
+    """
+    global _read_error
+    _read_error = None
+
+
 _snapshot_error = None
 
 
@@ -569,6 +582,11 @@ class Health:
         # arrives, so the clock this is judged against is always the caller's.
         self.since = now
         self.reads = self.complete = self.no_pay = self.clipped = 0
+        # Reads that raised. Counted here so the health line can still appear
+        # when every one of them did: the guard in report() used to be `not
+        # self.reads`, which is exactly true when the reader is broken, so the
+        # log went quiet at the moment it had the most to say.
+        self.failed = 0
         self.ms = []
 
     def add(self, out, parsed, card=None, previous=None):
@@ -590,11 +608,20 @@ class Health:
     def report(self, now, tracker, scanner):
         if self.since is None:
             self.since = now
-        if now - self.since < HEALTH_EVERY or not self.reads:
+        if now - self.since < HEALTH_EVERY or not (self.reads or self.failed):
+            return
+        if not self.reads:
+            # Every read raised. There are no timings to summarise and nothing
+            # else here is meaningful, but saying so is the whole point.
+            log('health over %ds: %d reads, ALL FAILED — see the read failure '
+                'above for what went wrong' % (now - self.since, self.failed))
+            self.reset(now)
             return
         median = sorted(self.ms)[len(self.ms) // 2]
         bits = ['%d reads, %d complete' % (self.reads, self.complete),
                 'median %.0fms' % median]
+        if self.failed:
+            bits.append('%d failed' % self.failed)
         if self.no_pay:
             bits.append('%d found no payout' % self.no_pay)
         if self.clipped:
@@ -1201,7 +1228,9 @@ def main():
         done = reader.take()
         if done is None:
             return False
-        if done['error'] is not None:
+        if done['error'] is None:
+            _read_ok()
+        else:
             # A read is the one part of this loop that touches an external
             # engine, a homography and a JPEG encoder, and any of them can
             # throw on one bad frame: a degenerate quad, a tesseract
@@ -1210,6 +1239,10 @@ def main():
             # minute of not scanning — for a frame that would have been
             # replaced 30ms later.
             _read_failed(done['error'])
+            # Counted so the two-minute health line can still appear when every
+            # read is failing — see Health.report.
+            health.failed += 1
+            health.report(time.time(), tracker, scanner)
             return False
         batch = done['outs']
         # The earlier frame's reading is evidence too: the accumulator merges
