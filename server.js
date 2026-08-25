@@ -597,6 +597,11 @@ function latestPerOffer(rows) {
   var out = [];
   var marks = Object.create(null);
   var rules = [];
+  // How many cards the rig watched go past, from the scanner's own tally. Kept
+  // beside the offers rather than in them: it is a fact about the window, not
+  // about any one card, and the page needs both to say what fraction was
+  // recorded.
+  var seen = [];
   var readings = Object.create(null);
 
   rows.forEach(function (r) {
@@ -606,6 +611,7 @@ function latestPerOffer(rows) {
       return;
     }
     if (r.kind === 'rule') { rules.push(r); return; }
+    if (r.kind === 'seen') { seen.push(r); return; }
     if (r.kind) return;                       // something newer than this reader
     if (!r.id) { out.push(r); return; }
     if (!(r.id in byId)) { byId[r.id] = out.length; out.push(r); readings[r.id] = [r]; return; }
@@ -631,7 +637,9 @@ function latestPerOffer(rows) {
     }
   });
 
-  return out.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+  out.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+  out.seen = seen;
+  return out;
 }
 
 // Make sure the directory a file is about to be written into exists.
@@ -1215,6 +1223,7 @@ function route(req, res) {
     var withHidden = q.hidden === '1';
     return readJournal(function (rows) {
       var offers = latestPerOffer(rows);
+      var seen = offers.seen || [];
       // The window first, then the count of what is hidden inside it.
       //
       // Counting before the filter meant the page said "3 offers are hidden and
@@ -1246,9 +1255,19 @@ function route(req, res) {
           'Content-Disposition': 'attachment; filename="uber-scan-offers.csv"'
         });
       }
+      // What the rig watched go past, over the same window. Summed here rather
+      // than shipped row by row: there is one of these every couple of minutes
+      // of scanning and the page wants the total, not the series.
+      var watched = { saw: 0, kept: 0 };
+      seen.forEach(function (r) {
+        if (floor && (r.at || 0) < floor) return;
+        watched.saw += r.saw || 0;
+        watched.kept += r.kept || 0;
+      });
       send(res, 200, JSON.stringify({ count: offers.length, total: total,
                                       truncated: total > offers.length,
                                       days: days, hidden: hidden,
+                                      watched: watched,
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });

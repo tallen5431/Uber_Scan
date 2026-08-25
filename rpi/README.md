@@ -1273,6 +1273,41 @@ all. That is the project's first rule holding as a measured property rather than
 as an intention, and it is now asserted on every run — each shape, under each
 kind of damage, has to be either right or silent, never a third thing.
 
+### What went past unrecorded
+
+The one thing a journal can never contain is what is not in it. Every figure on
+the offers page divides by the offers that were *read*, so a rig quietly missing
+a third of them looks exactly like a rig missing none — the medians shift, the
+suggested line shifts, and nothing anywhere says why.
+
+The nearest honest thing to a miss rate: **a read that found a payout is proof a
+card was in front of the camera**, and an accumulator episode that ends with no
+journal row is one the rig watched go past. Both are counted, on the same
+two-minute beat as the health line, and written to the journal as a
+`kind: "seen"` row — the same convention the driver's own tags use, so nothing
+that reads offers has to learn about them and the sync carries them already.
+
+The offers page turns the pair into a sentence: *"3 times the scanner picked a
+payout off the screen and never managed to record it — 25% of the 12 it saw."*
+Usually that is two reads that never agreed before the card was gone.
+
+Two things it is careful about, both of which would make it a lie otherwise:
+
+* **it is a floor, not a rate.** An offer the reader never saw at all is
+  invisible to this exactly as it is to everything else. The page says so in the
+  same breath rather than in a footnote.
+* **it counts sightings, not offers.** One card watched, lost behind a hand and
+  picked up again is two sightings of one offer. The wording never invites the
+  figure to be compared with the number of rows below it; what it is for is the
+  ratio.
+
+Counted on the transition rather than when the card goes, which is the less tidy
+of the two and the only correct one: a card still on the screen when the window
+closes has not ended, so waiting would drop the last card of every window and
+never count one that sat there for a whole shift. The cost is that a single card
+can be seen in one window and kept in the next, and that costs nothing, because
+both totals are added up over the whole range before anything divides them.
+
 ### When the reading cannot be true
 
 Not every misread is noise. In one shift of 234 offers, three had lost a decimal
@@ -1660,7 +1695,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 17 suites, 1962 checks
+npm test                # all 17 suites, 1970 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1688,7 +1723,7 @@ python3 rpi/test_repeats.py     #  48 on one card read many times
 python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 234 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 130 on the loop that holds the camera
+python3 rpi/test_scan_pi.py     # 138 on the loop that holds the camera
 python3 rpi/test_sync.py        #  67 on getting the offers off the car
 python3 rpi/test_liveview.py    #  18 on the picture the driver watches
 ```

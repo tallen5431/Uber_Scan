@@ -117,7 +117,7 @@ class FakeCam(object):
 
 
 def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
-        until=None):
+        until=None, look=None):
     """Drive scan_pi.main() over a fake camera and collect what came out.
 
     `until(state)` ends the run as soon as the thing being tested has happened,
@@ -150,7 +150,12 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     cam = FakeCam(offer, empty, appear_at=appear_at, vanish_at=vanish_at)
     started = []
     real_start, real_emit, real_sleep = SP.start_camera, SP.emit, time.sleep
+    real_look = PL.Scanner.look_many
     SP.start_camera = lambda *a, **k: (started.append(1), cam)[1]
+    # A stand-in for the OCR, when the case under test is one no rendering of a
+    # real card can produce — a payout whose journey never reads, for one.
+    if look is not None:
+        PL.Scanner.look_many = look
 
     verdicts = []
     # Both halves of the call. `whole` travels as a keyword, so recording only
@@ -187,6 +192,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         time.sleep = real_sleep
         sys.argv = argv
         SP.start_camera, SP.emit = real_start, real_emit
+        PL.Scanner.look_many = real_look
 
     rows = []
     if os.path.exists(journal):
@@ -933,6 +939,66 @@ eq('...but reports no verdict at all', len(beat_reads), 0)
 ok_('the verdict window clears a full verify beat and the read on the end of it',
     SP2.VERIFY_MAX + 3.0 < 20.0)
 ok_('...and is longer than the liveness window it replaced', 20.0 > 12.0)
+
+# --- counting what went past ------------------------------------------------
+# The one thing a journal can never contain is what is not in it. This is the
+# nearest honest thing to a miss rate: a read that found a payout proves a card
+# was in front of the camera, and an episode that ends with no row written is
+# one the rig watched go past. It is a floor — an offer the reader never saw at
+# all is invisible to this too — and everything that displays it says so.
+
+
+def payout_only(self, frames, now=None, geom=None):
+    """A payout, and a journey that never reads.
+
+    rate() refuses an incomplete reading, so a card like this can never reach
+    the journal however many times it is read. That is the miss this counter
+    exists to surface, and it is unreachable through the camera: no rendering
+    of a real card produces a payout with no journey for its whole life.
+    """
+    p = OP2.parse('$16.05')
+    return [{'parsed': dict(p), 'rate': OP2.rate(p, {}), 'locked': True,
+             'text': '$16.05', 'clipped': False, 'dropped': 0, 'recovered': 0,
+             'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+def tally_over(look, seconds=22.0):
+    """Run the loop with a blinking card and add up what it says it saw."""
+    import scan_pi as SP
+    real_every = SP.HEALTH_EVERY
+    SP.HEALTH_EVERY = 3.0                  # so a short run reports at all
+    try:
+        rows = run(TC.uberx_screen(), seconds=seconds, appear_at=0.4,
+                   vanish_at=10_000.0, look=look)['rows']
+    finally:
+        SP.HEALTH_EVERY = real_every
+    seen = [r for r in rows if r.get('kind') == 'seen']
+    offers = [r for r in rows if not r.get('kind')]
+    return (sum(r.get('saw') or 0 for r in seen),
+            sum(r.get('kept') or 0 for r in seen), len(offers))
+
+saw, kept, offers = tally_over(None)
+ok_('a card that reads is counted as seen', saw >= 1)
+eq('...and as kept', kept, saw)
+ok_('...and really did reach the journal', offers >= 1)
+
+saw, kept, offers = tally_over(payout_only)
+ok_('a payout that never becomes an offer is counted as seen', saw >= 1)
+eq('...and not as kept', kept, 0)
+eq('...which is the truth: nothing was written', offers, 0)
+
+# A tally must not look like an offer to anything that reads offers. It carries
+# a `kind`, which an offer never does — that one distinction is what lets the
+# web side and the scanner write one file without either knowing about the
+# other's rows, and a new kind has to keep it.
+_mixed = run(TC.uberx_screen(), seconds=8.0, appear_at=0.4,
+             vanish_at=10_000.0)['rows']
+ok_('every row is either an offer or a kind, never both',
+    all(bool(r.get('kind')) != ('pay' in r) for r in _mixed))
+ok_('...and a tally carries the pair the sync keys on',
+    all(r.get('id') and r.get('seq') for r in _mixed if r.get('kind') == 'seen'))
 
 # --- a fault that comes back is said again --------------------------------
 # The read-failure log is rate limited by message, and it never cleared that

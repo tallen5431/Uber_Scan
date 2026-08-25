@@ -1136,6 +1136,33 @@
       notes.push(data.hidden + ' offer' + (data.hidden === 1 ? ' is' : 's are')
                  + ' hidden and left out of every figure here.');
     }
+    // What went past unrecorded, from the scanner's own tally.
+    //
+    // The one thing a journal can never contain is what is not in it, so this
+    // is the nearest honest thing: a read that found a payout proves a card was
+    // in front of the camera, and an episode that ended with no row written is
+    // one the rig watched go past. It is a floor and is said to be one — an
+    // offer the reader never saw at all is invisible to this too.
+    var w = data.watched;
+    if (w && w.saw) {
+      // Counted in sightings, not in offers: one card watched, lost and picked
+      // up again is two sightings of one offer, and the wording must not invite
+      // anyone to compare this figure with the number of rows below it. What it
+      // is for is the ratio.
+      var lost = w.saw - w.kept;
+      notes.push(lost
+        ? '<b>' + lost + '</b> time' + (lost === 1 ? '' : 's')
+          + ' the scanner picked a payout off the screen and never managed to '
+          + 'record it — ' + Math.round(lost / w.saw * 100) + '% of the <b>'
+          + w.saw + '</b> it saw. Usually two reads that never agreed before the '
+          + 'card was gone. So at least that many offers are missing from '
+          + 'everything above, and probably more: one the camera never read at '
+          + 'all cannot be counted by anything.'
+        : 'Every one of the <b>' + w.saw + '</b> payout'
+          + (w.saw === 1 ? '' : 's') + ' the scanner picked off the screen was '
+          + 'recorded. An offer it never read at all cannot be counted, so that '
+          + 'is a floor rather than a guarantee.');
+    }
     notes.push(newest.costPerMile > 0
       ? 'Rates are after ' + money(newest.costPerMile, 2) + '/mi of running costs.'
       : 'No running cost is set, so these are what the offers paid before the car.');

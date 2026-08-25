@@ -587,6 +587,16 @@ class Health:
         # self.reads`, which is exactly true when the reader is broken, so the
         # log went quiet at the moment it had the most to say.
         self.failed = 0
+        # Cards the rig definitely saw against cards it managed to record.
+        #
+        # The journal can only hold what was read, so the one number it can
+        # never contain is how much it missed. This is the honest half of that:
+        # a read that found a payout is proof a card was in front of the camera,
+        # and an episode that ends without a journal row is one the rig watched
+        # go past. It cannot see an offer it never read at all — no counter can
+        # — so this is a floor on the miss rate rather than the whole of it, and
+        # it is labelled that way everywhere it is shown.
+        self.saw = self.kept = 0
         self.ms = []
 
     def add(self, out, parsed, card=None, previous=None):
@@ -606,22 +616,34 @@ class Health:
             self.clipped += 1
 
     def report(self, now, tracker, scanner):
+        """Say what has happened lately. Returns the tally, or None if silent.
+
+        The tally goes back to the caller because the counts are worth keeping
+        as well as printing: the log is on the machine nobody reads, and how
+        many cards went past unrecorded is a question a driver asks about a
+        shift, days later, from the offers page.
+        """
         if self.since is None:
             self.since = now
         if now - self.since < HEALTH_EVERY or not (self.reads or self.failed):
-            return
+            return None
         if not self.reads:
             # Every read raised. There are no timings to summarise and nothing
             # else here is meaningful, but saying so is the whole point.
             log('health over %ds: %d reads, ALL FAILED — see the read failure '
                 'above for what went wrong' % (now - self.since, self.failed))
+            tally = {'over': int(now - self.since), 'saw': self.saw,
+                     'kept': self.kept, 'reads': 0, 'failed': self.failed}
             self.reset(now)
-            return
+            return tally
         median = sorted(self.ms)[len(self.ms) // 2]
         bits = ['%d reads, %d complete' % (self.reads, self.complete),
                 'median %.0fms' % median]
         if self.failed:
             bits.append('%d failed' % self.failed)
+        if self.saw:
+            bits.append('%d card%s seen, %d recorded'
+                        % (self.saw, '' if self.saw == 1 else 's', self.kept))
         if self.no_pay:
             bits.append('%d found no payout' % self.no_pay)
         if self.clipped:
@@ -661,7 +683,10 @@ class Health:
                 bits.append('un-stuck %dx — the stored calibration is out of date'
                             % self.rebaselines)
         log('health over %.0fs: %s' % (now - self.since, '; '.join(bits)))
+        tally = {'over': int(now - self.since), 'saw': self.saw,
+                 'kept': self.kept, 'reads': self.reads, 'failed': self.failed}
         self.reset(now)
+        return tally
 
 
 def _fmt_roi(roi):
@@ -1031,6 +1056,12 @@ def main():
     # moving picture settles, so a trigger thrown away is a card never read.
     read_wanted = False
     last_alive = 0.0
+    # The card currently being watched, and what has become of it. See
+    # Health.saw — an episode that ends having shown a payout but written
+    # nothing is a card the rig saw and failed to keep.
+    seen_episode = None
+    seen_pay = False
+    seen_kept = False
     reader = Reader(scanner, threaded=not args.no_thread)
 
     # Every offer the scanner is sure of, kept so a shift can be looked at
@@ -1061,6 +1092,7 @@ def main():
         # is how a loop rewritten into a closure loses its memory without
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
+        nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for
         parsed = accumulator.add(out['parsed'])
@@ -1158,7 +1190,8 @@ def main():
             log('read %d found nothing usable (%s, %d in a row). Reader saw: %r'
                 % (frames, why, failures,
                    (out.get('text') or '').strip()[:220]))
-        health.report(now, tracker, scanner)
+        tally = health.report(now, tracker, scanner)
+        note_tally(tally)
 
         if args.json:
             emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole)
@@ -1215,16 +1248,65 @@ def main():
         # read back months later. Written and flagged: the page sets them
         # aside and says how many, and if a later frame does see the card
         # whole it supersedes the partial row anyway.
+        # Which card this reading belongs to, and whether that card has yet
+        # made it into the file. See Health.saw: an episode with a payout in it
+        # is a card the rig certainly saw, and one that ends with nothing
+        # written is one it watched go past.
+        # Counted the moment it happens, not when the card goes.
+        #
+        # Waiting for the episode to end sounds tidier and loses the last card
+        # of every window: a card still on the screen when the two minutes are
+        # up has not ended, so it is never counted, and one that sits there for
+        # a whole shift is never counted at all. Counting on the transition can
+        # split one card across two windows — seen in the first, kept in the
+        # second — which costs nothing, because both totals are added up over
+        # the whole range before anyone divides them.
+        episode = parsed.get('episode')
+        if episode != seen_episode:
+            seen_episode = episode
+            seen_pay = False
+            seen_kept = False
+        if parsed.get('pay') is not None and not seen_pay:
+            seen_pay = True
+            health.saw += 1
+
         if offer_log is not None and rate['ready'] and out['locked']:
-            offer_log.consider(parsed, rate, ms=out['ms']['total'],
-                               locked=out['locked'], whole=whole,
-                               settled=stable)
+            landed = offer_log.consider(parsed, rate, ms=out['ms']['total'],
+                                        locked=out['locked'], whole=whole,
+                                        settled=stable) is not None
+            # Nothing written because there was nothing new to say means an
+            # earlier reading of this same card already landed, which is still
+            # a card that reached the file.
+            if (landed or offer_log.id is not None) and not seen_kept:
+                seen_kept = True
+                health.kept += 1
 
         if args.display:
             cv2.imshow('uber-scan', render_panel(rate, parsed))
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 return True
         return False
+
+    def note_tally(tally):
+        """Keep the health tally, not just print it.
+
+        A `kind` row, the same way the web side records a tag: an offer never
+        carries one, so nothing that reads offers has to learn about these, and
+        the sync already carries them. Written only when a card was actually
+        seen — a quiet two minutes with the phone out of the mount is not
+        evidence about anything and would bury the windows that are.
+        """
+        if offer_log is None or not tally or not tally.get('saw'):
+            return
+        at = JR.now_ms()
+        offer_log.journal.append({
+            'v': JR.SCHEMA, 'kind': 'seen', 'at': at,
+            # An id and a seq because the sync keys on that pair; without them
+            # every one of these would look like the same row to the far end.
+            'id': 'seen-%d' % at, 'seq': 1,
+            'over': tally.get('over'), 'saw': tally.get('saw'),
+            'kept': tally.get('kept'),
+        })
 
     def collect():
         """Take a finished read, if there is one, and act on it."""
@@ -1245,7 +1327,7 @@ def main():
             # Counted so the two-minute health line can still appear when every
             # read is failing — see Health.report.
             health.failed += 1
-            health.report(time.time(), tracker, scanner)
+            note_tally(health.report(time.time(), tracker, scanner))
             return False
         batch = done['outs']
         # The earlier frame's reading is evidence too: the accumulator merges
