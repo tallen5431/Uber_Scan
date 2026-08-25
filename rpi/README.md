@@ -30,6 +30,21 @@ for several readings in a row, calibrates itself from that frame, and starts
 scanning. Already calibrated, it goes straight to scanning. `--recalibrate`
 starts over.
 
+"That frame" is meant literally, and for a while it was not. Aiming proved six
+frames in a row were big enough and sharp enough, and then calibration grabbed
+*one more* frame and wrote the corners it found in that one, unchecked. The gap
+between them is exactly where a hand comes off the bracket, the phone dims a
+step, headlights swing across the dash, or the lens hunts once more. Unlike a
+bad read, a bad calibration is permanent: it is the quad every read of the
+shift gets cropped from, and the only thing the driver sees is `no offer on the
+screen to test against`, which is also what a perfect calibration says when the
+phone happens to be idle. Calibration now looks through six frames, keeps the
+sharpest one that clears the same two floors aiming used, and if none of them
+do, writes nothing and says which way it went wrong. A box you drew by hand is
+never refused — it exists because the detector could not find the phone, so
+sending you back to that phase is no kind of answer — but it still gets pinned
+in the sharpest of the six rather than in whichever arrived first.
+
 It prints what it is doing at each step:
 
 ```
@@ -82,6 +97,18 @@ once calibration succeeds, and the camera preview is on port 8081 meanwhile.
 The scanner is restarted with a backoff if it dies, its errors appear in
 `/api/status`, and the site keeps serving throughout. `SCANNER=0` disables it,
 `SCANNER_SPEAK=0` keeps it silent.
+
+It is also restarted if it stops working **without** dying. A CSI camera that
+stops delivering frames leaves `capture_request()` blocked forever: the process
+is up, systemd is content, `/api/status` still says `running: true`, the live
+page keeps its green dot, and the loop never turns again — a rig that looks fine
+and reads nothing for the rest of the night. The scan loop says "still here"
+every four seconds whether or not it has read anything, so thirty seconds of
+silence from a running scanner is now a `SIGKILL` and the same restart a crash
+would get. `SCANNER_SILENT_MS` moves the window. `/api/status` carries a
+`wedged` count and a `wedgedAt`, and neither is cleared by the restart: `error`
+correctly goes back to null once the replacement is up, and these are what is
+left to tell you whether tonight was the first time or the fourth.
 
 ### Or as its own service
 
@@ -1523,8 +1550,16 @@ Three deliberate omissions:
 * **no accept/decline column.** The scanner cannot see the Accept button and
   must never touch it, so anything here would be a guess presented as a record.
 * **no OCR text.** The useful part is already parsed into numbers; what is left
-  is pickup addresses. `rpi/journal.jsonl` is gitignored and the server refuses
-  to serve anything under `rpi/`.
+  is pickup addresses. `rpi/journal.jsonl` is gitignored, and the static server
+  hands over only files whose extension is one the site is built from — `.html`,
+  `.css`, `.js`, the icons, the fonts, the traineddata. It used to be the other
+  way round, a list of paths to refuse, and a list of paths to refuse has to be
+  remembered every time something new appears beside `server.js`. It was not:
+  `rpi/` and `ssl/` were refused *by name*, so the journal in `rpi/` was safe and
+  a copy of that same journal anywhere else was not. `journal-backup.jsonl` in
+  the root, `backup/journal.jsonl`, `logs/uberscan.log` — all served in full,
+  pickup addresses included, to anyone on the car's wifi. Those are exactly the
+  files a person makes when they are being careful with their data.
 * **no failing.** A full card or a read-only filesystem costs the journal and
   nothing else. The scanner exists to read offers and keeps reading them.
 
@@ -1695,7 +1730,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 17 suites, 1970 checks
+npm test                # all 18 suites, 2025 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1720,12 +1755,15 @@ python3 rpi/test_exposure.py    #  84 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
 python3 rpi/test_journal.py     #  69 on keeping one row per offer
 python3 rpi/test_repeats.py     #  48 on one card read many times
-python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
+python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
+                                #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 234 from a picture of a card to a $/hour
 python3 rpi/test_scan_pi.py     # 138 on the loop that holds the camera
 python3 rpi/test_sync.py        #  67 on getting the offers off the car
-python3 rpi/test_liveview.py    #  18 on the picture the driver watches
+python3 rpi/test_liveview.py    #  34 on the picture the driver watches, and
+                                #     on nothing else being served with it
+python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

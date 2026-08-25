@@ -65,6 +65,30 @@ function isPrivate(pathname) {
   return PRIVATE.test(pathname) || SECRET_EXT.test(pathname);
 }
 
+/* ...and the other way round: only the kinds of file a website is made of.
+ *
+ * The rule above is a denylist, and a denylist has to be remembered every time
+ * something new appears next to server.js. It was not. `rpi/` and `ssl/` are
+ * refused by name, so the journal in `rpi/` is safe — and a copy of that same
+ * journal anywhere else is not. Verified against the running server: a manual
+ * `journal-backup.jsonl` in the root, a `backup/journal.jsonl`, and a
+ * `logs/uberscan.log` were all served in full to anyone on the car's wifi,
+ * pickup addresses included. Those are the exact files a person makes when they
+ * are being careful with their data.
+ *
+ * So the question is turned around. Every file this site actually ships —
+ * checked against sw.js's own precache list and everything under icons/ and
+ * vendor/ — already has a type in TYPES, because TYPES is the list of what a
+ * page is built from. Anything else is not part of the site and is not served,
+ * whatever it is called and wherever it is put. A new directory of data
+ * appearing next to the server is then safe by default rather than safe if
+ * somebody remembers.
+ */
+function isServable(pathname) {
+  return Object.prototype.hasOwnProperty.call(
+    TYPES, path.extname(pathname).toLowerCase());
+}
+
 /* ---------- the Pi scanner, as a child of this process ----------
  *
  * Started automatically when rpi/config.json exists, because that file only
@@ -80,6 +104,12 @@ var scanner = {
   status: null,        // most recent non-read message, e.g. aiming progress
   started: null,
   restarts: 0,
+  // A lifetime tally, deliberately not cleared when the replacement starts: it
+  // is the only trace a wedge leaves. A camera that goes quiet twice a shift is
+  // a hardware conversation, and zeroing the count at every restart would mean
+  // /api/status always said none.
+  wedged: 0,
+  wedgedAt: null,      // when the last one happened, for the same reason
   error: null
 };
 
@@ -89,6 +119,30 @@ var listeners = [];    // open server-sent-event responses
 // problem rather than another rung of the same one. Comfortably longer than the
 // camera takes to open and fail, comfortably shorter than a shift.
 var HEALTHY_RUN_MS = 60000;
+
+// How long a *running* scanner may say nothing before it is treated as wedged.
+//
+// Everything below restarts a scanner that exits. Nothing restarted one that
+// stayed alive and stopped working — and that is a real state: a CSI camera
+// that stops delivering frames leaves capture_request() blocked forever, so the
+// process is up, systemd is content, the loop never turns and the driver has a
+// rig that looks fine and reads nothing for the rest of the shift.
+//
+// It became detectable when the scan loop started saying "still here" every
+// four seconds whether or not it has read anything. Thirty seconds is seven of
+// those beats, which is slack enough for a Pi under load and short enough that
+// a wedge costs one offer rather than an evening.
+//
+// Armed only once that beat has been heard, so it can never fire during aiming
+// or calibration: those phases are the autopilot's, they emit on their own
+// schedule, and they already give up on a timeout of their own.
+var SILENT_MS = Number(process.env.SCANNER_SILENT_MS) || 30000;
+// Checked often enough that the deadline means roughly what it says — a fixed
+// five-second tick would turn a short SILENT_MS into a much longer one, which
+// matters for the test that wedges a scanner on purpose and for anyone who
+// tightens the window on a rig that beats faster.
+var SILENT_TICK_MS = Math.max(200, Math.min(5000, Math.round(SILENT_MS / 4)));
+var silentTimer = null;
 
 // The autopilot calibrates itself, so it runs whenever the Pi scanner code is
 // present — waiting for a config file would mean waiting for a manual step that
@@ -122,6 +176,7 @@ function startScanner() {
   scanner.proc = spawn(bin, args, { cwd: ROOT });
   scanner.started = Date.now();
   scanner.error = null;
+  scanner.heardAt = null;          // nothing from the scan loop yet
   console.log('scanner: started ' + bin + ' ' + args.join(' '));
 
   // Without this, a missing python3 or a bad SCANNER_CMD emits an 'error' with
@@ -169,6 +224,10 @@ function startScanner() {
         }
         // Setup messages carry no rate, so they must not overwrite the last read.
         if (read.ready !== undefined) scanner.last = read;
+        // The scan loop's own voice — a reading or a heartbeat — as opposed to
+        // the autopilot's progress messages. Only this arms the watchdog, and
+        // only this feeds it.
+        if (read.ready !== undefined || read.alive) scanner.heardAt = Date.now();
         broadcast(read);
       } catch (e) {
         console.log('scanner: ' + line);   // not JSON, so it is a log line
@@ -210,6 +269,43 @@ function startScanner() {
     console.error('scanner: retrying in ' + Math.round(delay / 1000) + 's');
     setTimeout(startScanner, delay);
   });
+}
+
+/* Kill a scanner that is running and has stopped saying anything.
+ *
+ * A kill rather than anything cleverer: there is nothing to negotiate with a
+ * process blocked inside a camera driver, and everything needed to bring it
+ * back already exists — the 'close' handler above restarts it with the same
+ * backoff it uses for a crash, so a camera that is genuinely gone produces a
+ * retry every minute rather than a spin.
+ *
+ * SIGKILL, not SIGTERM. The scan loop handles SIGTERM by unwinding cleanly,
+ * which is right when it is able to run; a wedged one cannot, and a signal it
+ * never processes would leave this timer firing forever against a process that
+ * has already been asked nicely. This is the case where the polite path has
+ * been ruled out by the diagnosis.
+ */
+function watchForSilence() {
+  if (shuttingDown || !scanner.proc) return;
+  // Never armed before the scan loop has spoken once: aiming and calibration
+  // are the autopilot's phases, they keep their own schedule, and they have
+  // their own give-up timeout.
+  if (!scanner.heardAt) return;
+  var quiet = Date.now() - scanner.heardAt;
+  if (quiet <= SILENT_MS) return;
+  scanner.wedged = (scanner.wedged || 0) + 1;
+  scanner.wedgedAt = Date.now();
+  scanner.error = 'the scanner stopped reporting for ' + Math.round(quiet / 1000)
+                + 's while still running — restarting it';
+  console.error('scanner: ' + scanner.error);
+  // Cleared first, so a kill that takes a moment to land cannot make this fire
+  // again on the next tick against the same process.
+  scanner.heardAt = null;
+  try {
+    scanner.proc.kill('SIGKILL');
+  } catch (e) {
+    console.error('scanner: could not kill the wedged process: ' + e.message);
+  }
 }
 
 var WATCH_PATH = path.join(ROOT, 'rpi', '.viewing');
@@ -1084,6 +1180,15 @@ function route(req, res) {
         phase: scanner.phase,
         running: !!scanner.proc,
         restarts: scanner.restarts,
+        // Times it was killed for going quiet while still running, as opposed
+        // to times it fell over on its own. The two have different causes and
+        // a count that merges them explains neither.
+        wedged: scanner.wedged || 0,
+        // A successful restart clears `error`, as it should — there is no
+        // current problem. This is what is left to say a camera went quiet at
+        // all, which is the difference between "it is fine now" and "it is fine
+        // now for the third time this evening".
+        wedgedAt: scanner.wedgedAt || null,
         startedAt: scanner.started,
         error: scanner.error
       },
@@ -1281,6 +1386,12 @@ function route(req, res) {
   if ((file !== ROOT && !file.startsWith(ROOT + path.sep)) || isPrivate(pathname)) {
     return send(res, 403, 'forbidden', { 'Content-Type': 'text/plain' });
   }
+  // Not 403: whether a file of that kind exists here is not this server's
+  // business to confirm, and a directory request has already been turned into
+  // index.html by the time it reaches here.
+  if (!isServable(pathname)) {
+    return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
+  }
 
   // ...and again after following links. Resolving the *path* proves nothing
   // about where a symlink inside ROOT actually points, and a lexical check
@@ -1409,6 +1520,11 @@ if (scannerEnabled()) {
   }
   console.log('  live verdict: /live.html      state: /api/status');
   startScanner();
+  // Checked often enough that the reported silence is roughly true, cheaply
+  // enough that it is not worth thinking about: one comparison a few times a
+  // window. unref so it can never be the thing keeping the process alive.
+  silentTimer = setInterval(watchForSilence, SILENT_TICK_MS);
+  if (silentTimer.unref) silentTimer.unref();
 } else if (process.env.SCANNER === '0') {
   console.log('\nPi scanner disabled (SCANNER=0).');
 }

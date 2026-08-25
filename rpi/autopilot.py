@@ -40,6 +40,11 @@ SNAPSHOT = os.path.join(HERE, 'live-frame.jpg')
 STABLE_READINGS = 6
 STABLE_INTERVAL = 0.5
 
+# How many frames calibrate_from may look through for one worth writing down.
+# Six at the aiming interval is three seconds, the same span aim() spends
+# proving the mount, and short enough that nobody standing at the car notices.
+CALIBRATE_TRIES = 6
+
 
 def emit(payload, as_json):
     """Every message goes to one place, so the terminal and the web UI agree."""
@@ -252,8 +257,95 @@ def _measure_exposure(source, quad, as_json):
     return int(chosen), detail
 
 
-def calibrate_from(source, as_json, drawn=None):
-    """Write config.json from the frame the preview is already looking at.
+def _frame_to_keep(source, as_json, drawn=None, floor=None):
+    """Pick a frame worth calibrating on, out of several.
+
+    aim() spends three seconds proving that the mount is big enough and sharp
+    enough, several frames running — and then calibration grabbed one more frame
+    and wrote that one down. Nothing checked it. The gap between the last frame
+    that passed and the one that got written is exactly where a hand comes off
+    the bracket, the phone dims a step, headlights swing across the dash, or the
+    lens hunts once more; and unlike a bad read, a bad calibration is permanent.
+    It is the quad every read of the shift is cropped from, and the driver's
+    only sign is 'no offer on the screen to test against', which is also what a
+    perfectly good calibration says when the phone happens to be idle.
+
+    So: look at a few, score them the way aiming scored them, and keep the
+    sharpest that clears the same floors. Returns (frame, quad, sharp) or
+    (None, None, None) with the reason already emitted.
+
+    A hand-drawn box is never refused. It exists because the detector could not
+    find the phone, so sending the driver back to the phase that failed them is
+    no kind of answer — but the sharpest of six frames is still a better frame
+    to pin their corners in than whichever one arrived first.
+    """
+    import numpy as np
+    import cropbox as CX
+    import pipeline as PL
+    import preview as PV
+    from calibrate import MIN_CARD_PIXELS, SHARP_ROI, card_source_pixels
+
+    floor = floor or MIN_CARD_PIXELS
+    best = (None, None, None)
+    seen_quad = False
+    small = None
+    blurry = None
+
+    for attempt in range(CALIBRATE_TRIES):
+        if attempt:
+            time.sleep(STABLE_INTERVAL)
+        frame = source.frame()
+        if drawn is not None:
+            quad = np.array(CX.in_pixels(drawn, (frame.shape[1], frame.shape[0])),
+                            dtype=np.float32)
+        else:
+            quad = PL.detect_screen_quad(frame)
+            if quad is None:
+                continue
+        seen_quad = True
+        sharp = PV.sharpness(PL.crop(PL.warp(frame, quad, 600), SHARP_ROI))
+
+        if drawn is None:
+            card_px = int(round(card_source_pixels(quad, frame.shape)
+                                * source.scale_to_capture))
+            if card_px < floor:
+                small = card_px
+                continue
+            if sharp < PV.SHARP_FLOOR:
+                blurry = sharp if blurry is None else max(blurry, sharp)
+                continue
+
+        if best[2] is None or sharp > best[2]:
+            best = (frame, quad, sharp)
+
+    if best[0] is not None:
+        return best
+
+    # Refusing is the point. Writing a config from a frame that failed these
+    # checks would look like success and read like nothing for the rest of the
+    # night; leaving config.json unwritten sends the driver back to aiming,
+    # which is a phase that tells them what is wrong every two seconds.
+    if not seen_quad:
+        why = 'lost the screen while calibrating'
+    elif small is not None and blurry is None:
+        why = ('the screen moved further away while calibrating — %d px, needs %d'
+               % (small, floor))
+    else:
+        why = ('the picture went soft while calibrating (%s, needs %d) — '
+               'check nothing is touching the mount'
+               % (round(blurry) if blurry else '?', PV.SHARP_FLOOR))
+    emit({'phase': 'error', 'message': why + '. Nothing was written; aim again.'},
+         as_json)
+    return None, None, None
+
+
+def calibrate_from(source, as_json, drawn=None, floor=None):
+    """Write config.json from a frame the preview has been checked against.
+
+    Which frame that is, and why it is not simply the next one off the camera,
+    is _frame_to_keep's business — but the consequence is this function's: given
+    nothing good enough, it writes nothing at all and says so, because a wrong
+    quad here is not one bad read, it is every read until someone re-aims.
 
     `drawn` is a box a person put on the live view, as fractions of the frame.
     Given one, nothing is detected: those corners are the calibration, the crop
@@ -261,20 +353,13 @@ def calibrate_from(source, as_json, drawn=None):
     scanner does not track the box back onto whatever it thinks the screen is.
     """
     import cv2
-    import numpy as np
     import cropbox as CX
     import pipeline as PL
     from calibrate import DEFAULT_ROI, card_source_pixels, load_existing
 
-    frame = source.frame()
-    if drawn is not None:
-        quad = np.array(CX.in_pixels(drawn, (frame.shape[1], frame.shape[0])),
-                        dtype=np.float32)
-    else:
-        quad = PL.detect_screen_quad(frame)
-        if quad is None:
-            emit({'phase': 'error', 'message': 'lost the screen while calibrating'}, as_json)
-            return False
+    frame, quad, _ = _frame_to_keep(source, as_json, drawn, floor)
+    if frame is None:
+        return False
 
     # The preview runs smaller than the scanner captures, so the corners have to
     # be scaled into capture coordinates or every read would be cropped wrong.
@@ -418,7 +503,7 @@ def main():
         source, drawn = aim(args.json, args.preview_port, args.aim_timeout, args.min_card)
         if source is None:
             return 1
-        ok = calibrate_from(source, args.json, drawn)
+        ok = calibrate_from(source, args.json, drawn, args.min_card)
         # The scanner needs the camera, and only one process may hold it.
         source.close()
         time.sleep(1.0)

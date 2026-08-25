@@ -58,6 +58,10 @@ if shutil.which('node') is None:
     sys.exit(0)
 
 work = tempfile.mkdtemp()
+# Files planted inside the repo to prove they are not served. Removed in the
+# `finally` below whatever happens — leaving a stray journal in a checkout is
+# precisely the mistake this block is about.
+leaked = []
 frame = os.path.join(work, 'live.jpg')
 journal = os.path.join(work, 'journal.jsonl')
 open(journal, 'w').close()
@@ -161,6 +165,44 @@ try:
     eq('...including the page itself',
        urllib.request.urlopen(base + '/live.html', timeout=3).status, 200)
 
+    # --- only the site is served ------------------------------------------
+    # The path rule used to be a denylist, and a denylist has to be remembered
+    # every time something new appears beside server.js. It was not: `rpi/` and
+    # `ssl/` were refused by name, so the journal in `rpi/` was safe and a copy
+    # of that same journal anywhere else was not. A `journal-backup.jsonl` in
+    # the root and a `backup/journal.jsonl` were both served in full — pickup
+    # addresses included — to anyone on the car's wifi. Those are exactly the
+    # files a person makes when being careful with their data.
+    for spot in ('journal-backup.jsonl', os.path.join('backup', 'journal.jsonl'),
+                 os.path.join('logs', 'uberscan.log')):
+        full = os.path.join(ROOT, spot)
+        if os.path.dirname(spot):
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, 'w') as fh:
+            fh.write('{"pay": 16.05, "places": ["Mae Dell Rd, Chattanooga"]}\n')
+        leaked.append(full)
+
+    for spot in ('/journal-backup.jsonl', '/backup/journal.jsonl',
+                 '/logs/uberscan.log', '/tools/test.sh'):
+        try:
+            urllib.request.urlopen(base + spot, timeout=3)
+            eq('a journal outside rpi/ is not served: %s' % spot, 'served', 'refused')
+        except urllib.error.HTTPError as e:
+            ok_('a journal outside rpi/ is not served: %s' % spot, e.code in (403, 404))
+
+    # ...and the site itself is untouched. An allowlist that also refuses the
+    # pages is not a fix, and every one of these is a file the app cannot start
+    # without.
+    for spot in ('/', '/index.html', '/live.html', '/journal.html', '/styles.css',
+                 '/offer-parser.js', '/advice.js', '/sw.js',
+                 '/manifest.webmanifest', '/icons/icon-192.png',
+                 '/vendor/tesseract.min.js', '/vendor/lang/eng.traineddata.gz'):
+        try:
+            eq('the site still serves %s' % spot,
+               urllib.request.urlopen(base + spot, timeout=3).status, 200)
+        except urllib.error.HTTPError as e:
+            eq('the site still serves %s' % spot, e.code, 200)
+
     # --- the fallback still works -----------------------------------------
     # A browser that will not render a multipart image falls back to fetching
     # stills, so that path may not rot.
@@ -196,6 +238,16 @@ finally:
         proc.wait(timeout=5)
     except Exception:
         proc.kill()
+    for stray in leaked:
+        try:
+            os.remove(stray)
+        except OSError:
+            pass
+    for spare in ('backup', 'logs'):
+        try:
+            os.rmdir(os.path.join(ROOT, spare))
+        except OSError:
+            pass
     shutil.rmtree(work, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
