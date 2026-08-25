@@ -132,6 +132,48 @@ def shop_screen(pal=LIGHT):
     return _bgr(im)
 
 
+def doordash_screen(pal=LIGHT, pay='$41.11', miles='9.8', by='7:15 PM',
+                    merchant="Papa John's Store 3317"):
+    """A delivery offer: a deadline instead of a duration, and a lone distance.
+
+    The third shape this rig has to read, and until now the only one that was
+    never drawn. Its three fixtures in the shared corpus are *text* — they go
+    straight into the parser and never through a lens, a warp, a crop or the OCR
+    engine — so every claim about reading a delivery card rested on text somebody
+    had typed out by hand.
+
+    That is the wrong half to test. This card is laid out unlike the other two in
+    exactly the ways the pipeline is sensitive to: the payout sits lower down
+    under a banner, the distance stands alone with no time beside it, the
+    duration is a clock time rather than a number of minutes, and the whole thing
+    is shorter, so it occupies a different share of the screen and the crop lands
+    somewhere else.
+
+    The wording is taken from the corpus's own real captures rather than
+    invented — "Guaranteed (incl. tips)", "Deliver by", "Pickup", the decline
+    header and the order count are all as a real card prints them.
+    """
+    im, d = _canvas(pal)
+    top = 1240
+    d.rounded_rectangle([0, top, W, H], radius=44, fill=pal['bg'])
+    # The banner a real card puts above the money, which is what pushes the
+    # payout down the card and is therefore part of the problem.
+    d.text((46, top + 44), 'Decline', font=font(30, False), fill=pal['sub'])
+    d.text((46, top + 100), 'High paying offer!', font=font(34), fill=pal['fg'])
+    d.text((46, top + 150), 'Your Platinum status gave you priority',
+           font=font(28, False), fill=pal['sub'])
+    d.text((46, top + 222), pay, font=font(86), fill=pal['fg'])
+    d.text((46, top + 336), 'Guaranteed (incl. tips)', font=font(32, False), fill=pal['sub'])
+    # A distance with no leg around it, and a deadline where a duration would be.
+    d.text((66, top + 410), '%s mi' % miles, font=font(40), fill=pal['fg'])
+    d.text((66, top + 476), 'Deliver by %s' % by, font=font(40), fill=pal['fg'])
+    d.text((66, top + 550), 'Pickup %s' % merchant, font=font(30, False), fill=pal['sub'])
+    d.text((66, top + 596), 'Customer dropoff', font=font(30, False), fill=pal['sub'])
+    d.rounded_rectangle([46, top + 680, W - 46, top + 790], radius=26, fill=(220, 30, 40))
+    d.text((430, top + 710), 'Accept', font=font(42), fill=(255, 255, 255))
+    return _bgr(im)
+
+
 def mount(screen, width, seed=1, cabin=24, sensor=SENSOR):
     """Put the phone in the frame at a given closeness, with sensor noise.
 

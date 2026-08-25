@@ -53,6 +53,9 @@ def eq(name, got, want):
         print('FAIL  %s: got %r want %r' % (name, got, want))
 
 
+def ok_(name, cond):
+    eq(name, bool(cond), True)
+
 def close(name, got, want, tol=0.01):
     global ok, bad
     if got is not None and abs(got - want) <= tol:
@@ -139,6 +142,128 @@ for label, screen, want, want_items in CARDS:
             expect = ('go' if truth['perHour'] >= settings['target']
                       else 'warn' if truth['perHour'] >= floor else 'no')
             eq(where + ' / the verdict', rate['state'], expect)
+
+
+# --- the third card shape, read from a picture ------------------------------
+# A delivery card gives a deadline where the other two give a duration, and a
+# distance standing on its own with no time beside it. Its fixtures in the
+# shared corpus are *text*, so until this block every claim about reading one
+# rested on a string somebody typed by hand — the parser was tested and the
+# camera, the warp, the crop and the OCR engine were not. That is the wrong half
+# to leave untested: this card is laid out unlike the others in exactly the ways
+# the pipeline is sensitive to, with the payout pushed down under a banner and
+# the whole card shorter, so the crop lands somewhere else.
+#
+# The clock is supplied, because a deadline is only a duration once something
+# says what time it is. 18:29 against a 19:15 deadline is 46 minutes.
+DELIVERY_SETTINGS = {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                     'pad': 0, 'secondsPerItem': 0, 'nowMinutes': 18 * 60 + 29}
+
+for theme, pal in (('light', TC.LIGHT), ('dark', TC.DARK)):
+    screen = TC.doordash_screen(pal)
+    for width in (900, 1200, 1450):
+        frame = mount(screen, width, seed=1)
+        quad = PL.detect_screen_quad(frame)
+        where = 'a delivery card in %s at %dpx' % (theme, width)
+        eq(where + ' / the screen is found', quad is not None, True)
+        if quad is None:
+            continue
+        scanner = PL.Scanner(quad=quad, card_height=900,
+                             settings=DELIVERY_SETTINGS)
+        acc = OfferAccumulator()
+        out = scanner.read(frame, now=100.0)
+        parsed = acc.add(out['parsed'], now=100.0)
+
+        eq(where + ' / payout', parsed['pay'], 41.11)
+        eq(where + ' / the lone distance', parsed['miles'], 9.8)
+        eq(where + ' / the deadline, in minutes since midnight',
+           parsed['deliverBy'], 19 * 60 + 15)
+        eq(where + ' / no duration is invented', parsed['minutes'], None)
+        # It survives the merge complete — the rule that lost every one of these
+        # cards for a while lived in the accumulator, not the parser.
+        eq(where + ' / complete after merging', parsed['complete'], True)
+        eq(where + ' / and finished, so it can be spoken',
+           OP.is_whole(parsed), True)
+
+        rate = OP.rate(parsed, DELIVERY_SETTINGS)
+        eq(where + ' / a verdict is reached', rate['ready'], True)
+        if not rate['ready']:
+            continue
+        eq(where + ' / the duration comes from the deadline',
+           rate['cardMinutes'], 46.0)
+        eq(where + ' / ...and says so', rate['fromDeadline'], True)
+        # $41.11 less 9.8 miles at 30c, over 46 minutes.
+        close(where + ' / $ per hour', rate['perHour'], (41.11 - 2.94) / (46 / 60.0))
+        close(where + ' / what was deducted', rate['cost'], 2.94)
+        eq(where + ' / the verdict', rate['state'], 'go')
+
+# --- and what happens when the picture is bad -------------------------------
+# The rule this project is built on is that a confidently wrong number is far
+# worse than no number, and this is the only place it can be checked as a
+# property rather than asserted as an intention: put every card shape through
+# every way a real frame goes wrong, and require that each reading is either
+# right or refused. Never a third thing.
+#
+# Measured while writing this: glare, softness and a dim cabin cost nothing on
+# any of the three shapes, and a screen rippling against the shutter takes them
+# all down — Uber at amplitude 18, the delivery card not until 30, because it
+# has fewer small lines to lose. Every one of those failures came back as no
+# payout at all. That is the direction that must hold.
+
+
+def _glare(f, strength=110):
+    """A band of windscreen reflection across the middle of the card."""
+    out = f.astype(np.float32)
+    h, w = f.shape[:2]
+    yy = np.mgrid[0:h, 0:w][0]
+    band = np.exp(-((yy - h * 0.52) ** 2) / (2 * (h * 0.06) ** 2))
+    return np.clip(out + (band * strength)[:, :, None], 0, 255).astype(np.uint8)
+
+
+def _soft(f):
+    """The mount shaken by a pothole, or a focus that has drifted."""
+    return cv2.GaussianBlur(f, (5, 5), 0)
+
+
+def _dim(f):
+    """A phone that has dimmed itself, or a night shift."""
+    return np.clip(f.astype(np.float32) * 0.45, 0, 255).astype(np.uint8)
+
+
+def _ripple(f, amp=30):
+    """The screen's refresh beating against the camera's exposure.
+
+    The fault the flicker-safe exposure exists to avoid, at an amplitude past
+    what a correctly exposed rig produces — so this is the failure case, and
+    what is asserted is only that it fails the right way.
+    """
+    out = f.astype(np.float32)
+    wave = (np.sin(np.arange(f.shape[0]) / 3.0) * amp)[:, None, None]
+    return np.clip(out + wave, 0, 255).astype(np.uint8)
+
+
+ROUGH = [('glare', _glare), ('soft', _soft), ('a dim cabin', _dim),
+         ('a rippling screen', _ripple)]
+SHAPES = [('a ride card', uberx_screen(), 16.05, PROFILES[0][1]),
+          ('a shop order', shop_screen(), 7.09, PROFILES[0][1]),
+          ('a delivery card', TC.doordash_screen(), 41.11, DELIVERY_SETTINGS)]
+
+for label, screen, true_pay, settings in SHAPES:
+    for cond, damage in ROUGH:
+        frame = damage(mount(screen, 1200, seed=1))
+        quad = PL.detect_screen_quad(frame)
+        where = '%s under %s' % (label, cond)
+        if quad is None:
+            ok += 1                     # refusing to find the screen is a refusal
+            continue
+        scanner = PL.Scanner(quad=quad, card_height=900, settings=settings)
+        out = scanner.read(frame, now=100.0)
+        parsed = out['parsed']
+        rate = OP.rate(parsed, settings)
+        # The whole property, in one line: a verdict may only be reached on the
+        # payout the card was drawn from. Anything else has to be a refusal.
+        ok_(where + ' / is right, or says nothing — never something else',
+            (not rate['ready']) or parsed['pay'] == true_pay)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d end-to-end money checks passed' % ok)

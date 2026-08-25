@@ -1234,6 +1234,45 @@ and when, it lives on a card in a vehicle, and it is copied to a machine at home
 
 turns it off and changes nothing else.
 
+### How well the three card shapes actually read
+
+For a long time this was an open question with a confident-sounding answer. The
+end-to-end test — the only one that goes picture → warp → crop → tesseract →
+dollars — rendered exactly two cards, both light-mode and both Uber-family. The
+delivery card's three fixtures were **text**: they went straight into the parser
+and never near a lens. So every claim about reading a DoorDash offer rested on a
+string somebody had typed out by hand, which is the wrong half to test — that
+card is laid out unlike the other two in exactly the ways the pipeline is
+sensitive to, with the payout pushed down under a banner, a distance standing
+alone with no time beside it, and a shorter card that puts the crop somewhere
+else entirely.
+
+It is drawn now, and measured. Reading the payout correctly, at three mount
+distances, in both themes:
+
+| | clean | glare | soft | dim cabin | rippling screen |
+| --- | --- | --- | --- | --- | --- |
+| ride card | ✓ | ✓ | ✓ | ✓ | refuses |
+| shop order | ✓ | ✓ | ✓ | ✓ | refuses |
+| delivery card | ✓ | ✓ | ✓ | ✓ | refuses |
+
+**A delivery card is as reliable as a ride card**, and slightly tougher under
+ripple — it holds to amplitude 24 where the ride card goes at 18, having fewer
+small lines to lose. Glare across the middle of the card, a mount shaken soft,
+and a phone dimmed for a night shift all cost nothing on any of the three.
+
+Ripple is the one that beats all of them, which is expected: it is the screen's
+refresh beating against the shutter, and it is what the flicker-safe exposure
+exists to prevent. The amplitudes above are past what a correctly exposed rig
+produces.
+
+The number that matters is not in that table. Sweeping ripple from nothing to
+well past the failure point, across every shape: **no reading ever reached a
+verdict with a wrong payout.** Every single failure came back as no payout at
+all. That is the project's first rule holding as a measured property rather than
+as an intention, and it is now asserted on every run — each shape, under each
+kind of damage, has to be either right or silent, never a third thing.
+
 ### When the reading cannot be true
 
 Not every misread is noise. In one shift of 234 offers, three had lost a decimal
@@ -1621,7 +1660,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 17 suites, 1872 checks
+npm test                # all 17 suites, 1962 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1648,7 +1687,7 @@ python3 rpi/test_journal.py     #  69 on keeping one row per offer
 python3 rpi/test_repeats.py     #  48 on one card read many times
 python3 rpi/test_calibrate.py   #  30 on what calibration may overwrite
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
-python3 rpi/test_money.py       # 144 from a picture of a card to a $/hour
+python3 rpi/test_money.py       # 234 from a picture of a card to a $/hour
 python3 rpi/test_scan_pi.py     # 130 on the loop that holds the camera
 python3 rpi/test_sync.py        #  67 on getting the offers off the car
 python3 rpi/test_liveview.py    #  18 on the picture the driver watches
