@@ -2047,6 +2047,41 @@ somewhere else.
 Rows carry the `target`, `band` and `costPerMile` in force when they were
 written, because a stored "PASS" is unreadable a month after the target moved.
 
+### The keypad had no test
+
+`ui.js` is the fallback input path: what a driver uses when the camera cannot
+read a card, or when there is no rig at all and this is an app on a phone. Its
+arithmetic is the shared parser's and is covered by the corpus; the four
+hundred lines around that arithmetic were covered by nothing.
+
+Three faults are recorded in its own comments, which is to say all three
+shipped, and each is a *confidently wrong number* rather than a crash:
+
+  - **The settings entry is shared with the camera scanner**, which keeps
+    `secondsPerItem` and `fullFrame` in it. Writing it back wholesale deleted
+    them, so changing anything on this page silently reset the shopping
+    allowance to zero — and scan.html then rated Shop & Deliver offers as if
+    the shopping took no time. Nothing resyncs the two pages.
+  - **`ready` was measured against the padded total** rather than the typed
+    minutes. Restoring that bug and typing a payout with a ten-minute pickup
+    pad set gives, measured: a green **ACCEPT at $96.3/hr** for an offer with
+    no time on it at all.
+  - **`perMile` was gross** while the rate beside it was net, so the same offer
+    read $1.91/mi here and $1.56/mi on the Pi, with neither screen saying why.
+
+`rpi/test_keypad.py` opens the page in a real browser and presses the keys,
+because `ui.js` exports nothing and that is how a thumb reaches it anyway. Forty
+four checks: those three, plus what the digits do (one decimal point, two
+places, a six-figure cap, a dropped leading zero), stepping between the three
+fields, the physical keyboard a rig might have plugged in, the draft that is
+kept across a reload and dropped after three minutes — an offer from an hour
+ago is a number the driver will read as this one — the logging cap, and the
+page still adding up an offer with `localStorage` throwing on every call, which
+is private mode, a full quota, or a browser with site data turned off.
+
+Each of the five behaviours worth having is verified by breaking it: restore
+any one of them and the check named for it fails.
+
 ### A rate with no running cost taken off it
 
 `rate()` charges no mileage at all for a distance it does not trust, which is
@@ -2380,7 +2415,7 @@ python3 rpi/test_scan_pi.py     # 163 on the loop that holds the camera, and
                                 #     on which live view it is being asked for
 python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
-python3 rpi/test_scanjs.py      #  39 on the phone's own scanner, through a
+python3 rpi/test_scanjs.py      #  40 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
 python3 rpi/test_liveview.py    #  47 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
@@ -2390,6 +2425,8 @@ python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
 python3 rpi/test_autopilot.py   #  37 on the one command that takes the rig
                                 #     from nothing to scanning, and on the
                                 #     branch that used to brick it
+python3 rpi/test_keypad.py      #  44 on the fallback input path, driven
+                                #     through a real browser one key at a time
 python3 rpi/test_lint.py        #  28 on the faults that only surface when a
                                 #     cold branch runs (skipped without flake8)
 python3 rpi/test_handoff.py     #  37 on the three files the browser and the

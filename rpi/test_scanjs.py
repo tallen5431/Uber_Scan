@@ -157,24 +157,33 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   out.sw = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.register('/sw.js');
     await navigator.serviceWorker.ready;
-    let keys = [];
-    for (let i = 0; i < 80; i++) {
-      keys = await caches.keys();
-      if (keys.length) break;
+
+    /* Wait to be *controlled*, not merely for a worker to exist.
+     *
+     * `ready` resolves once the scope has an active registration. It says
+     * nothing about this page: a page loaded before the worker registered
+     * starts life uncontrolled, and a fetch from an uncontrolled page goes
+     * straight to the network without the worker ever seeing it. sw.js calls
+     * clients.claim() in activate, which fixes that — asynchronously, some
+     * milliseconds later.
+     *
+     * So the vendor fetch below was racing the claim. Win the race and the
+     * engine is cached; lose it and the file is fetched, nothing is stored,
+     * and no amount of waiting afterwards produces the entry. That is what was
+     * happening: green on an idle machine, red inside a full run, twice.
+     */
+    for (let i = 0; i < 100 && !navigator.serviceWorker.controller; i++) {
       await new Promise(r => setTimeout(r, 100));
     }
-    // Pull one vendor file through the worker so the engine cache is populated
-    // the way a real first run populates it.
-    try { await fetch('vendor/lang/eng.traineddata.gz'); } catch (e) {}
-    // Waited for rather than slept through, and waited for the *entry* rather
-    // than the cache: the worker opens the cache, hands the response back and
-    // puts a copy in afterwards, so there is a moment when the engine cache
-    // exists and is empty. A fixed delay is a check that passes on an idle
-    // machine and fails on a busy one, which is how a suite ends up with a
-    // test nobody trusts — this one did exactly that, green on its own and red
-    // inside a full run.
-    let held = {};
+    const controlled = !!navigator.serviceWorker.controller;
+
+    /* ...and ask again rather than once. Even controlled, the worker hands the
+     * response back before it finishes putting a copy in the cache, so there
+     * is a moment when the engine cache exists and is empty. Re-fetching is
+     * free — the second one is served from the cache the first one filled. */
+    let keys = [], held = {};
     for (let i = 0; i < 100; i++) {
+      try { await fetch('vendor/lang/eng.traineddata.gz'); } catch (e) {}
       keys = await caches.keys();
       held = {};
       for (const k of keys) {
@@ -186,7 +195,7 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
       if (engine) break;
       await new Promise(r => setTimeout(r, 100));
     }
-    return { keys: keys, scope: reg.scope, held: held };
+    return { keys: keys, scope: reg.scope, held: held, controlled: controlled };
   });
   await browser.close();
   console.log(JSON.stringify(out));
@@ -317,6 +326,12 @@ try:
     # handler deletes — so the obvious fix, bumping the version, would have
     # thrown away 15MB of reader and left an offline phone unable to scan at
     # all, in the name of shipping a scanner fix.
+    # First, because everything below it depends on this and nothing below it
+    # would say so. An uncontrolled page fetches straight past the worker, so
+    # the engine cache stays empty and the failure reads as "the worker did not
+    # cache the engine" when the truth is "the worker never saw the request".
+    ok_('the page is under the worker before anything is asked of it',
+        got['sw'].get('controlled'))
     held = got['sw']['held']
     shells = [k for k in held if k.startswith('uberscan-shell-')]
     blobs = [k for k in held if k.startswith('uberscan-vendor-')]
