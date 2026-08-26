@@ -339,6 +339,69 @@ eq('...and every row written is still readable somewhere',
 
 shutil.rmtree(work, ignore_errors=True)
 
+
+# --- an uncertain distance never reaches the offers page dressed as a good one
+#
+# rate() charges no mileage at all for a distance it does not trust, so such a
+# row's $/hr is gross wearing net's clothes. That is fine while something says
+# so — and something does, twice over: server.js's bestReading drops a row 100
+# points for not being whole and 1000 for being suspect, so an uncertain row can
+# never out-vote a clean reading of the same card. But it only works because
+# every route to `milesUncertain` also trips one of those two flags, and that is
+# true today by an accident of arithmetic rather than by anything written down.
+#
+# There are exactly two routes. A journey whose legs disagree about having a
+# distance is not whole (offer_parser.legs_short_a_distance). A distance that
+# implies a speed no card can mean is uncertain past UNREADABLE_MPH — and
+# `suspect` is decided by SANE_MPH, which happens to be the same 75.0, reached
+# by different reasoning in a different part of the file.
+#
+# So the second route holds only while UNREADABLE_MPH >= SANE_MPH, and the
+# dangerous edit is *lowering* it. Drop it to 60 — which sounds cautious, and
+# reads as tightening a guard — and every sum between 60 and 75 mph becomes a
+# distance the reading will not be costed on while nothing else marks it. Such a
+# row is whole, not suspect, carries no mileage cost at all, and beats the clean
+# reading of the same card in bestReading if two frames produced it. Its
+# cost-free $/hr then goes into the list and into every median on the page.
+#
+# So the property is asserted rather than the coincidence: whatever the two
+# numbers are, a row that distrusts its own distance must admit it some other
+# way as well. The sums below deliberately include several that land just under
+# the line, since a case in the middle of the range cannot see this at all.
+def a_row(text):
+    parsed = P.parse(text)
+    rate = P.rate(parsed, MONEY)
+    return JR.row_for(parsed, rate, 1_700_000_000_000, offer_id='p', seq=1,
+                      ms=1400, locked=True, settled=True,
+                      whole=P.is_whole(parsed))
+
+
+uncertain_rows = 0
+for pay in ('$16.05', '$41.11'):
+    for first in ('1 min (0.4 mi)', '3 min (1.1 mi)', '25 min (11.q5 mi)'):
+        for second in ('20 min (7.3 mi)', '20 min (7.3 m1)', '4 min (73.5 mi)',
+                       '2 min (88.2 mi)', '40 min (0.2 mi)',
+                       # Sums landing just under the line, which is where the
+                       # two thresholds would come apart if either moved.
+                       '3 min (5.9 mi)', '4 min (6.8 mi)', '5 min (10.4 mi)'):
+            row = a_row('%s %s away %s trip' % (pay, first, second))
+            if not row['milesUncertain']:
+                continue
+            uncertain_rows += 1
+            ok_('a row that distrusts its distance says so another way too: %s %s'
+                % (first, second),
+                row['suspect'] or row['whole'] is False)
+
+ok_('...and the sweep actually produced some to check', uncertain_rows >= 6)
+
+# The same property from the other side: a row that is neither suspect nor
+# short a leg has a distance it is willing to be costed on.
+clean = a_row('$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip')
+eq('a clean two-leg reading is costed', clean['milesUncertain'], False)
+ok_('...and is whole', clean['whole'])
+ok_('...and is not suspect', not clean['suspect'])
+ok_('...and its mileage actually came off the top', (clean['cost'] or 0) > 0)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -528,9 +528,11 @@ exactly. Simulating a rolling shutter against a square-wave-dimmed panel
 16667µs is one 60Hz cycle, two of 120 and four of 240, so it is quiet against
 all of them — and it is 39% brighter than the 12000µs this used to run at, which
 is the other half of the complaint. It is the default now, and calibration
-measures the real thing anyway: it tries each flicker-safe candidate against the
-actual phone and keeps the quietest that still lights the card, recording what
-every candidate scored.
+measures the real thing anyway: it tries **every** candidate against the actual
+phone — the daylight rungs included, since those are where a bright screen
+pushes the rig at run time — and elects the quietest one long enough for a dark
+car. What the rest of them scored is kept rather than narrated, as
+`exposureLadder`; see below.
 
 Brightness is then handled by **gain first, exposure only along a ladder this
 screen measured quiet** — a phone dims itself, and a screen set up in daylight is
@@ -1158,7 +1160,7 @@ read against another are refused on every check, forever, while the health line
 goes on saying the corners are held — see the note under **Calibrate** about a
 still of the wrong size.
 
-Three keys in `config.json` are about where to look, and they mean different
+Four keys in `config.json` are about where to look, and they mean different
 things.
 
 - **`quad`** is the calibration — the corners as found when you calibrated.
@@ -1173,6 +1175,21 @@ things.
 - **`manualBox`** says a person drew the corners. Written by ▣ Set box and by
   `calibrate.py --box`, and it turns corner tracking off for as long as it is
   there. ⟳ Re-find removes it, along with the `cropBox` pin that came with it.
+
+Four more are about light, and only the first two are settings a person would
+ever edit.
+
+- **`exposureTime`** is the exposure calibration elected, in microseconds — the
+  one it measured this phone does not ripple at. `--exposure` overrides it.
+- **`analogueGain`** is where the last run left the gain, so a restart begins
+  near the light it was last in rather than at a guess.
+- **`exposureWhy`** is what every candidate scored, in prose, for a person
+  reading the file.
+- **`exposureLadder`** is the same measurement for the program: the rungs that
+  came back quiet on this screen, and the only ones a bright phone may push the
+  exposure down onto. Absent on a config written before this existed, and the
+  scanner then says so at startup and keeps its old guess for the one emergency
+  it was always used for. Re-run calibration to measure them.
 
 A pin lives under its own key rather than under `roi` deliberately. Every
 `config.json` written before the crop became derived carries an `roi`, and
@@ -1916,7 +1933,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 18 suites, 2104 checks
+npm test                # all 18 suites, 2143 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1939,7 +1956,8 @@ python3 rpi/test_accumulate.py  #  78 on merging readings across frames
 python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    # 120 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     #  69 on keeping one row per offer
+python3 rpi/test_journal.py     # 108 on keeping one row per offer, and on a
+                                #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  48 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
