@@ -308,12 +308,51 @@ function watchForSilence() {
   }
 }
 
-var WATCH_PATH = path.join(ROOT, 'rpi', '.viewing');
-var RESET_PATH = path.join(ROOT, 'rpi', '.recalibrate');
-// Where a box drawn on the live view is left for the camera side to pick up.
-// A file, like the two above, because the scanner is sometimes a child of this
-// process and sometimes a systemd unit that has never heard of it.
-var CROP_PATH = path.join(ROOT, 'rpi', '.cropbox.json');
+/* The three files this side leaves requests in for the camera side: somebody
+ * is watching and which view they want, re-find the phone, read this box.
+ * Files, because the scanner is sometimes a child of this process and
+ * sometimes a systemd unit that has never heard of it.
+ *
+ * In RAM where there is any. All three exist for seconds, none should survive
+ * a reboot, and `.viewing` is now rewritten about once a second for as long as
+ * a browser is fetching frames — which is a second's worth of card wear for
+ * something that is stale a second later. The live frame moved to /dev/shm for
+ * exactly this reason and these were left behind.
+ *
+ * This is `_dir()` in rpi/handoff.py, written again rather than shared,
+ * because one side is JavaScript and the other is Python. It has to be a rule
+ * both sides evaluate to the same answer rather than a list of candidates:
+ * FRAME_CANDIDATES below can take whichever file is freshest and be right
+ * either way, because a frame is written by one side and read by the other. A
+ * request written where the reader is not looking is not a stale picture, it
+ * is a button that does nothing. They agree because they run as the same user
+ * — the systemd unit's User= is the account that installed it, and otherwise
+ * the scanner is this process's own child. rpi/test_handoff.py holds the two
+ * implementations to the same answer.
+ *
+ * The readers look in the old place too, so a scanner that has not been
+ * restarted since the last `git pull` still hears these.
+ */
+function handoffDir() {
+  try {
+    fs.accessSync('/dev/shm', fs.constants.W_OK);
+    if (fs.statSync('/dev/shm').isDirectory()) return '/dev/shm';
+  } catch (e) { /* no shm, or not ours to write in */ }
+  return path.join(ROOT, 'rpi');
+}
+
+function handoffPath(base) {
+  var dir = handoffDir();
+  // Invisible-by-dot is right in a checkout and useless in /dev/shm, which is
+  // where you look to find out what is holding memory. Named so it is obvious
+  // whose it is and safe to delete. Mirrors _name() in handoff.py.
+  return path.join(dir, dir === '/dev/shm'
+    ? 'uberscan-' + base.replace(/^\./, '') : base);
+}
+
+var WATCH_PATH = handoffPath('.viewing');
+var RESET_PATH = handoffPath('.recalibrate');
+var CROP_PATH = handoffPath('.cropbox.json');
 var cropSeq = 0;
 var lastTouch = 0;
 var lastView = '';

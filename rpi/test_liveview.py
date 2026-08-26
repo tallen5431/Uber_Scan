@@ -286,7 +286,14 @@ try:
     #
     # This is the seam between two processes that are sometimes parent and
     # child and sometimes strangers, so it is checked as bytes on disk.
-    watch = os.path.join(ROOT, 'rpi', '.viewing')
+    # Asked of the shipped rule rather than written out again here: the three
+    # handoff files moved to /dev/shm, and a test carrying its own copy of a
+    # path goes on passing against a server writing somewhere else — which is
+    # the one failure it exists to catch. rpi/test_handoff.py holds the Python
+    # and JavaScript versions of that rule to the same answer.
+    sys.path.insert(0, os.path.join(ROOT, 'rpi'))
+    import handoff as HO
+    watch = HO.path(HO.VIEWING)
 
     def settled(want=None):
         """What the file says once the write behind the request has landed.

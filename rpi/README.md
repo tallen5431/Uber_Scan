@@ -970,6 +970,33 @@ before costs, the count beside every bar, and the sentence explaining why a row
 was set aside. Those sizes live in that page's own `<style>` block, which loads
 after the shared stylesheet and so beat anything set for them there.
 
+### Starting with the Pi
+
+`rpi/install-service.sh` writes a systemd unit. Two things were wrong with it
+for as long as it existed, and neither could have been noticed by running
+anything.
+
+It started `scan_pi.py`, which is the scanner and nothing else: it reads
+`rpi/config.json` and begins. On a rig that has never been calibrated there is
+no config, so it exits at once — and the unit restarts on failure, so the
+result was a service respawning every five seconds forever behind a blank live
+view. The script printed a warning about that instead of avoiding it.
+Everything else in the project goes through `autopilot.py`, which checks the
+camera, serves the aiming preview until the mount is good, calibrates the
+moment the frame holds steady, and then `exec`s the scanner in its own place so
+there is still one process for systemd to stop. It runs that now.
+
+And `StartLimitIntervalSec=0` sat in `[Service]`. systemd moved it to `[Unit]`
+in v230 and does not error on the old placement: it logs `Unknown key name` and
+carries on with the default, so the line meant to stop the unit giving up was
+being silently dropped. Five starts inside ten seconds and it would have
+stopped trying for good — on the one machine with nobody watching it.
+
+`rpi/test_service.py` runs the installer against a temporary root with `id` and
+`systemctl` shadowed, and reads back what it wrote: which script is started,
+that the script exists, which section each key landed in, and that the paths
+are baked in from wherever the script was run.
+
 ### Reading the phone *through* the live view
 
 The live view was written to answer one question — is the camera pointed at the
@@ -1940,6 +1967,33 @@ somewhere else.
 Rows carry the `target`, `band` and `costPerMile` in force when they were
 written, because a stored "PASS" is unreadable a month after the target moved.
 
+### A rate with no running cost taken off it
+
+`rate()` charges no mileage at all for a distance it does not trust, which is
+the right call — costing a journey on a number that was misread invents the
+correction as well as the distance. The consequence is that such a row's `$/hr`
+is a gross figure, and on a rig with a cost per mile it sits in the list a few
+dollars above where it belongs.
+
+Nothing the scanner writes today lands there. Every route to `milesUncertain`
+also trips `suspect` or `whole === false`, both already excluded from every
+figure, and `test_journal.py` asserts that as a property rather than trusting
+the coincidence. This is about the rows already on disk.
+
+Until 19 August the two thresholds were different numbers reached by different
+reasoning in different parts of `offer_parser.py`: a distance was distrusted
+above `MAX_MPH`, 55, and a reading called suspect above `SANE_MPH`, 75. Every
+journey computing between the two — a real highway run, or a misread landing in
+that band — was written distrusted, **not** suspect, and whole. Those rows are
+indistinguishable from clean ones to every test that came after, and each of
+them pulls the median, both quartiles and the recommended line upwards.
+
+`Advice.trustworthy` excludes them now, guarded on the row's own
+`costPerMile`: at zero nothing was ever deducted from anything, so a cost-free
+rate is not out of step with its neighbours and dropping it there would be
+throwing away a perfectly good offer for a difference that does not exist. The
+offers page explains such a row rather than listing it silently.
+
 ### Three sentences on the offers page that were not true
 
 **Two percentages of two different totals, side by side.** The headline read
@@ -1973,6 +2027,48 @@ drawn over a single row labelled "Not stated" tells the reader nothing, twice.
 That section and the time-of-day one now go when there is nothing to compare,
 instead of leaving a heading over an empty box that reads as a chart which
 failed to draw.
+
+### Three files, and where they live
+
+The browser asks the camera side for three things, and each is a file:
+`.viewing` (somebody is watching, and which of the two views they want),
+`.recalibrate` (forget where you think the phone is), `.cropbox.json` (read
+this box, drawn by hand). Files rather than a socket or a signal, because the
+scanner is sometimes a child of the web server and sometimes a systemd unit
+that has never heard of it.
+
+They lived in `rpi/`, on the card. Everything about them says they should not:
+each exists for seconds, none should survive a reboot, and once `.viewing`
+started carrying which view the driver wants, the web side began rewriting it
+about once a second for as long as a browser was fetching frames. The live
+frame moved to `/dev/shm` for exactly this reason and these were left behind.
+They are there now — `uberscan-viewing`, `uberscan-recalibrate`,
+`uberscan-cropbox.json` — with the aiming picture and the OCR staging images.
+
+**Found by a rule, not by a list.** The live frame can afford to be sloppy
+about this: `framePath` in `server.js` takes whichever candidate is freshest,
+which is right either way because one side writes it and the other reads it.
+These are handshakes. A request written where the reader is not looking is not
+a stale picture — it is a button that does nothing and never says so. So both
+sides answer the same question the same way (is `/dev/shm` a directory this
+process may write in?) and get the same answer, because they run as the same
+user: the unit's `User=` is the account that installed it, and otherwise the
+scanner is the server's own child. `rpi/handoff.py` holds the Python version,
+`server.js` the JavaScript one, and `rpi/test_handoff.py` runs both and
+compares the answers character for character.
+
+The readers still look in the old place too, and clear both. Upgrading is a
+`git pull` that moves both sides at once, but the scanner is a long-running
+process and the web server is restarted far more often, so on one machine the
+two really can be minutes apart — and a request left lying in the other
+location would be adopted whenever the scanner next restarted, moving the crop
+or throwing away a good calibration hours after it was asked for.
+
+The aiming picture came along too. `autopilot.py` wrote it to `rpi/` while the
+scanner it hands over to wrote to RAM, so the web side had two candidates to
+choose between by mtime when it should only ever have had one — and the picture
+a driver aims the mount by was a different file from the one they watch offers
+on.
 
 ### Getting them off the car
 
@@ -2184,7 +2280,7 @@ The Pi parser is a port of the browser one, and both run the same corpus:
 ```sh
 node tests/corpus.test.js       # 350 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
-node tests/advice.test.js       #  84 on what line to tell a driver to draw
+node tests/advice.test.js       #  95 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 383 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  92 on merging readings across frames, and on
@@ -2211,6 +2307,10 @@ python3 rpi/test_liveview.py    #  48 on the picture the driver watches, on
                                 #     dashboard layout being wired up, and on
                                 #     which of the two views was asked for
 python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
+python3 rpi/test_handoff.py     #  37 on the three files the browser and the
+                                #     camera pass requests through, and on both
+                                #     sides finding them in the same place
+python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
 python3 rpi/test_layout.py      # 153 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)

@@ -729,7 +729,7 @@ def worst_frame_gap(extra_argv, hold, seconds=9.0):
     stamps = []
     real_start, real_snap = SP.start_camera, SP.write_snapshot
     real_sleep = time.sleep
-    real_look, real_watch = PL.Scanner.look_many, SP.WATCH_PATH
+    real_look, real_watch = PL.Scanner.look_many, SP.WATCH_PATHS
     empty = OP2.parse('')
 
     def slow_look(self, frames, now=None, geom=None):
@@ -747,12 +747,15 @@ def worst_frame_gap(extra_argv, hold, seconds=9.0):
     PL.Scanner.look_many = slow_look
     # "Someone is watching" goes stale after ten seconds, and what would then
     # be measured is the idle interval rather than the read.
-    SP.WATCH_PATH = os.path.join(work, '.viewing')
+    # `watching()` reads the list, because the scanner also honours the old
+    # location while a web server one `git pull` behind is still writing there.
+    watch_here = os.path.join(work, '.viewing')
+    SP.WATCH_PATHS = [watch_here]
     stop = _threading.Event()
 
     def keep_watching():
         while not stop.is_set():
-            open(SP.WATCH_PATH, 'w').close()
+            open(watch_here, 'w').close()
             real_sleep(0.5)
 
     watcher = _threading.Thread(target=keep_watching, daemon=True)
@@ -776,7 +779,7 @@ def worst_frame_gap(extra_argv, hold, seconds=9.0):
         stop.set()
         time.sleep, sys.argv = real_sleep, argv
         SP.start_camera, SP.write_snapshot = real_start, real_snap
-        PL.Scanner.look_many, SP.WATCH_PATH = real_look, real_watch
+        PL.Scanner.look_many, SP.WATCH_PATHS = real_look, real_watch
 
     # The first stretch is camera setup and screen detection, which is not what
     # is being judged.
@@ -1114,8 +1117,8 @@ ok_('a measured ladder with nothing shorter never shortens the exposure',
 # wrong the other way has the scanner buying a sensor frame ten times a second
 # for a browser tab that was closed an hour ago.
 watch = os.path.join(tempfile.mkdtemp(), '.viewing')
-real_watch = SP.WATCH_PATH
-SP.WATCH_PATH = watch
+real_watch = SP.WATCH_PATHS
+SP.WATCH_PATHS = [watch]
 try:
     def asked_for(text, age=0.0):
         """Write the file as the server would, optionally already stale."""
@@ -1179,7 +1182,7 @@ try:
     ok_('...which is slower, or it is not paying for anything',
         SP.SNAPSHOT_SCREEN > SP.SNAPSHOT_FAST)
 finally:
-    SP.WATCH_PATH = real_watch
+    SP.WATCH_PATHS = real_watch
 
 
 # --- and what gets written -------------------------------------------------

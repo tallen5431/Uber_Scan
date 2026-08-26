@@ -511,6 +511,17 @@
       return 'Outside the range a real offer falls in, so it is kept but not '
            + 'counted. A fare summary left on the screen looks like this.';
     }
+    // Only reachable on rows already in the journal. Until 19 August the
+    // threshold for distrusting a distance and the one for calling a reading
+    // suspect were different numbers, so a journey computing between the two
+    // was written distrusted, not suspect, and whole — and no branch above
+    // catches any of that.
+    if (Advice.grossRate(r)) {
+      return 'The distance was not trusted, so no running cost was taken off '
+           + 'this one — which makes its ' + money(r.perHour, 0) + '/hr a '
+           + 'before-costs figure among after-costs ones. Kept, but left out '
+           + 'of the totals rather than counted a few dollars high.';
+    }
     return 'No rate could be worked out from this reading.';
   }
 

@@ -25,6 +25,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import handoff as HO                                          # noqa: E402
 
 # Same reason as the copy in camera.py, set here too because check() imports
 # picamera2 before anything imports camera, and this has to be in the
@@ -33,7 +34,17 @@ os.environ.setdefault('LIBCAMERA_LOG_LEVELS', '*:WARN')
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(HERE, 'config.json')
-SNAPSHOT = os.path.join(HERE, 'live-frame.jpg')
+
+# The same file the scanner will write once this hands over, rather than a
+# second one beside it. scan_pi picks RAM over the card — the live view is
+# ~50kB a frame several times a second and none of it survives a reboot — and
+# this phase was writing to the card regardless, so the web side had two
+# candidates to choose between by mtime when it should only ever have had one.
+# Imported rather than repeated, because a copy of that rule is a copy that
+# goes out of step. handoff.py and not scan_pi.py: check() below exists to find
+# out whether the OCR stack is installed, and `import scan_pi` at the top of
+# this file would import cv2 to answer that.
+SNAPSHOT = HO.frame()
 
 # The frame has to be this good, this consistently, before calibrating itself.
 # One lucky frame while the bracket is still in your hand is not a mount.

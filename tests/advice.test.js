@@ -298,6 +298,100 @@ function offer(atMinutes, pay, minutes, cost) {
                              cost: 0, suspect: 0, whole: 1, hidden: 1 }])).length,
      A.usable(good).length);
 
+  /* The legacy shape, and the reason this exclusion exists.
+   *
+   * Until 19 August the threshold for distrusting a distance (MAX_MPH, 55) and
+   * the one for calling a whole reading suspect (SANE_MPH, 75) were different
+   * numbers reached by different reasoning in different parts of the parser.
+   * A journey computing between the two — a real highway run, or a misread
+   * landing in that band — was written distrusted, not suspect, and whole.
+   * Nothing above catches any of that, and rate() charges no mileage on a
+   * distance it does not trust, so the row's $/hr is a before-costs figure
+   * sitting in a list of after-costs ones. They are still in the journal. */
+  function legacyUncertain(pay, minutes, costPerMile, atMinutes) {
+    return { at: 1000000000000 + (atMinutes || 0) * MIN,
+             pay: pay, minutes: minutes, billedMinutes: minutes,
+             cost: 0, costPerMile: costPerMile, milesUncertain: true,
+             suspect: 0, whole: 1, hidden: 0 };
+  }
+
+  eq('a rate with no running cost taken off it is not evidence either',
+     A.usable(good.concat([legacyUncertain(40, 20, 0.35)])).length,
+     A.usable(good).length);
+  ok_('...and the test would pass on the old rule too unless it is this shape',
+      !legacyUncertain(40, 20, 0.35).suspect
+      && legacyUncertain(40, 20, 0.35).whole === 1);
+
+  // ...but only where a running cost is actually charged. At zero nothing was
+  // ever deducted from anything, so this rate is not out of step with its
+  // neighbours and dropping it would throw away a good offer for a difference
+  // that does not exist.
+  eq('a rig that charges no mileage keeps them',
+     A.usable(good.concat([legacyUncertain(40, 20, 0)])).length,
+     A.usable(good).length + 1);
+  eq('...and so does one that never recorded a cost per mile',
+     A.usable(good.concat([legacyUncertain(40, 20, undefined)])).length,
+     A.usable(good).length + 1);
+
+  /* The whole point, in the figures the page is actually read for.
+   *
+   * Honest offers: $10 over twenty minutes with $3 of car, so $21/hr net.
+   * Legacy rows: $30 over the same twenty minutes with nothing deducted, so
+   * $90/hr — the shape a highway run took before 19 August. Excluded, the
+   * typical rate is the honest one; left in, the same page reports a market
+   * that does not exist. The `before` list is the same rows with the guard
+   * defeated, which is what the old code did with them.
+   *
+   * An even split, and deliberately so. A handful of these among a hundred
+   * honest rows moves a median barely at all — that is what a median is for,
+   * and it is why this went unnoticed. What is being checked here is that the
+   * rows are capable of moving the figures, not a claim about how many of them
+   * anybody's journal holds. The quartiles and the recommended line are where
+   * even a few of them show up first. */
+  var honest = [], legacy = [];
+  for (var g = 0; g < 20; g++) honest.push(offer(g * 3, 10, 20, 3));
+  // Arriving after the honest ones and at the same spacing, so they form part
+  // of the same shift rather than a run the replay would drop for having no
+  // length — which is what a shared timestamp would make them.
+  for (var t = 0; t < 20; t++) legacy.push(legacyUncertain(30, 20, 0.35, 60 + t * 3));
+
+  function typicalOf(rows) {
+    var v = rows.map(function (r) { return r.perHour; })
+                .sort(function (x, y) { return x - y; });
+    return v.length ? v[Math.floor(v.length / 2)] : null;
+  }
+
+  var after = A.usable(honest.concat(legacy));
+  // Defeating the guard the only way the module allows: say no cost was ever
+  // charged. Same pay, same minutes, same missing deduction.
+  var before = A.usable(honest.concat(legacy.map(function (r) {
+    var copy = {}; for (var k in r) copy[k] = r[k];
+    copy.costPerMile = 0;
+    return copy;
+  })));
+
+  eq('the honest rows all survive', after.length, honest.length);
+  eq('...and the legacy ones are what the difference is', before.length,
+     honest.length + legacy.length);
+  eq('the typical rate is the after-costs one', Math.round(typicalOf(after)), 21);
+  ok_('...where leaving them in reported a market that does not exist ('
+      + Math.round(typicalOf(before)) + '/hr)',
+      typicalOf(before) > typicalOf(after) + 5);
+  // The advice built on the same rows describes a different shift: twice the
+  // offers, twice the hours, and a replay earning two and a half times as much
+  // per hour from them. The recommended *line* happens not to move on this
+  // fixture — the plateau covers the same range either way, which is the point
+  // of reporting a plateau rather than a maximum — so the claim made here is
+  // the one that is true rather than the one that sounds worst.
+  var adviceAfter = A.bestAt(after, 30), adviceBefore = A.bestAt(before, 30);
+  eq('the replay walks only the honest rows', adviceAfter.offers, honest.length);
+  eq('...where it used to walk all of them', adviceBefore.offers,
+     honest.length + legacy.length);
+  ok_('...and credited itself two and a half times the hourly rate for it ($'
+      + Math.round(adviceBefore.best.perHour) + ' against $'
+      + Math.round(adviceAfter.best.perHour) + ')',
+      adviceBefore.best.perHour > adviceAfter.best.perHour * 2);
+
   eq('and so does a row with no pay',
      A.usable([{ at: 1, pay: null, minutes: 20, cost: 0 }]).length, 0);
   eq('or no time', A.usable([{ at: 1, pay: 10, minutes: 0, cost: 0 }]).length, 0);

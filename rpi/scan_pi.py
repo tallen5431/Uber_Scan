@@ -28,6 +28,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cropbox as CX
 import exposure as EX
+import handoff as HO
 import offer_parser as OP
 import pipeline as PL
 import journal as JR
@@ -37,26 +38,7 @@ from accumulate import OfferAccumulator
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
 
-def _default_snapshot():
-    """Where to leave the live view: RAM if there is any, the card if not.
-
-    This is written twenty-five times a second while someone is watching the
-    page, at roughly 50kB a frame — about 4.5GB an hour, against 19MB a *year*
-    for the journal. All of it is stale two frames later and none of it needs to
-    survive a reboot, so putting it on the SD card was paying the one part of
-    this system that wears out for nothing. pipeline.py has staged its OCR
-    images in /dev/shm all along for the same reason.
-
-    The web side resolves its own path and picks whichever candidate is
-    freshest, so the two cannot silently disagree — see framePath in server.js.
-    """
-    shm = '/dev/shm'
-    if os.path.isdir(shm) and os.access(shm, os.W_OK):
-        return os.path.join(shm, 'uberscan-live.jpg')
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'live-frame.jpg')
-
-
-DEFAULT_SNAPSHOT = _default_snapshot()
+DEFAULT_SNAPSHOT = HO.frame()
 
 # The motion gate means whole minutes can pass with no read, so the snapshot is
 # refreshed on a timer as well. Cheap: a warp and a resize, no OCR.
@@ -346,7 +328,11 @@ def next_verify(every, was, now, card_on_screen):
         return min(VERIFY_MAX, every * VERIFY_BACKOFF), was
     return VERIFY_EVERY, now
 
-WATCH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.viewing')
+# In RAM where there is any, and looked for in the checkout as well — see
+# handoff.py for why these three files moved and why the rule is a rule rather
+# than a list.
+WATCH_PATH = HO.path(HO.VIEWING)
+WATCH_PATHS = HO.candidates(HO.VIEWING)
 WATCH_WINDOW = 10.0
 
 # Touched by the web side when the driver asks for the outline to be re-found.
@@ -361,7 +347,7 @@ WATCH_WINDOW = 10.0
 # outline is on part of the screen", and no amount of looking tells them apart.
 # The driver can see which it is in one glance at the live view, so the honest
 # answer is to let them say.
-RESET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.recalibrate')
+RESET_PATH = HO.path(HO.RECALIBRATE)
 
 
 # A Pi 4 has no real-time clock. With no network it boots somewhere in 1970 and
@@ -391,14 +377,21 @@ def clock_minutes(now=None):
 
 
 def reset_requested():
-    """True once per request, and never fatal if the file cannot be removed."""
+    """True once per request, and never fatal if the file cannot be removed.
+
+    Both places are checked and both are cleared: a web server one `git pull`
+    behind this process writes to the other one, and a request left lying in
+    either would be acted on whenever the scanner next restarted — throwing
+    away a good calibration mid-shift for no reason the driver could see.
+    """
     try:
-        if not os.path.exists(RESET_PATH):
-            return False
-        os.remove(RESET_PATH)
-        return True
+        asked = any(os.path.exists(p) for p in HO.candidates(HO.RECALIBRATE))
     except OSError:
         return False
+    if not asked:
+        return False
+    HO.clear(HO.RECALIBRATE)
+    return True
 
 
 def use_manual_box(scanner, quad_px):
@@ -436,11 +429,21 @@ def watching():
     """
     global _watch_cache
     try:
-        stamp = os.path.getmtime(WATCH_PATH)
+        stamp = None
+        chosen = None
+        for candidate in WATCH_PATHS:
+            try:
+                seen_at = os.path.getmtime(candidate)
+            except OSError:
+                continue
+            if stamp is None or seen_at > stamp:
+                stamp, chosen = seen_at, candidate
+        if stamp is None:
+            return False, VIEW_SCENE
         if time.time() - stamp >= WATCH_WINDOW:
             return False, VIEW_SCENE
         if _watch_cache[0] != stamp:
-            with open(WATCH_PATH) as fh:
+            with open(chosen) as fh:
                 want = fh.read(16).strip()
             _watch_cache = (stamp, VIEW_SCREEN if want == VIEW_SCREEN else VIEW_SCENE)
     except (OSError, ValueError):

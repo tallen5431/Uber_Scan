@@ -1,10 +1,14 @@
 *.pem
 *.pyc
 __pycache__/
+# Requests in flight between the web side and the camera side: someone is
+# looking, re-find the phone, read this box. All three exist for seconds and
+# live in /dev/shm on any machine that has it — see rpi/handoff.py. These are
+# the fallback names, used where there is no RAM disk to write in, and still
+# read on either machine so an upgrade cannot drop a request between the two
+# sides restarting.
 rpi/.viewing
 rpi/.viewing.part
-# Requests in flight between the web side and the camera side: someone is
-# looking, re-find the phone, read this box. All three exist for seconds.
 rpi/.recalibrate
 rpi/.cropbox.json
 rpi/.cropbox.json.part

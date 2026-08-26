@@ -166,12 +166,25 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     // Pull one vendor file through the worker so the engine cache is populated
     // the way a real first run populates it.
     try { await fetch('vendor/lang/eng.traineddata.gz'); } catch (e) {}
-    await new Promise(r => setTimeout(r, 400));
-    keys = await caches.keys();
-    const held = {};
-    for (const k of keys) {
-      const c = await caches.open(k);
-      held[k] = (await c.keys()).map(r => new URL(r.url).pathname);
+    // Waited for rather than slept through, and waited for the *entry* rather
+    // than the cache: the worker opens the cache, hands the response back and
+    // puts a copy in afterwards, so there is a moment when the engine cache
+    // exists and is empty. A fixed delay is a check that passes on an idle
+    // machine and fails on a busy one, which is how a suite ends up with a
+    // test nobody trusts — this one did exactly that, green on its own and red
+    // inside a full run.
+    let held = {};
+    for (let i = 0; i < 100; i++) {
+      keys = await caches.keys();
+      held = {};
+      for (const k of keys) {
+        const c = await caches.open(k);
+        held[k] = (await c.keys()).map(r => new URL(r.url).pathname);
+      }
+      const engine = Object.keys(held).some(k =>
+        held[k].some(p => p.indexOf('/vendor/') !== -1));
+      if (engine) break;
+      await new Promise(r => setTimeout(r, 100));
     }
     return { keys: keys, scope: reg.scope, held: held };
   });

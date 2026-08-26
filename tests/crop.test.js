@@ -13,7 +13,18 @@ var path = require('path');
 var spawn = require('child_process').spawn;
 
 var ROOT = path.join(__dirname, '..');
-var CROP_PATH = path.join(ROOT, 'rpi', '.cropbox.json');
+/* Where the request lands, asked of the shipped rule rather than written out
+   again here. The three handoff files moved to /dev/shm — see rpi/handoff.py —
+   and a test carrying its own copy of a path is a test that goes on passing
+   against a server writing somewhere else, which is the one failure this file
+   exists to catch. */
+var CROP_PATH = (function () {
+  try {
+    fs.accessSync('/dev/shm', fs.constants.W_OK);
+    if (fs.statSync('/dev/shm').isDirectory()) return '/dev/shm/uberscan-cropbox.json';
+  } catch (e) { /* no shm here */ }
+  return path.join(ROOT, 'rpi', '.cropbox.json');
+})();
 var PORT = 8791;
 
 var ok = 0, bad = 0;

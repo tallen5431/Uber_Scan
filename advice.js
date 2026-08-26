@@ -122,7 +122,7 @@
    * not, and whichever happened to be stricter silently governed a different
    * set of figures from the other.
    *
-   * Three exclusions, and each is a different kind of "no":
+   * Four exclusions, and each is a different kind of "no":
    *   hidden — the driver said this was not an offer they were made. The test
    *            card presented to check the rig is not a job.
    *   suspect — the reading cannot be true, so it is evidence about the camera
@@ -130,12 +130,47 @@
    *   whole === false — only part of the journey was read, and a fragment
    *            always flatters: the same pay over less time. Left in, it pulls
    *            every figure and every recommendation upwards.
+   *   a rate with no running cost taken off it, on a rig that takes running
+   *            costs off — see grossRate below.
    *
    * `whole` is absent on rows written before it existed, and those were only
    * ever written when whole — so undefined counts as true. */
   function trustworthy(row) {
     return !!row && typeof row === 'object'
-      && !row.hidden && !row.suspect && row.whole !== false;
+      && !row.hidden && !row.suspect && row.whole !== false
+      && !grossRate(row);
+  }
+
+  /* A row whose $/hr is gross while every row around it is net.
+   *
+   * `rate()` charges no mileage at all for a distance it does not trust —
+   * which is the right call, since costing a journey on a number that was
+   * misread invents the correction as well as the distance. The consequence is
+   * that such a row's $/hr is a gross figure, and on a rig with a cost per
+   * mile it sits in the list a few dollars above where it belongs.
+   *
+   * Nothing the scanner writes today lands here. Every route to
+   * `milesUncertain` also trips `suspect` or `whole === false`, both already
+   * excluded above, and test_journal.py asserts that as a property rather than
+   * trusting the coincidence. This is about the rows already on disk.
+   *
+   * Until 19 Aug 2026 the two thresholds were different numbers reached by
+   * different reasoning in different parts of offer_parser.py: a distance was
+   * distrusted above MAX_MPH, 55, and a reading called suspect above SANE_MPH,
+   * 75. Every journey computing between the two — a real highway run, or a
+   * misread landing in that band — was written distrusted, not suspect, and
+   * whole. Those rows are still in the journal, they are indistinguishable
+   * from clean ones to every test above, and each of them pulls the median,
+   * both quartiles and the recommended line upwards.
+   *
+   * Guarded on the row's own `costPerMile`, which has been written on every
+   * row since the journal existed. At zero nothing was ever deducted from
+   * anything, so a cost-free rate is not out of step with its neighbours and
+   * there is nothing to exclude — dropping it there would be throwing away a
+   * perfectly good offer for a difference that does not exist. */
+  function grossRate(row) {
+    return !!row.milesUncertain
+      && typeof row.costPerMile === 'number' && row.costPerMile > 0;
   }
 
   function usable(offers) {
@@ -474,6 +509,7 @@
   }
 
   return { advise: advise, usable: usable, runs: runs, replay: replay,
-           bestAt: bestAt, trustworthy: trustworthy, unexplained: unexplained,
+           bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
+           unexplained: unexplained,
            THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT };
 }));

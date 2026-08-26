@@ -28,14 +28,18 @@ share should not need the OCR stack to be importable.
 
 import json
 import os
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import handoff as HO                                          # noqa: E402
 
 # Where the web side leaves a box for the camera side to pick up. A file, for
 # the same reason .recalibrate and .viewing are files: the scanner is sometimes
 # a child of the web server and sometimes a systemd unit that has never heard of
-# it, and a file works identically either way.
-REQUEST_PATH = os.path.join(HERE, '.cropbox.json')
+# it, and a file works identically either way. In RAM where there is any, and
+# read from the checkout as well — see handoff.py.
+REQUEST_PATH = HO.path(HO.CROPBOX)
 
 # What to write into config.json's `cropBox` for a hand-drawn box: read all of
 # what was drawn, rather than deriving a crop inside it.
@@ -149,32 +153,47 @@ def describe(quad):
     return '%.2f %.2f %.2f %.2f' % (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 
 
-def take_request(path=REQUEST_PATH):
+def take_request(path=None):
     """The pending box, removed as it is read. None when there is not one.
 
     Removed first, so a request that cannot be parsed is not retried on every
     frame for the rest of the shift, and never fatal: this runs inside the
     capture loop, where nothing is worth stopping reading offers for.
+
+    Both places are looked in and both are cleared, for the same reason
+    `reset_requested` does it: a web server a `git pull` behind this process
+    writes to the other one, and a box left lying in either would be adopted
+    whenever the scanner next restarted — moving the crop, hours later, with
+    nothing on screen to explain why the reads stopped.
+
+    An explicit `path` overrides all of that, which is what the tests and
+    `write_request`'s terminal recipe use.
     """
-    try:
-        if not os.path.exists(path):
-            return None
-        with open(path) as fh:
-            raw = fh.read()
-    except (IOError, OSError):
-        return None
-    finally:
+    where = [path] if path else HO.candidates(HO.CROPBOX)
+    raw = None
+    for candidate in where:
         try:
-            os.remove(path)
+            if not os.path.exists(candidate):
+                continue
+            with open(candidate) as fh:
+                raw = fh.read()
+            break
+        except (IOError, OSError):
+            continue
+    for candidate in where:
+        try:
+            os.remove(candidate)
         except OSError:
             pass
+    if raw is None:
+        return None
     try:
         return parse_request(json.loads(raw))
     except (ValueError, TypeError):
         return None
 
 
-def write_request(quad, path=REQUEST_PATH):
+def write_request(quad, path=None):
     """Leave a box for the camera side to pick up.
 
     The counterpart of the writer in server.js, for a rig being driven from a
@@ -189,6 +208,7 @@ def write_request(quad, path=REQUEST_PATH):
     at exactly this path at exactly this moment and half a JSON object parses
     as nothing at all.
     """
+    path = path or HO.path(HO.CROPBOX)
     tmp = path + '.part'
     with open(tmp, 'w') as fh:
         json.dump({'quad': quad}, fh)
