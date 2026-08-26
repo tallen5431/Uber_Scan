@@ -34,7 +34,24 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  /* The first four names are a phone's, and on the rig's own screen not one of
+     them exists. Measured in the rig's own browser on a Debian box — which is
+     what Raspberry Pi OS is — by drawing the same string in each family and
+     comparing widths: `-apple-system`, `BlinkMacSystemFont`, `"Segoe UI"` and
+     `Roboto` all came back identical to a family that was never installed, so
+     the whole stack fell through to `system-ui`, which there is DejaVu Sans.
+     DejaVu is the widest face on the machine: the same sentence measured 339px
+     in it against 300px in Liberation Sans and 268px in the browser's own
+     default. Every width in this file was budgeted against a phone's narrower
+     face and then given 13-26% more letter to fit, which is most of why labels
+     that sit on one line on the phone wrap on the panel.
+
+     Piboto is Raspberry Pi OS's own UI font and Noto Sans ships with its
+     desktop; both are narrower and better hinted at small sizes than DejaVu.
+     Neither exists on a phone, where the four names above still win, so this
+     costs the phone nothing — an unavailable family is simply skipped. */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               Piboto, "Noto Sans", "Liberation Sans", system-ui, sans-serif;
   overscroll-behavior: none;
   user-select: none;
   -webkit-user-select: none;
@@ -230,7 +247,16 @@ html, body {
 /* Equal slots for however many buttons the page has, rather than a fixed three
    that every page then has to override. It also means a button hidden because
    this machine has no camera closes its gap instead of leaving a hole. */
-.bottombar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }
+/* `1fr` is shorthand for `minmax(auto, 1fr)`, and that `auto` floor is the
+   width of the longest word in the button. Five buttons on a 390px phone —
+   Targets, History, Offers, Live, Camera — floored the row at 408px, and a
+   grid does not clip: the whole page laid out 408px wide and scrolled
+   sideways. The note at the bottom of this file says what that costs, and it
+   was written about this same bar at a different size.
+
+   `minmax(0, 1fr)` removes the floor, so the row is exactly as wide as the
+   screen and the labels give way instead of the layout. */
+.bottombar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
 .bottombar [hidden] { display: none; }
 .bottombar button, .bottombar .linkbtn {
   appearance: none;
@@ -238,13 +264,20 @@ html, body {
   background: transparent;
   color: var(--muted);
   border-radius: 12px;
-  padding: 10px;
+  padding: 10px 4px;
   font: inherit;
-  font-size: 14px;
+  /* Shrinks with the screen instead of wrapping. Four of these buttons kept
+     their icon and label on one line and the fifth pushed its label under the
+     icon, which is what made a bar of five look like a bar of two designs. */
+  font-size: clamp(12px, 3.4vw, 14px);
   font-weight: 600;
   text-align: center;
   text-decoration: none;
   display: block;
+  /* Allowed to be narrower than its own label, which is what stops the row
+     forcing the page wider than the glass. Not `overflow: hidden` with it:
+     clipping "Camera" to "Camer" is a worse answer than letting it wrap. */
+  min-width: 0;
 }
 
 /* ---------- Sheets ---------- */
@@ -487,17 +520,53 @@ html, body {
     grid-template-rows: auto auto 1fr auto;
     align-content: start;
   }
-  body[data-page="keypad"] #verdict   { grid-column: 1; grid-row: 1 / -1; align-self: start; }
+  /* Stretched, not `align-self: start`.
+   *
+   * The verdict already spanned every row of the left column, so it had the
+   * full height of the panel available and declined it: measured at 800x480 it
+   * drew 175px tall in a 468px column and left the bottom 293px — 40% of the
+   * whole display, 45% at 1024x600 — as flat black. The answer this page
+   * exists to give was a small card in a corner of a mostly empty screen.
+   *
+   * Filling it is not decoration. The panel is glanced at from the driver's
+   * seat, and the taller it is the bigger the number inside it can be. */
+  body[data-page="keypad"] #verdict {
+    grid-column: 1; grid-row: 1 / 4;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
+  }
   body[data-page="keypad"] .fields    { grid-column: 2; grid-row: 1; }
   body[data-page="keypad"] #hint      { grid-column: 2; grid-row: 2; }
   body[data-page="keypad"] .keypad    { grid-column: 2; grid-row: 3; }
-  body[data-page="keypad"] .bottombar { grid-column: 2; grid-row: 4; }
+  /* Across the whole panel rather than tucked into the right-hand column.
+     Five labels sharing 388px got 69px of usable width each, which is less
+     than the word "Camera" is wide at a size meant to be read from the
+     driver's seat — so the label either wrapped under its icon in some
+     buttons and not others, or was cut off mid-word. Full width gives each
+     one about 150px and the question stops arising. It is also the easier
+     row to hit: these are the controls reached for while parked, and they now
+     run the width of the screen instead of half of it. */
+  body[data-page="keypad"] .bottombar { grid-column: 1 / -1; grid-row: 4; }
 
   /* Sized to the column it is now in, not to the whole screen. 20vw of an
      800px panel is 160px, which overflowed a half-width panel on its own. */
   .rate-value { font-size: clamp(30px, 8.5vw, 60px); }
+  /* ...and bigger again only on the keypad, where the panel now runs the full
+     height of the screen and the number is the one thing on the page read at
+     a glance. Scoped to that page on purpose: on the scanner this same class
+     is a strip floating over a live camera picture, and a 90px figure there
+     grows the strip until it covers the box the driver is lining the card up
+     with — making the number easier to read by hiding the thing being read. */
+  body[data-page="keypad"] .rate-value { font-size: clamp(30px, 11vw, 96px); }
   .rate-unit  { font-size: clamp(14px, 2.6vw, 20px); }
-  .verdict-label { font-size: clamp(13px, 2.4vw, 17px); }
+  /* The word above the number, and the one channel that still carries the
+     verdict for a driver who cannot separate the red panel from the green.
+     17px of it against a 90px number, on a panel now filling the height, was
+     out of proportion with the thing it is a caption for. */
+  .verdict-label { font-size: clamp(14px, 3vw, 26px); }
   .sub { font-size: clamp(15px, 2.8vw, 20px); }
   .verdict { padding: 8px 10px 10px; }
 
@@ -522,7 +591,13 @@ html, body {
   .sub small { font-size: 15px; letter-spacing: .06em; }
   .field-label { font-size: 14px; }
   .hint, .note { font-size: 15px; }
-  .bottombar button, .bottombar .linkbtn { font-size: 17px; padding: 8px 4px; }
+  /* A flat 17px here fitted the four buttons this bar had when it was written.
+     Five of them on a 480px panel gives each 88px, and "📷 Camera" is 85 of
+     those — so it wrapped under its own icon while its neighbours did not, and
+     the extra line pushed the page 13px past the bottom of the glass. Scaled
+     to the panel instead: 14px at 480, 17px at 800, 18px on the 1024 panel,
+     and each of them fits the track it is in. */
+  .bottombar button, .bottombar .linkbtn { font-size: clamp(14px, 2.1vw, 18px); padding: 8px 4px; }
   .stats div { font-size: 24px; }
   .stats small { font-size: 13px; }
   .notice { font-size: 16px; }
@@ -534,11 +609,43 @@ html, body {
 @media (orientation: landscape) and (max-height: 380px) {
   body[data-page="keypad"] #app { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
   body[data-page="keypad"] #hint { display: none; }
-  .rate-value { font-size: clamp(26px, 7vw, 44px); }
-  /* Two rows of two rather than four across. In half of a 480px panel each of
-     four buttons gets about 58px, and "Camera" does not fit in that — it ran
-     off the right edge and took the whole page sideways with it. A page that
-     scrolls down is a small nuisance; a page that scrolls sideways is one
-     where the driver cannot find the controls at all. */
-  .bottombar { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+  .rate-value { font-size: clamp(26px, 7vw, 52px); }
+
+  /* This used to wrap the bar into two columns, because in half of a 480px
+     panel each of four buttons got about 58px and "Camera" ran off the right
+     edge, taking the whole page sideways with it. That was the right fix for
+     four buttons. A fifth was added — the link to the live view — and two
+     columns became *three rows* of controls, 148px of them, on a screen 320px
+     tall: the page went from scrolling sideways to overflowing 445px into 320,
+     which is the same fault standing up instead of lying down.
+     `minmax(0, 1fr)` above now stops the sideways case on its own, so the bar
+     can go back to one row — and it gets the full width of the panel to do it
+     in rather than the 230px right-hand column, which is the only way five
+     labels fit.
+
+     The hint's row goes with it. `display: none` takes the hint out of the
+     grid but not the track: a `grid-template-rows` of four still reserved an
+     empty row and, worse, the 8px gap on each side of it. Three tracks here,
+     so nothing is spent on a row with nothing in it. */
+  body[data-page="keypad"] #app {
+    grid-template-rows: auto 1fr auto;
+    gap: 6px;
+    padding: calc(env(safe-area-inset-top) + 4px) 8px calc(env(safe-area-inset-bottom) + 4px);
+  }
+  body[data-page="keypad"] #verdict   { grid-row: 1 / 3; }
+  body[data-page="keypad"] .keypad    { grid-row: 2; }
+  body[data-page="keypad"] .bottombar { grid-column: 1 / -1; grid-row: 3; }
+
+  /* The keypad is what the remaining height is competing for, and 44px per key
+     is the floor this file defends everywhere else. It is kept: the row of
+     controls moving out of the column is what pays for it. */
+  .verdict { padding: 6px 8px 8px; }
+  /* `auto-fit, minmax(74px, 1fr)` puts two of the three figures on one row and
+     the third alone underneath in a column this narrow, which reads as a
+     layout that ran out of room rather than one that was chosen. Three across,
+     and the labels give up the letter-spacing to make it. */
+  .submetrics { padding-top: 5px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sub small { font-size: 12px; letter-spacing: .02em; }
+  .fields { gap: 6px; }
+  .field { padding: 5px 4px 6px; }
 }

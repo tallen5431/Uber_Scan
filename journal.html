@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Uber Scan — offers</title>
+<title>Uber Scan — Offers</title>
+<meta name="theme-color" content="#0b0f14">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#0b0d10">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
 <script src="advice.js"></script>
 <style>
@@ -226,6 +228,55 @@
   .facts dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums;
               text-align: right; }
   .facts .quiet dd { font-weight: 500; color: var(--muted); }
+
+  /* ---------- A screen bolted to a dashboard ---------- */
+  /* The same breakpoint styles.css uses, and it has to be here rather than
+     there: nearly every class on this page is declared in this block, and this
+     block is loaded after the stylesheet, so anything set out there for these
+     rules loses to whatever is written above.
+   *
+   * What that left is a page rendering at 9.5, 10, 11 and 12 pixels — the day
+   * headers, the time each offer came in, the rate before costs, the counts
+   * beside every bar, the axis labels, and the sentence explaining why a row
+   * was set aside. Those sizes were chosen for a phone about 30cm away. This
+   * screen is at arm's length, so the same letter subtends half the angle, and
+   * they are exactly the figures the page exists to be read for. Nothing here
+   * changes a colour or a layout — only how big the small print is. */
+  @media (orientation: landscape) and (max-height: 620px) {
+    #app { padding-left: 14px; padding-right: 14px; }
+    h2 { font-size: 15px; }
+    .hint, .note, #headline { font-size: 15px; line-height: 1.5; }
+    .advice p { font-size: 16px; }
+    .stats .unit { font-size: 14px; }
+    .unit { font-size: 13px; }
+
+    .block { padding: 6px 0; }
+    .block .label { width: 78px; font-size: 14px; }
+    .block .amount { width: 66px; font-size: 16px; }
+    .block .n { width: 34px; font-size: 13px; }
+    .runlabel em { font-size: 12px; }
+    .scale { margin-left: 86px; margin-right: 118px; }
+    .scale span { font-size: 13px; }
+
+    .day b { font-size: 16px; }
+    .day span { font-size: 14px; }
+    .offer .big { font-size: 22px; min-width: 96px; }
+    .offer .big em { font-size: 13px; }
+    .offer .meta { font-size: 15px; }
+    .offer .meta em { font-size: 13px; }
+    .offer .when { font-size: 14px; }
+    .offer .tag { font-size: 12px; }
+    .offer .why { font-size: 14px; }
+    .offer .took { font-size: 16px; }
+    .facts { font-size: 15px; }
+    .facts h3 { font-size: 12px; }
+
+    .rangebtns button, #showHidden, .acts button, #undo, #undoGo { font-size: 15px; }
+    #nothing { font-size: 16px; }
+    #nothing b { font-size: 18px; }
+    #nothing code { font-size: 15px; }
+    .find input { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
@@ -288,7 +339,7 @@
   <div id="blocks"></div>
   <div class="scale" id="blockScale"></div>
 
-  <h2>Rides and shop orders <em>· median $/hr</em></h2>
+  <h2 id="kindsHead">Rides and shop orders <em>· median $/hr</em></h2>
   <div id="kinds"></div>
 
   <h2>Every offer <em id="recentNote">· tap one to see everything that was read</em></h2>
@@ -334,7 +385,7 @@
   ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds',
    'caveats', 'ranges', 'csv', 'recentNote', 'log', 'more',
    'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead',
-   'blocksHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
+   'blocksHead', 'kindsHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
    'find', 'findNote', 'live', 'nothing', 'ladder'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
@@ -423,6 +474,16 @@
   }
 
   function whyAside(r) {
+    // First, because it is the driver's own doing rather than anything the
+    // scanner decided, and because a hidden row falls through every test
+    // below it: a rate was worked out, it is printed two lines above, and the
+    // page was telling them "No rate could be worked out from this reading."
+    // The one row on this page whose absence from the figures is explained by
+    // an act they remember taking, and it was the one given no explanation.
+    if (r.hidden) {
+      return 'You hid this one, so it is listed but left out of every figure '
+           + 'on this page. "Put this back" below returns it to the count.';
+    }
     if (r.whole === false) {
       return 'The scanner never saw the whole card — only part of the journey '
            + 'was in the crop, so this reads better than the offer was.';
@@ -869,6 +930,10 @@
         ? 'Nothing usable in this stretch — <b>' + setAside + '</b> set aside as doubtful.'
         : 'No offers recorded yet. The scanner keeps one line per offer it is sure of.';
       el.blocks.innerHTML = el.kinds.innerHTML = '';
+      // ...and the headings over them. A blanked chart under "By time of day"
+      // reads as a chart that failed to draw rather than as one there is
+      // nothing to draw.
+      el.blocksHead.hidden = el.kindsHead.hidden = true;
       el.more.textContent = '';
       el.nothing.hidden = false;
       el.nothing.innerHTML = kept.length
@@ -941,19 +1006,34 @@
     // have taken 6%. Four times over, on the sentence at the top of the page.
     var cleared = offers.filter(function (r) { return r.perHour >= target; }).length;
     var mine = offers.filter(function (r) { return r.accepted; });
-    var takeable = null;
+    // The replay's own count of what it walked, and its own count of what it
+    // could have taken. Both come back from the same call over the same set.
+    var sim = null;
     try {
-      var sim = Advice.replay(Advice.runs(Advice.usable(kept)), target);
-      if (sim && sim.trips > 0) takeable = Math.round(sim.takes * 100);
-    } catch (e) { takeable = null; }
-    var lines = ['At ' + money(target) + '/hr, <b>'
-      + Math.round(cleared / offers.length * 100) + '%</b> of <b>'
+      sim = Advice.replay(Advice.runs(Advice.usable(kept)), target);
+    } catch (e) { sim = null; }
+
+    /* Two figures that are not fractions of the same thing, and this sentence
+       used to print them as bare percentages side by side — "52% of 48 offers
+       cleared the line, though only about 38% were yours to take". A reader
+       subtracts them and gets a number that means nothing: the 52% is over
+       every usable offer in the range, and the 38% is over only the offers
+       inside a run of scanning, because `runs()` drops the rest. On the
+       recording that prompted the second half of this sentence the two
+       denominators differed by a fifth.
+
+       Counts, then, each with the total it is out of written next to it, and
+       the replay's figure given its own sentence rather than hung off the
+       first with a "though" — which is what made it read as a correction to
+       the number before it. */
+    var lines = ['At ' + money(target) + '/hr, <b>' + cleared + '</b> of <b>'
       + offers.length + '</b> offer' + (offers.length === 1 ? '' : 's')
-      + ' cleared the line'
-      + (takeable !== null
-         ? ' — though only about <b>' + takeable + '%</b> were yours to take, '
-           + 'since the rest arrived while you would already have been driving.'
-         : '.')];
+      + ' cleared the line.'];
+    if (sim && sim.seen > 0) {
+      lines.push('Replaying the shift, where an offer arriving while you were '
+        + 'already driving is not one you could take: <b>' + sim.trips
+        + '</b> of the <b>' + sim.seen + '</b> offers inside a run of scanning.');
+    }
     // Once anything is ticked, the comparison the whole page is for: what the
     // offers said against what was actually worked. Nothing is shown until then,
     // because a "0 taken" on an untagged log reads as a claim rather than an
@@ -961,10 +1041,27 @@
     if (mine.length) {
       var mineRates = mine.map(function (r) { return r.perHour; })
                           .sort(function (a, b) { return a - b; });
-      var minePay = mine.reduce(function (t, r) { return t + (r.pay || 0); }, 0);
+      // Net, like every other figure on this page — the note at the bottom
+      // says so out loud ("Rates are after $0.35/mi of running costs"), and
+      // this was the one number that ignored it. Worse, it sat in the same
+      // sentence as a net $/hr, so the two halves were measured differently
+      // and nothing said which was which. `cost` is absent on rows whose
+      // distance was not trusted, and there the payout is the honest total
+      // anyway: no running cost was charged against that offer either.
+      var mineCost = 0;
+      var minePay = mine.reduce(function (t, r) {
+        var c = (typeof r.cost === 'number' && isFinite(r.cost)) ? r.cost : 0;
+        mineCost += c;
+        return t + (r.pay || 0) - c;
+      }, 0);
       lines.push('You marked <b>' + mine.length + '</b> as taken, worth <b>'
-        + money(minePay, 2) + '</b> at a typical <b>'
-        + money(percentile(mineRates, 0.5), 0) + '/hr</b>.');
+        + money(minePay, 2) + '</b>'
+        // Only claimed when something was actually taken off. With costs set
+        // to zero the two totals are the same number, and calling it "after
+        // running costs" would be describing a subtraction that never
+        // happened.
+        + (mineCost > 0 ? ' after running costs' : '')
+        + ', at a typical <b>' + money(percentile(mineRates, 0.5), 0) + '/hr</b>.');
     }
     el.headline.innerHTML = lines.join('<br>');
 
@@ -990,6 +1087,7 @@
     // claim depending on whether it rests on eleven evenings or on one, and
     // the chart said the same thing either way.
     var dayCount = Object.keys(daysSeen).length;
+    el.blocksHead.hidden = false;
     el.blocksHead.innerHTML = 'By time of day <em>· median $/hr, across '
       + dayCount + ' day' + (dayCount === 1 ? '' : 's') + '</em>';
     // A fixed scale at twice the target puts the target itself at the halfway
@@ -1035,6 +1133,12 @@
       kinds[which].rates.push(r.perHour);
     });
     kinds = kinds.filter(function (k) { return k.rates.length; });
+    /* A chart of one bar is not a comparison, and this one is headed with the
+       comparison it is failing to make. Every offer in the log unclassified
+       gives "Rides and shop orders" over a single row labelled "Not stated" —
+       a section that tells the reader nothing, twice. It goes until there are
+       two kinds to hold against each other. */
+    el.kindsHead.hidden = kinds.length < 2;
     el.kinds.innerHTML = kinds.map(function (k) {
       if (!k.rates.length) return '';
       var sorted = k.rates.slice().sort(function (x, y) { return x - y; });
@@ -1229,6 +1333,7 @@
         // numbers about a different question, and nothing marks them stale.
         el.headline.textContent = '';
         el.blocks.innerHTML = el.kinds.innerHTML = el.log.innerHTML = '';
+        el.blocksHead.hidden = el.kindsHead.hidden = true;
         el.runs.innerHTML = '';
         el.runsHead.hidden = true;
         el.advice.hidden = true;

@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Uber Scan — Live</title>
 <meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
 <style>
   /* Read at arm's length, in a car, at a glance. Nothing subtle here. */
@@ -63,8 +66,13 @@
        panel's height, an absolute ceiling, and the column the number has to fit
        inside. The height term is what lets a 1024x600 panel spend its extra
        room on the one number the screen exists for — the flat 92px cap left it
-       the same size as on an 800x480, with 130px of black above and below. */
-    #perHour { font-size: min(16vw, 26dvh, 140px,
+       the same size as on an 800x480, with 130px of black above and below.
+       The ceiling is 170 rather than 140 because at 140 it was the term that
+       bit on a 1024x600 panel, which put the absolute cap back in charge of
+       the exact screen the height term was added for; at 170 the height wins
+       there (156px) and the width still wins on an 800x480 (128px), which is
+       the arrangement intended. */
+    #perHour { font-size: min(16vw, 26dvh, 170px,
                               calc((100cqw - 40px) / (var(--chars) * 0.62))); }
     /* ...and it gives some of that back when there is something to say. A
        notice is two more lines inside a panel that is already as tall as the

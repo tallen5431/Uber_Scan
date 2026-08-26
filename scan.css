@@ -55,7 +55,7 @@ body.adjusting .corner::after {
   right: 8px;
   bottom: calc(env(safe-area-inset-bottom) + 96px);
   text-align: center;
-  font-size: 12.5px;
+  font-size: 15px;
   font-weight: 600;
   color: #cfe1ff;
   background: rgba(20, 27, 36, .92);
@@ -120,17 +120,27 @@ body.locked .corner { border-color: var(--go); }
 #stage > .verdict.fault { background: rgba(28, 38, 50, .96);
                           border: 2px dashed var(--muted); }
 
-.warn {
+/* The message box inside the verdict panel, and it was written as a bare
+   `.warn`. Nothing on any page carries `class="warn"` — the box is
+   `class="notice"` — so the only element this rule ever matched was
+   `.verdict.warn`, the CLOSE CALL panel itself. Every close call on the
+   scanner therefore came out a different shape from the other three verdicts:
+   its own padding, its own corner radius, an amber border around the whole
+   panel and an 8px margin above it, all inherited from a rule meant for a
+   sentence inside it. styles.css documents this exact trap a few lines above
+   its own `.notice` — "a message and a state should not share a class name" —
+   and this file went and did it anyway. Scoped to the element now. */
+#stage .notice {
   margin-top: 8px;
   padding: 7px 10px;
   border-radius: 9px;
   background: rgba(245, 165, 36, .18);
   border: 1px solid var(--warn);
   color: #ffd591;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
-.warn[hidden] { display: none; }
+#stage .notice[hidden] { display: none; }
 
 #statusline {
   position: absolute;
@@ -138,20 +148,38 @@ body.locked .corner { border-color: var(--go); }
   right: 0;
   bottom: calc(env(safe-area-inset-bottom) + 74px);
   text-align: center;
-  font-size: 11px;
+  /* 11px over a moving camera picture, on a screen at arm's length. This is
+     the line that says whether the reader is loaded, whether a card was found
+     and how long the last read took — the whole answer to "why is nothing
+     happening". */
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: #cbd5e1;
   text-shadow: 0 1px 3px #000;
   padding: 0 10px;
 }
 
+/* Six controls, and the column count used to be written out by hand as
+   `1fr 1fr 1fr 46px 1fr`. Five tracks for six children: the sixth — the link
+   back to the keypad — went onto an implicit second row, and that row is drawn
+   over `#statusline` and `#adjustNote`, which sit 74px and 96px above the
+   bottom edge. So the one line that says *why* nothing is being read ("no card
+   found", "reader still loading", "hold still") was printed underneath a
+   button at every panel size this thing runs on.
+
+   Counted tracks and counted children is a rule that has to be remembered in
+   two files at once. Flowing into as many equal columns as there are children
+   cannot go out of step with the markup. `minmax(0, 1fr)` rather than `1fr`
+   because a `1fr` track will not shrink below its own longest word, and six
+   words on a 390px phone add up to more than the glass. */
 .scanbar {
   position: absolute;
   left: 8px;
   right: 8px;
   bottom: calc(env(safe-area-inset-bottom) + 10px);
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 46px 1fr;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 6px;
 }
 .scanbar button, .scanbar .filebtn, .scanbar .linkbtn {
@@ -162,13 +190,89 @@ body.locked .corner { border-color: var(--go); }
   border-radius: 12px;
   padding: 13px 2px;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   text-align: center;
   text-decoration: none;
   display: block;
+  /* Allowed to be narrower than its own label, which is what lets six of
+     these share a 390px phone without the row forcing the page wider than
+     the glass. */
+  min-width: 0;
+  /* 44px, the same floor styles.css defends for every other bar of controls
+     in this project — and the one bar that never had it. These are pressed
+     one-handed, on glass, by somebody who has just parked, and padding alone
+     had them at 43px on a phone and 37px on a small panel. Centred rather
+     than top-aligned, or the label sits against the top edge of the taller
+     box. */
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .scanbar .filebtn { position: relative; overflow: hidden; }
 .scanbar .filebtn input { position: absolute; inset: 0; opacity: 0; }
 body.frozen #btnFreeze { background: #1d3a6b; color: #cfe1ff; }
 body.adjusting #btnBox { background: #0d5c31; color: #d7ffe6; }
+
+/* Six controls across a phone held upright is 59px each, and "📷 Photo" is
+   wider than that at any size still worth reading — so it broke under its own
+   icon while "▣ Box" beside it did not, and a bar where some labels wrap and
+   others do not looks broken rather than tight. Two rows of three, chosen
+   rather than fallen into: 126px a button, every label on one line, and a
+   target twice the size to hit one-handed. The status line and the box note
+   move up by the extra row, because the one thing that must never happen on
+   this page is the controls being drawn over the line that says why nothing
+   is being read. */
+@media (max-width: 460px) and (orientation: portrait) {
+  .scanbar { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #statusline { bottom: calc(env(safe-area-inset-bottom) + 126px); }
+  #adjustNote { bottom: calc(env(safe-area-inset-bottom) + 148px); }
+}
+
+/* ---------- A screen bolted to a dashboard ---------- */
+/* This page is normally the phone's, but the rig can land on it too — press
+   ⌨/📷 on the panel and here you are — and every size above was chosen for a
+   phone held about 30cm away. The panel sits at arm's length, so the same
+   pixel is half the angle. Matches the breakpoint in styles.css deliberately;
+   the two must not disagree about what counts as a dashboard.
+ *
+ * The verdict is an overlay here rather than a panel of its own, and on a
+ * 320px-tall screen it was taking 44% of the glass — with the box the driver
+ * is trying to line up on the card sitting underneath it. Tighter, so the
+ * camera keeps the room. */
+@media (orientation: landscape) and (max-height: 620px) {
+  #statusline { font-size: 16px; }
+  #adjustNote { font-size: 16px; }
+  .scanbar button, .scanbar .filebtn, .scanbar .linkbtn { font-size: 16px; padding: 12px 2px; }
+  #stage .notice { font-size: 15px; }
+
+  #stage > .verdict { top: calc(env(safe-area-inset-top) + 6px); padding: 5px 10px 7px; }
+  #stage > .verdict .rate { margin: 0 0 4px; }
+  #stage > .verdict .submetrics { padding-top: 5px; }
+
+  /* The box the driver lines the card up with. Its defaults — a third of the
+     way down, not quite half the height — are a phone held upright, where the
+     verdict strip is a fifth of the glass. On a panel a third as tall the
+     strip reaches the box's top corners, so the two marks that say whether
+     the card is square in the frame are behind the answer. Down and shorter:
+     clear of the strip above and of the status line below, which is the only
+     other thing on this screen that has to stay legible. */
+  #reticle { top: 38%; height: 36%; }
+  #reticle.full { top: 34%; height: 42%; }
+}
+
+/* Narrower than a 5" panel and the overlay, the status line and the row of
+   controls together take two thirds of the glass, leaving the camera — the
+   whole point of the page — a strip in the middle. The three figures go: they
+   are readable on the card the camera is pointed at, and the rate above them
+   is the one thing here that is not. */
+@media (orientation: landscape) and (max-height: 380px) {
+  #stage > .verdict .submetrics { display: none; }
+  #stage > .verdict .rate { margin: 0; }
+  .scanbar button, .scanbar .filebtn, .scanbar .linkbtn { font-size: 14px; padding: 10px 2px; }
+  #statusline { bottom: calc(env(safe-area-inset-bottom) + 62px); font-size: 14px; }
+  #adjustNote { bottom: calc(env(safe-area-inset-bottom) + 84px); }
+  #reticle { top: 30%; height: 42%; }
+  #reticle.full { top: 26%; height: 48%; }
+}

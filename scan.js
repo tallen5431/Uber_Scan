@@ -451,20 +451,45 @@
   el.photo.addEventListener('change', function (e) {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
+    // The reader is about 15MB and loads in the background; on a cold start
+    // over a phone connection that is a good few seconds, and this button is
+    // live the whole time. Pressed early, `readOnce` reached for a `worker`
+    // that was still null and threw inside an async `onload` — where there is
+    // no caller to catch it. Nothing appeared on screen at all: the picture
+    // was picked, the file dialog closed, and the page went on saying
+    // "loading reader…" as though the press had never happened.
+    if (!worker) {
+      status('still loading the reader — try that photo again in a moment');
+      e.target.value = '';
+      return;
+    }
     var img = new Image();
     img.onload = async function () {
       frozen = true;
       document.body.classList.add('frozen');
       el.btnFreeze.textContent = '▶ Scan';
       status('reading photo…');
-      // A still has no successive frames to agree with, so one good read is
-      // all the agreement there can be — but it still has to be a *whole* card,
-      // for the same reason a live one does.
-      var out = await readOnce(img, null);
-      lastResult = out.parsed;
-      locked = isWhole(out.parsed);
-      render(out.ms);
+      try {
+        // A still has no successive frames to agree with, so one good read is
+        // all the agreement there can be — but it still has to be a *whole*
+        // card, for the same reason a live one does.
+        var out = await readOnce(img, null);
+        lastResult = out.parsed;
+        locked = isWhole(out.parsed);
+        render(out.ms);
+      } catch (err) {
+        // Same rule as the live loop: a read that failed must not leave the
+        // last card's numbers standing as though they were this photo's.
+        readFailed(err);
+      }
       URL.revokeObjectURL(img.src);
+      // Or the same file picked twice in a row fires no `change` at all.
+      e.target.value = '';
+    };
+    img.onerror = function () {
+      status('could not open that picture');
+      URL.revokeObjectURL(img.src);
+      e.target.value = '';
     };
     img.src = URL.createObjectURL(file);
   });

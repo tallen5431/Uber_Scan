@@ -241,6 +241,13 @@
       hours: seconds / 3600,
       perHour: seconds > 0 ? earned / (seconds / 3600) : 0,
       trips: trips,
+      // How many offers this walk actually looked at. `takes` is a fraction of
+      // it, and without it the fraction has no stated denominator — which is
+      // how the journal page came to print `takes` beside a percentage worked
+      // out over a different set, and invite the reader to subtract them. It
+      // is not the same as the number of offers handed in: `runs()` drops the
+      // ones that fall outside a run of scanning.
+      seen: seen,
       takes: seen ? trips / seen : 0
     };
   }

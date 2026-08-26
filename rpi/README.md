@@ -912,6 +912,64 @@ four buttons. They are 15-17px on a dashboard panel now, and the headline rate i
 sized against the panel's height as well as its width, so a 1024x600 screen
 spends its extra room on the one number it exists for: 92px before, 140px now.
 
+### The other three pages
+
+`live.html` was the one that got measured; the other three were not, and every
+fault above had a twin somewhere else. Each of the four is now rendered at
+800x480, 1024x600, 480x320 and on a phone, and what comes out is checked rather
+than looked at — `test_layout.py`.
+
+**The keypad wasted half the panel.** Its verdict already spanned the full
+height of the left-hand column and declined it: 175px of card in a 468px column,
+so 40% of an 800x480 screen was flat black and 45% of a 1024x600 one. The
+headline rate is what that height is for. It is 88px now instead of 60, and the
+row of controls runs the width of the screen instead of the right-hand third —
+which was the only way five labels fit in it without wrapping or being cut off
+mid-word.
+
+**...and scrolled sideways on a phone.** `grid-auto-columns: 1fr` is
+`minmax(auto, 1fr)`, and that `auto` floor is the longest word in the button.
+Five of them — Targets, History, Offers, Live, Camera — floored the row at 408px
+on a 390px screen, so the whole page laid out 408px wide. A page that scrolls
+down is a nuisance; a page that scrolls sideways is one where the controls are
+off the edge of the glass. On a 3.5" panel the same bar wrapped to three rows
+and pushed the page 445px into 320px of screen.
+
+**The scanner drew its controls on top of its own status line.** `.scanbar`
+declared five columns for six buttons. The sixth flowed onto an implicit second
+row, and that row lands exactly where `#statusline` sits — so the one line that
+says *why* nothing is being read ("loading reader…", "searching…", "read
+failed") was printed underneath a button at every size this rig ships on. It is
+`grid-auto-flow: column` now, which cannot go out of step with the markup, and
+the layers are checked for overlap rather than counted by hand. Its buttons also
+never had the 44px floor the rest of the project defends: they were 43px on a
+phone and 37px on a panel.
+
+**A message and a state shared a class name, again.** `scan.css` declared a bare
+`.warn` for the notice box inside the verdict. Nothing on any page carries
+`class="warn"` — the box is `class="notice"` — so the only element that rule
+ever matched was `.verdict.warn`, the CLOSE CALL panel itself, which came out a
+different shape from the other three verdicts. `styles.css` documents this exact
+trap a few lines above its own `.notice`.
+
+**And the font was never the one anybody thought.** The stack led with
+`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto`, none of which exists on
+Raspberry Pi OS. Measured in the rig's own browser by drawing the same string in
+each family: all four came back identical to a family that was never installed,
+so the whole stack fell through to `system-ui`, which there is DejaVu Sans — the
+widest face on the machine. The same sentence measures 339px in it against 300px
+in Liberation Sans and 268px in the browser's own default, and every width in
+the file was budgeted against a phone's narrower face. That is most of why
+labels that sit on one line on the phone wrap on the panel. `Piboto` — Raspberry
+Pi OS's own UI font — and `Noto Sans` are named ahead of the generic now. A
+phone never sees them; the four names above still win there.
+
+The offer log got the same treatment as the live view had: it was rendering at
+9.5, 10 and 11 pixels — the day headers, the time each offer came in, the rate
+before costs, the count beside every bar, and the sentence explaining why a row
+was set aside. Those sizes live in that page's own `<style>` block, which loads
+after the shared stylesheet and so beat anything set for them there.
+
 ### Reading the live view
 
 | | |
@@ -1808,6 +1866,40 @@ somewhere else.
 Rows carry the `target`, `band` and `costPerMile` in force when they were
 written, because a stored "PASS" is unreadable a month after the target moved.
 
+### Three sentences on the offers page that were not true
+
+**Two percentages of two different totals, side by side.** The headline read
+"At $25/hr, 52% of 48 offers cleared the line — though only about 38% were
+yours to take". The first figure is over every usable offer in the range. The
+second is `Advice.replay`'s, over only the offers that fall inside a run of
+scanning, because `runs()` drops the rest — on the sample above, 13 of the 48.
+A reader subtracts them, and gets a number about nothing. Both are counts now,
+each printed next to the total it is out of, and the replay gets its own
+sentence rather than hanging off the first with a "though", which is what made
+it read as a correction to the figure before it. `replay()` returns `seen`
+alongside `takes` so the denominator can be stated rather than implied.
+
+**A gross total in a page of net ones.** "You marked 6 as taken, worth $342.10
+at a typical $34/hr" summed the payouts. The `$34/hr` beside it is after
+running costs, the note at the foot of the page says "Rates are after $0.35/mi
+of running costs", and every other figure on the page obeys that. Now this one
+does too — and only claims to when something was actually subtracted, since
+with costs set to zero the two totals are the same number.
+
+**"No rate could be worked out from this reading" — printed under a rate.**
+A row is set aside if it is hidden, suspect, or not whole. The explanation had
+a branch for each of those but hidden, so a row the driver had hidden
+themselves fell through to the generic last line, two lines under its own
+perfectly good `$/hr`. It is the one row on that page whose absence from the
+figures is explained by something the driver remembers doing, and it was the
+one given no explanation.
+
+While there: a chart of one bar is not a comparison. "Rides and shop orders"
+drawn over a single row labelled "Not stated" tells the reader nothing, twice.
+That section and the time-of-day one now go when there is nothing to compare,
+instead of leaving a heading over an empty box that reads as a chart which
+failed to draw.
+
 ### Getting them off the car
 
 #### A copy that cannot be read is not an empty copy
@@ -2042,6 +2134,9 @@ python3 rpi/test_liveview.py    #  39 on the picture the driver watches, on
                                 #     nothing else being served with it, and on
                                 #     the dashboard layout being wired up
 python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
+python3 rpi/test_layout.py      # 131 on every page fitting the screen it is
+                                #     bolted to and being readable from the
+                                #     driving seat (skipped without Playwright)
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
