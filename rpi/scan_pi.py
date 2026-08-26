@@ -129,13 +129,25 @@ SCREEN_QUALITY = 78
 # It does not need 25 a second either way. The scene view is watched for motion
 # — is the phone still in the box, has the mount slipped — and a slide show
 # there reads as a fault. This one is watched to read a card that is not moving
-# and to see where a mouse pointer is. Ten a second is a conservative first
-# guess on hardware this was not measured on; raise it if the Pi turns out to
-# have the room, since nothing else on this loop depends on the number.
+# and, increasingly, to see where a mouse pointer is: the driver works the
+# phone with a bluetooth mouse and this picture is where they watch the cursor.
+# A cursor at ten frames a second feels attached to the hand; below that it
+# does not.
+#
+# Fifteen, then, rather than the first cautious ten — the compose is ~5ms and
+# the sensor copy is the rest, so this is a fraction of one core even on a Pi.
+# It is also a flag, `--screen-fps`, because the right number is a property of
+# the machine rather than of this code: raise it until the reads slow down, or
+# drop it on a busy rig. Nothing else on this loop depends on it.
 #
 # Paid only while somebody has actually asked for this view, which is what
 # .viewing carries.
-SNAPSHOT_SCREEN = 0.1
+SNAPSHOT_SCREEN = 1 / 15.0
+
+# Below this the picture is a slide show and above it the Pi is composing
+# frames nobody sees between camera frames — the sensor delivers 30 a second in
+# the default mode, so asking for more than that buys duplicates.
+SCREEN_FPS_LIMITS = (2.0, 30.0)
 
 # What the browser asked to look at. Anything else is the scene, so a truncated
 # write, an empty file or an older server that writes nothing all land on the
@@ -451,12 +463,32 @@ def watching():
     return True, _watch_cache[1]
 
 
-def snapshot_interval(view=VIEW_SCENE, seen=None):
+def snapshot_interval(view=VIEW_SCENE, seen=None, screen_every=None):
     if seen is None:
         seen = watching()[0]
     if not seen:
         return SNAPSHOT_IDLE
-    return SNAPSHOT_SCREEN if view == VIEW_SCREEN else SNAPSHOT_FAST
+    if view != VIEW_SCREEN:
+        return SNAPSHOT_FAST
+    return SNAPSHOT_SCREEN if screen_every is None else screen_every
+
+
+def screen_every(fps):
+    """Seconds between phone-view frames, from a rate a person typed.
+
+    Clamped rather than refused. This is a comfort setting on somebody's own
+    rig, and the failure modes at the ends are a slide show and a Pi composing
+    frames between camera frames — neither worth stopping a shift over. A rate
+    of zero or less would be a division by zero, which is worth refusing.
+    """
+    low, high = SCREEN_FPS_LIMITS
+    try:
+        want = float(fps)
+    except (TypeError, ValueError):
+        return SNAPSHOT_SCREEN
+    if not (want > 0):
+        return SNAPSHOT_SCREEN
+    return 1.0 / min(high, max(low, want))
 
 
 def load_config(path):
@@ -1020,6 +1052,10 @@ def main():
                          'of the wall clock for the same evidence')
     ap.add_argument('--no-track', action='store_true',
                     help='never re-find the phone; use the calibrated corners exactly')
+    ap.add_argument('--screen-fps', type=float, default=1.0 / SNAPSHOT_SCREEN,
+                    help='frames a second for the phone view (default %d); it '
+                         'buys a full sensor frame each time, so raise it until '
+                         'reads slow down' % round(1.0 / SNAPSHOT_SCREEN))
     ap.add_argument('--no-thread', action='store_true',
                     help='read on the camera loop instead of beside it. The '
                          'default keeps the live view and the corner tracking '
@@ -1193,6 +1229,9 @@ def main():
     spoke_for = None
     frames = 0
     last_snapshot = 0.0
+    # Read once here rather than per frame: it cannot change while running, and
+    # this sits in the loop that also holds the camera.
+    phone_view_every = screen_every(getattr(args, 'screen_fps', None))
     resample_until = 0.0
     # Which card the burst above is for, so it is armed once per card rather
     # than once per read. See where it is set.
@@ -1816,7 +1855,7 @@ def main():
                 # otherwise nothing is ever seen between offers.
                 seen_by, want_view = watching()
                 due = args.snapshot and (now - last_snapshot) > snapshot_interval(
-                    want_view, seen_by)
+                    want_view, seen_by, phone_view_every)
                 if not do_read and not due:
                     continue
                 # The sensor frame is copied only when something is going to

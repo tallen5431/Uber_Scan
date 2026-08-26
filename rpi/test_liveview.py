@@ -19,7 +19,6 @@ The server is the real server.js, started as a subprocess.
 """
 
 import html.parser
-import json
 import os
 import re
 import shutil
@@ -257,23 +256,25 @@ try:
     tree = Nesting()
     tree.feed(page)
 
-    # Every id the dashboard block gives a grid-column to, and where it lives.
-    block = re.search(r'@media \(orientation: landscape\) and \(max-height: \d+px\) \{'
-                      r'(.*?)\n  \}', page, re.S)
-    ok_('the dashboard block is still there', block is not None)
+    # Every id the across-the-screen layout gives a grid-column to, and where
+    # that id actually lives in the markup. A grid places its own children and
+    # nobody else's, so a `grid-column` on something nested one level deeper
+    # applies to nothing at all — which is how this layout came to have never
+    # once worked, invisibly, on a page that looked right without a camera.
+    #
+    # The condition used to carry `and (max-height: 620px)`; it is bare
+    # landscape now, because the height term was excluding every panel larger
+    # than the two it was written for. rpi/test_layout.py holds every file to
+    # the same condition, so this only has to find the block.
+    block = re.search(r'@media \(orientation: landscape\)\s*\{(.*?)\n  \}',
+                      page, re.S)
+    ok_('the across-the-screen block is still there', block is not None)
     placed = set(re.findall(r'#([A-Za-z][\w-]*)[^{}]*\{[^{}]*grid-column',
                             block.group(1) if block else ''))
     ok_('...and it places things by id', placed)
     for name in sorted(placed):
         eq('%s is a child of the grid that places it' % name,
            tree.parent.get(name), 'app')
-
-    # Both halves of the layout have to switch at the same width, or the page
-    # spends a range of sizes half in one design and half in the other.
-    heights = set(re.findall(r'orientation: landscape\) and \(max-height: (\d+)px',
-                             page + open(os.path.join(ROOT, 'styles.css')).read()))
-    eq('the two files agree on where a dashboard panel starts',
-       sorted(int(h) for h in heights), [380, 620])
 
     # --- which picture the browser is asking for --------------------------
     #

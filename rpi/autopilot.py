@@ -73,7 +73,17 @@ def emit(payload, as_json):
 
 
 def check(as_json):
-    """Fail early and specifically, rather than deep inside a capture loop."""
+    """Fail early and specifically, rather than deep inside a capture loop.
+
+    Says so first. Importing cv2, numpy, pytesseract and picamera2 on a Pi is
+    seconds of work — picamera2 alone pulls in libcamera — and this runs before
+    anything else, so it is the first thing the driver waits through. It used
+    to do that silently: `live.html` shows `PHASE_LABEL[phase]` and falls back
+    to "WAITING FOR AN OFFER" for a phase it does not know, so a rig still
+    working out whether OpenCV is installed claimed to be watching for offers.
+    The label for this phase was already there and nothing ever sent it.
+    """
+    emit({'phase': 'check', 'message': 'checking the camera and the reader'}, as_json)
     missing = []
     for module, fix in (('cv2', 'sudo apt install -y python3-opencv'),
                         ('numpy', 'sudo apt install -y python3-numpy'),
@@ -109,7 +119,6 @@ def aim(as_json, port, timeout, min_card=None):
     timeout — with no amount of moving the mount able to fix a reflection the
     detector prefers to the phone.
     """
-    import cv2
     import camera as CAM
     import cropbox as CX
     import pipeline as PL
@@ -529,8 +538,6 @@ def main():
 
     if not check(args.json):
         return 1
-
-    import camera as CAM
 
     # Deleting the file was the old way to force a re-aim, and it took the
     # driver's target and running costs with it — calibrate_from can only

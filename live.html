@@ -23,7 +23,7 @@
      The camera view is the half that gives way. It matters while aiming the
      mount and hardly at all afterwards, whereas the verdict is the entire
      reason the screen is there. */
-  @media (orientation: landscape) and (max-height: 620px) {
+  @media (orientation: landscape) {
     #app { display: grid;
            grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
            grid-template-rows: minmax(0, 1fr) auto auto;
@@ -35,6 +35,14 @@
        name was the first thing to be clipped away. `safe center` centres while
        it fits and falls back to the top when it does not. */
     .live { grid-column: 1; grid-row: 1; justify-content: safe center; }
+    /* The panel takes the height of the row it is in rather than only the
+       height of its own words. On a 1280x800 panel the verdict was 352px of a
+       788px column and the rest was black — the same complaint that started
+       this, one screen along. Stretched, with the contents centred inside it,
+       so the number has somewhere to grow into and the card looks like a card
+       rather than a label floating in the dark. */
+    .live #verdict { flex: 1 1 auto; display: flex; flex-direction: column;
+                     justify-content: center; min-height: 0; }
     #viewWrap { grid-column: 2; grid-row: 1; margin: 0; min-height: 0;
                 align-self: center; }
     /* Bounded by the row it is in rather than by the viewport. It used to be
@@ -109,7 +117,7 @@
        the exact screen the height term was added for; at 170 the height wins
        there (156px) and the width still wins on an 800x480 (128px), which is
        the arrangement intended. */
-    #perHour { font-size: min(16vw, 26dvh, 170px,
+    #perHour { font-size: min(16vw, 26dvh, 240px,
                               calc((100cqw - 40px) / (var(--chars) * 0.62))); }
     /* ...and it gives some of that back when there is something to say. A
        notice is two more lines inside a panel that is already as tall as the
@@ -249,7 +257,7 @@
    * it that a driver still has to read: which figure is which, what the buttons
    * do, and whether anything is still reading offers.
    */
-  @media (orientation: landscape) and (max-height: 620px) {
+  @media (orientation: landscape) {
     .pending { font-size: 16px; }
     .connbar { font-size: 15px; padding: 4px; }
     .dot { width: 11px; height: 11px; }

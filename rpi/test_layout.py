@@ -48,6 +48,8 @@ PAGES = ['index.html', 'live.html', 'journal.html', 'scan.html']
 PANELS = [
     ('800x480', 800, 480),    # the official 7" Pi touchscreen
     ('1024x600', 1024, 600),  # the common 7" HDMI panel
+    ('1280x800', 1280, 800),  # a tablet-shaped panel, on its side
+    ('1024x768', 1024, 768),  # 4:3 — landscape, but only just
     ('480x320', 480, 320),    # a 3.5" hat
     ('390x844', 390, 844),    # a phone
 ]
@@ -148,15 +150,162 @@ for sheet in ('styles.css', 'scan.css'):
     bare = re.findall(r'(?:^|[,{}])\s*(\.warn(?:\[[^\]]*\])?)\s*(?=[,{])', css, re.M)
     eq('%s: no bare .warn rule to collide with the verdict state' % sheet, bare, [])
 
-# Both halves of the layout have to switch at the same height, or a page spends
-# a range of sizes half in one design and half in the other.
-heights = set()
+# The verdict colours, written out twice on purpose and kept in step by hand.
+#
+# scan.css cannot use the shared custom properties for the four verdict panels:
+# they overlay a live camera picture, so they have to be opaque enough to read
+# against it, which means rgba() with an alpha rather than a hex. Its own
+# comment says "kept in step with styles.css by hand. If those change, change
+# these" — and records that they were not: the copy was left on the old flat
+# luminance palette when the shared one changed, and had no case for `doubt` at
+# all, so a reading the scanner refused to judge came out the same colour as
+# "searching for a card". The one state whose whole purpose is to look like
+# nothing else looked like nothing.
+#
+# A rule that has to be remembered on every commit is a rule that gets
+# forgotten on some commit, which is the same reasoning that took the hand-bump
+# out of sw.js. Nothing here makes scan.css derive its colours — it cannot —
+# but the two are held to the same numbers.
+def hex_rgb(value):
+    value = value.strip().lstrip('#')
+    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+
+shared = dict(re.findall(r'(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;',
+                         open(os.path.join(ROOT, 'styles.css')).read()))
+overlay = open(os.path.join(ROOT, 'scan.css')).read()
+# Which shared colour each overlaid panel is the opaque version of. `fault` is
+# not a verdict — it is the scanner saying it is broken — and takes the plain
+# panel colour rather than one off the verdict ladder.
+OVERLAID = [('go', '--go-dim'), ('warn', '--warn-dim'), ('no', '--no-dim'),
+            ('doubt', '--doubt-dim'), ('fault', '--panel-2')]
+ok_('styles.css still defines the shared palette',
+    all(var in shared for _, var in OVERLAID))
+for state, var in OVERLAID:
+    found = re.search(r'#stage > \.verdict\.%s\s*\{[^}]*?rgba\(\s*(\d+),\s*(\d+),\s*(\d+)'
+                      % state, overlay, re.S)
+    ok_('the scanner paints a %s panel' % state, found is not None)
+    if not found or var not in shared:
+        continue
+    eq('...in the same colour styles.css calls %s' % var,
+       tuple(int(n) for n in found.groups()), hex_rgb(shared[var]))
+
+# Every state the shared file gives a panel colour must have one here too. The
+# gap that actually happened was an absence, not a mismatch: `doubt` was added
+# to styles.css and never to scan.css, and an absence is invisible to any check
+# that only compares the pairs it finds.
+painted = set(re.findall(r'#stage > \.verdict\.([a-z]+)\s*\{', overlay))
+eq('the scanner has a panel for every verdict the shared file paints',
+   sorted(state for state, _ in OVERLAID if state not in painted), [])
+
+# --- can it be read at all -------------------------------------------------
+#
+# The palette is dark on purpose — this is looked at through a windscreen at
+# night, and a light panel in a dark car is a lamp pointed at the driver. What
+# was wrong was not the darkness but the steps between the darks: the panel
+# every card and key is filled with measured 1.11:1 against the background and
+# the border round it 1.31:1, which is to say the boxes were not boxes. Turned
+# up in daylight they washed into one flat rectangle.
+#
+# WCAG's ratio is the only non-subjective thing to hold this to, so it is what
+# is held to. Text at 4.5:1, large text and the boundary of a control at 3:1.
+def relative_luminance(colour):
+    colour = colour.strip().lstrip('#')
+    channels = []
+    for i in (0, 2, 4):
+        c = int(colour[i:i + 2], 16) / 255.0
+        channels.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def contrast(a, b):
+    la, lb = relative_luminance(a), relative_luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+# (what is drawn, what it is drawn on, the ratio it has to reach, why)
+READABILITY = [
+    ('--text', '--bg', 4.5, 'body text'),
+    ('--muted', '--bg', 4.5, 'the labels under every figure'),
+    ('--muted', '--panel', 4.5, 'the same labels inside a card'),
+    ('--muted', '--panel-2', 4.5, 'and inside a key'),
+    ('--text', '--go-dim', 4.5, 'the rate on an ACCEPT panel'),
+    ('--text', '--warn-dim', 4.5, 'the rate on a CLOSE CALL panel'),
+    ('--text', '--no-dim', 4.5, 'the rate on a PASS panel'),
+    ('--text', '--doubt-dim', 4.5, 'the rate on a panel that refused to judge'),
+    # The verdict words. Never drawn below 18px bold — see .verdict-label —
+    # which is where the standard asks 3:1 rather than 4.5:1. Green saturates
+    # before it reaches 4.5 against the green it sits on: there is no lighter
+    # green that is still green, and darkening the panel would break the
+    # brightest-to-darkest ladder that carries the verdict without colour.
+    ('--go', '--go-dim', 3.0, 'the word ACCEPT'),
+    ('--warn', '--warn-dim', 4.5, 'the words CLOSE CALL'),
+    ('--no', '--no-dim', 4.5, 'the word PASS'),
+    ('--doubt', '--doubt-dim', 4.5, 'the word on a refused reading'),
+]
+
+palette = dict(re.findall(r'(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;',
+                          open(os.path.join(ROOT, 'styles.css')).read()))
+for fg, bg, floor, what in READABILITY:
+    if fg not in palette or bg not in palette:
+        ok_('styles.css defines %s and %s' % (fg, bg), False)
+        continue
+    got = contrast(palette[fg], palette[bg])
+    ok_('%s reads against what it sits on (%.2f:1, needs %.1f)' % (what, got, floor),
+        got >= floor)
+
+# A box has to look like a box. This is the one that was actually failing, and
+# it is not about text: a key, a card and the bar of controls are all filled
+# with `--panel` or `--panel-2` and identified by nothing else.
+for fill, floor, what in (('--panel', 1.45, 'a card against the page'),
+                          ('--panel-2', 1.45, 'a key against the page')):
+    got = contrast(palette[fill], palette['--bg'])
+    ok_('%s is visible as a shape (%.2f:1)' % (what, got), got >= floor)
+# ...and the border, which is what carries the edge where two panels meet.
+for on in ('--panel', '--panel-2'):
+    got = contrast(palette['--line'], palette[on])
+    ok_('a border reads against %s (%.2f:1)' % (on, got), got >= 1.9)
+
+# The ladder the whole verdict design rests on: with no colour vision at all,
+# take-it is the brightest panel and leave-it is the darkest. Any change to
+# these four that reverses the order silently removes the fallback.
+ladder = [relative_luminance(palette[v]) for v in
+          ('--go-dim', '--warn-dim', '--doubt-dim', '--no-dim')]
+eq('the verdict panels still run brightest to darkest',
+   ladder, sorted(ladder, reverse=True))
+
+# Every file has to agree about when the page lays itself out across the screen
+# rather than down it, or a page spends a range of sizes half in one design and
+# half in the other.
+#
+# That used to be `(orientation: landscape) and (max-height: 620px)`, and the
+# height term was the mistake. It was written when the only landscape targets
+# were an 800x480 touchscreen and a 1024x600 HDMI panel, and it silently
+# excluded every larger one: a 1280x800 panel — a tablet on its side, which is
+# what the rig ended up bolted to — is landscape and 800px tall, so it missed
+# by 180 pixels and got the phone design. Measured there: a 460px column down
+# the middle of a 1280px screen, the readout stacked above the picture instead
+# of beside it, and the verdict pushed 221px off the top of the glass.
+#
+# Landscape alone now. It says exactly what it means — this screen is wider
+# than it is tall, so use the width — and there is no size of landscape screen
+# for which the answer is different.
+conditions = set()
 for name in SHEETS:
     for css in style_blocks(name):
-        heights |= set(re.findall(
-            r'orientation: landscape\) and \(max-height: (\d+)px', css))
-eq('every file agrees where a dashboard panel starts',
-   sorted(int(h) for h in heights), [380, 620])
+        conditions |= set(re.findall(r'@media \(orientation: landscape\)([^{]*)\{', css))
+eq('every file switches to the across-the-screen layout at the same point',
+   sorted(c.strip() for c in conditions),
+   ['', 'and (max-height: 380px)'])
+# ...and the narrow-panel rules are an extra squeeze inside the wide layout,
+# not a third design. A file that only had the 380px block would be applying
+# them without the layout they adjust.
+for name in SHEETS:
+    css = '\n'.join(style_blocks(name))
+    narrow = 'and (max-height: 380px)' in css
+    wide = re.search(r'@media \(orientation: landscape\)\s*\{', css) is not None
+    ok_('%s: the 3.5-inch rules come with the layout they adjust' % name,
+        wide or not narrow)
 
 # Every page is somebody's home screen icon and somebody's browser tab. Only
 # the keypad ever named one; the rest fell through to a /favicon.ico this

@@ -1,10 +1,23 @@
 :root {
+  /* Dark on purpose: this is looked at through a windscreen at night, and a
+     light panel in a dark car is a lamp pointed at the driver. What was wrong
+     was not the darkness but the *steps* between the darks. Measured against
+     the background as WCAG computes it, the panel every card and key is filled
+     with came out at 1.11:1 and the border round it at 1.31:1 — which is to
+     say the boxes were not boxes. On a screen turned up in daylight they
+     washed into one flat rectangle. The background is untouched; everything
+     drawn on top of it moved up.
+
+     Every pair below is checked by rpi/test_layout.py rather than eyeballed. */
   --bg: #0b0f14;
-  --panel: #141b24;
-  --panel-2: #1c2632;
-  --line: #26313f;
+  --panel: #273548;
+  --panel-2: #324458;
+  --line: #5d738d;
   --text: #eef4fb;
-  --muted: #8ea1b8;
+  /* 7.27:1 on the background before, 8.94 now. This is the colour of every
+     label under every figure — "PAY", "MINUTES", "NET $/MI" — and of the line
+     that says what the scanner is doing. */
+  --muted: #9fb3c9;
   /* The four verdicts, as a deliberate ladder from brightest to darkest.
      They used to be four hues at one luminance: the ACCEPT and CLOSE CALL
      panels measured 1.02:1 against each other and PASS against doubt 1.01:1,
@@ -13,9 +26,15 @@
      twelve, on a screen looked at while driving. The ladder is the fallback:
      even with no colour at all, take-it is the brightest and leave-it is the
      darkest. The glyph below is the real fix. */
-  --go: #2ee87c;
+  /* The verdict words, on their own panels: ACCEPT was 3.55:1 against the
+     green it sits on and CLOSE CALL 4.30 against the amber. Green saturates
+     before it reaches 4.5 — there is no lighter green that is still green —
+     so the label is instead never drawn below the size at which 3:1 is the
+     standard, and the ratio is 4.34 rather than 3.55. Amber had room and
+     takes it: 4.67, which clears the threshold at any size. */
+  --go: #33ff88;
   --go-dim: #127540;
-  --warn: #ffc247;
+  --warn: #ffce4b;
   --warn-dim: #7a5208;
   --no: #ff5468;
   --no-dim: #520f1a;
@@ -90,7 +109,11 @@ html, body {
 .verdict.fault .verdict-label { color: var(--text); }
 
 .verdict-label {
-  font-size: clamp(15px, 4.5vw, 20px);
+  /* Never below 18px bold, which is where WCAG stops asking for 4.5:1 and
+     asks for 3:1 — and the green on green is 4.34. Below that size the same
+     colour would be a failure rather than a pass, so the floor is doing real
+     work and not only being generous. */
+  font-size: clamp(18px, 4.5vw, 22px);
   font-weight: 800;
   letter-spacing: .14em;
   color: var(--muted);
@@ -501,7 +524,7 @@ html, body {
  * display black on either side, with the verdict small in the centre.
  *
  * So: fill the width, and lay the page out across it rather than down it. */
-@media (orientation: landscape) and (max-height: 620px) {
+@media (orientation: landscape) {
   /* Never a fixed height. Whatever else is wrong on an unusual panel, nothing
      may end up drawn on top of anything else — scrolling is a nuisance,
      overlapping controls are a fault. */
@@ -560,13 +583,17 @@ html, body {
      is a strip floating over a live camera picture, and a 90px figure there
      grows the strip until it covers the box the driver is lining the card up
      with — making the number easier to read by hiding the thing being read. */
-  body[data-page="keypad"] .rate-value { font-size: clamp(30px, 11vw, 96px); }
+  /* The ceiling is high because the terms that matter are the two that scale
+     with the panel; it is only here to stop a desktop window drawing a
+     four-hundred-pixel number. A 1280-wide panel gets 140px of figure where
+     the old 96 cap left it the same size as on an 800px one. */
+  body[data-page="keypad"] .rate-value { font-size: min(11vw, 34dvh, 200px); }
   .rate-unit  { font-size: clamp(14px, 2.6vw, 20px); }
   /* The word above the number, and the one channel that still carries the
      verdict for a driver who cannot separate the red panel from the green.
      17px of it against a 90px number, on a panel now filling the height, was
      out of proportion with the thing it is a caption for. */
-  .verdict-label { font-size: clamp(14px, 3vw, 26px); }
+  .verdict-label { font-size: clamp(18px, 3vw, 30px); }
   .sub { font-size: clamp(15px, 2.8vw, 20px); }
   .verdict { padding: 8px 10px 10px; }
 

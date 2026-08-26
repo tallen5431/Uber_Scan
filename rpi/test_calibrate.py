@@ -187,8 +187,6 @@ import io
 import contextlib
 
 import autopilot as AP
-import pipeline as PL
-import preview as PV
 
 AP.STABLE_INTERVAL = 0            # the checks are about which frame, not waiting
 

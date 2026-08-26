@@ -437,8 +437,7 @@ if run_dark['ready']:
 #
 # Neither lives in a file the parser's own tests touch, which is the whole point
 # of checking them here: the parser is free to grow a state, and nothing that
-# renders one may fall over when it does.
-import scan_pi as SP                                           # noqa: E402
+# renders one may fall over when it does. (`SP` is already imported above.)
 
 
 def _rate(state, per_hour=30.0, why=None):

@@ -877,6 +877,31 @@ later will save it. Move the bracket until it goes green, then calibrate.
 `--image f.png` runs the same overlay on a still, which is how it is tested
 off-Pi.
 
+### Landscape is the breakpoint, not 620 pixels
+
+The across-the-screen layout used to be behind
+`(orientation: landscape) and (max-height: 620px)`, and the height term was a
+mistake that took a while to surface. It was written when the only landscape
+targets were an 800x480 touchscreen and a 1024x600 HDMI panel; every larger one
+silently missed it. A **1280x800 panel — a tablet on its side, which is what
+this rig ended up bolted to — is landscape and 800px tall, so it missed by 180
+pixels and got the phone design**. Measured there: a 460px column down the
+middle of a 1280px screen, the readout stacked above the picture instead of
+beside it, the verdict pushed **221px off the top of the glass**, and the page
+819px tall in 800px of screen.
+
+It is bare `(orientation: landscape)` now. That says exactly what it means —
+this screen is wider than it is tall, so lay the page out across it — and there
+is no size of landscape screen for which the answer is different. The
+`max-height: 380px` block stays as an extra squeeze inside it for the 3.5"
+hat. `rpi/test_layout.py` renders every page at 1280x800 and 1024x768 as well
+as the small panels, and holds every stylesheet to the same two conditions.
+
+The verdict also takes the height of the column it is in rather than only the
+height of its own words, on the driving screen as well as the keypad — at
+1280x800 it was 352px of a 788px column with the rest black, which is the
+complaint that started all of this, one screen along.
+
 ### The screen bolted to the dashboard
 
 Every layout in this project assumes a phone: tall, narrow, held about 30cm from
@@ -997,6 +1022,39 @@ stopped trying for good — on the one machine with nobody watching it.
 that the script exists, which section each key landed in, and that the paths
 are baked in from wherever the script was run.
 
+### Dark, but not flat
+
+The palette is dark on purpose: this is looked at through a windscreen at
+night, and a light panel in a dark car is a lamp pointed at the driver. What
+was wrong was never the darkness — it was the *steps* between the darks.
+
+Measured as WCAG computes it, against the background:
+
+| | before | now |
+|---|---|---|
+| a card or a key, as a shape | **1.11:1** | 1.55:1 |
+| its border, against the card | **1.31:1** | 2.3:1 |
+| the labels under every figure | 7.27:1 | 8.94:1 |
+| the word ACCEPT, on its green | **3.55:1** | 4.34:1 |
+| the words CLOSE CALL, on amber | **4.30:1** | 4.67:1 |
+
+1.11:1 means the boxes were not boxes. Every key on the pad, every card in the
+log and every button in the bottom bar was filled with a colour a ninth of a
+step from the page behind it, and turned up in daylight they washed into one
+flat rectangle. The background is untouched; everything drawn on top of it
+moved up.
+
+Green saturates before it reaches 4.5:1 against the green it sits on — there is
+no lighter green that is still green, and darkening the panel would break the
+brightest-to-darkest ladder that carries the verdict for a driver who cannot
+separate red from green. So the label is instead never drawn below 18px bold,
+which is where the standard asks 3:1 rather than 4.5:1, and 4.34 clears that
+with room. Amber had headroom and took it.
+
+None of this is eyeballed: `rpi/test_layout.py` computes every ratio from
+`styles.css` and fails below the floor, and checks the four verdict panels
+still run brightest to darkest.
+
 ### Reading the phone *through* the live view
 
 The live view was written to answer one question — is the camera pointed at the
@@ -1038,10 +1096,24 @@ A view you cannot see the button in is not one you can drive the phone from.
 avoid. Composing is actually cheaper than the scene view — that one's expense
 was never the shrink but the card inset warped out of the sensor — so the price
 is the 12MB copy, and it is the one thing here much dearer on a Pi than on the
-machine these numbers came from. Paid at ten frames a second rather than
-twenty-five: this view is watched to read a card that is not moving and to see
-where a pointer is, not for motion. `SNAPSHOT_SCREEN` is a conservative first
-guess on hardware it was not measured on; raise it if the Pi has the room.
+machine these numbers came from.
+
+Fifteen frames a second, not the scene view's twenty-five. This picture is
+watched to read a card that is not moving and, increasingly, to see where a
+mouse pointer is: the phone is worked with a bluetooth mouse and this is where
+the cursor is watched, and a cursor below about ten frames a second stops
+feeling attached to the hand. The right number is a property of the machine
+rather than of the code, so it is a flag:
+
+```sh
+python3 rpi/autopilot.py --screen-fps 20   # raise it until reads slow down
+python3 rpi/autopilot.py --screen-fps 6    # or drop it on a busy rig
+```
+
+Clamped to 2-30 rather than refused: the failure modes at the ends are a slide
+show and a Pi composing frames between camera frames, and neither is worth
+stopping a shift over. The sensor delivers 30 a second in the default mode, so
+above that it would be paying for duplicates.
 
 **Only while somebody is looking at it.** The web side already touches
 `rpi/.viewing` whenever a browser fetches a frame, and that file now carries
@@ -2302,16 +2374,21 @@ python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  39 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
-python3 rpi/test_liveview.py    #  48 on the picture the driver watches, on
+python3 rpi/test_liveview.py    #  47 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
                                 #     dashboard layout being wired up, and on
                                 #     which of the two views was asked for
 python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
+python3 rpi/test_autopilot.py   #  37 on the one command that takes the rig
+                                #     from nothing to scanning, and on the
+                                #     branch that used to brick it
+python3 rpi/test_lint.py        #  28 on the faults that only surface when a
+                                #     cold branch runs (skipped without flake8)
 python3 rpi/test_handoff.py     #  37 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
 python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
-python3 rpi/test_layout.py      # 153 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 244 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 ```
