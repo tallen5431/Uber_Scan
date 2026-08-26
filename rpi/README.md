@@ -890,6 +890,14 @@ middle of a 1280px screen, the readout stacked above the picture instead of
 beside it, the verdict pushed **221px off the top of the glass**, and the page
 819px tall in 800px of screen.
 
+One thing that widening it broke, and which the same suite then caught: the
+across-the-screen layout deliberately lifts the shared `max-width: 480px` so
+the charts and the log rows can use the panel, and the log page had never met a
+desktop-sized window before. Body text ran **1892px wide on a 1920 screen** —
+around two hundred characters a line — and 1252px on the 1280 panel. The bars
+keep the width, because a bar is read by length rather than by reading along
+it; the sentences are capped at 72 characters and the page at 1180px.
+
 It is bare `(orientation: landscape)` now. That says exactly what it means —
 this screen is wider than it is tall, so lay the page out across it — and there
 is no size of landscape screen for which the answer is different. The
@@ -2388,7 +2396,7 @@ python3 rpi/test_handoff.py     #  37 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
 python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
-python3 rpi/test_layout.py      # 244 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 258 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 ```

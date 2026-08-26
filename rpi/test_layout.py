@@ -198,6 +198,37 @@ painted = set(re.findall(r'#stage > \.verdict\.([a-z]+)\s*\{', overlay))
 eq('the scanner has a panel for every verdict the shared file paints',
    sorted(state for state, _ in OVERLAID if state not in painted), [])
 
+# --- every element the page reaches for actually exists --------------------
+#
+# A page collects its controls once, by id, into an `el` object — and a
+# renamed id does not fail there. `getElementById` returns null, `el.thing`
+# is null, and what happens next is either a TypeError deep inside a render
+# that runs twice a second, or, worse, a button that quietly does nothing for
+# the rest of the shift. Neither says which id went missing.
+COLLECTORS = [
+    ('live.html', 'live.html'),
+    ('journal.html', 'journal.html'),
+    ('scan.html', 'scan.js'),
+    ('index.html', 'ui.js'),
+]
+for page, where in COLLECTORS:
+    markup = open(os.path.join(ROOT, page)).read()
+    script = markup if where == page else open(os.path.join(ROOT, where)).read()
+    have = set(re.findall(r'\bid="([^"]+)"', markup))
+
+    # Both shapes: the one-at-a-time calls, and the list handed to the
+    # collector loop that most of these pages build their `el` object with.
+    wanted = set(re.findall(r"""getElementById\(\s*['"]([^'"]+)['"]\s*\)""", script))
+    anchor = script.find('var el = {}')
+    if anchor != -1:
+        stop = script.index('.forEach', anchor)
+        start = script.rindex('[', 0, stop)
+        wanted |= set(re.findall(r"'([^']+)'", script[start:stop]))
+
+    ok_('%s reaches for some elements' % page, len(wanted) > 3)
+    eq('%s: every element it reaches for is in the markup' % page,
+       sorted(w for w in wanted if w not in have), [])
+
 # --- can it be read at all -------------------------------------------------
 #
 # The palette is dark on purpose — this is looked at through a windscreen at
@@ -385,6 +416,20 @@ const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
             what = (el.id || el.className || el.tagName).toString().slice(0, 30);
           }
         }
+        // The longest line of running text on the page. A line the eye has to
+        // travel a long way along loses its place coming back to the start of
+        // the next one, which is why prose has a measure at all.
+        let measure = 0, measureIn = '';
+        for (const e of document.querySelectorAll('p, li, .hint, .note, #headline, dd')) {
+          const b = e.getBoundingClientRect();
+          if (!b.width || !b.height) continue;
+          if ((e.textContent || '').trim().length < 60) continue;
+          if (b.width > measure) {
+            measure = b.width;
+            measureIn = (e.id || e.className || e.tagName).toString().slice(0, 24);
+          }
+        }
+
         // Every control meant to be pressed one-handed, on glass, in a car.
         let shortest = null, shortestIn = null;
         for (const el of document.querySelectorAll(
@@ -417,6 +462,7 @@ const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
           clientW: d.clientWidth, clientH: d.clientHeight,
           smallest: smallest, smallestIn: what,
           shortest: shortest, shortestIn: shortestIn,
+          measure: measure, measureIn: measureIn,
           layers: layers,
         };
       });
@@ -596,6 +642,18 @@ try:
                     ok_('...taller than the row the scene view was boxed into '
                         'at %s (%.0fpx, was %.0f)' % (panel, phone['h'], phone['was']),
                         phone['h'] > phone['was'] + 40)
+
+            # A line of prose has a width past which it stops being readable.
+            # Widening the across-the-screen breakpoint to all of landscape put
+            # the log page on a desktop-sized window for the first time, and it
+            # ran body text 1892px wide — around 200 characters a line, because
+            # that layout deliberately lifts the shared 480px cap so the charts
+            # and the rows can use the panel. The bars keep the width; the
+            # sentences do not.
+            if r.get('measure'):
+                ok_('%s at %s keeps a line of text readable (%.0fpx in %s)'
+                    % (name, panel, r['measure'], r['measureIn']),
+                    r['measure'] <= 900)
 
             layers = r.get('layers') or []
             if len(layers) > 1:

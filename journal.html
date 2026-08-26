@@ -243,7 +243,22 @@
    * they are exactly the figures the page exists to be read for. Nothing here
    * changes a colour or a layout — only how big the small print is. */
   @media (orientation: landscape) {
-    #app { padding-left: 14px; padding-right: 14px; }
+    /* This is the one page that is *read* rather than glanced at, and the
+       across-the-screen layout lifts the shared `max-width: 480px` so the
+       charts and the log rows can use the panel. On a 1280 screen that gave
+       running text a 1252px measure — around 130 characters a line — and on a
+       1920 one, 1892px and 200 characters. The eye loses its place returning
+       to the start of a line long before that.
+       Two caps, because the two want different widths: the page as a whole so
+       a desktop window does not stretch a week of offers across a monitor, and
+       the prose inside it to something a line of text is meant to be. The bars
+       and the rows keep the full width — a bar is read by length, not by
+       reading along it. */
+    #app { padding-left: 14px; padding-right: 14px;
+           max-width: 1180px; margin-left: auto; margin-right: auto; }
+    #headline, .hint, .note, .advice p, #nothing, .empty-msg, .offer .why {
+      max-width: 72ch; margin-left: auto; margin-right: auto;
+    }
     h2 { font-size: 15px; }
     .hint, .note, #headline { font-size: 15px; line-height: 1.5; }
     .advice p { font-size: 16px; }
