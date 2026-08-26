@@ -71,7 +71,22 @@ DEFAULT_SNAPSHOT = HO.frame()
 # 50kB each, and does not have to — the stream respects back-pressure, so a slow
 # link simply receives fewer frames rather than falling further behind the longer
 # it watches. The rig's own screen, which is a loopback socket, gets all of them.
-SNAPSHOT_FAST = 0.04
+#
+# ...and none of that was what the rig actually did. The snapshot is due-checked
+# once per camera frame and nowhere else, so the only rates it can produce are
+# the camera's divided by whole numbers — 30, 15, 10, 7.5 on the binned sensor.
+# The check was a strict "elapsed > period", which always lands on the next one
+# *down*, because the frame arriving on the deadline is a hair early and gets
+# skipped. Simulated against a 30fps sensor, this 25 delivered 15.1. The
+# 13.7-vs-28.4 measurement above was of the fetch-a-still fallback, not of this.
+#
+# Taking the frame nearest the deadline rather than the first one past it puts
+# this on 30 — which is the sensor's own rate, the honest ceiling, and what the
+# paragraph above was aiming at. Written as the sensor's rate rather than as the
+# 0.04 it used to be, since every ask between 23 and 30 now rounds to the same
+# 30 and a number that cannot be delivered is a number that misleads whoever
+# reads it next.
+SNAPSHOT_FAST = 1 / 30.0
 SNAPSHOT_IDLE = 3.0
 
 # The live view is a *view*, not a read. It exists so the driver can see what
@@ -471,6 +486,28 @@ def snapshot_interval(view=VIEW_SCENE, seen=None, screen_every=None):
     if view != VIEW_SCREEN:
         return SNAPSHOT_FAST
     return SNAPSHOT_SCREEN if screen_every is None else screen_every
+
+
+def snapshot_due(now, last, period, tick):
+    """Whether this camera frame is the one to publish.
+
+    Checked once per camera frame and nowhere else, so the only rates this can
+    produce are the camera's divided by whole numbers — 30, 15, 10, 7.5 on the
+    binned sensor. Which of them a request lands on is what this decides.
+
+    A strict `elapsed > period` always lands on the next one *down*: the frame
+    arriving exactly on the deadline is a hair early, gets skipped, and the
+    next one is a whole camera frame late. Simulated against a 30fps sensor,
+    asking for 15 delivered 10.6, and 18, 20, 24 and 25 all delivered 15.1 —
+    so the flag was close to meaningless above 15 and the default was a third
+    short of its own label.
+
+    Half a frame of slack takes whichever frame is *nearest* the deadline, so
+    an unachievable rate rounds to the closest achievable one instead of always
+    downward. `tick` is the measured gap between camera frames; None before
+    two have been seen, which only costs the first frame of a session.
+    """
+    return (now - last) >= period - (tick or 0.0) * 0.5
 
 
 def screen_every(fps):
@@ -1234,6 +1271,11 @@ def main():
     spoke_for = None
     frames = 0
     last_snapshot = 0.0
+    # How long the camera actually leaves between frames, smoothed. Measured
+    # rather than assumed: the sensor mode decides it (30fps binned, 9fps at
+    # full resolution) and a rig may be started on either.
+    tick = None
+    last_tick = None
     # Read once here rather than per frame: it cannot change while running, and
     # this sits in the loop that also holds the camera.
     phone_view_every = screen_every(getattr(args, 'screen_fps', None))
@@ -1562,6 +1604,12 @@ def main():
                 luma = np.frombuffer(buf, dtype=np.uint8,
                                      count=LORES[0] * LORES[1]).reshape((LORES[1], LORES[0]))
                 now = time.time()
+                if last_tick is not None:
+                    gap = now - last_tick
+                    # A gap of a second is a stall, not a frame rate.
+                    if 0 < gap < 1.0:
+                        tick = gap if tick is None else tick * 0.9 + gap * 0.1
+                last_tick = now
                 do_read = scanner.should_read(luma)
                 moved = False           # did the corners shift on this frame?
 
@@ -1876,8 +1924,25 @@ def main():
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.
                 seen_by, want_view = watching()
-                due = args.snapshot and (now - last_snapshot) > snapshot_interval(
-                    want_view, seen_by, phone_view_every)
+                # Half a camera frame of slack, and `>=` rather than `>`.
+                #
+                # This is checked once per camera frame and nowhere else, so
+                # the achievable rates are the camera's rate divided by whole
+                # numbers — 30, 15, 10, 7.5 on a binned sensor. A strict
+                # "elapsed > period" always lands on the *next* one down,
+                # because the frame that arrives exactly on the deadline is a
+                # hair early and gets skipped. Simulated against a 30fps
+                # sensor: 15 asked for delivered 10.6, and 18, 20, 24 and 25
+                # all delivered 15.1 — so the flag was close to meaningless
+                # above 15 and the default was a third short of its own label.
+                #
+                # Taking the frame nearest the deadline instead rounds to the
+                # closest achievable rate rather than always down. Nothing
+                # downstream objects: measured through the real server, the
+                # stream carries 58.7 parts a second.
+                due = args.snapshot and snapshot_due(
+                    now, last_snapshot,
+                    snapshot_interval(want_view, seen_by, phone_view_every), tick)
                 if not do_read and not due:
                     continue
                 # The sensor frame is copied only when something is going to
@@ -1932,7 +1997,10 @@ def main():
                                # nobody has open should not be the expensive
                                # kind.
                                view=want_view if seen_by else VIEW_SCENE)
-                last_snapshot = time.time()
+                # The frame's own clock, not the clock after composing it.
+                # Composing costs a few milliseconds and charging them to the
+                # next interval makes every period that much longer than asked.
+                last_snapshot = now
 
             if not do_read:
                 continue

@@ -1222,6 +1222,67 @@ eq('...and so does a stored one that no longer points at anything',
 ok_('the phone view is encoded for reading, not for glancing',
     SP.SCREEN_QUALITY > SP.SNAPSHOT_QUALITY)
 
+# --- the rate the live view is actually published at ------------------------
+#
+# The snapshot is due-checked once per camera frame and nowhere else, so the
+# only rates it can produce are the camera's divided by whole numbers: 30, 15,
+# 10, 7.5 on the binned sensor. That is fine. What was not fine is which of
+# them a request landed on.
+#
+# The check was a strict `elapsed > period`, and the frame that arrives exactly
+# on the deadline is a hair early, so it was skipped and the next one — a whole
+# camera frame late — was taken instead. Every rate therefore rounded *down* to
+# the next achievable one: 15 asked for delivered 10.6, and 18, 20, 24 and 25
+# all delivered 15.1, which made the flag close to meaningless above 15 and the
+# default a third short of its own label.
+#
+# Simulated rather than driven through the loop, because what is being checked
+# is the arithmetic of the due test and a real camera would only add jitter to
+# it. The loop's own version of this is the frame-gap measurement above.
+CAMERA_TICK = 1.0 / 30.0
+
+
+def publishes_at(fps, decide=None, seconds=10.0):
+    """Frames a second actually produced, asking for `fps` on a 30fps sensor.
+
+    Driven through the shipped decision rather than a copy of it, or this
+    checks arithmetic nobody runs.
+    """
+    decide = decide or SP.snapshot_due
+    period, last, n, t = 1.0 / fps, -1e9, 0, 0.0
+    while t < seconds:
+        if decide(t, last, period, CAMERA_TICK):
+            last, n = t, n + 1
+        t += CAMERA_TICK
+    return n / seconds
+
+
+def strictly_after(now, last, period, tick):
+    """What the check used to be, for the comparison below."""
+    return (now - last) > period
+
+
+eq('asking for the sensor\'s own rate gets it', round(publishes_at(30)), 30)
+eq('...and half of it', round(publishes_at(15)), 15)
+eq('...and a third', round(publishes_at(10)), 10)
+# The default the flag ships with has to be one the rig can actually hit, or
+# the number in --help is a number nobody gets.
+eq('the phone view\'s default is delivered, not approached',
+   round(publishes_at(1.0 / SP.SNAPSHOT_SCREEN)), round(1.0 / SP.SNAPSHOT_SCREEN))
+eq('...and so is the scene view\'s',
+   round(publishes_at(1.0 / SP.SNAPSHOT_FAST)), 30)
+
+# The fault itself, as it was: no slack means every rate rounds down.
+ok_('without the slack, the asked-for rate is never reached (%.1f for 15)'
+    % publishes_at(15, strictly_after), publishes_at(15, strictly_after) < 12)
+ok_('...and four different requests collapse onto one rate',
+    len({round(publishes_at(f, strictly_after)) for f in (18, 20, 24, 25)}) == 1)
+
+# A rate the sensor cannot divide into is rounded to the nearest it can, rather
+# than always downward — that is the whole of the change.
+ok_('an unachievable rate lands on the nearest achievable one',
+    publishes_at(24) > publishes_at(24, strictly_after))
+
 # --- running out of light, in both directions -------------------------------
 #
 # The controller decides these (test_exposure.py) and the live page shows them

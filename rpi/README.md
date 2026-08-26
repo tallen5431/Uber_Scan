@@ -1152,7 +1152,7 @@ was never the shrink but the card inset warped out of the sensor — so the pric
 is the 12MB copy, and it is the one thing here much dearer on a Pi than on the
 machine these numbers came from.
 
-Fifteen frames a second, not the scene view's twenty-five. This picture is
+Fifteen frames a second, not the scene view's thirty. This picture is
 watched to read a card that is not moving and, increasingly, to see where a
 mouse pointer is: the phone is worked with a bluetooth mouse and this is where
 the cursor is watched, and a cursor below about ten frames a second stops
@@ -1204,17 +1204,62 @@ outline on a picture already cropped to it.
 | **Green outline** | where the corners are *now* — calibration as the tracker has since moved it, not as it was written down. If it is not hugging the phone's screen, see below, or draw it yourself with ▣ Set box. |
 | **White inset** | the exact image handed to the reader: de-skewed, cropped to the card, contrast boosted. Literally the reader's own last picture rather than a re-creation of it, so it can lag the outline by a read. If the pay, minutes and miles are legible there, the reader has everything it needs. |
 
-The view refreshes about **seven times a second** while the page is open. That
-got cheaper before it got faster: a snapshot used to copy a 12MB frame, draw the
-outline on it at full size, shrink it with an area filter and then warp a second
-copy of a card the reader had already made. It now shrinks once with a linear
-filter, draws on the small picture and reuses the reader's card — about a
-quarter of the work, so nearly three times the frame rate still costs less than
-the old rate did.
+The view refreshes at **the camera's own rate — thirty a second — while the page
+is open**, and the phone view at fifteen. That got cheaper before it got faster:
+a snapshot used to copy a 12MB frame, draw the outline on it at full size,
+shrink it with an area filter and then warp a second copy of a card the reader
+had already made. It now shrinks once with a linear filter, draws on the small
+picture and reuses the reader's card — about a quarter of the work, so four
+times the frame rate still costs less than the old rate did.
 
-It does not live on the SD card. The view refreshes about fourteen times a
-second while someone is watching, at ~50kB a frame — roughly **2.5GB an hour
-written to the card**, against about 19MB a *year* for the journal. Every byte
+### The rate you ask for is not the rate you get
+
+Composing a frame costs 5.5ms here — 1.10ms to copy, 1.16ms to warp, 3.20ms to
+encode — which is a ceiling of 183 a second, and the server delivered 58.7
+distinct parts a second when fed by a 60fps writer. Neither of those was the
+limit. The limit was the *schedule*.
+
+The snapshot is due-checked once per camera frame and nowhere else, so the only
+rates this loop can produce are the camera's divided by whole numbers: 30, 15,
+10, 7.5 on the binned sensor. The check was a strict `elapsed > period`, which
+always lands on the next one **down** — the frame arriving exactly on the
+deadline is a hair early, gets skipped, and its successor is a whole camera
+frame late. Simulated against a 30fps sensor:
+
+| asked for | delivered, strict `>` | delivered, nearest frame |
+|---|---|---|
+| 10 | 7.8 | 10.1 |
+| 15 | 10.6 | 15.1 |
+| 18 | 15.1 | 15.1 |
+| 20 | 15.1 | 16.5 |
+| 24 | 15.1 | 30.1 |
+| 25 | 15.1 | 30.1 |
+| 30 | 16.5 | 30.1 |
+
+So `--screen-fps` was close to meaningless above 15 — 18, 20, 24 and 25 all
+delivered the same 15.1 — and the scene view's own default was a third short of
+its label. `snapshot_due()` now allows half a camera frame of slack, which takes
+whichever frame is *nearest* the deadline rather than the first one past it: an
+unachievable rate rounds to the closest achievable one instead of always
+downward, and an achievable one is actually achieved.
+
+The slack is measured, not assumed. The loop keeps a smoothed gap between camera
+frames, ignoring anything over a second as a stall rather than a rate, so this
+stays right on a rig running the 9fps full-sensor mode or the 60fps cropped one.
+Before two frames have been seen there is no measurement and the slack is zero,
+which costs the first frame of a session and nothing else.
+
+The rows that still do not land on their label — 18 and 20 arriving at 15.1 and
+16.5 — are
+the honest answer rather than a remaining bug. There is no way to publish 20
+frames a second from a sensor delivering 30 without publishing some of them
+twice, and a duplicate frame is a wasted encode and a wasted 8.7kB. The number
+to reach for on this sensor is 30, 15, 10 or 7.5; anything else is a request to
+be rounded.
+
+It does not live on the SD card. The view refreshes up to thirty times a second
+while someone is watching, at ~50kB a frame — roughly **5GB an hour written to
+the card**, against about 19MB a *year* for the journal. Every byte
 of it is stale two frames later and none of it needs to survive a reboot, so it
 goes to `/dev/shm`, which is RAM. `pipeline.py` has staged its OCR images there
 all along for exactly this reason; the live frame simply never got the same
@@ -1354,7 +1399,7 @@ further 60ms and fetched again — a request, a file read, a response and a deco
 for every frame whether or not the picture had changed. The server now holds one
 connection open and writes a part only when the frame on disk is genuinely new.
 
-**A viewer on the far end of the car's wifi cannot carry 25 frames a second of
+**A viewer on the far end of the car's wifi cannot carry 30 frames a second of
 50kB each, and does not have to.** The stream respects back-pressure, so a slow
 link receives fewer frames rather than falling further behind the longer it
 watches. The rig's own screen is a loopback socket and gets all of them.
@@ -2458,7 +2503,7 @@ python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 172 on the loop that holds the camera, and
+python3 rpi/test_scan_pi.py     # 180 on the loop that holds the camera, and
                                 #     on which live view it is being asked for
 python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
