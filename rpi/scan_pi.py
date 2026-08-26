@@ -966,6 +966,24 @@ def emit_alive(too_bright=False, too_dim=False):
                       'tooDim': bool(too_dim)}), flush=True)
 
 
+def emit_reading():
+    """A card is in front of the reader and the reader has started on it.
+
+    The one thing the driver could not see. A read is about 1.4 seconds on a
+    Pi 4 and 91% of it is inside tesseract, and for every one of those seconds
+    the dashboard said WAITING FOR AN OFFER over a row of dashes — which is what
+    it says when there is nothing on the phone at all. The card was there, the
+    rig had noticed it, and the panel was reporting the opposite.
+
+    Sent when the frames are handed over rather than when the verdict comes
+    back, because the whole point is the gap between the two. Like the
+    heartbeat, it carries no `ready` and no numbers, so it cannot overwrite a
+    verdict or vouch for one — it says only that the wait has a reason.
+    """
+    print(json.dumps({'reading': True, 'at': int(time.time() * 1000)}),
+          flush=True)
+
+
 def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
     """One JSON object per line, flushed, so a parent process sees reads live."""
     payload = {
@@ -2028,6 +2046,10 @@ def main():
             # somewhere the card is not.
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(), scanner.geometry())
+            # Before the read, not after it. The dashboard has nothing else to
+            # go on for the second and a half this takes — see emit_reading.
+            if args.json:
+                emit_reading()
             if not reader.threaded and collect():
                 break
 

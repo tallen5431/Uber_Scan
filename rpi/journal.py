@@ -241,6 +241,17 @@ class OfferLog:
         # accumulator picks up another leg, which is precisely when the id must
         # not change.
         self.pay = None
+        # Every address any reading of the card on screen has produced.
+        #
+        # Kept here as well as in the accumulator because the two have different
+        # lifetimes: the accumulator's window is twelve seconds and a card sits
+        # on screen for tens of them, so a window that rolls over while the same
+        # card is still up starts again with nothing. The row a driver reads is
+        # written from here, and a row must be able to gain an address without
+        # ever losing one — the settled upgrade in consider() rebuilds the row
+        # from the *current* reading, and 93 of one shift's 121 offers go
+        # through that path.
+        self.places = []
         # Whether this offer's row has already been superseded with a
         # settled flag. See consider(): once per offer, never per look.
         self.settled_written = False
@@ -278,7 +289,18 @@ class OfferLog:
         self.seq = row.get('seq') or 0
         self.first_at = row.get('firstAt') or at
         self.last_at = at
-        self.content = tuple(row.get('content') or ()) or None
+        # Normalised, because this came back through JSON and JSON has no
+        # tuples: the address list inside the fingerprint returns as a list and
+        # would never compare equal to the tuple content_of() builds, so every
+        # read after a restart looked novel and wrote a row.
+        stored = row.get('content') or ()
+        self.content = tuple(tuple(x) if isinstance(x, list) else x
+                             for x in stored) or None
+        # The addresses that fingerprint was built from, so a resumed card can
+        # keep them rather than starting again with none.
+        self.places = [p for p in (stored[-1] if stored
+                                   and isinstance(stored[-1], list) else [])
+                       if isinstance(p, str)]
         # A row the reader itself flagged as impossible is not an identity to
         # come back to; leaving the anchor empty lets the first believable
         # reading after the restart adopt this id rather than start a new one.
@@ -297,7 +319,6 @@ class OfferLog:
         """
         at = now_ms(now)
         episode = parsed.get('episode')
-        content = content_of(parsed)
 
         # A different payout is a different offer, whatever the episode counter
         # says. The counter lives in one accumulator in one process, so it is
@@ -368,8 +389,25 @@ class OfferLog:
                 self.first_at = at
                 self.content = None
                 self.pay = None
+                # A different card is a different place. Reset with the rest of
+                # the identity, or the next offer inherits this one's address.
+                self.places = []
 
         self.last_at = at
+        # Before anything decides whether to write. A reading that finally saw
+        # the map is not a different reading — `content_of` does not look at
+        # the address — so this is the only chance to keep it.
+        if self.keep_places:
+            for place in parsed.get('places') or []:
+                if (len(self.places) < OP.MAX_PLACES
+                        and place.lower()
+                        not in [p.lower() for p in self.places]):
+                    self.places.append(place)
+        # Computed here rather than at the top, because it now asks about the
+        # addresses and those are only settled once the identity above has had
+        # its say — a new card clears them, and a reading of the same card adds
+        # to them.
+        content = content_of(parsed, self.places)
         if not impossible and parsed.get('pay') is not None:
             self.pay = parsed.get('pay')
         if content == self.content:
@@ -396,7 +434,8 @@ class OfferLog:
                 upgrade = row_for(parsed, rate, at, first_at=self.first_at,
                                   offer_id=self.id, seq=self.seq, ms=ms,
                                   locked=locked, settled=True, whole=whole,
-                                  keep_places=self.keep_places)
+                                  keep_places=self.keep_places,
+                                  places=list(self.places))
                 if self.journal.append(upgrade):
                     self.written += 1
                     return upgrade
@@ -407,14 +446,15 @@ class OfferLog:
         self.seq += 1
         row = row_for(parsed, rate, at, first_at=self.first_at,
                       offer_id=self.id, seq=self.seq, ms=ms, locked=locked,
-                      settled=settled, whole=whole, keep_places=self.keep_places)
+                      settled=settled, whole=whole,
+                      keep_places=self.keep_places, places=list(self.places))
         if self.journal.append(row):
             self.written += 1
             return row
         return None
 
 
-def content_of(parsed):
+def content_of(parsed, places=None):
     """What makes this reading different from the last one of the same card.
 
     Not the payout: the accumulator already keys on that, and the whole point of
@@ -428,11 +468,13 @@ def content_of(parsed):
     """
     return (parsed.get('pay'), parsed.get('minutes'), parsed.get('miles'),
             parsed.get('items'), bool(parsed.get('hasTotal')),
-            bool(parsed.get('milesUncertain')), parsed.get('deliverBy'))
+            bool(parsed.get('milesUncertain')), parsed.get('deliverBy'),
+            tuple(parsed.get('places') or () if places is None else places))
 
 
 def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
-            locked=None, settled=False, whole=True, keep_places=True):
+            locked=None, settled=False, whole=True, keep_places=True,
+            places=None):
     """One offer, as it will be stored.
 
     Numbers only, and each one either read off the card or derived from the
@@ -450,7 +492,13 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
     if minutes is None:
         minutes = parsed.get('minutes')
     why = OP.doubt(pay, minutes, miles)
-    places = parsed.get('places') if keep_places else []
+    # `places` overrides the reading's own, so a caller that has been watching
+    # the card for longer than one reading can hand over everything it saw. The
+    # settled upgrade rebuilds the row from the current reading, and an address
+    # the current reading happened to miss would otherwise be dropped from a row
+    # that already had it. See OfferLog.places.
+    places = (places if places is not None else parsed.get('places')) \
+        if keep_places else []
     return {
         # Rows outlive the code that wrote them. One integer buys a reader that
         # can tell a schema change from corruption.
@@ -532,7 +580,7 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         'deliverBy': parsed.get('deliverBy'),
         'fromDeadline': bool(rate.get('fromDeadline')),
         'ms': _round(ms, 0),
-        'content': list(content_of(parsed)),
+        'content': list(content_of(parsed, places)),
     }
 
 

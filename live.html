@@ -128,7 +128,20 @@
       font-size: min(12vw, 17dvh, 96px,
                      calc((100cqw - 40px) / (var(--chars) * 0.62)));
     }
-    #verdict:has(#warn:not([hidden])) .working { display: none; }
+    /* ...and the room comes out of the line that is already on screen twice.
+       This hid the whole working, which is where the raw $/hr lives and the
+       only place on this page it appears. A notice is showing for the whole
+       life of a card whenever the distance was unreadable — that flag is a
+       stored property of the merged reading and never clears — so on 52 of
+       one real shift's 121 offers the raw figure was not slow to arrive, it
+       never arrived at all. Those are also exactly the offers where no
+       mileage cost was taken off, so the working had no net line either and
+       the block rendered nothing: a hidden empty box, bought at the price of
+       the one number it was there to show.
+
+       The net line is the headline, in small type. Dropping that costs
+       nothing a glance needs and buys the same line of height. */
+    #verdict:has(#warn:not([hidden])) .working .net { display: none; }
     #raw, #viewNote { display: none; }
   }
 
@@ -475,6 +488,21 @@
   // under target. The picture goes dark and the reads go with it.
   var tooDim = false;
 
+  // A card is under the reader right now. The gap this fills is the one the
+  // driver actually notices: a read is about 1.4 seconds on a Pi 4 and this
+  // panel spent every one of them saying WAITING FOR AN OFFER over a row of
+  // dashes, which is what it says when the phone is blank. The card was there
+  // and the rig had already started on it.
+  var readingAt = 0;
+
+  // ...and how long that claim is good for. A read that has not come back in
+  // this long did not take a while, it failed: the loop reports a broken read
+  // to its log rather than as a reading, so nothing would ever clear this.
+  // Comfortably longer than a slow read on a loaded Pi and far short of the
+  // staleness test above, so a stuck reader shows as stale rather than as
+  // permanently busy.
+  var READING_MS = 8000;
+
   // Said in terms of what to do, not what happened. "Clipping at the gain
   // floor" is true and useless; the driver is holding the thing that fixes it.
   var TOO_BRIGHT = 'Phone screen too bright for the camera — turn its '
@@ -505,7 +533,14 @@
       // red means a glance at a dead scanner reads as "decline this offer" —
       // the driver acts on a decision nothing made.
       el.verdict.className = 'verdict ' + (p.phase === 'error' ? 'fault' : 'empty');
-      el.verdictLabel.textContent = PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER';
+      // A card under the reader is not "waiting for an offer", and saying so
+      // was the panel's least honest second and a half. Not while aiming or
+      // faulted: both of those are about the rig rather than about a card, and
+      // both are what the driver is there to fix.
+      var busy = readingAt && (Date.now() - readingAt) < READING_MS
+                 && p.phase !== 'error' && p.phase !== 'aim';
+      el.verdictLabel.textContent = busy ? 'READING THE CARD'
+        : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER');
       // Only while aiming, where the number means pixels and says so. On any
       // other phase this put a four-digit camera measurement in the position
       // and size of the headline rate, under the label "/hr" — the single most
@@ -537,7 +572,8 @@
         : (quiet > STALE_MS
             ? 'nothing from the scanner for ' + Math.round(quiet / 1000)
               + 's — it may have stopped'
-            : (r ? 'scanner running, no offer on screen' + trackNote(r) : ''));
+            : (busy ? 'working out the pay, the time and the distance'
+               : (r ? 'scanner running, no offer on screen' + trackNote(r) : '')));
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
       el.working.hidden = true;
       showRaw(r && r.text);
@@ -645,13 +681,20 @@
       return n === null ? '--'
         : '$' + (Math.abs(n) >= 100 ? Math.round(n) : Number(n).toFixed(1));
     };
-    var rows = ['<span>' + money(r.pay, 2) + ' <i>in</i> ' + time + '</span>'
-                + ' <span><i>=</i> <b>' + rate(gross) + '/hr</b> <i>raw</i></span>'];
+    // Named, not just ordered. The landscape rules reclaim height when a
+    // notice appears and they have to take it from the net line — which is
+    // the headline repeated — rather than from the raw one, which is on this
+    // page exactly once. See the rule under #verdict:has(#warn...).
+    var rows = [['raw', '<span>' + money(r.pay, 2) + ' <i>in</i> ' + time + '</span>'
+                 + ' <span><i>=</i> <b>' + rate(gross) + '/hr</b> <i>raw</i></span>']];
     if (deducted) {
-      rows.push('<span><i>less</i> ' + money(r.cost, 2) + ' <i>car costs</i></span>'
-                + ' <span><i>=</i> <b>' + rate(r.perHour) + '/hr</b> <i>net</i></span>');
+      rows.push(['net',
+                 '<span><i>less</i> ' + money(r.cost, 2) + ' <i>car costs</i></span>'
+                 + ' <span><i>=</i> <b>' + rate(r.perHour) + '/hr</b> <i>net</i></span>']);
     }
-    el.working.innerHTML = rows.map(function (h) { return '<div>' + h + '</div>'; }).join('');
+    el.working.innerHTML = rows.map(function (row) {
+      return '<div class="' + row[0] + '">' + row[1] + '</div>';
+    }).join('');
     el.working.hidden = false;
 
     var notes = [];
@@ -760,6 +803,10 @@
       // has to be read off the message before that happens.
       if (msg.tooBright !== undefined) tooBright = !!msg.tooBright;
       if (msg.tooDim !== undefined) tooDim = !!msg.tooDim;
+      // A read started, and — on the next message carrying a verdict — ended.
+      // Same shape as the two above: no `ready`, so it cannot stand in for one.
+      if (msg.reading) readingAt = Date.now();
+      if (msg.ready !== undefined) readingAt = 0;
       // Only a reading moves the verdict's own clock. The guard is the same one
       // the next line uses to decide whether this message replaces the verdict
       // at all — a heartbeat carries no `ready`, and must not vouch for one.

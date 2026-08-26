@@ -1134,6 +1134,41 @@
       "expect": [
         "Dollar General (925 Shiloh Rd Nw)"
       ]
+    },
+    {
+      "name": "the furniture under a pickup address is not part of it",
+      "text": "UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw Avg. wait time at pickup: 1 min 23 min (8.4 mi) trip Celebration Blvd, Acworth Accept",
+      "expect": [
+        "Old 41 Hwy NW, Kennesaw",
+        "Celebration Blvd, Acworth"
+      ]
+    },
+    {
+      "name": "the card's icon row is not part of a street name",
+      "text": "UberX $10.30 5 min (1.1 mi) away Chastain Rd NW, Kennesaw 4 19 min (8.5 mi) trip Canton Rd, Marietta %",
+      "expect": [
+        "Chastain Rd NW, Kennesaw",
+        "Canton Rd, Marietta"
+      ]
+    },
+    {
+      "name": "a shop card does not put \"total\" in the merchant name",
+      "text": "Shop & Deliver $7.09 6 items 34 min (3.6 mi) total Five Guys (3450 Cobb Pkwy. NW) Accept",
+      "expect": [
+        "Five Guys (3450 Cobb Pkwy. NW)"
+      ]
+    },
+    {
+      "name": "the map behind the card is not somewhere the job went",
+      "text": "UberX $8.04 4 min (1.1 mi) away a we, a oo 1 we, a in i ie. a 22 min (6.9 mi) trip . a ae eS My on - J ee ae",
+      "expect": []
+    },
+    {
+      "name": "sludge in front of an address does not take the address with it",
+      "text": "UberX $9.05 3 min (0.9 mi) away oN | Cobb Pkwy NW, Kennesaw 'a 27 min (9.2 mi) trip",
+      "expect": [
+        "Cobb Pkwy NW, Kennesaw"
+      ]
     }
   ],
   "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day \u2014 so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",

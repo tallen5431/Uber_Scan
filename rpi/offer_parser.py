@@ -97,20 +97,98 @@ PICKUP = re.compile(
     r'(?=\s*\(\s*\d+\s*orders?\s*\)|\s+customer\b|\s+dropoff\b'
     r'|\s+accept\b|\s+add\s+to\b|\s+decline\b|$)', re.IGNORECASE | ASCII)
 
+# ...except where the word is not a label at all. A ride card prints "Avg. wait
+# time at pickup" under the pickup address, and that "pickup" was read as the
+# delivery card's own anchor: what followed it — the rest of the card — went
+# into the journal as where the job went. One real shift stored the phrase
+# itself as a place twice, and stored `1 min 23 min (8.4 mi) trip Celebration
+# Blvd, Acworth` as another.
+#
+# Checked against the text before the match rather than with a lookbehind,
+# which Safari did not have until 16.4 and this parser also runs in a phone
+# browser.
+PICKUP_NOT_A_LABEL = re.compile(r'\b(?:at|time)\s*$', re.IGNORECASE | ASCII)
+
 # An address as these cards write one: a junction, or a street with a town after
 # it. Deliberately narrow — a line that is not clearly a place is not stored,
 # because a journal full of half-read map furniture is worse than one with a
 # few offers that cannot be searched by where they went.
-LOOKS_LIKE_A_PLACE = re.compile(
-    r'[A-Za-z].*(?:,\s*[A-Za-z]|\s&\s|\b(?:st|street|rd|road|ave|avenue|blvd|'
-    r'pkwy|parkway|dr|drive|ln|lane|way|ct|court|hwy|highway|pl|place|ter|'
-    r'terrace|cir|circle)\b)', re.IGNORECASE | ASCII)
+#
+# "A comma with a letter after it" was too narrow a definition of narrow. Over a
+# real shift of 121 offers it admitted `a we, a oo 1 we, a in i ie. a ; . a ae
+# eS My on - J ee ae` — pure sludge off the map behind the card, stored and then
+# shown on the offers page as where the job went. A comma is not evidence. A
+# street word is, a junction between two named things is, and so is a town: a
+# capitalised word of three letters or more sitting after the comma.
+#
+# Three separate patterns rather than one alternation, because the town test is
+# the only one that cares about case and a single regex would have to be
+# case-insensitive for the street words — which is how the capital that makes
+# ", Kennesaw" evidence and ", a oo" not would have been thrown away.
+STREET_WORD = (r'st|street|rd|road|ave|avenue|blvd|bivd|pkwy|parkway|dr|drive|'
+               r'ln|lane|way|ct|court|hwy|highway|pl|place|ter|terrace|cir|'
+               r'circle|trce|trail|trl|spgs|springs|county')
+PLACE_STREET = re.compile(r'\b(?:%s)\b' % STREET_WORD, re.IGNORECASE | ASCII)
+PLACE_JUNCTION = re.compile(r'[A-Za-z]{3}.*\s&\s.*[A-Za-z]{3}', ASCII)
+PLACE_TOWN = re.compile(r',\s*[A-Z][A-Za-z]{2,}', ASCII)
+PLACE_WORD = re.compile(r'[A-Za-z]{3}', ASCII)
+
+
+def looks_like_a_place(value):
+    """Is this an address, or is it the map it was printed on?"""
+    if not PLACE_WORD.search(value or ''):
+        return False
+    return bool(PLACE_STREET.search(value) or PLACE_JUNCTION.search(value)
+                or PLACE_TOWN.search(value))
 
 # Words a card puts near a place that are not part of its name.
+#
+# `total` joins them because a shop card prints "34 min (3.6 mi) total" and the
+# merchant's name straight after it, so the leg tail begins with the word: 5 of
+# one shift's addresses were stored as "total Five Guys (3450 Cobb Pkwy. NW)".
+#
+# `away` and `trip` are here for the same reason: an Uber ride card writes
+# "5 min (1.2 mi) away" and "20 min (7.3 mi) trip", so the word sits between the
+# leg the address hangs off and the address itself.
 PLACE_JUNK = re.compile(
     r'^(?:pickup|dropoff|customer|accept|decline|add\s+to\s+route|'
-    r'deliver(?:ed|y)?\s*by.*|verified|exclusive|guaranteed)\b[\s:.-]*',
+    r'deliver(?:ed|y)?\s*by.*|verified|exclusive|guaranteed|tota?l|away|trip)'
+    r'\b[\s:.-]*', re.IGNORECASE | ASCII)
+
+# ...and where a place *ends*. PLACE_JUNK only ever trimmed a prefix, so every
+# word the card prints after an address rode along with it into the journal. The
+# commonest by far is Uber's own "Avg. wait time at pickup", which sits directly
+# under the pickup address: it was on 25 of one shift's 60 stored places, and
+# what the offers page showed was `Cobb Pkwy NW, Acworth Avg. wait time at
+# pickup; Canton Rd, Marietta` — an address a driver reads as not-an-address.
+#
+# A pipe ends one too. It is never in a street name and it is what the card's
+# own dividers and its bottom icon row come back as.
+PLACE_TAIL = re.compile(
+    r'(?:\||\b(?:avg|wait\s*time|fast\s*charg|add\s+to\s+route|accept|decline'
+    r'|verified|exclusive|guaranteed|included|customer|dropoff|orders?)\b)',
     re.IGNORECASE | ASCII)
+
+# The card's bottom bar — a row of icons — comes back as one and two character
+# scraps: `Kennesaw 4`, `Marietta %`, `Acworth ¥`, `Kennesaw 2c 4`. Stripped a
+# token at a time from each end, because they arrive in runs.
+#
+# Two lists, not one. `S Main St NW` starts with a real single letter and
+# `Chick-fil-A (2555 Dallas Highway) s` ends with a false one, so a compass
+# point is worth keeping at the front and not at the back. Length is the test
+# rather than shape: "Papa John's Store 3317" ends in a number that belongs to
+# it, and four characters is not a scrap.
+PLACE_TRAIL_KEEP = frozenset(('nw', 'ne', 'sw', 'se', 'st', 'rd', 'dr', 'ct',
+                              'ln', 'pl', 'ga'))
+PLACE_LEAD_KEEP = PLACE_TRAIL_KEEP | frozenset(('n', 's', 'e', 'w'))
+PLACE_EDGE = re.compile(r'^[^0-9A-Za-z]+|[^0-9A-Za-z]+$', ASCII)
+
+# How many places one card can name. A pickup and a dropoff on a ride card, a
+# merchant and a customer on a delivery one, and a little room for a stacked
+# order. Defined here because the accumulator and the journal both cap their own
+# collections at the same number and three copies of it is three chances to
+# disagree about what a card can hold.
+MAX_PLACES = 4
 TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 
 # What kind of job the card is offering, taken from the words the card prints
@@ -432,6 +510,43 @@ def minutes_until(deadline, now_minutes):
     return float(left)
 
 
+def trim_place(value):
+    """One address, with the card's furniture taken off both ends.
+
+    An anchor says where a place *starts*; nothing on the card says where it
+    stops, so what got stored was the address plus whatever the layout printed
+    next to it. Cut at the furniture, drop the prefix, then take the icon-row
+    scraps off each end a token at a time. See PLACE_TAIL.
+
+    Parentheses survive on purpose: a branch address is printed inside them —
+    "Dollar General (925 Shiloh Rd Nw)" — and taking the closing one off leaves
+    a dangling bracket and a name that reads as truncated.
+    """
+    def scrap(token, keep):
+        core = PLACE_EDGE.sub('', token)
+        return not core or (len(core) <= 2 and core.lower() not in keep)
+
+    # The front first, and the tail after. Order matters: a pipe ends a place,
+    # but `oN | Cobb Pkwy NW, Kennesaw 'a` is a pipe with the sludge on the
+    # *near* side of it, and cutting there first threw the address away and
+    # kept the "oN".
+    parts = (value or '').split()
+    while True:
+        while parts and scrap(parts[0], PLACE_LEAD_KEEP):
+            parts.pop(0)
+        # Two prefixes happen — "total Pickup Papa John's" — and the second is
+        # only at the front once the first has gone.
+        shorter = PLACE_JUNK.sub('', ' '.join(parts).strip()).strip(' .,-;:|').split()
+        if shorter == parts:
+            break
+        parts = shorter
+
+    parts = PLACE_TAIL.split(' '.join(parts))[0].split()
+    while parts and scrap(parts[-1], PLACE_TRAIL_KEEP):
+        parts.pop()
+    return ' '.join(parts).strip(' .,-;:|')
+
+
 def find_places(text, legs):
     """Where the job goes, as the card writes it. Never invented.
 
@@ -444,8 +559,7 @@ def find_places(text, legs):
     out = []
 
     def keep(value):
-        value = PLACE_JUNK.sub('', (value or '').strip())
-        value = value.strip(' .,-;:|')
+        value = trim_place(value)
         if len(value) < 3 or len(value) > 60:
             return
         if not re.search(r'[A-Za-z]{2}', value):
@@ -453,9 +567,11 @@ def find_places(text, legs):
         if value.lower() not in [v.lower() for v in out]:
             out.append(value)
 
-    m = PICKUP.search(text)
-    if m:
+    for m in PICKUP.finditer(text):
+        if PICKUP_NOT_A_LABEL.search(text[max(0, m.start() - 14):m.start()]):
+            continue
         keep(m.group(1))
+        break
 
     # A delivery card without a "Pickup" label puts the merchant straight after
     # the deadline: "Deliver by 6:39 PM / Cherry Cricket / 4 items 0.6 mi". The
@@ -478,11 +594,16 @@ def find_places(text, legs):
         tail = re.split(r'\b(?:accept|decline|verified|exclusive|guaranteed'
                         r'|add\s+to\s+route|\d+\s*mi\b)', tail,
                         maxsplit=1, flags=re.IGNORECASE | ASCII)[0]
-        tail = tail.strip(' .,-;:|()')
-        if LOOKS_LIKE_A_PLACE.match(tail):
+        # Trimmed before it is judged, not after. The test asks whether this is
+        # an address, and the thing to ask it about is the string that would be
+        # stored — `1 min ~ 4 . mins | . = | i oO < * ~~ agama ae ae; i Old
+        # Mountain Rd NW, Kennesaw` passes on the address buried at the end of
+        # it and then goes into the journal sludge and all.
+        tail = trim_place(tail)
+        if looks_like_a_place(tail):
             keep(tail)
 
-    return out[:4]
+    return out[:MAX_PLACES]
 
 
 def parse(raw_text):

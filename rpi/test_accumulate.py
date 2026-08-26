@@ -378,6 +378,51 @@ eq('the merged legs are the window\'s', len(seen[4]['legDetail']), 2)
 eq('...with the distance the window found',
    sorted(l['miles'] for l in seen[4]['legDetail']), [1.1, 7.3])
 
+# --- an address one frame saw is not lost to the frame after it -------------
+#
+# The address sits at the edge of the crop, in small type, over a map — which
+# is exactly the field a single frame drops. `merged = dict(parsed)` took the
+# last frame's, so one frame losing it lost it for the offer.
+WITH = ('UberX $12.45 5 min (1.2 mi) away Chastain Rd NW, Kennesaw '
+        '23 min (8.4 mi) trip Canton Rd, Marietta')
+WITHOUT = '$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip'
+
+eq('the card names two places', P.parse(WITH)['places'],
+   ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta'])
+eq('...and the frame that lost the map names none', P.parse(WITHOUT)['places'], [])
+
+acc = OfferAccumulator()
+acc.add(P.parse(WITH), now=600.0)
+after = acc.add(P.parse(WITHOUT), now=600.5)
+eq('a frame that missed the address does not erase it',
+   after['places'], ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta'])
+
+# ...and the other way round, which is the commoner order: the first look
+# misses the map and a later one catches it.
+acc = OfferAccumulator()
+acc.add(P.parse(WITHOUT), now=700.0)
+later = acc.add(P.parse(WITH), now=700.5)
+eq('...and an address found late still arrives',
+   later['places'], ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta'])
+
+# A different card is a different window, so nothing carries over. Two offers
+# paying different amounts are never one offer.
+acc = OfferAccumulator()
+acc.add(P.parse(WITH), now=800.0)
+other = acc.add(P.parse('$19.06 5 min (1.2 mi) away 23 min (8.4 mi) trip'),
+                now=800.5)
+eq('the next card does not inherit the last one\'s address', other['places'], [])
+
+# Never more than one card's worth, however many frames read the map slightly
+# differently. Four frames, four spellings of the same corner.
+acc = OfferAccumulator()
+for i, town in enumerate(('Kennesaw', 'Kennesaws', 'Kennesow', 'Kennesaur')):
+    many = acc.add(P.parse('$12.45 5 min (1.2 mi) away Chastain Rd NW, %s '
+                           '23 min (8.4 mi) trip Canton Rd, Marietta' % town),
+                   now=900.0 + i * 0.5)
+eq('a window of frames cannot grow more places than a card has',
+   len(many['places']), 4)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

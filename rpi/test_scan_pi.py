@@ -1239,6 +1239,33 @@ ok_('the phone view is encoded for reading, not for glancing',
 # Simulated rather than driven through the loop, because what is being checked
 # is the arithmetic of the due test and a real camera would only add jitter to
 # it. The loop's own version of this is the frame-gap measurement above.
+# --- the loop says a card is under the reader, before the verdict -----------
+#
+# A read is about 1.4 seconds on a Pi 4 and the dashboard spent every one of
+# them saying WAITING FOR AN OFFER, which is what it says when the phone is
+# blank. This is the one message that fills that gap, and everything about it
+# has to stay incapable of standing in for a verdict.
+def said(fn):
+    out = io.StringIO()
+    real, sys.stdout = sys.stdout, out
+    try:
+        fn()
+    finally:
+        sys.stdout = real
+    return json.loads(out.getvalue())
+
+
+heard = said(SP.emit_reading)
+eq('the loop says when a read starts', heard.get('reading'), True)
+ok_('...and stamps it', isinstance(heard.get('at'), int) and heard['at'] > 0)
+# The whole safety property, and the same one the heartbeat has: the page keys
+# every verdict off `ready`, so a message without it is dropped before it can
+# replace one. A "reading" that carried `ready` would blank the last verdict on
+# every card the driver is still looking at.
+ok_('...carrying no verdict', 'ready' not in heard)
+ok_('...and no numbers to mistake for one',
+    not [k for k in heard if k in ('perHour', 'grossPerHour', 'pay', 'state')])
+
 CAMERA_TICK = 1.0 / 30.0
 
 

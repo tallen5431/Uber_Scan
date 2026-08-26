@@ -227,7 +227,12 @@ function startScanner() {
         // The scan loop's own voice — a reading or a heartbeat — as opposed to
         // the autopilot's progress messages. Only this arms the watchdog, and
         // only this feeds it.
-        if (read.ready !== undefined || read.alive) scanner.heardAt = Date.now();
+        // `reading` counts too: it is sent from inside the loop the moment a
+        // read is handed over, so it proves the loop is turning exactly as a
+        // heartbeat does — and on a busy screen it is the message that arrives.
+        if (read.ready !== undefined || read.alive || read.reading) {
+          scanner.heardAt = Date.now();
+        }
         broadcast(read);
       } catch (e) {
         console.log('scanner: ' + line);   // not JSON, so it is a log line
@@ -757,6 +762,32 @@ function bestReading(rows) {
     // based matching made it likelier, by filing a repeated misreading under
     // one id instead of two.
     if (score >= bestScore) { bestScore = score; best = r; }
+  }
+  // The winner is taken whole, and an address is not one of the fields the vote
+  // is about — so a reading that scored best on pay, minutes and miles took its
+  // empty `places` with it and the offers page showed no address for a card
+  // another reading of the same card had read the map off perfectly well.
+  //
+  // Only ever filled in, never overruled: where the winner has an address that
+  // is the one to show, because it is the reading the numbers came from.
+  //
+  // And borrowed from a reading that agrees about the card before any other.
+  // "The first row with an address" is not a rule, it is an accident of order:
+  // on a card read three times where the outvoted reading had one address and
+  // an agreeing reading had another, it showed the outvoted one's.
+  if (!(best && best.places && best.places.length)) {
+    var lends = rows.filter(function (r) {
+      return r !== best && r.places && r.places.length && !r.suspect
+        && r.whole !== false;
+    });
+    var agrees = lends.filter(function (r) {
+      return r.pay === best.pay && r.minutes === best.minutes
+        && r.miles === best.miles;
+    });
+    var lender = (agrees.length ? agrees : lends)[0];
+    // Copied rather than assigned into. These row objects come straight off the
+    // journal and are read again by the next request.
+    if (lender) best = Object.assign({}, best, { places: lender.places });
   }
   return best;
 }

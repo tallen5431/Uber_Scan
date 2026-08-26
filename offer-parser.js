@@ -160,13 +160,70 @@
 
   var PICKUP = /\bpick\s?up\b[\s:.-]*([\s\S]{2,60}?)(?=\s*\(\s*\d+\s*orders?\s*\)|\s+customer\b|\s+dropoff\b|\s+accept\b|\s+add\s+to\b|\s+decline\b|$)/i;
 
+  /* ...except where the word is not a label at all. A ride card prints "Avg.
+     wait time at pickup" under the pickup address, and that "pickup" was read
+     as the delivery card's own anchor: what followed it — the rest of the card
+     — went into the journal as where the job went. One real shift stored the
+     phrase itself as a place twice, and stored `1 min 23 min (8.4 mi) trip
+     Celebration Blvd, Acworth` as another.
+
+     Checked against the text before the match rather than with a lookbehind,
+     which Safari did not have until 16.4. */
+  var PICKUP_ALL = new RegExp(PICKUP.source, 'gi');
+  var PICKUP_NOT_A_LABEL = /\b(?:at|time)\s*$/i;
+
   /* An address as these cards write one: a junction, or a street with a town
      after it. Deliberately narrow — a line that is not clearly a place is not
      stored, because a journal full of half-read map furniture is worse than one
-     that cannot be searched by where an offer went. */
-  var LOOKS_LIKE_A_PLACE = /^[A-Za-z].*(?:,\s*[A-Za-z]|\s&\s|\b(?:st|street|rd|road|ave|avenue|blvd|pkwy|parkway|dr|drive|ln|lane|way|ct|court|hwy|highway|pl|place|ter|terrace|cir|circle)\b)/i;
+     that cannot be searched by where an offer went.
 
-  var PLACE_JUNK = /^(?:pickup|dropoff|customer|accept|decline|add\s+to\s+route|deliver(?:ed|y)?\s*by.*|verified|exclusive|guaranteed)\b[\s:.-]*/i;
+     "A comma with a letter after it" was too narrow a definition of narrow.
+     Over a real shift of 121 offers it admitted `a we, a oo 1 we, a in i ie. a
+     ; . a ae eS My on - J ee ae` — sludge off the map behind the card, stored
+     and then shown on the offers page as where the job went. A comma is not
+     evidence. A street word is, a junction between two named things is, and so
+     is a town: a capitalised word of three letters or more after the comma.
+
+     Three patterns rather than one alternation, because the town test is the
+     only one that cares about case and a single regex would need the `i` flag
+     for the street words — which is how the capital that makes ", Kennesaw"
+     evidence and ", a oo" not would have been thrown away. */
+  var STREET_WORD = 'st|street|rd|road|ave|avenue|blvd|bivd|pkwy|parkway|dr|drive|'
+    + 'ln|lane|way|ct|court|hwy|highway|pl|place|ter|terrace|cir|circle|trce|'
+    + 'trail|trl|spgs|springs|county';
+  var PLACE_STREET = new RegExp('\\b(?:' + STREET_WORD + ')\\b', 'i');
+  var PLACE_JUNCTION = /[A-Za-z]{3}.*\s&\s.*[A-Za-z]{3}/;
+  var PLACE_TOWN = /,\s*[A-Z][A-Za-z]{2,}/;
+  var PLACE_WORD = /[A-Za-z]{3}/;
+
+  /* Words a card puts near a place that are not part of its name.
+
+     `total` is among them because a shop card prints "34 min (3.6 mi) total"
+     and the merchant's name straight after it, so the leg tail begins with the
+     word: 5 of one shift's addresses were stored as "total Five Guys (3450 Cobb
+     Pkwy. NW)". */
+  var PLACE_JUNK = /^(?:pickup|dropoff|customer|accept|decline|add\s+to\s+route|deliver(?:ed|y)?\s*by.*|verified|exclusive|guaranteed|tota?l|away|trip)\b[\s:.-]*/i;
+
+  /* ...and where a place *ends*. PLACE_JUNK only ever trimmed a prefix, so
+     every word the card printed after an address rode along with it into the
+     journal. The commonest by far is Uber's own "Avg. wait time at pickup",
+     which sits directly under the pickup address: it was on 25 of one shift's
+     60 stored places, and what the offers page showed was `Cobb Pkwy NW,
+     Acworth Avg. wait time at pickup; Canton Rd, Marietta`.
+
+     A pipe ends one too. It is never in a street name and it is what the card's
+     own dividers and its bottom icon row come back as. */
+  var PLACE_TAIL = /(?:\||\b(?:avg|wait\s*time|fast\s*charg|add\s+to\s+route|accept|decline|verified|exclusive|guaranteed|included|customer|dropoff|orders?)\b)/i;
+
+  /* The card's bottom bar — a row of icons — comes back as one and two
+     character scraps: `Kennesaw 4`, `Marietta %`, `Acworth ¥`, `Kennesaw 2c 4`.
+     Two lists, not one: `S Main St NW` starts with a real single letter and
+     `Chick-fil-A (2555 Dallas Highway) s` ends with a false one. Length is the
+     test rather than shape — "Papa John's Store 3317" ends in a number that
+     belongs to it, and four characters is not a scrap. */
+  var PLACE_TRAIL_KEEP = ['nw', 'ne', 'sw', 'se', 'st', 'rd', 'dr', 'ct', 'ln', 'pl', 'ga'];
+  var PLACE_LEAD_KEEP = PLACE_TRAIL_KEEP.concat(['n', 's', 'e', 'w']);
+  var PLACE_EDGE = /^[^0-9A-Za-z]+|[^0-9A-Za-z]+$/g;
   var PLACE_STOP = /\b(?:accept|decline|verified|exclusive|guaranteed|add\s+to\s+route|\d+\s*mi\b)/i;
   var AFTER_DEADLINE_STOP = /\d|\b(?:accept|decline|pickup|customer|dropoff)\b/i;
 
@@ -194,16 +251,53 @@
 
   /* Where the job goes, as the card writes it. Never invented — three anchors,
      each something the card actually prints. */
+  /* Is this an address, or is it the map it was printed on? */
+  function looksLikeAPlace(value) {
+    value = String(value || '');
+    if (!PLACE_WORD.test(value)) return false;
+    return PLACE_STREET.test(value) || PLACE_JUNCTION.test(value)
+      || PLACE_TOWN.test(value);
+  }
+
+  /* One address, with the card's furniture taken off both ends.
+
+     An anchor says where a place *starts*; nothing on the card says where it
+     stops, so what got stored was the address plus whatever the layout printed
+     next to it. See PLACE_TAIL.
+
+     Parentheses survive on purpose, and the Pi's port never trimmed them
+     either: a branch address is printed inside them — "Dollar General (925
+     Shiloh Rd Nw)" — so taking the closing one off leaves a dangling open
+     bracket and a name that reads as truncated, and the two ports would store
+     the same merchant under two different strings. */
+  function trimPlace(value) {
+    function scrap(token, keep) {
+      var core = String(token).replace(PLACE_EDGE, '');
+      return !core || (core.length <= 2 && keep.indexOf(core.toLowerCase()) < 0);
+    }
+    // The front first, and the tail after. Order matters: a pipe ends a place,
+    // but `oN | Cobb Pkwy NW, Kennesaw 'a` is a pipe with the sludge on the
+    // *near* side of it, and cutting there first threw the address away and
+    // kept the "oN".
+    var parts = String(value || '').split(/\s+/).filter(Boolean);
+    for (;;) {
+      while (parts.length && scrap(parts[0], PLACE_LEAD_KEEP)) parts.shift();
+      // Two prefixes happen — "total Pickup Papa John's" — and the second is
+      // only at the front once the first has gone.
+      var shorter = parts.join(' ').trim().replace(PLACE_JUNK, '')
+        .replace(/^[\s.,\-;:|]+|[\s.,\-;:|]+$/g, '').split(/\s+/).filter(Boolean);
+      if (shorter.join(' ') === parts.join(' ')) break;
+      parts = shorter;
+    }
+    parts = parts.join(' ').split(PLACE_TAIL)[0].split(/\s+/).filter(Boolean);
+    while (parts.length && scrap(parts[parts.length - 1], PLACE_TRAIL_KEEP)) parts.pop();
+    return parts.join(' ').replace(/^[\s.,\-;:|]+|[\s.,\-;:|]+$/g, '');
+  }
+
   function findPlaces(text, legs) {
     var out = [];
     function keep(value) {
-      value = String(value || '').replace(PLACE_JUNK, '');
-      // Parentheses are not trimmed, and the Pi's port never trimmed them.
-      // A branch address is printed inside them — "Dollar General (925 Shiloh
-      // Rd Nw)" — so taking the closing one off leaves a dangling open bracket
-      // and a name that reads as truncated, and the two ports stored the same
-      // merchant under two different strings.
-      value = value.replace(/^[\s.,\-;:|]+|[\s.,\-;:|]+$/g, '');
+      value = trimPlace(value);
       if (value.length < 3 || value.length > 60) return;
       if (!/[A-Za-z]{2}/.test(value)) return;
       for (var i = 0; i < out.length; i++) {
@@ -212,8 +306,12 @@
       out.push(value);
     }
 
-    var m = text.match(PICKUP);
-    if (m) keep(m[1]);
+    PICKUP_ALL.lastIndex = 0;
+    for (var m; (m = PICKUP_ALL.exec(text)) !== null;) {
+      if (PICKUP_NOT_A_LABEL.test(text.slice(Math.max(0, m.index - 14), m.index))) continue;
+      keep(m[1]);
+      break;
+    }
 
     /* A delivery card without a "Pickup" label puts the merchant straight after
        the deadline: "Deliver by 6:39 PM / Cherry Cricket / 4 items 0.6 mi". */
@@ -229,8 +327,13 @@
         ? legs[j + 1].start : text.length;
       var tail = text.slice(legs[j].end, stop).slice(0, 80);
       tail = tail.split(PLACE_STOP)[0];
-      tail = tail.replace(/^[\s.,\-;:|()]+|[\s.,\-;:|()]+$/g, '');
-      if (LOOKS_LIKE_A_PLACE.test(tail)) keep(tail);
+      // Trimmed before it is judged, not after. The test asks whether this is
+      // an address, and the thing to ask it about is the string that would be
+      // stored — `1 min ~ 4 . mins | . = | i oO < * ~~ agama ae ae; i Old
+      // Mountain Rd NW, Kennesaw` passes on the address buried at the end of it
+      // and then goes into the journal sludge and all.
+      tail = trimPlace(tail);
+      if (looksLikeAPlace(tail)) keep(tail);
     }
     return out.slice(0, 4);
   }
@@ -696,7 +799,9 @@
   return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
            setting: setting, doubt: doubt, DEFAULT_SETTINGS: DEFAULT_SETTINGS,
            findDeadline: findDeadline, minutesUntil: minutesUntil,
-           findPlaces: findPlaces, isComplete: isComplete, isWhole: isWhole,
+           findPlaces: findPlaces, trimPlace: trimPlace,
+           looksLikeAPlace: looksLikeAPlace,
+           isComplete: isComplete, isWhole: isWhole,
            SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH,
            MAX_MPH: MAX_MPH, UNREADABLE_MPH: UNREADABLE_MPH };
 }));

@@ -337,6 +337,56 @@ ok_('...and is small again', os.path.getsize(path) <= 200 + 64)
 eq('...and every row written is still readable somewhere',
    len(JR.Journal(path).rows()) + len(JR.Journal(path + '.1').rows()) > 0, True)
 
+# --- an address survives every path a row is written by --------------------
+#
+# The settled upgrade rebuilds the row from the *current* reading, and 93 of one
+# real shift's 121 rows go through it. A reading that had lost the map to glare
+# therefore superseded a row that had the address with one that did not — and
+# the superseding row is the newest, which is the one every reader takes.
+WITH = ('UberX $12.45 5 min (1.2 mi) away Chastain Rd NW, Kennesaw '
+        '23 min (8.4 mi) trip Canton Rd, Marietta')
+WITHOUT = '$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip'
+WHERE = ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta']
+
+log = fresh('places.jsonl')
+acc = OfferAccumulator()
+t = 1_700_000_000.0
+for i, text in enumerate([WITH, WITHOUT, WITHOUT, WITHOUT]):
+    parsed = acc.add(P.parse(text), now=t + i * 0.5)
+    # `settled` from the second look on, as the scan loop reports it once a
+    # reading stops moving. That is the path that rebuilds the row.
+    log.consider(parsed, P.rate(parsed, MONEY), now=t + i * 0.5, settled=i > 0)
+rows = log.journal.rows()
+ok_('the card that named two places was recorded', len(rows) >= 1)
+eq('the first row has the address', rows[0]['places'], WHERE)
+eq('...and so does the last, however it was written',
+   rows[-1]['places'], WHERE)
+ok_('...including the settled upgrade', any(r.get('settled') for r in rows))
+
+# The other order, and the one the address usually arrives in: the first look
+# misses the map and a later one finds it. `content_of` does not look at the
+# address, so that read writes no new row at all — the address has to reach the
+# row some other way or it never lands.
+log = fresh('places-late.jsonl')
+acc = OfferAccumulator()
+for i, text in enumerate([WITHOUT, WITHOUT, WITH]):
+    parsed = acc.add(P.parse(text), now=t + i * 0.5)
+    log.consider(parsed, P.rate(parsed, MONEY), now=t + i * 0.5)
+eq('an address found on a later look still reaches the journal',
+   log.journal.rows()[-1]['places'], WHERE)
+
+# ...and the setting still turns the whole thing off. A remembered list that
+# ignored the flag would keep storing addresses after it was switched off,
+# which is the one behaviour this feature promised it would not have.
+log = JR.OfferLog(JR.Journal(os.path.join(work, 'no-places.jsonl')),
+                  keep_places=False)
+acc = OfferAccumulator()
+for i, text in enumerate([WITH, WITHOUT]):
+    parsed = acc.add(P.parse(text), now=t + i * 0.5)
+    log.consider(parsed, P.rate(parsed, MONEY), now=t + i * 0.5)
+eq('keepPlaces off stores no address at all',
+   [r['places'] for r in log.journal.rows()], [[]] * len(log.journal.rows()))
+
 shutil.rmtree(work, ignore_errors=True)
 
 

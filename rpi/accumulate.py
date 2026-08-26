@@ -38,6 +38,12 @@ QUIET = 2.0
 # Distances this close are the same leg read twice, not two legs.
 SAME_LEG_MILES = 0.15
 
+# The same ceiling the parser puts on one frame's addresses, and the parser's own
+# copy of it. A window is several frames of one card, not several cards, so the
+# union of what they saw should not be longer than what one of them could have
+# reported.
+MAX_PLACES = OP.MAX_PLACES
+
 
 class OfferAccumulator:
     """Merges parsed readings of one offer. Feed it every read; use what it returns."""
@@ -74,6 +80,18 @@ class OfferAccumulator:
         # 166 minutes, and the other way round it moves it the other way, which
         # is a PASS shown as an ACCEPT.
         self.deadlines = []
+        # Where the card said the job goes, from every frame of this window
+        # rather than from the last one.
+        #
+        # `merged = dict(parsed)` below carries the last frame's places, and an
+        # address is exactly the field a single frame loses: it sits at the edge
+        # of the crop, in small type, over a map. Across one real shift the
+        # journal has an address on 60 of 121 offers while individual frames of
+        # the same cards had them and were overwritten. This is the same mistake
+        # the comment under `merged_legs` describes, in a field nobody had
+        # checked. Never voted on — an address is not arithmetic and a rate is
+        # not computed from it — so what one frame saw is kept.
+        self.places = []
         self.samples = 0
         self.max_legs = 0
         self.corrected = False
@@ -225,6 +243,13 @@ class OfferAccumulator:
             self.items.append(parsed['items'])
         if parsed.get('deliverBy') is not None:
             self.deadlines.append(parsed['deliverBy'])
+        # Capped where the parser caps its own list, so a window of frames that
+        # each read the map slightly differently cannot grow one.
+        for place in parsed.get('places') or []:
+            if len(self.places) >= MAX_PLACES:
+                break
+            if place.lower() not in [p.lower() for p in self.places]:
+                self.places.append(place)
 
         return self._merged(parsed)
 
@@ -308,6 +333,12 @@ class OfferAccumulator:
         # 56-minute job to 41 minutes and $17.75/hr PASS to $24.25/hr, on two
         # frames out of three that said 12.
         merged['items'] = _consensus(self.items) if self.items else parsed.get('items')
+        # Kept rather than voted on — see `self.places`. Everything above this
+        # line is a number a verdict is computed from, where a misread has to be
+        # outvoted; an address is read by a driver deciding whether they
+        # recognise the job, and the failure that matters is not seeing one at
+        # all.
+        merged['places'] = list(self.places) or (parsed.get('places') or [])
         # Voted the same way, and for the stronger reason: this one *is* the
         # duration. _consensus takes the majority and breaks a tie with the
         # larger value, which for minutes-since-midnight is the later deadline —

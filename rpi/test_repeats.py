@@ -362,6 +362,50 @@ else:
         got = offers()
         eq('a mark survives the vote', got[0]['accepted'], True)
         eq('...on the reading the vote chose', got[0]['minutes'], 31)
+
+        # Nor may the vote throw away the address. It scores pay, minutes and
+        # distance, so a reading that wins on those takes its empty `places`
+        # with it — and the offers page then shows no address for a card
+        # another reading of the same card read the map off perfectly well.
+        WHERE = ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta']
+        write([dict(reading('c', 1, T, 10.30, 31, 15.1), places=WHERE),
+               reading('c', 2, T + 4_000, 10.30, 40, 23.6),
+               reading('c', 3, T + 8_000, 10.30, 31, 15.1)])
+        got = offers()
+        eq('the winning reading keeps an address a loser found', got[0].get('places'), WHERE)
+        eq('...without taking that reading\'s numbers too', got[0]['minutes'], 31)
+
+        # ...borrowed from a reading that agrees about the card, ahead of one
+        # that does not. Here the outvoted 40min/23.6mi reading has an address
+        # and so does an agreeing 31min/15.1mi one; taking the first row with a
+        # place would show the outvoted reading's.
+        write([dict(reading('c', 1, T, 10.30, 40, 23.6), places=['Somewhere Else Rd, Acworth']),
+               dict(reading('c', 2, T + 4_000, 10.30, 31, 15.1), places=WHERE),
+               reading('c', 3, T + 8_000, 10.30, 31, 15.1)])
+        eq('the address comes from a reading that agrees about the card',
+           offers()[0].get('places'), WHERE)
+
+        # ...and where the winner has one of its own, that is the one to show:
+        # it is the reading the numbers came from.
+        write([dict(reading('c', 1, T, 10.30, 40, 23.6), places=['Somewhere Else Rd, Acworth']),
+               dict(reading('c', 2, T + 4_000, 10.30, 31, 15.1), places=WHERE),
+               dict(reading('c', 3, T + 8_000, 10.30, 31, 15.1), places=WHERE)])
+        eq('an address on the winning reading is not overruled',
+           offers()[0].get('places'), WHERE)
+
+        # An impossible reading does not lend one either. It is the row the vote
+        # drove to -1000, and its map is no more believable than its money.
+        write([dict(reading('c', 1, T, 1030.0, 31, 15.1, suspect=True),
+                    places=['Nowhere At All Rd, Kennesaw']),
+               reading('c', 2, T + 4_000, 10.30, 31, 15.1)])
+        eq('a reading the vote refused does not lend its address',
+           offers()[0].get('places'), None)
+
+        # A card where nobody read the map still has no address, rather than
+        # one borrowed from somewhere.
+        write([reading('c', 1, T, 10.30, 31, 15.1),
+               reading('c', 2, T + 4_000, 10.30, 31, 15.1)])
+        eq('a card nobody read an address off has none', offers()[0].get('places'), None)
     finally:
         proc.terminate()
         try:
