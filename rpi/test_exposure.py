@@ -237,6 +237,82 @@ ok_('...to about the right level',
     abs(EX.brightness(lit_card(g.gain, dim=0.35)) - EX.TARGET_BRIGHT)
     / EX.TARGET_BRIGHT < 0.2)
 
+# ...including one dimmed past the point where darkness alone would be taken
+# for an empty mount.
+#
+# LIT_ENOUGH is a backstop for a caller that cannot say whether the phone is
+# there, and it says so in its own comment — but the branch read
+# `has_screen and bright >= LIT_ENOUGH`, so a tracker locked onto a phone still
+# lost the argument to the constant. A screen reading under 20 therefore took
+# the empty-mount path: lengthen to the longest rung, then stop. Measured, the
+# gain sat at its starting 1.5 for ever with 5.3x of headroom untouched and the
+# picture stayed dark, which is the shape of "some conditions make it very
+# dim". The claim that a phone at its dimmest still reads several times
+# LIT_ENOUGH is contradicted by this file's own record of a night-time card
+# reading 6.
+VERY_DIM = 0.06                       # about 13 at the starting gain, under 20
+g = EX.AutoGain(gain=1.5, every=6.0)
+start = EX.brightness(lit_card(1.5, dim=VERY_DIM))
+ok_('the fixture really is darker than the empty-mount backstop (%d)' % start,
+    start < EX.LIT_ENOUGH)
+for i in range(1, 31):
+    g.update(lit_card(g.gain, dim=VERY_DIM), 100.0 + i * 6.0, has_screen=True)
+ok_('a phone dimmer than the backstop is still brightened when the tracker '
+    'can see it (gain %.1f)' % g.gain, g.gain > 6.0)
+
+# The protection it must not cost: the same darkness with the phone actually
+# gone. Raising gain against dark upholstery is what wound the rig to its
+# ceiling chasing a card that was not there.
+g = EX.AutoGain(gain=1.5, every=6.0)
+for i in range(1, 31):
+    g.update(lit_card(g.gain, dim=VERY_DIM), 100.0 + i * 6.0, has_screen=False)
+eq('...and held at exactly the same darkness when the tracker says it is gone',
+   g.gain, 1.5)
+
+# ...and with nobody tracking, where the caller has no answer to give, the
+# constant is all there is and still holds.
+g = EX.AutoGain(gain=1.5, every=6.0)
+for i in range(1, 31):
+    g.update(lit_card(g.gain, dim=VERY_DIM), 100.0 + i * 6.0)
+eq('...and held on darkness alone when nothing is tracking', g.gain, 1.5)
+
+# --- running out of light, and saying so -----------------------------------
+#
+# `too_bright` has always been reported: gain on its floor, no shorter rung,
+# the remedy the driver's. The other end of the same complaint was reported by
+# nothing at all — everything spent, the screen still under target, a dark
+# picture and no word about why.
+g = EX.AutoGain(gain=1.5, every=6.0)
+ok_('a fresh controller is complaining about neither end',
+    not g.too_dim and not g.too_bright)
+for i in range(1, 31):
+    g.update(lit_card(g.gain, dim=VERY_DIM), 100.0 + i * 6.0, has_screen=True)
+eq('...and it spends everything it has first', g.gain, EX.GAIN_LIMITS[1])
+ok_('a phone the camera cannot make up for is reported', g.too_dim)
+ok_('...and not as the opposite complaint', not g.too_bright)
+
+# It clears when the light does, or it is a notice the driver learns to ignore.
+for i in range(31, 61):
+    g.update(lit_card(g.gain, dim=1.0), 100.0 + i * 6.0, has_screen=True)
+ok_('the complaint clears when the phone is turned back up', not g.too_dim)
+ok_('...and the gain comes back down with it', g.gain < 3.0)
+
+# An empty mount is not a dim phone, and must not be reported as one: the
+# driver would turn up a phone that is in their pocket.
+g = EX.AutoGain(gain=1.5, every=6.0)
+for i in range(1, 31):
+    g.update(cabin(g.gain), 100.0 + i * 6.0, has_screen=False)
+ok_('a phone that is not there is not a phone that is too dim', not g.too_dim)
+
+# Nor may both ends be true at once, which would put two contradictory
+# instructions on the same screen.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=EX.DEFAULT_EXPOSURE)
+white = np.full((60, 40), 255, np.uint8)
+for i in range(1, 41):
+    g.update(white, 100.0 + i * 6.0, has_screen=True)
+ok_('a blown-out card is too bright', g.too_bright)
+ok_('...and never also too dim', not g.too_dim)
+
 # ...and a card that comes back blown out is still brought down.
 g = EX.AutoGain(gain=8.0, every=6.0)
 for i in range(1, 31):
@@ -413,13 +489,13 @@ for _ in range(60):
     g.update(at(g.gain, g.exposure, 6.0), t)
 eq('a measured ladder with nothing shorter holds the exposure', g.exposure, MEASURED)
 ok_('...at the gain floor', g.gain < EX.GAIN_LIMITS[0] * 1.02)
-ok_('...and says the phone is too bright rather than making it ripple', g.stuck)
+ok_('...and says the phone is too bright rather than making it ripple', g.too_bright)
 
 # ...and it stops saying so the moment the phone comes back down.
 for _ in range(20):
     t += 6.0
     g.update(at(g.gain, g.exposure, 1.0), t)
-ok_('the complaint clears when the light does', not g.stuck)
+ok_('the complaint clears when the light does', not g.too_bright)
 ok_('...on a card back at target',
     abs(EX.brightness(at(g.gain, g.exposure, 1.0)) - EX.TARGET_BRIGHT)
     / EX.TARGET_BRIGHT < 0.2)
@@ -435,7 +511,7 @@ ok_('a measured ladder with room below it is used', g.exposure < MEASURED)
 ok_('...and only rungs that were on it', g.exposure in (4167, 8333, 16667))
 ok_('...leaving a card that reads',
     EX.clipped_fraction(at(g.gain, g.exposure, 6.0)) <= EX.CLIPPED_FRACTION)
-ok_('...with nothing to complain about', not g.stuck)
+ok_('...with nothing to complain about', not g.too_bright)
 
 # An unmeasured ladder keeps its old emergency, and only its old emergency: it
 # may shorten to escape a blown-out card, but never to tidy up a split.

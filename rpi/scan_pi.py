@@ -715,6 +715,7 @@ class Health:
         # does not make the screen ripple. Not a fault in the rig, and the one
         # thing that fixes it is a slider on the driver's phone.
         self.too_bright = False
+        self.too_dim = False
 
     def reset(self, now):
         # None rather than time.time(): the window starts when the first read
@@ -815,6 +816,9 @@ class Health:
         if self.exposure is not None and self.exposure != self.measured_exposure:
             bits.append('exposure %dus, borrowed against %dus for daylight'
                         % (self.exposure, self.measured_exposure))
+        if self.too_dim:
+            bits.append('TOO DARK with nothing left to give — turn the phone '
+                        'brightness up')
         if self.too_bright:
             bits.append('OVER-EXPOSED with nothing left to give — turn the '
                         'phone brightness down')
@@ -910,7 +914,7 @@ def show(frame_text, rate, parsed, ms, locked):
 ALIVE_EVERY = 4.0
 
 
-def emit_alive(too_bright=False):
+def emit_alive(too_bright=False, too_dim=False):
     """The beat, and the one condition that has to reach the driver without one.
 
     `tooBright` rides here rather than on a reading because the state it
@@ -921,7 +925,8 @@ def emit_alive(too_bright=False):
     overwrite a verdict.
     """
     print(json.dumps({'alive': True, 'at': int(time.time() * 1000),
-                      'tooBright': bool(too_bright)}), flush=True)
+                      'tooBright': bool(too_bright),
+                      'tooDim': bool(too_dim)}), flush=True)
 
 
 def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
@@ -1546,7 +1551,8 @@ def main():
                 now_alive = time.time()
                 if now_alive - last_alive > ALIVE_EVERY:
                     last_alive = now_alive
-                    emit_alive(too_bright=health.too_bright)
+                    emit_alive(too_bright=health.too_bright,
+                               too_dim=health.too_dim)
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate
@@ -1749,8 +1755,13 @@ def main():
                 # of the subject. Skipping the beat is the honest answer.
                 if auto_gain is not None and scanner.quad is not None:
                     lit = PL.quad_window(luma, scanner.quad, track_scale)
-                    have_screen = True if tracker is None \
-                        else not tracker.status()['lost']
+                    # None, not True, when nothing is tracking: --no-track
+                    # leaves this caller with no answer to give, and saying
+                    # "yes, there is a phone" when it cannot know is what the
+                    # LIT_ENOUGH backstop is there to cover. Saying it out loud
+                    # is what let the backstop be applied only where it belongs.
+                    have_screen = (None if tracker is None
+                                   else not tracker.status()['lost'])
                     was_exposure = auto_gain.exposure
                     # The photometric picture, before any preprocessing — the
                     # same window and the same measure the controller steers by,
@@ -1786,13 +1797,24 @@ def main():
                     # take at any setting that does not make the screen ripple.
                     # The only remedy left belongs to the driver, so it goes on
                     # the screen they are looking at rather than into a log.
-                    if auto_gain.stuck != health.too_bright:
-                        health.too_bright = auto_gain.stuck
+                    if auto_gain.too_bright != health.too_bright:
+                        health.too_bright = auto_gain.too_bright
                         log('the phone is brighter than the camera can take — '
                             'turn the screen brightness down a notch'
-                            if auto_gain.stuck
+                            if auto_gain.too_bright
                             else 'the picture is back inside what the camera '
                                  'can take')
+                    # ...and the other end of the same complaint, which nothing
+                    # used to report at all: everything spent, and the screen
+                    # still under target. The picture is dark, the reads get
+                    # worse, and the remedy — the phone's own brightness, or a
+                    # mount sitting in shadow — is the driver's.
+                    if auto_gain.too_dim != health.too_dim:
+                        health.too_dim = auto_gain.too_dim
+                        log('the phone is dimmer than the camera can make up '
+                            'for — turn the screen brightness up a notch'
+                            if auto_gain.too_dim
+                            else 'there is enough light again')
 
                 # Keep sampling for a short while after a card appears, so a leg
                 # missed by one frame can still be picked up by the next.

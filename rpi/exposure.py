@@ -131,10 +131,20 @@ LENGTHEN_MARGIN = 1.15
 # the next beat undoes.
 UP_MAX = 2.0
 
-# Below this, the window holds no lit screen — it is the dark inside of a car.
-# A phone at its dimmest still reads several times this; an unlit mount reads
-# well under it. Used only as a backstop for when nothing is tracking the
-# screen, since a caller that knows the phone is missing says so outright.
+# Below this, the window probably holds no lit screen — it is the dark inside
+# of a car. A backstop for when nothing is tracking the screen, and *only* for
+# that: a caller that knows whether the phone is there says so outright, and
+# this must not be second-guessed against it.
+#
+# It used to be second-guessed against it. The branch read `has_screen and
+# bright >= LIT_ENOUGH`, so a tracker locked onto a phone still lost the
+# argument to a constant, and a genuinely dim screen took the empty-mount path:
+# lengthen to the longest rung, then stop. Measured on a screen reading 4, the
+# gain sat at its 1.5 starting value for ever with 5.3x of headroom untouched,
+# and the picture stayed dark with nothing said about it. The claim that "a
+# phone at its dimmest still reads several times this" is contradicted a few
+# lines further down this same file, which records a real night-time card
+# reading 6.
 LIT_ENOUGH = 20.0
 
 
@@ -346,13 +356,19 @@ class AutoGain:
         # How hard to cut the next time the picture comes back at full well.
         # Grows while it keeps coming back, resets the moment it does not.
         self.cut = BLOWN_STEP
-        # The picture is over-exposed and there is nothing left to give: gain is
-        # on its floor and there is no shorter rung to fall to. The only
-        # remaining remedy belongs to the driver, so it has to reach them — see
-        # the health line in scan_pi and the notice on the live page.
-        self.stuck = False
+        # Out of room, and which way. Both are the rig saying the remedy is no
+        # longer its own, so both have to reach the driver — see the health
+        # line in scan_pi and the notice on the live page.
+        #
+        # `too_bright`: gain on its floor and no shorter rung to fall to.
+        # `too_dim`: gain on its ceiling, already on the longest rung, and the
+        # screen still under target. Only the first of these was ever reported,
+        # so a rig that had run out of light showed a dark picture and said
+        # nothing at all about why.
+        self.too_bright = False
+        self.too_dim = False
 
-    def update(self, gray, now, has_screen=True):
+    def update(self, gray, now, has_screen=None):
         """The camera controls to apply, or {} to leave the camera alone.
 
         There is only one quantity worth controlling here, and it is not the
@@ -382,6 +398,13 @@ class AutoGain:
         came back to a card blown out at 8x and took another minute to climb
         down — a minute that lands exactly when the driver has picked the phone
         up to look at an offer.
+
+        Three answers, not two. True and False are the tracker's, and are
+        believed. `None` is a caller that cannot know — the rig started with
+        `--no-track`, or nothing is following the corners yet — and only then
+        is the brightness itself used to guess, against LIT_ENOUGH. Conflating
+        "I do not know" with "there is no phone" is what kept a dim screen
+        dark.
         """
         blown = clipped_fraction(gray) > CLIPPED_FRACTION
 
@@ -396,6 +419,10 @@ class AutoGain:
         bright = brightness(gray)
         if bright <= 0:
             return {}
+
+        # Whether there is a screen to aim at. The tracker's answer where there
+        # is one; the brightness as a last resort where there is not.
+        lit_screen = has_screen if has_screen is not None else bright >= LIT_ENOUGH
 
         light = self.gain * (self.exposure or 1.0)
 
@@ -417,7 +444,7 @@ class AutoGain:
             self.cut = min(self.cut ** BLOWN_ESCALATE, BLOWN_MAX_STEP)
         else:
             self.cut = BLOWN_STEP
-            self.stuck = False
+            self.too_bright = False
             if abs(bright - self.target) / self.target <= GAIN_TOLERANCE:
                 # On target. Nothing to correct — but the same picture may still
                 # be payable with a longer exposure and less gain, so ask.
@@ -426,7 +453,7 @@ class AutoGain:
                 # Over target and still off the rail, so the error is a real
                 # measurement for once. Move once, by what it says.
                 want = light * self.target / bright
-            elif has_screen and bright >= LIT_ENOUGH:
+            elif lit_screen:
                 # Under target, with a screen to aim at, and off the rail — so
                 # this is a measurement too, and it is answered by what it says
                 # rather than by a constant.
@@ -455,12 +482,24 @@ class AutoGain:
                 want = (light if self.exposure is None
                         else self.gain * self.candidates[-1])
 
-        return self._settle(want, blown)
+        ctrls = self._settle(want, blown)
+
+        # Everything that can be spent has been spent, and it was not enough.
+        # Asked after the move rather than inside _split, because _split does
+        # not know how bright the picture is — only what was asked for — and a
+        # beat spent climbing toward the ceiling is not the same as a beat sat
+        # against it.
+        self.too_dim = (not blown and lit_screen
+                        and self.gain >= self.limits[1] - 1e-6
+                        and (self.exposure is None
+                             or self.exposure >= max(self.candidates))
+                        and bright < self.target * (1 - GAIN_TOLERANCE))
+        return ctrls
 
     def _settle(self, want, blown):
         """Pay for `want` units of light, and say what to send the camera."""
         gain, rung, stuck = self._split(want, blown)
-        self.stuck = self.stuck or stuck
+        self.too_bright = self.too_bright or stuck
 
         moved = rung is not None and rung != self.exposure
         ctrls = {}

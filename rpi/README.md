@@ -1063,6 +1063,52 @@ None of this is eyeballed: `rpi/test_layout.py` computes every ratio from
 `styles.css` and fails below the floor, and checks the four verdict panels
 still run brightest to darkest.
 
+### A dim phone was being treated as an empty mount
+
+The complaint was "some conditions make the video feed very dim". The cause is
+one word in a conditional.
+
+`LIT_ENOUGH` is a brightness below which the window probably holds no lit
+screen — the dark inside of a car rather than a phone. Its own comment says it
+is "used only as a backstop for when nothing is tracking the screen, since a
+caller that knows the phone is missing says so outright". The code did not do
+that. The branch read `has_screen and bright >= LIT_ENOUGH`, so a tracker
+locked onto a phone still lost the argument to a constant, and any screen
+reading under 20 took the empty-mount path: lengthen to the longest exposure,
+then stop.
+
+Measured, on a screen reading 4: the gain sat at its starting 1.5 for ever,
+with **5.3x of headroom untouched**, and the picture stayed dark. The claim in
+that comment — "a phone at its dimmest still reads several times this" — is
+contradicted twenty lines further down the same file, which records a real
+night-time card reading **6**.
+
+`has_screen` has three answers now rather than two. `True` and `False` are the
+tracker's and are believed; `None` is a caller that cannot know — `--no-track`,
+or nothing following the corners yet — and only then does brightness speak for
+itself. Measured on the same dim screen, the gain now climbs 1.5 → 3 → 6 → 8 in
+three beats, and the published picture goes from a mean of 20.7 to 114.9.
+
+**And it says when it has run out.** `stuck` was only ever set off the short
+end: gain on its floor, no shorter rung, "turn the phone brightness down".
+Railed the other way — gain on its ceiling, already on the longest rung, screen
+still under target — nothing was reported at all. There is a `too_dim` now, on
+the health line and on the live page, saying to turn the phone up or move the
+mount out of the shade.
+
+**What is deliberately not done.** The picture is not tone-mapped for the eye.
+It would be free and it would look better, and it would also make a rig that
+has run out of light *look* fine — which is exactly what the notice above
+exists to prevent. The exposure is the truth about the exposure.
+
+**The limit that remains.** With the tracker lost, the gain is still held:
+raising it against dark upholstery is what once wound the rig to its ceiling
+chasing a card that was not there, and took a minute to climb down from just as
+the driver picked the phone up. The exposure is still given back in that state
+— measured, 2083us to 16667us, an eightfold recovery — so a rig that shortened
+itself into a hole climbs out of it. A phone so dim that the detector cannot
+find it even then stays dim until "⟳ Re-find" or a brighter screen.
+
 ### Reading the phone *through* the live view
 
 The live view was written to answer one question — is the camera pointed at the
@@ -2402,7 +2448,8 @@ python3 rpi/test_accumulate.py  #  92 on merging readings across frames, and on
                                 #     a recovered leg staying recovered
 python3 rpi/test_pipeline.py    # 206 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
-python3 rpi/test_exposure.py    # 120 on flicker, brightness, gain and exposure
+python3 rpi/test_exposure.py    # 133 on flicker, brightness, gain and
+                                #     exposure, and on both ends of running out
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
 python3 rpi/test_journal.py     # 137 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
@@ -2411,7 +2458,7 @@ python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 163 on the loop that holds the camera, and
+python3 rpi/test_scan_pi.py     # 172 on the loop that holds the camera, and
                                 #     on which live view it is being asked for
 python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy

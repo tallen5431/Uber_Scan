@@ -470,11 +470,17 @@
   // the one thing that fixes it is a slider on the phone in the driver's hand —
   // so it belongs on this screen and nowhere else.
   var tooBright = false;
+  // The same complaint from the other end, and the one nothing used to report:
+  // gain on its ceiling, already on the longest exposure, and the screen still
+  // under target. The picture goes dark and the reads go with it.
+  var tooDim = false;
 
   // Said in terms of what to do, not what happened. "Clipping at the gain
   // floor" is true and useless; the driver is holding the thing that fixes it.
   var TOO_BRIGHT = 'Phone screen too bright for the camera — turn its '
                  + 'brightness down a notch.';
+  var TOO_DIM = 'Phone screen too dim for the camera — turn its brightness up '
+              + 'a notch, or move the mount out of the shade.';
 
   var PHASE_LABEL = {
     check: 'CHECKING',
@@ -521,7 +527,8 @@
       // Ahead of the phase message, because it is the one the driver can act
       // on: a washed-out card between offers is exactly the state where there
       // is no reading to hang it off, which is why it is here as well as below.
-      var setup = [tooBright ? TOO_BRIGHT : '', p.message || ''].filter(Boolean);
+      var setup = [tooBright ? TOO_BRIGHT : '', tooDim ? TOO_DIM : '',
+                   p.message || ''].filter(Boolean);
       el.warn.textContent = setup.join(' ');
       el.warn.hidden = !setup.length;
       var quiet = Date.now() - seenAt;
@@ -652,6 +659,7 @@
     // to it, and because the reading it is sitting on top of was taken through
     // a washed-out card.
     if (tooBright) notes.push(TOO_BRIGHT);
+    if (tooDim) notes.push(TOO_DIM);
     if (r.milesUncertain) notes.push('Distance unreadable — pay shown before mileage cost.');
     else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
     // Said out loud, because a fragment is not a small error in a safe
@@ -751,6 +759,7 @@
       // `ready`, so a message that carries no verdict is dropped whole. This
       // has to be read off the message before that happens.
       if (msg.tooBright !== undefined) tooBright = !!msg.tooBright;
+      if (msg.tooDim !== undefined) tooDim = !!msg.tooDim;
       // Only a reading moves the verdict's own clock. The guard is the same one
       // the next line uses to decide whether this message replaces the verdict
       // at all — a heartbeat carries no `ready`, and must not vouch for one.

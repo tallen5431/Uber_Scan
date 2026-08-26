@@ -841,7 +841,7 @@ def drive(extra_argv, seconds, look=None, appear_at=0.4):
 
     SP.start_camera = lambda *a, **k: cam
     SP.emit = lambda *a, **k: (said.append(time.time()), reads.append(time.time()))
-    SP.emit_alive = lambda too_bright=False: said.append(time.time())
+    SP.emit_alive = lambda **kw: said.append(time.time())
     if look is not None:
         PL.Scanner.look_many = look
 
@@ -1221,6 +1221,66 @@ eq('...and so does a stored one that no longer points at anything',
 # It is a picture to read, so it is not written at the quality of a thumbnail.
 ok_('the phone view is encoded for reading, not for glancing',
     SP.SCREEN_QUALITY > SP.SNAPSHOT_QUALITY)
+
+# --- running out of light, in both directions -------------------------------
+#
+# The controller decides these (test_exposure.py) and the live page shows them
+# (live.html); this is the wiring between, which is the part that silently does
+# not exist. `too_dim` did not: the controller had no such idea, the health
+# line had no such branch, and the heartbeat carried no such field, so a rig
+# that had run out of light showed a dark picture and said nothing.
+import contextlib                                             # noqa: E402
+# `io` is already imported further up this file.
+
+
+def health_line(**flags):
+    """The line the log gets, with these flags set on it."""
+    h = SP.Health()
+    h.reset(0.0)
+    h.reads = 1
+    h.ms.append(200)          # report() takes a median of these
+    for name, value in flags.items():
+        setattr(h, name, value)
+    grab = io.StringIO()
+    with contextlib.redirect_stdout(grab):
+        h.report(121.0, None, PL.Scanner(quad=None, roi=None))
+    return grab.getvalue()
+
+
+quiet = health_line()
+ok_('an ordinary health line complains about neither end',
+    'TOO DARK' not in quiet and 'OVER-EXPOSED' not in quiet)
+
+dim = health_line(too_dim=True)
+ok_('a rig out of light says so on the health line', 'TOO DARK' in dim)
+ok_('...and says what to do about it', 'brightness up' in dim)
+
+bright = health_line(too_bright=True)
+ok_('a rig with too much light still says so', 'OVER-EXPOSED' in bright)
+ok_('...and says the opposite thing to do', 'brightness down' in bright)
+
+# The heartbeat is what the live page reads, and it is a separate path from the
+# health line: a rig can be perfectly healthy in every other respect and still
+# need the driver to touch their phone.
+def beat(**flags):
+    grab = io.StringIO()
+    with contextlib.redirect_stdout(grab):
+        SP.emit_alive(**flags)
+    return json.loads(grab.getvalue().strip())
+
+
+eq('the heartbeat carries both flags, false by default',
+   (beat().get('tooBright'), beat().get('tooDim')), (False, False))
+eq('...and true when they are', (beat(too_dim=True).get('tooDim'),
+                                 beat(too_bright=True).get('tooBright')),
+   (True, True))
+# The page reads these by name off the heartbeat; a rename here is a notice
+# that silently stops appearing.
+page = open(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), 'live.html')).read()
+for field in ('tooBright', 'tooDim'):
+    ok_('live.html reads %s off the heartbeat' % field,
+        'msg.%s' % field in page)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
