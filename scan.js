@@ -15,7 +15,36 @@
   // acting on a glitch. Cheap to require when a read takes ~200ms.
   var AGREE_TO_LOCK = 2;
   var MISSES_TO_RESET = 3;
-  var MAX_OCR_WIDTH = 1400;   // beyond this the engine slows with no gain
+
+  // How big a picture the reader is handed, which is not a detail and is not
+  // only about speed.
+  //
+  // This used to be a width: scale to 1400 across, and — because the scale was
+  // Math.min(2, 1400 / width) — *upscale* anything narrower, by up to double. A
+  // reticle on a phone frames something around 700 to 1200px wide, so in
+  // practice the reader was handed two to three megapixels of interpolated
+  // card. Tesseract does not like that, and it does not fail quietly: measured
+  // on this project's own shop-order render, scaled to a range of widths and
+  // read with the same engine and the same contrast step,
+  //
+  //     0.45 MP  no payout        1.26 MP  no payout
+  //     0.80 MP  $7.09            1.47 MP  no payout
+  //     1.02 MP  $7.09            2.46 MP  no payout   <- what the browser did
+  //
+  // The payout is the largest text on the card, which is why it is the first
+  // thing to go: past about a megapixel its glyphs outgrow the range the
+  // recogniser was trained on, and on a shop order that line stands alone with
+  // no neighbours to give it context. The whole rest of the card kept reading
+  // perfectly, so the failure looked like "the payout is missing" rather than
+  // like a bad picture — and every Uber Eats shop order the phone app was
+  // pointed at came back unreadable.
+  //
+  // So the same rule the Pi uses, and the same two numbers: lift a small card
+  // to a height worth reading, then hold the whole thing inside a pixel budget.
+  // See pipeline.fit_for_ocr, whose comment is about cost and whose real value
+  // turns out to be this.
+  var OCR_CARD_HEIGHT = 900;
+  var MAX_OCR_PIXELS = 1000000;
 
   // Smallest box worth reading, as a fraction of the preview. Below this there
   // is no room for a payout at a size the engine can resolve, and a box that
@@ -222,14 +251,26 @@
 
   // Upscale and flatten to high-contrast grey: a decimal point is only a pixel
   // or two through a lens, and it is the character that matters most.
+  /* The size to hand the reader, as pipeline.fit_for_ocr decides it: a card
+     shorter than OCR_CARD_HEIGHT is lifted to it, and then whatever comes out
+     is held inside MAX_OCR_PIXELS. Exported below so a test can check this
+     agrees with the Pi's, which is the thing that went wrong. */
+  function fitForOcr(w, h) {
+    if (!isFinite(w) || !isFinite(h) || w <= 0 || h <= 0) return { w: 1, h: 1 };
+    var scale = h < OCR_CARD_HEIGHT ? OCR_CARD_HEIGHT / h : 1;
+    var pixels = (w * scale) * (h * scale);
+    if (pixels > MAX_OCR_PIXELS) scale *= Math.sqrt(MAX_OCR_PIXELS / pixels);
+    return { w: Math.max(1, Math.round(w * scale)),
+             h: Math.max(1, Math.round(h * scale)) };
+  }
+
   function grab(source, rect) {
     var sw = rect ? rect.w : source.videoWidth || source.width;
     var sh = rect ? rect.h : source.videoHeight || source.height;
-    var scale = Math.min(2, MAX_OCR_WIDTH / sw);
-    if (!isFinite(scale) || scale <= 0) scale = 1;
+    var fit = fitForOcr(sw, sh);
 
-    el.frame.width = Math.round(sw * scale);
-    el.frame.height = Math.round(sh * scale);
+    el.frame.width = fit.w;
+    el.frame.height = fit.h;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
@@ -606,6 +647,7 @@
       render(out.ms);
       return { parsed: out.parsed, ms: out.ms, rate: judged(out.parsed) };
     },
+    fitForOcr: fitForOcr,
     ready: function () { return !!worker; }
   };
 })();

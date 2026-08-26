@@ -82,6 +82,44 @@ gradient and reduced contrast.
 End to end in the browser, including canvas preprocessing and rendering:
 **~500–630ms per read**, on top of a one-time ~460ms engine start.
 
+### ...and for a long time, not on a shop order
+
+That table was measured on a ride card, and a ride card was the only shape
+anyone had put through the browser. Driven headlessly through `window.__scan`
+against all three shapes, the Uber Eats shop order came back with its journey,
+its item count and its merchant read perfectly and **no payout at all**. Light
+mode and dark, at every framing a phone produces.
+
+It was the size of the picture. The reader was handed a canvas scaled to 1400px
+across — and since the scale was `Math.min(2, 1400 / width)`, anything narrower
+than that was *upscaled*, by up to double. A reticle on a phone frames something
+around 700–1200px wide, so in practice tesseract was being given two to three
+megapixels of interpolated card. Holding the engine and the contrast step fixed
+and varying only the size:
+
+| Megapixels | Payout |
+|---|---|
+| 0.45 | not read |
+| **0.80** | **$7.09** |
+| **1.02** | **$7.09** |
+| 1.26 | not read |
+| 1.47 | not read |
+| 2.46 | not read ← what the browser was doing |
+
+The payout is the *largest* text on the card, which is why it is the first thing
+to go: past about a megapixel its glyphs outgrow the range the recogniser was
+trained on, and on a shop order that line stands alone with no neighbours to
+give it context. A ride card's payout has two chips above it and survives; a
+delivery card's has a banner. Everything else on every card kept reading
+perfectly, so the failure looked like "the payout is missing" rather than like a
+bad picture.
+
+The Pi never had this, because `pipeline.fit_for_ocr` caps the picture at a
+megapixel — a rule whose own comment says it is there "because an image nobody
+asked for is work nobody wanted, not because it is a lever". It is a lever. The
+browser uses the same two numbers now, and `rpi/test_scanjs.py` checks the two
+implementations still agree.
+
 ## Is it fast enough?
 
 Comfortably. Two agreeing reads are required before a verdict is trusted, so
@@ -133,13 +171,19 @@ real offers before mounting anything.
 ## Running the tests
 
 ```sh
-node tests/parser.test.js     # 60 checks, no browser needed
-node tests/corpus.test.js     # 97 checks shared with the Pi parser
-node tests/crop.test.js       # the Pi's hand-drawn box, server to scanner
+node tests/parser.test.js     #  83 checks, no browser needed
+node tests/corpus.test.js     # 336 checks shared with the Pi parser
+node tests/crop.test.js       #  16 on the Pi's hand-drawn box, server to scanner
+python3 rpi/test_scanjs.py    #  25 through a real browser, end to end
 ```
 
-The browser tests live in the session scratchpad and need Playwright plus a
-local server on port 8765.
+The last one drives this page the way a phone does — it renders each card shape,
+serves the real site, opens `scan.html` in headless Chromium, and reads them
+through `window.__scan`. That hook had been sitting in `scan.js` since it was
+written, with a comment saying it existed "so the test harness can drive the
+same pipeline headlessly", and no harness ever used it. The shop-order bug above
+is what that cost. It needs Playwright, and skips cleanly without it, so the Pi
+does not have to carry a browser to run `bash tools/test.sh`.
 
 ## Known limits
 
