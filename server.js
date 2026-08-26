@@ -772,9 +772,40 @@ function appendLines(text, done) {
   });
 }
 
+/* The journal, as rows. `done(rows, err)`: rows is [] when there is simply no
+ * journal yet, and null when there is one and it could not be read.
+ *
+ * Those two used to be the same answer, and the comment below said why — a
+ * missing file is not an error. It is not; the other thing is. A journal that
+ * exists and cannot be read answered [] as well, and [] is not "I do not know",
+ * it is "there is nothing", which the sync endpoints believe.
+ *
+ * Reproduced against the real server, running as a user that could append to
+ * the journal but not read it — which is the one shape that reaches this, since
+ * every error that also breaks the append is already refused loudly. Twenty
+ * rows on disk, then the same twenty POSTed three times:
+ *
+ *     GET  /api/journal/newest  -> {"ok":true,"newest":0,"have":0,"offers":0}
+ *     POST /api/journal/ingest  -> {"ok":true,"added":20,...}   three times
+ *     lines on disk: 80
+ *
+ * The de-duplication that makes ingest idempotent is a set built from the rows
+ * already there, so an empty set makes every incoming row look new. Sixty
+ * duplicate rows, `ok: true`, and a `have` that is wrong. And `newest: 0` sends
+ * the rig back to a thirty-day floor, so it re-sends everything every ten
+ * minutes and the far end appends all of it, reporting success each time. The
+ * backup quietly fills with copies while both ends say it is working.
+ */
+/* What this build of the far end understands. Sent whether or not the journal
+ * can be read, because it is how a sender tells a current build from an old one
+ * — and a rig told nothing about a reachable machine goes on to blame it for
+ * being out of date. */
+var SYNC_CAN = ['ingest', 'config', 'mkdir', 'count'];
+
 function readJournal(done) {
   fs.readFile(JOURNAL_PATH, 'utf8', function (err, text) {
-    if (err) return done([]);           // nothing recorded yet is not an error
+    // Nothing recorded yet is not an error. Anything else is.
+    if (err) return done(err.code === 'ENOENT' ? [] : null, err);
     var rows = [];
     text.split('\n').forEach(function (line) {
       line = line.trim();
@@ -935,7 +966,14 @@ function route(req, res) {
              { 'Content-Type': 'application/json; charset=utf-8' });
       };
       if (err) return fail(err.message);
-      readJournal(function (existing) {
+      readJournal(function (existing, readErr) {
+        // Without the rows already here there is no de-duplication, and
+        // appending anyway turns every re-send into a copy. Refusing is the
+        // only honest answer: the sender retries, and nothing is lost.
+        if (!existing) {
+          return fail('cannot read the journal to merge into it ('
+                      + (readErr && readErr.code || 'unknown') + ')', 500);
+        }
         var seen = {};
         existing.forEach(function (r) {
           var k = syncKey(r);
@@ -1068,7 +1106,23 @@ function route(req, res) {
   // What the far end already has, so a sender knows where to start. Cheap
   // enough to call every few minutes and the only thing the rig needs to ask.
   if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/newest') {
-    return readJournal(function (rows) {
+    return readJournal(function (rows, readErr) {
+      // Answering 0 here is not a small error: the sender treats it as "the
+      // far end has nothing", falls back to a thirty-day floor and re-sends a
+      // month of offers, every ten minutes, for as long as the fault lasts.
+      //
+      // But not a 500 either, because this endpoint is also how the sender
+      // works out what the far end can do — whether it understands `mkdir`,
+      // whether it is an old build at all — and a rig told nothing about a
+      // reachable machine goes on to blame it for being out of date. So it
+      // answers, says it cannot read, and simply does not offer a number.
+      if (!rows) {
+        return send(res, 200, JSON.stringify({
+          ok: false, readable: false,
+          error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')',
+          can: SYNC_CAN
+        }), { 'Content-Type': 'application/json; charset=utf-8' });
+      }
       // The newest *offer*, not the newest row.
       //
       // The sender resumes from an hour before this, so whatever it means has
@@ -1095,7 +1149,7 @@ function route(req, res) {
                                       // itself, rather than needing somebody to
                                       // think of running --all.
                                       offers: offers,
-                                      can: ['ingest', 'config', 'mkdir', 'count'] }),
+                                      can: SYNC_CAN }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }
@@ -1326,7 +1380,13 @@ function route(req, res) {
     // when their day began.
     var since = clampNumber(q.since, 0, 4102444800000, 0);
     var withHidden = q.hidden === '1';
-    return readJournal(function (rows) {
+    return readJournal(function (rows, readErr) {
+      // This one may degrade — a driver looking at the offers page is better
+      // served by the page than by a 500 — but not silently. An empty history
+      // and an unreadable one look identical otherwise, and the second is the
+      // one worth acting on.
+      var unreadable = rows ? null : (readErr && readErr.code || 'unknown');
+      rows = rows || [];
       var offers = latestPerOffer(rows);
       var seen = offers.seen || [];
       // The window first, then the count of what is hidden inside it.
@@ -1373,6 +1433,11 @@ function route(req, res) {
                                       truncated: total > offers.length,
                                       days: days, hidden: hidden,
                                       watched: watched,
+                                      // Null unless the journal is there and
+                                      // could not be read, in which case the
+                                      // emptiness below is not a record of a
+                                      // quiet week.
+                                      unreadable: unreadable,
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });

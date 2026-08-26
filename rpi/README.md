@@ -1810,6 +1810,47 @@ written, because a stored "PASS" is unreadable a month after the target moved.
 
 ### Getting them off the car
 
+#### A copy that cannot be read is not an empty copy
+
+The far end de-duplicates by building a set of what it already holds, which is
+what makes an upload idempotent and is the reason a timer can run it every ten
+minutes. Those rows came from a reader that answered `[]` to **every** error —
+including a journal that is there and cannot be read. An empty set makes every
+incoming row look new.
+
+Reproduced against the real server, running as a user that could append to the
+journal but not read it, which is the one shape that reaches this (every error
+that also breaks the append is already refused loudly):
+
+```
+GET  /api/journal/newest  ->  {"ok":true,"newest":0,"have":0,"offers":0}
+POST /api/journal/ingest  ->  {"ok":true,"added":20,...}      x3
+lines on disk (started 20): 80
+```
+
+Sixty duplicate rows, `ok: true`, and a `have` that is wrong. And `newest: 0`
+disables the repair as well: the rig computes no shortfall, falls through to a
+thirty-day floor, and re-sends a month of offers every ten minutes for as long
+as the fault lasts — with both ends reporting success the whole time. The only
+backup quietly filling with copies is the exact failure the sync design lists
+first among the ones it must not have.
+
+`ENOENT` is still "nothing recorded yet". Anything else now says so:
+
+* **ingest** refuses with 500 rather than appending what it cannot de-duplicate.
+* **newest** still answers `200`, and still says what the build `can` do — a rig
+  told nothing about a reachable machine goes on to blame it for being out of
+  date — but it reports `readable: false` and offers no number at all, because
+  the number is what triggers the thirty-day re-send.
+* **the rig** declines to send, on stderr rather than through `say()`, and exits
+  non-zero. `--quiet` is for the routine chatter of a ten-minute timer; this is
+  a standing fault at the other end, and it is the one the install gate has to
+  catch, since a backup that cannot merge is not a backup.
+* **the offers page** still renders, but says `The journal could not be read` —
+  an empty history and an unreadable one look identical otherwise, and only one
+  of them is worth acting on.
+
+
 The journal is the only thing this rig produces that cannot be made again. The
 scanner can be reflashed in an afternoon; a year of what the work actually paid
 cannot. Until there is a second copy it lives on one SD card, in a vehicle,
@@ -1961,7 +2002,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 19 suites, 2253 checks
+npm test                # all 19 suites, 2270 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1993,7 +2034,8 @@ python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
 python3 rpi/test_scan_pi.py     # 143 on the loop that holds the camera
-python3 rpi/test_sync.py        #  67 on getting the offers off the car
+python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
+                                #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  39 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
 python3 rpi/test_liveview.py    #  39 on the picture the driver watches, on

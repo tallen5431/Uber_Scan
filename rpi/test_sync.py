@@ -92,7 +92,11 @@ class FarEnd(object):
         self.base = 'http://127.0.0.1:%d' % self.port
         for _ in range(120):
             try:
-                urllib.request.urlopen(self.base + '/api/journal/newest', timeout=1).read()
+                # /api/status, not /api/journal/newest: this is a liveness
+                # probe, and `newest` is a data endpoint that is *supposed* to
+                # fail when the journal path is unusable — which is exactly the
+                # case two of the tests below set up on purpose.
+                urllib.request.urlopen(self.base + '/api/status', timeout=1).read()
                 return
             except Exception:
                 time.sleep(0.1)
@@ -278,7 +282,11 @@ class FarEndAt(FarEnd):
         self.base = 'http://127.0.0.1:%d' % self.port
         for _ in range(120):
             try:
-                urllib.request.urlopen(self.base + '/api/journal/newest', timeout=1).read()
+                # /api/status, not /api/journal/newest: this is a liveness
+                # probe, and `newest` is a data endpoint that is *supposed* to
+                # fail when the journal path is unusable — which is exactly the
+                # case two of the tests below set up on purpose.
+                urllib.request.urlopen(self.base + '/api/status', timeout=1).read()
                 return
             except Exception:
                 time.sleep(0.1)
@@ -540,6 +548,129 @@ finally:
     guarded.close()
 
 shutil.rmtree(work, ignore_errors=True)
+
+
+# --- a journal that cannot be read is not an empty journal ------------------
+#
+# The far end de-duplicates by building a set of what it already holds, which is
+# what makes ingest idempotent and is called "the whole design" where it is
+# written. The rows come from readJournal, and readJournal answered [] to every
+# error — including a journal that is there and unreadable. An empty set makes
+# every incoming row look new.
+#
+# Reproduced against the real server before the fix, running as a user that
+# could append to the journal but not read it: twenty rows on disk, the same
+# twenty POSTed three times, `ok: true, added: 20` each time, and eighty lines
+# on disk afterwards. And /api/journal/newest answered 0, which sends the rig
+# back to a thirty-day floor — so it re-sends a month of offers every ten
+# minutes and the far end appends all of them, both ends reporting success.
+#
+# Needs a process that cannot read a file it can append to, so: drop privileges
+# where we have them to drop, use the mode directly where we are already an
+# ordinary user, and skip where neither is possible rather than pretend.
+def _unprivileged():
+    if os.geteuid() != 0:
+        return []                       # the mode alone will do it
+    if shutil.which('setpriv') is None:
+        return None
+    return ['setpriv', '--reuid=65534', '--regid=65534', '--clear-groups']
+
+
+PREFIX = _unprivileged()
+if PREFIX is None:
+    print('cannot drop privileges here — skipping the unreadable-journal checks')
+else:
+    work = tempfile.mkdtemp()
+    # The whole chain has to be traversable by whoever ends up running node.
+    os.chmod(work, 0o777)
+    proc = None
+    try:
+        path = os.path.join(work, 'journal.jsonl')
+        rows = [offer(i, 1_700_000_000_000 + i) for i in range(6)]
+        body = ''.join(json.dumps(r) + '\n' for r in rows)
+        with open(path, 'w') as fh:
+            fh.write(body)
+        os.chmod(path, 0o222)           # appendable, not readable
+        write(os.path.join(work, 'mine.jsonl'), rows)
+
+        port = free_port()
+        proc = subprocess.Popen(
+            PREFIX + ['node', os.path.join(ROOT, 'server.js')],
+            env=dict(os.environ, SCANNER='0', PORT=str(port), JOURNAL=path),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        base = 'http://127.0.0.1:%d' % port
+        up = False
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(base + '/api/status', timeout=1).read()
+                up = True
+                break
+            except Exception:
+                time.sleep(0.1)
+
+        if not up:
+            print('the far end never came up — skipping the unreadable-journal checks')
+        else:
+            def post(where, payload):
+                req = urllib.request.Request(
+                    base + where, data=payload.encode('utf-8'), method='POST')
+                try:
+                    r = urllib.request.urlopen(req, timeout=10)
+                    return r.status, json.loads(r.read().decode('utf-8'))
+                except urllib.error.HTTPError as e:
+                    return e.code, json.loads(e.read().decode('utf-8') or '{}')
+
+            def get(where):
+                try:
+                    r = urllib.request.urlopen(base + where, timeout=10)
+                    return r.status, json.loads(r.read().decode('utf-8'))
+                except urllib.error.HTTPError as e:
+                    return e.code, json.loads(e.read().decode('utf-8') or '{}')
+
+            code, out = get('/api/journal/newest')
+            eq('an unreadable journal still answers', code, 200)
+            eq('...but not with "you have nothing"', out.get('newest'), None)
+            eq('...it says it could not read', out.get('readable'), False)
+            ok_('...and which way it failed', 'EACCES' in json.dumps(out))
+            # Still a current build, and it has to be able to say so: a rig told
+            # nothing about a reachable machine goes on to blame it for being
+            # out of date, which sends somebody to update the wrong thing.
+            ok_('...while still saying what it can do', 'mkdir' in (out.get('can') or []))
+
+            # And the sender declines rather than piling copies into it.
+            code2, said = run_main(base, os.path.join(work, 'mine.jsonl'))
+            eq('the rig refuses to send into it', code2, 1)
+            ok_('...and says why, in terms of the far end', 'cannot read' in said)
+
+            before = len(rows)
+            for attempt in (1, 2, 3):
+                code, out = post('/api/journal/ingest', body)
+                eq('ingest %d is refused rather than duplicating' % attempt, code, 500)
+                eq('...and reports failure', out.get('ok'), False)
+
+            os.chmod(path, 0o644)
+            on_disk = [l for l in open(path).read().splitlines() if l.strip()]
+            eq('nothing was appended by the three refusals', len(on_disk), before)
+
+            # ...and the page a driver looks at says so, rather than showing an
+            # empty history that looks like a quiet week.
+            os.chmod(path, 0o222)
+            code, out = get('/api/journal')
+            eq('the offers page still answers', code, 200)
+            eq('...with nothing in it', out.get('count'), 0)
+            ok_('...and says why it is empty', out.get('unreadable'))
+    finally:
+        if proc is not None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+        try:
+            os.chmod(os.path.join(work, 'journal.jsonl'), 0o644)
+        except OSError:
+            pass
+        shutil.rmtree(work, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)

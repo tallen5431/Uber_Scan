@@ -194,6 +194,21 @@ def main():
         return 0
 
     far = far_end(args.to)
+    # A far end that answers and says it cannot read its own journal is a
+    # different thing from one that does not answer, and only one of them is
+    # normal. Sending into it would append rows it cannot de-duplicate against,
+    # so every tick would add another copy of everything and report success.
+    if far is not None and far.get('readable') is False:
+        # stderr and not say(): --quiet is for the routine chatter of a timer
+        # that runs every ten minutes, and this is a standing fault at the other
+        # end that nobody will otherwise see. It is also the one the install
+        # gate has to catch, since a backup that cannot merge is not a backup.
+        print('%s is reachable but cannot read its own journal (%s). Sending '
+              'nothing: it could not tell a new row from one it already has, so '
+              'every upload would append another copy of everything and report '
+              'success. Fix that end before trusting this backup.'
+              % (args.to, far.get('error') or 'unknown'), file=sys.stderr)
+        return 1
     newest = None if far is None else int(far.get('newest') or 0)
     if newest is None:
         # Unreachable, or something there that is not this server. Normal in a

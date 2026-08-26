@@ -1143,6 +1143,18 @@
     // in front of the camera, and an episode that ended with no row written is
     // one the rig watched go past. It is a floor and is said to be one — an
     // offer the reader never saw at all is invisible to this too.
+    // A journal that is there and cannot be read looks exactly like a quiet
+    // week, and only one of those is worth doing something about. The server
+    // used to answer both with an empty list — see readJournal — which on this
+    // page is a blank history and on the sync endpoints was sixty duplicate
+    // rows reported as a success.
+    if (data.unreadable) {
+      notes.push('<b>The journal could not be read (' + data.unreadable
+                 + ').</b> Everything above is empty because nothing could be '
+                 + 'loaded, not because nothing was recorded — the file is '
+                 + 'still there. Check its permissions before trusting a gap '
+                 + 'here, and know that the backup cannot merge into it either.');
+    }
     var w = data.watched;
     if (w && w.saw) {
       // Counted in sightings, not in offers: one card watched, lost and picked
