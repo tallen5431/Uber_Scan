@@ -60,6 +60,43 @@
        verdict is why the screen is bolted to the dashboard. */
     #app:has(#viewWrap.gone) { grid-template-columns: minmax(0, 1fr); }
     #viewWrap.gone { display: none; }
+
+    /* Reading the phone rather than aiming at it.
+     *
+     * A phone is portrait and this panel is landscape, so the picture is
+     * bounded by height and the columns should not be split evenly: at
+     * 1.25fr/1fr the image was width-bound at 345px on an 800x480 screen and
+     * drew 260px tall in a 468px row, leaving 200px of the one dimension it
+     * actually wanted. Given the height, the same phone comes out 468px tall —
+     * a little under twice the linear size, on top of the six-fold gain in the
+     * picture itself.
+     *
+     * The verdict keeps the rest of the width. It is still the reason the
+     * screen is bolted to the dashboard; it is just no longer the only thing
+     * on it worth looking at, and a phone screen you cannot read the buttons
+     * on is not a phone you can drive with a mouse. */
+    body.phoneview #app { grid-template-columns: minmax(0, 1fr) auto; }
+    /* Down the whole panel, not just the row the verdict is in. The bar of
+       controls and the connection line were spanning both columns, so the
+       picture stopped 78px above the bottom of an 800x480 screen and the space
+       it stopped for was black: the verdict does not fill its row either. With
+       every row to itself the same phone is 468px tall instead of 382, and the
+       controls lose nothing — five buttons across the remaining 520px is still
+       104px each. */
+    body.phoneview #viewWrap  { grid-column: 2; grid-row: 1 / -1; }
+    body.phoneview .connbar   { grid-column: 1; }
+    body.phoneview .bottombar { grid-column: 1; }
+    body.phoneview #viewWrap { align-self: stretch; display: flex;
+                               align-items: center; justify-content: flex-end; }
+    body.phoneview #viewWrap img {
+      /* Height first, and width whatever the phone's own shape makes it. The
+         base rule is `width: 100%`, which on a portrait picture in a landscape
+         cell is the wrong axis to pin. */
+      width: auto; height: 100%; max-width: 100%; max-height: 100%;
+    }
+    /* The caption sits under a picture that is now as tall as the row, so it
+       has nowhere to be. The picture says what it is. */
+    body.phoneview #viewNote { display: none; }
     /* The rate is sized against the panel it sits in, and that panel is now a
        column rather than the whole width.
        Four limits, and whichever bites first wins: the panel's width, the
@@ -300,6 +337,15 @@
     <a class="linkbtn" href="journal.html">▤ Offers</a>
     <button type="button" class="linkbtn" id="setBox">▣ Set box</button>
     <button type="button" class="linkbtn" id="reset">⟳ Re-find</button>
+    <!-- Two things this picture gets used for, and they want opposite
+         pictures. Aiming the mount wants the whole scene with the outline on
+         it; working the phone through this screen — which is what a bluetooth
+         mouse on the phone and the rig's display in front of you amounts to —
+         wants the phone's screen and nothing else. `aria-pressed` because it
+         is a mode, not a navigation. -->
+    <button type="button" class="linkbtn" id="viewMode" aria-pressed="false"
+            title="Switch between the whole scene and the phone's screen"
+            >⛶ Phone</button>
   </nav>
 </main>
 
@@ -739,7 +785,18 @@
   var view = document.getElementById('view');
   var viewNote = document.getElementById('viewNote');
   var viewWrap = document.getElementById('viewWrap');
-  var STREAM_URL = '/api/frame.mjpeg';
+  /* Which picture to ask the rig for. The scanner reads this off the same
+     file that tells it somebody is watching, so it travels on the request for
+     a frame rather than in a call of its own — see touchWatchFile in
+     server.js. It is a query parameter and not a header because the <img> tag
+     is what makes these requests, and an <img> cannot set a header. */
+  var VIEW_KEY = 'uberscan.liveView';
+  var phoneView = false;
+  try { phoneView = localStorage.getItem(VIEW_KEY) === 'screen'; } catch (e) { phoneView = false; }
+
+  function streamUrl() {
+    return '/api/frame.mjpeg?view=' + (phoneView ? 'screen' : 'scene');
+  }
   var FRAME_GAP = 30;          // a floor for the fallback, so it cannot spin
   var streaming = false;
   var streamTried = 0;
@@ -748,7 +805,9 @@
 
   function sawAFrame() {
     viewWrap.classList.remove('gone');
-    viewNote.textContent = 'camera view · inset is what the reader sees';
+    viewNote.textContent = phoneView
+      ? "the phone's screen, flattened"
+      : 'camera view · inset is what the reader sees';
     clearTimeout(watchdog);
     watchdog = null;
   }
@@ -761,7 +820,7 @@
   function startStream() {
     streaming = true;
     streamTried++;
-    view.src = STREAM_URL;
+    view.src = streamUrl();
     // If nothing renders at all, the stream is not working here — whatever the
     // reason — and a still every 30ms is a great deal better than a blank box.
     clearTimeout(watchdog);
@@ -786,7 +845,8 @@
   function refreshView() {
     if (streaming || document.hidden || framePending) return;
     framePending = true;
-    view.src = '/api/frame.jpg?t=' + Date.now();
+    view.src = '/api/frame.jpg?view=' + (phoneView ? 'screen' : 'scene')
+             + '&t=' + Date.now();
   }
 
   function frameDone() {
@@ -842,6 +902,37 @@
         }, 2500);
       });
   });
+
+  // --- which picture ------------------------------------------------------
+  //
+  // Remembered, because it is a property of how this rig is used rather than
+  // of this page load. A driver reading the phone off this display through a
+  // bluetooth mouse is doing that for the whole shift, and having to press a
+  // button again every time the page reloads is the kind of small tax that
+  // ends with the feature unused.
+  var viewModeBtn = document.getElementById('viewMode');
+
+  function applyViewMode() {
+    document.body.classList.toggle('phoneview', phoneView);
+    viewModeBtn.setAttribute('aria-pressed', phoneView ? 'true' : 'false');
+    // The label says what pressing it gets you, not what you are looking at.
+    viewModeBtn.textContent = phoneView ? '⛶ Scene' : '⛶ Phone';
+    if (!viewWrap.classList.contains('gone')) sawAFrame();
+  }
+
+  viewModeBtn.addEventListener('click', function () {
+    phoneView = !phoneView;
+    try { localStorage.setItem(VIEW_KEY, phoneView ? 'screen' : 'scene'); } catch (e) { /* private mode */ }
+    applyViewMode();
+    // The mode rides on the request for a frame, so the rig does not hear
+    // about it until the next one is asked for. A stream is one request that
+    // never ends — it would go on delivering the old picture until something
+    // else restarted it — so it is restarted here.
+    if (streaming) startStream();
+    else refreshView();
+  });
+
+  applyViewMode();
 
   // --- drawing the box to read -------------------------------------------
   //
@@ -955,6 +1046,22 @@
       drawHint.textContent = 'no camera view yet — the box is drawn on the picture, '
         + 'which appears within a few seconds of the scanner starting';
       return;
+    }
+    // A box dragged here is sent as a fraction of the *camera frame*, and the
+    // phone view is not the camera frame — it is one rectangle out of it,
+    // flattened and blown up to fill the picture. The same drag would land
+    // somewhere else entirely, and the failure would be silent: a box
+    // accepted, a quad moved, and the scanner reading a patch of car door.
+    //
+    // Switched rather than refused. The scene is the picture this button needs
+    // and there is nothing to lose by going there — you cannot draw the
+    // phone's outline on a picture that has been cropped to it already.
+    if (on && phoneView) {
+      phoneView = false;
+      try { localStorage.setItem(VIEW_KEY, 'scene'); } catch (e) { /* private mode */ }
+      applyViewMode();
+      if (streaming) startStream();
+      else refreshView();
     }
     drawingMode(on);
     if (on) {

@@ -970,6 +970,80 @@ before costs, the count beside every bar, and the sentence explaining why a row
 was set aside. Those sizes live in that page's own `<style>` block, which loads
 after the shared stylesheet and so beat anything set for them there.
 
+### Reading the phone *through* the live view
+
+The live view was written to answer one question — is the camera pointed at the
+right thing? — and everything about it follows from that. The whole scene,
+shrunk to 480px, the corners drawn on in green, quality 60, and between reads
+it is made from the 640x480 luma preview rather than the sensor, because copying
+twelve megabytes to make a thumbnail was most of what the picture cost.
+
+There is a second way this rig gets used, and it needs the opposite picture. The
+phone sits in the mount pointing at the camera, where it cannot be read or
+reached; pair a bluetooth mouse to it and the rig's own display becomes the only
+sight of the phone there is. Then the offer card has to be legible in this
+picture, and so does whichever button the pointer is over.
+
+The scene view cannot be that picture at any size. Measured against a synthetic
+rig frame with the phone in a realistic mount position: the phone lands in
+**123x206** of those 480 pixels. Enlarging the `<img>` enlarges those 206 rows.
+The information is not in the file.
+
+So `⛶ Phone` publishes a different picture rather than a bigger one — the same
+perspective warp the reader uses, from the sensor frame, filling the frame at
+1000px tall:
+
+| | scene | phone |
+|---|---|---|
+| the phone, in the file | 123 x 206 | 573 x 1000 |
+| the phone, on an 800x480 panel | 88 x 148 | 269 x 468 |
+| file size | 8.7 kB | 23.5 kB |
+| compose | 1.8 ms warp + 0.8 ms encode | 1.8 ms warp + 3.2 ms encode |
+
+Three times the linear size on the glass and five times the linear detail behind
+it. Not the OCR image, which is contrast-stretched, thresholded and sometimes
+inverted — a picture of a page rather than of a screen — and not cropped to the
+reading box either, because that box is deliberately the part of the screen a
+*price* lives in and the Accept button is outside it on every card shape here.
+A view you cannot see the button in is not one you can drive the phone from.
+
+**What it costs.** The sensor frame, which is the copy the scene view exists to
+avoid. Composing is actually cheaper than the scene view — that one's expense
+was never the shrink but the card inset warped out of the sensor — so the price
+is the 12MB copy, and it is the one thing here much dearer on a Pi than on the
+machine these numbers came from. Paid at ten frames a second rather than
+twenty-five: this view is watched to read a card that is not moving and to see
+where a pointer is, not for motion. `SNAPSHOT_SCREEN` is a conservative first
+guess on hardware it was not measured on; raise it if the Pi has the room.
+
+**Only while somebody is looking at it.** The web side already touches
+`rpi/.viewing` whenever a browser fetches a frame, and that file now carries
+which view was asked for — a query parameter on `/api/frame.jpg` and
+`/api/frame.mjpeg`, because an `<img>` cannot set a header. In the file rather
+than in an endpoint of its own so the two facts expire together: a mode set by
+its own call would outlive the tab that set it, and the scanner would go on
+buying sensor frames for nobody. An unknown word, an empty file or an older
+server all mean the scene.
+
+It is written through a rename. Once the file had contents worth reading it also
+had a window in which it had none, and the scanner reads it on its own clock up
+to thirty times a second; catching the truncate makes it see an empty file,
+read that — correctly — as "the scene", and cache it against an mtime that may
+not move again for a second.
+
+**Where it falls back.** No corners, or corners that have wandered off the
+frame, and the scene comes back instead. That is the useful answer rather than
+the tidy one: the scene view is the picture that shows *why* there is no phone
+view — the phone out of frame, the mount knocked, the outline sitting on a
+reflection — and it is the one a driver fixes that from.
+
+`▣ Set box` switches back to the scene on its own. A box dragged on the picture
+is sent as a fraction of the camera frame, and the phone view is not the camera
+frame; the same drag would land somewhere else entirely and the failure would be
+silent — a box accepted, the quad moved, and the scanner reading a patch of car
+door. There is nothing lost by switching, since you cannot draw the phone's
+outline on a picture already cropped to it.
+
 ### Reading the live view
 
 | | |
@@ -2115,7 +2189,8 @@ node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 383 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  92 on merging readings across frames, and on
                                 #     a recovered leg staying recovered
-python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
+python3 rpi/test_pipeline.py    # 206 on where to look, how big, what to log,
+                                #     and the two pictures the live view sends
 python3 rpi/test_exposure.py    # 120 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
 python3 rpi/test_journal.py     # 137 on keeping one row per offer, and on a
@@ -2125,16 +2200,18 @@ python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 143 on the loop that holds the camera
+python3 rpi/test_scan_pi.py     # 163 on the loop that holds the camera, and
+                                #     on which live view it is being asked for
 python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  39 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
-python3 rpi/test_liveview.py    #  39 on the picture the driver watches, on
-                                #     nothing else being served with it, and on
-                                #     the dashboard layout being wired up
+python3 rpi/test_liveview.py    #  48 on the picture the driver watches, on
+                                #     nothing else being served with it, on the
+                                #     dashboard layout being wired up, and on
+                                #     which of the two views was asked for
 python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
-python3 rpi/test_layout.py      # 131 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 153 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 ```

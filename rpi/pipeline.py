@@ -714,6 +714,50 @@ def resize_height(image, height):
                       interpolation=cv2.INTER_CUBIC if scale > 1 else cv2.INTER_AREA)
 
 
+def screen_view(frame, quad, height):
+    """The phone's screen, flattened, filling the picture.
+
+    `snapshot` below answers "is it looking at the right thing?" and is built
+    for that: the whole scene, shrunk hard, with the corners drawn on. That is
+    the right picture for aiming a camera and the wrong one for *reading* the
+    phone through it, which is what the rig's own display is used for when the
+    driver is working the phone with a bluetooth mouse rather than a thumb.
+    Most of a scene view is car interior, and the part that is not is a couple
+    of hundred pixels of phone.
+
+    This is the same warp the reader uses — straight on, at a fixed height —
+    without the OCR preprocessing, which is contrast-stretched, thresholded and
+    sometimes inverted, and is a picture of a page rather than a picture of a
+    screen. Colour where the frame has colour, because "which button is blue"
+    is a thing a person reads off a phone and a reader never does.
+
+    Not cropped to the reading box either. The box is deliberately the part of
+    the screen a *price* lives in; the Accept button is outside it on every card
+    shape here, and a view you cannot see the button in is not one you can drive
+    the phone from.
+
+    Returns None when there is nothing to flatten, so the caller can fall back
+    to the scene rather than publish a stretched picture of the wrong corners.
+    """
+    if quad is None or height <= 0:
+        return None
+    quad = np.asarray(quad, dtype=np.float32)
+    if quad.shape != (4, 2) or not np.all(np.isfinite(quad)):
+        return None
+    h, w = frame.shape[:2]
+    # Corners that have wandered off the frame warp to a picture of the black
+    # outside it. The tracker can produce those between a phone being moved and
+    # the recovery noticing, and they are exactly when somebody is looking.
+    if quad[:, 0].max() < 0 or quad[:, 1].max() < 0:
+        return None
+    if quad[:, 0].min() > w or quad[:, 1].min() > h:
+        return None
+    view = warp(frame, quad, height)
+    if view.ndim == 2:
+        view = cv2.cvtColor(view, cv2.COLOR_GRAY2BGR)
+    return view
+
+
 def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640, card=None,
              warp_card=True):
     """One image that answers "is it looking at the right thing?".

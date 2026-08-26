@@ -1106,6 +1106,120 @@ exposures = [c['ExposureTime'] for c in sixty['cam'].controls if 'ExposureTime' 
 ok_('a measured ladder with nothing shorter never shortens the exposure',
     all(e >= 16667 for e in exposures))
 
+# --- which picture the live view is asking for -----------------------------
+#
+# One file carries both facts, because they expire together: a view nobody has
+# asked for in ten seconds is not being watched, and there is no mode to honour.
+# Getting that wrong in the safe direction costs a stale picture; getting it
+# wrong the other way has the scanner buying a sensor frame ten times a second
+# for a browser tab that was closed an hour ago.
+watch = os.path.join(tempfile.mkdtemp(), '.viewing')
+real_watch = SP.WATCH_PATH
+SP.WATCH_PATH = watch
+try:
+    def asked_for(text, age=0.0):
+        """Write the file as the server would, optionally already stale."""
+        SP._watch_cache = (None, SP.VIEW_SCENE)     # a fresh process, not a cache hit
+        with open(watch, 'w') as fh:
+            fh.write(text)
+        if age:
+            os.utime(watch, (time.time() - age, time.time() - age))
+        return SP.watching()
+
+    eq('no file at all is nobody watching', SP.watching(), (False, SP.VIEW_SCENE))
+    eq('the scene, asked for', asked_for('scene\n'), (True, SP.VIEW_SCENE))
+    eq('the phone, asked for', asked_for('screen\n'), (True, SP.VIEW_SCREEN))
+    # An older web side wrote this file empty. It must not read as a request for
+    # the expensive picture.
+    eq('an empty file is the view that has always been there',
+       asked_for(''), (True, SP.VIEW_SCENE))
+    eq('...and so is a word this side does not know',
+       asked_for('holographic\n'), (True, SP.VIEW_SCENE))
+    # A half-written file is reachable: the server truncates and rewrites in
+    # place while this side may be reading.
+    eq('...and so is half of one', asked_for('scr'), (True, SP.VIEW_SCENE))
+    # The window is what makes the mode expire with the person watching.
+    eq('a request nobody has renewed stops being one',
+       asked_for('screen\n', age=SP.WATCH_WINDOW + 1), (False, SP.VIEW_SCENE))
+
+    # Read once per camera frame, so up to thirty times a second, off the card.
+    # The contents are cached against the mtime; a changed mtime must still be
+    # picked up or switching views would never take effect.
+    asked_for('screen\n')
+    opened = []
+    real_open = SP.open if hasattr(SP, 'open') else open
+    import builtins
+    real_builtin_open = builtins.open
+
+    def counting_open(*a, **k):
+        if a and a[0] == watch:
+            opened.append(a[0])
+        return real_builtin_open(*a, **k)
+
+    builtins.open = counting_open
+    try:
+        for _ in range(20):
+            SP.watching()
+        eq('twenty looks at an unchanged file read it none', len(opened), 0)
+        with open(watch, 'w') as fh:
+            fh.write('scene\n')
+        os.utime(watch, (time.time() + 0.01, time.time() + 0.01))
+        eq('...and a changed one is picked up', SP.watching(), (True, SP.VIEW_SCENE))
+    finally:
+        builtins.open = real_builtin_open
+
+    # The rate follows the view, because the phone view buys a sensor frame.
+    eq('nobody watching is the idle tick',
+       SP.snapshot_interval(SP.VIEW_SCENE, False), SP.SNAPSHOT_IDLE)
+    eq('...whichever view was last asked for',
+       SP.snapshot_interval(SP.VIEW_SCREEN, False), SP.SNAPSHOT_IDLE)
+    eq('the scene runs fast', SP.snapshot_interval(SP.VIEW_SCENE, True), SP.SNAPSHOT_FAST)
+    eq('the phone view runs slower, and pays for the sensor frame with it',
+       SP.snapshot_interval(SP.VIEW_SCREEN, True), SP.SNAPSHOT_SCREEN)
+    ok_('...which is slower, or it is not paying for anything',
+        SP.SNAPSHOT_SCREEN > SP.SNAPSHOT_FAST)
+finally:
+    SP.WATCH_PATH = real_watch
+
+
+# --- and what gets written -------------------------------------------------
+shot_dir = tempfile.mkdtemp()
+shot = os.path.join(shot_dir, 'live.jpg')
+big = np.full((1748, 2328, 3), 30, np.uint8)
+big[300:1500, 700:1400] = 210
+phone = np.float32([[700, 300], [1400, 300], [1400, 1500], [700, 1500]])
+cfg_min = {'quad': phone.tolist(), 'cardHeight': 900}
+
+SP.write_snapshot(big, cfg_min, shot, quad=phone, roi=None, view=SP.VIEW_SCENE)
+scene_img = cv2.imread(shot)
+eq('the scene view is the width it has always been', scene_img.shape[1], SP.SNAPSHOT_WIDTH)
+
+SP.write_snapshot(big, cfg_min, shot, quad=phone, roi=None, view=SP.VIEW_SCREEN)
+phone_img = cv2.imread(shot)
+eq('the phone view is the height asked for', phone_img.shape[0], SP.SCREEN_HEIGHT)
+ok_('...and holds a great deal more of the phone than the scene did',
+    phone_img.shape[0] * phone_img.shape[1] > 8 * scene_img.shape[0] * scene_img.shape[1]
+    * ((1400 - 700) * (1500 - 300)) / float(2328 * 1748))
+
+# No corners is the case this has to survive rather than the case it is for:
+# the phone out of frame, the mount knocked, the outline sitting on a
+# reflection. Falling back to the scene shows the driver which of those it is.
+SP.write_snapshot(big, cfg_min, shot, quad=phone - np.float32([9000, 0]), roi=None,
+                  view=SP.VIEW_SCREEN)
+eq('corners that have wandered off the frame fall back to the scene',
+   cv2.imread(shot).shape[1], SP.SNAPSHOT_WIDTH)
+# ...including when they came from the stored calibration rather than the
+# tracker, which is the shape this takes when a rig is started with the phone
+# not yet in the mount.
+SP.write_snapshot(big, {'quad': (phone + np.float32([0, 9000])).tolist(),
+                        'cardHeight': 900},
+                  shot, quad=None, roi=None, view=SP.VIEW_SCREEN)
+eq('...and so does a stored one that no longer points at anything',
+   cv2.imread(shot).shape[1], SP.SNAPSHOT_WIDTH)
+# It is a picture to read, so it is not written at the quality of a thumbnail.
+ok_('the phone view is encoded for reading, not for glancing',
+    SP.SCREEN_QUALITY > SP.SNAPSHOT_QUALITY)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

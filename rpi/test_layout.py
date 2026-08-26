@@ -271,6 +271,33 @@ const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
           layers: layers,
         };
       });
+      // The other thing this panel is used for: reading the phone through it
+      // and working it with a bluetooth mouse. That view is only worth having
+      // if the picture is bigger than the one it replaced, which is a claim
+      // about pixels and can be measured.
+      if (name === 'live.html') {
+        const before = await page.evaluate(() => {
+          const r = document.getElementById('view').getBoundingClientRect();
+          return { w: r.width, h: r.height };
+        });
+        await page.click('#viewMode');
+        await page.waitForTimeout(1200);
+        out[panel[0] + ' phoneview'] = await page.evaluate(before => {
+          const d = document.documentElement;
+          const img = document.getElementById('view');
+          const r = img.getBoundingClientRect();
+          const btn = document.getElementById('viewMode');
+          return {
+            src: img.getAttribute('src') || '',
+            pressed: btn.getAttribute('aria-pressed'),
+            label: btn.textContent.trim(),
+            h: r.height,
+            was: before.h,
+            rowH: document.getElementById('app').getBoundingClientRect().height,
+            over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+          };
+        }, before);
+      }
       await page.close();
     }
     await ctx.close();
@@ -304,11 +331,22 @@ with open(journal, 'w') as fh:
     for r in rows:
         fh.write(json.dumps(r) + '\n')
 
+# A frame on disk, or live.html hides the picture and there is no layout to
+# measure. Portrait and the shape of a phone, because that is what the view
+# being checked here publishes and the whole question is whether a tall picture
+# gets the height of a wide panel.
+frame = os.path.join(work, 'live.jpg')
+try:
+    from PIL import Image
+    Image.new('RGB', (573, 1000), (238, 240, 244)).save(frame, quality=70)
+except Exception:
+    skip('no PIL, so there is no frame to lay out')
+
 port = free_port()
 proc = subprocess.Popen(
     ['node', os.path.join(ROOT, 'server.js')],
     env=dict(os.environ, SCANNER='0', PORT=str(port), JOURNAL=journal,
-             FRAME=os.path.join(work, 'live.jpg')),
+             FRAME=frame),
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 base = 'http://127.0.0.1:%d' % port
 try:
@@ -383,6 +421,33 @@ try:
             # top of anything. A grid whose column count went out of step with
             # its markup put the controls over the status line at every size
             # this rig ships on, and the page still rendered.
+            phone = got.get('%s phoneview' % panel)
+            if name == 'live.html' and phone:
+                # The mode has to reach the rig, and it travels on the request
+                # for a frame — there is no other call. A src that does not
+                # carry it is a button that changes the layout and nothing else.
+                ok_('the phone view asks the rig for the phone at %s (%s)'
+                    % (panel, phone['src'][:48]), 'view=screen' in phone['src'])
+                eq('...and says it is a mode, not a link, at %s' % panel,
+                   phone['pressed'], 'true')
+                # The label names what pressing it gets you, or the driver
+                # presses it to leave a view they are already in.
+                ok_('...and offers the way back at %s (%r)' % (panel, phone['label']),
+                    'Scene' in phone['label'])
+                ok_('the phone view does not overflow the glass at %s' % panel,
+                    not phone['over'])
+                if dashboard:
+                    # The whole point. A portrait phone in a landscape cell is
+                    # bounded by height, so this only pays if it gets the
+                    # height — and the picture it replaces was drawn at a third
+                    # of the panel.
+                    ok_('the phone fills the panel at %s (%.0fpx of %.0f)'
+                        % (panel, phone['h'], phone['rowH']),
+                        phone['h'] > phone['rowH'] * 0.85)
+                    ok_('...taller than the row the scene view was boxed into '
+                        'at %s (%.0fpx, was %.0f)' % (panel, phone['h'], phone['was']),
+                        phone['h'] > phone['was'] + 40)
+
             layers = r.get('layers') or []
             if len(layers) > 1:
                 overlaps = [

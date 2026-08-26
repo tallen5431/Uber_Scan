@@ -275,6 +275,85 @@ try:
     eq('the two files agree on where a dashboard panel starts',
        sorted(int(h) for h in heights), [380, 620])
 
+    # --- which picture the browser is asking for --------------------------
+    #
+    # Two views now: the wide shot with the corners drawn on, for aiming the
+    # camera, and the phone's own screen flattened, for reading the phone
+    # through the rig's display. The scanner learns which from the same file
+    # that tells it somebody is watching, so the two expire together — a mode
+    # set by a call of its own would outlive the tab that set it, and the
+    # scanner would go on buying a sensor frame ten times a second for nobody.
+    #
+    # This is the seam between two processes that are sometimes parent and
+    # child and sometimes strangers, so it is checked as bytes on disk.
+    watch = os.path.join(ROOT, 'rpi', '.viewing')
+
+    def settled(want=None):
+        """What the file says once the write behind the request has landed.
+
+        `want` because these run back to back and the file already holds the
+        previous answer: without it a read can win the race and report the
+        request before this one. Waiting for a value that never comes still
+        returns whatever is there, so a genuine failure reads as one.
+        """
+        got = ''
+        for _ in range(60):
+            try:
+                with open(watch) as fh:
+                    got = fh.read().strip()
+            except OSError:
+                got = ''
+            if got and (want is None or got == want):
+                return got
+            time.sleep(0.05)
+        return got or '<never written>'
+
+    def asked_for(query):
+        # A change of view has to go through at once rather than waiting out
+        # the once-a-second throttle, so each of these is a real switch.
+        urllib.request.urlopen(base + '/api/frame.jpg' + query, timeout=3).read()
+        return settled(query.split('view=')[-1].split('&')[0] if 'view=' in query else None)
+
+    eq('asking for the phone view says so', asked_for('?view=screen'), 'screen')
+    eq('...and asking for the scene says that', asked_for('?view=scene'), 'scene')
+    eq('a browser that says nothing gets the view that has always been there',
+       asked_for('?t=123'), 'scene')
+    eq('...and so does one that asks for something invented',
+       asked_for('?view=holographic'), 'scene')
+    # Node hands back an array for a repeated key, and an array is not a word.
+    eq('...or asks twice', asked_for('?view=screen&view=scene'), 'scene')
+
+    # The page uses the stream and keeps the still as a fallback, so the view
+    # has to travel on both. It is the stream that matters most: one request
+    # that never ends, so the only chance to say which picture is when it opens.
+    stream = socket.create_connection(('127.0.0.1', port), timeout=5)
+    stream.sendall(b'GET /api/frame.mjpeg?view=screen HTTP/1.1\r\nHost: x\r\n\r\n')
+    eq('the stream carries it too', settled('screen'), 'screen')
+    stream.close()
+
+    # Never a torn read.
+    #
+    # This file is written by one process and read by another on its own clock,
+    # up to thirty times a second, and an empty read means "the scene" — so a
+    # truncate-then-write hands the driver the wrong picture for as long as the
+    # reader's cache holds it. Sampling for the gap is not a test: the window
+    # is microseconds and a loop that misses it passes, which is how a check
+    # that proves nothing ends up in a suite. Checked at the mechanism instead.
+    # A rename gives the path the staging file's inode, so consecutive writes
+    # land on different ones; writing in place keeps the inode it had.
+    inodes = []
+    for i in range(6):
+        urllib.request.urlopen(
+            base + '/api/frame.jpg?view=' + ('screen' if i % 2 else 'scene'),
+            timeout=3).read()
+        settled('screen' if i % 2 else 'scene')
+        inodes.append(os.stat(watch).st_ino)
+    ok_('the view is swapped in by rename rather than written in place',
+        len(set(inodes)) > 1)
+    # ...and the staging file is not left lying in the repository.
+    ok_('no half-written file is left behind', not os.path.exists(watch + '.part'))
+    eq('...and the last word asked for is the one standing', settled(), 'screen')
+
     # --- the fallback still works -----------------------------------------
     # A browser that will not render a multipart image falls back to fetching
     # stills, so that path may not rot.

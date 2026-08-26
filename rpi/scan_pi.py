@@ -108,6 +108,59 @@ SNAPSHOT_IDLE = 3.0
 SNAPSHOT_WIDTH = 480
 SNAPSHOT_QUALITY = 60
 
+# ...all of which is true of a view used to *aim* the camera, and none of it is
+# true of one used to read the phone.
+#
+# The rig's screen is bolted where the driver can see it, and the phone is not:
+# it sits in the mount pointing at the camera. Working it with a bluetooth mouse
+# and reading it off this panel makes the live view the driver's only sight of
+# the phone — so the offer card has to be legible in it, and so does whichever
+# button the pointer is over.
+#
+# The scene view cannot be that picture at any size. Between reads it is made
+# from the 640x480 luma preview and published 480px wide, and the phone occupies
+# perhaps a third of the frame: call it 160 pixels across for a screen whose
+# text is small at 1080. Enlarging the <img> enlarges those 160 pixels. The
+# information is not in the file.
+#
+# So the phone view is a different picture rather than a bigger one: the same
+# perspective warp the reader uses, from the sensor frame, filling the frame.
+# 1000px tall against a phone occupying maybe 900 of the sensor's 1748 rows is
+# roughly one-for-one — no invented detail, and about six times the linear
+# resolution the scene view gives the same screen.
+SCREEN_HEIGHT = 1000
+# Higher than the scene's 60. Text at the size a phone draws it is exactly what
+# JPEG's chroma subsampling and ringing damage first, and this picture exists to
+# be read rather than glanced at.
+SCREEN_QUALITY = 78
+
+# The phone view costs what the scene view was written to avoid: it needs the
+# sensor frame, which is the 12MB copy that branch exists to skip.
+#
+# Measured on a development machine against a synthetic rig frame: the warp is
+# 1.8ms and the JPEG 3.2ms on worst-case noise, so composing one is about 5ms —
+# genuinely cheaper than the scene view, whose expense was never the shrink but
+# the card inset warped out of the sensor. The sensor copy on top is the real
+# price, and it is the one thing here that is much dearer on a Pi than on this
+# machine.
+#
+# It does not need 25 a second either way. The scene view is watched for motion
+# — is the phone still in the box, has the mount slipped — and a slide show
+# there reads as a fault. This one is watched to read a card that is not moving
+# and to see where a mouse pointer is. Ten a second is a conservative first
+# guess on hardware this was not measured on; raise it if the Pi turns out to
+# have the room, since nothing else on this loop depends on the number.
+#
+# Paid only while somebody has actually asked for this view, which is what
+# .viewing carries.
+SNAPSHOT_SCREEN = 0.1
+
+# What the browser asked to look at. Anything else is the scene, so a truncated
+# write, an empty file or an older server that writes nothing all land on the
+# view that has always been there.
+VIEW_SCENE = 'scene'
+VIEW_SCREEN = 'screen'
+
 # The motion gate fires once per offer, because a card sitting still is not a
 # change. One frame is therefore the only sample there would ever be, and one
 # frame is where a leg gets lost to glare or a blink of defocus. After anything
@@ -363,13 +416,44 @@ def use_manual_box(scanner, quad_px):
     scanner.card_share = 1.0
 
 
-def snapshot_interval():
+_watch_cache = (None, VIEW_SCENE)
+
+
+def watching():
+    """Whether anyone is looking, and at which view.
+
+    One file, because the two questions have one answer: a view nobody asked
+    for is not being watched, and a watcher who has not said which view wants
+    the one that has always been there. The web side rewrites this whenever a
+    browser fetches a frame, so the mode cannot drift away from who is
+    actually looking — it expires with them.
+
+    Called once per camera frame, so up to thirty times a second, and this file
+    is on the card rather than in /dev/shm: the mtime is a stat the kernel
+    answers out of its dentry cache, but reading it is an open, a read and a
+    close each time. The web side rewrites it at most once a second, so the
+    contents are cached against the mtime and only read when that moves.
+    """
+    global _watch_cache
     try:
-        if time.time() - os.path.getmtime(WATCH_PATH) < WATCH_WINDOW:
-            return SNAPSHOT_FAST
-    except OSError:
-        pass
-    return SNAPSHOT_IDLE
+        stamp = os.path.getmtime(WATCH_PATH)
+        if time.time() - stamp >= WATCH_WINDOW:
+            return False, VIEW_SCENE
+        if _watch_cache[0] != stamp:
+            with open(WATCH_PATH) as fh:
+                want = fh.read(16).strip()
+            _watch_cache = (stamp, VIEW_SCREEN if want == VIEW_SCREEN else VIEW_SCENE)
+    except (OSError, ValueError):
+        return False, VIEW_SCENE
+    return True, _watch_cache[1]
+
+
+def snapshot_interval(view=VIEW_SCENE, seen=None):
+    if seen is None:
+        seen = watching()[0]
+    if not seen:
+        return SNAPSHOT_IDLE
+    return SNAPSHOT_SCREEN if view == VIEW_SCREEN else SNAPSHOT_FAST
 
 
 def load_config(path):
@@ -499,7 +583,8 @@ def _read_ok():
 _snapshot_error = None
 
 
-def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None):
+def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None,
+                   view=VIEW_SCENE):
     """Write what the camera sees, for the live page. Never fatally.
 
     `quad` overrides the calibrated corners so the outline follows the tracker
@@ -511,8 +596,12 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None)
     come down onto the smaller picture. See the call site for why that is worth
     doing: the sensor frame exists to be read, and copying twelve megabytes of
     it to make a 480px thumbnail is most of what the live view costs.
+
+    `view` picks between aiming the camera and reading the phone through it.
+    See SCREEN_HEIGHT.
     """
     global _snapshot_error
+    quality = SNAPSHOT_QUALITY
     try:
         if quad is None:
             quad = np.array(cfg['quad'], dtype=np.float32)
@@ -523,14 +612,25 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None)
             # it has to become a colour picture before anything coloured goes on
             # it — otherwise the box comes out grey on grey.
             frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-        view = PL.snapshot(frame, quad, roi,
-                           cfg.get('cardHeight', 900),
-                           width=SNAPSHOT_WIDTH, card=card,
-                           warp_card=scale is None)
+        picture = None
+        if view == VIEW_SCREEN:
+            picture = PL.screen_view(frame, quad, SCREEN_HEIGHT)
+            if picture is not None:
+                quality = SCREEN_QUALITY
+        if picture is None:
+            # No corners, or corners nothing could be warped out of. Falling
+            # back to the scene is the useful answer rather than the tidy one:
+            # it is the picture that shows *why* there is no phone view — the
+            # phone out of frame, the mount knocked, the outline sitting on a
+            # reflection — and it is the one the driver fixes that from.
+            picture = PL.snapshot(frame, quad, roi,
+                                  cfg.get('cardHeight', 900),
+                                  width=SNAPSHOT_WIDTH, card=card,
+                                  warp_card=scale is None)
     except Exception as e:
         message = str(e)
     else:
-        message = PL.write_jpeg(path, view, quality=SNAPSHOT_QUALITY)
+        message = PL.write_jpeg(path, picture, quality=quality)
     # This runs several times a second; repeating one broken thing that often
     # buries everything else in the log.
     if message and message != _snapshot_error:
@@ -1711,7 +1811,9 @@ def main():
 
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.
-                due = args.snapshot and (now - last_snapshot) > snapshot_interval()
+                seen_by, want_view = watching()
+                due = args.snapshot and (now - last_snapshot) > snapshot_interval(
+                    want_view, seen_by)
                 if not do_read and not due:
                     continue
                 # The sensor frame is copied only when something is going to
@@ -1723,7 +1825,18 @@ def main():
                 # is already in hand, already the right sort of size, and the
                 # only thing lost is colour in a picture nobody reads colour
                 # from. The reader still gets the sensor, at full resolution.
-                if do_read:
+                #
+                # ...and the phone view is the case that needs it back. It is a
+                # picture of the phone's screen made to be read, and the preview
+                # stream does not contain the text: warping 640x480 luma up to a
+                # 1000px screen invents every pixel of it. So that view buys the
+                # sensor frame, and pays for it by composing eight times a
+                # second instead of twenty-five — see SNAPSHOT_SCREEN. Only
+                # while somebody is actually looking at it; the moment they stop
+                # asking, `watching()` says so and this goes back to the
+                # preview.
+                want_sensor = due and seen_by and want_view == VIEW_SCREEN
+                if do_read or want_sensor:
                     # picamera2's "RGB888" hands back B, G, R ordered arrays,
                     # which is exactly what OpenCV expects. The name is the odd
                     # one out.
@@ -1748,7 +1861,13 @@ def main():
             if args.snapshot and (due or do_read):
                 write_snapshot(frame, cfg, args.snapshot, quad=scanner.quad,
                                roi=scanner.crop_box, card=previous_card,
-                               scale=preview_scale)
+                               scale=preview_scale,
+                               # The phone view only when somebody is asking for
+                               # it. A read composes a snapshot too, and one
+                               # written on the reader's schedule to a page
+                               # nobody has open should not be the expensive
+                               # kind.
+                               view=want_view if seen_by else VIEW_SCENE)
                 last_snapshot = time.time()
 
             if not do_read:

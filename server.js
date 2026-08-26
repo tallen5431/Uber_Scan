@@ -316,12 +316,46 @@ var RESET_PATH = path.join(ROOT, 'rpi', '.recalibrate');
 var CROP_PATH = path.join(ROOT, 'rpi', '.cropbox.json');
 var cropSeq = 0;
 var lastTouch = 0;
+var lastView = '';
 
-function touchWatchFile() {
+/* Which picture the browser is asking for, carried in the file that already
+ * says somebody is asking. Two views: `scene` is the wide shot with the
+ * corners drawn on, for aiming the camera; `screen` is the phone's own screen
+ * flattened and filling the frame, for reading the phone through the rig's
+ * display. See SCREEN_HEIGHT in rpi/scan_pi.py for why it has to be a
+ * different picture rather than a bigger one.
+ *
+ * In the file rather than in a new endpoint because the two facts expire
+ * together. A mode set by its own request would outlive the browser that set
+ * it — close the tab in phone view and the scanner keeps paying for phone
+ * frames nobody is looking at, until something else happens to correct it.
+ * Written by the request for a frame, so it lasts exactly as long as someone
+ * is fetching frames, and an unknown or missing value is the scene.
+ */
+function touchWatchFile(view) {
+  var want = view === 'screen' ? 'screen' : 'scene';
   var now = Date.now();
-  if (now - lastTouch < 1000) return;      // the mtime only needs to be recent
+  // The mtime only needs to be recent — but a *change* of view has to go
+  // through at once, or switching costs the driver up to a second of looking
+  // at the wrong picture and wondering whether the button worked.
+  if (now - lastTouch < 1000 && want === lastView) return;
   lastTouch = now;
-  fs.writeFile(WATCH_PATH, '', function () {});
+  lastView = want;
+  /* Written through a rename, the same way the scanner writes a frame.
+   *
+   * Once this file had contents worth reading it also had a window in which it
+   * had none: writeFile truncates and then writes, and the scanner reads this
+   * on its own clock, up to thirty times a second. Catching the gap makes the
+   * scanner see an empty file, which it reads — correctly — as "no view named,
+   * use the scene", and it then caches that against the mtime. If the mtime of
+   * the truncate and of the write land in the same tick, the cache is not
+   * invalidated and the driver watches the wrong picture until the next write,
+   * up to a second later. A rename has no such window: the scanner sees the
+   * old contents or the new ones. */
+  fs.writeFile(WATCH_PATH + '.part', want + '\n', function (err) {
+    if (err) return;
+    fs.rename(WATCH_PATH + '.part', WATCH_PATH, function () {});
+  });
 }
 
 function broadcast(read) {
@@ -1208,8 +1242,14 @@ function route(req, res) {
   }
 
   var pathname;
+  var wantView = '';
   try {
-    pathname = decodeURIComponent(url.parse(req.url).pathname);
+    var parsed = url.parse(req.url, true);
+    pathname = decodeURIComponent(parsed.pathname);
+    // Node hands back an array for a repeated key. Only the frame endpoints
+    // look at this, and only ever for one of two known words, so anything
+    // else — an array, a number, a novel — falls through to the scene.
+    wantView = typeof parsed.query.view === 'string' ? parsed.query.view : '';
   } catch (e) {
     return send(res, 400, 'bad request', { 'Content-Type': 'text/plain' });
   }
@@ -1274,7 +1314,7 @@ function route(req, res) {
       return send(res, 503, 'too many viewers', { 'Content-Type': 'text/plain' });
     }
     mjpegClients++;
-    touchWatchFile();
+    touchWatchFile(wantView);
     res.writeHead(200, {
       'Content-Type': 'multipart/x-mixed-replace; boundary=' + MJPEG_BOUNDARY,
       'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -1319,7 +1359,7 @@ function route(req, res) {
           lastSent = st.mtimeMs;
           // Someone is watching, so the scanner should keep composing at its
           // fast rate. Cheap and throttled inside touchWatchFile.
-          touchWatchFile();
+          touchWatchFile(wantView);
           var head = '--' + MJPEG_BOUNDARY + '\r\n'
                    + 'Content-Type: image/jpeg\r\n'
                    + 'Content-Length: ' + data.length + '\r\n\r\n';
@@ -1339,7 +1379,7 @@ function route(req, res) {
   if (pathname === '/api/frame.jpg') {
     // Tell the scanner someone is looking, so it refreshes the view quickly
     // instead of on its idle tick. Throttled: this fires twice a second.
-    touchWatchFile();
+    touchWatchFile(wantView);
     return fs.readFile(framePath(), function (err, data) {
       if (err) {
         return send(res, 404, 'no frame yet', { 'Content-Type': 'text/plain' });

@@ -585,6 +585,61 @@ with_card = PL.snapshot(cv2.cvtColor(small, cv2.COLOR_GRAY2BGR),
 ok_("...but does show the reader's own picture when there is one",
     with_card[-40:, -40:].std() > 1.0)
 
+# --- the other live view: the phone's screen, to be read through -----------
+# The scene view exists to answer "is it pointed at the right thing?" and is
+# built for that: shrunk to 480px with the corners drawn on. It cannot also be
+# the picture somebody reads the phone through — the phone is about a fifth of
+# the frame, so it lands in roughly 120x200 of those pixels, and no amount of
+# enlarging the <img> puts detail back that the file never held.
+scene_phone = sensor_quad * (480.0 / 2328)
+eq('the phone is barely a hundred pixels wide inside the scene view',
+   int(scene_phone[:, 0].max() - scene_phone[:, 0].min()), 144)
+
+flat = PL.screen_view(sensor, sensor_quad, 1000)
+eq('the phone view is exactly the height asked for', flat.shape[0], 1000)
+eq('...and keeps the screen\'s own shape', flat.shape[1],
+   int(round(1000 * (1400 - 700) / float(1500 - 300))))
+ok_('...which is five times the phone the scene view holds',
+    flat.shape[1] > 4 * (scene_phone[:, 0].max() - scene_phone[:, 0].min()))
+
+# Colour, even off the luma preview, because the caller composites nothing onto
+# it and the page displays it as-is — a two-dimensional array is not a picture
+# a browser can be handed.
+eq('a colour frame stays colour', flat.ndim, 3)
+grey = PL.screen_view(small, sensor_quad / preview_scale, 400)
+eq('a luma frame comes back as a picture rather than a plane', grey.ndim, 3)
+
+# Not cropped to the reading box. That box is deliberately the part of the
+# screen a *price* lives in; the Accept button is outside it on every card shape
+# here, and a view with no button in it is not one a phone can be driven from.
+whole = PL.warp(sensor, sensor_quad, 1000)
+eq('the phone view is the whole screen', flat.shape, whole.shape)
+boxed = PL.crop(whole, [0, 0.2, 1, 0.6])
+ok_("...and the reader's own picture is a slice of it, which is why this is "
+    'not that', boxed.shape[0] < whole.shape[0] * 0.7)
+
+# Nothing to flatten is None rather than a picture of nothing, so the caller can
+# fall back to the scene — which is the view that shows *why* there is no phone
+# in this one.
+# `ok_(... is None)` rather than `eq(..., None)`: comparing an ndarray to None
+# is elementwise, and the array of booleans that comes back raises rather than
+# being false. A refusal check written the obvious way crashes when the refusal
+# stops happening, which reads as a broken test rather than a caught fault.
+ok_('no corners, no phone view', PL.screen_view(sensor, None, 1000) is None)
+ok_('...nor a zero height', PL.screen_view(sensor, sensor_quad, 0) is None)
+ok_('...nor corners that are not four points',
+    PL.screen_view(sensor, np.float32([[0, 0], [1, 1]]), 1000) is None)
+ok_('...nor corners with a NaN in them',
+    PL.screen_view(sensor, np.float32([[np.nan, 0], [1400, 300],
+                                       [1400, 1500], [700, 1500]]), 1000) is None)
+# Corners that have wandered clean off the frame warp to a picture of the black
+# outside it, and the tracker can produce those between a phone being moved and
+# the recovery noticing — which is exactly when somebody is looking.
+ok_('...nor corners entirely off the left of the frame',
+    PL.screen_view(sensor, sensor_quad - np.float32([4000, 0]), 1000) is None)
+ok_('...nor corners entirely below it',
+    PL.screen_view(sensor, sensor_quad + np.float32([0, 4000]), 1000) is None)
+
 # --- the live picture, written where a server may be reading it ------------
 import tempfile                                               # noqa: E402
 
