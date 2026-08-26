@@ -82,7 +82,7 @@ class Request(object):
 class FakeCam(object):
     """A cabin, then an offer, then the cabin again."""
 
-    def __init__(self, offer, empty, appear_at=0.6, vanish_at=6.0):
+    def __init__(self, offer, empty, appear_at=0.6, vanish_at=6.0, spoil=None):
         self.offer, self.empty = offer, empty
         self.appear_at, self.vanish_at = appear_at, vanish_at
         self.started = time.time()
@@ -90,11 +90,18 @@ class FakeCam(object):
         self.double_released = 0
         self.controls = []
         self.stopped = False
+        # Something done to every frame on its way out, for the cases where what
+        # is being tested is a bad picture rather than a bad card.
+        self.spoil = spoil
+        self.frames = 0
         self._show()
 
     def _show(self):
         t = time.time() - self.started
         self.frame = self.offer if self.appear_at <= t < self.vanish_at else self.empty
+        if self.spoil is not None:
+            self.frame = self.spoil(self.frame, self.frames)
+        self.frames += 1
         grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
         small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
         # YUV420 puts the Y plane first, which is all the loop reads.
@@ -117,7 +124,7 @@ class FakeCam(object):
 
 
 def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
-        until=None, look=None):
+        until=None, look=None, spoil=None, config_extra=None):
     """Drive scan_pi.main() over a fake camera and collect what came out.
 
     `until(state)` ends the run as soon as the thing being tested has happened,
@@ -138,16 +145,19 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     workdir = tempfile.mkdtemp()
     config = os.path.join(workdir, 'config.json')
     journal = os.path.join(workdir, 'journal.jsonl')
+    settings = {'quad': [[float(x), float(y)] for x, y in quad],
+                'cardHeight': 900,
+                'capture': {'width': CAP[0], 'height': CAP[1]},
+                'lensPosition': 10.0,
+                'exposureTime': 16667,
+                'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                             'pad': 0, 'secondsPerItem': 0}}
+    settings.update(config_extra or {})
     with open(config, 'w') as fh:
-        json.dump({'quad': [[float(x), float(y)] for x, y in quad],
-                   'cardHeight': 900,
-                   'capture': {'width': CAP[0], 'height': CAP[1]},
-                   'lensPosition': 10.0,
-                   'exposureTime': 16667,
-                   'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
-                                'pad': 0, 'secondsPerItem': 0}}, fh)
+        json.dump(settings, fh)
 
-    cam = FakeCam(offer, empty, appear_at=appear_at, vanish_at=vanish_at)
+    cam = FakeCam(offer, empty, appear_at=appear_at, vanish_at=vanish_at,
+                  spoil=spoil)
     started = []
     real_start, real_emit, real_sleep = SP.start_camera, SP.emit, time.sleep
     real_look = PL.Scanner.look_many
@@ -829,7 +839,7 @@ def drive(extra_argv, seconds, look=None, appear_at=0.4):
 
     SP.start_camera = lambda *a, **k: cam
     SP.emit = lambda *a, **k: (said.append(time.time()), reads.append(time.time()))
-    SP.emit_alive = lambda: said.append(time.time())
+    SP.emit_alive = lambda too_bright=False: said.append(time.time())
     if look is not None:
         PL.Scanner.look_many = look
 
@@ -1033,6 +1043,68 @@ finally:
 ok_('a health line appears even with no successful read', len(said) == 1)
 ok_('...and says every read failed', 'ALL FAILED' in (said[0] if said else ''))
 ok_('...and how many', '12' in (said[0] if said else ''))
+
+# --- a picture that never settles is still exposed for ----------------------
+# This is the trap that used to close on a shift, and it closed because the two
+# halves of it were written months apart and never read together.
+#
+# The exposure control was gated on `scanner.settled`. Shortening the exposure
+# is what a blown-out card provokes. On a 60Hz phone the rung below the
+# calibrated one is half a dimming cycle, so the screen ripples — and a rippling
+# screen never settles: measured against the real motion gate, 8333us on a 60Hz
+# panel reads 75.2 where the settle threshold is 2.0. So the branch that would
+# have given the exposure back never ran again, `should_read` never fired
+# either, and one nudge of the phone's brightness slider ended the shift with
+# the loop still saying "still here" every four seconds.
+#
+# Simulated end to end before the fix: at twice the brightness the rig wedged
+# after 19 seconds and managed one read in six minutes.
+#
+# Nothing in the exposure control ever needed a still picture. A percentile and
+# a count of full-well pixels do not care whether the frame is moving.
+def rippling(frame, n):
+    """A screen beating against the shutter: bands that crawl between frames."""
+    rows = np.arange(frame.shape[0], dtype=np.float32)
+    wave = np.sin(rows / 3.0 + n * 1.7)[:, None, None] * 60.0
+    return np.clip(frame.astype(np.float32) + wave, 0, 255).astype(np.uint8)
+
+
+ripple_run = run(TC.uberx_screen(), seconds=30.0, spoil=rippling,
+                 extra_argv=['--no-parallel'],
+                 until=lambda st: False)
+ripple_cam = ripple_run['cam']
+gain_moves = [c for c in ripple_cam.controls if 'AnalogueGain' in c]
+ok_('a rippling picture never settles — the fixture is doing its job',
+    ripple_cam.frames > 50)
+ok_('...and the exposure control still runs against it', len(gain_moves) >= 1)
+
+# The same loop, on a picture that is both rippling and blown out: the state
+# the rig used to lock itself into. What must not happen is that it sits there.
+def blown_and_rippling(frame, n):
+    return rippling(np.clip(frame.astype(np.float32) * 3.0, 0, 255).astype(np.uint8), n)
+
+
+stuck_run = run(TC.uberx_screen(), seconds=30.0, spoil=blown_and_rippling,
+                extra_argv=['--no-parallel'], until=lambda st: False)
+moves = [c for c in stuck_run['cam'].controls if 'AnalogueGain' in c or 'ExposureTime' in c]
+ok_('a blown, rippling picture is still acted on', len(moves) >= 2)
+gains = [c['AnalogueGain'] for c in stuck_run['cam'].controls if 'AnalogueGain' in c]
+ok_('...and the gain comes down rather than staying put',
+    gains and min(gains) < 1.5)
+
+
+# --- ...and only onto rungs this screen measured quiet ----------------------
+# With a measured ladder that has nothing below the calibrated exposure — which
+# is the truthful answer for a 60Hz phone — the rig may not shorten at all. The
+# card stays a little bright, the screen does not ripple, and the driver is told
+# the one thing that fixes it.
+sixty = run(TC.uberx_screen(), seconds=30.0,
+            spoil=lambda f, n: np.clip(f.astype(np.float32) * 3.0, 0, 255).astype(np.uint8),
+            extra_argv=['--no-parallel'], until=lambda st: False,
+            config_extra={'exposureLadder': [16667]})
+exposures = [c['ExposureTime'] for c in sixty['cam'].controls if 'ExposureTime' in c]
+ok_('a measured ladder with nothing shorter never shortens the exposure',
+    all(e >= 16667 for e in exposures))
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)

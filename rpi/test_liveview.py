@@ -18,8 +18,10 @@ aimed.
 The server is the real server.js, started as a subprocess.
 """
 
+import html.parser
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -202,6 +204,76 @@ try:
                urllib.request.urlopen(base + spot, timeout=3).status, 200)
         except urllib.error.HTTPError as e:
             eq('the site still serves %s' % spot, e.code, 200)
+
+    # --- the dashboard layout is wired to the elements it names ------------
+    # The rig's own panel is wide and short, so live.html turns #app into a
+    # two-column grid — the verdict beside the camera view — and hands each
+    # child a `grid-column`. #viewWrap was not a child. It sat one level deeper
+    # inside .live, which is a flex column, so its `grid-column: 2` applied to
+    # nothing: the camera view stacked underneath the verdict in the left-hand
+    # column, the right-hand column stayed empty, and the page grew past the
+    # glass. Measured on an 800x480 panel: columns of 431px and 345px, the
+    # verdict rendered at 431px instead of 784px, 43% of the screen black, and
+    # the page 768px tall so the bar of controls fell off the bottom.
+    #
+    # It survived because it is invisible without a camera: with no frame the
+    # `:has(.gone)` rule collapses the grid to one column and the page looks
+    # right, which is exactly the state a development machine is in.
+    #
+    # Checked structurally rather than by rendering, because that is the actual
+    # rule — a grid places its own children and nobody else's — and because it
+    # holds for whatever gets added next.
+    class Nesting(html.parser.HTMLParser):
+        """The id of each element's DIRECT parent, or None when it has none.
+
+        Direct, deliberately. A grid places its own children and nobody else's,
+        so "somewhere inside #app" is exactly the wrong question — the element
+        that broke this was inside #app the whole time, one level too deep.
+        """
+
+        VOID = ('img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'area',
+                'base', 'col', 'embed', 'param', 'track', 'wbr')
+
+        def __init__(self):
+            html.parser.HTMLParser.__init__(self)
+            self.stack = []          # one entry per open element: its id or None
+            self.parent = {}
+
+        def handle_starttag(self, tag, attrs):
+            got = dict(attrs).get('id')
+            if got:
+                self.parent[got] = self.stack[-1] if self.stack else None
+            if tag not in self.VOID:
+                self.stack.append(got)
+
+        def handle_startendtag(self, tag, attrs):
+            self.handle_starttag(tag, attrs)
+
+        def handle_endtag(self, tag):
+            if tag not in self.VOID and self.stack:
+                self.stack.pop()
+
+    page = open(os.path.join(ROOT, 'live.html')).read()
+    tree = Nesting()
+    tree.feed(page)
+
+    # Every id the dashboard block gives a grid-column to, and where it lives.
+    block = re.search(r'@media \(orientation: landscape\) and \(max-height: \d+px\) \{'
+                      r'(.*?)\n  \}', page, re.S)
+    ok_('the dashboard block is still there', block is not None)
+    placed = set(re.findall(r'#([A-Za-z][\w-]*)[^{}]*\{[^{}]*grid-column',
+                            block.group(1) if block else ''))
+    ok_('...and it places things by id', placed)
+    for name in sorted(placed):
+        eq('%s is a child of the grid that places it' % name,
+           tree.parent.get(name), 'app')
+
+    # Both halves of the layout have to switch at the same width, or the page
+    # spends a range of sizes half in one design and half in the other.
+    heights = set(re.findall(r'orientation: landscape\) and \(max-height: (\d+)px',
+                             page + open(os.path.join(ROOT, 'styles.css')).read()))
+    eq('the two files agree on where a dashboard panel starts',
+       sorted(int(h) for h in heights), [380, 620])
 
     # --- the fallback still works -----------------------------------------
     # A browser that will not render a multipart image falls back to fetching

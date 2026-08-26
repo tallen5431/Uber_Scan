@@ -166,7 +166,7 @@ eq('all clipped', EX.clipped_fraction(np.full((10, 10), 255, np.uint8)), 1.0)
 
 # --- gain tracks the phone dimming itself ----------------------------------
 g = EX.AutoGain(gain=1.5, every=6.0)
-eq('the first look is taken', g.update(np.full((50, 50), 205, np.uint8), 100.0), None)
+eq('the first look is taken', g.update(np.full((50, 50), 205, np.uint8), 100.0), {})
 eq('...and a well-lit card needs nothing', g.gain, 1.5)
 
 # The phone dims at night: gain should climb, and keep climbing while it is dark.
@@ -174,7 +174,7 @@ g = EX.AutoGain(gain=1.5, every=6.0)
 g.update(np.full((50, 50), 90, np.uint8), 100.0)
 first = g.gain
 ok_('a dim card raises gain', first > 1.5)
-eq('but not again within the interval', g.update(np.full((50, 50), 90, np.uint8), 102.0), None)
+eq('but not again within the interval', g.update(np.full((50, 50), 90, np.uint8), 102.0), {})
 for i in range(1, 12):
     g.update(np.full((50, 50), 90, np.uint8), 100.0 + i * 7.0)
 ok_('it keeps climbing while dark', g.gain > first)
@@ -292,22 +292,30 @@ eq('...and nightfall gives all of it back', g.exposure, MEASURED)
 ok_('...leaving a readable card', EX.brightness(at(g.gain, g.exposure, 0.35)) > 150)
 
 # Exposure is spent before gain, because exposure up to the measured value is
-# free and gain is noise. Not *instead of* gain: the candidates are a factor of
-# two apart, so the exposure can only ever get the card close and the gain has
-# to walk the last stretch. What is being asserted is the order.
+# free — every rung was measured quiet — and gain is noise.
+#
+# Asserted as a property of where it comes to rest rather than as the order of
+# the first two moves. The order was the right test of a design with a rule for
+# gain and a separate rule for exposure; there is one rule now, and it picks the
+# longest rung that can carry the light every single beat. So the thing to check
+# is that the rig cannot be found sitting on a short exposure with gain to spare
+# — which is the actual complaint, and which the ordering test could not see.
 g = EX.AutoGain(gain=1.5, every=6.0, exposure=MEASURED)
 t = a_day(g, 12.0)
 short, noisy = g.exposure, g.gain
-first = None
-for _ in range(40):
-    t += 6.0
-    g.update(at(g.gain, g.exposure, 2.0), t)
-    if first is None and (g.exposure != short or abs(g.gain - noisy) > 0.01):
-        first = 'exposure' if g.exposure != short else 'gain'
-eq('coming out of glare lengthens the exposure before it raises the gain',
-   first, 'exposure')
-ok_('...and does end up longer', g.exposure > short)
+a_day(g, 2.0, steps=40, t0=t)
+ok_('coming out of glare lengthens the exposure', g.exposure > short)
 ok_('...on a card that reads', 120 < EX.brightness(at(g.gain, g.exposure, 2.0)) < 250)
+ok_('...without paying for it in noise', g.gain < EX.GAIN_LIMITS[1] / 2)
+
+# Deliberately not "and the gain came down". Less light on the card needs more
+# light out of the camera, so the gain can legitimately end up higher than it
+# was in the glare — what must not happen is the rig sitting on a short
+# exposure with gain it could have spent on a longer one. That is the property,
+# and it is checkable directly.
+longer = [c for c in g.candidates if c > g.exposure]
+ok_('...and it rests on the longest exposure it can afford',
+    not longer or g.gain * g.exposure / longer[0] < EX.GAIN_LIMITS[0])
 
 # The lengthening looks before it steps. Doubling a card that is merely a little
 # dark blows it out, which shortens it straight back, which is a limit cycle —
@@ -337,6 +345,149 @@ g = EX.AutoGain(gain=1.0, every=6.0)
 a_day(g, 5.0, steps=20)
 eq('without an exposure to manage, nothing is invented', g.exposure, None)
 eq('...and the gain still backs off a blown card', g.gain, EX.GAIN_LIMITS[0])
+
+
+# --- the driver turns their phone's brightness up ---------------------------
+# The complaint this was built from, in one line: "it looks too bright if I turn
+# the brightness up on my phone". It was a fair complaint. `brightness` is a
+# percentile, every percentile of a card at full well is 255, and so the loop
+# could not tell a nudge from an eightfold and answered both with the same 18%
+# step on a six-second beat. Measured against the real loop driving a rendered
+# card, the card stayed blown out for 36 seconds after a doubling and 48 after
+# an eightfold — against an offer that lives 30 to 45.
+def chasing(light, gain0=1.5, ladder=None, limit=200):
+    """Seconds until the card is off the rail, and until it is back on target."""
+    g = EX.AutoGain(gain=gain0, every=6.0, exposure=MEASURED,
+                    **({'candidates': ladder} if ladder else {}))
+    t, off_rail = 0.0, None
+    for _ in range(limit):
+        frame = at(g.gain, g.exposure, light)
+        blown = EX.clipped_fraction(frame) > EX.CLIPPED_FRACTION
+        if not blown and off_rail is None:
+            off_rail = t
+        if (off_rail is not None and not blown
+                and abs(EX.brightness(frame) - EX.TARGET_BRIGHT)
+                / EX.TARGET_BRIGHT <= 0.2):
+            return off_rail, t, g
+        t += EX.BLOWN_EVERY if blown else 6.0
+        g.update(frame, t)
+    return off_rail, None, g
+
+
+# Two numbers, because they are two different promises. Coming off the rail is
+# when the card stops being a white rectangle and starts being readable at all;
+# reaching target is when the picture is properly exposed again. The first is
+# the one that costs offers.
+for light in (1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0):
+    rail, settled, g = chasing(light)
+    ok_('a phone turned up %.2fx is off the rail inside 8s' % light,
+        rail is not None and rail <= 8.0)
+    ok_('...and properly exposed again inside 15s at %.2fx' % light,
+        settled is not None and settled <= 15.0)
+
+# It must not be answered by over-correcting into the dark, which is what a flat
+# halving does to a small nudge: the card comes off the rail immediately and
+# then sits at 62% of target while it climbs back.
+rail, settled, g = chasing(1.25)
+ok_('a small nudge is answered with a small cut',
+    EX.brightness(at(g.gain, g.exposure, 1.25)) > EX.TARGET_BRIGHT * 0.75)
+eq('...without touching the exposure at all', g.exposure, MEASURED)
+
+
+# --- and only onto rungs this screen measured quiet -------------------------
+# Falling back down a hardcoded ladder means stepping onto exposures nobody
+# measured. On the commonest panel family the first rung below the calibrated
+# 16667us is 8333us — half a 60Hz cycle, which choose_exposure's own comment
+# calls the only entry in FLICKER_SAFE that bands. Simulated against a 60Hz
+# panel it scores 128.8 where 4.0 already means rippling.
+#
+# On such a phone the honest ladder has nothing below the calibrated value, and
+# the honest answer to a phone turned up past what gain can take is to say so
+# rather than to make the screen ripple.
+SIXTY_HZ = (16667,)                 # what quiet_ladder returns for a 60Hz panel
+
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=MEASURED, candidates=SIXTY_HZ)
+t = 0.0
+for _ in range(60):
+    t += 6.0
+    g.update(at(g.gain, g.exposure, 6.0), t)
+eq('a measured ladder with nothing shorter holds the exposure', g.exposure, MEASURED)
+ok_('...at the gain floor', g.gain < EX.GAIN_LIMITS[0] * 1.02)
+ok_('...and says the phone is too bright rather than making it ripple', g.stuck)
+
+# ...and it stops saying so the moment the phone comes back down.
+for _ in range(20):
+    t += 6.0
+    g.update(at(g.gain, g.exposure, 1.0), t)
+ok_('the complaint clears when the light does', not g.stuck)
+ok_('...on a card back at target',
+    abs(EX.brightness(at(g.gain, g.exposure, 1.0)) - EX.TARGET_BRIGHT)
+    / EX.TARGET_BRIGHT < 0.2)
+
+# A ladder that WAS measured quiet below the calibrated value may be walked.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=MEASURED,
+                candidates=(4167, 8333, 16667))     # a 240Hz panel
+t = 0.0
+for _ in range(60):
+    t += 6.0
+    g.update(at(g.gain, g.exposure, 6.0), t)
+ok_('a measured ladder with room below it is used', g.exposure < MEASURED)
+ok_('...and only rungs that were on it', g.exposure in (4167, 8333, 16667))
+ok_('...leaving a card that reads',
+    EX.clipped_fraction(at(g.gain, g.exposure, 6.0)) <= EX.CLIPPED_FRACTION)
+ok_('...with nothing to complain about', not g.stuck)
+
+# An unmeasured ladder keeps its old emergency, and only its old emergency: it
+# may shorten to escape a blown-out card, but never to tidy up a split.
+g = EX.AutoGain(gain=3.0, every=6.0, exposure=MEASURED)
+ok_('an unmeasured ladder is marked as such', not g.ladder_measured)
+t = 0.0
+for _ in range(30):
+    t += 6.0
+    g.update(at(g.gain, g.exposure, 0.5), t)       # dim: never blown
+eq('...so a dim card never shortens the exposure on a guess', g.exposure, MEASURED)
+
+
+# --- the ladder comes off the measurement calibration already took ----------
+REPORT = [{'exposure': 1042, 'banding': 170.0, 'bright': 20},
+          {'exposure': 2083, 'banding': 169.9, 'bright': 40},
+          {'exposure': 4167, 'banding': 164.7, 'bright': 80},
+          {'exposure': 8333, 'banding': 128.8, 'bright': 150},
+          {'exposure': 16667, 'banding': 2.2, 'bright': 205},
+          {'exposure': 25000, 'banding': 53.0, 'bright': 250},
+          {'exposure': 33333, 'banding': 2.5, 'bright': 255}]
+eq('a 60Hz panel keeps only whole 60Hz cycles',
+   EX.quiet_ladder(REPORT), (16667, 33333))
+eq('...and nothing longer than the exposure that was chosen',
+   EX.quiet_ladder(REPORT, ceiling=16667), (16667,))
+eq('an empty report is an empty ladder', EX.quiet_ladder([]), ())
+
+QUIET = [{'exposure': 4167, 'banding': 1.5, 'bright': 90},
+         {'exposure': 8333, 'banding': 0.7, 'bright': 150},
+         {'exposure': 16667, 'banding': 0.5, 'bright': 205}]
+eq('a 480Hz panel keeps the short rungs too',
+   EX.quiet_ladder(QUIET, ceiling=16667), (4167, 8333, 16667))
+
+# The rungs a bright phone actually pushes the rig onto are the short ones, and
+# they used to be the only exposures it ever used that nobody had measured.
+ok_('the daylight rungs are candidates worth measuring',
+    set(EX.DAYLIGHT_SAFE) & set(EX.quiet_ladder(QUIET, ceiling=16667)))
+
+# ...but a rig calibrated in daylight must not start the night on a 2ms
+# exposure, so a short rung may be measured without ever being elected.
+picked, _ = EX.choose_exposure(
+    lambda us: [np.full((40, 40), min(255, us / 80.0), np.uint8)] * 3,
+    candidates=EX.DAYLIGHT_SAFE + EX.FLICKER_SAFE)
+ok_('a daylight rung is never elected as the calibrated exposure',
+    picked in EX.FLICKER_SAFE)
+
+# Two exposures nobody could deliver used to sit in the list. picamera2 defaults
+# a video configuration's frame duration to 33333us and an exposure cannot
+# outlast its frame, so 40000 and 50000 were requested, silently clamped, and
+# whichever won was written to config.json as "measured against this screen"
+# naming a number the sensor never used.
+ok_('every candidate fits inside a 30fps frame', max(EX.FLICKER_SAFE) <= 33333)
+ok_('...including the default', EX.DEFAULT_EXPOSURE <= 33333)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d exposure checks passed' % ok)

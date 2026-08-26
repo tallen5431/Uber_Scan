@@ -242,7 +242,25 @@ def _ripple(f, amp=30):
     return np.clip(out + wave, 0, 255).astype(np.uint8)
 
 
+def _too_bright(f, times=3.0):
+    """The driver turned their phone's brightness up.
+
+    The complaint this file's whole matrix exists to answer, and the one
+    condition that was not in it. Modelled the way a sensor actually fails
+    rather than as a multiply: charge that will not fit in a well spills into
+    the neighbours and the lens veils the frame with a share of its own light,
+    which is what eats the thin strokes of a payout. A bare multiply leaves
+    black text perfectly black however blown out the white is, and would have
+    made this look like a condition the reader shrugs off.
+    """
+    lit = f.astype(np.float32) * times
+    over = np.maximum(lit - 255.0, 0.0)
+    lit = lit + cv2.GaussianBlur(over, (0, 0), 9) * 0.55
+    return np.clip(lit, 0, 255).astype(np.uint8)
+
+
 ROUGH = [('glare', _glare), ('soft', _soft), ('a dim cabin', _dim),
+         ('a phone turned right up', _too_bright),
          ('a rippling screen', _ripple)]
 SHAPES = [('a ride card', uberx_screen(), 16.05, PROFILES[0][1]),
           ('a shop order', shop_screen(), 7.09, PROFILES[0][1]),

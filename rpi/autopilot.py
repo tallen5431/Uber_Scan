@@ -220,8 +220,17 @@ def _measure_exposure(source, quad, as_json):
     polarity = {'dark': None}
 
     def grab(exposure_us):
+        # Everything the sensor and the ISP could move on their own, pinned —
+        # not only the exposure. This sweep is the one measurement the whole
+        # module rests on, and it compares candidates against each other: a
+        # white-balance algorithm still walking between them, or a gain the
+        # preview picked and nobody recorded, is a difference between rungs
+        # that has nothing to do with the rung. Gain at 1.0 also makes `bright`
+        # mean the same thing for every candidate.
         try:
-            source.cam.set_controls({'AeEnable': False, 'ExposureTime': int(exposure_us)})
+            source.cam.set_controls({'AeEnable': False, 'AwbEnable': False,
+                                     'AnalogueGain': 1.0,
+                                     'ExposureTime': int(exposure_us)})
         except Exception:
             return []
         time.sleep(0.45)          # let the setting take effect before believing it
@@ -242,19 +251,34 @@ def _measure_exposure(source, quad, as_json):
         return frames
 
     if source.cam is None:
-        return EX.DEFAULT_EXPOSURE, 'no camera to measure with'
+        return EX.DEFAULT_EXPOSURE, 'no camera to measure with', ()
 
-    chosen, report = EX.choose_exposure(grab)
+    # Every rung, not only the ones long enough to be elected. The short ones
+    # are where a bright phone pushes the rig at run time, and they used to be
+    # the only exposures it ever used without anyone having measured them on
+    # this screen. Two extra seconds of calibration buys the whole ladder.
+    chosen, report = EX.choose_exposure(
+        grab, candidates=EX.DAYLIGHT_SAFE + EX.FLICKER_SAFE)
     if not report:
-        return EX.DEFAULT_EXPOSURE, 'exposure not settable on this camera'
+        return EX.DEFAULT_EXPOSURE, 'exposure not settable on this camera', ()
 
     best = [r for r in report if r['exposure'] == chosen]
+    ladder = EX.quiet_ladder(report, ceiling=chosen)
     detail = '; '.join('%dus banding %.1f bright %.0f' % (r['exposure'], r['banding'], r['bright'])
                        for r in report)
+    noisy = [r['exposure'] for r in report if r['exposure'] not in ladder
+             and r['exposure'] < chosen]
     emit({'phase': 'calibrated',
-          'message': 'exposure %dus (banding %.1f) — measured against this screen; tried %s'
-                     % (chosen, best[0]['banding'] if best else -1, detail)}, as_json)
-    return int(chosen), detail
+          'message': 'exposure %dus (banding %.1f) — measured against this screen; '
+                     'shorter rungs it may fall back to: %s%s. Tried %s'
+                     % (chosen, best[0]['banding'] if best else -1,
+                        ', '.join('%dus' % c for c in reversed(ladder) if c < chosen)
+                        or 'none — this screen bands at every shorter exposure',
+                        ('; ruled out %s for banding'
+                         % ', '.join('%dus' % c for c in sorted(noisy, reverse=True)))
+                        if noisy else '',
+                        detail)}, as_json)
+    return int(chosen), detail, ladder
 
 
 def _frame_to_keep(source, as_json, drawn=None, floor=None):
@@ -366,7 +390,7 @@ def calibrate_from(source, as_json, drawn=None, floor=None):
     scale = source.scale_to_capture
     quad_full = [[float(x * scale), float(y * scale)] for x, y in quad]
 
-    exposure_us, why = _measure_exposure(source, quad, as_json)
+    exposure_us, why, ladder = _measure_exposure(source, quad, as_json)
 
     # Keep whatever the driver put in the file. Calibrating decides where the
     # phone is; it has no business deciding what an hour of their time is worth,
@@ -380,6 +404,13 @@ def calibrate_from(source, as_json, drawn=None, floor=None):
         'lensPosition': source.lens_position,
         'exposureTime': exposure_us,
         'exposureWhy': why,
+        # Machine-readable, because `exposureWhy` above is prose and the run
+        # loop needs the answer rather than the sentence. These are the rungs
+        # this screen measured quiet: the only ones a bright phone may push the
+        # exposure onto. Without them the fallback is a guess about panels in
+        # general, and on a 60Hz phone the first guess below the calibrated
+        # value is the one that makes the screen ripple.
+        'exposureLadder': [int(c) for c in ladder],
     })
     # One definition, in calibrate. Written out by hand in both places these
     # could drift apart, and the only symptom would be a driver's money quietly

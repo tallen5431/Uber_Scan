@@ -532,17 +532,36 @@ measures the real thing anyway: it tries each flicker-safe candidate against the
 actual phone and keeps the quietest that still lights the card, recording what
 every candidate scored.
 
-Brightness is then handled by **gain, never exposure** — a phone dims itself, and
-a screen set up in daylight is a much darker subject at 2am. Full auto-exposure
-is not the answer: it hunts on a strobing emissive panel and would undo the
-flicker arithmetic the moment it decided the picture was dim. So the exposure
-stays where it was measured and gain tracks the screen in small steps every few
-seconds, which cannot reintroduce banding. `--gain` pins it; `--no-auto-gain`
-stops it moving.
+Brightness is then handled by **gain first, exposure only along a ladder this
+screen measured quiet** — a phone dims itself, and a screen set up in daylight is
+a much darker subject at 2am. Full auto-exposure is not the answer: it hunts on a
+strobing emissive panel and would undo the flicker arithmetic the moment it
+decided the picture was dim. `--gain` pins it; `--no-auto-gain` stops it moving.
 
-Both show up in the health line — `card brightness 190/205; banding 0.4; gain
+There is only one quantity worth controlling, and it is not the gain: how bright
+the picture comes out is gain **times** exposure and nothing else. So the loop
+decides what that product should be and then buys it with the longest exposure it
+can afford and the least gain — exposure up to the calibrated value is free, gain
+is noise. Written the other way round, as a rule for gain plus a separate rule for
+exposure plus interlocks to stop them fighting, every interlock existed because
+the two had fought: worst of them, moving a rung changed the brightness by a
+factor of two all by itself, so lengthening a card that was merely a little dark
+blew it out, which shortened it straight back, for ever. With the product
+controlled a rung change is paid for in gain and the picture does not move, so
+that cycle cannot be written down.
+
+Both show up in the health line — `screen brightness 190/205; banding 0.4; gain
 2.1` — so "it looks dark" and "it looks wavy" can be confirmed with a number
 rather than argued about. Which is how the next one was caught.
+
+That brightness figure used to be measured on the image handed to the reader,
+which has been through CLAHE and, on a dark-mode phone, inverted. Contrast
+stretching lands any card near the target whatever the exposure did, and the
+inversion makes it read **backwards**: a dark-mode card far too dark reported
+241 against a target of 205. The one instrument for "the picture looks too
+bright" was answering a different question from the one the exposure loop steers
+by. It comes off the raw screen window now, at the same beat, so the log and the
+controller are talking about the same picture.
 
 ### Measure the screen, not the room
 
@@ -568,6 +587,84 @@ logs show `banding 19.9 (rippling)` and `28.4` at railed gain against `0.5`
 when calibration measured it. Rippling fails reads, failed reads trigger
 whole-screen searches, and a search costs a second read — so a diluted
 brightness measurement shows up at the far end as the scanner being slow.
+
+### Turning the phone's brightness up
+
+One nudge of a phone's brightness slider used to end a shift, and every link in
+the chain was individually reasonable.
+
+The loop steers by `brightness`, which is the 90th percentile of the screen.
+Past the clipping point that number **stops moving**: measured on the rig's own
+test cards it reads 255.0 at 1.25x too bright and still 255.0 at 8x. So the
+control could not tell a nudge from an eightfold and answered both with the same
+18% step on a six-second beat — **36 seconds of blown-out card after a doubling,
+48 after an eightfold**, against an offer that lives 30 to 45 seconds.
+
+Then, with the gain on its floor, it shortened the exposure. The fallback ladder
+was a constant in the source, and on a 60Hz panel — the commonest family, and the
+one the 16667us default is chosen for — the rung below it is 8333us, half a
+dimming cycle. Simulating a rolling shutter over a PWM backlight and scoring it
+with the project's own `banding_score`, where 4.0 already means rippling:
+
+|            | 60Hz | 120Hz | 240Hz | 480Hz |
+|------------|-----:|------:|------:|------:|
+| **8333us** | 128.8|   2.0 |   2.6 |   0.7 |
+| **16667us**|   2.2|   1.3 |   1.4 |   0.5 |
+| **20000us**|  40.5|  32.0 |   9.7 |   7.8 |
+| **25000us**|  53.0|   2.8 |   1.3 |   0.7 |
+| **33333us**|   2.5|   0.7 |   0.7 |   0.1 |
+
+And then the trap closed. A rippling screen never settles — against the real
+motion gate, 8333us on a 60Hz panel reads **75.2** where the settle threshold is
+2.0 — and the exposure control was gated on the picture having settled. So the
+branch that would have given the exposure back never ran again. `should_read`
+needs the picture to settle too, so nothing was read either. Simulated end to
+end on the real loop at twice the brightness: **wedged after 19 seconds, one read
+in six minutes**, with the loop still saying "still here" every four seconds and
+the live page showing a green dot.
+
+Four changes, and the first is the one that matters:
+
+* **The exposure control is not gated on the picture settling.** It never needed
+  to be: a percentile and a count of full-well pixels do not care whether the
+  frame is moving. The tracker's settled gate stays where it earns its keep.
+* **The fallback ladder is measured, not assumed.** Calibration already scored
+  every candidate on the driver's own phone and threw the numbers away into a
+  prose sentence; they are kept now as `exposureLadder` in `config.json`, and
+  the run loop will only ever step onto a rung that came back quiet. The
+  daylight rungs are measured too — they were the ones the rig actually used and
+  the only ones nobody had checked. A rig with no measured ladder keeps the old
+  guess for the old emergency only, and says so at startup.
+* **The cut is sized by search rather than by a constant.** It starts at the
+  ordinary 18% and grows while the picture keeps coming back at full well, so a
+  nudge costs one beat and an eightfold costs six, on a one-second beat while
+  blown — because a blown card is unreadable anyway, so there is no offer being
+  disturbed.
+* **When there is nothing left to give, it says so.** On a 60Hz phone there is
+  no quiet rung below the calibrated one, so the honest answer to a phone
+  brighter than the camera can take is to hold the flicker-safe exposure, leave
+  the card a little bright, and put *Phone screen too bright for the camera —
+  turn its brightness down a notch* on the screen the driver is looking at. That
+  is the only remedy that exists, and it belongs to them.
+
+Measured on the same rig, before and after — seconds until the card is off the
+rail, and until it is properly exposed again:
+
+|              | 1.25x | 1.5x |  2x |  3x |  4x |  6x |  8x |
+|--------------|------:|-----:|----:|----:|----:|----:|----:|
+| **before**   |    6s |  12s | 36s | 24s | 42s | 30s | 48s |
+| **off the rail** | 1s |  2s |  3s |  4s |  5s |  5s |  6s |
+| **back on target** | 1s | 2s | 3s |  4s | 11s |  5s | 12s |
+
+and at 2x and 3x on a 60Hz phone the rig now holds 16667us, keeps reading, and
+asks the driver to turn the screen down after two seconds.
+
+Two candidates also left `FLICKER_SAFE`. picamera2 defaults a video
+configuration's frame duration to 33333us and an exposure cannot outlast its
+frame, so 40000 and 50000 were requested during calibration, silently clamped to
+33333, and whichever won was written to `config.json` as "measured against this
+screen" naming a number the sensor never used. 33333us is already two whole 60Hz
+cycles, and longer exposures buy motion smear on a card read from a moving car.
 
 ## When the phone is in dark mode
 
@@ -777,6 +874,41 @@ later will save it. Move the bracket until it goes green, then calibrate.
 `--save shot.png` writes one annotated frame instead of serving, and
 `--image f.png` runs the same overlay on a still, which is how it is tested
 off-Pi.
+
+### The screen bolted to the dashboard
+
+Every layout in this project assumes a phone: tall, narrow, held about 30cm from
+the eye. The rig's own panel is the opposite — wide, short, and sitting where a
+driver can reach it without leaning, call it 60cm. So `live.html` turns itself
+into two columns on a landscape screen under 620px tall: the verdict beside the
+camera view, with the connection line and the controls across the bottom.
+
+It had never once done that. `#viewWrap` carried `grid-column: 2` but was nested
+one level inside `.live`, and a grid places its own children and nobody else's —
+so the property applied to nothing. Rendered at 800x480 and measured: two columns
+of 431px and 345px, the verdict drawn at 431px instead of 784px, the camera view
+stacked underneath it in the same column, **43% of the glass black**, and the page
+768px tall in 480px of screen so the bar of controls fell off the bottom.
+
+It survived because it is invisible without a camera. With no frame the
+`:has(.gone)` rule collapses the grid to one column and the page looks right,
+which is the state every development machine is in. There is a structural check
+for it now, in `test_liveview.py`: every id the dashboard block gives a
+`grid-column` to has to be a direct child of the grid that places it.
+
+A 1024x600 panel — the common 7" HDMI one — missed the breakpoint by 40px and got
+the phone layout instead: a 480px column down the middle of a 1024px screen, and
+the headline rate scrolled off the top. The breakpoint is 620px now, in both
+files, and the two files are checked to agree, because half a page in one design
+and half in the other is worse than either.
+
+The type was the other half of the complaint. Same pixel density as a phone at
+twice the distance means every letter subtends half the angle, and the small
+things were all literal pixel values that the breakpoint could not reach —
+11px on the labels under the figures, 12.5px on the working line, 13px on the
+four buttons. They are 15-17px on a dashboard panel now, and the headline rate is
+sized against the panel's height as well as its width, so a 1024x600 screen
+spends its extra room on the one number it exists for: 92px before, 140px now.
 
 ### Reading the live view
 
@@ -1277,16 +1409,41 @@ else entirely.
 It is drawn now, and measured. Reading the payout correctly, at three mount
 distances, in both themes:
 
-| | clean | glare | soft | dim cabin | rippling screen |
-| --- | --- | --- | --- | --- | --- |
-| ride card | ✓ | ✓ | ✓ | ✓ | refuses |
-| shop order | ✓ | ✓ | ✓ | ✓ | refuses |
-| delivery card | ✓ | ✓ | ✓ | ✓ | refuses |
+| | clean | glare | soft | dim cabin | phone turned right up | rippling screen |
+| --- | --- | --- | --- | --- | --- | --- |
+| ride card | ✓ | ✓ | ✓ | ✓ | ✓ | refuses |
+| shop order | ✓ | ✓ | ✓ | ✓ | ✓ | refuses |
+| delivery card | ✓ | ✓ | ✓ | ✓ | ✓ | refuses |
 
 **A delivery card is as reliable as a ride card**, and slightly tougher under
 ripple — it holds to amplitude 24 where the ride card goes at 18, having fewer
 small lines to lose. Glare across the middle of the card, a mount shaken soft,
 and a phone dimmed for a night shift all cost nothing on any of the three.
+
+The over-bright column is modelled the way a sensor actually fails rather than
+as a multiply: charge that will not fit in a well spills into its neighbours and
+the lens veils the frame with a share of its own light. That distinction is the
+whole test. A bare multiply leaves black text perfectly black however blown out
+the white is, so it would say this condition costs nothing — where in fact the
+veiling is exactly what eats the thin strokes of a payout.
+
+Swept from correctly exposed to six times too bright, in steps of a quarter:
+
+```
+  ride card       RRRRRRRRR--pp-pp-----
+  shop order      RRRRRRRRRR-p---------
+                  x1.0 ......... x3.5 ......... x6.0
+  R right verdict    p payout misread, no verdict reached    - refused
+```
+
+Right up to about **3.25x**, then refusals. In between there is a band where the
+payout is genuinely misread — at 4x the reader returns `$16 05`, the decimal
+point bloomed away, and the parser makes that $16.00 instead of $16.05. **No
+wrong verdict is reached anywhere in the sweep**, and the reason is structural
+rather than lucky: the decimal point is a small feature, the journey underneath
+it is small text, and both die at the same brightness. A card that has lost its
+decimal point has also lost its minutes, so the reading is incomplete and never
+gets rated. The first rule holds because the damage is not selective.
 
 Ripple is the one that beats all of them, which is expected: it is the screen's
 refresh beating against the shutter, and it is what the flicker-safe exposure
@@ -1730,7 +1887,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 18 suites, 2025 checks
+npm test                # all 18 suites, 2074 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1751,18 +1908,19 @@ node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 354 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  78 on merging readings across frames
 python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
-python3 rpi/test_exposure.py    #  84 on flicker, brightness, gain and exposure
+python3 rpi/test_exposure.py    # 120 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
 python3 rpi/test_journal.py     #  69 on keeping one row per offer
 python3 rpi/test_repeats.py     #  48 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
-python3 rpi/test_money.py       # 234 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 138 on the loop that holds the camera
+python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
+python3 rpi/test_scan_pi.py     # 143 on the loop that holds the camera
 python3 rpi/test_sync.py        #  67 on getting the offers off the car
-python3 rpi/test_liveview.py    #  34 on the picture the driver watches, and
-                                #     on nothing else being served with it
+python3 rpi/test_liveview.py    #  39 on the picture the driver watches, on
+                                #     nothing else being served with it, and on
+                                #     the dashboard layout being wired up
 python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
 ```
 

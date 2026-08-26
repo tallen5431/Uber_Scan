@@ -576,6 +576,10 @@ class Health:
         # worth a line when they differ — see report().
         self.exposure = None
         self.measured_exposure = None
+        # The phone is brighter than the camera can take at any setting that
+        # does not make the screen ripple. Not a fault in the rig, and the one
+        # thing that fixes it is a slider on the driver's phone.
+        self.too_bright = False
 
     def reset(self, now):
         # None rather than time.time(): the window starts when the first read
@@ -603,9 +607,20 @@ class Health:
         self.reads += 1
         self.ms.append(out['ms']['total'])
         if card is not None:
-            self.bright = EX.brightness(card)
-            # Two consecutive reads of a still card differ by flicker and noise
-            # and almost nothing else, which is exactly what banding_score is.
+            # Banding only. `card` here is the image handed to the reader, which
+            # has been through CLAHE and, on a dark-mode phone, inverted — and
+            # banding survives both, because it is a difference between two
+            # frames treated identically.
+            #
+            # Brightness does not survive either, which is why it is no longer
+            # taken here. A contrast-stretched card reads near the target
+            # whatever the exposure did, and an inverted one reads *backwards*:
+            # a dark-mode card that is far too dark reported 241 against a
+            # target of 205. That number is the one diagnostic for "the picture
+            # looks too bright", and it was answering a different question from
+            # the one the exposure loop steers by. It is set at the AutoGain
+            # beat now, off the raw screen window, so the log and the controller
+            # are talking about the same picture.
             if previous is not None and previous.shape == card.shape:
                 self.banding = EX.banding_score([previous, card])
         if parsed.get('complete'):
@@ -652,7 +667,8 @@ class Health:
         # screen looks wavy" are things a person notices and a log should be
         # able to confirm or deny with a number.
         if self.bright is not None:
-            bits.append('card brightness %d/%d' % (round(self.bright), round(EX.TARGET_BRIGHT)))
+            bits.append('screen brightness %d/%d'
+                        % (round(self.bright), round(EX.TARGET_BRIGHT)))
         if self.banding is not None:
             bits.append('banding %.1f%s' % (self.banding,
                                             ' (rippling)' if self.banding > 4.0 else ''))
@@ -664,6 +680,9 @@ class Health:
         if self.exposure is not None and self.exposure != self.measured_exposure:
             bits.append('exposure %dus, borrowed against %dus for daylight'
                         % (self.exposure, self.measured_exposure))
+        if self.too_bright:
+            bits.append('OVER-EXPOSED with nothing left to give — turn the '
+                        'phone brightness down')
         bits.append('crop %s' % _fmt_roi(scanner.crop_box))
         if tracker is not None:
             status = tracker.status()
@@ -756,8 +775,18 @@ def show(frame_text, rate, parsed, ms, locked):
 ALIVE_EVERY = 4.0
 
 
-def emit_alive():
-    print(json.dumps({'alive': True, 'at': int(time.time() * 1000)}), flush=True)
+def emit_alive(too_bright=False):
+    """The beat, and the one condition that has to reach the driver without one.
+
+    `tooBright` rides here rather than on a reading because the state it
+    describes is precisely the state where there may be no reading: the phone is
+    brighter than the camera can take, the card is washing out, and the remedy
+    is a slider the driver has in their hand. Sent every beat so the page can
+    clear it as soon as it goes away, and outside `ready` so it can never
+    overwrite a verdict.
+    """
+    print(json.dumps({'alive': True, 'at': int(time.time() * 1000),
+                      'tooBright': bool(too_bright)}), flush=True)
 
 
 def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
@@ -974,8 +1003,16 @@ def main():
     exposure_us = (args.exposure if args.exposure is not None
                    else cfg.get('exposureTime') or EX.DEFAULT_EXPOSURE)
     gain = args.gain if args.gain is not None else cfg.get('analogueGain') or 1.5
+    # The rungs to fall back down when the light is more than gain can answer.
+    # Calibration measured the banding of every candidate on this driver's own
+    # phone; `exposureLadder` is which of them came back quiet. Without one —
+    # a config written before this existed — AutoGain keeps its old guess about
+    # panels in general, and says so, because on a 60Hz phone the first rung
+    # below the calibrated exposure is the one that makes the screen ripple.
+    ladder = cfg.get('exposureLadder')
     auto_gain = (None if (args.no_auto_gain or args.gain is not None)
-                 else EX.AutoGain(gain, exposure=exposure_us))
+                 else EX.AutoGain(gain, exposure=exposure_us,
+                                  **({'candidates': ladder} if ladder else {})))
     cam = start_camera(cfg, exposure_us, gain, lens)
     if args.save_misses:
         os.makedirs(args.save_misses, exist_ok=True)
@@ -1028,6 +1065,18 @@ def main():
            'a whole number of 60/120/240Hz cycles, so the screen should not band'
            if exposure_us in EX.FLICKER_SAFE else 'not a standard flicker period',
            gain, 'tracking the screen' if auto_gain else 'fixed'))
+    # Which rungs a bright phone can push it onto, and whether anybody checked.
+    # A ladder measured on this screen is the difference between falling back
+    # onto a quiet exposure and falling back onto one that ripples.
+    if auto_gain is not None:
+        below = [c for c in auto_gain.candidates if c < exposure_us]
+        log('setup: if the phone gets brighter than gain can answer, exposure '
+            'falls back to %s (%s)'
+            % (', '.join('%dus' % c for c in reversed(below)) or 'nothing shorter',
+               'measured quiet on this screen' if ladder
+               else 'NOT measured on this screen — re-run calibration to '
+                    'measure them, since a rung that bands is worse than a '
+                    'card that is a little bright'))
     log('setup: corners %s' % [[int(x), int(y)] for x, y in quad])
     spill = PL.touches_edge(quad, frame_shape)
     if spill:
@@ -1355,7 +1404,7 @@ def main():
                 now_alive = time.time()
                 if now_alive - last_alive > ALIVE_EVERY:
                     last_alive = now_alive
-                    emit_alive()
+                    emit_alive(too_bright=health.too_bright)
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate
@@ -1534,33 +1583,74 @@ def main():
                 # six-second steps to come back down once the phone returned.
                 # That minute lands exactly when the driver has picked the phone
                 # up to look at an offer.
-                if auto_gain is not None and scanner.settled:
-                    lit = PL.quad_window(luma, scanner.quad, track_scale) \
-                        if scanner.quad is not None else luma
+                #
+                # Deliberately NOT gated on the picture having settled, which
+                # is what it used to be, and which made the two halves of this
+                # into a trap that closed. Shortening the exposure is what a
+                # blown-out card provokes; on a 60Hz panel the rung below the
+                # calibrated one made the screen ripple; a rippling screen never
+                # settles — the motion gate reads 75 against a settle threshold
+                # of 2 — so this branch never ran again, the exposure could
+                # never be given back, and `should_read` never fired either. One
+                # nudge of the phone's brightness slider ended the shift, with
+                # the loop still saying "still here" every four seconds.
+                #
+                # Nothing here needed a still picture in the first place: a
+                # percentile and a count of full-well pixels do not care whether
+                # the frame is moving. The tracker's own settled gate is above,
+                # where it earns its keep.
+                #
+                # With no corners there is no screen to expose for, and the
+                # fallback used to be the whole frame — which exposure.py spends
+                # eleven lines explaining is the one thing not to hand it, since
+                # the dark car around the phone is most of the picture and none
+                # of the subject. Skipping the beat is the honest answer.
+                if auto_gain is not None and scanner.quad is not None:
+                    lit = PL.quad_window(luma, scanner.quad, track_scale)
                     have_screen = True if tracker is None \
                         else not tracker.status()['lost']
                     was_exposure = auto_gain.exposure
-                    new_gain = auto_gain.update(lit, now, has_screen=have_screen)
-                    if new_gain is not None:
-                        cam.set_controls({'AnalogueGain': float(new_gain)})
-                        cfg['analogueGain'] = round(new_gain, 3)
-                        health.gain = new_gain
+                    # The photometric picture, before any preprocessing — the
+                    # same window and the same measure the controller steers by,
+                    # so the health line's number is the controller's number.
+                    health.bright = EX.brightness(lit)
+                    ctrls = auto_gain.update(lit, now, has_screen=have_screen)
+                    if ctrls:
+                        cam.set_controls(ctrls)
+                    if 'AnalogueGain' in ctrls:
+                        cfg['analogueGain'] = round(auto_gain.gain, 3)
+                        health.gain = auto_gain.gain
                     # Daylight through a windscreen can blow the card out with
                     # the gain already on its floor, and then the exposure is
-                    # the only thing left. It is given back the moment the light
-                    # drops, and never goes above what calibration measured.
+                    # the only thing left. It is given back the moment there is
+                    # gain to trade for it, and never goes above what
+                    # calibration measured.
                     if auto_gain.exposure != was_exposure:
-                        cam.set_controls({'ExposureTime': int(auto_gain.exposure)})
-                        log('exposure %s to %dus: the card was blown out with '
-                            'the gain already at its floor'
+                        log('exposure %s to %dus: %s'
                             % ('shortened' if auto_gain.exposure < was_exposure
-                               else 'given back', auto_gain.exposure))
+                               else 'given back', auto_gain.exposure,
+                               'the card was blown out with the gain already at '
+                               'its floor'
+                               if auto_gain.exposure < was_exposure
+                               else 'traded back against gain, which is the noisy '
+                                    'half of the same brightness'))
                     # Deliberately not written to cfg: the borrowed value is a
                     # response to the light right now, and persisting it would
                     # start a night shift on a noon exposure with nothing to
                     # tell it that is wrong. cfg keeps what calibration measured.
                     health.exposure = auto_gain.exposure
                     health.measured_exposure = auto_gain.measured
+                    # Out of room: the phone is brighter than this camera can
+                    # take at any setting that does not make the screen ripple.
+                    # The only remedy left belongs to the driver, so it goes on
+                    # the screen they are looking at rather than into a log.
+                    if auto_gain.stuck != health.too_bright:
+                        health.too_bright = auto_gain.stuck
+                        log('the phone is brighter than the camera can take — '
+                            'turn the screen brightness down a notch'
+                            if auto_gain.stuck
+                            else 'the picture is back inside what the camera '
+                                 'can take')
 
                 # Keep sampling for a short while after a card appears, so a leg
                 # missed by one frame can still be picked up by the next.

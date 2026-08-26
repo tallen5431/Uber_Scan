@@ -20,16 +20,36 @@
      The camera view is the half that gives way. It matters while aiming the
      mount and hardly at all afterwards, whereas the verdict is the entire
      reason the screen is there. */
-  @media (orientation: landscape) and (max-height: 560px) {
+  @media (orientation: landscape) and (max-height: 620px) {
     #app { display: grid;
            grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
            grid-template-rows: minmax(0, 1fr) auto auto;
            align-content: start; }
-    .live { grid-column: 1; grid-row: 1; justify-content: flex-start; }
-    #viewWrap { grid-column: 2; grid-row: 1; margin: 0; min-height: 0; }
-    #viewWrap img { max-height: calc(100dvh - 132px); object-fit: contain; }
+    /* `safe`, which is the difference between overflowing downward and
+       overflowing upward. Centred content that is taller than its box spills
+       equally in both directions, and the top is where the word ACCEPT lives —
+       so on the one screen whose whole job is to show a verdict, the verdict's
+       name was the first thing to be clipped away. `safe center` centres while
+       it fits and falls back to the top when it does not. */
+    .live { grid-column: 1; grid-row: 1; justify-content: safe center; }
+    #viewWrap { grid-column: 2; grid-row: 1; margin: 0; min-height: 0;
+                align-self: center; }
+    /* Bounded by the row it is in rather than by the viewport. It used to be
+       `100dvh - 132px`, which is a guess at what the bars below it cost, and a
+       guess that is too big overflows the page — the whole reason the bottom
+       bar ended up off the glass. `100%` is the row, and the row is what is
+       actually left over. */
+    #viewWrap img { max-height: 100%; object-fit: contain; }
+    /* The details block has no room on a dashboard panel and is hidden below,
+       but it still needs a cell or it lands in the middle of the grid. */
+    #raw { grid-column: 1 / -1; grid-row: 2; }
     .connbar { grid-column: 1 / -1; grid-row: 2; }
     .bottombar { grid-column: 1 / -1; grid-row: 3; }
+    /* Never taller than the glass. Everything above lays the page out across
+       the panel instead of down it precisely so it fits; this is the assertion
+       that it did, and it is what stops a bar of controls scrolling out of
+       reach of a driver who is not going to be scrolling. */
+    #app { height: 100dvh; min-height: 0; overflow: hidden; }
     /* When there is no camera frame to show — before the first one arrives, or
        on a machine with no camera at all — the verdict takes the whole panel
        rather than sitting in half of it beside a black rectangle. The view is
@@ -38,9 +58,24 @@
     #app:has(#viewWrap.gone) { grid-template-columns: minmax(0, 1fr); }
     #viewWrap.gone { display: none; }
     /* The rate is sized against the panel it sits in, and that panel is now a
-       column rather than the whole width. */
-    #perHour { font-size: min(11vw, 92px,
+       column rather than the whole width.
+       Four limits, and whichever bites first wins: the panel's width, the
+       panel's height, an absolute ceiling, and the column the number has to fit
+       inside. The height term is what lets a 1024x600 panel spend its extra
+       room on the one number the screen exists for — the flat 92px cap left it
+       the same size as on an 800x480, with 130px of black above and below. */
+    #perHour { font-size: min(16vw, 26dvh, 140px,
                               calc((100cqw - 40px) / (var(--chars) * 0.62))); }
+    /* ...and it gives some of that back when there is something to say. A
+       notice is two more lines inside a panel that is already as tall as the
+       row it sits in, so without this the panel grows past the glass and the
+       word ACCEPT is the part that goes — clipped off the top, on the one
+       screen whose whole job is to show it. */
+    #verdict:has(#warn:not([hidden])) #perHour {
+      font-size: min(12vw, 17dvh, 96px,
+                     calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
+    #verdict:has(#warn:not([hidden])) .working { display: none; }
     #raw, #viewNote { display: none; }
   }
 
@@ -51,6 +86,11 @@
   @media (orientation: landscape) and (max-height: 380px) {
     .working { display: none; }
     #detail { display: none; }
+    /* On a panel this small a notice and the figures cannot both fit, and the
+       notice wins: it is there because something is wrong with the reading, so
+       the three numbers underneath it are the ones not to trust. The headline
+       and the reason for doubting it are the pair worth keeping. */
+    #verdict:has(#warn:not([hidden])) .submetrics { display: none; }
   }
 
   /* The number is sized to the panel and to how many characters it has to
@@ -149,6 +189,29 @@
     background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
     max-height: 28vh; overflow: auto; font-size: 11px; line-height: 1.45;
   }
+
+  /* ---------- Sizes for the driver's seat ----------
+   *
+   * Last in the file on purpose. Everything above is written for a phone held
+   * about 30cm away; the rig's own panel has the same pixel density and sits
+   * roughly twice as far off, so the same letter subtends half the angle. The
+   * lines below were all literal pixel values — 12.5px of read timings, a 12px
+   * connection line, a 13px bar of controls — and the dashboard breakpoint near
+   * the top of this file could not touch them, because they are declared after
+   * it and win on source order. Written up here, they are simply later.
+   *
+   * The verdict itself was never the problem. These are the small things around
+   * it that a driver still has to read: which figure is which, what the buttons
+   * do, and whether anything is still reading offers.
+   */
+  @media (orientation: landscape) and (max-height: 620px) {
+    .pending { font-size: 16px; }
+    .connbar { font-size: 15px; padding: 4px; }
+    .dot { width: 11px; height: 11px; }
+    .bottombar button, .bottombar .linkbtn { font-size: 17px; padding: 8px 4px; }
+    #drawTools button { font-size: 17px; }
+    #drawHint { font-size: 15px; }
+  }
 </style>
 </head>
 <body>
@@ -179,26 +242,40 @@
       <div id="warn" class="notice" hidden></div>
     </section>
     <div class="pending" id="detail" style="text-align:center"></div>
-
-    <!-- What the camera is actually looking at. The inset is the exact image
-         handed to the reader, so aim and focus are both visible here. -->
-    <figure id="viewWrap">
-      <img id="view" alt="live camera view">
-      <!-- Where the driver says the card is, when the scanner cannot find it. -->
-      <div id="drawn" hidden></div>
-      <figcaption id="viewNote">camera view · inset is what the reader sees</figcaption>
-      <div id="drawHint" hidden>drag a box around the offer card on the phone</div>
-      <div id="drawTools">
-        <button type="button" class="linkbtn" id="drawUse" disabled>✓ Read this box</button>
-        <button type="button" class="linkbtn" id="drawCancel">✕ Cancel</button>
-      </div>
-    </figure>
-
-    <details id="raw" hidden>
-      <summary>what the reader read</summary>
-      <pre id="rawText"></pre>
-    </details>
   </div>
+
+  <!-- What the camera is actually looking at. The inset is the exact image
+       handed to the reader, so aim and focus are both visible here.
+
+       A child of #app rather than of .live, which is not a detail. On the rig's
+       own dashboard panel #app becomes a two-column grid — the verdict beside
+       the camera view — and this carries `grid-column: 2`. Nested one level
+       deeper that property applied to nothing at all: .live is a flex column,
+       so the view stacked underneath the verdict inside the left-hand column,
+       and the right-hand column stayed empty. Measured on an 800x480 panel: two
+       columns of 431px and 345px, the verdict rendered at 431px, the camera
+       view at 431px below it, 43% of the glass black, and the page overflowing
+       to 768px so the bottom bar fell off the bottom of the screen.
+
+       Only visible when the camera is working, which is why it survived: with
+       no frame the `:has(.gone)` rule collapses the grid to one column and the
+       page looks right. -->
+  <figure id="viewWrap">
+    <img id="view" alt="live camera view">
+    <!-- Where the driver says the card is, when the scanner cannot find it. -->
+    <div id="drawn" hidden></div>
+    <figcaption id="viewNote">camera view · inset is what the reader sees</figcaption>
+    <div id="drawHint" hidden>drag a box around the offer card on the phone</div>
+    <div id="drawTools">
+      <button type="button" class="linkbtn" id="drawUse" disabled>✓ Read this box</button>
+      <button type="button" class="linkbtn" id="drawCancel">✕ Cancel</button>
+    </div>
+  </figure>
+
+  <details id="raw" hidden>
+    <summary>what the reader read</summary>
+    <pre id="rawText"></pre>
+  </details>
 
   <!-- The status link lives here rather than in the bottom bar, which has three
        slots and now spends one on something needed mid-shift. This is raw JSON
@@ -326,6 +403,16 @@
   var READ_STALE_MS = 20000;
   var socketUp = false;
   var scannerState = null;
+  // The camera is out of room: the phone is brighter than it can take at any
+  // setting that does not make the screen ripple. Not a fault in the rig, and
+  // the one thing that fixes it is a slider on the phone in the driver's hand —
+  // so it belongs on this screen and nowhere else.
+  var tooBright = false;
+
+  // Said in terms of what to do, not what happened. "Clipping at the gain
+  // floor" is true and useless; the driver is holding the thing that fixes it.
+  var TOO_BRIGHT = 'Phone screen too bright for the camera — turn its '
+                 + 'brightness down a notch.';
 
   var PHASE_LABEL = {
     check: 'CHECKING',
@@ -369,8 +456,12 @@
         el.vMin.textContent = p.sharpness !== null && p.sharpness !== undefined ? p.sharpness : '--';
         el.vMile.textContent = (p.stable || 0) + '/' + (p.need || 6);
       }
-      el.warn.textContent = p.message || '';
-      el.warn.hidden = !p.message;
+      // Ahead of the phase message, because it is the one the driver can act
+      // on: a washed-out card between offers is exactly the state where there
+      // is no reading to hang it off, which is why it is here as well as below.
+      var setup = [tooBright ? TOO_BRIGHT : '', p.message || ''].filter(Boolean);
+      el.warn.textContent = setup.join(' ');
+      el.warn.hidden = !setup.length;
       var quiet = Date.now() - seenAt;
       el.detail.textContent = aiming
         ? 'the view below is live — move the mount until this says good'
@@ -495,6 +586,10 @@
     el.working.hidden = false;
 
     var notes = [];
+    // First, because it is the only note on this screen with an action attached
+    // to it, and because the reading it is sitting on top of was taken through
+    // a washed-out card.
+    if (tooBright) notes.push(TOO_BRIGHT);
     if (r.milesUncertain) notes.push('Distance unreadable — pay shown before mileage cost.');
     else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
     // Said out loud, because a fragment is not a small error in a safe
@@ -587,6 +682,13 @@
       // old" — or, worse, a negative age that never trips the stale test at
       // all, leaving a frozen verdict on screen looking live.
       seenAt = Date.now();
+      // The camera saying it has run out of room. It rides the heartbeat rather
+      // than a reading precisely because the state it describes is the one
+      // where there may be no reading — the phone is brighter than the camera
+      // can take, the card is washing out, and everything below keys on
+      // `ready`, so a message that carries no verdict is dropped whole. This
+      // has to be read off the message before that happens.
+      if (msg.tooBright !== undefined) tooBright = !!msg.tooBright;
       // Only a reading moves the verdict's own clock. The guard is the same one
       // the next line uses to decide whether this message replaces the verdict
       // at all — a heartbeat carries no `ready`, and must not vouch for one.

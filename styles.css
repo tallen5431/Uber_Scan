@@ -468,7 +468,7 @@ html, body {
  * display black on either side, with the verdict small in the centre.
  *
  * So: fill the width, and lay the page out across it rather than down it. */
-@media (orientation: landscape) and (max-height: 560px) {
+@media (orientation: landscape) and (max-height: 620px) {
   /* Never a fixed height. Whatever else is wrong on an unusual panel, nothing
      may end up drawn on top of anything else — scrolling is a nuisance,
      overlapping controls are a fault. */
@@ -505,7 +505,27 @@ html, body {
      place to shave a target down. The keypad simply gets the room instead. */
   .key { font-size: clamp(20px, 4vw, 30px); }
   .field-value { font-size: clamp(18px, 3.4vw, 26px); }
-  .bottombar button, .bottombar .linkbtn { font-size: 13px; padding: 8px 4px; }
+
+  /* --- and everything small grows, because this screen is further away ---
+   *
+   * Every size on this page was chosen for a phone: about 133 pixels to the
+   * inch, held roughly 30cm from the eye. The rig's own panel is the same
+   * pixel density and sits where the driver can reach it without leaning —
+   * call it 60cm. Same physical letter, twice the distance, half the angle it
+   * subtends. The labels under the figures were 11px and the bar of controls
+   * 13px, and neither changed at this breakpoint at all, because both were
+   * written as literal pixels rather than as anything responsive.
+   *
+   * These are the ones a driver actually reads mid-shift: which figure is the
+   * pay and which is the miles, and what the four buttons do.
+   */
+  .sub small { font-size: 15px; letter-spacing: .06em; }
+  .field-label { font-size: 14px; }
+  .hint, .note { font-size: 15px; }
+  .bottombar button, .bottombar .linkbtn { font-size: 17px; padding: 8px 4px; }
+  .stats div { font-size: 24px; }
+  .stats small { font-size: 13px; }
+  .notice { font-size: 16px; }
 }
 
 /* Narrower than a 5" panel and there is no room for two columns of anything.
