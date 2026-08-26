@@ -361,8 +361,12 @@
     // summary; a reading merged across frames carries `hasTotal` and has
     // already trimmed the legs. Both are asked, because this scanner judges the
     // first and the rig judges the second, and they must agree about one card.
-    if (parsed.hasTotal) return true;
     var detail = parsed.legDetail || [];
+    // A journey whose legs disagree about having a distance is not finished,
+    // however many legs were found. `legs >= 2` below counts legs; it does not
+    // ask whether they read. Another frame is exactly what fixes it.
+    if (legsShortADistance(detail)) return false;
+    if (parsed.hasTotal) return true;
     for (var i = 0; i < detail.length; i++) {
       if (detail[i] && detail[i].isTotal) return true;
     }
@@ -370,6 +374,31 @@
     return !(parsed.legs || 0)
       && parsed.deliverBy !== null && parsed.deliverBy !== undefined
       && parsed.miles !== null && parsed.miles !== undefined;
+  }
+
+  /* True when some leg of a journey has a distance and another has none.
+   *
+   * The sum is then a whole journey's *time* against part of its distance, and
+   * nothing downstream can tell. Every existing guard looks for a distance that
+   * is too big — checkDistance catches a lost decimal turning a 6mph errand
+   * into a 63mph one — and this failure produces one that is too small, which
+   * reads as an ordinary slow trip and passes every check there is.
+   *
+   * Measured on a rendered card at three times the brightness it was exposed
+   * for: "20 min (7.3 mi) trip" came back as "20 min (7.3 m1) trip", so the
+   * second leg contributed its twenty minutes and no distance at all. The
+   * reading was 23 minutes over 1.1 miles instead of 8.4, complete, whole,
+   * unflagged, and rated — $41.01/hr for an offer worth $35.30/hr, because the
+   * missing miles are missing *cost*. It errs optimistic, which is the one
+   * direction that turns a pass into an accept. */
+  function legsShortADistance(legs) {
+    var withMiles = 0, total = 0, i;
+    for (i = 0; i < (legs || []).length; i++) {
+      if (!legs[i]) continue;
+      total++;
+      if (legs[i].miles !== null && legs[i].miles !== undefined) withMiles++;
+    }
+    return withMiles > 0 && withMiles < total;
   }
 
   function checkDistance(minutes, miles, hadDecimal) {
@@ -423,6 +452,7 @@
     var dist = checkDistance(minutes, miles, hadDecimal);
     miles = dist.miles;
     dist.corrected = dist.corrected || correctedLeg;
+    dist.uncertain = dist.uncertain || legsShortADistance(used);
 
     var itemMatch = text.match(ITEMS);
     var items = itemMatch ? toNumber(itemMatch[1]) : null;

@@ -307,14 +307,39 @@
       }
     },
     {
-      "name": "...nor is one whose distance has",
+      "name": "a leg whose distance did not read keeps its minutes and makes the distance uncertain",
       "text": "$16.05 25 min (11.q5 mi) away 17 min (3.7 mi) trip",
       "expect": {
         "pay": 16.05,
         "minutes": 42.0,
         "miles": 3.7,
         "legs": 2,
-        "complete": true
+        "complete": true,
+        "milesUncertain": true
+      }
+    },
+    {
+      "name": "...the same thing one letter further along, which is what a blown-out card does",
+      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip",
+      "expect": {
+        "pay": 16.05,
+        "minutes": 23.0,
+        "miles": 1.1,
+        "legs": 2,
+        "complete": true,
+        "milesUncertain": true
+      }
+    },
+    {
+      "name": "...and legs that all read leave it certain",
+      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
+      "expect": {
+        "pay": 16.05,
+        "minutes": 23.0,
+        "miles": 8.4,
+        "legs": 2,
+        "complete": true,
+        "milesUncertain": false
       }
     },
     {
@@ -1194,6 +1219,16 @@
     {
       "name": "one plain leg is half a card",
       "text": "$16.05 20 min (7.3 mi) trip",
+      "expect": false
+    },
+    {
+      "name": "two legs are not whole when one of their distances did not read",
+      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip",
+      "expect": false
+    },
+    {
+      "name": "...whichever leg it was",
+      "text": "$16.05 25 min (11.q5 mi) away 17 min (3.7 mi) trip",
       "expect": false
     },
     {

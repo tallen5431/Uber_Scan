@@ -315,6 +315,15 @@ def is_whole(parsed):
     # summary; a reading merged across frames carries `hasTotal` and has already
     # trimmed the legs. Both are asked, because the browser scanner judges the
     # first and the rig judges the second, and they must agree about one card.
+    # A journey whose legs disagree about having a distance is not finished,
+    # however many legs were found. `legs >= 2` below counts legs; it does not
+    # ask whether they read. A two-leg card whose second distance came back as
+    # "7.3 m1" therefore called itself whole — the loop stopped resampling, the
+    # voice spoke it, and the offers page counted it — on a journey credited
+    # with 23 minutes and 1.1 of its 8.4 miles. Another frame is exactly what
+    # fixes that: the accumulator merges legs across frames for this reason.
+    if legs_short_a_distance(parsed.get('legDetail') or []):
+        return False
     if parsed.get('hasTotal') or any(
             leg.get('isTotal') for leg in (parsed.get('legDetail') or [])):
         return True
@@ -323,6 +332,30 @@ def is_whole(parsed):
     return (not (parsed.get('legs') or 0)
             and parsed.get('deliverBy') is not None
             and parsed.get('miles') is not None)
+
+
+def legs_short_a_distance(legs):
+    """True when some leg of a journey has a distance and another has none.
+
+    The sum is then a whole journey's *time* against part of its distance, and
+    nothing downstream can tell. Every existing guard looks for a distance that
+    is too big — `check_distance` catches a lost decimal turning a 6mph errand
+    into a 63mph one — and this failure produces one that is too small, which
+    reads as an ordinary slow trip and passes every check there is.
+
+    Measured on a rendered card at three times the brightness it was exposed
+    for: `20 min (7.3 mi) trip` came back as `20 min (7.3 m1) trip`, so the
+    second leg contributed its twenty minutes and no distance at all. The
+    reading was 23 minutes over 1.1 miles instead of 8.4, `complete`, `whole`,
+    unflagged, and rated — $41.01/hr for an offer worth $35.30/hr, because the
+    missing miles are missing *cost*. It errs optimistic, which is the one
+    direction that turns a pass into an accept.
+
+    The corpus had an instance of this all along, under a name that says the
+    opposite of what it asserted.
+    """
+    with_miles = [l for l in legs if l.get('miles') is not None]
+    return bool(with_miles) and len(with_miles) < len(legs)
 
 
 def check_distance(minutes, miles, had_decimal):
@@ -454,6 +487,7 @@ def parse(raw_text):
                 had_decimal = True
             if leg.get('corrected'):
                 corrected_leg = True
+    short_a_leg = legs_short_a_distance(used)
 
     # A card gives distances to one decimal place, so a sum of them has one
     # decimal place. Binary floating point disagrees: 3.5 + 6.1 is
@@ -464,6 +498,7 @@ def parse(raw_text):
         miles = round2(miles)
     miles, corrected, uncertain = check_distance(minutes, miles, had_decimal)
     corrected = corrected or corrected_leg
+    uncertain = uncertain or short_a_leg
 
     m = ITEMS.search(text)
     items = to_number(m.group(1)) if m else None

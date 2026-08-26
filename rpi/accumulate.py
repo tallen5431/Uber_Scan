@@ -243,6 +243,12 @@ class OfferAccumulator:
             minutes = (minutes or 0) + _consensus(slot['minutes'])
             if slot['miles']:
                 miles = (miles or 0) + _consensus(slot['miles'])
+        # A slot no frame in the window ever read a distance for still hands its
+        # minutes to the sum, so the merge has the whole journey's time against
+        # part of its distance — the same defect as in a single parse, and here
+        # it has survived every frame rather than one.
+        short_a_leg = any(not slot['miles'] for slot in used) \
+            and any(slot['miles'] for slot in used)
 
         merged = dict(parsed)
         merged['minutes'] = minutes if minutes else parsed.get('minutes')
@@ -271,7 +277,7 @@ class OfferAccumulator:
         # by ten is not a correction any single misread can justify.
         _, _, uncertain = OP.check_distance(merged['minutes'], merged['miles'],
                                             had_decimal=True)
-        merged['milesUncertain'] = uncertain
+        merged['milesUncertain'] = uncertain or short_a_leg
         # Correcting is only ever advisory — it colours a note, it does not move
         # money — so it is remembered across the window rather than taken from
         # whichever frame happened to be last. If any frame needed a decimal put

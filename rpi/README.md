@@ -1457,6 +1457,35 @@ all. That is the project's first rule holding as a measured property rather than
 as an intention, and it is now asserted on every run — each shape, under each
 kind of damage, has to be either right or silent, never a third thing.
 
+### ...and the rate is not the payout
+
+That assertion checked `parsed['pay'] == true_pay`, and its own comment called
+that "the payout the card was drawn from". But the number on the screen is pay
+divided by time, less distance times cost. **Checking one of the three inputs
+checks none of the answer**, and the gap was not hypothetical.
+
+Adding the over-bright column above turned one up immediately. A ride card at
+three times the brightness it was exposed for read `20 min (7.3 m1) trip` — the
+`i` of `mi` bloomed into a `1` — so the second leg handed its twenty minutes to
+the sum and none of its distance. The reading was 23 minutes over **1.1 of its
+8.4 miles**: `complete`, `whole`, unflagged, and rated at a confident
+**$41.01/hr for an offer worth $35.30/hr**.
+
+Every guard missed it, and for the same reason. They all look for a distance
+that is too *big* — `check_distance` exists because losing the decimal in
+"3.6 mi" turns a 6mph errand into a 63mph one — and this failure produces a
+distance that is too *small*, which reads as an ordinary slow trip. Missing
+miles are missing cost, so it errs optimistic, which is the one direction that
+turns a pass into an accept. The corpus had an instance of it all along, filed
+under a name that says the opposite of what it asserted.
+
+So a leg with minutes and no distance now makes the journey's distance
+uncertain, and makes the reading **not whole** — which is the right answer twice
+over, because another frame is exactly what fixes it: the accumulator merges
+legs across frames for this reason, and `whole` is what keeps the loop
+resampling until it has. The same rule is in the browser parser, in the
+accumulator's merge across a window, and in the shared corpus.
+
 ### What went past unrecorded
 
 The one thing a journal can never contain is what is not in it. Every figure on
@@ -1887,7 +1916,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 18 suites, 2074 checks
+npm test                # all 18 suites, 2104 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1901,11 +1930,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 321 checks, the shared corpus
+node tests/corpus.test.js       # 336 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  84 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 354 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 369 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  78 on merging readings across frames
 python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    # 120 on flicker, brightness, gain and exposure

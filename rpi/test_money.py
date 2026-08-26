@@ -262,11 +262,20 @@ def _too_bright(f, times=3.0):
 ROUGH = [('glare', _glare), ('soft', _soft), ('a dim cabin', _dim),
          ('a phone turned right up', _too_bright),
          ('a rippling screen', _ripple)]
-SHAPES = [('a ride card', uberx_screen(), 16.05, PROFILES[0][1]),
-          ('a shop order', shop_screen(), 7.09, PROFILES[0][1]),
-          ('a delivery card', TC.doordash_screen(), 41.11, DELIVERY_SETTINGS)]
+# Every figure each card was drawn from, not only its payout. The property
+# below used to check the pay alone, and the comment above it called that "the
+# payout the card was drawn from" — but the number on the screen is pay divided
+# by time, less distance times cost, so checking one third of the inputs checks
+# none of the answer. It let through a real one: a card three times too bright
+# read `20 min (7.3 m1) trip`, contributed that leg's twenty minutes and none of
+# its distance, and reached a confident $41.01/hr on 1.1 of its 8.4 miles —
+# missing miles being missing cost, so the error ran optimistic.
+SHAPES = [('a ride card', uberx_screen(), 16.05, 23.0, 8.4, PROFILES[0][1]),
+          ('a shop order', shop_screen(), 7.09, 34.0, 3.6, PROFILES[0][1]),
+          ('a delivery card', TC.doordash_screen(), 41.11, None, 9.8,
+           DELIVERY_SETTINGS)]
 
-for label, screen, true_pay, settings in SHAPES:
+for label, screen, true_pay, true_min, true_miles, settings in SHAPES:
     for cond, damage in ROUGH:
         frame = damage(mount(screen, 1200, seed=1))
         quad = PL.detect_screen_quad(frame)
@@ -279,9 +288,19 @@ for label, screen, true_pay, settings in SHAPES:
         parsed = out['parsed']
         rate = OP.rate(parsed, settings)
         # The whole property, in one line: a verdict may only be reached on the
-        # payout the card was drawn from. Anything else has to be a refusal.
+        # figures the card was drawn from — all of them, since all of them are
+        # in the answer. Anything else has to be a refusal.
+        #
+        # A distance the reading itself calls uncertain is not "something else":
+        # rate() charges no mileage for it, the page says so, and the reading is
+        # not whole, so the loop keeps looking. What is forbidden is a wrong
+        # number presented as a right one.
+        agrees = (parsed['pay'] == true_pay
+                  and (true_min is None or parsed['minutes'] == true_min)
+                  and (true_miles is None or parsed['miles'] == true_miles
+                       or parsed['milesUncertain']))
         ok_(where + ' / is right, or says nothing — never something else',
-            (not rate['ready']) or parsed['pay'] == true_pay)
+            (not rate['ready']) or agrees)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d end-to-end money checks passed' % ok)
