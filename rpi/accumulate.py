@@ -243,16 +243,29 @@ class OfferAccumulator:
             minutes = (minutes or 0) + _consensus(slot['minutes'])
             if slot['miles']:
                 miles = (miles or 0) + _consensus(slot['miles'])
-        # A slot no frame in the window ever read a distance for still hands its
-        # minutes to the sum, so the merge has the whole journey's time against
-        # part of its distance — the same defect as in a single parse, and here
-        # it has survived every frame rather than one.
+        # The legs behind the sum, rebuilt from the window rather than inherited
+        # from whichever frame happened to be last.
         #
-        # Two slots or more, and whether the *other* slot kept its distance does
-        # not matter: both losing theirs leaves miles None, which reads as a card
-        # that states no distance rather than as damage. See
-        # offer_parser.legs_short_a_distance, whose rule this is.
-        short_a_leg = len(used) >= 2 and any(not slot['miles'] for slot in used)
+        # `dict(parsed)` below carries the last frame's own legDetail, and this
+        # file already knows what that costs — the comment under `milesUncertain`
+        # is about exactly the same mistake with a different field. It did not
+        # matter while nothing read legDetail off a merged reading; it matters
+        # now that is_whole does. Measured: a window that had already recovered
+        # the trip distance from a good frame, correct at 8.4 miles and not
+        # uncertain, went back to `whole: False` the moment one later frame lost
+        # it again — so a card the rig had read correctly stopped being spoken,
+        # kept being resampled, and was written to the journal as a fragment,
+        # which keeps it out of every median on the offers page.
+        merged_legs = [{'minutes': _consensus(slot['minutes']),
+                        'miles': _consensus(slot['miles']) if slot['miles'] else None,
+                        'isTotal': slot['isTotal']}
+                       for slot in used]
+
+        # One definition of the rule, in the parser, asked about the merge's own
+        # legs. A second copy here would be a second thing to get wrong, and the
+        # first version of it already was: it exempted the case where no leg had
+        # a distance at all, which is the worse one.
+        short_a_leg = OP.legs_short_a_distance(merged_legs)
 
         merged = dict(parsed)
         merged['minutes'] = minutes if minutes else parsed.get('minutes')
@@ -305,6 +318,7 @@ class OfferAccumulator:
         merged['deliverBy'] = (_consensus(self.deadlines) if self.deadlines
                                else parsed.get('deliverBy'))
         merged['legs'] = len(used)
+        merged['legDetail'] = merged_legs
         # A total is the whole journey in one line, so one of them is a complete
         # picture where one ordinary leg is only ever half of one.
         merged['hasTotal'] = bool(totals)

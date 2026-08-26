@@ -332,6 +332,52 @@ again = acc.add(P.parse(DELIVERY), now=1700.5)
 eq('read again, still complete', again['complete'], True)
 eq('...and still one card', again['mergedFrom'], 2)
 
+# --- a leg's distance, once recovered, stays recovered ----------------------
+#
+# This is what merging across frames is *for*: one frame loses the trip
+# distance, another catches it, and the window keeps the better answer. A leg
+# with minutes and no distance makes the reading not whole, so the loop goes on
+# resampling — and the whole point of that is the frame that fixes it.
+#
+# What must not happen is losing it again. `merged` starts life as a copy of the
+# last frame's parse, so every summary field has to be rebuilt from the window
+# or it describes one frame instead of the sum. `milesUncertain` was already
+# rebuilt for exactly this reason, and `legDetail` was not — it did not matter
+# until is_whole started reading it. Measured before the fix: a window correct
+# at 8.4 miles and not uncertain went back to `whole: False` on the next
+# damaged frame, so a card the rig had already read correctly stopped being
+# spoken, kept being resampled, and reached the journal as a fragment — which
+# keeps it out of every median on the offers page.
+DAMAGED = '$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip'
+CLEAN = '$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip'
+
+acc = OfferAccumulator()
+seen = []
+for i, text in enumerate([DAMAGED, DAMAGED, CLEAN, DAMAGED, DAMAGED]):
+    seen.append(acc.add(P.parse(text), now=1_700_000_000.0 + i * 0.5))
+
+eq('a lost leg distance is short before it is found', seen[0]['miles'], 1.1)
+eq('...and says so', seen[0]['milesUncertain'], True)
+eq('...and is not whole', P.is_whole(seen[0]), False)
+
+eq('one good frame recovers the distance', seen[2]['miles'], 8.4)
+eq('...and clears the doubt', seen[2]['milesUncertain'], False)
+eq('...and makes the reading whole', P.is_whole(seen[2]), True)
+
+for i in (3, 4):
+    eq('a later bad frame does not lose it again (frame %d)' % (i + 1),
+       seen[i]['miles'], 8.4)
+    eq('...nor re-raise the doubt (frame %d)' % (i + 1),
+       seen[i]['milesUncertain'], False)
+    eq('...nor un-whole a finished reading (frame %d)' % (i + 1),
+       P.is_whole(seen[i]), True)
+
+# The legs the summary is made of describe the window, not whichever frame
+# arrived last — which is the thing that went wrong.
+eq('the merged legs are the window\'s', len(seen[4]['legDetail']), 2)
+eq('...with the distance the window found',
+   sorted(l['miles'] for l in seen[4]['legDetail']), [1.1, 7.3])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

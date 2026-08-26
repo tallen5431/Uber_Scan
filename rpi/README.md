@@ -1519,6 +1519,18 @@ is left alone, because it can be a total — `$7.09 34 min total` states no
 distance and is a whole journey by itself — and one plain leg is already not
 whole for having no second half.
 
+Making `is_whole` read `legDetail` turned up one more thing, which is the point
+of the whole mechanism. A merged reading starts life as a copy of the **last
+frame's** parse, so every summary field has to be rebuilt from the window or it
+describes one frame instead of the sum — `milesUncertain` already was, for
+exactly this reason, and `legDetail` was not, because until now nothing read it
+off a merge. So a window that had already recovered the trip distance from a
+good frame, correct at 8.4 miles and not uncertain, went back to `whole: false`
+on the next damaged frame: a card the rig had read correctly stopped being
+spoken, kept being resampled, and reached the journal as a fragment. The legs
+are rebuilt from the window now, and once a distance is recovered it stays
+recovered — which is what merging across frames is *for*.
+
 ### What went past unrecorded
 
 The one thing a journal can never contain is what is not in it. Every figure on
@@ -1949,7 +1961,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 19 suites, 2225 checks
+npm test                # all 19 suites, 2239 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1968,7 +1980,8 @@ node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  84 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 383 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  #  78 on merging readings across frames
+python3 rpi/test_accumulate.py  #  92 on merging readings across frames, and on
+                                #     a recovered leg staying recovered
 python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    # 120 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
