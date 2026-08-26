@@ -162,6 +162,30 @@ card in the sample says 34 minutes for 6 items at a Dollar General. Set
 | Less $0.30/mi for 3.6 mi | $10.61 |
 | Plus 90s per item (9 min) | $8.39 |
 
+## The offline cache stopped shipping fixes
+
+`sw.js` was cache-first with a hand-bumped version, and the version was the
+whole mechanism: forget it and a phone that has already installed the app serves
+the old code forever. The comment on its first line said exactly that. It was
+forgotten twice in two commits — the shop-order fix above, and a parser fix that
+keeps a gross rate out of the medians — so neither reached a single installed
+phone. A rule that has to be remembered on every commit is a rule that gets
+forgotten on some commit.
+
+The shell is **stale-while-revalidate** now: served from cache at once,
+re-fetched in the background, entry replaced. Forgetting to bump costs one page
+load instead of costing everything, and the version is a convenience rather than
+the mechanism.
+
+The obvious fix would have been worse than the bug. `vendor/` — the OCR engine
+and its language data, about 15MB — was never in `ASSETS`; it only ever landed
+in the cache opportunistically, in the fetch handler, under the same key. And
+`activate` deletes every cache that is not the current one. So simply bumping
+the version would have deleted the engine, and `install` would not have put it
+back: a phone with no signal would have lost the scanner entirely, in the name
+of shipping a scanner fix. The engine has a cache of its own now, bumped only
+when the engine itself changes.
+
 ## Testing without a rig
 
 Hit **📷 Photo** and pick a screenshot. It runs the identical pipeline —
@@ -172,9 +196,9 @@ real offers before mounting anything.
 
 ```sh
 node tests/parser.test.js     #  83 checks, no browser needed
-node tests/corpus.test.js     # 336 checks shared with the Pi parser
+node tests/corpus.test.js     # 350 checks shared with the Pi parser
 node tests/crop.test.js       #  16 on the Pi's hand-drawn box, server to scanner
-python3 rpi/test_scanjs.py    #  25 through a real browser, end to end
+python3 rpi/test_scanjs.py    #  39 through a real browser, end to end
 ```
 
 The last one drives this page the way a phone does — it renders each card shape,

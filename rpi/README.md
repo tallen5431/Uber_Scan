@@ -1961,7 +1961,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 19 suites, 2239 checks
+npm test                # all 19 suites, 2253 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1994,7 +1994,7 @@ python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
 python3 rpi/test_scan_pi.py     # 143 on the loop that holds the camera
 python3 rpi/test_sync.py        #  67 on getting the offers off the car
-python3 rpi/test_scanjs.py      #  25 on the phone's own scanner, through a
+python3 rpi/test_scanjs.py      #  39 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
 python3 rpi/test_liveview.py    #  39 on the picture the driver watches, on
                                 #     nothing else being served with it, and on

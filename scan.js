@@ -324,6 +324,25 @@
     if (locked && !wasLocked) buzz(judged(parsed).state === 'go' ? [18, 40, 18] : [45]);
   }
 
+  /* A failed read is a read that found nothing, not a read that did not happen.
+   *
+   * Neither consider() nor render() used to run on a throw, so every value on
+   * the screen kept whatever it had. An engine that throws every cycle — a
+   * phone that has run its worker out of memory, a half-cached core — therefore
+   * held a green ACCEPT and a dollar figure from an offer that was already
+   * gone, indefinitely, admitted to only by 11px of grey status text. That is
+   * the worst state this page can reach, and one exception reaches it.
+   *
+   * The decay machinery already exists and is the whole fix: an incomplete
+   * reading counts as a miss, and MISSES_TO_RESET of them clear the verdict.
+   * Named rather than inlined so the test can drive this path rather than a
+   * second copy of it. */
+  function readFailed(e) {
+    consider({ complete: false });
+    render(0);
+    status('read failed: ' + (e && e.message ? e.message : e));
+  }
+
   async function loop() {
     while (running) {
       if (frozen || busy || el.video.readyState < 2) { await sleep(80); continue; }
@@ -333,7 +352,7 @@
         consider(out.parsed);
         render(out.ms);
       } catch (e) {
-        status('read failed: ' + e.message);
+        readFailed(e);
       }
       busy = false;
       await sleep(30);
@@ -395,6 +414,22 @@
     // A read can warrant more than one note at once — a recovered decimal and
     // added shopping time are independent facts and both change the number.
     var notes = [];
+    // Half a card, said in words. The label above already softens to "ACCEPT ?"
+    // when the reading is not whole — and the headline underneath it does not
+    // soften at all, which is the wrong way round: the number is the thing being
+    // read. A single leg is the same pay over less time, so it always reads
+    // *better* than the offer is: "$16.00 3 min away" is a confident green
+    // $320/hr for a card whose truth is $35.30. doubt() cannot catch that (3
+    // minutes and $16 are both perfectly ordinary) and the distance is not
+    // uncertain, so without this there is nothing on the screen to argue with.
+    //
+    // The same sentence as live.html, deliberately. The two screens are the
+    // same decision made in two places and a driver checking one against the
+    // other has to find them saying the same thing.
+    if (r.ready && p && !isWhole(p)) {
+      notes.push('Still reading this card — the journey may not be all there '
+                 + 'yet, which makes it look better than it is.');
+    }
     if (r.milesUncertain) notes.push('Distance unreadable — showing pay before mileage cost.');
     else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
     if (r.ready && r.shopMinutes) notes.push('Includes ' + Math.round(r.shopMinutes) + ' min of shopping time.');
@@ -648,6 +683,14 @@
       return { parsed: out.parsed, ms: out.ms, rate: judged(out.parsed) };
     },
     fitForOcr: fitForOcr,
+    /* Drive the read-failed path without breaking the engine to do it: this is
+       the branch where a screen full of last offer's numbers can survive an
+       exception, and it is only reachable by throwing. */
+    failRead: function (times) {
+      for (var i = 0; i < (times || 1); i++) {
+        readFailed(new Error('forced'));
+      }
+    },
     ready: function () { return !!worker; }
   };
 })();

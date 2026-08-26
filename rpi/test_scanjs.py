@@ -130,6 +130,51 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     out.fit[wh.join('x')] = await page.evaluate(
       p => window.__scan.fitForOcr(p[0], p[1]), wh);
   }
+
+  // Half a card: what the page says when the reading is not whole.
+  const frag = 'data:image/png;base64,'
+    + fs.readFileSync(path.join(dir, 'fragment.png')).toString('base64');
+  out.fragment = await page.evaluate(async s => {
+    const got = await window.__scan.readImage(s);
+    return { pay: got.parsed.pay, ready: got.rate.ready, state: got.rate.state,
+             perHour: got.rate.perHour || null,
+             shown: document.getElementById('perHour').textContent.trim(),
+             label: document.getElementById('verdictLabel').textContent.trim(),
+             warned: !document.getElementById('warn').hidden,
+             warning: document.getElementById('warn').textContent.trim() };
+  }, frag);
+
+  // A reader that throws every cycle must not leave the last verdict standing.
+  out.afterThrow = await page.evaluate(async () => {
+    const before = document.getElementById('perHour').textContent.trim();
+    window.__scan.failRead(4);
+    return { before: before,
+             after: document.getElementById('perHour').textContent.trim(),
+             label: document.getElementById('verdictLabel').textContent.trim() };
+  });
+
+  // The offline cache: which caches exist, and does the app shell refresh.
+  out.sw = await page.evaluate(async () => {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    let keys = [];
+    for (let i = 0; i < 80; i++) {
+      keys = await caches.keys();
+      if (keys.length) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    // Pull one vendor file through the worker so the engine cache is populated
+    // the way a real first run populates it.
+    try { await fetch('vendor/lang/eng.traineddata.gz'); } catch (e) {}
+    await new Promise(r => setTimeout(r, 400));
+    keys = await caches.keys();
+    const held = {};
+    for (const k of keys) {
+      const c = await caches.open(k);
+      held[k] = (await c.keys()).map(r => new URL(r.url).pathname);
+    }
+    return { keys: keys, scope: reg.scope, held: held };
+  });
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch(e => { console.log(JSON.stringify({ skip: 'browser: ' + e.message })); });
@@ -149,6 +194,10 @@ try:
         fname = name.replace(' ', '-') + '.png'
         cv2.imwrite(os.path.join(work, fname), card)
         manifest.append({'name': name, 'file': fname})
+    # Half a card: one leg, which always reads better than the offer is.
+    frag = TC.uberx_screen()
+    frag = frag[int(frag.shape[0] * 0.42):int(frag.shape[0] * 0.72), :]
+    cv2.imwrite(os.path.join(work, 'fragment.png'), frag)
     with open(os.path.join(work, 'cards.json'), 'w') as fh:
         json.dump(manifest, fh)
     driver = os.path.join(work, 'drive.js')
@@ -215,6 +264,70 @@ try:
     delivery = got['reads']['a delivery card']
     ok_('a deadline the clock cannot make sense of is refused, not shown',
         delivery['state'] != 'doubt' or delivery['shown'] == '--')
+
+    # --- half a card says so, in words -------------------------------------
+    # A single leg is the same pay over less time, so it always reads *better*
+    # than the offer is — "$16.00 3 min away" is a confident green $320/hr for
+    # a card whose truth is $35.30. doubt() cannot see it (3 minutes and $16 are
+    # both ordinary) and the distance is not uncertain, so the only thing that
+    # can argue with the number is a sentence saying the journey is not all
+    # there. live.html has had one for a while; this page had the "?" on the
+    # word and nothing on the figure, which is the wrong half to hedge.
+    frag = got['fragment']
+    if frag['ready']:
+        ok_('half a card is called out on the phone too', frag['warned'])
+        ok_('...in the same words as the driving screen',
+            'may not be all there' in frag['warning'])
+        ok_('...while the label hedges as well', frag['label'].endswith('?'))
+    else:
+        ok_('half a card shows no rate at all', frag['shown'] == '--')
+
+    # --- a reader that throws does not leave the last verdict standing ------
+    # On a throw neither consider() nor render() ran, so every number on the
+    # screen kept its previous value. An engine that throws every cycle — a
+    # phone that has run its worker out of memory — therefore held a green
+    # ACCEPT and a dollar figure from an offer that was already gone, admitted
+    # to only by the status line.
+    thrown = got['afterThrow']
+    eq('a run of failed reads clears the rate', thrown['after'], '--')
+    ok_('...and the verdict with it',
+        thrown['label'] in ('POINT AT THE OFFER', 'READ AGAIN'))
+
+    # --- the offline cache keeps the engine and refreshes the app ----------
+    # The version constant used to be the whole mechanism: forget to bump it and
+    # an installed phone serves the old code for ever, which is exactly what
+    # happened to two fixes in two commits. The app shell revalidates in the
+    # background now, so forgetting costs one page load.
+    #
+    # And the engine lives in a cache of its own. It was never in ASSETS — it
+    # only ever arrived opportunistically, under the same key the activate
+    # handler deletes — so the obvious fix, bumping the version, would have
+    # thrown away 15MB of reader and left an offline phone unable to scan at
+    # all, in the name of shipping a scanner fix.
+    held = got['sw']['held']
+    shells = [k for k in held if k.startswith('uberscan-shell-')]
+    blobs = [k for k in held if k.startswith('uberscan-vendor-')]
+    eq('the worker installs one app-shell cache', len(shells), 1)
+    eq('...and one for the vendored engine', len(blobs), 1)
+    ok_('the shell holds the app', any(p.endswith('scan.js') for p in held[shells[0]]))
+    ok_('...and not the engine',
+        not any('/vendor/' in p for p in held[shells[0]]))
+    ok_('the engine cache holds the engine',
+        any('/vendor/' in p for p in held[blobs[0]]))
+
+    # The half of this that a single page load cannot exercise: what survives a
+    # *version change*. Bumping the shell runs activate again, and activate
+    # deletes every cache it is not told to keep — so the check is that it is
+    # told to keep the engine. Asserted on the source, and said plainly rather
+    # than dressed up as a runtime test, because reaching it for real would mean
+    # serving two different workers to one page.
+    worker_src = open(os.path.join(ROOT, 'sw.js')).read()
+    keep = [l for l in worker_src.splitlines() if 'caches.delete(k)' in l]
+    eq('activate has one rule about what to delete', len(keep), 1)
+    ok_('...and it spares the app shell', 'SHELL' in keep[0])
+    ok_('...and the vendored engine, which install does not put back',
+        'BLOB' in keep[0])
+    ok_('...which is a different cache from the shell', shells[0] != blobs[0])
 
     # --- the browser sizes its picture the way the Pi does ------------------
     # This is the rule that broke, and it broke by drifting from the Pi's. Both

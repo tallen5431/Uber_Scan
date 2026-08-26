@@ -1,8 +1,35 @@
-/* Offline cache. Bumped whenever a file in ASSETS changes. This is cache-first, so a phone
- * that has the old worker keeps serving the old page forever otherwise —
- * v7 shipped before live.html, styles.css and offer-parser.js all changed,
- * which would have hidden every one of those changes behind a stale cache. */
-var CACHE = 'uberscan-v32';
+/* Offline cache.
+ *
+ * This used to be cache-first with a hand-bumped version, and the version was
+ * load-bearing: forget it and a phone that has already installed the app serves
+ * the old code forever. The comment said so — "bumped whenever a file in ASSETS
+ * changes" — and it still went wrong twice in two commits. `scan.js` was fixed
+ * so the phone could read a shop order at all, `offer-parser.js` was fixed so a
+ * card with no readable distance stopped feeding a gross rate into the medians,
+ * and neither reached a single installed phone, because the constant below did
+ * not move. A rule that has to be remembered on every commit is a rule that
+ * gets forgotten on some commit.
+ *
+ * So the shell is stale-while-revalidate now: served from cache at once, then
+ * re-fetched in the background and the entry replaced. Forgetting to bump costs
+ * one page load instead of costing everything, and the version is a convenience
+ * rather than the mechanism.
+ *
+ * The two caches are separate for a reason that would have bitten the obvious
+ * fix. `vendor/` — the OCR engine and its language data, about 15MB — was never
+ * in ASSETS; it only ever landed in the cache opportunistically, in the fetch
+ * handler, under the same key. `activate` deletes every cache that is not the
+ * current one. So simply bumping the version would have deleted the engine and
+ * install would not have put it back: a phone with no signal would have lost
+ * the scanner entirely, in the name of shipping a scanner fix.
+ */
+var SHELL = 'uberscan-shell-v33';
+
+/* Bumped only when the vendored engine itself changes, which is rare and
+ * deliberate. Held apart from the shell so that shipping app code never costs
+ * anyone 15MB of re-download, and never leaves an offline phone without a
+ * reader. */
+var BLOB = 'uberscan-vendor-v1';
 
 var ASSETS = [
   './',
@@ -23,9 +50,13 @@ var ASSETS = [
   'icons/apple-touch-icon.png'
 ];
 
+function isVendor(pathname) {
+  return pathname.indexOf('/vendor/') !== -1;
+}
+
 self.addEventListener('install', function (e) {
   e.waitUntil(
-    caches.open(CACHE)
+    caches.open(SHELL)
       .then(function (c) { return c.addAll(ASSETS); })
       .then(function () { return self.skipWaiting(); })
   );
@@ -35,7 +66,9 @@ self.addEventListener('activate', function (e) {
   e.waitUntil(
     caches.keys().then(function (keys) {
       return Promise.all(keys.map(function (k) {
-        return k === CACHE ? null : caches.delete(k);
+        // Both survive. Deleting BLOB here is what would cost an offline phone
+        // its reader; deleting neither is what would leave old shells around.
+        return (k === SHELL || k === BLOB) ? null : caches.delete(k);
       }));
     }).then(function () { return self.clients.claim(); })
   );
@@ -68,21 +101,52 @@ self.addEventListener('fetch', function (e) {
    */
   if (url.pathname.indexOf('/api/') === 0) return;
 
+  /* The engine and its language data: many megabytes, and they only change
+   * when someone re-vendors them. Cache-first and left alone, so a page load
+   * never re-fetches them and a bump of the app shell never evicts them. */
+  if (isVendor(url.pathname)) {
+    e.respondWith(
+      caches.match(e.request).then(function (hit) {
+        if (hit) return hit;
+        return fetch(e.request).then(function (res) {
+          if (res && res.ok && res.type === 'basic' && !url.search) {
+            var copy = res.clone();
+            caches.open(BLOB).then(function (c) { c.put(e.request, copy); });
+          }
+          return res;
+        });
+      })
+    );
+    return;
+  }
+
+  /* Everything else: answer from cache immediately if it is there, and refresh
+   * the entry in the background either way. The driver sees the cached page at
+   * cache-first speed and the next load has the new code — which is the whole
+   * difference between shipping a fix late and not shipping it.
+   *
+   * A background fetch that fails must leave the cached copy alone, which is
+   * what the empty catch is for: offline is the case this file exists for. */
   e.respondWith(
     caches.match(e.request).then(function (hit) {
-      if (hit) return hit;
-      return fetch(e.request).then(function (res) {
-        // Cache same-origin successes so a first visit online works offline
-        // later. Query strings are skipped: they are cache-busters here, and
-        // storing them accumulates entries nothing will ever ask for again.
+      var fresh = fetch(e.request).then(function (res) {
+        // Query strings are skipped: they are cache-busters here, and storing
+        // them accumulates entries nothing will ever ask for again.
         if (res && res.ok && res.type === 'basic' && !url.search) {
           var copy = res.clone();
-          caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+          caches.open(SHELL).then(function (c) { c.put(e.request, copy); });
         }
         return res;
       }).catch(function () {
-        return caches.match('index.html');
+        // Nothing cached and no network. A navigation can still be answered
+        // with the app shell; anything else has to fail as itself, because
+        // handing back index.html in place of a script is a stranger failure
+        // than not answering at all.
+        if (hit) return hit;
+        return e.request.mode === 'navigate'
+          ? caches.match('index.html') : Response.error();
       });
+      return hit || fresh;
     })
   );
 });
