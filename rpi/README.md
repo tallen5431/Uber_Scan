@@ -1503,6 +1503,22 @@ legs across frames for this reason, and `whole` is what keeps the loop
 resampling until it has. The same rule is in the browser parser, in the
 accumulator's merge across a window, and in the shared corpus.
 
+The first version of that rule asked whether some *other* leg had kept its
+distance, so one leg losing its miles was caught and **both** losing them was
+not — which is the wrong way round, because the second leaves less evidence
+rather than more. With no leg carrying a distance the total is simply `null`,
+indistinguishable from a card that states no distance: nothing is flagged,
+`rate()` charges no mileage for a distance it does not have, and the row is
+whole and unsuspicious, so its **gross** rate is pooled into every median on the
+offers page beside everyone else's net ones. Measured on
+`$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip`, both distances mangled:
+$22.93/hr, whole, unflagged, counted.
+
+It is two legs or more now, and it does not ask about the others. A single leg
+is left alone, because it can be a total — `$7.09 34 min total` states no
+distance and is a whole journey by itself — and one plain leg is already not
+whole for having no second half.
+
 ### What went past unrecorded
 
 The one thing a journal can never contain is what is not in it. Every figure on
@@ -1933,7 +1949,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 19 suites, 2168 checks
+npm test                # all 19 suites, 2225 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -1947,16 +1963,16 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 336 checks, the shared corpus
+node tests/corpus.test.js       # 350 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  84 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 369 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 383 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  #  78 on merging readings across frames
 python3 rpi/test_pipeline.py    # 192 on where to look, how big, and what to log
 python3 rpi/test_exposure.py    # 120 on flicker, brightness, gain and exposure
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     # 108 on keeping one row per offer, and on a
+python3 rpi/test_journal.py     # 137 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  48 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and

@@ -331,6 +331,30 @@
       }
     },
     {
+      "name": "...and both legs losing theirs is the same fault, not an exemption",
+      "text": "$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip",
+      "expect": {
+        "pay": 16.05,
+        "minutes": 42.0,
+        "miles": null,
+        "legs": 2,
+        "complete": true,
+        "milesUncertain": true
+      }
+    },
+    {
+      "name": "...while a lone total states no distance and is not damaged",
+      "text": "$7.09 34 min total",
+      "expect": {
+        "pay": 7.09,
+        "minutes": 34.0,
+        "miles": null,
+        "legs": 1,
+        "complete": true,
+        "milesUncertain": false
+      }
+    },
+    {
       "name": "...and legs that all read leave it certain",
       "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
       "expect": {
@@ -1230,6 +1254,16 @@
       "name": "...whichever leg it was",
       "text": "$16.05 25 min (11.q5 mi) away 17 min (3.7 mi) trip",
       "expect": false
+    },
+    {
+      "name": "...or both of them, which used to look like a card with no distance",
+      "text": "$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip",
+      "expect": false
+    },
+    {
+      "name": "a total stating no distance is still a whole journey",
+      "text": "$7.09 34 min total",
+      "expect": true
     },
     {
       "name": "a delivery card with a distance is finished",

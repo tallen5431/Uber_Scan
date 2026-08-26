@@ -335,7 +335,7 @@ def is_whole(parsed):
 
 
 def legs_short_a_distance(legs):
-    """True when some leg of a journey has a distance and another has none.
+    """True when a multi-leg journey is missing a distance from any of its legs.
 
     The sum is then a whole journey's *time* against part of its distance, and
     nothing downstream can tell. Every existing guard looks for a distance that
@@ -353,9 +353,26 @@ def legs_short_a_distance(legs):
 
     The corpus had an instance of this all along, under a name that says the
     opposite of what it asserted.
+
+    Two legs or more, deliberately, and it does not ask whether any *other* leg
+    kept its distance. A first version did, so one leg losing its miles was
+    caught and both legs losing them was not — and the second is the worse case,
+    since it leaves `miles` as None, which reads as "this card states no
+    distance" rather than as damage. Nothing marks it, rate() charges no mileage
+    for a distance it does not have, and the row is whole and unsuspicious, so
+    its gross rate goes into every median on the offers page beside net ones.
+    Measured on `$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip`, both
+    distances mangled: $22.93/hr, whole, unflagged.
+
+    A card printing an ordinary leg always prints its distance beside the time,
+    so a leg without one is OCR damage rather than a card shape. A *single* leg
+    is left alone, because it can be a total — the corpus has `$7.09 34 min
+    total`, which states no distance and is a whole journey by itself — and one
+    plain leg is already not whole for having no second half.
     """
-    with_miles = [l for l in legs if l.get('miles') is not None]
-    return bool(with_miles) and len(with_miles) < len(legs)
+    if len(legs) < 2:
+        return False
+    return any(l.get('miles') is None for l in legs)
 
 
 def check_distance(minutes, miles, had_decimal):

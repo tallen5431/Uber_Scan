@@ -378,12 +378,16 @@ def a_row(text):
 
 uncertain_rows = 0
 for pay in ('$16.05', '$41.11'):
-    for first in ('1 min (0.4 mi)', '3 min (1.1 mi)', '25 min (11.q5 mi)'):
+    for first in ('1 min (0.4 mi)', '3 min (1.1 mi)', '25 min (11.q5 mi)',
+                  '25 min (1q.5 mi)'):
         for second in ('20 min (7.3 mi)', '20 min (7.3 m1)', '4 min (73.5 mi)',
                        '2 min (88.2 mi)', '40 min (0.2 mi)',
                        # Sums landing just under the line, which is where the
                        # two thresholds would come apart if either moved.
-                       '3 min (5.9 mi)', '4 min (6.8 mi)', '5 min (10.4 mi)'):
+                       '3 min (5.9 mi)', '4 min (6.8 mi)', '5 min (10.4 mi)',
+                       # ...and both legs losing their distance, which
+                       # leaves no distance at all rather than a short one.
+                       '17 min (3.q mi)'):
             row = a_row('%s %s away %s trip' % (pay, first, second))
             if not row['milesUncertain']:
                 continue
@@ -393,6 +397,44 @@ for pay in ('$16.05', '$41.11'):
                 row['suspect'] or row['whole'] is False)
 
 ok_('...and the sweep actually produced some to check', uncertain_rows >= 6)
+
+# --- and a row the medians will count has a distance to be costed on --------
+#
+# The sweep above asks whether an uncertain distance owns up to it. This asks
+# the question from the other end, and it is the one that catches a distance
+# that never appeared at all.
+#
+# journal.html counts a row into every median on the page when Advice.trustworthy
+# accepts it — not hidden, not suspect, `whole` not false — and rate() charges no
+# mileage for a distance it does not have. So a two-leg card whose distances BOTH
+# failed to read lands as `miles: null`, which is indistinguishable from a card
+# that states no distance: nothing marks it, and its gross rate is pooled with
+# everyone else's net ones. Measured on
+# `$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip`: $22.93/hr, whole,
+# unflagged, counted.
+#
+# One leg losing its distance used to be caught and both losing it did not,
+# which is the wrong way round — the second leaves less evidence, not more.
+def trustworthy(row):
+    """journal.html's rule for a row worth counting, as advice.js states it."""
+    return not row.get('hidden') and not row['suspect'] and row['whole'] is not False
+
+
+counted_rows = 0
+for first, second in (('25 min (11.q5 mi)', '17 min (3.q mi)'),
+                      ('25 min (11.q5 mi)', '17 min (3.7 mi)'),
+                      ('3 min (1.1 mi)', '20 min (7.3 m1)'),
+                      ('3 min (1.1 mi)', '20 min (7.3 mi)')):
+    row = a_row('$16.05 %s away %s trip' % (first, second))
+    if not trustworthy(row):
+        continue
+    counted_rows += 1
+    ok_('a counted two-leg row has a distance: %s %s' % (first, second),
+        row['miles'] is not None)
+    ok_('...and was actually costed on it: %s %s' % (first, second),
+        (row['cost'] or 0) > 0)
+
+eq('...and exactly one of those four is fit to count', counted_rows, 1)
 
 # The same property from the other side: a row that is neither suspect nor
 # short a leg has a distance it is willing to be costed on.

@@ -392,13 +392,19 @@
    * missing miles are missing *cost*. It errs optimistic, which is the one
    * direction that turns a pass into an accept. */
   function legsShortADistance(legs) {
-    var withMiles = 0, total = 0, i;
-    for (i = 0; i < (legs || []).length; i++) {
-      if (!legs[i]) continue;
-      total++;
-      if (legs[i].miles !== null && legs[i].miles !== undefined) withMiles++;
+    var list = [], i;
+    for (i = 0; i < (legs || []).length; i++) if (legs[i]) list.push(legs[i]);
+    // Two or more, and it does not ask whether any other leg kept its distance.
+    // Both legs losing theirs is the worse case, not the exempt one: it leaves
+    // miles null, which reads as "this card states no distance" rather than as
+    // damage, so nothing marks it and its gross rate joins net ones in every
+    // median. A single leg is left alone because it can be a total, which
+    // states no distance and is a whole journey by itself.
+    if (list.length < 2) return false;
+    for (i = 0; i < list.length; i++) {
+      if (list[i].miles === null || list[i].miles === undefined) return true;
     }
-    return withMiles > 0 && withMiles < total;
+    return false;
   }
 
   function checkDistance(minutes, miles, hadDecimal) {

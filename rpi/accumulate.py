@@ -247,8 +247,12 @@ class OfferAccumulator:
         # minutes to the sum, so the merge has the whole journey's time against
         # part of its distance — the same defect as in a single parse, and here
         # it has survived every frame rather than one.
-        short_a_leg = any(not slot['miles'] for slot in used) \
-            and any(slot['miles'] for slot in used)
+        #
+        # Two slots or more, and whether the *other* slot kept its distance does
+        # not matter: both losing theirs leaves miles None, which reads as a card
+        # that states no distance rather than as damage. See
+        # offer_parser.legs_short_a_distance, whose rule this is.
+        short_a_leg = len(used) >= 2 and any(not slot['miles'] for slot in used)
 
         merged = dict(parsed)
         merged['minutes'] = minutes if minutes else parsed.get('minutes')
