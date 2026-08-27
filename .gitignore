@@ -7,14 +7,21 @@ __pycache__/
 # the fallback names, used where there is no RAM disk to write in, and still
 # read on either machine so an upgrade cannot drop a request between the two
 # sides restarting.
-rpi/.viewing
-rpi/.viewing.part
-rpi/.recalibrate
-rpi/.cropbox.json
-rpi/.cropbox.json.part
+# Globs, because every one of these is written through a temporary and the
+# temporary names are not all `.part`: the crop endpoint uses
+# `.cropbox.json.<pid>.<n>.part` so two drags landing together cannot interleave
+# into one file. Named exactly, three of those temporaries were missed, and a
+# `git add -A` on the rig commits whatever was on disk at the time.
+rpi/.viewing*
+rpi/.recalibrate*
+rpi/.cropbox.json*
+rpi/live-frame.jpg*
+# Advisory between this project's own scripts, so a second one says which pid
+# holds the camera instead of dying with a traceback about a device. It contains
+# that pid, and it is written into the checkout.
+rpi/.camera.lock
 rpi/config-preview.png
 rpi/config.json
-rpi/live-frame.jpg
 ssl/
 
 # A shift's worth of offers: what was paid, how far, and when. That is the

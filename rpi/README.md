@@ -361,6 +361,42 @@ rather than four. `READ_SECONDS` in scan_pi.py is where that cost is written
 down; two constants are derived from it and one of them lives in another file,
 which is how the last one went stale.
 
+### Where the job goes, on the screen that decides
+
+The scanner has sent `places` on every read since it learned to read a map, and
+until now the only screens that painted it were the offers page and the CSV.
+The driving screen — the one a driver is actually looking at while the timer
+runs — was the one that could not tell them whether they recognise the job.
+
+One line under the figures, ellipsised, dimmer than the numbers, and two places
+joined with an arrow the way the offers page writes them so the two screens read
+alike. It is what you scan to recognise a job rather than what you judge it by,
+so it is never allowed to take room from the headline: an address runs to sixty
+characters and this panel is read at arm's length in a moving car.
+
+It clears when the card does. Left up, the last job's address reads as belonging
+to whatever arrives next.
+
+### Nothing the rig writes may become a commit
+
+`rpi/.camera.lock` is written into the checkout and holds a pid, and nothing
+ignored it — so `git add -A` on the Pi committed a working directory's worth of
+state to a public remote. Adding the line is the fix; the interesting part is
+that a hand-kept list is what let it happen, and checking the list found two
+more.
+
+Every one of these files is written through a temporary and renamed into place,
+and the temporary names are not all `<name>.part`: the crop endpoint appends a
+pid and a counter, so `.cropbox.json.4321.7.part`, because two drags landing
+together must not interleave into one file. Named exactly, three of those were
+committable. They are globs now.
+
+`test_lint.py` derives the list from the code rather than keeping its own:
+anything joined onto `rpi/` as a literal, plus handoff.py's fallback names, has
+to be covered by `.gitignore` — including a `.part`, a pid-suffixed `.part` and
+a `.tmp` for each. The next runtime file cannot be forgotten, because nothing
+has to remember it.
+
 ### A verdict is only as fresh as its own clock
 
 The driving screen seeds itself from `/api/status` so a tab that has just opened
@@ -2683,16 +2719,19 @@ python3 rpi/test_autopilot.py   #  37 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      #  48 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        #  28 on the faults that only surface when a
-                                #     cold branch runs (skipped without flake8)
+python3 rpi/test_lint.py        #  50 on the faults that only surface when a
+                                #     cold branch runs, and on nothing the rig
+                                #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #  37 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
 python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
+python3 rpi/test_camera.py      #  34 on which tuning file opens the camera, and
+                                #     on who is already holding it
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 126 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 150 on what the driving screen shows while a
                                 #     card is being read, and after (skipped
                                 #     without Playwright)
 python3 rpi/test_layout.py      # 258 on every page fitting the screen it is

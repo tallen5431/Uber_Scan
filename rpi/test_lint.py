@@ -21,12 +21,16 @@ Skipped where flake8 is not installed, like every other optional dependency
 here. It is not a runtime dependency of the rig and must never become one.
 """
 
+import fnmatch
+import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'rpi'))
 ok = bad = 0
 
 # The pyflakes codes, and what each one is actually about. Named rather than
@@ -122,6 +126,63 @@ finally:
         os.remove(broken)
     except OSError:
         pass
+
+# --- nothing the rig writes may become a commit ----------------------------
+#
+# A different class of fault that also only shows up on the machine: a file the
+# code creates at runtime, inside its own checkout, that nobody told git to
+# ignore. `git add -A` on the Pi then commits it. `rpi/.camera.lock` was one,
+# and it holds a pid — a working directory's worth of state pushed to a public
+# remote because one line was missed in a file nothing checks.
+#
+# So the list is derived from the code rather than kept by hand: every literal
+# joined onto this directory that is not a source file the repo ships.
+WRITES = re.compile(
+    r"os\.path\.join\(\s*(?:HERE|os\.path\.dirname\(os\.path\.abspath\(__file__\)\))"
+    r"\s*,\s*'([^']+)'")
+
+ignored = []
+gitignore = os.path.join(ROOT, '.gitignore')
+if os.path.exists(gitignore):
+    ignored = [l.strip() for l in open(gitignore) if l.strip()
+               and not l.strip().startswith('#')]
+
+
+def is_ignored(name):
+    """Would git leave `rpi/<name>` alone?"""
+    return any(fnmatch.fnmatch('rpi/' + name, pattern.rstrip('/'))
+               or fnmatch.fnmatch(name, pattern.rstrip('/'))
+               for pattern in ignored)
+
+
+ok_('the repo has a .gitignore at all', bool(ignored))
+written = set()
+for path in sorted(glob.glob(os.path.join(ROOT, 'rpi', '*.py'))):
+    if os.path.basename(path).startswith('test_'):
+        continue
+    for name in WRITES.findall(open(path).read()):
+        # Source the repo ships is not something the rig wrote.
+        if os.path.exists(os.path.join(ROOT, 'rpi', name)) and name.endswith('.py'):
+            continue
+        written.add(name)
+
+ok_('the scan found the files the rig writes', len(written) >= 3)
+for name in sorted(written):
+    ok_('rpi/%s is ignored, so it cannot be committed' % name, is_ignored(name))
+
+# ...and the fallback names handoff.py uses where there is no RAM disk, which
+# are built rather than written out as literals.
+import handoff as HO                                          # noqa: E402
+for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
+    ok_('the fallback %s is ignored' % base, is_ignored(base))
+
+# Every one of them is written through a temporary and renamed into place, and
+# the temporary names are not all `<name>.part`: the crop endpoint appends a pid
+# and a counter so two drags arriving together cannot interleave into one file.
+# Naming them exactly is what left three of these committable.
+for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
+    for suffix in ('.part', '.4321.7.part', '.tmp'):
+        ok_('...and %s%s with it' % (base, suffix), is_ignored(base + suffix))
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)

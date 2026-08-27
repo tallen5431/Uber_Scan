@@ -171,6 +171,25 @@ html, body {
 }
 .rate-raw[hidden] { display: none; }
 
+/* Where the job goes, under the figures rather than among them.
+ *
+ * The scanner has sent this on every read since it learned to read a map, and
+ * no screen a driver looks at while deciding painted it. It is what you scan to
+ * recognise a job, not what you judge it by — so it is dimmer than the numbers
+ * and never allowed to push them off the glass: one line, ellipsised, because
+ * an address runs to sixty characters and this panel is read at arm's length in
+ * a moving car. */
+.places {
+  margin-top: 6px;
+  font-size: clamp(12px, 3vw, 15px);
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.places[hidden] { display: none; }
+
 /* Four across on a phone held in one hand. auto-fit rather than a fixed count
    so a narrow screen wraps to two rows instead of squeezing the digits. */
 /* The arithmetic behind the headline. Sized between the rate and the labels:

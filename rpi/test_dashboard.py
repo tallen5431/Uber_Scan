@@ -85,7 +85,8 @@ UNCERTAIN = {
 }
 # ...and one where the distance was trusted, so there are two lines and a cost.
 DEDUCTED = dict(UNCERTAIN, state='no', perHour=14.71, grossPerHour=20.97,
-                cost=2.4, perMile=0.7, milesUncertain=False, whole=True)
+                cost=2.4, perMile=0.7, milesUncertain=False, whole=True,
+                places=['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
 # A delivery card states a deadline and no duration, so `minutes` is null and
 # the rate was worked out over `cardMinutes`. The raw row divided by `minutes`
 # and printed "$12.00 in -- min = $21.2/hr raw" — a sum with nothing under the
@@ -94,6 +95,8 @@ DEADLINE = dict(UNCERTAIN, state='warn', pay=12.0, minutes=None, cardMinutes=34.
                 billedMinutes=34.0, perHour=21.18, grossPerHour=21.18,
                 fromDeadline=True, deliverBy=1140, miles=None, whole=True,
                 milesUncertain=False, cost=0)
+
+READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE}
 
 DRIVER = r'''
 const { chromium } = require('playwright');
@@ -185,6 +188,15 @@ const LOOK = (sel) => {
       slot.raw = await page.evaluate(LOOK, '.working .raw');
       slot.net = await page.evaluate(LOOK, '.working .net');
       slot.warn = await page.evaluate(LOOK, '#warn');
+      slot.places = await page.evaluate(LOOK, '#places');
+      // The card goes away. An address left on screen would read as belonging
+      // to whatever arrives next.
+      await page.evaluate(() => window.__es.push(
+        { ready: false, state: 'empty', track: null }));
+      await page.waitForTimeout(150);
+      slot.placesAfter = await page.evaluate(LOOK, '#places');
+      await page.evaluate((r) => window.__es.push(r), READINGS[key]);
+      await page.waitForTimeout(150);
       slot.fits = await page.evaluate(() => {
         const d = document.documentElement;
         return d.scrollHeight <= d.clientHeight + 1
@@ -288,10 +300,9 @@ try:
 
     driver = os.path.join(work, 'dashboard.js')
     open(driver, 'w').write(DRIVER)
-    readings = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED,
-                'deadline': DEADLINE}
+    readings = READINGS
     proc2 = subprocess.run(
-        ['node', driver, base, json.dumps(PANELS), json.dumps(readings)],
+        ['node', driver, base, json.dumps(PANELS), json.dumps(READINGS)],
         env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
                  PW_EXES=json.dumps([
                      os.environ.get('CHROMIUM', ''),
@@ -316,7 +327,8 @@ try:
             # undefined used to vanish from the JSON and take its checks with
             # it, so the run passed by not looking.
             missing = [k for k in ('idle', 'reading', 'readingRate', 'verdict',
-                                   'rate', 'raw', 'net', 'warn')
+                                   'rate', 'raw', 'net', 'warn', 'places',
+                                   'placesAfter')
                        if not isinstance((r or {}).get(k), dict)]
             eq('%s: every element was measured' % where, missing, [])
             if not r or missing:
@@ -350,6 +362,19 @@ try:
                 '--' not in r['raw']['text'])
             ok_('%s: ...labelled as the raw one' % where,
                 'raw' in r['raw']['text'])
+
+            # Where the job goes. Sent on every read since the scanner learned
+            # to read a map, and painted on no screen a driver looks at while
+            # deciding — including this one, which is the one they look at.
+            want = READINGS[key].get('places') or []
+            eq('%s: the address is on the glass exactly when there is one' % where,
+               bool(r['places']['shown']), bool(want))
+            if want:
+                for place in want:
+                    ok_('%s: ...and names %s' % (where, place),
+                        place in r['places']['text'])
+            ok_('%s: ...and goes when the card does' % where,
+                not r['placesAfter']['shown'])
             ok_('%s: the headline rate is on the glass' % where,
                 r['rate']['shown'])
             ok_('%s: the panel still fits' % where, r['fits'])

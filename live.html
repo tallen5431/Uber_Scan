@@ -319,6 +319,13 @@
         <div class="sub"><span id="vMile">--</span><small id="lMile">miles</small></div>
         <div class="sub"><span id="vPerMile">--</span><small id="lPerMile">$/mi</small></div>
       </div>
+      <!-- Where the job goes. Sent on every read since the scanner learned to
+           read a map, and painted nowhere until now — so the one screen a
+           driver is actually looking at while they decide was the only one that
+           could not tell them whether they recognise the job. Under the
+           figures, because it is what you scan to recognise a job rather than
+           what you judge it by. -->
+      <div class="places" id="places" hidden></div>
       <div id="warn" class="notice" hidden></div>
     </section>
     <div class="pending" id="detail" style="text-align:center"></div>
@@ -407,7 +414,7 @@
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'working', 'spoken']
+   'working', 'places', 'spoken']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -544,6 +551,18 @@
   var TOO_DIM = 'Phone screen too dim for the camera — turn its brightness up '
               + 'a notch, or move the mount out of the shade.';
 
+  // Where the job goes, as the card wrote it.
+  //
+  // One line, ellipsised. An address can be sixty characters and this panel is
+  // read at arm's length in a moving car: a second line of small grey text
+  // costs the headline room it needs more. Two places are joined with an arrow,
+  // the same way the offers page writes them, so the two screens read alike.
+  function showPlaces(list) {
+    var where = (list || []).filter(function (p) { return !!p; });
+    el.places.textContent = where.join(' \u2192 ');
+    el.places.hidden = !where.length;
+  }
+
   var PHASE_LABEL = {
     check: 'CHECKING',
     aim: 'AIM THE CAMERA',
@@ -600,6 +619,9 @@
                    p.message || ''].filter(Boolean);
       el.warn.textContent = setup.join(' ');
       el.warn.hidden = !setup.length;
+      // No card, no address. Leaving the last one up would have it read as
+      // belonging to whatever comes next.
+      showPlaces(null);
       var quiet = Date.now() - seenAt;
       el.detail.textContent = aiming
         ? 'the view below is live — move the mount until this says good'
@@ -735,6 +757,7 @@
                  '<span><i>less</i> ' + money(r.cost, 2) + ' <i>car costs</i></span>'
                  + ' <span><i>=</i> <b>' + rate(r.perHour) + '/hr</b> <i>net</i></span>']);
     }
+    showPlaces(r.places);
     el.working.innerHTML = rows.map(function (row) {
       return '<div class="' + row[0] + '">' + row[1] + '</div>';
     }).join('');
