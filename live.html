@@ -145,12 +145,26 @@
     #raw, #viewNote { display: none; }
   }
 
-  /* Smaller again, and the arithmetic behind the headline is the first thing
-     to give up its room: the verdict, the rate and the figures off the card
-     are what a glance needs, and the sum that connects them can be checked on
-     a bigger screen when parked. */
+  /* Smaller again, and the arithmetic behind the headline gives up most of its
+     room: the verdict, the rate and the figures off the card are what a glance
+     needs, and the sum that connects them can be checked on a bigger screen
+     when parked.
+
+     Most of it, not all of it. This hid the working outright, and the working
+     is the only place on this page the raw $/hr appears — so between here and
+     the notice rule above there were two separate ways for that figure to be
+     absent and nothing on screen to tell either of them from a number the page
+     had failed to work out. What survives is the one line that is not written
+     anywhere else; the net line goes, because it is the headline in small type,
+     and so does the pay-and-time half of the raw line, which is a check against
+     the card rather than a figure. */
   @media (orientation: landscape) and (max-height: 380px) {
-    .working { display: none; }
+    .working .net { display: none; }
+    .working .raw span:first-child { display: none; }
+    .working .raw i { font-style: normal; }
+    /* `=` opens a sum whose left-hand side is no longer on screen. */
+    .working .raw i:first-of-type { display: none; }
+    .working { font-size: 11px; margin-top: 2px; }
     #detail { display: none; }
     /* On a panel this small a notice and the figures cannot both fit, and the
        notice wins: it is there because something is wrong with the reading, so
@@ -658,19 +672,28 @@
     //
     // Each line is a pair of unbreakable halves, so a narrow screen splits
     // between them rather than stranding "min" on a line of its own.
-    var mins = r.minutes === null ? '--' : Math.round(r.minutes);
+    // The card's own minutes where it states them, the time left to the
+    // deadline where it does not — the same fallback the submetric above uses.
+    // Without it a delivery card, which states a deadline and no duration,
+    // printed its raw rate over a dash: "$12.00 in -- min = $21.2/hr raw", a
+    // sum with nothing under the line. That is the whole DoorDash half of a
+    // shift, showing the one figure this panel had to be argued into showing
+    // at all and then failing to say what it was divided by.
+    var over = (typeof r.cardMinutes === 'number') ? r.cardMinutes : r.minutes;
+    var mins = (over === null || over === undefined) ? '--' : Math.round(over);
     // Both rates come off the scanner, divided by the same minutes, so this
     // sum is the scanner's arithmetic rather than a second version of it.
     // Older payloads carried only the net rate; there, the card's own time is
     // the denominator, which is what those versions meant by it.
     var gross = (typeof r.grossPerHour === 'number') ? r.grossPerHour
-      : (r.minutes > 0 ? r.pay / (r.minutes / 60) : null);
+      : (over > 0 ? r.pay / (over / 60) : null);
     // And the time it was divided by. Usually the card's own minutes, longer
     // once a shopping allowance or a pad is configured — shown as an extra so
     // the figure in the stat row below and the one these rates divide by are
     // both accounted for, instead of silently disagreeing.
-    var billed = (typeof r.billedMinutes === 'number') ? r.billedMinutes : r.minutes;
-    var extra = r.minutes === null ? 0 : Math.round(billed) - Math.round(r.minutes);
+    var billed = (typeof r.billedMinutes === 'number') ? r.billedMinutes : over;
+    var extra = (over === null || over === undefined)
+      ? 0 : Math.round(billed) - Math.round(over);
     var time = extra > 0 ? mins + ' <i>+</i> ' + extra + ' min'
              : extra < 0 ? Math.round(billed) + ' min'
              : mins + ' min';

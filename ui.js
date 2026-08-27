@@ -32,6 +32,7 @@
     perMile: document.getElementById('perMile'),
     perMileLabel: document.getElementById('perMileLabel'),
     perMin: document.getElementById('perMin'),
+    rawRate: document.getElementById('rawRate'),
     netPay: document.getElementById('netPay'),
     netLabel: document.getElementById('netLabel'),
     padHint: document.getElementById('padHint'),
@@ -129,6 +130,12 @@
 
     var ready = pay > 0 && typedMinutes > 0 && minutes > 0;
     var perHour = ready ? net / (minutes / 60) : null;
+    // The same offer before the running cost, so this screen can say which of
+    // the two numbers it is showing. Over the same denominator as `perHour`,
+    // including the pad, because the point of it is to be the *same* sum with
+    // one term removed — a raw rate over a different number of minutes is a
+    // third figure, and three rates on one screen explain nothing.
+    var grossPerHour = ready ? pay / (minutes / 60) : null;
     var perMin = ready ? net / minutes : null;
     // Net, like perHour, so the two agree about what a dollar means. This was
     // gross while the rate beside it was net, so the same offer read $1.97/mi
@@ -158,7 +165,8 @@
       ready: ready, pay: pay, miles: miles, minutes: minutes,
       typedMinutes: typedMinutes,
       cost: cost, net: net,
-      perHour: perHour, perMin: perMin, perMile: perMile,
+      perHour: perHour, grossPerHour: grossPerHour,
+      perMin: perMin, perMile: perMile,
       doubt: why,
       state: state
     };
@@ -206,6 +214,18 @@
     // The typed pay, time and distance stay below it — they are what the driver
     // goes back and corrects.
     el.perHour.textContent = r.state === 'doubt' ? '--' : rateText(r.perHour);
+    // ...and the raw figure beside it, on the same terms as the two camera
+    // screens. The headline here is net and labelled "/hr" whether a mileage
+    // cost came off it or not, so a driver typing an offer in to check the rig
+    // was comparing two numbers that are only sometimes the same thing. Shown
+    // only where they differ: a figure repeated beside itself is noise next to
+    // the one number that decides an offer.
+    var raw = (r.state !== 'doubt' && typeof r.grossPerHour === 'number'
+               && r.grossPerHour !== null
+               && Math.round(r.grossPerHour) !== Math.round(r.perHour))
+      ? rateText(r.grossPerHour) + ' raw' : '';
+    el.rawRate.textContent = raw;
+    el.rawRate.hidden = !raw;
     el.perMile.textContent = r.perMile === null ? '--' : money(r.perMile, 2);
     el.perMin.textContent = r.perMin === null ? '--' : money(r.perMin, 2);
     el.netPay.textContent = r.pay > 0 ? money(r.net, 2) : '--';

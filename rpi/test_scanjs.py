@@ -111,6 +111,13 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   const page = await (await browser.newContext(
     { viewport: { width: 420, height: 900 } })).newPage();
   await page.goto(base + '/scan.html', { waitUntil: 'domcontentloaded' });
+  // A running cost, because without one there is nothing to take off and the
+  // raw rate and the net rate are one number. costPerMile defaults to 0, so a
+  // page opened cold cannot exercise the difference between them at all.
+  await page.evaluate(() => localStorage.setItem('uberscan.settings.v1',
+    JSON.stringify({ target: 25, band: 15, costPerMile: 0.35, pad: 0,
+                     secondsPerItem: 0 })));
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__scan && window.__scan.ready()',
                              null, { timeout: 180000 });
   const out = { reads: {}, fit: {} };
@@ -122,10 +129,37 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
       return { pay: got.parsed.pay, minutes: got.parsed.minutes,
                miles: got.parsed.miles, ready: got.rate.ready,
                state: got.rate.state, perHour: got.rate.perHour || null,
-               shown: document.getElementById('perHour').textContent.trim() };
+               gross: got.rate.grossPerHour || null,
+               shown: document.getElementById('perHour').textContent.trim(),
+               raw: document.getElementById('rawRate').textContent.trim(),
+               rawShown: !document.getElementById('rawRate').hidden };
     }, data);
     out.reads[c.name] = r;
   }
+  // ...and the same cards with no running cost set at all, where the raw rate
+  // and the net rate are one number and showing it twice is noise beside the
+  // one figure that decides an offer. Without this pass nothing exercises the
+  // negative side of that rule: every card in the corpus has a distance, so
+  // with a cost per mile set they all differ.
+  await page.evaluate(() => localStorage.setItem('uberscan.settings.v1',
+    JSON.stringify({ target: 25, band: 15, costPerMile: 0, pad: 0,
+                     secondsPerItem: 0 })));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction('window.__scan && window.__scan.ready()',
+                             null, { timeout: 180000 });
+  out.free = {};
+  for (const c of cards) {
+    const data = 'data:image/png;base64,'
+      + fs.readFileSync(path.join(dir, c.file)).toString('base64');
+    out.free[c.name] = await page.evaluate(async s => {
+      const got = await window.__scan.readImage(s);
+      return { ready: got.rate.ready, state: got.rate.state,
+               perHour: got.rate.perHour || null,
+               gross: got.rate.grossPerHour || null,
+               rawShown: !document.getElementById('rawRate').hidden };
+    }, data);
+  }
+
   for (const wh of JSON.parse(process.env.FIT_CASES)) {
     out.fit[wh.join('x')] = await page.evaluate(
       p => window.__scan.fitForOcr(p[0], p[1]), wh);
@@ -279,6 +313,40 @@ try:
     eq('...with its journey', shop['minutes'], 34)
     eq('...and its distance', shop['miles'], 3.6)
     ok_('...and a rate on the screen', shop['shown'].startswith('$'))
+
+    # ...with the raw figure beside it, where the two differ.
+    #
+    # The headline is net and is labelled "/hr" whether a mileage cost came off
+    # it or not, so this page and the rig's showed numbers that are only
+    # sometimes the same thing with nothing on either saying which. A shop order
+    # over 3.6 miles has a cost, so the two figures differ and both belong on
+    # screen; where they do not differ, printing one twice beside itself is
+    # noise next to the one number that decides an offer.
+    ok_('...and the raw rate beside it', shop['rawShown'])
+    ok_('...labelled as the raw one', shop['raw'].endswith('raw'))
+    ok_('...and it is the bigger of the two, being before costs',
+        shop['gross'] is not None and shop['gross'] > shop['perHour'])
+    for name, make, pay in CARDS:
+        r = got['reads'][name]
+        if not r['ready'] or r['gross'] is None:
+            continue
+        same = round(r['gross']) == round(r['perHour'])
+        eq('%s: the raw rate is shown exactly when it differs' % name,
+           bool(r['rawShown']), not same)
+
+    # ...and with no running cost set, where there is nothing to take off and
+    # the two rates are one number.
+    free = got.get('free') or {}
+    checked = 0
+    for name, make, pay in CARDS:
+        r = free.get(name) or {}
+        if not r.get('ready') or r.get('gross') is None:
+            continue
+        checked += 1
+        eq('%s: net and raw are one number with no cost set' % name,
+           round(r['gross']), round(r['perHour']))
+        ok_('%s: ...so it is not printed twice' % name, not r['rawShown'])
+    ok_('the no-cost pass actually read something', checked > 0)
 
     # --- a delivery card is judged against the clock, or not at all --------
     # The container's clock makes the deadline hours away, which is exactly the

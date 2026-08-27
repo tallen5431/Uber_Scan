@@ -153,6 +153,24 @@ html, body {
 }
 .rate-unit { font-size: clamp(18px, 5vw, 26px); font-weight: 700; color: var(--muted); }
 
+/* The same offer before running costs came off it.
+ *
+ * The headline is net, and on every screen that shows one it is labelled the
+ * same way whether a mileage cost was taken off or not — so a driver comparing
+ * the rig against this page, or against the keypad, was comparing two numbers
+ * that are only sometimes the same thing with nothing on screen saying which.
+ * Small and beside the big one, the way the offers page already writes it, and
+ * shown only when the two figures actually differ: repeating a number next to
+ * itself is noise, and noise beside the one figure that decides an offer is
+ * worse than nothing. */
+.rate-raw {
+  font-size: clamp(13px, 3.4vw, 18px);
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.rate-raw[hidden] { display: none; }
+
 /* Four across on a phone held in one hand. auto-fit rather than a fixed count
    so a narrow screen wraps to two rows instead of squeezing the digits. */
 /* The arithmetic behind the headline. Sized between the rate and the labels:

@@ -39,7 +39,7 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The rig's own panel, and the small hat, which has rules of its own.
-PANELS = [('800x480', 800, 480), ('1280x800', 1280, 800)]
+PANELS = [('800x480', 800, 480), ('1280x800', 1280, 800), ('480x320', 480, 320)]
 
 ok = bad = 0
 
@@ -86,6 +86,14 @@ UNCERTAIN = {
 # ...and one where the distance was trusted, so there are two lines and a cost.
 DEDUCTED = dict(UNCERTAIN, state='no', perHour=14.71, grossPerHour=20.97,
                 cost=2.4, perMile=0.7, milesUncertain=False, whole=True)
+# A delivery card states a deadline and no duration, so `minutes` is null and
+# the rate was worked out over `cardMinutes`. The raw row divided by `minutes`
+# and printed "$12.00 in -- min = $21.2/hr raw" — a sum with nothing under the
+# line, on the whole DoorDash half of a shift.
+DEADLINE = dict(UNCERTAIN, state='warn', pay=12.0, minutes=None, cardMinutes=34.0,
+                billedMinutes=34.0, perHour=21.18, grossPerHour=21.18,
+                fromDeadline=True, deliverBy=1140, miles=None, whole=True,
+                milesUncertain=False, cost=0)
 
 DRIVER = r'''
 const { chromium } = require('playwright');
@@ -220,7 +228,8 @@ try:
 
     driver = os.path.join(work, 'dashboard.js')
     open(driver, 'w').write(DRIVER)
-    readings = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED}
+    readings = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED,
+                'deadline': DEADLINE}
     proc2 = subprocess.run(
         ['node', driver, base, json.dumps(PANELS), json.dumps(readings)],
         env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
@@ -239,7 +248,7 @@ try:
         skip(got['skip'])
 
     for panel, _w, _h in PANELS:
-        for key in ('uncertain', 'deducted'):
+        for key in ('uncertain', 'deducted', 'deadline'):
             where = '%s %s' % (panel, key)
             r = got.get(where)
             ok_('%s was measured' % where, r is not None)
@@ -272,6 +281,15 @@ try:
             # --- the number that was sent and never shown ------------------
             ok_('%s: the raw $/hr is on the glass' % where, r['raw']['shown'])
             ok_('%s: ...with a figure in it' % where, '$' in r['raw']['text'])
+            # A sum with something under the line. The row divided by the
+            # card's stated duration, and a delivery card states a deadline
+            # instead — so the whole DoorDash half of a shift read "$12.00 in
+            # -- min = $21.2/hr raw", which is the one figure this panel had to
+            # be argued into showing at all, over a dash.
+            ok_('%s: ...and nothing in it is a dash' % where,
+                '--' not in r['raw']['text'])
+            ok_('%s: ...labelled as the raw one' % where,
+                'raw' in r['raw']['text'])
             ok_('%s: the headline rate is on the glass' % where,
                 r['rate']['shown'])
             ok_('%s: the panel still fits' % where, r['fits'])

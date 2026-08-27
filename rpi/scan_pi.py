@@ -2092,6 +2092,15 @@ def render_panel(rate, parsed, size=(800, 480)):
                 cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 5)
     cv2.putText(panel, '$%.0f/hr' % rate['perHour'], (36, 300),
                 cv2.FONT_HERSHEY_SIMPLEX, 6.0, (255, 255, 255), 12)
+    # ...and the same offer before running costs, where that is a different
+    # number. The headline is net and says "/hr" either way, so this panel and
+    # the web one showed figures that are only sometimes the same thing. Only
+    # where they differ, because a number repeated beside itself is noise next
+    # to the one figure the panel exists for.
+    gross = rate.get('grossPerHour')
+    if gross is not None and round(gross) != round(rate['perHour']):
+        cv2.putText(panel, '$%.0f/hr raw' % gross, (40, 350),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.1, (210, 210, 210), 2)
     cv2.putText(panel, '$%.2f  %s min  %s mi' % (parsed['pay'], parsed['minutes'], parsed['miles']),
                 (40, 400), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
     return panel

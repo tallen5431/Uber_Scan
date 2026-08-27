@@ -62,7 +62,7 @@
   var lastResult = null;
 
   var el = {};
-  ['video', 'frame', 'reticle', 'verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin',
+  ['video', 'frame', 'reticle', 'verdict', 'verdictLabel', 'perHour', 'rawRate', 'vPay', 'vMin',
    'vMile', 'warn', 'statusline', 'btnFreeze', 'photo', 'btnSettings', 'engineNote',
    'stage', 'btnBox', 'adjustNote'
   ].forEach(function (id) { el[id] = document.getElementById(id); });
@@ -400,6 +400,20 @@
     // the same offer read as a loss on two screens and as a number on two.
     el.perHour.textContent = (r.ready && r.state !== 'doubt')
       ? rateText(r.perHour) : '--';
+    // ...and the same offer before running costs, beside it.
+    //
+    // The headline is net, and it is labelled "/hr" whether a mileage cost came
+    // off it or not — so this screen and the rig's showed two numbers that are
+    // only sometimes the same thing, with nothing on either saying which. Shown
+    // only where the two actually differ, which is exactly where the difference
+    // is worth a driver's attention: repeating a figure beside itself is noise
+    // next to the one number that decides an offer.
+    var raw = (r.ready && r.state !== 'doubt'
+               && typeof r.grossPerHour === 'number'
+               && Math.round(r.grossPerHour) !== Math.round(r.perHour))
+      ? rateText(r.grossPerHour) + ' raw' : '';
+    el.rawRate.textContent = raw;
+    el.rawRate.hidden = !raw;
 
     el.vPay.textContent = p && p.pay !== null ? money(p.pay, 2) : '--';
     // The card's own minutes, not the billed ones. `r.minutes` has the pickup

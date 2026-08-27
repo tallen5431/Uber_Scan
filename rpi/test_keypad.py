@@ -126,6 +126,8 @@ const [base] = process.argv.slice(2);
     perMile: document.getElementById('perMile').textContent.trim(),
     perMin: document.getElementById('perMin').textContent.trim(),
     netPay: document.getElementById('netPay').textContent.trim(),
+    rawRate: document.getElementById('rawRate').textContent.trim(),
+    rawShown: !document.getElementById('rawRate').hidden,
     label: document.getElementById('verdictLabel').textContent.trim(),
     state: document.getElementById('verdict').className,
     active: (document.querySelector('.field.active') || {}).dataset
@@ -389,6 +391,25 @@ costed = got.get('costed') or {}
 eq('the rate is after running costs', costed.get('perHour'), '$34.2')
 eq('...and so is the per-mile beside it', costed.get('perMile'), '$1.56')
 eq('...and the net pay', costed.get('netPay'), '$13.11')
+
+# ...and the screen says which of the two rates it is showing.
+#
+# The headline is net and is labelled "/hr" whether a mileage cost came off it
+# or not. A driver typing an offer in here to check the rig against it was
+# comparing two numbers that are only sometimes the same thing, with nothing on
+# either screen saying so. $16.05 over 23 minutes is $41.9/hr before the car
+# and $34.2 after it, and the gap is the whole reason the setting exists.
+ok_('the raw rate is shown beside the net one', costed.get('rawShown'))
+eq('...as the same sum without the running cost', costed.get('rawRate'), '$41.9 raw')
+
+# And not when there is nothing to say. With no cost per mile the two figures
+# are one figure, and printing it twice beside itself is noise next to the one
+# number that decides an offer. `padPlusOne` rather than `padOnly`: the latter
+# has no minutes typed and therefore no rate at all, so it would pass this for
+# the wrong reason.
+free = got.get('padPlusOne') or {}
+ok_('a complete offer with no cost set has a rate', free.get('perHour') != '--')
+ok_('...and does not print it twice', not free.get('rawShown'))
 
 # --- a slipped decimal point is not a green ACCEPT -------------------------
 slipped = got.get('slipped') or {}

@@ -1644,6 +1644,36 @@ Pi defaults it to **0.30**, so the two show different numbers for the same
 offer. Both now label themselves, but pick one and set it in both if you use
 both.
 
+### Both rates, on every screen that shows one
+
+Labelling the headline is not the same as showing the other number, and for a
+long time only two of six surfaces showed it at all. The raw rate lived in
+live.html's working block and in the offers page; the browser scanner, the
+keypad and the rig's own OpenCV panel printed a net figure under a plain `/hr`
+and nothing else. So a driver reading $14.7/hr off the dashboard, typing the
+same offer into the keypad and getting $21.0, had two screens disagreeing with
+nothing on either saying why.
+
+Now every one of them prints the raw figure beside the net one, small, in the
+same words — `$21.0 raw` — and **only where the two actually differ**. Where no
+mileage came off they are one number, and printing it twice beside itself is
+noise next to the one figure that decides an offer.
+
+The dashboard's working block had three separate ways to lose that figure, and
+none of them looked like a value the page had failed to work out:
+
+| | |
+|---|---|
+| a notice was showing | The `:has(#warn)` rule hid the whole block to buy back height. One of the notices is "distance unreadable", a stored property of the merged reading that never clears — so on **52 of one shift's 121 offers** the raw rate was not slow to arrive, it never arrived. Those are the same rows where no mileage came off, so the block had no net line either and rendered nothing at all. It now takes the height from the net line, which is the headline in small type. |
+| a short landscape screen | `.working { display: none }` below 380px tall — a phone held sideways to check the rig. It now keeps the raw line and drops the pay-and-time half of it, which is a check against the card rather than a figure. At 480×320 that reads `$21.0/hr raw` on one line. |
+| a delivery card | The row divided by the card's *stated* duration, and a delivery card states a deadline instead — so the whole DoorDash half of a shift printed `$8.04 in -- min = $21.0/hr raw`, a sum with nothing under the line. It now falls back to `cardMinutes`, the same fallback the figures below it already used. |
+
+`test_dashboard.py` drives the real page with the real messages at three panel
+sizes and asserts the raw row is on the glass, carries a figure, says which
+figure it is, and contains no dash. `test_keypad.py` and `test_scanjs.py` hold
+the other two surfaces to the same rule in both directions — shown when the
+numbers differ, absent when they do not.
+
 ### Picking a number
 
 $0.30 is a petrol midsize with some depreciation in it. Built up from parts,
@@ -2596,7 +2626,7 @@ python3 rpi/test_scan_pi.py     # 184 on the loop that holds the camera, and
                                 #     on which live view it is being asked for
 python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
-python3 rpi/test_scanjs.py      #  40 on the phone's own scanner, through a
+python3 rpi/test_scanjs.py      #  53 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
 python3 rpi/test_liveview.py    #  47 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
@@ -2606,7 +2636,7 @@ python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
 python3 rpi/test_autopilot.py   #  37 on the one command that takes the rig
                                 #     from nothing to scanning, and on the
                                 #     branch that used to brick it
-python3 rpi/test_keypad.py      #  44 on the fallback input path, driven
+python3 rpi/test_keypad.py      #  48 on the fallback input path, driven
                                 #     through a real browser one key at a time
 python3 rpi/test_lint.py        #  28 on the faults that only surface when a
                                 #     cold branch runs (skipped without flake8)
@@ -2617,7 +2647,7 @@ python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   #  46 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 117 on what the driving screen shows while a
                                 #     card is being read, and after (skipped
                                 #     without Playwright)
 python3 rpi/test_layout.py      # 258 on every page fitting the screen it is
