@@ -335,12 +335,57 @@ almost nothing: the recording above spends seventy seconds re-reading a card
 that says the same thing every time.
 
 So the beat **backs off while nothing changes** — ×1.6 per identical read, up to
-a 12s ceiling — and snaps straight back to 2.5s the instant a reading differs or
-the screen empties. The case the timer exists for costs exactly what it did
-before, one beat; the case it was wasting on settles at **12% duty instead of
-56%**. The ceiling is reached after four identical reads running (2.5 → 4.0 →
-6.4 → 10.2 → 12.0), and it is also the worst case for how long a replacement
-offer can sit unnoticed.
+a ceiling — and snaps straight back to 2.5s the instant a reading differs or the
+screen empties. The case the timer exists for costs exactly what it did before,
+one beat; the case it was wasting on settles at about **12% duty instead of
+56%**.
+
+**The ceiling is that duty divided into what a read costs**, and it moved when
+the read did. It was 12s while a read was ~1.4s. Keeping the engine alive
+roughly halved that — the owner's shift recorded a median `ms` of 1517 before
+the change and it measured 2.12× end to end, so call it 715ms — and 12% of a
+715ms read is **6s**. Same duty, half the wait.
+
+The wait is the thing being bought. A replacement offer does not move the motion
+gate, so the ceiling is exactly how long a driver can be looking at a verdict
+belonging to the previous card:
+
+| | read cost | ceiling | duty | worst case |
+|---|---|---|---|---|
+| a flat beat | ~1.4s | 2.5s | 56% | 2.5s |
+| backing off, slow reader | ~1.4s | 12s | 12% | 12s |
+| backing off, kept engine | ~0.75s | **6s** | 12% | **6s** |
+
+The ceiling is now reached after two identical reads running (2.5 → 4.0 → 6.0)
+rather than four. `READ_SECONDS` in scan_pi.py is where that cost is written
+down; two constants are derived from it and one of them lives in another file,
+which is how the last one went stale.
+
+### A verdict is only as fresh as its own clock
+
+The driving screen seeds itself from `/api/status` so a tab that has just opened
+is not blank until the next read, and the server sends the last reading again to
+every socket that connects for the same reason. Both were adopted as if they had
+just happened. Open the dashboard against a rig that stopped an hour ago and its
+last ACCEPT was painted at full confidence: **12 seconds before it dimmed, 20
+before anything said how old it was** — and every reconnect after that started
+the clock over, for as long as the tab stayed open.
+
+That is the confidently-wrong number this project's first rule is about, on the
+one screen whose entire job is a verdict, arriving without anything going wrong.
+
+The fix is that both now carry **how old they are**, not when they happened.
+`/api/status` answers with `lastAgeMs` and `heardAgeMs`, the replayed reading is
+marked `replay` and carries `ageMs`, and all four are computed on the sending
+machine's own clock. Ages rather than timestamps for a reason this page already
+had written down about `at`: a Pi has no real-time clock, it boots in 1970 and
+jumps when the network arrives, so subtracting one machine's idea of now from
+another's is how "12 seconds old" became "fifty-six years old" — and worse, how
+a negative age never tripped the staleness test at all. A duration has no origin
+to disagree about.
+
+An age that is missing or negative is treated as older than the window rather
+than newer: a verdict of unknown age is exactly the one not to vouch for.
 
 ### Keeping the engine
 
@@ -2622,13 +2667,13 @@ python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 184 on the loop that holds the camera, and
+python3 rpi/test_scan_pi.py     # 189 on the loop that holds the camera, and
                                 #     on which live view it is being asked for
 python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  53 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
-python3 rpi/test_liveview.py    #  47 on the picture the driver watches, on
+python3 rpi/test_liveview.py    #  56 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
                                 #     dashboard layout being wired up, and on
                                 #     which of the two views was asked for
@@ -2647,7 +2692,7 @@ python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 117 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 126 on what the driving screen shows while a
                                 #     card is being read, and after (skipped
                                 #     without Playwright)
 python3 rpi/test_layout.py      # 258 on every page fitting the screen it is

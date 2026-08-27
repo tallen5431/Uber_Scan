@@ -113,6 +113,7 @@ const STUB = `
     }
   }
   window.EventSource = FakeEventSource;
+  window.__replay = REPLAY_BODY;
 `;
 
 // What a driver can actually see: on screen, with a box, not display:none, and
@@ -153,7 +154,7 @@ const LOOK = (sel) => {
     });
     for (const key of Object.keys(READINGS)) {
       const page = await ctx.newPage();
-      await page.addInitScript(STUB);
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
       await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
                 .catch(() => {});
       await page.waitForFunction('window.__es !== undefined', null,
@@ -194,6 +195,65 @@ const LOOK = (sel) => {
     }
     await ctx.close();
   }
+
+  // --- a page opened against a rig that stopped an hour ago ----------------
+  //
+  // The seed and the SSE replay both hand over the last reading. The page used
+  // to start its own staleness clocks at zero for both, so a dead rig's ACCEPT
+  // was painted at full confidence: twelve seconds before it dimmed, twenty
+  // before anything said how old it was.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.addInitScript(
+      STUB.replace('REPLAY_BODY', JSON.stringify(READINGS.deducted)));
+    // The server is real, so /api/status is intercepted rather than faked
+    // wholesale: everything else about the page stays as it ships.
+    await page.route('**/api/status', async (route) => {
+      const stale = Object.assign({}, READINGS.deducted, { at: 1 });
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ scanner: { running: true }, last: stale,
+                               lastAgeMs: 3600000, heardAgeMs: 3600000,
+                               status: { phase: 'scanning' } }),
+      });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForTimeout(700);
+    out.stale = {
+      detail: await page.evaluate(LOOK, '#detail'),
+      verdict: await page.evaluate(LOOK, '#verdictLabel'),
+      dimmed: await page.evaluate(
+        () => document.getElementById('verdict').classList.contains('stale')),
+    };
+
+    // ...and the same reading arriving as a replay on a reconnect, which the
+    // page stamped as freshly read once per reconnect for as long as it stayed
+    // open.
+    await page.evaluate(() => window.__es.push(
+      Object.assign({}, window.__replay, { replay: true, ageMs: 3600000 })));
+    await page.waitForTimeout(200);
+    out.replay = {
+      detail: await page.evaluate(LOOK, '#detail'),
+      dimmed: await page.evaluate(
+        () => document.getElementById('verdict').classList.contains('stale')),
+    };
+    // A genuine live read clears it again — the point is an accurate clock,
+    // not a permanently pessimistic one.
+    await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
+    await page.waitForTimeout(200);
+    out.fresh = {
+      detail: await page.evaluate(LOOK, '#detail'),
+      dimmed: await page.evaluate(
+        () => document.getElementById('verdict').classList.contains('stale')),
+    };
+    await page.close();
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify({ skip: String(e && e.message) })); });
@@ -293,6 +353,38 @@ try:
             ok_('%s: the headline rate is on the glass' % where,
                 r['rate']['shown'])
             ok_('%s: the panel still fits' % where, r['fits'])
+
+    # --- a rig that stopped an hour ago does not look live --------------
+    #
+    # The seed and the SSE replay both hand the page the last reading. It used
+    # to start its own staleness clocks at zero for both, so a dead rig's
+    # verdict was painted at full confidence — twelve seconds before it dimmed,
+    # twenty before anything said how old it was — on every load, and again on
+    # every reconnect for as long as the tab stayed open.
+    stale = got.get('stale') or {}
+    ok_('the seeded verdict was measured', bool(stale.get('detail')))
+    if stale.get('detail'):
+        ok_('an hour-old reading is marked stale on load', stale.get('dimmed'))
+        ok_('...and says how long ago it was read',
+            'ago' in (stale['detail']['text'] or ''))
+        ok_('...in something other than seconds-since-page-load',
+            's ago' in (stale['detail']['text'] or '')
+            and ' 0s ago' not in (stale['detail']['text'] or ''))
+
+    replay = got.get('replay') or {}
+    ok_('the replayed verdict was measured', bool(replay.get('detail')))
+    if replay.get('detail'):
+        ok_('a reconnect does not make an old reading fresh again',
+            replay.get('dimmed'))
+
+    # ...and a real read clears it. The point is an accurate clock, not a
+    # permanently pessimistic one — a page that never trusts a verdict is as
+    # useless as one that always does.
+    fresh = got.get('fresh') or {}
+    ok_('the live reading was measured', bool(fresh.get('detail')))
+    if fresh.get('detail'):
+        ok_('a genuine read is not stale', not fresh.get('dimmed'))
+        ok_('...and does not carry an age', 'ago' not in (fresh['detail']['text'] or ''))
 
     # The whole point of the notice case: a card whose distance could not be
     # read carries a notice for its entire life, and that is exactly when the

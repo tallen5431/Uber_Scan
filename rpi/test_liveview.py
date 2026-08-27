@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import socket
+import json
 import subprocess
 import sys
 import tempfile
@@ -408,6 +409,87 @@ finally:
         except OSError:
             pass
     shutil.rmtree(work, ignore_errors=True)
+
+# --- how old the last verdict is, said in a number of milliseconds ---------
+#
+# The page seeds itself from /api/status and is sent the last reading again on
+# every socket that connects. It used to start its staleness clocks at zero for
+# both, so a rig that stopped an hour ago had its ACCEPT painted at full
+# confidence on every page load and re-freshened on every reconnect.
+#
+# Ages rather than timestamps, because a Pi has no real-time clock: it boots in
+# 1970 and jumps when the network arrives, so handing a browser one machine's
+# absolute time to subtract from another's is the arithmetic that turned "12
+# seconds old" into "fifty-six years old". A duration has no origin to disagree
+# about. This checks the server's half of that.
+if shutil.which('python3'):
+    work2 = tempfile.mkdtemp()
+    # A scanner that says one thing and then goes quiet, which is exactly the
+    # rig this is about.
+    fake = os.path.join(work2, 'onceonly.py')
+    with open(fake, 'w') as fh:
+        fh.write('import json, sys, time\n'
+                 'print(json.dumps({"ready": True, "state": "go", "perHour": 25.0,\n'
+                 '                  "grossPerHour": 25.0, "pay": 10.0,\n'
+                 '                  "minutes": 24.0, "miles": None}), flush=True)\n'
+                 'time.sleep(600)\n')
+    port2 = free_port()
+    quiet = subprocess.Popen(
+        ['node', os.path.join(ROOT, 'server.js')],
+        env=dict(os.environ, PORT=str(port2), HTTPS_PORT='0',
+                 JOURNAL=os.path.join(work2, 'j.jsonl'),
+                 SCANNER='1', SCANNER_CMD='python3', SCANNER_ARGS=fake),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    base2 = 'http://127.0.0.1:%d' % port2
+    try:
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(base2 + '/api/status', timeout=1).read()
+                break
+            except Exception:
+                time.sleep(0.1)
+        # The reading has to have landed before its age means anything.
+        for _ in range(60):
+            body = json.loads(urllib.request.urlopen(
+                base2 + '/api/status', timeout=3).read().decode('utf-8'))
+            if body.get('last'):
+                break
+            time.sleep(0.1)
+
+        ok_('the server keeps the last reading', bool(body.get('last')))
+        ok_('...and says how old it is', isinstance(body.get('lastAgeMs'), int))
+        ok_('...and how long since the scanner said anything',
+            isinstance(body.get('heardAgeMs'), int))
+        first = body.get('lastAgeMs')
+        time.sleep(1.2)
+        later = json.loads(urllib.request.urlopen(
+            base2 + '/api/status', timeout=3).read().decode('utf-8'))
+        ok_('the age grows as the reading gets older',
+            later.get('lastAgeMs', 0) >= (first or 0) + 900)
+        ok_('...and is a duration, not a timestamp',
+            later.get('lastAgeMs', 0) < 60 * 60 * 1000)
+
+        # ...and the same reading, replayed to a socket that has just connected.
+        stream = urllib.request.urlopen(base2 + '/api/events', timeout=5)
+        line = b''
+        for _ in range(40):
+            line = stream.readline()
+            if line.startswith(b'data: '):
+                break
+        replayed = json.loads(line[len(b'data: '):].decode('utf-8'))
+        stream.close()
+        eq('a replayed reading says it is a replay', replayed.get('replay'), True)
+        ok_('...and carries its own age', isinstance(replayed.get('ageMs'), int))
+        ok_('...which is not zero, an hour after the fact',
+            replayed.get('ageMs', -1) >= 1000)
+        eq('...and is otherwise the reading itself', replayed.get('perHour'), 25.0)
+    finally:
+        quiet.terminate()
+        try:
+            quiet.wait(timeout=5)
+        except Exception:
+            quiet.kill()
+        shutil.rmtree(work2, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d live-view checks passed' % ok)

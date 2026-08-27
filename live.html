@@ -485,11 +485,31 @@
   // nothing on the screen admitting it.
   var readAt = Date.now();
 
-  // Longer than the verdict beat can legitimately be quiet: VERIFY_MAX is 12s
-  // and a read on the end of it is another 1.4s, more on a loaded Pi. Measured
-  // max healthy gap between verdicts on a still card was 12.1s with the read
-  // cost removed, so anything near 15 would dim a working rig.
-  var READ_STALE_MS = 20000;
+  // Longer than the verdict beat can legitimately be quiet, and no longer.
+  //
+  // The scanner's ceiling on that beat is VERIFY_MAX and a read lands on the
+  // end of it, so the largest healthy gap between verdicts is those two added
+  // together. This was 20s when the ceiling was 12s and a read was 1.4s; both
+  // of those halved, and a window that stays wide after the thing it was sized
+  // against got quicker is a window that lets a dead rig look alive for longer
+  // than it has to. 6.0 + 0.75 is 6.75s, and this leaves most of it again as
+  // slack for a loaded Pi.
+  //
+  // The two constants live in two files. test_scan_pi.py reads this one out of
+  // this page and asserts the relationship, rather than keeping a copy of it.
+  var READ_STALE_MS = 12000;
+
+  // An age off the wire, made safe to subtract from this page's clock.
+  //
+  // A missing one means "no idea", and the honest answer to that is the oldest
+  // thing this page can represent rather than the freshest: a verdict of
+  // unknown age is exactly the one not to vouch for. A negative one is a clock
+  // that disagrees with itself, and clamping it is what stops an age from
+  // reading as the future and never going stale at all.
+  function age(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return READ_STALE_MS + 1;
+    return ms;
+  }
   var socketUp = false;
   var scannerState = null;
   // The camera is out of room: the phone is brighter than it can take at any
@@ -817,7 +837,8 @@
       // clock from another's is how "12 seconds old" became "fifty-six years
       // old" — or, worse, a negative age that never trips the stale test at
       // all, leaving a frozen verdict on screen looking live.
-      seenAt = Date.now();
+      seenAt = msg.replay ? Math.min(seenAt, Date.now() - age(msg.ageMs))
+                          : Date.now();
       // The camera saying it has run out of room. It rides the heartbeat rather
       // than a reading precisely because the state it describes is the one
       // where there may be no reading — the phone is brighter than the camera
@@ -833,7 +854,13 @@
       // Only a reading moves the verdict's own clock. The guard is the same one
       // the next line uses to decide whether this message replaces the verdict
       // at all — a heartbeat carries no `ready`, and must not vouch for one.
-      if (msg.ready !== undefined) readAt = Date.now();
+      // A replay is not a read. The server sends the last reading to every
+      // socket that connects, so a dropped connection coming back re-stamped a
+      // dead rig's verdict as freshly read — once per reconnect, indefinitely.
+      // Its age comes with it, for the same reason the seed above takes one.
+      if (msg.ready !== undefined) {
+        readAt = msg.replay ? Date.now() - age(msg.ageMs) : Date.now();
+      }
       if (msg.phase) phase = msg;
       if (msg.ready !== undefined) last = msg;
       render();
@@ -846,8 +873,31 @@
   }
 
   // Seed from the current state so a fresh tab is not blank until the next read.
+  //
+  // Aged, not adopted. `readAt` and `seenAt` start at "now" because loading the
+  // page is hearing something — but what this seeds is a reading that may be
+  // hours old, and starting its clock at zero paints a dead rig's last ACCEPT
+  // at full confidence for twelve seconds and leaves it unlabelled for twenty.
+  // On the one screen whose whole job is a verdict, that is the confidently
+  // wrong number this project exists to avoid, and it happens on every load.
+  //
+  // The server sends how old it is rather than when it happened, because a Pi
+  // has no real-time clock and subtracting its idea of now from this browser's
+  // is exactly the arithmetic the message handler below already refuses to do.
   fetch('/api/status').then(function (r) { return r.json(); }).then(function (s) {
-    if (s.last) last = s.last;
+    if (s.last) {
+      last = s.last;
+      readAt = Date.now() - age(s.lastAgeMs);
+    }
+    // ...and the same for having heard from the scanner at all. Without this a
+    // page loaded against a stopped scanner showed a live connection dot over
+    // a frozen picture, because the fetch that proved the *web server* was up
+    // was taken as proof the camera was.
+    if (s.heardAgeMs !== undefined && s.heardAgeMs !== null) {
+      seenAt = Date.now() - age(s.heardAgeMs);
+    } else if (s.last) {
+      seenAt = readAt;
+    }
     if (s.status) phase = s.status;
     scannerState = s.scanner || null;
     render();

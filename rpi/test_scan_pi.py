@@ -17,6 +17,7 @@ it counts every request handed out and every one given back.
 
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -24,6 +25,23 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# The two windows live.html keys staleness on, read out of the page rather than
+# copied into this file. A copy is a second place to remember, and the failure
+# guarded against here is exactly two numbers in two files going out of step —
+# which is what happened when the reader got twice as fast and the page's
+# patience stayed where a slow one had put it.
+def page_constant(name):
+    page = open(os.path.join(ROOT, 'live.html')).read()
+    found = re.search(r'\bvar\s+%s\s*=\s*(\d+)\s*;' % name, page)
+    return int(found.group(1)) if found else None
+
+
+PAGE_READ_STALE = page_constant('READ_STALE_MS')
+PAGE_STALE = page_constant('STALE_MS')
 
 import cv2                                                    # noqa: E402
 import testcards as TC                                        # noqa: E402
@@ -551,8 +569,15 @@ eq('...so a card appearing is read at the fast beat', every, SP.VERIFY_EVERY)
 
 # Worst case, stated as a number: how long a replacement offer can sit unread.
 ok_('a stale verdict cannot outlive the ceiling', SP.VERIFY_MAX <= 15.0)
+# Still a real saving over the fast beat — 2.4 reads' worth rather than the 4.8
+# it was. The ratio moved because the ceiling is derived from what a read costs
+# and the fast beat is not: the reader got twice as quick, so the ceiling came
+# down to hold the same duty cycle and the beat it backs off *from* stayed put.
 ok_('...and the ceiling is a real saving over the fast beat',
-    SP.VERIFY_MAX >= SP.VERIFY_EVERY * 3)
+    SP.VERIFY_MAX >= SP.VERIFY_EVERY * 2)
+# ...and it is the read cost that sets it, not a number somebody liked.
+ok_('the ceiling spends about a tenth of the time reading',
+    0.08 <= SP.READ_SECONDS / SP.VERIFY_MAX <= 0.16)
 
 # --- the reader, on its own ------------------------------------------------
 # The queue between the loop and the OCR. Checked apart from the loop because
@@ -909,9 +934,13 @@ else:
     # the page's patience must clear a full verify beat plus the read on the end
     # of it, or the fix above is one slow read away from coming back.
     ok_('the heartbeat is well inside the page\'s patience',
-        SP2.ALIVE_EVERY * 2 < 12.0)
-    ok_('...and the verify ceiling alone would not have been',
-        SP2.VERIFY_MAX + 1.4 > 12.0)
+        SP2.ALIVE_EVERY * 2 < PAGE_STALE / 1000.0)
+    # ...and the two clocks still have to be separate. A heartbeat proves the
+    # loop is turning; it proves nothing about the verdict on screen, which is
+    # why a rig whose every read was failing went on showing the last ACCEPT.
+    # That argument does not depend on which of the two windows is wider.
+    ok_('...and a heartbeat is not a verdict',
+        SP2.ALIVE_EVERY < SP2.VERIFY_MAX)
 
     # --- and the burst is armed once per card, not once per read ------------
     # Each read inside the resample burst used to push its end four seconds
@@ -946,11 +975,28 @@ ok_('a rig whose reads all fail still says it is alive', len(beat_said) >= 2)
 eq('...but reports no verdict at all', len(beat_reads), 0)
 
 # The page keys verdict freshness on READ_STALE_MS and liveness on STALE_MS, so
-# the two constants have to leave room for a healthy verdict beat. Asserted here
-# because the constants live in two files and nothing else compares them.
+# the two constants have to leave room for a healthy verdict beat.
+ok_('the page states how long a verdict stays fresh', PAGE_READ_STALE is not None)
+ok_('...and how long the scanner may be quiet', PAGE_STALE is not None)
+
+# The healthy worst case, from the scanner's own constants: a full backed-off
+# beat with a read on the end of it.
+healthy = SP2.VERIFY_MAX + SP2.READ_SECONDS
 ok_('the verdict window clears a full verify beat and the read on the end of it',
-    SP2.VERIFY_MAX + 3.0 < 20.0)
-ok_('...and is longer than the liveness window it replaced', 20.0 > 12.0)
+    healthy < PAGE_READ_STALE / 1000.0)
+# ...and is not so much larger that a stopped rig looks alive for a shift.
+#
+# A band, not a ceiling: a window under about 1.5x the healthy gap dims a
+# working rig on a loaded Pi, and one over about 2.5x lets a stopped one look
+# live for twice as long as it has to. The first version of this check used 3x
+# and let the old 20s value through by a quarter of a second, which is a bound
+# that passes rather than a bound that holds.
+ok_('...with enough slack for a loaded Pi',
+    PAGE_READ_STALE / 1000.0 > healthy * 1.5)
+ok_('...without being wider than the fault it has to catch',
+    PAGE_READ_STALE / 1000.0 < healthy * 2.5)
+ok_('the heartbeat window clears a heartbeat, several times over',
+    SP2.ALIVE_EVERY * 2 < PAGE_STALE / 1000.0)
 
 # --- counting what went past ------------------------------------------------
 # The one thing a journal can never contain is what is not in it. This is the

@@ -219,7 +219,31 @@ VERIFY_EVERY = 2.5
 # back different resets it to VERIFY_EVERY immediately, so the case it was
 # written for costs exactly what it did before: one beat.
 VERIFY_BACKOFF = 1.6
-VERIFY_MAX = 12.0
+
+# What a read costs, near enough for the arithmetic that hangs off it.
+#
+# Not measured here — it cannot be, this file has no camera — but it is the
+# number two constants below and one in live.html are derived from, and leaving
+# it implicit is how they went out of step with a reader that got faster. The
+# owner's own shift recorded a median `ms` of 1517 before the engine stopped
+# being thrown away per read, and that change measured 2.12x end to end on a
+# development machine: 1517 / 2.12 is about 715ms. Rounded up, because being
+# wrong in this direction only costs a slightly lazier beat.
+READ_SECONDS = 0.75
+
+# ...and the ceiling, which is that cost divided by the duty cycle this is
+# willing to spend on looking at a card that has not changed.
+#
+# It was 12.0, chosen when a read was ~1.4s: 1.4/12 is a 12% duty, against the
+# 56% a flat 2.5s beat cost. The duty was the whole argument, and the read then
+# halved, so the same argument now lands at 6.0 — 0.75/6.0 is the same 12% for
+# half the wait.
+#
+# The wait is what this buys. A *replacement* offer does not move the motion
+# gate, so the ceiling is exactly how long the driver can be looking at a
+# verdict that belongs to the previous card. Twelve seconds of that was the
+# price of a slow reader; it is not the price of this one.
+VERIFY_MAX = 6.0
 
 
 class Reader:

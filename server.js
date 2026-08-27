@@ -1357,6 +1357,25 @@ function route(req, res) {
         error: scanner.error
       },
       last: scanner.last,
+      // How old those two are, in milliseconds, measured entirely on this
+      // machine's clock.
+      //
+      // Ages rather than timestamps, and for the reason live.html already
+      // documents about `at`: a Pi has no real-time clock, so it boots in 1970
+      // and jumps when the network arrives. Handing a browser one machine's
+      // absolute time to subtract from another's is how "12 seconds old"
+      // became "fifty-six years old", and worse, how a negative age never
+      // tripped the stale test at all. A duration has no origin to disagree
+      // about.
+      //
+      // Without these the page seeded a verdict from here and started its own
+      // staleness clock at zero, so opening the dashboard against a rig that
+      // died an hour ago painted that offer's ACCEPT at full confidence: 12
+      // seconds before it dimmed, 20 before anything said "last read ... ago".
+      lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
+        ? Math.max(0, Date.now() - scanner.last.at) : null,
+      heardAgeMs: scanner.heardAt
+        ? Math.max(0, Date.now() - scanner.heardAt) : null,
       status: scanner.status
     }), { 'Content-Type': 'application/json; charset=utf-8' });
   }
@@ -1469,7 +1488,18 @@ function route(req, res) {
       'Connection': 'keep-alive'
     });
     res.write('retry: 2000\n\n');
-    if (scanner.last) res.write('data: ' + JSON.stringify(scanner.last) + '\n\n');
+    // The last reading, so a tab that has just connected is not blank until the
+    // next one. Marked as the replay it is, and carrying its own age: the page
+    // stamps every message bearing `ready` as freshly read, so without this a
+    // dropped socket coming back re-aged a dead rig's verdict to zero — once
+    // per reconnect, for as long as the tab stayed open.
+    if (scanner.last) {
+      res.write('data: ' + JSON.stringify(Object.assign({}, scanner.last, {
+        replay: true,
+        ageMs: (typeof scanner.last.at === 'number')
+          ? Math.max(0, Date.now() - scanner.last.at) : null
+      })) + '\n\n');
+    }
     listeners.push(res);
     req.on('close', function () {
       listeners = listeners.filter(function (r) { return r !== res; });
