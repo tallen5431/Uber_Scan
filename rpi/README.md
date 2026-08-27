@@ -361,6 +361,29 @@ rather than four. `READ_SECONDS` in scan_pi.py is where that cost is written
 down; two constants are derived from it and one of them lives in another file,
 which is how the last one went stale.
 
+### What the preflight can and cannot see
+
+`doctor.py` is what a driver runs when the rig will not work, and it was silent
+about the two states that are working-but-worse — the two that are invisible
+from the outside precisely because the fallback is deliberate:
+
+| | |
+|---|---|
+| **reading engine** | Whether the OCR runs in this process or spawns a `tesseract` per card. Both read identically and one is about twice as quick; the fallback is silent by design, so the only symptom is a `ms` column in the journal that is double what it should be, noticed months later. |
+| **scratch space** | Whether `/dev/shm` is writable. On it, the live view and the OCR staging images cost nothing. Without it they go to the SD card at roughly **5GB an hour**, onto the one component in the rig that wears out, and nothing anywhere says so. |
+
+Neither is blocking, and that is the point of adding them rather than the
+detail. A rig spawning a process per card reads every card correctly; a rig
+with no RAM disk still scans. Reporting either as a refusal to start would make
+the report noise, and the whole value of a preflight is that its failures mean
+something.
+
+`test_doctor.py` holds it to that: it runs the real thing, checks every line is
+marked `ok` or `FAIL` rather than printed into the void, compares both new
+findings against the thing they claim to describe, and then forces the slow path
+with `UBERSCAN_TESSERACT=binary` and asserts the report *changes* while the
+blocking count and the exit code do not.
+
 ### Where the job goes, on the screen that decides
 
 The scanner has sent `places` on every read since it learned to read a map, and
@@ -2728,6 +2751,8 @@ python3 rpi/test_handoff.py     #  37 on the three files the browser and the
 python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
 python3 rpi/test_camera.py      #  34 on which tuning file opens the camera, and
                                 #     on who is already holding it
+python3 rpi/test_doctor.py      #  30 on the preflight running to the end, and
+                                #     on slower not being reported as broken
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading

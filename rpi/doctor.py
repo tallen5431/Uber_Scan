@@ -54,6 +54,43 @@ def main():
         except Exception as e:
             check('tesseract runs', False, str(e))
 
+    # Which of the two reading paths this machine will actually use.
+    #
+    # Both work and both read identically; one is about twice as quick, because
+    # it does not re-load the LSTM model before every card. The fallback is
+    # silent by design — a rig that reads slowly is working — which is exactly
+    # why a preflight should say so. Without this the only symptom is a `ms`
+    # column in the journal that is twice what it should be, months later.
+    if has_cv2 and has_pytesseract:
+        try:
+            import pipeline as PL
+            kept = bool(PL._tess_lib())
+            check('reading engine', kept,
+                  'kept in this process (about twice as fast)' if kept
+                  else 'spawning a tesseract per read — roughly half speed',
+                  'sudo apt install -y tesseract-ocr   # brings libtesseract, '
+                  'which is what this uses')
+        except Exception as e:
+            check('reading engine', False, str(e))
+
+    # RAM for the things that are stale two frames later.
+    #
+    # The live view is written up to thirty times a second and the OCR staging
+    # image once per read. On /dev/shm that is free; on the SD card it is about
+    # 5GB an hour onto the one component in the rig that wears out, and nothing
+    # anywhere would say so — the fallback is deliberate and silent, because a
+    # rig with no RAM disk should still scan.
+    try:
+        import handoff as HO
+        on_ram = HO._dir() != HO.HERE
+        check('scratch space', on_ram,
+              HO._dir() + '  (frames and OCR images stay out of the SD card)'
+              if on_ram else
+              'no writable /dev/shm — frames go to the SD card, ~5GB an hour',
+              'check /dev/shm is mounted and writable')
+    except Exception as e:
+        check('scratch space', False, str(e))
+
     espeak = shutil.which('espeak-ng')
     check('espeak-ng (only for --speak)', bool(espeak), espeak or 'not installed',
           'sudo apt install -y espeak-ng')
@@ -123,9 +160,13 @@ def main():
 
     failed = [r for r in results if not r[1]]
     # Focus by hand still works, so a missing AF algorithm is not blocking.
+    # Slower is not broken. A rig spawning a tesseract per read still reads
+    # every card correctly, and one with no RAM disk still scans — both are
+    # worth knowing and neither is a reason to refuse to start.
     blocking = [r for r in failed
                 if 'espeak' not in r[0] and 'calibration' not in r[0] and 'focus' not in r[0]
-                and 'autofocus' not in r[0]]
+                and 'autofocus' not in r[0] and 'reading engine' not in r[0]
+                and 'scratch space' not in r[0]]
 
     print()
     if not failed:
