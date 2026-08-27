@@ -255,7 +255,8 @@ Not from tuning the OCR engine. From refusing to run it:
 | **Warp to the screen** | Tesseract's cost scales with pixels. Feeding it a card instead of a 16MP frame is worth more than every other optimisation combined. |
 | **Crop to the card** | The card is aimed at the middle of the frame, so the crop is the middle of the quad, sized to the card. On the rig's own health lines this is worth about **200ms of a 1100ms read** — real, but far less than the old self-fitting crop cost by wandering. |
 | **Never look at the page upside down** | When a page scores badly, tesseract runs the whole thing a second time inverted, in case it was white-on-black. `preprocess()` hands it dark text on a light card every time, so that pass can never help — and it is charged exactly where it hurts, on the reads that fail. A map costs **282ms with it and 211 without**, a dark screen **199 against 154**. Half a shift's reads are of something that is not an offer, so over a realistic mix the median read goes **586ms → 438ms** with no change in what it reads. `-c tessedit_do_invert=0`. That "every time" is a promise `preprocess` now has to keep rather than assume — a phone in dark mode falsifies it, and [it turns the picture over](#when-the-phone-is-in-dark-mode) so the switch stays honest. |
-| **Hand over a file, not an array** | pytesseract's array path routes the image through PIL, whose PNG encoder measured **93ms** — over a third of a read, spent compressing a picture tesseract immediately decompresses. An uncompressed PGM encodes in 0.1ms and reads identically: **262ms → 157ms**. It goes in `/dev/shm`, so the SD card is never in the hot path. |
+| **Hand over a file, not an array** | pytesseract's array path routes the image through PIL, whose PNG encoder measured **93ms** — over a third of a read, spent compressing a picture tesseract immediately decompresses. An uncompressed PGM encodes in 0.1ms and reads identically: **262ms → 157ms**. It goes in `/dev/shm`, so the SD card is never in the hot path. Now only the fallback path: the kept engine is handed the array itself. |
+| **Do not start tesseract at all** | Every read spawned a `tesseract`, and a fresh process re-loads and unpacks the LSTM model before it looks at a pixel — **81.8ms of a 129.1ms read, 63% of it**, paid again on each of the 4 (median) to 14 (worst) reads merged into one offer. The engine is now initialised once and kept: same `libtesseract.so.5` the binary wraps, already on the box as its dependency, so nothing is installed. Byte-identical output, checked row for row across light and dark cards at four mount distances in both page-segmentation modes. A whole read goes **187.1ms → 88.3ms**. See [Keeping the engine](#keeping-the-engine). |
 | **Look in the middle first** | The screen is the biggest bright thing *that the middle of the frame is inside*, falling back to plain biggest. Size alone is a guess about the scene and it loses to a lit dashboard panel or a window at dusk; with a panel larger and brighter than the phone beside it, the old rule locked onto the panel and read nothing while this one reads the card. |
 | **Track on the small stream** | Re-finding the corners uses the 640×480 luma the motion gate already has, not a shrunk-down sensor frame: **0.96ms against 6.98ms**, almost all of the difference being the shrinking. It also means tracking needs no full-resolution capture at all, so it keeps working at full rate while the scanner is otherwise idle. |
 | **Confirm in parallel, not in series** | A verdict waits for two reads that agree, and that confirmation earns its keep: over rippling, soft, glared and dim frames, one read claiming a whole offer was **wrong 1 time in 36**, and two agreeing were wrong none. So the checking is not what gets shortened — the waiting is. The frame after the trigger is captured too and both are read at once, which measured **56% of the cost of two in a row** and halves the time to a verdict for exactly the same evidence. Requires `OMP_THREAD_LIMIT=1`, which scan_pi sets: unpinned, two tesseract instances fight over all four cores and the same pair took **46 seconds** against 435ms. `--no-parallel` goes back to one at a time. |
@@ -340,6 +341,93 @@ before, one beat; the case it was wasting on settles at **12% duty instead of
 56%**. The ceiling is reached after four identical reads running (2.5 → 4.0 →
 6.4 → 10.2 → 12.0), and it is also the worst case for how long a replacement
 offer can sit unnoticed.
+
+### Keeping the engine
+
+Everything above is about running tesseract less. This one is about the part of
+each run that was not reading anything.
+
+`pytesseract` spawns a `tesseract` process per call, and that process loads and
+unpacks the LSTM model before it looks at a single pixel. Measured here by
+timing a read of a blank 32×32 image — whatever that costs is what is spent
+before there is anything to recognise:
+
+| | |
+|---|---|
+| a real card | 129.1 ms |
+| a blank 32×32 | 81.8 ms |
+| **so, startup** | **63% of every read** |
+
+And paid again on each of the 4 (median) to 14 (worst) reads that merge into one
+stored offer. A whole read, end to end through `Scanner.read`:
+
+| | spawned per read | engine kept |
+|---|---|---|
+| read | 187.1 ms | **88.3 ms** |
+| of which OCR | 169.3 ms | 71.4 ms |
+
+**Same engine, not a different one.** `libtesseract.so.5` is what the `tesseract`
+binary is a thin wrapper around, and it is already on the box as that binary's
+own dependency — nothing is installed, and the rig keeps the binary too. Same
+traineddata, same `--oem 1`, same `tessedit_do_invert=0`, page-segmentation mode
+set per call so the psm-4 retry shares the engine rather than building a second.
+
+That "same" is the whole claim, so it is checked rather than asserted:
+`test_tesseract.py` reads light and dark screens at four mount distances across
+all three card layouts, in both modes, and compares the two paths' per-word
+tables **row for row**. 24 of 24 identical, down to the confidence figures.
+
+**One engine per thread**, because `look_many` reads two frames at once and a
+`TessBaseAPI` cannot be shared. Each holds its own model: measured **+11.7MB**
+for the first and +14.2MB for the second, which is the price of this — memory
+for time.
+
+That is also what made the paired read a memory leak, and it is worth writing
+down because the mistake is invisible from either side on its own.
+`look_many` built its `ThreadPoolExecutor` inside a `with` and shut it down at
+the end of the call. Free when a read was a process; ruinous once the engine
+belongs to the thread, because a fresh pair of threads per read is a fresh pair
+of engines per read. Measured: **12 engines after six paired reads, RSS 151MB →
+286MB**, climbing for as long as the shift lasted, on a box with no swap. The
+pool now outlives the call:
+
+| | spawned binary | engine kept |
+|---|---|---|
+| paired read | 194.3 ms | **100.6 ms** |
+| engines after 21 of them | — | 2, RSS flat at 159MB |
+
+Under that sits a plain ceiling, `MAX_ENGINES`. The pool is the fix; the ceiling
+is there because the thing being guarded against is a Pi running out of memory
+mid-shift, and the cost of hitting it by mistake is one slow read.
+
+**Every way it can fail ends with the rig still reading.** A missing library, a
+missing symbol, an init that returns non-zero, an exception mid-shift: any of
+them and the read goes to the binary, permanently, with one line in the log. A
+command line the shim does not fully understand — `--dpi`, a word list — is
+handed over rather than guessed at, because silently dropping a flag would read
+the card under settings nobody chose. `UBERSCAN_TESSERACT=binary` is the way
+back without a code change.
+
+Two details worth knowing. `GetTSVText` is reached by its C++ symbol, since the
+C wrapper does not export it; that is the one brittle thing here, it is looked
+up at load, and its absence is simply another reason to use the binary. And the
+library narrates to stderr — "Estimating resolution as 146" on every read —
+which as a subprocess went to a pipe pytesseract discarded and in-process would
+go to the rig's own log several times a second; `debug_file` sends it back where
+it was.
+
+`OMP_THREAD_LIMIT=1` moved from `scan_pi.main()` to `pipeline` at import for the
+same reason all of this works: the engine is in this process now, and libgomp
+reads the environment when it starts rather than when a subprocess is spawned.
+
+**The "~1.4s a read on a Pi 4" figures elsewhere in this file predate this**, and
+so do the arguments built on them — the verify beat's duty cycle, the case for
+taking the read off the camera loop. They were measured with a process per read
+and none of them has been re-measured on a Pi since. Both numbers here are off a
+faster machine, so the honest thing to carry over is the ratio and not the
+milliseconds: something close to half. A real shift's journal is the place to
+check it, and it records `ms` on every row — the shift these figures were chased
+with had a median of 1517ms.
 
 ### The read does not hold the camera
 
@@ -2489,21 +2577,22 @@ node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  95 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 383 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  #  92 on merging readings across frames, and on
-                                #     a recovered leg staying recovered
+python3 rpi/test_accumulate.py  # 103 on merging readings across frames, on a
+                                #     recovered leg staying recovered, and on
+                                #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 206 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
 python3 rpi/test_exposure.py    # 133 on flicker, brightness, gain and
                                 #     exposure, and on both ends of running out
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     # 137 on keeping one row per offer, and on a
+python3 rpi/test_journal.py     # 143 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
-python3 rpi/test_repeats.py     #  48 on one card read many times
+python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 180 on the loop that holds the camera, and
+python3 rpi/test_scan_pi.py     # 184 on the loop that holds the camera, and
                                 #     on which live view it is being asked for
 python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
@@ -2525,6 +2614,12 @@ python3 rpi/test_handoff.py     #  37 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
 python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
+python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
+                                #     the spawned binary did, and on every way
+                                #     it can fail ending with the rig reading
+python3 rpi/test_dashboard.py   #  46 on what the driving screen shows while a
+                                #     card is being read, and after (skipped
+                                #     without Playwright)
 python3 rpi/test_layout.py      # 258 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)

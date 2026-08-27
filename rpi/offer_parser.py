@@ -5,6 +5,7 @@ JavaScript the shared corpus fails. Keep the two in step when editing either.
 """
 
 import math
+import difflib
 import re
 
 # Characters OCR routinely swaps for digits, only ever applied inside a token
@@ -508,6 +509,73 @@ def minutes_until(deadline, now_minutes):
     if left < 0:
         left += 24 * 60
     return float(left)
+
+
+# When two readings are one address.
+#
+# Merging the addresses seen across a window of frames is what stops a frame
+# that lost the map to glare from erasing one that had it — and, done on exact
+# strings, it invents journeys. Two frames one comma apart give "Cobb Pkwy NW,
+# Acworth" and "Cobb Pkwy NW Acworth", both survive an exact-match dedupe, and
+# the offers page joins places with an arrow: one address rendered as a two-stop
+# route that never happened. That is worse than the missing address the merge
+# was added to fix, and the behaviour it replaced could not produce it.
+#
+# Calibrated on one real shift's 61 distinct addresses. One address a single OCR
+# slip apart scores 0.889 and up; the two genuinely different ends of a card, over
+# all 21 two-place cards in that shift, score 0.595 and down. Same street with a
+# different town — the nearest thing to a hard case — sits between at 0.606 to
+# 0.875. There is a lot of room in that gap, so the line is drawn at 0.90 and the
+# cost of being wrong is one row showing an address twice rather than a route
+# nobody drove.
+PLACE_SAME = 0.90
+
+# A truncated read is the front of the whole one. Ratio alone is poor at this —
+# "Cobb Pkwy NW" against "Cobb Pkwy NW, Acworth" scores 0.74 — so containment
+# gets its own rule, with a floor so a fragment cannot swallow a real address.
+PLACE_PREFIX_SHARE = 0.7
+
+PLACE_KEY = re.compile(r'[^0-9a-z]+', ASCII)
+
+
+def place_key(value):
+    """An address with everything OCR argues about taken out of it."""
+    return PLACE_KEY.sub('', (value or '').lower())
+
+
+def same_place(a, b):
+    """Two readings of one address, rather than two addresses.
+
+    Deliberately not used by find_places: within a single frame the exact match
+    is what the JavaScript port also does, and the two are held to the same
+    answers by the shared corpus. This is about the *union across frames*, which
+    only the Pi does.
+    """
+    key_a, key_b = place_key(a), place_key(b)
+    if not key_a or not key_b:
+        return key_a == key_b
+    if key_a == key_b:
+        return True
+    short, long = sorted((key_a, key_b), key=len)
+    if (long.startswith(short)
+            and len(short) >= len(long) * PLACE_PREFIX_SHARE):
+        return True
+    return difflib.SequenceMatcher(None, key_a, key_b).ratio() >= PLACE_SAME
+
+
+def merge_place(places, value):
+    """Add one address to a list, unless it is one of them read again.
+
+    Keeps the longer of the two where they are the same place: a truncated read
+    is the common failure, so more characters is more of the address.
+    """
+    for i, seen in enumerate(places):
+        if same_place(seen, value):
+            if len(value) > len(seen):
+                places[i] = value
+            return places
+    places.append(value)
+    return places
 
 
 def trim_place(value):

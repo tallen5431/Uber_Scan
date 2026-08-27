@@ -14,10 +14,20 @@ Tesseract's cost is mostly the recogniser walking the text, not the image: four
 times the pixels measured 26% more time. So the wins are in not running it, and
 in not making it read the same page twice (see OCR_CONFIG) — not in shaving
 pixels off a picture it was going to read either way.
+
+...and the largest one was in not *starting* it. That paragraph was written
+about a `tesseract` process spawned per read, and a fresh process re-loads and
+unpacks the LSTM model before it looks at a pixel: 81.8ms of a 129.1ms read, or
+63% of it, and paid again on each of the four (median) to fourteen (worst) reads
+merged into one stored offer. The engine is now initialised once and kept — same
+library, same model, byte-identical output — and a whole read went from 187.1ms
+to 88.3ms. See _Tesseract.
 """
 
 import atexit
+import ctypes
 import os
+import shlex
 import tempfile
 import threading
 import time
@@ -25,7 +35,25 @@ from concurrent import futures
 
 import cv2
 import numpy as np
-import pytesseract
+
+# OpenMP pinned to one thread per tesseract instance, always, and set here
+# because here is the last moment it can be: tesseract now runs inside this
+# process (see _Tesseract) and libgomp reads the environment when it first
+# starts a parallel region, not when a subprocess is spawned. Importing this
+# module is what loads the library, so this has to be above that import.
+#
+# Two reads at once need it or they fight over all four cores: unpinned, a pair
+# measured 46 seconds against 435ms sequential. It is unconditional because a
+# single read is not alone on the machine either — it runs beside the camera
+# loop, which is capturing, gating, tracking and writing the live view
+# throughout, so an unpinned tesseract spreading over four cores takes them from
+# the thing whose whole purpose is to keep going during a read. Pinning costs a
+# single read nothing measurable.
+#
+# setdefault, so an explicit setting still wins.
+OMP_THREAD_LIMIT = os.environ.setdefault('OMP_THREAD_LIMIT', '1')
+
+import pytesseract                                            # noqa: E402
 
 try:
     from . import offer_parser as OP
@@ -870,8 +898,269 @@ def stage_for_ocr(image):
     return image
 
 
+# --- the engine, kept alive ------------------------------------------------
+#
+# Every read used to spawn a `tesseract` process, and a fresh process re-loads
+# and unpacks the LSTM model before it looks at a single pixel. Measured here:
+# 81.8ms of a 129.1ms read, or **63% of it**, spent starting up — and paid again
+# on every one of the four (median) to fourteen (worst) reads that get merged
+# into one stored offer. The module note at the top of this file says the wins
+# are in not running tesseract rather than in shaving pixels off a picture it
+# was going to read anyway. True, and it missed that most of each run was not
+# reading anything.
+#
+# So the engine is initialised once and kept. Same library the binary is a
+# wrapper around — libtesseract.so.5 is already on the box as its dependency, so
+# nothing new is installed — same traineddata, same OEM, same variables, and the
+# TSV it returns is byte-identical to the binary's, header line aside. Measured
+# on the same card: **124.8ms to 37.2ms**.
+#
+# One engine per thread, because look_many runs two reads at once and a
+# TessBaseAPI is not shareable. Each holds its own copy of the model, which is
+# the cost of this: memory for time.
+#
+# Everything here is allowed to fail. A missing library, a missing symbol, an
+# init that returns non-zero, an exception mid-read — any of them and this hands
+# the read back to the binary, permanently, and says so once. A rig that reads
+# slowly is working; a rig that does not read is not. `UBERSCAN_TESSERACT=binary`
+# is the way back without a code change, in the same spirit as --no-thread.
+#
+# GetTSVText is reached by its C++ symbol because the C wrapper does not export
+# it. That is the one brittle thing in here, so it is looked up at init and its
+# absence is simply another reason to use the binary.
+_TSV_SYMBOL = '_ZN9tesseract11TessBaseAPI10GetTSVTextEi'
+
+_TESS_LIB = None                 # None: not tried. False: not usable.
+_TESS_LOCK = threading.Lock()
+_TESS_LOCAL = threading.local()
+_TESS_OPEN = []                  # every engine built, so they can be closed
+_TESS_SAID = False
+
+
+def _tess_off(why):
+    """Give up on the library, once, out loud."""
+    global _TESS_LIB, _TESS_SAID
+    _TESS_LIB = False
+    if not _TESS_SAID:
+        _TESS_SAID = True
+        print('reading with the tesseract binary instead of the library: %s' % why)
+
+
+def _tess_lib():
+    """The shared library, bound, or False."""
+    global _TESS_LIB
+    if _TESS_LIB is not None:
+        return _TESS_LIB
+    with _TESS_LOCK:
+        if _TESS_LIB is not None:
+            return _TESS_LIB
+        if os.environ.get('UBERSCAN_TESSERACT', '').lower() == 'binary':
+            _tess_off('asked for by UBERSCAN_TESSERACT')
+            return False
+        try:
+            lib = ctypes.CDLL('libtesseract.so.5')
+            lib.TessBaseAPICreate.restype = ctypes.c_void_p
+            lib.TessBaseAPIInit2.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                             ctypes.c_char_p, ctypes.c_int]
+            lib.TessBaseAPIInit2.restype = ctypes.c_int
+            lib.TessBaseAPISetVariable.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                                   ctypes.c_char_p]
+            lib.TessBaseAPISetVariable.restype = ctypes.c_bool
+            lib.TessBaseAPISetPageSegMode.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            lib.TessBaseAPISetImage.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                                ctypes.c_int, ctypes.c_int,
+                                                ctypes.c_int, ctypes.c_int]
+            lib.TessBaseAPIGetUTF8Text.argtypes = [ctypes.c_void_p]
+            lib.TessBaseAPIGetUTF8Text.restype = ctypes.c_void_p
+            lib.TessBaseAPIEnd.argtypes = [ctypes.c_void_p]
+            lib.TessBaseAPIDelete.argtypes = [ctypes.c_void_p]
+            lib.TessDeleteText.argtypes = [ctypes.c_void_p]
+            tsv = getattr(lib, _TSV_SYMBOL)
+            tsv.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            tsv.restype = ctypes.c_void_p
+            lib.uberscan_tsv = tsv
+            _TESS_LIB = lib
+        except Exception as e:
+            _tess_off(str(e))
+    return _TESS_LIB
+
+
+def _tess_config(config):
+    """(oem, psm, variables) out of a tesseract command line, or None.
+
+    None means "not a command line this understands", and the caller falls back
+    to the binary rather than guessing at it. Every flag has to be recognised:
+    silently dropping one would read the card under settings nobody asked for,
+    which is the sort of difference that shows up as a wrong number.
+    """
+    oem, psm, variables = 3, 3, []
+    parts = shlex.split(config or '')
+    i = 0
+    while i < len(parts):
+        flag = parts[i]
+        nxt = parts[i + 1] if i + 1 < len(parts) else None
+        try:
+            if flag == '--oem' and nxt is not None:
+                oem = int(nxt)
+            elif flag == '--psm' and nxt is not None:
+                psm = int(nxt)
+            elif flag == '-c' and nxt is not None and '=' in nxt:
+                key, value = nxt.split('=', 1)
+                variables.append((key, value))
+            else:
+                return None
+        except ValueError:
+            return None
+        i += 2
+    return oem, psm, tuple(variables)
+
+
+class _Tesseract:
+    """One initialised engine, on one thread."""
+
+    def __init__(self, lib, oem, variables):
+        self.lib = lib
+        self.api = ctypes.c_void_p(lib.TessBaseAPICreate())
+        if not self.api:
+            raise RuntimeError('tesseract would not start')
+        if lib.TessBaseAPIInit2(self.api, None, b'eng', int(oem)) != 0:
+            lib.TessBaseAPIDelete(self.api)
+            self.api = None
+            raise RuntimeError('tesseract would not load eng')
+        # Tesseract narrates to stderr — "Estimating resolution as 146" on every
+        # read, and more when a page confuses it. Run as a subprocess that went
+        # to a pipe pytesseract threw away; run in this process it goes to the
+        # rig's own log, several lines a second while a card is up, in the file
+        # a driver pastes back. Sending it to the same place the binary's copy
+        # went is not losing anything. Set before the caller's own variables, so
+        # a caller that wants it back can ask.
+        lib.TessBaseAPISetVariable(self.api, b'debug_file', b'/dev/null')
+        for key, value in variables:
+            lib.TessBaseAPISetVariable(self.api, key.encode(), str(value).encode())
+        _TESS_OPEN.append(self)
+
+    def read(self, image, psm, tsv):
+        # Greyscale and contiguous, which is what SetImage is being told it is.
+        # A picture that is neither would be read as noise rather than refused.
+        if image.ndim == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        buf = np.ascontiguousarray(image, dtype=np.uint8)
+        height, width = buf.shape[:2]
+        self.lib.TessBaseAPISetPageSegMode(self.api, int(psm))
+        self.lib.TessBaseAPISetImage(self.api, buf.ctypes.data,
+                                     width, height, 1, width)
+        got = (self.lib.uberscan_tsv(self.api, 0) if tsv
+               else self.lib.TessBaseAPIGetUTF8Text(self.api))
+        if not got:
+            return ''
+        try:
+            return ctypes.string_at(got).decode('utf-8', 'replace')
+        finally:
+            self.lib.TessDeleteText(ctypes.c_void_p(got))
+
+    def close(self):
+        if self.api:
+            # Ended as well as deleted: without it tesseract prints a wall of
+            # "LEAK! object still has count 1" at exit, which is the last thing
+            # in the log a driver would paste back.
+            self.lib.TessBaseAPIEnd(self.api)
+            self.lib.TessBaseAPIDelete(self.api)
+            self.api = None
+
+
+# Two, because a paired read is two frames and OMP_THREAD_LIMIT pins each engine
+# to one core — two at once on a four-core Pi leaves the camera loop the other
+# two. A larger batch is not refused, it queues, which is the right answer
+# rather than a wider fan-out onto cores that are already busy.
+_READ_WORKERS = 2
+_READ_POOL = None
+_READ_POOL_LOCK = threading.Lock()
+
+
+def _read_pool():
+    global _READ_POOL
+    if _READ_POOL is None:
+        with _READ_POOL_LOCK:
+            if _READ_POOL is None:
+                _READ_POOL = futures.ThreadPoolExecutor(
+                    max_workers=_READ_WORKERS, thread_name_prefix='ocr')
+    return _READ_POOL
+
+
+# A ceiling on engines, whatever the threading above does.
+#
+# Each holds its own copy of the model — 11.7MB for the first, 14.2MB for the
+# second — so a caller that reads from a fresh thread every time would eat the
+# Pi. The pool above is the fix; this is the backstop, because the failure it
+# guards against is a rig running out of memory mid-shift and the cost of being
+# wrong about it is one slow read.
+MAX_ENGINES = 4
+
+
+def _close_engines():
+    for engine in list(_TESS_OPEN):
+        try:
+            engine.close()
+        except Exception:
+            pass
+    del _TESS_OPEN[:]
+
+
+atexit.register(_close_engines)
+
+
+def _in_process(image, config, tsv):
+    """Read with the kept engine. None means "use the binary"."""
+    lib = _tess_lib()
+    if not lib:
+        return None
+    parsed = _tess_config(config)
+    if parsed is None:
+        return None
+    oem, psm, variables = parsed
+    key = (oem, variables)
+    engines = getattr(_TESS_LOCAL, 'engines', None)
+    if engines is None:
+        engines = _TESS_LOCAL.engines = {}
+    engine = engines.get(key)
+    try:
+        if engine is None:
+            if len(_TESS_OPEN) >= MAX_ENGINES:
+                return None
+            engine = engines[key] = _Tesseract(lib, oem, variables)
+        return engine.read(image, psm, tsv)
+    except Exception as e:
+        # This one is dead; the next read builds a fresh one. Twice in a row and
+        # the library is the problem rather than the engine.
+        engines.pop(key, None)
+        if engine is not None:
+            try:
+                engine.close()
+                _TESS_OPEN.remove(engine)
+            except Exception:
+                pass
+            _tess_off(str(e))
+        return None
+
+
 def ocr(image, config=OCR_CONFIG):
+    out = _in_process(image, config, tsv=False)
+    if out is not None:
+        return out
     return pytesseract.image_to_string(stage_for_ocr(image), config=config)
+
+
+def tsv_rows(image, config=OCR_CONFIG):
+    """Tesseract's per-word table for this image, without the header line.
+
+    The library returns the rows alone and the binary writes a header above
+    them; the difference is dealt with here rather than by every caller.
+    """
+    out = _in_process(image, config, tsv=True)
+    if out is not None:
+        return out.splitlines()
+    return pytesseract.image_to_data(stage_for_ocr(image),
+                                     config=config).splitlines()[1:]
 
 
 def ocr_lines(image, config=OCR_CONFIG):
@@ -881,8 +1170,7 @@ def ocr_lines(image, config=OCR_CONFIG):
     well, so this costs nothing extra. The boxes are what let a crop that has
     slid off the card find its way back on.
     """
-    tsv = pytesseract.image_to_data(stage_for_ocr(image), config=config)
-    rows = [r.split('\t') for r in tsv.splitlines()[1:]]
+    rows = [r.split('\t') for r in tsv_rows(image, config)]
     grouped = {}
     order = []
     for r in rows:
@@ -1201,8 +1489,14 @@ class Scanner:
         geom = self.geometry() if geom is None else geom
         if len(frames) == 1:
             return [self._look(frames[0], now, geom)]
-        with futures.ThreadPoolExecutor(max_workers=len(frames)) as pool:
-            return list(pool.map(lambda f: self._look(f, now, geom), frames))
+        # The pool outlives the call. It used to be built per read and shut down
+        # at the end of it, which was free when a read spawned a process and is
+        # not now: the engine belongs to the thread, so a fresh pair of threads
+        # per read meant a fresh pair of engines per read — 12 of them after six
+        # paired reads, RSS 151MB to 286MB, and climbing for as long as the
+        # shift lasted. Reusing the threads is what makes keeping the engine
+        # mean anything.
+        return list(_read_pool().map(lambda f: self._look(f, now, geom), frames))
 
     def settle(self, outs, geom=None):
         """Fold a batch of readings back into what the Scanner believes.

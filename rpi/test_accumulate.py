@@ -413,14 +413,48 @@ other = acc.add(P.parse('$19.06 5 min (1.2 mi) away 23 min (8.4 mi) trip'),
                 now=800.5)
 eq('the next card does not inherit the last one\'s address', other['places'], [])
 
-# Never more than one card's worth, however many frames read the map slightly
-# differently. Four frames, four spellings of the same corner.
+# One address read twice is one address. A union on exact strings keeps both —
+# and the offers page joins places with an arrow, so a card whose pickup was
+# read once with a comma and once without is rendered as a two-stop route that
+# never happened. That is worse than the missing address the union fixes, and
+# the last-frame behaviour it replaced could not produce it.
+WITH_COMMA = '$12.45 5 min (1.2 mi) away Cobb Pkwy NW, Acworth 23 min (8.4 mi) trip'
+NO_COMMA = '$12.45 5 min (1.2 mi) away Cobb Pkwy NW Acworth 23 min (8.4 mi) trip'
+eq('the two frames really do read it differently',
+   P.parse(WITH_COMMA)['places'] == P.parse(NO_COMMA)['places'], False)
 acc = OfferAccumulator()
-for i, town in enumerate(('Kennesaw', 'Kennesaws', 'Kennesow', 'Kennesaur')):
-    many = acc.add(P.parse('$12.45 5 min (1.2 mi) away Chastain Rd NW, %s '
-                           '23 min (8.4 mi) trip Canton Rd, Marietta' % town),
-                   now=900.0 + i * 0.5)
-eq('a window of frames cannot grow more places than a card has',
+acc.add(P.parse(WITH_COMMA), now=900.0)
+twice = acc.add(P.parse(NO_COMMA), now=900.5)
+eq('one address read two ways stays one address', len(twice['places']), 1)
+eq('...and the fuller reading is the one kept',
+   twice['places'], ['Cobb Pkwy NW, Acworth'])
+
+# ...and the other direction, which is the whole risk of merging at all: the
+# two genuinely different ends of a card must survive as two.
+acc = OfferAccumulator()
+ends = acc.add(P.parse('$12.45 5 min (1.2 mi) away Chastain Rd NW, Kennesaw '
+                       '23 min (8.4 mi) trip Canton Rd, Marietta'), now=950.0)
+eq('the two ends of a real card are still two places', len(ends['places']), 2)
+
+# Same street, different town is a different place. It is the nearest thing to a
+# hard case for the test above and it must come down on this side of it.
+acc = OfferAccumulator()
+acc.add(P.parse('$12.45 5 min (1.2 mi) away Cobb Pkwy NW, Acworth 23 min (8.4 mi) trip'),
+        now=960.0)
+towns = acc.add(P.parse('$12.45 5 min (1.2 mi) away Cobb Pkwy NW, Kennesaw '
+                        '23 min (8.4 mi) trip'), now=960.5)
+eq('the same street in two towns is two places', len(towns['places']), 2)
+
+# Never more than one card's worth, however many frames read the map. Four
+# frames, four genuinely different corners.
+acc = OfferAccumulator()
+CORNERS = ('Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta',
+           'Airport Rd NW, Kennesaw', 'Post Woods Dr, Atlanta',
+           'Dallas Hwy, Marietta')
+for i, corner in enumerate(CORNERS):
+    many = acc.add(P.parse('$12.45 5 min (1.2 mi) away %s 23 min (8.4 mi) trip'
+                           % corner), now=900.0 + i * 0.5)
+eq('five corners do not become five places on a card that holds four',
    len(many['places']), 4)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad

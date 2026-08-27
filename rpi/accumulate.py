@@ -248,8 +248,11 @@ class OfferAccumulator:
         for place in parsed.get('places') or []:
             if len(self.places) >= MAX_PLACES:
                 break
-            if place.lower() not in [p.lower() for p in self.places]:
-                self.places.append(place)
+            # Not an exact match: two frames one comma apart give "Cobb Pkwy
+            # NW, Acworth" and "Cobb Pkwy NW Acworth", and a union on exact
+            # strings keeps both — which the offers page renders, arrow and
+            # all, as a two-stop route that never happened. See OP.same_place.
+            OP.merge_place(self.places, place)
 
         return self._merged(parsed)
 

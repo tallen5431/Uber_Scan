@@ -399,10 +399,10 @@ class OfferLog:
         # the address — so this is the only chance to keep it.
         if self.keep_places:
             for place in parsed.get('places') or []:
-                if (len(self.places) < OP.MAX_PLACES
-                        and place.lower()
-                        not in [p.lower() for p in self.places]):
-                    self.places.append(place)
+                if len(self.places) < OP.MAX_PLACES:
+                    # Merged rather than appended, so one address read twice
+                    # slightly differently is one address. See OP.same_place.
+                    OP.merge_place(self.places, place)
         # Computed here rather than at the top, because it now asks about the
         # addresses and those are only settled once the identity above has had
         # its say — a new card clears them, and a reading of the same card adds
