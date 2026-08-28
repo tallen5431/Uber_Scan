@@ -424,6 +424,14 @@ try:
     # accepted flag only on rows that already count, so this one must not
     # appear in the taken figure either.
     rows.append({'kind': 'mark', 'id': 'o3', 'at': now - 800000, 'accepted': True})
+    # The test card the driver presents each morning to check the rig, hidden.
+    # It is not an offer they were made, so it is not an offer at all — and
+    # /api/journal drops it before the offers page ever sees it. Counted here it
+    # would land in BOTH figures: once as an offer, then again as one the
+    # scanner set aside, blaming the reader for the driver's own exclusion.
+    rows.append({'v': 1, 'id': 'o9', 'at': now - 400000, 'seq': 9, 'pay': 99.0,
+                 'minutes': 5.0, 'perHour': 1188.0, 'whole': True})
+    rows.append({'kind': 'mark', 'id': 'o9', 'at': now - 390000, 'hidden': True})
     with open(journal, 'w') as fh:
         fh.write('\n'.join(json.dumps(r) for r in rows) + '\n')
 
@@ -438,6 +446,12 @@ try:
     eq('...of which the ones with a rate worth drawing are counted',
        day.get('counted'), 2)
     eq('...and the rest are named rather than dropped', day.get('setAside'), 2)
+    # The hidden row is in neither figure. The offers page never sees it, so a
+    # count that included it would put a bigger number on the driving screen
+    # than the offers page shows for the same day — and its $1188/hr would have
+    # been the loudest thing on either screen if it had reached a median.
+    ok_('a row the driver hid is not an offer they were made',
+        day.get('offers') == 4 and day.get('setAside') == 2)
     # 20 and 30 straddle the middle of a two-sample set, so the median is 25 by
     # the same interpolation journal.html uses. A different rounding here would
     # put two different medians for one day on two screens.
@@ -488,6 +502,35 @@ try:
     eq('...and has no median to report', empty.get('median'), None)
     ok_('...and does not call that a broken journal',
         empty.get('unreadable') is None)
+
+    # --- an empty journal that just rolled is not a quiet day ---------------
+    #
+    # journal.py rolls past 64MB with os.replace and nothing ever removes the
+    # sibling, so "a .1 exists" is true forever after the first roll. Tested
+    # that way the panel would announce a roll every quiet morning for years,
+    # which is a worse claim than the one it is here to prevent. What makes it
+    # this shift's business is the roll having happened inside this window.
+    with open(journal, 'w') as fh:
+        fh.write('')
+    rolled_path = journal + '.1'
+    with open(rolled_path, 'w') as fh:
+        fh.write(json.dumps({'v': 1, 'id': 'old', 'at': now - 200000000,
+                             'pay': 5.0, 'minutes': 10.0, 'perHour': 30.0}) + '\n')
+
+    two_days_ago = time.time() - 2 * 86400
+    os.utime(rolled_path, (two_days_ago, two_days_ago))
+    stale_roll = today('since=%d' % since)
+    eq('an empty day on a rig that rolled long ago counts nothing',
+       stale_roll.get('offers'), 0)
+    ok_('...and does not blame a roll from another week for it',
+        stale_roll.get('rolled') is False)
+
+    an_hour_ago = time.time() - 3600
+    os.utime(rolled_path, (an_hour_ago, an_hour_ago))
+    fresh_roll = today('since=%d' % since)
+    ok_('...while a roll inside this window is said out loud',
+        fresh_roll.get('rolled') is True)
+    os.remove(rolled_path)
 finally:
     proc.terminate()
     try:
@@ -593,6 +636,39 @@ if shutil.which('python3'):
         eq('...with the payout the button is named after',
            (later.get('offer') or {}).get('pay'), 12.45)
         ok_('...and how old it is', isinstance(later.get('offerAgeMs'), int))
+
+        # ...and once it is marked, it stays marked across a reload.
+        #
+        # The page half of this is measured in test_dashboard.py against a
+        # stubbed /api/status — which proves the page reads the flag, and
+        # nothing at all about anything setting it. This is the other half, on
+        # the real server: the mark route has to record it against the offer the
+        # driving screen is holding, or the button forgets every reload while
+        # the shift count beside it remembers.
+        ok_('an offer on record starts unmarked',
+            not (later.get('offer') or {}).get('accepted'))
+        mark = urllib.request.Request(
+            base2 + '/api/offers/mark',
+            data=json.dumps({'id': 'o-1', 'accepted': True}).encode(),
+            headers={'Content-Type': 'application/json'}, method='POST')
+        urllib.request.urlopen(mark, timeout=3).read()
+        marked = json.loads(urllib.request.urlopen(base2 + '/api/status',
+                                                   timeout=3).read().decode())
+        ok_('...and marking it is remembered against it',
+            (marked.get('offer') or {}).get('accepted') is True)
+
+        # A mark for something else is about a row on the offers page and says
+        # nothing about what is on this screen. Recording it here would tick the
+        # button for an offer the driver never marked.
+        other = urllib.request.Request(
+            base2 + '/api/offers/mark',
+            data=json.dumps({'id': 'some-other-row', 'accepted': False}).encode(),
+            headers={'Content-Type': 'application/json'}, method='POST')
+        urllib.request.urlopen(other, timeout=3).read()
+        after_other = json.loads(urllib.request.urlopen(base2 + '/api/status',
+                                                        timeout=3).read().decode())
+        ok_('...and a mark naming a different offer leaves it alone',
+            (after_other.get('offer') or {}).get('accepted') is True)
     finally:
         quiet.terminate()
         try:

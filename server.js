@@ -991,6 +991,16 @@ function shiftSummary(rows, since) {
   var early = 0;
   var window = [];
   offers.forEach(function (o) {
+    // A row the driver hid is not an offer they were made — the test card
+    // presented to check the rig is not a job. /api/journal drops these before
+    // the offers page ever sees them, so a hidden row is in neither its count
+    // nor its set-aside figure, and this has to drop them too. Left in, they
+    // landed in BOTH: counted as an offer, then rejected by trustworthy and
+    // reported as one the scanner had set aside. The driving screen said "6
+    // offers · 2 set aside" where the offers page said "5 offers (1 set
+    // aside)" for the same day, and blamed the reader for an exclusion the
+    // driver had made.
+    if (o.hidden) return;
     var at = (typeof o.at === 'number' && isFinite(o.at)) ? o.at : null;
     if (at === null) return;
     if (at < CLOCK_BELIEVABLE_AFTER) { early += 1; return; }
@@ -1058,6 +1068,18 @@ function todaySummary(since, done) {
     var out = {};
     Object.keys(answer).forEach(function (k) { out[k] = answer[k]; });
     out.clockSet = clockSet;
+    // Answered fresh for the same reason, and found by the check that covers
+    // it: this depends on the SIBLING's mtime and on `since`, neither of which
+    // is the journal file the cache is keyed on. Cached, a roll that happened
+    // while journal.jsonl itself did not change was served the previous
+    // answer's `false` — the one state it exists to report, reported wrong.
+    // The stat only runs when there are no offers to report anyway.
+    out.rolled = false;
+    if (!out.offers && !out.unreadable) {
+      try {
+        out.rolled = fs.statSync(JOURNAL_PATH + '.1').mtimeMs >= since;
+      } catch (e) { /* no sibling: this journal has never rolled */ }
+    }
     done(out);
   };
   fs.stat(JOURNAL_PATH, function (statErr, st) {
@@ -1082,8 +1104,14 @@ function todaySummary(since, done) {
         // says "no offers yet" at eleven at night. Nothing here reads the .1
         // sibling — that is a bigger change than a status line — but it can at
         // least decline to claim the day was quiet.
-        answer.rolled = (!answer.offers && !answer.beforeClock
-                         && fs.existsSync(JOURNAL_PATH + '.1')) || false;
+        //
+        // "A sibling exists" is NOT the test. journal.py rolls with os.replace
+        // and nothing ever removes the .1, so one roll makes that true forever
+        // and every quiet morning afterwards would announce a roll that
+        // happened months ago — which is a worse lie than the one this is here
+        // to prevent. What makes it this shift's business is the roll having
+        // happened inside this window.
+
       }
       // An unreadable journal is not cached. It is a transient the next request
       // may not hit, and keying it on a size and mtime that did not change

@@ -205,6 +205,11 @@
   }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--no); }
   .connbar a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+  /* The connection state keeps its width and the shift line gives way.
+     Both are flex items on one row; without this the longer shift line
+     wraps "no Pi scanner on this machine" onto two lines, which is the
+     message that matters most at the moment it is hardest to read. */
+  #conn { white-space: nowrap; flex: 0 0 auto; }
   /* One line, and it gives way rather than widening the row. `min-width: 0`
      because a flex item will not shrink below its content without it, and this
      row sits on a panel the page is held to fitting — a long shift line that
@@ -686,6 +691,9 @@
 
   var shiftAt = 0;
   var shiftBusy = false;
+  // A request that arrived while one was in flight, to be run once it
+  // lands. Marking an offer during the slow poll is exactly that case.
+  var shiftAgain = false;
   // Three minutes. The server has to read and parse the whole journal to
   // answer, on the same event loop that drives the camera stream — a year of
   // driving is around 19MB and the best part of a second of frozen loop on a
@@ -716,22 +724,58 @@
       if (typeof s.median === 'number') {
         bits.push('median $' + Math.round(s.median) + '/hr');
       }
-      // Offers the rig recorded before its clock was right. They are stamped
-      // 1970 on disk and cannot fall inside any day, so the count above is
-      // short by this many and says so rather than quietly losing them.
-      if (s.beforeClock) {
-        bits.push(s.beforeClock + ' before the clock was set');
-      }
+      // `beforeClock` is deliberately NOT printed here. Offers the rig recorded
+      // before its clock was right are stamped 1970 on disk and cannot fall
+      // inside any day window — but that is true of every day, forever, so on a
+      // line about today it is a suffix that never clears and attributes rows
+      // from some past boot to this shift. The offers page drops them silently
+      // for the same reason. It stays in the response because it is a true fact
+      // about the journal and a diagnostic may want it; it is not a figure for
+      // this row.
     }
     el.shift.textContent = '· ' + bits.join(' · ');
     el.shift.hidden = false;
   }
 
+  // 1 Jan 2025, the same floor server.js applies. Below this a clock is not a
+  // clock: the Pi has no RTC, boots in 1970 and jumps when NTP arrives.
+  var CLOCK_BELIEVABLE_AFTER = 1735689600000;
+  // Long enough that a slow rig is not cut off mid-answer, short enough that a
+  // connection which never closes does not freeze the figures for the shift.
+  var SHIFT_TIMEOUT_MS = 20000;
+
   function loadShift() {
-    if (shiftBusy) return;
+    // The page's OWN clock first. On the panel bolted to the dashboard this
+    // browser is running on the Pi, so an unset clock makes dayStart() a 1970
+    // moment — which the server refuses, correctly, and the line would simply
+    // vanish with nothing said. The server's own answer covers the other case,
+    // a phone with a good clock looking at a rig without one.
+    var since = dayStart();
+    if (since < CLOCK_BELIEVABLE_AFTER) {
+      shiftAt = Date.now();
+      showShift({ clockSet: false });
+      return;
+    }
+    if (shiftBusy) {
+      // Asked while one is already in the air. Dropping it silently is what
+      // made marking an offer during the three-minute poll repaint the count
+      // from BEFORE the mark: the answer already in flight was computed
+      // without it. Remember to go again instead.
+      shiftAgain = true;
+      return;
+    }
     shiftBusy = true;
     shiftAt = Date.now();
-    fetch('/api/today?since=' + dayStart()).then(function (r) {
+    // A fetch that never settles would leave shiftBusy set for the rest of the
+    // shift, and the figures on the panel would stop moving with nothing
+    // saying they had.
+    var stop = null;
+    if (typeof AbortController === 'function') {
+      stop = new AbortController();
+      setTimeout(function () { stop.abort(); }, SHIFT_TIMEOUT_MS);
+    }
+    fetch('/api/today?since=' + since,
+          stop ? { signal: stop.signal } : undefined).then(function (r) {
       // An older build has no such route, and an unknown /api path on this
       // server falls past every handler to a text/plain 404 — so `.json()`
       // rejects with a SyntaxError rather than returning a status to branch on.
@@ -747,6 +791,7 @@
       showShift(null);
     }).then(function () {
       shiftBusy = false;
+      if (shiftAgain) { shiftAgain = false; loadShift(); }
     });
   }
 

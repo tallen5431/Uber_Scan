@@ -496,12 +496,17 @@ Four states print words instead of a count, because in each of them a plausible
 number would be a wrong one: the rig's clock has not been set (it has no RTC,
 boots in 1970, and its unit is not ordered after time-sync — so it genuinely can
 record offers before it knows what day it is); the journal could not be read,
-which looks identical to a quiet day; the journal just rolled past 64MB, which
-also looks like a quiet day; and the endpoint is not there at all, which is what
+which looks identical to a quiet day; the journal rolled past 64MB inside this
+window, which also looks like a quiet day — tested on the roll's own age, since
+`journal.py` rolls with `os.replace` and nothing ever removes the sibling, so
+"a `.1` exists" is true forever after the first roll and would announce it every
+quiet morning for years; and the endpoint is not there at all, which is what
 a build one `git pull` behind does — as a *text/plain* 404, so `.json()` rejects
-rather than returning a status to branch on. Offers stamped before the clock was
-set can never fall inside a day window, so the line says how many it could not
-place rather than losing them.
+rather than returning a status to branch on. Offers stamped before the clock
+was set can never fall inside a day window; the count of them is in the
+response but deliberately not on the line, because it is true of every day
+forever and a suffix that never clears would blame this shift for rows from
+some past boot.
 
 #### The two figures that would have disagreed
 
@@ -521,6 +526,40 @@ count, so it is the one time the figures are worth asking for off the timer.
 asserting a hidden line on a page that never got an answer proves nothing, since
 it starts hidden — it puts figures on the panel first and then takes the endpoint
 away.
+
+#### What an adversarial review of it found
+
+Six reviewers over the finished diff, each finding independently put to three
+refuters. Twenty-one claims, and the ones that survived were all the same shape
+— a figure that was *nearly* the offers page's figure:
+
+- **Hidden rows were counted twice over.** `/api/journal` drops them before the
+  offers page ever sees one, so a hidden row is in neither its count nor its
+  set-aside figure. Here it was in *both*: counted as an offer, then rejected by
+  `trustworthy` and reported as one the scanner had set aside. The driving
+  screen read "6 offers · 2 set aside" where the offers page read "5 offers (1
+  set aside)" for the same day — and blamed the reader for an exclusion the
+  driver had made. Three of the six reviewers found this independently and one
+  reproduced it against a running server.
+- **`beforeClock` was an all-time tally on a line about today.** Removed from
+  the line.
+- **`rolled` announced a roll forever.** Five findings hit this one.
+- **"waiting for the clock" was unreachable on the rig.** The panel's browser
+  runs on the Pi, so an unset clock made `dayStart()` a 1970 moment, which the
+  server refuses — correctly — and the line simply vanished with nothing said.
+  The page now checks its own clock first; the server's answer still covers a
+  phone with a good clock looking at a rig without one.
+- **A hung fetch froze the figures for the shift**, and a mark landing during
+  the slow poll was dropped and then repainted with the pre-mark count.
+- **Two checks that could not fail.** `oneLine` compared a flex item's height to
+  its container's, which is true of every flex item at every size. And seven
+  existing mark-button checks had been re-parented under an unrelated `if`.
+
+The `rolled` fix then failed its own new check, which is why it was written: the
+flag depends on the sibling's mtime and on `since`, neither of which is the file
+the cache is keyed on, so a roll that happened while `journal.jsonl` itself did
+not change was served the previous answer's `false` — the one state it exists to
+report, reported wrong. It is answered outside the cache now, like `clockSet`.
 
 **Known limit:** the machine at home runs the same `server.js` and will answer
 with its own journal, which the sync timer leaves up to eleven minutes behind,
@@ -2820,7 +2859,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3294 checks
+npm test                # all 29 suites, 3303 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -2862,7 +2901,7 @@ python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  53 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
-python3 rpi/test_liveview.py    #  77 on the picture the driver watches, on
+python3 rpi/test_liveview.py    #  84 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
                                 #     dashboard layout being wired up, on which
                                 #     of the two views was asked for, on the
@@ -2889,7 +2928,7 @@ python3 rpi/test_doctor.py      #  30 on the preflight running to the end, and
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 206 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 208 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying

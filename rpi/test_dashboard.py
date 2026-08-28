@@ -264,13 +264,21 @@ const LOOK = (sel) => {
     const lookShift = () => page.evaluate(() => {
       const s = document.getElementById('shift');
       const r = s.getBoundingClientRect();
-      const bar = s.parentElement.getBoundingClientRect();
+      const cs = getComputedStyle(s);
+      const conn = document.getElementById('conn').getBoundingClientRect();
+      // Against its own line box, NOT against the row it sits in. "No taller
+      // than my flex container" is true of every flex item at every size and
+      // for every string — it was a check that could not fail, which left the
+      // whole nowrap/ellipsis rule unguarded.
+      const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
       return { hidden: s.hidden, text: (s.textContent || '').trim(),
                shown: !s.hidden && r.width > 0 && r.height > 0
                       && r.top >= 0 && r.bottom <= window.innerHeight + 1,
-               size: Math.round(parseFloat(getComputedStyle(s).fontSize)),
-               // One line: no taller than the row it is a flex item of.
-               oneLine: r.height <= bar.height + 1,
+               size: Math.round(parseFloat(cs.fontSize)),
+               oneLine: r.height <= line * 1.6,
+               // ...and it gives way rather than wrapping the message beside
+               // it, which is the one that matters most when it appears.
+               connLines: Math.round(conn.height / line),
                fits: document.documentElement.scrollWidth
                      <= document.documentElement.clientWidth + 1 };
     });
@@ -663,6 +671,23 @@ try:
         ok_('pressing again takes it back off',
             (undone.get('text') or '').endswith('?'))
 
+        # By id every time, and each mark against the offer that was on record
+        # when it was pressed. Marking by pay-and-minutes would be a rule
+        # catching every offer paying that to the cent.
+        eq('...and every note names one offer by id, in order',
+           posted, [{'id': 'o1', 'accepted': True},
+                    {'id': 'o2', 'accepted': True},
+                    {'id': 'o2', 'accepted': False}])
+
+        # It has to be usable in a moving car and must not break the panel.
+        for name, slot in (('offered', offered), ('marked', marked)):
+            ok_('the control is a real target when %s (%dx%d)'
+                % (name, slot.get('w') or 0, slot.get('h') or 0),
+                (slot.get('w') or 0) >= 80 and (slot.get('h') or 0) >= 44)
+            ok_('...with nothing clipped off it when %s' % name,
+                not slot.get('clipped'))
+            ok_('...and the panel still fits when %s' % name, slot.get('fits'))
+
     # --- what the shift adds up to, on the row under the verdict ---------
     first = got.get('shiftFirst') or {}
     ok_('the shift line was measured', bool(first))
@@ -684,6 +709,8 @@ try:
             and (first.get('text') or '').count('$') == 1)
         # On the glass and on one line, on the panel this is bolted to.
         ok_('...on one line', first.get('oneLine'))
+        eq('...and the connection message beside it still on one',
+           first.get('connLines'), 1)
         ok_('...without widening the panel', first.get('fits'))
         ok_('...at a size that can be read from the driving seat (%spx)'
             % first.get('size'), (first.get('size') or 0) >= 12)
@@ -725,29 +752,18 @@ try:
             lost.get('hidden'))
 
     # Offers the rig recorded before its clock was set are stamped 1970 and
-    # cannot fall inside any day. The count is short by that many and says so.
+    # cannot fall inside any day window. That is true of every day forever, so
+    # naming them on a line about today was a suffix that never cleared and
+    # blamed this shift for rows from some past boot. The count stays in the
+    # response; it is not a figure for this row.
     early = got.get('shift_early') or {}
     ok_('the pre-clock state was measured', bool(early))
     if early:
-        ok_('...and names the offers no day window can hold',
-            '4 before the clock was set' in (early.get('text') or ''))
+        ok_('...and an all-time tally is not printed on a line about today',
+            'before the clock' not in (early.get('text') or ''))
+        ok_('...while today\'s own figures still are',
+            '3 offers' in (early.get('text') or ''))
 
-        # By id every time, and each mark against the offer that was on record
-        # when it was pressed. Marking by pay-and-minutes would be a rule
-        # catching every offer paying that to the cent.
-        eq('...and every note names one offer by id, in order',
-           posted, [{'id': 'o1', 'accepted': True},
-                    {'id': 'o2', 'accepted': True},
-                    {'id': 'o2', 'accepted': False}])
-
-        # It has to be usable in a moving car and must not break the panel.
-        for name, slot in (('offered', offered), ('marked', marked)):
-            ok_('the control is a real target when %s (%dx%d)'
-                % (name, slot.get('w') or 0, slot.get('h') or 0),
-                (slot.get('w') or 0) >= 80 and (slot.get('h') or 0) >= 44)
-            ok_('...with nothing clipped off it when %s' % name,
-                not slot.get('clipped'))
-            ok_('...and the panel still fits when %s' % name, slot.get('fits'))
 
     # --- a rig that stopped an hour ago does not look live --------------
     #
