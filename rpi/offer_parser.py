@@ -83,6 +83,12 @@ ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 DELIVER_BY = re.compile(
     r'deliver(?:ed|y)?\s*by\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?', re.IGNORECASE | ASCII)
 
+# A decimal point inside a distance token, either way OCR renders it. Kept
+# because the fact is lost the moment the string becomes a float: "10.0 mi" and
+# "10 mi" arrive at check_distance identical, and only one of them may have its
+# decimal "recovered".
+LONE_DECIMAL = re.compile(r'[.,]', ASCII)
+
 # A distance with no leg around it. Only ever consulted when no leg was found,
 # so it cannot double-count an Uber card — and never the "4 mi from fast
 # charger" badge, which is a fact about the map rather than about the job.
@@ -723,6 +729,11 @@ def parse(raw_text):
             v = to_number(lone.group(1))
             if v is not None and 0 < v <= 500:
                 miles = round2(v)
+                # Whether the token carried a decimal point, which is the one
+                # thing recover_decimal needs to know and the one thing that is
+                # lost the moment the string becomes a float. A card printing
+                # "10.0 mi" and one printing "10 mi" arrive here identical.
+                had_decimal = bool(LONE_DECIMAL.search(lone.group(1)))
 
     return {
         'pay': pay,
@@ -743,6 +754,13 @@ def parse(raw_text):
         'legs': len(used),
         'milesCorrected': corrected,
         'milesUncertain': uncertain,
+        # A distance is only as checkable as the time beside it. On a ride card
+        # check_distance has already run against the legs' own minutes; on a
+        # delivery card there are no minutes at all, so it returned the number
+        # untouched and this says whether it may still be recovered later. See
+        # rate(), which is where the clock is.
+        'milesChecked': minutes is not None,
+        'milesHadDecimal': had_decimal,
         'complete': is_complete(pay, minutes, deadline),
         # What the card says it is. None when the card did not say — the top
         # chip may simply not have been inside the crop — which is different
@@ -911,7 +929,35 @@ def rate(parsed, settings=None):
         return {'ready': False, 'state': 'empty'}
     # A distance we do not trust must not become a cost. Falling back to gross
     # overstates the rate slightly; a bad distance can understate it enormously.
-    cost = 0 if parsed['milesUncertain'] else (parsed['miles'] or 0) * cost_per_mile
+    # A distance is only as checkable as the time beside it, and a delivery card
+    # states none — so check_distance returned the number untouched and a lost
+    # decimal went straight into the cost. "2.4 mi" read as "24 mi" is charged
+    # $7.20 of mileage instead of $0.72: $18.1/hr becomes $2.5/hr, unflagged,
+    # with nothing on any screen saying the distance was doubted. A ride card
+    # never had this hole, because its legs carry their own minutes.
+    #
+    # The machinery was always there and unreachable. check_distance(25, 24.0,
+    # had_decimal=False) already returns (2.4, corrected, ...) — it just needs a
+    # denominator, and the denominator for a delivery card is the time left
+    # until its deadline, which is worked out here because it needs the clock.
+    #
+    # `milesHadDecimal` is what stops the cure being worse: a card that really
+    # says "10.0 mi" must not have its decimal "recovered" down to 1.0.
+    miles = parsed['miles']
+    miles_uncertain = parsed['milesUncertain']
+    miles_corrected = parsed['milesCorrected']
+    # `is False` and not a truthiness test. A caller that builds this dict by
+    # hand — the keypad, a test, an older row being re-rated — has no such key,
+    # and treating its absence as "not checked" let rate() recover a decimal
+    # from a distance that had already been checked, or typed. A hand-entered
+    # 115 miles over 63 minutes came back as 11.5. Absent means do not touch it.
+    if parsed.get('milesChecked') is False and miles is not None:
+        miles, recovered, doubted = check_distance(
+            card_minutes, miles, bool(parsed.get('milesHadDecimal')))
+        miles_corrected = miles_corrected or recovered
+        miles_uncertain = miles_uncertain or doubted
+
+    cost = 0 if miles_uncertain else (miles or 0) * cost_per_mile
     net = parsed['pay'] - cost
     # ...and whether that leaves a rate the target can be compared against.
     #
@@ -940,7 +986,7 @@ def rate(parsed, settings=None):
     # Judged on what the card said, not on what the arithmetic made of it: `pad`
     # and the shopping allowance are the driver's own additions and a card is
     # not misread for having them applied.
-    why = doubt(parsed['pay'], card_minutes, parsed['miles'])
+    why = doubt(parsed['pay'], card_minutes, miles)
 
     return {
         'ready': True,
@@ -967,10 +1013,15 @@ def rate(parsed, settings=None):
         # Net, like perHour, so the two agree about what a dollar means. A
         # display showing one gross and the other net invites exactly the
         # arithmetic that does not add up.
-        'perMile': (net / parsed['miles']
-                    if parsed['miles'] and not parsed['milesUncertain'] else None),
-        'milesUncertain': parsed['milesUncertain'],
-        'milesCorrected': parsed['milesCorrected'],
+        'perMile': (net / miles if miles and not miles_uncertain else None),
+        # The distance this verdict was actually reached with, which is not
+        # always the one the card appeared to state. Returned so the row that
+        # gets written and the rate that gets shown cannot disagree about it —
+        # a ride card's correction happens inside parse() and is already in
+        # `parsed`, and a delivery card's happens here.
+        'miles': miles,
+        'milesUncertain': miles_uncertain,
+        'milesCorrected': miles_corrected,
         # The minutes the arithmetic used from the card, and whether they were
         # a stated duration or the time left until a delivery deadline. Those
         # are different claims and a record that cannot tell them apart cannot

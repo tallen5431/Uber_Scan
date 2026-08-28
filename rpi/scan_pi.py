@@ -1083,10 +1083,14 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
         'fromDeadline': bool(rate.get('fromDeadline')),
         'deliverBy': parsed.get('deliverBy'),
         'places': parsed.get('places') or [],
-        'miles': parsed['miles'],
+        # The distance the verdict was made over. On a delivery card parse()
+        # had no time to check it against and rate() recovers a lost decimal
+        # there, so taking it from parsed would put 24 miles on the panel
+        # beside a rate worked out over 2.4.
+        'miles': rate.get('miles', parsed['miles']),
         'items': parsed['items'],
-        'milesCorrected': parsed['milesCorrected'],
-        'milesUncertain': parsed['milesUncertain'],
+        'milesCorrected': rate.get('milesCorrected', parsed['milesCorrected']),
+        'milesUncertain': rate.get('milesUncertain', parsed['milesUncertain']),
         # What was taken off the top, and at what rate. Without these the page
         # cannot explain its own headline: a driver who works out 7.09 over 34
         # minutes gets $12.51/hr and the screen says $10.61, with nothing on it

@@ -2655,6 +2655,46 @@ counts the residual rather than hiding it. Shrinking it means charging the
 an under-estimate, so charging it tightens the bound rather than inventing
 anything. That is a change to the cost model, and it is the next one to make.
 
+### A distance nobody could check
+
+A delivery card states a distance with no time beside it. `check_distance` needs
+a denominator to work — losing the decimal in "3.6 mi" is caught because it turns
+a 6 mph errand into a 63 mph one — so with no minutes it returned the number
+untouched, unflagged, and a lost decimal went straight into the running cost.
+
+**2.4 mi read as 24 mi is charged $7.20 of mileage instead of $0.72.** $18.1/hr
+becomes $2.5/hr, with nothing on any screen saying the distance was doubted. A
+ride card never had this hole, because its legs carry their own minutes.
+
+The machinery was always there and unreachable. `check_distance(25, 24.0,
+had_decimal=False)` already returns 2.4 and says it corrected it — it just needs
+a denominator, and for a delivery card that is the time left until its deadline,
+which is worked out in `rate()` because it needs the clock. So the re-check
+happens there, and `rate()` now returns the distance it actually judged with, the
+way it already returns the minutes it judged with and for exactly the same
+reason. The journal and the panel take it from there, so a row cannot record 24
+miles beside a rate worked out over 2.4.
+
+Two guards make it safe, and each was found by a check failing rather than by
+foresight.
+
+**A printed decimal is not "recovered" away.** The fact is lost the moment the
+string becomes a float — "10.0 mi" and "10 mi" arrive identical — so the token's
+own punctuation is carried through `parse()`. Tested where it decides the
+answer: 60.0 miles with 25 minutes to run is 144 mph, so the recovery *would*
+fire and make it 6.0, and the printed point is the only thing stopping it. The
+first version of that fixture used 10.0 mi at an ordinary speed, where
+`check_distance` never reaches the recovery at all and the guard was doing no
+work — the mutation walked straight through it.
+
+**An absent flag means leave it alone.** `milesChecked` says the parser had
+nothing to check the distance against. A caller building the reading by hand —
+the keypad, a test, an old row being re-rated — has no such key, and reading its
+absence as "not checked" let `rate()` recover a decimal from a distance that had
+already been checked, or typed: a hand-entered **115 miles over 63 minutes came
+back as 11.5**, and the speed doubt that should have fired never did. It is an
+explicit `is False` now, and `test_money.py` pins it.
+
 ### $816 an hour, on a card that said $1.36
 
 Five readings that shift reached the panel as ACCEPT at between $103 and $816
@@ -2975,7 +3015,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3363 checks
+npm test                # all 29 suites, 3398 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -2989,11 +3029,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 368 checks, the shared corpus
+node tests/corpus.test.js       # 382 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  95 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 401 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 415 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 103 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -3008,7 +3048,7 @@ python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
-python3 rpi/test_money.py       # 248 from a picture of a card to a $/hour,
+python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
 python3 rpi/test_scan_pi.py     # 204 on the loop that holds the camera, on

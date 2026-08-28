@@ -761,6 +761,84 @@
         "state": "no",
         "uncosted": true
       }
+    },
+    {
+      "name": "a delivery distance that lost its decimal is recovered against the deadline",
+      "_why": "A delivery card states a distance with no time beside it, so parse() had no denominator and check_distance returned it untouched. 2.4 mi read as 24 mi was charged $7.20 of mileage instead of $0.72 \u2014 $18.1/hr shown as $2.5/hr, unflagged. rate() knows the clock.",
+      "text": "$8.25 Guaranteed (incl. tip) 24 mi Deliver by 6:05 PM",
+      "settings": {
+        "target": 25,
+        "band": 15,
+        "costPerMile": 0.3,
+        "nowMinutes": 1060
+      },
+      "expect": {
+        "miles": 2.4,
+        "cost": 0.72,
+        "milesCorrected": true,
+        "milesUncertain": false
+      }
+    },
+    {
+      "name": "...and the same card read correctly is left alone",
+      "text": "$8.25 Guaranteed (incl. tip) 2.4 mi Deliver by 6:05 PM",
+      "settings": {
+        "target": 25,
+        "band": 15,
+        "costPerMile": 0.3,
+        "nowMinutes": 1060
+      },
+      "expect": {
+        "miles": 2.4,
+        "cost": 0.72,
+        "milesCorrected": false
+      }
+    },
+    {
+      "name": "...and a printed decimal is not 'recovered' away",
+      "_why": "The decimal point is what says whether one was lost, and it has to be tested where it decides the answer: 60.0 miles with 25 minutes to run is 144 mph, so the recovery WOULD fire and turn it into 6.0 \u2014 the printed decimal is the only thing stopping it. The card is doubted instead, which is the honest answer to a distance that cannot be right and cannot be explained by a lost point. A 10.0 mi card at an ordinary speed proves nothing here, because check_distance never reaches the recovery at all.",
+      "text": "$8.25 Guaranteed (incl. tip) 60.0 mi Deliver by 6:05 PM",
+      "settings": {
+        "target": 25,
+        "band": 15,
+        "costPerMile": 0.3,
+        "nowMinutes": 1060
+      },
+      "expect": {
+        "miles": 60.0,
+        "milesCorrected": false,
+        "milesUncertain": true
+      }
+    },
+    {
+      "name": "a delivery distance plausible against its deadline is not touched",
+      "_why": "24 miles with 45 minutes to run is 32 mph and perfectly ordinary. The recovery only fires on a speed that cannot be true.",
+      "text": "$18.00 Guaranteed (incl. tip) 24 mi Deliver by 6:25 PM",
+      "settings": {
+        "target": 25,
+        "band": 15,
+        "costPerMile": 0.3,
+        "nowMinutes": 1060
+      },
+      "expect": {
+        "miles": 24.0,
+        "milesCorrected": false
+      }
+    },
+    {
+      "name": "a ride card is checked by parse() and not re-checked here",
+      "_why": "Its legs carry their own minutes, so the correction has already happened. Re-running it against the billed minutes would be a second bite at a number that was already judged.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip",
+      "settings": {
+        "target": 25,
+        "band": 15,
+        "costPerMile": 0.3,
+        "nowMinutes": 1060
+      },
+      "expect": {
+        "miles": 8.4,
+        "milesCorrected": false
+      }
     }
   ],
   "_coerce_comment": "The three functions that decide what an offer is judged against, checked in both languages from one list. Every one of these had drifted: Number('  ') is 0 in JavaScript so a whitespace target meant every offer was an ACCEPT while Python fell back to 25; float() takes '1e3' and '1_0' and parseFloat does not; and Infinity and NaN were guarded out of doubt() in JavaScript and compared against the bounds in Python. None of it was reachable from a test. '@inf', '@-inf' and '@nan' stand in for values JSON cannot hold.",

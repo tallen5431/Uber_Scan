@@ -145,6 +145,12 @@
    * counter included, which is what an hourly rate is supposed to divide by. */
   var DELIVER_BY = /deliver(?:ed|y)?\s*by\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?/i;
 
+  // A decimal point inside a distance token, either way OCR renders it. Kept
+  // because the fact is lost the moment the string becomes a number: "10.0 mi"
+  // and "10 mi" arrive at checkDistance identical, and only one of them may
+  // have its decimal "recovered".
+  var LONE_DECIMAL = /[.,]/;
+
   /* A distance with no leg around it. Only consulted when no leg was found, so
      it cannot double-count a ride card — and never the "4 mi from fast charger"
      badge, which is a fact about the map rather than about the job. */
@@ -577,7 +583,10 @@
       var lone = text.match(LONE_MILES);
       if (lone) {
         var v = toNumber(lone[1]);
-        if (v !== null && v > 0 && v <= 500) miles = Math.round(v * 100) / 100;
+        if (v !== null && v > 0 && v <= 500) {
+          miles = Math.round(v * 100) / 100;
+          hadDecimal = LONE_DECIMAL.test(lone[1]);
+        }
       }
     }
 
@@ -601,6 +610,13 @@
       legs: used.length,
       milesCorrected: dist.corrected,
       milesUncertain: dist.uncertain,
+      // A distance is only as checkable as the time beside it. On a ride card
+      // checkDistance has already run against the legs' own minutes; on a
+      // delivery card there are none, so it returned the number untouched and
+      // this says whether it may still be recovered later. See rate(), which
+      // is where the clock is.
+      milesChecked: minutes !== null,
+      milesHadDecimal: hadDecimal,
       // Enough to act on: without pay and time there is no rate to show.
       complete: isComplete(pay, minutes, deadline),
       // Null when the card did not say — the top chip may simply not have been
@@ -758,7 +774,32 @@
     // A distance we do not trust must not be turned into a cost. Falling back
     // to gross pay overstates the rate slightly; using a bad distance can
     // understate it enormously, which is the error that loses you money.
-    var cost = parsed.milesUncertain ? 0 : (parsed.miles || 0) * costPerMile;
+    // A distance is only as checkable as the time beside it, and a delivery
+    // card states none — so checkDistance returned the number untouched and a
+    // lost decimal went straight into the cost. "2.4 mi" read as "24 mi" is
+    // charged $7.20 of mileage instead of $0.72: $18.1/hr becomes $2.5/hr,
+    // unflagged. A ride card never had this hole; its legs carry their minutes.
+    //
+    // The machinery was always there and unreachable — it just needs a
+    // denominator, and for a delivery card that is the time left until its
+    // deadline, worked out here because it needs the clock. milesHadDecimal is
+    // what stops the cure being worse: a card that really says "10.0 mi" must
+    // not have its decimal recovered down to 1.0.
+    var miles = parsed.miles;
+    var milesUncertain = !!parsed.milesUncertain;
+    var milesCorrected = !!parsed.milesCorrected;
+    // `=== false` and not a falsiness test. A caller that builds this object by
+    // hand — the keypad, a test, an older row being re-rated — has no such key,
+    // and treating its absence as "not checked" let rate() recover a decimal
+    // from a distance that had already been checked, or typed.
+    if (parsed.milesChecked === false && miles !== null && miles !== undefined) {
+      var rechecked = checkDistance(cardMinutes, miles, !!parsed.milesHadDecimal);
+      miles = rechecked.miles;
+      milesCorrected = milesCorrected || rechecked.corrected;
+      milesUncertain = milesUncertain || rechecked.uncertain;
+    }
+
+    var cost = milesUncertain ? 0 : (miles || 0) * costPerMile;
     // ...and whether that leaves a rate the target can be compared against.
     //
     // `target` is a NET line — the driver set it against rates with their
@@ -809,9 +850,13 @@
       // Net, like perHour, so the two agree about what a dollar means. A
       // display showing one gross and the other net invites exactly the
       // arithmetic that does not add up.
-      perMile: (parsed.miles && !parsed.milesUncertain) ? net / parsed.miles : null,
-      milesUncertain: !!parsed.milesUncertain,
-      milesCorrected: !!parsed.milesCorrected,
+      perMile: (miles && !milesUncertain) ? net / miles : null,
+      // The distance this verdict was actually reached with, which is not
+      // always the one the card appeared to state. Returned so the row that
+      // gets written and the rate that gets shown cannot disagree about it.
+      miles: miles === undefined ? null : miles,
+      milesUncertain: milesUncertain,
+      milesCorrected: milesCorrected,
       // The minutes the arithmetic used from the card, and whether they were a
       // stated duration or the time left until a delivery deadline. Those are
       // different claims and a record that cannot tell them apart cannot be

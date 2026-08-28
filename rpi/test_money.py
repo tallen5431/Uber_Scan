@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cv2
 
+import journal as JR
 import offer_parser as OP
 import pipeline as PL
 from accumulate import OfferAccumulator
@@ -391,6 +392,49 @@ eq('...while the number itself is unchanged',
 poor = OP.rate(priced(4.05, 40.0, 12.0, True), SETTINGS)
 eq('an uncosted rate below the floor is still a pass', poor['state'], 'no')
 ok_('...though it still says no cost came off', poor['uncosted'])
+
+# --- a distance nobody could check, and one nobody should re-check ----------
+#
+# A delivery card states a distance with no time beside it, so parse() has no
+# denominator and check_distance hands the number back untouched. rate() is
+# where the clock is, so that is where a lost decimal is recovered — and the
+# writers take the distance from rate() for the same reason they already take
+# the minutes from it, so the row and the rate cannot disagree.
+#
+# The half that needed finding: a caller building this dict BY HAND has no
+# `milesChecked` key at all — the keypad does, every test that constructs a
+# reading does, and an old row being re-rated does. Reading a missing key as
+# "not checked" let rate() recover a decimal from a distance that had already
+# been checked, or typed: a hand-entered 115 miles over 63 minutes came back as
+# 11.5, and the speed doubt that should have fired never did. Absent has to mean
+# leave it alone.
+DELIVERY = {'target': 25, 'band': 15, 'costPerMile': 0.30, 'nowMinutes': 1060}
+
+typed = {'pay': 56.65, 'minutes': 63.0, 'miles': 115.0, 'milesUncertain': False,
+         'milesCorrected': False, 'items': None, 'legs': 1, 'deliverBy': None,
+         'shop': None, 'complete': True}
+by_hand = OP.rate(typed, DELIVERY)
+eq('a reading with no milesChecked key keeps the distance it was given',
+   by_hand.get('miles'), 115.0)
+eq('...and is still doubted for the speed it implies', by_hand.get('doubt'), 'speed')
+
+# ...while a delivery card, which says outright that nothing checked it, is.
+lost = OP.rate(OP.parse('$8.25 Guaranteed (incl. tip) 24 mi Deliver by 6:05 PM'),
+               DELIVERY)
+eq('a delivery distance the parser could not check is recovered here',
+   lost.get('miles'), 2.4)
+ok_('...and says it was corrected rather than doing it silently',
+    lost.get('milesCorrected'))
+
+# The row that gets written has to be the distance the verdict was reached
+# with. Storing the card's apparent 24 miles beside a rate worked out over 2.4
+# is a row that cannot be reconciled with itself.
+row = JR.row_for(OP.parse('$8.25 Guaranteed (incl. tip) 24 mi Deliver by 6:05 PM'),
+                 lost, at=1700000000000)
+eq('the stored distance is the one the rate was worked out over',
+   row['miles'], 2.4)
+ok_('...and the row says so', row['milesCorrected'])
+eq('...and the cost in the row matches it', row['cost'], 0.72)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d end-to-end money checks passed' % ok)

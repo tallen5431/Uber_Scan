@@ -483,7 +483,17 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
     unreadable a month after the target moved, with no way to tell a verdict
     that was right then from one that would be wrong now.
     """
-    pay, miles = parsed.get('pay'), parsed.get('miles')
+    pay = parsed.get('pay')
+    # The distance the verdict was actually made over, for the same reason the
+    # minutes below come from rate(): a delivery card states a distance with no
+    # time beside it, so parse() had nothing to check it against and rate() —
+    # which knows the clock — is where a lost decimal is recovered. Storing the
+    # card's apparent 24 miles beside a rate worked out over 2.4 would be a row
+    # that cannot be reconciled with itself. Falls back to the parsed value for
+    # a row written before rate() returned one.
+    miles = rate.get('miles')
+    if miles is None:
+        miles = parsed.get('miles')
     # The minutes the verdict was actually made over. On a delivery card that
     # is the time left until the deadline, which parse() cannot work out on its
     # own — so it comes back from rate(), and only falls back to the card's own
@@ -534,8 +544,13 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         'legs': parsed.get('legs'),
         'mergedFrom': parsed.get('mergedFrom'),
         'hasTotal': bool(parsed.get('hasTotal')),
-        'milesCorrected': bool(parsed.get('milesCorrected')),
-        'milesUncertain': bool(parsed.get('milesUncertain')),
+        # From rate() as well, and for the same reason: on a delivery card the
+        # correction happens there. `in rate` rather than a truthiness test,
+        # because False is the answer for most rows and is not a missing one.
+        'milesCorrected': bool(rate['milesCorrected'] if 'milesCorrected' in rate
+                               else parsed.get('milesCorrected')),
+        'milesUncertain': bool(rate['milesUncertain'] if 'milesUncertain' in rate
+                               else parsed.get('milesUncertain')),
         'locked': bool(locked),
         # Whether the whole journey was in view: a line tagged as the total, or
         # both legs of a two-leg card. A reading without it is a *fragment*, and
