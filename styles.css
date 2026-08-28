@@ -190,6 +190,19 @@ html, body {
 }
 .places[hidden] { display: none; }
 
+/* The button that records a decision the rig cannot see.
+ *
+ * Marked when it is set, so a glance says whether this offer is already on the
+ * record — the driver is not going to remember whether they pressed it, and
+ * pressing it twice would take the mark off again. Deliberately not styled like
+ * the verdict: it is a note about an offer, not a judgement of one, and nothing
+ * on this screen should look like it acts on the phone. */
+.bottombar #took.on {
+  border-color: var(--go-dim);
+  background: var(--go-dim);
+  color: var(--text);
+}
+
 /* Four across on a phone held in one hand. auto-fit rather than a fixed count
    so a narrow screen wraps to two rows instead of squeezing the digits. */
 /* The arithmetic behind the headline. Sized between the rate and the labels:

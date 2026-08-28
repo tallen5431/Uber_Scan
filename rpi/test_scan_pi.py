@@ -190,6 +190,11 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     # the positional arguments would have quietly asserted nothing about it —
     # which is exactly what the first version of this test did.
     SP.emit = lambda *a, **k: (verdicts.append((a, k)), real_emit(*a, **k))[1]
+    # ...and which offer the loop says it has put on the record, which is what
+    # the driving screen's "took it" button is named after and marks by.
+    announced = []
+    real_offer = SP.emit_offer
+    SP.emit_offer = lambda *a, **k: (announced.append(a), real_offer(*a, **k))[1]
 
     argv = sys.argv
     sys.argv = ['scan_pi', '--config', config, '--json', '--snapshot', '',
@@ -198,6 +203,15 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
 
     def state():
         return dict(verdicts=verdicts,
+                    # How many times the loop has reached a verdict, and how
+                    # many times it has named the offer on record. A run that
+                    # stops the instant a row lands cannot tell "once per card"
+                    # from "once per read" — the loop gets one chance either
+                    # way — so a test that means to check that has to be able
+                    # to stop on the second announcement instead.
+                    announced=len(announced),
+                    reads=sum(1 for a, _ in verdicts
+                              if a and isinstance(a[0], dict) and a[0].get('ready')),
                     rows=(sum(1 for _ in open(journal))
                           if os.path.exists(journal) else 0))
 
@@ -220,6 +234,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         time.sleep = real_sleep
         sys.argv = argv
         SP.start_camera, SP.emit = real_start, real_emit
+        SP.emit_offer = real_offer
         PL.Scanner.look_many = real_look
 
     rows = []
@@ -231,6 +246,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     ready = [a for a, _ in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
     ready_kw = [k for a, k in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
     return dict(cam=cam, rows=rows, ready=ready, ready_kw=ready_kw,
+                announced=announced,
                 config=config, journal=journal, started=len(started))
 
 
@@ -319,6 +335,43 @@ if rows:
     eq('...and the journey', (last['minutes'], last['miles']), (23.0, 8.4))
     ok_('...and is marked whole, since both legs were read', last.get('whole'))
     ok_('...and rows are numbered', last.get('seq', 0) >= 1)
+
+    # ...and the loop said which offer that is, so the driving screen can offer
+    # to mark it as taken. Asserted against the *loop*, not against emit_offer
+    # in isolation: the function returning the right shape proves nothing if
+    # nothing calls it, which is exactly what a first version of this missed.
+    announced = run_uberx['announced']
+    ok_('the loop announced the offer it recorded', len(announced) >= 1)
+    if announced:
+        eq('...by the journal\'s own id', announced[0][0], last['id'])
+        eq('...with the payout the button will be named after',
+           announced[0][1].get('pay'), 16.05)
+
+# --- one card, held on screen, named once -----------------------------------
+#
+# The run above stops the instant a row lands, so it cannot tell "once per card"
+# from "once per read": the loop gets exactly one chance either way. Removing
+# the guard from scan_pi left it passing unchanged — a bound that passes rather
+# than a bound that holds, which is the same fault this suite has caught in
+# itself before.
+#
+# So hold the card up and stop on the evidence that would break it. Without the
+# guard the second announcement ends the run and the count fails; with it, the
+# run goes on until the card has been read several times over and the count is
+# still one. The `reads` check is what keeps that honest — a card that is never
+# re-read would satisfy the count for the wrong reason.
+#
+# It matters because the driving screen listens to this socket for verdicts. An
+# announcement per read is a message a second arriving beside them, for a card
+# that has not changed.
+held = run(TC.uberx_screen(), seconds=75.0, extra_argv=['--no-parallel'],
+           vanish_at=1e9,
+           until=lambda st: st['announced'] >= 2 or st['reads'] >= 4)
+ok_('a card that stays up is read again and again', len(held['ready']) >= 2)
+eq('...and named once per card, not once per read', len(held['announced']), 1)
+if held['announced'] and held['rows']:
+    eq('...naming the row that was written',
+       held['announced'][0][0], held['rows'][-1]['id'])
 
 # --- a shop order, which is a different shape of card ----------------------
 run_shop = run(TC.shop_screen(), seconds=90.0, extra_argv=['--no-parallel'],
@@ -1311,6 +1364,37 @@ ok_('...and stamps it', isinstance(heard.get('at'), int) and heard['at'] > 0)
 ok_('...carrying no verdict', 'ready' not in heard)
 ok_('...and no numbers to mistake for one',
     not [k for k in heard if k in ('perHour', 'grossPerHour', 'pay', 'state')])
+
+# --- and which offer it just put on the record ------------------------------
+#
+# The one fact the rig cannot observe is the driver pressing Accept, and it must
+# never press it — so "I took this" is information only the driver has, and
+# until now recording it meant opening the offers page afterwards and finding
+# the row. This is the message that lets the driving screen offer the button:
+# the journal's own id for the card just written.
+told = said(lambda: SP.emit_offer('1700000000-1245',
+                                  {'pay': 12.45, 'minutes': 28.0},
+                                  {'ready': True, 'perHour': 20.51,
+                                   'cardMinutes': 28.0}))
+eq('the loop names the offer it recorded', told['offer']['id'], '1700000000-1245')
+eq('...with the payout, so the button can say which', told['offer']['pay'], 12.45)
+eq('...and the minutes it was judged over', told['offer']['minutes'], 28.0)
+# The same safety property the heartbeat has, for the same reason: the page
+# keys every verdict off `ready`, so a message without it is dropped before it
+# can replace one. An id arriving after a card has gone must not resurrect a
+# verdict for it.
+ok_('...carrying no verdict', 'ready' not in told)
+ok_('...and no state to be mistaken for one',
+    not [k for k in told if k in ('state', 'doubt', 'grossPerHour')])
+
+# The card's own minutes, not the billed ones. The button is named after what
+# the driver saw on the phone; a figure with their pickup pad added would not
+# match the card they are trying to remember.
+padded = said(lambda: SP.emit_offer('x', {'pay': 12.45, 'minutes': 28.0},
+                                    {'ready': True, 'perHour': 18.0,
+                                     'cardMinutes': 28.0, 'minutes': 38.0}))
+eq('the minutes are the card\'s, not the billed ones',
+   padded['offer']['minutes'], 28.0)
 
 CAMERA_TICK = 1.0 / 30.0
 

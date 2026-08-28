@@ -208,6 +208,89 @@ const LOOK = (sel) => {
     await ctx.close();
   }
 
+  // --- marking an offer as taken, from the screen the driver is looking at -
+  //
+  // The rig cannot see the Accept button and must never press it, so whether an
+  // offer was taken is a fact only the driver has. The catch is the ordering:
+  // they accept ON THE PHONE, the card is replaced by a navigation screen, the
+  // scanner reads no card and the verdict clears — so by the time they can say
+  // "I took that", the thing they took is no longer on the panel. The control
+  // therefore marks the last offer on RECORD and is named after it.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    const posted = [];
+    await page.route('**/api/offers/mark', async (route) => {
+      posted.push(JSON.parse(route.request().postData() || '{}'));
+      await route.fulfill({ status: 200, contentType: 'application/json',
+                            body: '{"ok":true}' });
+    });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    const look = () => page.evaluate(() => {
+      const t = document.getElementById('took');
+      const r = t.getBoundingClientRect();
+      return { hidden: t.hidden, text: (t.textContent || '').trim(),
+               pressed: t.getAttribute('aria-pressed'),
+               w: Math.round(r.width), h: Math.round(r.height),
+               clipped: t.scrollWidth > t.clientWidth + 1,
+               fits: document.documentElement.scrollWidth
+                     <= document.documentElement.clientWidth + 1 };
+    });
+
+    await page.evaluate(() => window.__es.push({ phase: 'scanning' }));
+    await page.waitForTimeout(120);
+    out.tookIdle = await look();
+
+    await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
+    await page.evaluate(() => window.__es.push(
+      { offer: { id: 'o1', pay: 8.04, minutes: 23, perHour: 14.71 }, at: 1 }));
+    await page.waitForTimeout(150);
+    out.tookOffered = await look();
+
+    // The driver accepts on the phone; the card goes.
+    await page.evaluate(() => window.__es.push(
+      { ready: false, state: 'empty', track: null }));
+    await page.waitForTimeout(150);
+    out.tookAfterCard = await look();
+
+    // Short, and recorded rather than awaited into a stall. page.click waits
+    // for the element to become clickable, so a control that is hidden when it
+    // should not be turns a failed check into a ten-minute hang — which is how
+    // the mutation that hides it after the card goes was "caught" the first
+    // time. A check that stalls is not a check that failed.
+    const press = () => page.click('#took', { timeout: 3000 }).then(() => true,
+                                                                   () => false);
+    out.tookClicked = await press();
+    await page.waitForTimeout(200);
+    out.tookMarked = await look();
+
+    // A different offer arrives while the last one is STILL MARKED, which is
+    // the ordering that matters and the one an undo-first test cannot reach: a
+    // mark belongs to an offer, not to the button, and a tick carried over
+    // would tell the driver they had recorded something they had not.
+    await page.evaluate(() => window.__es.push(
+      { offer: { id: 'o2', pay: 12.45, minutes: 30, perHour: 22.1 }, at: 2 }));
+    await page.waitForTimeout(150);
+    out.tookNext = await look();
+
+    // ...and the new one marks and unmarks as its own.
+    out.tookClickedNext = await press();
+    await page.waitForTimeout(200);
+    out.tookNextMarked = await look();
+    out.tookClickedAgain = await press();
+    await page.waitForTimeout(200);
+    out.tookUndone = await look();
+    out.tookPosted = posted;
+    await page.close();
+    await ctx.close();
+  }
+
   // --- a page opened against a rig that stopped an hour ago ----------------
   //
   // The seed and the SSE replay both hand over the last reading. The page used
@@ -229,12 +312,23 @@ const LOOK = (sel) => {
         status: 200, contentType: 'application/json',
         body: JSON.stringify({ scanner: { running: true }, last: stale,
                                lastAgeMs: 3600000, heardAgeMs: 3600000,
+                               // ...and which offer is on the record, which is
+                               // the only way a page that has just opened can
+                               // know: the socket replays the last reading, not
+                               // the last offer.
+                               offer: { id: 'seed-1', pay: 9.75, minutes: 21,
+                                        perHour: 27.86 },
+                               offerAgeMs: 3600000,
                                status: { phase: 'scanning' } }),
       });
     });
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
     await page.waitForTimeout(700);
+    out.seedTook = await page.evaluate(() => {
+      const t = document.getElementById('took');
+      return { hidden: t.hidden, text: (t.textContent || '').trim() };
+    });
     out.stale = {
       detail: await page.evaluate(LOOK, '#detail'),
       verdict: await page.evaluate(LOOK, '#verdictLabel'),
@@ -379,6 +473,70 @@ try:
                 r['rate']['shown'])
             ok_('%s: the panel still fits' % where, r['fits'])
 
+    # --- marking an offer as taken, from the driving screen --------------
+    idle = got.get('tookIdle') or {}
+    offered = got.get('tookOffered') or {}
+    gone = got.get('tookAfterCard') or {}
+    marked = got.get('tookMarked') or {}
+    undone = got.get('tookUndone') or {}
+    nxt = got.get('tookNext') or {}
+    posted = got.get('tookPosted') or []
+
+    ok_('the mark control was measured', bool(offered))
+    if offered:
+        # Pressable at all — the property the timeout above turns from a stall
+        # into a result.
+        ok_('the control can actually be pressed', got.get('tookClicked'))
+        ok_('...and pressed again to take it back off',
+            got.get('tookClickedAgain'))
+        # Nothing to mark before the scanner has written anything.
+        ok_('there is nothing to mark before an offer is recorded', idle.get('hidden'))
+        ok_('an offer on the record offers itself', not offered.get('hidden'))
+        # Named, because the driver will be looking at it after the card has
+        # gone and cannot otherwise tell which offer they are about to mark.
+        ok_('...and says which offer', '8.04' in (offered.get('text') or ''))
+        ok_('...as a question, not an instruction to the phone',
+            (offered.get('text') or '').endswith('?'))
+
+        # The case the whole design turns on: the driver accepts on the phone,
+        # the card is replaced, the verdict clears — and the offer is still
+        # markable, still named.
+        ok_('the offer is still markable once the card has gone',
+            not gone.get('hidden'))
+        ok_('...and still named', '8.04' in (gone.get('text') or ''))
+
+        ok_('marking says so', (marked.get('text') or '').startswith('\u2713'))
+        eq('...to assistive tech as well', marked.get('pressed'), 'true')
+
+        # A mark belongs to an offer, not to the button. This is asked while
+        # the previous offer is still marked: a tick carried onto the next card
+        # tells the driver they recorded something they did not.
+        eq('the next offer starts unmarked', nxt.get('pressed'), 'false')
+        ok_('...and shows no tick', not (nxt.get('text') or '').startswith('\u2713'))
+        ok_('...and is named after itself', '12.45' in (nxt.get('text') or ''))
+        ok_('...and can be marked in its own right',
+            (got.get('tookNextMarked') or {}).get('pressed') == 'true')
+
+        ok_('pressing again takes it back off',
+            (undone.get('text') or '').endswith('?'))
+
+        # By id every time, and each mark against the offer that was on record
+        # when it was pressed. Marking by pay-and-minutes would be a rule
+        # catching every offer paying that to the cent.
+        eq('...and every note names one offer by id, in order',
+           posted, [{'id': 'o1', 'accepted': True},
+                    {'id': 'o2', 'accepted': True},
+                    {'id': 'o2', 'accepted': False}])
+
+        # It has to be usable in a moving car and must not break the panel.
+        for name, slot in (('offered', offered), ('marked', marked)):
+            ok_('the control is a real target when %s (%dx%d)'
+                % (name, slot.get('w') or 0, slot.get('h') or 0),
+                (slot.get('w') or 0) >= 80 and (slot.get('h') or 0) >= 44)
+            ok_('...with nothing clipped off it when %s' % name,
+                not slot.get('clipped'))
+            ok_('...and the panel still fits when %s' % name, slot.get('fits'))
+
     # --- a rig that stopped an hour ago does not look live --------------
     #
     # The seed and the SSE replay both hand the page the last reading. It used
@@ -395,6 +553,20 @@ try:
         ok_('...in something other than seconds-since-page-load',
             's ago' in (stale['detail']['text'] or '')
             and ' 0s ago' not in (stale['detail']['text'] or ''))
+
+    # A page that has just opened knows the last offer only from the seed: the
+    # socket replays the last *reading*, and a driver who accepted on the phone
+    # gets back to this screen after the card has already gone. A stale verdict
+    # and a markable offer are different things — the verdict is dimmed above
+    # because it may no longer be true, while which offer was last written is a
+    # fact that does not go off.
+    seed_took = got.get('seedTook') or {}
+    ok_('the seeded mark control was measured', bool(seed_took))
+    if seed_took:
+        ok_('a page opened after the card has gone can still mark it',
+            not seed_took.get('hidden'))
+        ok_('...and is named after the offer it would mark',
+            '9.75' in (seed_took.get('text') or ''))
 
     replay = got.get('replay') or {}
     ok_('the replayed verdict was measured', bool(replay.get('detail')))

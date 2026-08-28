@@ -177,6 +177,8 @@ function startScanner() {
   scanner.started = Date.now();
   scanner.error = null;
   scanner.heardAt = null;          // nothing from the scan loop yet
+  scanner.offer = null;            // ...and no offer on the record yet
+  scanner.offerAt = null;
   console.log('scanner: started ' + bin + ' ' + args.join(' '));
 
   // Without this, a missing python3 or a bad SCANNER_CMD emits an 'error' with
@@ -224,6 +226,16 @@ function startScanner() {
         }
         // Setup messages carry no rate, so they must not overwrite the last read.
         if (read.ready !== undefined) scanner.last = read;
+        // Which offer is on the record, so the driving screen can offer to mark
+        // it as taken. Held here as well as pushed, because a tab opened after
+        // the card has gone — which is the normal case, the driver accepts on
+        // the phone and the card disappears — would otherwise have nothing to
+        // mark. Cleared by nothing: the last offer stays markable until the
+        // next one replaces it.
+        if (read.offer && typeof read.offer.id === 'string') {
+          scanner.offer = read.offer;
+          scanner.offerAt = Date.now();
+        }
         // The scan loop's own voice — a reading or a heartbeat — as opposed to
         // the autopilot's progress messages. Only this arms the watchdog, and
         // only this feeds it.
@@ -1372,6 +1384,10 @@ function route(req, res) {
       // staleness clock at zero, so opening the dashboard against a rig that
       // died an hour ago painted that offer's ACCEPT at full confidence: 12
       // seconds before it dimmed, 20 before anything said "last read ... ago".
+      // The last offer written to the journal, and how long ago — the same
+      // duration-not-timestamp rule as everything else here.
+      offer: scanner.offer || null,
+      offerAgeMs: scanner.offerAt ? Math.max(0, Date.now() - scanner.offerAt) : null,
       lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
         ? Math.max(0, Date.now() - scanner.last.at) : null,
       heardAgeMs: scanner.heardAt

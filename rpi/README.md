@@ -400,6 +400,50 @@ characters and this panel is read at arm's length in a moving car.
 It clears when the card does. Left up, the last job's address reads as belonging
 to whatever arrives next.
 
+### Marking one as taken, from the seat
+
+Whether the driver pressed Accept is the one fact the rig cannot see, and it
+must never press it — so a driver saying so is the only way that fact ever
+reaches the record. Until now saying so meant opening the offers page, finding
+the row among the ones that scrolled past while driving, and pressing it there:
+four deliberate actions with a bluetooth mouse, after the timer had started.
+
+It is one button on the driving screen now, and the interesting part is what it
+is named. `live.html` replaces its verdict on any reading that carries a
+`ready`, and a phone showing the navigation screen produces exactly that — so
+**by the time a driver has accepted, the card is already gone from the panel**.
+A button saying "took it" would be marking something they can no longer see, and
+on a screen where the previous offer's figures were still up a second ago, that
+is a mismarked row rather than a missing one. So the scanner announces which
+offer it just wrote — `{"offer": {"id", "pay", "minutes", "perHour"}}` — the
+server holds it on `/api/status`, and the button carries the amount: **`Took
+$8.04?`**, then **`✓ Took $8.04`**. It survives a reload and a dropped socket,
+because the normal case is the driver looking at this screen *after* the card
+has gone.
+
+Three things it does not do:
+
+- **It does not mark by the figures.** `{match: {pay, minutes, miles}}` is a
+  rule that catches every offer paying that to the cent, and two genuinely
+  different cards doing that inside one window is a case already in
+  `test_repeats.py`. It marks by journal id.
+- **It does not touch the phone.** Same rule as everything else here: the rig
+  reads, it does not tap. The label is past tense for that reason — an
+  imperative on a panel next to a live verdict can be read as doing something to
+  the offer.
+- **It does not announce once per read.** The card is re-read for as long as it
+  sits on screen; the announcement is guarded so it goes out once per card. Left
+  unguarded it is a message a second on the socket the driving screen watches
+  for verdicts, and the suite fails on the count, not on the distinct ids —
+  asserting only that the ids matched passes just as well when every read
+  announces again.
+
+Pressing it again unmarks it, which is a note of its own rather than a deletion.
+The mark belongs to the offer and not to the button: when a new card is
+announced the button goes back to unmarked, so a mark left set cannot be
+inherited by whatever arrives next — the same failure the address line avoids by
+clearing.
+
 ### Nothing the rig writes may become a commit
 
 `rpi/.camera.lock` is written into the checkout and holds a pid, and nothing

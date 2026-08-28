@@ -432,6 +432,8 @@ if shutil.which('python3'):
                  'print(json.dumps({"ready": True, "state": "go", "perHour": 25.0,\n'
                  '                  "grossPerHour": 25.0, "pay": 10.0,\n'
                  '                  "minutes": 24.0, "miles": None}), flush=True)\n'
+                 'print(json.dumps({"offer": {"id": "o-1", "pay": 12.45,\n'
+                 '                  "minutes": 28.0, "perHour": 20.51}}), flush=True)\n'
                  'time.sleep(600)\n')
     port2 = free_port()
     quiet = subprocess.Popen(
@@ -483,6 +485,18 @@ if shutil.which('python3'):
         ok_('...which is not zero, an hour after the fact',
             replayed.get('ageMs', -1) >= 1000)
         eq('...and is otherwise the reading itself', replayed.get('perHour'), 25.0)
+
+        # --- and which offer is on the record, for the mark button ---------
+        #
+        # The driving screen offers to mark the last offer as taken, and the
+        # normal case is a tab looked at *after* the card has gone: the driver
+        # accepts on the phone, the card is replaced, the scanner reads no card.
+        # So the offer has to survive here rather than only on the wire.
+        eq('the server keeps the offer on record',
+           (later.get('offer') or {}).get('id'), 'o-1')
+        eq('...with the payout the button is named after',
+           (later.get('offer') or {}).get('pay'), 12.45)
+        ok_('...and how old it is', isinstance(later.get('offerAgeMs'), int))
     finally:
         quiet.terminate()
         try:

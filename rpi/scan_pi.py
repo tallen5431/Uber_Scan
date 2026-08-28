@@ -1008,6 +1008,44 @@ def emit_reading():
           flush=True)
 
 
+def emit_offer(offer_id, parsed, rate):
+    """Which offer is now on the record, so the driver can say they took it.
+
+    The one thing the rig cannot see is the driver pressing Accept, and it must
+    never press it — so whether an offer was taken is a fact only the driver
+    has. Recording it meant opening the offers page afterwards and finding the
+    row, which is a thing nobody does at the wheel and few people do later.
+
+    So the driving screen gets a button, and this is what makes that possible:
+    the journal's own id for the card that was just written. Without it the page
+    could only mark by pay-and-minutes, which is a *rule* — it would mark every
+    offer paying that to the cent, and this project has two genuinely different
+    cards doing exactly that inside one window (see test_repeats.py).
+
+    Sent as its own line rather than on the reading, because the id is not known
+    until after the journal has been written and the reading has already gone
+    out. Like the heartbeat, it carries no `ready` and no verdict, so it can
+    neither overwrite one nor stand in for one.
+
+    The pay and the minutes ride along so the button can *name* what it will
+    mark. By the time a driver has accepted on their phone the card is gone from
+    the panel — the scanner sees the navigation screen and the verdict clears —
+    so a button saying only "took it" would be marking something the driver can
+    no longer see.
+    """
+    print(json.dumps({'offer': {
+        'id': offer_id,
+        'pay': parsed.get('pay'),
+        # The card's own minutes, not the billed ones: a figure with the
+        # driver's pickup pad added would not match the card they are trying to
+        # remember. `or`, not a two-argument `get` — `rate` always carries the
+        # key and it is `None` on a card that stated no duration, so the default
+        # would never have been reached.
+        'minutes': rate.get('cardMinutes') or parsed.get('minutes'),
+        'perHour': round(rate['perHour'], 2) if rate.get('ready') else None,
+    }, 'at': int(time.time() * 1000)}), flush=True)
+
+
 def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
     """One JSON object per line, flushed, so a parent process sees reads live."""
     payload = {
@@ -1302,6 +1340,10 @@ def main():
     previous_card = None
     failures = 0
     spoke_for = None
+    # The offer the driving screen has already been told about. Once per card,
+    # not once per read: a card sits on screen for tens of seconds and is
+    # re-read throughout, and the page needs the id rather than a heartbeat.
+    told_offer = None
     frames = 0
     last_snapshot = 0.0
     # How long the camera actually leaves between frames, smoothed. Measured
@@ -1365,7 +1407,7 @@ def main():
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
-        nonlocal last_sample, spoke_for
+        nonlocal last_sample, spoke_for, told_offer
         parsed = accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
         # a duration. Passed in rather than read inside the parser, which
@@ -1551,6 +1593,12 @@ def main():
             if (landed or offer_log.id is not None) and not seen_kept:
                 seen_kept = True
                 health.kept += 1
+            # ...and say which offer that is, once per card rather than once
+            # per read. The driving screen holds it so the driver can mark it
+            # as taken without going and finding the row afterwards.
+            if args.json and offer_log.id is not None and offer_log.id != told_offer:
+                told_offer = offer_log.id
+                emit_offer(offer_log.id, parsed, rate)
 
         if args.display:
             cv2.imshow('uber-scan', render_panel(rate, parsed))

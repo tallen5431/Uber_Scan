@@ -375,6 +375,16 @@
   <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a></div>
 
   <nav class="bottombar">
+    <!-- The one thing the rig cannot see: whether the driver pressed Accept.
+         It must never press it, so this is the only way that fact ever reaches
+         the record — and until now it meant opening the offers page afterwards
+         and finding the row.
+
+         It names the offer because by the time a driver has accepted on their
+         phone the card is gone from this panel: the scanner sees the navigation
+         screen, reads no card, and the verdict clears. A button saying only
+         "took it" would be marking something they can no longer see. -->
+    <button type="button" class="linkbtn" id="took" hidden></button>
     <a class="linkbtn" href="index.html">⌨ Type</a>
     <a class="linkbtn" href="journal.html">▤ Offers</a>
     <button type="button" class="linkbtn" id="setBox">▣ Set box</button>
@@ -414,7 +424,7 @@
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'working', 'places', 'spoken']
+   'working', 'places', 'spoken', 'took']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -562,6 +572,64 @@
     el.places.textContent = where.join(' \u2192 ');
     el.places.hidden = !where.length;
   }
+
+  // The last offer the scanner wrote to the journal, and whether the driver has
+  // said they took it.
+  //
+  // Not the offer on screen: those are the same thing only in the moment before
+  // a decision, and the decision is made on the phone, after which the card
+  // goes away. This is what the button marks and what it is named after.
+  var onRecord = null;
+  var tookState = false;
+  var tookBusy = false;
+
+  function showTook() {
+    if (!onRecord || !onRecord.id) {
+      el.took.hidden = true;
+      return;
+    }
+    el.took.hidden = false;
+    // Past tense, and the amount. "Took $8.04" is a note about a decision
+    // already made; anything in the imperative could be read, on a screen
+    // bolted to a dashboard next to a verdict, as doing something to the offer
+    // — and the one thing this rig must never do is press Accept.
+    var what = (typeof onRecord.pay === 'number')
+      ? '$' + onRecord.pay.toFixed(2) : 'the last one';
+    // No "undo" in the label: at this width it overflowed the button by 20px
+    // and the word was clipped off, which is worse than not offering it — an
+    // affordance nobody can see is not an affordance. It is a toggle, styled
+    // when set, exactly as the same control on the offers page behaves.
+    el.took.textContent = tookBusy ? '…'
+      : (tookState ? '\u2713 Took ' + what : 'Took ' + what + '?');
+    el.took.title = tookState
+      ? 'Recorded as taken. Press again if that was wrong.'
+      : 'Record that you accepted this offer. It does not touch your phone.';
+    el.took.classList.toggle('on', tookState);
+    el.took.setAttribute('aria-pressed', tookState ? 'true' : 'false');
+  }
+
+  el.took.addEventListener('click', function () {
+    if (!onRecord || !onRecord.id || tookBusy) return;
+    var want = !tookState;
+    tookBusy = true;
+    showTook();
+    fetch('/api/offers/mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // By id, never by pay-and-minutes. Marking by the figures is a *rule*
+      // that catches every offer paying that to the cent, and two genuinely
+      // different cards doing exactly that inside one window is a case this
+      // project has already met — see rpi/test_repeats.py.
+      body: JSON.stringify({ id: onRecord.id, accepted: want })
+    }).then(function (r) {
+      if (r.ok) tookState = want;
+    }).catch(function () {
+      /* The record is the point; a failed write must not look like a success. */
+    }).then(function () {
+      tookBusy = false;
+      showTook();
+    });
+  });
 
   var PHASE_LABEL = {
     check: 'CHECKING',
@@ -870,6 +938,13 @@
       // has to be read off the message before that happens.
       if (msg.tooBright !== undefined) tooBright = !!msg.tooBright;
       if (msg.tooDim !== undefined) tooDim = !!msg.tooDim;
+      // A new offer on the record. `tookState` resets with it — the mark
+      // belongs to the offer, not to the button.
+      if (msg.offer && msg.offer.id) {
+        if (!onRecord || onRecord.id !== msg.offer.id) tookState = false;
+        onRecord = msg.offer;
+        showTook();
+      }
       // A read started, and — on the next message carrying a verdict — ended.
       // Same shape as the two above: no `ready`, so it cannot stand in for one.
       if (msg.reading) readingAt = Date.now();
@@ -922,6 +997,13 @@
       seenAt = readAt;
     }
     if (s.status) phase = s.status;
+    // The offer on record survives a reload and a dropped socket, which is the
+    // normal case rather than the odd one: the driver accepts on the phone, the
+    // card goes, and only then do they look at this screen.
+    if (s.offer && s.offer.id) {
+      onRecord = s.offer;
+      showTook();
+    }
     scannerState = s.scanner || null;
     render();
     showConnection();
