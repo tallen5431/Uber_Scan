@@ -815,6 +815,31 @@ def setting(value, fallback):
 SANE_PAY = (1.0, 300.0)
 SANE_MINUTES = (2.0, 240.0)
 SANE_MPH = 75.0
+# A rate no offer on these apps pays. Not a judgement about a good job — that is
+# what `target` is for — but the line above which the arithmetic itself cannot
+# be true, so the reading behind it is a misread rather than a windfall.
+#
+# Measured against the owner's own shift of 202 offers: the highest rate among
+# readings whose distance was trusted was $37.29/hr. Everything above $100/hr
+# that shift was a lost decimal point — $1.06 read as $106 over the same 29
+# minutes and 11.8 miles, shown as ACCEPT at $219/hr; $7.06 as $158, shown at
+# $351/hr; $136 over ten minutes, shown at $816/hr. This sits at five times the
+# highest real one because the cost of being wrong runs both ways: a ceiling
+# that clips a genuine surge hides an offer the driver should have seen.
+SANE_RATE = 200.0
+# ...and only once the trip is long enough for a rate to describe it.
+#
+# A rate ceiling on its own is wrong, because $/hr is unbounded as the duration
+# shrinks: $10 for a two-minute half-mile hop is $300/hr and is an ordinary
+# offer. The corpus has held that case since before this check existed, and the
+# first version of this check broke it — a ceiling clipping a real offer is the
+# same failure as a ceiling letting a misread through, pointed the other way.
+#
+# Below ten minutes a few dollars of tip dominates the rate and $/hr is a poor
+# description of the card. Above it, the rate is a rate. At the boundary this
+# doubts a payout over $33 for ten minutes, $100 for thirty, $200 for an hour —
+# none of which these apps pay.
+SANE_RATE_OVER_MINUTES = 10.0
 
 
 def doubt(pay, minutes, miles=None):
@@ -834,6 +859,14 @@ def doubt(pay, minutes, miles=None):
         return None
     if not (SANE_MINUTES[0] <= minutes <= SANE_MINUTES[1]):
         return 'time'
+    # Each of the two can be sane on its own and impossible together. $136 is
+    # inside SANE_PAY and ten minutes is inside SANE_MINUTES, and $816/hr is
+    # neither — it is a decimal point that did not survive the read. Nothing
+    # tested the pair, so five readings of one shift reached the panel as
+    # ACCEPT at between $103 and $816 an hour.
+    if (minutes >= SANE_RATE_OVER_MINUTES
+            and pay / (minutes / 60.0) > SANE_RATE):
+        return 'rate'
     if (isinstance(miles, (int, float)) and not isinstance(miles, bool)
             and miles >= 1.0 and minutes > 0
             and miles / (minutes / 60.0) > SANE_MPH):
@@ -880,6 +913,27 @@ def rate(parsed, settings=None):
     # overstates the rate slightly; a bad distance can understate it enormously.
     cost = 0 if parsed['milesUncertain'] else (parsed['miles'] or 0) * cost_per_mile
     net = parsed['pay'] - cost
+    # ...and whether that leaves a rate the target can be compared against.
+    #
+    # `target` is a NET line — the driver set it against rates with their
+    # running costs already taken off. When no cost could be taken off and a
+    # cost per mile is configured, `per_hour` is a gross figure, so it is an
+    # UPPER BOUND on the offer rather than the offer. It may clear the target;
+    # it may be nowhere near it. The rig does not know.
+    #
+    # Measured on the owner's own shift of 202 offers: 108 of them, 53%, were
+    # rated with no running cost at all, and the overstatement on the ones that
+    # did state a distance ran to a median of 30%, a p90 of 173% and a maximum
+    # of 334% — where the line above this used to say "slightly". 33 of the 35
+    # ACCEPTs that shift came out of that pool, and 20 of them fall below the
+    # target once the distance printed on the card is charged. Against a $25
+    # target the offers whose cost WAS charged had a median of $12.03/hr.
+    #
+    # So the verdict is capped rather than the number withheld. CLOSE CALL is
+    # the honest answer to "this might clear your line and I cannot tell": the
+    # driver still sees the rate, the addresses and the arithmetic, and decides.
+    # What they do not get is a green light the arithmetic cannot support.
+    uncosted = cost_per_mile > 0 and cost == 0
 
     per_hour = net / (minutes / 60.0)
     floor = target * (1 - band / 100.0)
@@ -928,7 +982,14 @@ def rate(parsed, settings=None):
         # useful row in the file, and one that is quietly dropped cannot be
         # studied or counted. What is withheld is only the verdict.
         'doubt': why,
+        # Whether the rate above is the offer or only a ceiling on it, so a
+        # display can say which it is showing rather than leaving two different
+        # kinds of number looking identical.
+        'uncosted': uncosted,
         'state': ('doubt' if why else
+                  # An upper bound may not clear a net target. Capped, not
+                  # demoted further: below the floor it is still 'no'.
+                  'warn' if uncosted and per_hour >= target else
                   'go' if per_hour >= target else
                   'warn' if per_hour >= floor else 'no'),
     }

@@ -522,6 +522,16 @@
            + num(r.miles / (r.minutes / 60), 0) + ' mph, which no offer does — '
            + 'one of the two was misread. No verdict was given.';
     }
+    // Each figure can be sane on its own and impossible together, which is why
+    // this is its own sentence rather than a variant of the pay one: the pay
+    // may be right and the time wrong, and telling the driver to check the
+    // payout would send them to the wrong half of the card.
+    if (r.doubt === 'rate') {
+      return 'The pay and the time together work out at '
+           + money(r.pay / (r.minutes / 60), 0) + '/hr, which no offer pays — '
+           + 'one of the two was misread, most often a decimal point lost from '
+           + 'the payout. No verdict was given.';
+    }
     if (r.suspect) {
       return 'Outside the range a real offer falls in, so it is kept but not '
            + 'counted. A fare summary left on the screen looks like this.';
@@ -647,7 +657,8 @@
       // that reads as "this was not recorded". Not judging it was the decision.
       + row('Called it', r.state === 'doubt'
             ? ('no verdict — '
-               + ({ pay: 'the pay', time: 'the time', speed: 'the distance' }[r.doubt]
+               + ({ pay: 'the pay', time: 'the time', speed: 'the distance',
+                    rate: 'the pay against the time' }[r.doubt]
                   || 'the reading')
                + ' is outside anything a real offer does')
             : (({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' })[r.state] || '--'))

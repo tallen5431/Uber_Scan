@@ -496,7 +496,10 @@
   function announce(r) {
     var say = r.state === 'doubt'
       ? ({ pay: 'Check the pay.', time: 'Check the time.',
-           speed: 'Check the distance.' }[r.doubt] || 'Read that again.')
+           speed: 'Check the distance.',
+           // Both figures can be sane alone and impossible together, so this
+           // one names the pair rather than picking a side.
+           rate: 'Check the pay and the time.' }[r.doubt] || 'Read that again.')
       : (({ go: 'Accept', warn: 'Close call', no: 'Pass' }[r.state] || '')
          + ', ' + rateText(r.perHour) + ' an hour'
          + (r.locked && r.whole !== false ? '.' : ', still reading.'));
@@ -892,7 +895,8 @@
     if (r.state === 'doubt') {
       el.verdictLabel.textContent =
         { pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
-          speed: 'CHECK THE DISTANCE' }[r.doubt] || 'READ AGAIN';
+          speed: 'CHECK THE DISTANCE',
+          rate: 'CHECK PAY AND TIME' }[r.doubt] || 'READ AGAIN';
     } else {
       el.verdictLabel.textContent =
         ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '')
@@ -1001,7 +1005,22 @@
     // a washed-out card.
     if (tooBright) notes.push(TOO_BRIGHT);
     if (tooDim) notes.push(TOO_DIM);
-    if (r.milesUncertain) notes.push('Distance unreadable — pay shown before mileage cost.');
+    // A rate with no running cost taken off it is a CEILING, not the offer,
+    // and the old wording — "pay shown before mileage cost" — described the
+    // arithmetic without saying what it meant. On the owner's own shift 108 of
+    // 202 offers were rated this way and the overstatement ran to a median of
+    // 30% and a maximum of 334%. `uncosted` rather than `milesUncertain`
+    // because a card that states no distance at all lands in the same place,
+    // and because with no cost per mile configured there is nothing missing.
+    if (r.uncosted) {
+      // Short because it has to fit: the first wording of this ran twenty
+      // characters longer and pushed the headline rate off the 480x320 panel,
+      // which the layout checks caught. "Ceiling" is the word that matters —
+      // it says the number may be anywhere below itself.
+      notes.push(r.milesUncertain
+        ? 'Distance unreadable — rate is a ceiling.'
+        : 'No distance on the card — rate is a ceiling.');
+    } else if (r.milesUncertain) notes.push('Distance unreadable — check the miles.');
     else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
     // Said out loud, because a fragment is not a small error in a safe
     // direction: the same pay divided by less time always looks better. The

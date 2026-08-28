@@ -80,12 +80,17 @@ UNCERTAIN = {
     'perMile': None, 'pay': 8.0, 'minutes': 22.0, 'cardMinutes': 22.0,
     'miles': 6.9, 'items': None, 'cost': 0, 'costPerMile': 0.3,
     'milesCorrected': False, 'milesUncertain': True, 'whole': False,
+    # No mileage came off, and a cost per mile is set — so this rate is a
+    # ceiling on the offer rather than the offer. 108 of 202 offers on one real
+    # shift were rated this way.
+    'uncosted': True,
     'legs': 3, 'mergedFrom': 5, 'ms': 1517, 'text': '', 'places': [],
     'fromDeadline': False, 'deliverBy': None, 'track': None,
 }
 # ...and one where the distance was trusted, so there are two lines and a cost.
 DEDUCTED = dict(UNCERTAIN, state='no', perHour=14.71, grossPerHour=20.97,
                 cost=2.4, perMile=0.7, milesUncertain=False, whole=True,
+                uncosted=False,
                 places=['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
 # A delivery card states a deadline and no duration, so `minutes` is null and
 # the rate was worked out over `cardMinutes`. The raw row divided by `minutes`
@@ -96,7 +101,16 @@ DEADLINE = dict(UNCERTAIN, state='warn', pay=12.0, minutes=None, cardMinutes=34.
                 fromDeadline=True, deliverBy=1140, miles=None, whole=True,
                 milesUncertain=False, cost=0)
 
-READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE}
+# A payout whose decimal point did not survive the read. $136 is inside the
+# sane range for a payout and ten minutes is inside the sane range for a trip;
+# it is the pair that cannot be true, and nothing tested the pair until five
+# readings of one shift reached the panel as ACCEPT between $103 and $816/hr.
+IMPOSSIBLE = dict(UNCERTAIN, state='doubt', doubt='rate', pay=136.0,
+                  minutes=10.0, cardMinutes=10.0, billedMinutes=10.0, miles=3.1,
+                  perHour=816.0, grossPerHour=816.0, whole=True)
+
+READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
+            'impossible': IMPOSSIBLE}
 
 DRIVER = r'''
 const { chromium } = require('playwright');
@@ -155,7 +169,10 @@ const LOOK = (sel) => {
     const ctx = await browser.newContext({
       viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
     });
-    for (const key of Object.keys(READINGS)) {
+    // Named, not every key: READINGS also carries a reading the panel is
+    // meant to refuse, and the per-panel sweep below asserts a verdict is
+    // shown. The Python half walks the same three by name.
+    for (const key of ['uncertain', 'deducted', 'deadline']) {
       const page = await ctx.newPage();
       await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
       await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
@@ -337,6 +354,46 @@ const LOOK = (sel) => {
     await page.waitForTimeout(200);
     out.tookUndone = await look();
     out.tookPosted = posted;
+    await page.close();
+    await ctx.close();
+  }
+
+  // --- a rate the rig could not cost, and one that cannot be true ----------
+  //
+  // Two states a driver has to be able to tell apart at a glance from the
+  // driving seat. The first is a real offer whose running cost could not be
+  // taken off, so the number on the panel is a ceiling: it may clear the target
+  // or be nowhere near it. The second is a reading that cannot be true at all.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+
+    // A rate that cleared the target on a distance nobody could use.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.uncertain, { state: 'warn', perHour: 27.24,
+                                              grossPerHour: 27.24 }));
+    await page.waitForTimeout(200);
+    out.ceiling = {
+      label: await page.evaluate(LOOK, '#verdictLabel'),
+      warn: await page.evaluate(LOOK, '#warn'),
+      rate: await page.evaluate(LOOK, '#perHour'),
+    };
+
+    // ...and one that cannot be true. $136 over ten minutes.
+    await page.evaluate((r) => window.__es.push(r), READINGS.impossible);
+    await page.waitForTimeout(200);
+    out.impossible = {
+      label: await page.evaluate(LOOK, '#verdictLabel'),
+      rate: await page.evaluate(LOOK, '#perHour'),
+      pay: await page.evaluate(LOOK, '#vPay'),
+    };
     await page.close();
     await ctx.close();
   }
@@ -687,6 +744,46 @@ try:
             ok_('...with nothing clipped off it when %s' % name,
                 not slot.get('clipped'))
             ok_('...and the panel still fits when %s' % name, slot.get('fits'))
+
+    # --- a rate the rig could not cost, and one that cannot be true ------
+    #
+    # The panel's whole job is a verdict, and these are the two states where a
+    # plausible-looking one would be wrong. On the owner's own shift of 202
+    # offers, 108 were rated with no running cost at all and 33 of the 35
+    # ACCEPTs came out of that pool; five readings reached the panel as ACCEPT
+    # at between $103 and $816 an hour.
+    ceiling = got.get('ceiling') or {}
+    ok_('the uncosted state was measured', bool(ceiling.get('label')))
+    if ceiling.get('label'):
+        # Never ACCEPT. It may clear the target or be nowhere near it, and the
+        # rig cannot tell which — CLOSE CALL is the honest answer.
+        # startswith, because the panel appends " ?" while a reading is still
+        # unsettled and that suffix is its own true statement. The property
+        # here is the word, and above all that the word is not ACCEPT.
+        label = (ceiling['label'].get('text') or '').strip()
+        ok_('a rate with no mileage off it is a close call (%r)' % label,
+            label.startswith('CLOSE CALL'))
+        ok_('...and never an accept', 'ACCEPT' not in label)
+        ok_('...and the number is still shown, because it is still evidence',
+            ceiling.get('rate', {}).get('shown'))
+        ok_('...with a notice saying it is a ceiling',
+            'ceiling' in ((ceiling.get('warn') or {}).get('text') or ''))
+        ok_('...which is on the glass, not pushed off it',
+            (ceiling.get('warn') or {}).get('shown'))
+
+    impossible = got.get('impossible') or {}
+    ok_('the impossible reading was measured', bool(impossible.get('label')))
+    if impossible.get('label'):
+        # $136 over ten minutes. Each figure is sane alone; the pair cannot be.
+        # Naming the pair matters — telling the driver to check the payout
+        # would send them to the wrong half of the card when the time is what
+        # was misread.
+        eq('a reading that cannot be true names the pair, not a side',
+           (impossible['label'].get('text') or '').strip(), 'CHECK PAY AND TIME')
+        eq('...and withholds the rate rather than printing $816/hr',
+           (impossible.get('rate') or {}).get('text'), '--')
+        ok_('...while the figures it was working from stay on screen',
+            '136' in ((impossible.get('pay') or {}).get('text') or ''))
 
     # --- what the shift adds up to, on the row under the verdict ---------
     first = got.get('shiftFirst') or {}

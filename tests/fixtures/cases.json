@@ -709,6 +709,58 @@
         "cost": 34.5,
         "state": "no"
       }
+    },
+    {
+      "name": "a distance that could not be trusted may not clear a net target",
+      "_why": "One leg lost its miles, so no running cost could be charged and the rate is an upper bound. On the owner's own shift 108 of 202 offers were rated this way and 33 of the 35 ACCEPTs came out of that pool.",
+      "text": "$9.08 6 min (1.2 mi) away 14 min trip",
+      "settings": {
+        "target": 25,
+        "costPerMile": 0.3
+      },
+      "expect": {
+        "state": "warn",
+        "uncosted": true
+      }
+    },
+    {
+      "name": "...and with no running cost configured there is nothing to cap",
+      "_why": "costPerMile 0 means the driver has opted out of costing, so gross IS net and the rate is the offer rather than a ceiling on it.",
+      "text": "$9.08 6 min (1.2 mi) away 14 min trip",
+      "settings": {
+        "target": 25,
+        "costPerMile": 0
+      },
+      "expect": {
+        "state": "go",
+        "uncosted": false
+      }
+    },
+    {
+      "name": "...and a trusted distance still earns a green light",
+      "_why": "The cap must not swallow the offers it exists to protect.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip",
+      "settings": {
+        "target": 25,
+        "costPerMile": 0.3
+      },
+      "expect": {
+        "state": "go",
+        "uncosted": false
+      }
+    },
+    {
+      "name": "a rate below the floor is still a pass, not a close call",
+      "_why": "The cap lowers a green light to a close call; it must not raise a pass into one.",
+      "text": "$4.05 6 min (1.2 mi) away 40 min trip",
+      "settings": {
+        "target": 25,
+        "costPerMile": 0.3
+      },
+      "expect": {
+        "state": "no",
+        "uncosted": true
+      }
     }
   ],
   "_coerce_comment": "The three functions that decide what an offer is judged against, checked in both languages from one list. Every one of these had drifted: Number('  ') is 0 in JavaScript so a whitespace target meant every offer was an ACCEPT while Python fell back to 25; float() takes '1e3' and '1_0' and parseFloat does not; and Infinity and NaN were guarded out of doubt() in JavaScript and compared against the bounds in Python. None of it was reachable from a test. '@inf', '@-inf' and '@nan' stand in for values JSON cannot hold.",
@@ -1036,6 +1088,44 @@
         "pay": 12,
         "minutes": 20,
         "miles": "@nan",
+        "expect": null
+      },
+      {
+        "name": "a payout whose decimal point did not survive the read",
+        "_why": "$1.36 read as $136 is $816/hr over ten minutes. Each half is sane on its own \u2014 $136 is inside SANE_PAY, ten minutes inside SANE_MINUTES \u2014 and nothing tested the pair, so five readings of one real shift reached the panel as ACCEPT at between $103 and $816 an hour.",
+        "pay": 136.0,
+        "minutes": 10.0,
+        "miles": 3.1,
+        "expect": "rate"
+      },
+      {
+        "name": "...and the same card read correctly is not doubted",
+        "pay": 1.36,
+        "minutes": 10.0,
+        "miles": 3.1,
+        "expect": null
+      },
+      {
+        "name": "a short hop that really does pay well is not a misread",
+        "_why": "$/hr is unbounded as the duration shrinks, so a bare rate ceiling clips real offers. $10 over two minutes is $300/hr and ordinary; the ceiling applies only once the trip is long enough for a rate to describe it.",
+        "pay": 10.0,
+        "minutes": 2.0,
+        "miles": 0.5,
+        "expect": null
+      },
+      {
+        "name": "...and just past the boundary the same rate is impossible",
+        "_why": "$50 over ten minutes is $300/hr for a trip long enough that the rate means something. No app pays it.",
+        "pay": 50.0,
+        "minutes": 10.0,
+        "miles": 2.0,
+        "expect": "rate"
+      },
+      {
+        "name": "an hour's work at a plausible rate is not doubted",
+        "pay": 40.0,
+        "minutes": 60.0,
+        "miles": 25.0,
         "expect": null
       }
     ],

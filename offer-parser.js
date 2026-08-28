@@ -674,6 +674,22 @@
   var SANE_PAY = [1.0, 300.0];
   var SANE_MINUTES = [2.0, 240.0];
   var SANE_MPH = 75.0;
+  // A rate no offer on these apps pays. Not a judgement about a good job — that
+  // is what `target` is for — but the line above which the arithmetic itself
+  // cannot be true, so the reading behind it is a misread rather than a
+  // windfall. Measured against the owner's own shift of 202 offers: the highest
+  // rate among readings whose distance was trusted was $37.29/hr, and
+  // everything above $100/hr that shift was a lost decimal point. Five times
+  // the highest real one, because a ceiling that clips a genuine surge hides an
+  // offer the driver should have seen.
+  var SANE_RATE = 200.0;
+  // ...and only once the trip is long enough for a rate to describe it. A rate
+  // ceiling on its own is wrong, because $/hr is unbounded as the duration
+  // shrinks: $10 for a two-minute half-mile hop is $300/hr and is an ordinary
+  // offer, which the corpus has held since before this check existed and which
+  // the first version of it broke. Below ten minutes a few dollars of tip
+  // dominates the rate; above it, the rate is a rate.
+  var SANE_RATE_OVER_MINUTES = 10.0;
 
   // Why this reading cannot be true, or null if it might be. Written the same
   // way as offer_parser.doubt so the two cannot answer differently.
@@ -695,6 +711,11 @@
     if (!(pay >= SANE_PAY[0] && pay <= SANE_PAY[1])) return 'pay';
     if (typeof minutes !== 'number') return null;
     if (!(minutes >= SANE_MINUTES[0] && minutes <= SANE_MINUTES[1])) return 'time';
+    // Each of the two can be sane on its own and impossible together. $136 is
+    // inside SANE_PAY and ten minutes is inside SANE_MINUTES, and $816/hr is
+    // neither — it is a decimal point that did not survive the read.
+    if (minutes >= SANE_RATE_OVER_MINUTES
+        && pay / (minutes / 60) > SANE_RATE) return 'rate';
     if (typeof miles === 'number' && isFinite(miles) && miles >= 1.0
         && minutes > 0 && miles / (minutes / 60) > SANE_MPH) return 'speed';
     return null;
@@ -738,6 +759,22 @@
     // to gross pay overstates the rate slightly; using a bad distance can
     // understate it enormously, which is the error that loses you money.
     var cost = parsed.milesUncertain ? 0 : (parsed.miles || 0) * costPerMile;
+    // ...and whether that leaves a rate the target can be compared against.
+    //
+    // `target` is a NET line — the driver set it against rates with their
+    // running costs already taken off. When no cost could be taken off and a
+    // cost per mile is configured, `perHour` is a gross figure and therefore an
+    // UPPER BOUND on the offer rather than the offer itself.
+    //
+    // Measured on the owner's own shift of 202 offers: 108 of them, 53%, were
+    // rated with no running cost at all, and the overstatement on the ones that
+    // did state a distance ran to a median of 30% and a maximum of 334%. 33 of
+    // the 35 ACCEPTs that shift came out of that pool, and 20 fall below the
+    // target once the distance printed on the card is charged.
+    //
+    // The verdict is capped rather than the number withheld: CLOSE CALL is the
+    // honest answer to "this might clear your line and I cannot tell".
+    var uncosted = costPerMile > 0 && cost === 0;
     var net = parsed.pay - cost;
 
     var perHour = net / (minutes / 60);
@@ -786,7 +823,14 @@
       // useful row in the file, and one that is quietly dropped cannot be
       // studied or counted. What is withheld is only the verdict.
       doubt: why,
+      // Whether the rate above is the offer or only a ceiling on it, so a
+      // display can say which it is showing rather than leaving two different
+      // kinds of number looking identical.
+      uncosted: uncosted,
       state: why ? 'doubt'
+           // An upper bound may not clear a net target. Capped, not demoted
+           // further: below the floor it is still 'no'.
+           : (uncosted && perHour >= target) ? 'warn'
            : perHour >= target ? 'go'
            : perHour >= floor ? 'warn' : 'no'
     };
@@ -803,5 +847,6 @@
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole,
            SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH,
+           SANE_RATE: SANE_RATE, SANE_RATE_OVER_MINUTES: SANE_RATE_OVER_MINUTES,
            MAX_MPH: MAX_MPH, UNREADABLE_MPH: UNREADABLE_MPH };
 }));

@@ -2562,6 +2562,70 @@ is private mode, a full quota, or a browser with site data turned off.
 Each of the five behaviours worth having is verified by breaking it: restore
 any one of them and the check named for it fails.
 
+### The ACCEPT that was made of a missing deduction
+
+202 offers off one real shift, and the arithmetic behind every verdict in it:
+
+| | offers | median $/hr | ACCEPT |
+|---|---|---|---|
+| a running cost was charged | 94 | $12.03 | **2** |
+| none was charged | 108 | ~$23 | **33** |
+
+The target is $25. So **53% of the shift was rated with no running cost at
+all**, and that is where all but two of the ACCEPTs came from. Twenty of the
+thirty-five fall below the target once the distance printed on the card is
+charged — a floor, not an estimate, because on those rows the distance itself
+is partial.
+
+The mechanism was one line, and the flag feeding it was right. When a leg loses
+its miles, `legs_short_a_distance` marks the reading, and its docstring names
+the danger exactly: the error "errs optimistic, which is the one direction that
+turns a pass into an accept." Then `rate()` answered that flag by charging *no*
+mileage at all — optimistic again, by a second route. The comment on it said
+falling back to gross "overstates the rate slightly". On this shift that
+overstatement ran to a **median of 30%, a p90 of 173% and a maximum of 334%**.
+
+`target` is a net line. A rate with no cost off it is a **ceiling** on the
+offer, not the offer, so it cannot be compared to that line. The verdict is now
+capped at CLOSE CALL rather than the number being withheld: the driver still
+sees the rate, the addresses and the arithmetic, and decides. What they no
+longer get is a green light the arithmetic cannot support. Replayed over the
+same 202 offers, ACCEPT goes from 35 to 2, thirty become CLOSE CALL, three stop
+getting a verdict at all, and **nothing that was a PASS moves**.
+
+**What it still cannot do.** The cap stops an upper bound earning an ACCEPT; it
+cannot stop it reading a band high. $16.05 over 34 minutes and 33.7 miles is
+$10.48/hr costed and $28.32/hr uncosted — a clear pass showing as a close call,
+and no cap fixes that while the number is still on screen, because that number
+is all the rig knows. `test_money.py` asserts the guarantee that holds and
+counts the residual rather than hiding it. Shrinking it means charging the
+*partial* distance instead of none: where a leg's miles are missing the sum is
+an under-estimate, so charging it tightens the bound rather than inventing
+anything. That is a change to the cost model, and it is the next one to make.
+
+### $816 an hour, on a card that said $1.36
+
+Five readings that shift reached the panel as ACCEPT at between $103 and $816
+an hour. `doubt()` checks the payout against a sane range, the duration against
+a sane range, and the two together against a sane speed — and **nothing checked
+the pay against the time**. $136 is inside `SANE_PAY`, ten minutes is inside
+`SANE_MINUTES`, and $816/hr is a decimal point that did not survive the read.
+The same card read correctly elsewhere in the file says $1.36.
+
+The first version of the check was a flat rate ceiling, and the corpus refused
+it — correctly. **$/hr is unbounded as the duration shrinks**: $10 for a
+two-minute half-mile hop is $300/hr and is an ordinary offer, which the corpus
+has held since long before this. A ceiling that clips a real offer is the same
+failure as one that lets a misread through, pointed the other way. So the
+ceiling applies only above ten minutes, where a rate describes the card rather
+than a tip dominating it: over $33 for ten minutes, $100 for thirty, $200 for
+an hour. None of which these apps pay.
+
+It is its own reason, `rate`, rather than a variant of `pay`, because the pay
+may be right and the time wrong — and "check the payout" would send a driver to
+the wrong half of the card. The panel says **CHECK PAY AND TIME** and withholds
+the rate.
+
 ### A rate with no running cost taken off it
 
 `rate()` charges no mileage at all for a distance it does not trust, which is
@@ -2859,7 +2923,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3303 checks
+npm test                # all 29 suites, 3350 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -2873,11 +2937,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 355 checks, the shared corpus
+node tests/corpus.test.js       # 368 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  95 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 388 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 401 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 103 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -2892,7 +2956,9 @@ python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
-python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
+python3 rpi/test_money.py       # 248 from a picture of a card to a $/hour,
+                                #     and on a rate with no running cost off
+                                #     it never earning an ACCEPT
 python3 rpi/test_scan_pi.py     # 201 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
@@ -2928,7 +2994,7 @@ python3 rpi/test_doctor.py      #  30 on the preflight running to the end, and
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 208 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 218 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying

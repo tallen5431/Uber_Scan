@@ -302,6 +302,96 @@ for label, screen, true_pay, true_min, true_miles, settings in SHAPES:
         ok_(where + ' / is right, or says nothing — never something else',
             (not rate['ready']) or agrees)
 
+# --- a rate with no running cost off it is a ceiling, not the offer ---------
+#
+# `target` is a NET line, set against rates with running costs already taken
+# off. When no cost could be taken off, `perHour` is gross and is therefore an
+# upper bound — it may clear the target, it may be nowhere near it, and the rig
+# cannot tell which. On the owner's own shift of 202 offers, 108 were rated
+# that way and 33 of the 35 ACCEPTs came out of that pool; 20 of them fall
+# below the target once the distance printed on the card is charged.
+#
+# The property that matters is that the cap only ever moves a verdict DOWN. A
+# guard that could raise one would be a new way to manufacture the ACCEPT it
+# exists to prevent.
+RANK = {'no': 0, 'warn': 1, 'go': 2}
+SETTINGS = {'target': 25, 'band': 15, 'costPerMile': 0.30}
+FREE = {'target': 25, 'band': 15, 'costPerMile': 0}
+
+
+def priced(pay, minutes, miles, uncertain):
+    return {'pay': pay, 'minutes': minutes, 'miles': miles,
+            'milesUncertain': uncertain, 'milesCorrected': False, 'items': None,
+            'legs': 2, 'deliverBy': None, 'shop': None, 'complete': True}
+
+
+# The guarantee is narrower than "never more confident", and the first version
+# of this block asserted the wider one and failed — correctly. An uncosted rate
+# is a HIGHER number, so it lands in a higher band: $16.05 over 34 minutes and
+# 33.7 miles is $10.48/hr costed and $28.32/hr uncosted, a clear PASS reading as
+# a CLOSE CALL. No cap can fix that while still showing the number, because the
+# number really is all the rig knows.
+#
+# What it CAN guarantee is that an upper bound never earns the one verdict that
+# tells a driver to take the job. That is the property here. The residual — a
+# pass reading as a close call — is counted rather than hidden, and the way to
+# shrink it is to charge the partial distance rather than none, which is a
+# change to the cost model and not to this guard.
+promoted_to_go = 0
+lowered = raised = capped = 0
+for pay in (2.0, 5.0, 8.04, 12.0, 16.05, 24.08, 41.06):
+    for minutes in (11.0, 20.0, 34.0, 60.0, 90.0):
+        for miles in (None, 1.0, 5.2, 12.4, 33.7):
+            with_cost = OP.rate(priced(pay, minutes, miles, False), SETTINGS)
+            without = OP.rate(priced(pay, minutes, miles, True), SETTINGS)
+            if not (with_cost.get('ready') and without.get('ready')):
+                continue
+            # Same card, same settings; the only difference is whether the
+            # distance could be used. The uncosted one may never be the more
+            # confident of the two.
+            a = RANK.get(with_cost['state'])
+            b = RANK.get(without['state'])
+            if a is None or b is None:
+                continue
+            if b > a:
+                raised += 1
+                if without['state'] == 'go':
+                    promoted_to_go += 1
+            elif b < a:
+                lowered += 1
+            if without['state'] == 'warn' and without['perHour'] >= 25:
+                capped += 1
+
+eq('an upper bound never earns the verdict that says take it',
+   promoted_to_go, 0)
+ok_('...and the guard is doing something, not nothing', lowered > 0)
+# Named, not hidden: a rate the rig cannot cost still reads a band too high.
+ok_('...though %d of these still read a band high, which charging the partial'
+    ' distance rather than none would shrink' % raised, raised > 0)
+ok_('...capping rates that would have cleared the target (%d of them)' % capped,
+    capped > 0)
+
+# The driver who sets no cost per mile has opted out of costing, so gross IS
+# net and there is nothing to cap. Capping there would punish a setting.
+free_go = OP.rate(priced(9.08, 20.0, 5.2, True), FREE)
+eq('with no cost per mile set there is nothing missing, so no cap',
+   free_go['state'], 'go')
+ok_('...and nothing claims a cost was skipped', not free_go['uncosted'])
+
+# ...and the same card with the cost configured is the capped one.
+capped_go = OP.rate(priced(9.08, 20.0, 5.2, True), SETTINGS)
+eq('the same card with a cost per mile set is a close call',
+   capped_go['state'], 'warn')
+ok_('...and says the rate is a ceiling', capped_go['uncosted'])
+eq('...while the number itself is unchanged',
+   round(capped_go['perHour'], 2), round(free_go['perHour'], 2))
+
+# Below the floor it stays a pass. The cap lowers a green light to a close
+# call; it must not raise a pass into one.
+poor = OP.rate(priced(4.05, 40.0, 12.0, True), SETTINGS)
+eq('an uncosted rate below the floor is still a pass', poor['state'], 'no')
+ok_('...though it still says no cost came off', poor['uncosted'])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d end-to-end money checks passed' % ok)
 sys.exit(1 if bad else 0)

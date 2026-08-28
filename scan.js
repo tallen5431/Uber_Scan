@@ -386,7 +386,8 @@
       ? 'POINT AT THE OFFER'
       : r.state === 'doubt'
       ? ({ pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
-           speed: 'CHECK THE DISTANCE' }[r.doubt] || 'READ AGAIN')
+           speed: 'CHECK THE DISTANCE',
+           rate: 'CHECK PAY AND TIME' }[r.doubt] || 'READ AGAIN')
       : ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] + (locked ? '' : ' ?'));
 
     // The headline is withheld on a reading that cannot be true, exactly as on
