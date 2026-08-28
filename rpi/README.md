@@ -2736,7 +2736,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 19 suites, 2270 checks
+npm test                # all 29 suites, 3246 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -2750,11 +2750,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 350 checks, the shared corpus
+node tests/corpus.test.js       # 355 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  95 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 383 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 388 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 103 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -2770,16 +2770,19 @@ python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 237 from a picture of a card to a $/hour
-python3 rpi/test_scan_pi.py     # 189 on the loop that holds the camera, and
-                                #     on which live view it is being asked for
+python3 rpi/test_scan_pi.py     # 201 on the loop that holds the camera, on
+                                #     which live view it is being asked for,
+                                #     and on one card being named once however
+                                #     many times it is read
 python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  53 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
-python3 rpi/test_liveview.py    #  56 on the picture the driver watches, on
+python3 rpi/test_liveview.py    #  59 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
-                                #     dashboard layout being wired up, and on
-                                #     which of the two views was asked for
+                                #     dashboard layout being wired up, on which
+                                #     of the two views was asked for, and on the
+                                #     offer a reopened tab can still mark
 python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
 python3 rpi/test_autopilot.py   #  37 on the one command that takes the rig
                                 #     from nothing to scanning, and on the
@@ -2800,9 +2803,10 @@ python3 rpi/test_doctor.py      #  30 on the preflight running to the end, and
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 150 on what the driving screen shows while a
-                                #     card is being read, and after (skipped
-                                #     without Playwright)
+python3 rpi/test_dashboard.py   # 176 on what the driving screen shows while a
+                                #     card is being read, after, and once the
+                                #     card has gone and only the driver knows
+                                #     they took it (skipped without Playwright)
 python3 rpi/test_layout.py      # 258 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
