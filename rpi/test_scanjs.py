@@ -330,9 +330,22 @@ try:
         r = got['reads'][name]
         if not r['ready'] or r['gross'] is None:
             continue
+        # There is no raw figure beside a headline that is not a figure. The
+        # page withholds the rate entirely when it doubts it, and a lone
+        # "$2.5 raw" under a "--" would be the withheld number printed anyway.
+        #
+        # Keyed off what is on the screen rather than off the state name behind
+        # it, because this check began as a restatement of the page's rule that
+        # dropped one of its clauses — and a second copy of a rule that has
+        # drifted is the fault this project keeps finding. It only surfaced at
+        # certain hours: the delivery fixture says "Deliver by 7:15 PM" and is
+        # judged against the clock, so read in the small hours its deadline is
+        # sixteen hours out, the rate comes to $2.33/hr, and the page doubts it.
+        # Read at noon the same card is judged and the check passed.
+        judged = r['shown'] != '--'
         same = round(r['gross']) == round(r['perHour'])
         eq('%s: the raw rate is shown exactly when it differs' % name,
-           bool(r['rawShown']), not same)
+           bool(r['rawShown']), judged and not same)
 
     # ...and with no running cost set, where there is nothing to take off and
     # the two rates are one number.
