@@ -1322,6 +1322,51 @@ class Geometry:
                        MAX_READ_HEIGHT))
 
 
+def worth_a_second_look(parsed):
+    """Is this a reading a different page-segmentation mode might rescue?
+
+    Only one that found no payout but did find the journey — a second opinion
+    about a card the reader could not see at all is not a recovery, it is a
+    guess.
+
+    `deliverBy` on both counts, because a delivery card has no minutes: it
+    states a deadline instead. Gated on minutes alone this was dead code for one
+    of the three card shapes the rig reads — over 591 rendered delivery reads it
+    fired ZERO times, against 10% of ride reads and 13% of shop reads.
+
+    `is not None`, not truthiness. `deliverBy` is minutes since midnight, so a
+    card saying "Deliver by 12:00 AM" carries 0 — falsey — and a truthiness test
+    would leave this dead through the one hour it is most likely to be read.
+    This rig is driven past midnight.
+    """
+    return bool(parsed['pay'] is None
+                and (parsed['minutes'] or parsed['deliverBy'] is not None))
+
+
+def second_look_agrees(first, second):
+    """May the second reading replace the first?
+
+    Only if it found a payout AND still agrees about the journey. A second
+    opinion that also rewrites the journey is not a recovered payout, it is a
+    different reading, and there is nothing here to say which of the two is
+    right.
+
+    The deadline counts as part of the journey. On a ride card this pins the two
+    numbers the rate is made of; on a delivery card `minutes` is None on BOTH
+    sides — degenerate on 591 of 591 reads — so `miles` alone was carrying it,
+    and on some readings miles was None on both sides as well, leaving nothing
+    at all anchoring the swap. Meanwhile the deadline, which is what rate()
+    divides the payout by on this card shape, was the one field free to move: a
+    retry shifting 7:15 PM to 9:15 PM turns $49.79/hr into $13.80/hr, and to
+    6:45 PM into a confident $143/hr. It costs nothing to close — every real
+    recovery measured agreed about the deadline already.
+    """
+    return bool(second['pay'] is not None
+                and second['minutes'] == first['minutes']
+                and second['miles'] == first['miles']
+                and second['deliverBy'] == first['deliverBy'])
+
+
 class Scanner:
     """Holds the motion gate and the agreement counter across frames."""
 
@@ -1622,13 +1667,37 @@ class Scanner:
         # payout AND still agrees about the journey. A second opinion that also
         # rewrites the minutes is not a recovered payout, it is a different
         # reading, and there is nothing here to say which of the two is right.
+        #
+        # `deliverBy` on both counts, because a delivery card has no minutes at
+        # all. Gated on minutes alone this whole block was dead code for one of
+        # the three card shapes the rig reads: over 591 delivery reads it fired
+        # ZERO times, against 10% of ride reads and 13% of shop reads. Widened,
+        # it fires on 3.7% of delivery reads and recovered the payout on 8 of
+        # them, every one correct, with no wrong read introduced.
+        #
+        # `is not None`, not truthiness. `deliverBy` is minutes since midnight,
+        # so a card saying "Deliver by 12:00 AM" carries 0 — which is falsey,
+        # and would have left the block dead through the one hour it is most
+        # likely to be read. This rig is driven past midnight.
+        #
+        # And the agreement check gets `deliverBy` too, which is not tidiness.
+        # Its job, per the paragraph above, is that a second opinion which also
+        # rewrites the journey is a different reading rather than a recovered
+        # payout. On a ride card it pins the two numbers the rate is made of. On
+        # a delivery card `minutes` is None on BOTH sides — degenerate on 591 of
+        # 591 reads — so `miles` alone was carrying it, and on 2 of the 22
+        # firings miles was None on both sides as well: nothing at all anchoring
+        # it. Meanwhile the number that actually divides the payout on this card
+        # shape is the deadline, and that was the one field left free to move.
+        # A retry shifting 7:15 PM to 9:15 PM turns $49.79/hr into $13.80/hr;
+        # shifting it to 6:45 PM turns it into a confident $143/hr ACCEPT. It
+        # costs nothing to close: all 8 real recoveries agreed on the deadline
+        # already, so the stricter check rejects none of them.
         recovered = 0
-        if parsed['pay'] is None and parsed['minutes']:
+        if worth_a_second_look(parsed):
             again, again_lines = ocr_lines(prepped, RECOVER_CONFIG)
             second = OP.parse(again)
-            if (second['pay'] is not None
-                    and second['minutes'] == parsed['minutes']
-                    and second['miles'] == parsed['miles']):
+            if second_look_agrees(parsed, second):
                 text, lines, parsed = again, again_lines, second
                 recovered = 1
         t3 = time.perf_counter()

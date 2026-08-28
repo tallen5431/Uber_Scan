@@ -730,8 +730,16 @@
     // Each of the two can be sane on its own and impossible together. $136 is
     // inside SANE_PAY and ten minutes is inside SANE_MINUTES, and $816/hr is
     // neither — it is a decimal point that did not survive the read.
-    if (minutes >= SANE_RATE_OVER_MINUTES
-        && pay / (minutes / 60) > SANE_RATE) return 'rate';
+    // Math.max, so the ceiling never loosens as the trip gets shorter. Written
+    // as two branches first, and that made a STEP: below ten minutes nothing
+    // but SANE_PAY's own $300 applied, so $136 over ten minutes was doubted at
+    // $810/hr while the same $136 over NINE minutes was a green ACCEPT at
+    // $899/hr. A guard a shorter trip walks under is not a guard. Below the
+    // boundary this is a flat cap on the PAY — $33.33, the payout that reaches
+    // SANE_RATE at ten minutes.
+    if (pay / (Math.max(minutes, SANE_RATE_OVER_MINUTES) / 60) > SANE_RATE) {
+      return 'rate';
+    }
     if (typeof miles === 'number' && isFinite(miles) && miles >= 1.0
         && minutes > 0 && miles / (minutes / 60) > SANE_MPH) return 'speed';
     return null;

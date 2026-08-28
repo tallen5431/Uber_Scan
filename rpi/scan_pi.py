@@ -1605,7 +1605,7 @@ def main():
                 emit_offer(offer_log.id, parsed, rate)
 
         if args.display:
-            cv2.imshow('uber-scan', render_panel(rate, parsed))
+            cv2.imshow('uber-scan', render_panel(rate, parsed, whole=whole))
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 return True
         return False
@@ -2138,11 +2138,35 @@ def main():
 COLOURS = {'go': (100, 201, 23), 'warn': (36, 165, 245), 'no': (75, 50, 240),
            'doubt': (92, 45, 58), 'empty': (36, 27, 20)}
 LABELS = {'go': 'ACCEPT', 'warn': 'CLOSE', 'no': 'PASS'}
-DOUBT_LABELS = {'pay': 'CHECK PAY', 'time': 'CHECK TIME', 'speed': 'CHECK MILES'}
+DOUBT_LABELS = {'pay': 'CHECK PAY', 'time': 'CHECK TIME', 'speed': 'CHECK MILES',
+                # Both figures can be sane alone and impossible together, so
+                # this one names the pair rather than picking a side — telling
+                # a driver to check the payout sends them to the wrong half of
+                # the card when the time is what was misread. Added with the
+                # reason itself; without it this panel fell back to READ AGAIN
+                # while the other two screens named it.
+                'rate': 'CHECK PAY & TIME'}
 
 
-def render_panel(rate, parsed, size=(800, 480)):
-    """Big, flat, readable at a glance and at arm's length."""
+def render_panel(rate, parsed, size=(800, 480), whole=True):
+    """Big, flat, readable at a glance and at arm's length.
+
+    `whole` says the whole journey was in view. A reading without it is a
+    FRAGMENT, and a fragment always flatters the offer — the pickup leg of a
+    two-leg card on its own is a shorter, better-paying job than the card
+    describes. live.html has qualified its verdict with a "?" for exactly this
+    since it was written; this panel, the one actually bolted to the dashboard,
+    did not, so the same reading the web page hedged showed here as a flat
+    green ACCEPT.
+
+    It arrives as an argument rather than being worked out here, because
+    `is_whole` has a deadline branch: a delivery card is legitimately whole with
+    no legs at all, and a panel that restated the test from the legs would
+    qualify every delivery card the rig reads. The loop already has the value.
+
+    Defaults True so that a caller which does not know cannot accidentally
+    cast doubt on a reading that never earned it.
+    """
     panel = np.zeros((size[1], size[0], 3), dtype=np.uint8)
     # `.get`, not `[...]`: this is the scan loop, and a state this function has
     # not been taught about must cost a dull panel rather than a KeyError that
@@ -2167,8 +2191,11 @@ def render_panel(rate, parsed, size=(800, 480)):
                     (40, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (210, 210, 210), 2)
         return panel
 
-    cv2.putText(panel, LABELS.get(rate['state'], ''), (40, 90),
-                cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 5)
+    # The verdict, and a question mark when it is drawn from a fragment. Same
+    # mark and same meaning as the web page, so a driver reading one screen and
+    # then the other is not learning two vocabularies.
+    cv2.putText(panel, LABELS.get(rate['state'], '') + ('' if whole else ' ?'),
+                (40, 90), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 5)
     cv2.putText(panel, '$%.0f/hr' % rate['perHour'], (36, 300),
                 cv2.FONT_HERSHEY_SIMPLEX, 6.0, (255, 255, 255), 12)
     # ...and the same offer before running costs, where that is a different

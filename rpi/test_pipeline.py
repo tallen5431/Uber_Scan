@@ -7,6 +7,7 @@ around it, which are the ones that fail silently. A crop in the wrong place
 reports "no offer" on a screen with an offer on it, and reports it confidently.
 """
 
+import inspect
 import os
 import sys
 
@@ -999,6 +1000,73 @@ quiet.should_read(dark_after, GATE_SCALE)
 quiet.should_read(dark_after, GATE_SCALE)
 ok_('an unchanged picture does not fire the gate through the window',
     quiet.last_diff <= PL.STILL_T)
+
+# --- the second look at a card whose payout did not read ---------------------
+#
+# _look takes a second OCR pass in a different page-segmentation mode when the
+# first found no payout. It was gated on the reading having minutes, and a
+# delivery card never has any — it states a deadline instead — so the whole
+# block was dead code for one of the three card shapes the rig reads. Measured
+# over 591 rendered delivery reads it fired zero times, against 10% of ride
+# reads and 13% of shop reads.
+#
+# These drive the gate expression and the agreement check directly rather than
+# through the reader, because what is being asserted is which readings are
+# eligible and which second opinions are acceptable — not what tesseract makes
+# of any particular picture.
+# The gate and the check are named functions rather than expressions buried in
+# a method that needs a camera frame to reach, so these call the real thing. The
+# first version of this block re-implemented the gate beside the assertions,
+# which meant the only thing tying test to code was a string search for the
+# source line — a mutation to the gate could not fail the behaviour, only the
+# grep. A check that cannot fail on behaviour is not checking behaviour.
+def _eligible(pay, minutes, deliver_by):
+    return PL.worth_a_second_look(
+        {'pay': pay, 'minutes': minutes, 'deliverBy': deliver_by})
+
+
+ok_('a ride card with no payout gets a second look',
+    _eligible(None, 23.0, None))
+ok_('a delivery card with no payout gets one too',
+    _eligible(None, None, 1155))
+# Minutes since midnight, so a deadline of 12:00 AM is 0 — falsey, and a
+# truthiness test would have left the block dead through the one hour it is
+# most likely to be read. This rig is driven past midnight.
+ok_('...including one due at midnight, which is deliverBy 0',
+    _eligible(None, None, 0))
+ok_('a reading that already has a payout is left alone',
+    not _eligible(12.45, 23.0, 1155))
+ok_('...and one with neither a duration nor a deadline has nothing to agree with',
+    not _eligible(None, None, None))
+# ...and the reader still asks. A gate that answers correctly and a reader that
+# never calls it are different facts.
+_look_src = inspect.getsource(PL.Scanner._look)
+ok_('the reader asks before taking a second look',
+    'worth_a_second_look(parsed)' in _look_src)
+
+
+_agrees = PL.second_look_agrees
+
+
+# A delivery card's deadline is the denominator of its $/hr — rate() turns it
+# into cardMinutes — so it plays exactly the role minutes plays on a ride card.
+# Left out of the check, `minutes` compared None to None on every delivery read
+# and `miles` alone carried it; on some readings miles was None on both sides
+# too, and nothing anchored the retry at all. A second opinion that moves the
+# deadline is a different reading, not a recovered payout: 7:15 PM read as
+# 9:15 PM turns $49.79/hr into $13.80/hr, and as 6:45 PM into a confident
+# $143/hr.
+_first = {'pay': None, 'minutes': None, 'miles': 9.8, 'deliverBy': 1155}
+ok_('a second look that finds the payout and agrees is taken',
+    _agrees(_first, {'pay': 41.11, 'minutes': None, 'miles': 9.8, 'deliverBy': 1155}))
+ok_('...one that moves the deadline is not',
+    not _agrees(_first, {'pay': 41.11, 'minutes': None, 'miles': 9.8, 'deliverBy': 1275}))
+ok_('...one that moves the distance is not',
+    not _agrees(_first, {'pay': 41.11, 'minutes': None, 'miles': 2.1, 'deliverBy': 1155}))
+ok_('...and one that finds no payout is not',
+    not _agrees(_first, {'pay': None, 'minutes': None, 'miles': 9.8, 'deliverBy': 1155}))
+ok_('...and asks before taking its answer',
+    'second_look_agrees(parsed, second)' in _look_src)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d pipeline checks passed' % ok)

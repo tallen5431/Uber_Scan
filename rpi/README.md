@@ -2695,6 +2695,100 @@ already been checked, or typed: a hand-entered **115 miles over 63 minutes came
 back as 11.5**, and the speed doubt that should have fired never did. It is an
 explicit `is False` now, and `test_money.py` pins it.
 
+### A guard a shorter trip walks under
+
+`SANE_RATE_OVER_MINUTES` was written as a boundary and implemented as two
+branches, which made it a **step**. Below ten minutes nothing applied but
+`SANE_PAY`'s own $300 ceiling, so:
+
+| | verdict |
+|---|---|
+| $136 over **10** minutes | doubt, $810/hr |
+| $136 over **9** minutes | **ACCEPT, $899/hr** |
+
+$300 over three minutes was a green ACCEPT at $6000/hr. A guard a shorter trip
+walks under is not a guard.
+
+It is one expression now — `pay / (max(minutes, SANE_RATE_OVER_MINUTES) / 60)` —
+so the ceiling never loosens as the duration shrinks. Below the boundary that is
+a flat cap on the **pay**: $33.33, the payout that reaches `SANE_RATE` at ten
+minutes. It refuses none of the 568 real offers on record — the largest under
+ten minutes is $5.00 — and no corpus card that was not already wrong.
+
+**And it caught something the investigation said no bound could.** One verifier
+concluded the fix was orthogonal to the failure OCR actually produces and that
+the honest change was presentation instead. A challenger refuted that with a
+card sitting in this project's own corpus: `$47.53 9 min (3.1 mi) trip 53L min
+(18.6 mi) away`. The second leg reads as rubbish and is correctly dropped, which
+leaves the nine-minute pickup leg carrying the whole payout — parsed complete,
+`is_whole` False, and rated **ACCEPT at $310.67/hr where the truth over 62
+minutes is $46**. The continuous ceiling catches it. A lost leg makes pay,
+minutes and miles each individually plausible; it is the rate they imply
+together that cannot be true.
+
+Both were right about different things. Some lost legs clear the cap and are
+caught; the one the pictures produced — $16.05 over 4 minutes, $241/hr — sits
+below the $300/hr the corpus pins as an ordinary short hop, and no ceiling can
+have both. That one belongs to `whole`, below.
+
+### The panel in the car did not hedge
+
+`live.html` computes `settled = r.locked && r.whole !== false` and appends a
+"?" to the verdict when a reading is a fragment. `render_panel` — the OpenCV
+panel actually bolted to the dashboard — never saw `whole` at all, so the same
+reading the web page qualified showed in the car as a flat green ACCEPT. The
+loop already had the value: it computes `whole` and hands it to the resample
+burst, to `emit`, to the voice and to the journal. The panel was the one
+consumer left out.
+
+It arrives as an argument rather than being recomputed, because `is_whole` has a
+deadline branch — a delivery card is legitimately whole with no legs at all, and
+a panel restating the test from the legs would qualify every delivery card the
+rig reads. It defaults to `True`, so a caller that does not know cannot cast
+doubt on a reading that never earned it.
+
+The same pass found `DOUBT_LABELS` had no entry for `rate`, the reason added
+with the ceiling above — so a card the other two screens named as CHECK PAY AND
+TIME fell back to READ AGAIN on the one screen where the driver cannot go and
+look it up. `test_scan_pi.py` now derives the reasons from the parser's own
+source and asserts the panel has a name for every one, so the next reason cannot
+be forgotten either.
+
+### The second look that could not happen
+
+`_look` takes a second OCR pass in a different page-segmentation mode when the
+first found no payout. It was gated on the reading having minutes — and a
+delivery card never has any. Over **591 rendered delivery reads it fired zero
+times**, against 10% of ride reads and 13% of shop reads: dead code for one of
+the three card shapes the rig supports. Widened, it fires on 3.7% of delivery
+reads and recovered the payout on 8 of them, every one correct, with no wrong
+read introduced.
+
+Two details decided it, and neither was in the original proposal.
+
+**`is not None`, not truthiness.** `deliverBy` is minutes since midnight, so a
+card saying "Deliver by 12:00 AM" carries **0** — falsey. The truthiness test
+would have left the block dead through the one hour it is most likely to be
+read, on a rig whose recorded shift ran to half past two in the morning.
+
+**The agreement check had to be tightened in the same commit.** Its job is that
+a second opinion which also rewrites the journey is a different reading, not a
+recovered payout. On a ride card it pins the two numbers the rate is made of. On
+a delivery card `minutes` is None on *both* sides — degenerate on 591 of 591
+reads — so `miles` alone was carrying it, and on 2 of the 22 firings miles was
+None on both sides too: **nothing at all anchoring the swap**. Meanwhile the
+deadline, which is what `rate()` divides the payout by on this card shape, was
+the one field left free to move. A retry shifting 7:15 PM to 9:15 PM turns
+$49.79/hr into $13.80/hr; to 6:45 PM, into a confident $143/hr. Widening the
+gate without closing that is the one ordering that makes the rig worse.
+
+Both are named functions now — `worth_a_second_look` and `second_look_agrees` —
+rather than expressions inside a method that needs a camera frame to reach. The
+first version of their tests re-implemented the gate beside the assertions, so
+the only thing tying test to code was a string search for the source line: a
+mutation to the gate could fail the grep but never the behaviour. A check that
+cannot fail on behaviour is not checking behaviour.
+
 ### $816 an hour, on a card that said $1.36
 
 Five readings that shift reached the panel as ACCEPT at between $103 and $816
@@ -3015,7 +3109,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3398 checks
+npm test                # all 29 suites, 3429 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3029,15 +3123,15 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 382 checks, the shared corpus
+node tests/corpus.test.js       # 389 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  95 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 415 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 422 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 103 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
-python3 rpi/test_pipeline.py    # 216 on where to look, how big, what to log,
+python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
 python3 rpi/test_exposure.py    # 133 on flicker, brightness, gain and
                                 #     exposure, and on both ends of running out
@@ -3051,7 +3145,7 @@ python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 204 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 210 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read

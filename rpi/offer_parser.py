@@ -882,8 +882,23 @@ def doubt(pay, minutes, miles=None):
     # neither — it is a decimal point that did not survive the read. Nothing
     # tested the pair, so five readings of one shift reached the panel as
     # ACCEPT at between $103 and $816 an hour.
-    if (minutes >= SANE_RATE_OVER_MINUTES
-            and pay / (minutes / 60.0) > SANE_RATE):
+    #
+    # `max`, so the ceiling never loosens as the trip gets shorter. Written as
+    # two branches first, and that made a STEP: below ten minutes nothing but
+    # SANE_PAY's own $300 applied, so $136 over ten minutes was doubted at
+    # $810/hr while the same $136 over NINE minutes was a green ACCEPT at
+    # $899/hr. A guard that a shorter trip walks under is not a guard.
+    #
+    # Below the boundary this is a flat cap on the PAY — $33.33, the payout that
+    # reaches SANE_RATE at ten minutes — because $/hr is unbounded as the
+    # duration shrinks and that is the whole reason the boundary exists. It
+    # refuses none of the 568 real offers on record (the largest under ten
+    # minutes is $5.00) and no corpus card that is not already wrong.
+    #
+    # It is derived from the two constants above rather than being a third, so
+    # raising SANE_RATE raises this with it. That coupling is intended: it is
+    # the same ceiling.
+    if pay / (max(minutes, SANE_RATE_OVER_MINUTES) / 60.0) > SANE_RATE:
         return 'rate'
     if (isinstance(miles, (int, float)) and not isinstance(miles, bool)
             and miles >= 1.0 and minutes > 0

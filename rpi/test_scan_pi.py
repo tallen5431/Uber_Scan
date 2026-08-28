@@ -17,6 +17,7 @@ it counts every request handed out and every one given back.
 
 import json
 import os
+import inspect
 import re
 import sys
 import tempfile
@@ -565,6 +566,49 @@ _doubt = SP.render_panel(_rate('doubt', 3548.49, 'pay'),
 _go = SP.render_panel(_rate('go', 3548.49), {'pay': 1184.0, 'minutes': 20.0, 'miles': 3.9})
 ok_('a doubted card is not drawn like an accepted one',
     not np.array_equal(_doubt, _go))
+
+# --- a fragment is not a verdict, on the screen in the car either -----------
+#
+# A reading without the whole journey in view always flatters the offer: the
+# pickup leg of a two-leg card on its own is a shorter, better-paying job than
+# the card describes. The corpus has a card that does exactly this — its second
+# leg reads as "53L min" and is correctly dropped — leaving $47.53 over nine
+# minutes, complete, is_whole False, and rated at $310/hr against a truth of
+# $46. live.html has hedged that with a "?" since it was written. The panel
+# bolted to the dashboard did not, so the reading the web page qualified showed
+# in the car as a flat green ACCEPT.
+_frag = SP.render_panel(_rate('go', 35.3), _card, whole=False)
+_full = SP.render_panel(_rate('go', 35.3), _card, whole=True)
+ok_('a fragment is not drawn like a whole reading',
+    not np.array_equal(_frag, _full))
+# In the label, and nowhere else: no number may move because a leg was missed.
+_band = slice(40, 110)
+ok_('...and the difference is in the verdict, not the figures',
+    not np.array_equal(_frag[_band], _full[_band])
+    and np.array_equal(_frag[130:], _full[130:]))
+# A caller that does not know must not cast doubt on a reading that never
+# earned it — most of them pass nothing.
+ok_('a panel drawn without saying costs no confidence',
+    np.array_equal(SP.render_panel(_rate('go', 35.3), _card), _full))
+
+# ...and the loop actually says. A panel that can qualify a reading and a loop
+# that never tells it are different facts, which is the shape of fault this
+# project keeps finding.
+ok_('the loop hands the panel what it knows about the journey',
+    'render_panel(rate, parsed, whole=whole)' in inspect.getsource(SP.main))
+
+# Every reason the parser can refuse a card for has a label here.
+#
+# `rate` was added to doubt() and not to this panel, so a card the other two
+# screens named as CHECK PAY AND TIME fell back to READ AGAIN in the car — the
+# one screen where the driver cannot go and look it up. Derived from the
+# parser's own source rather than kept as a list, so the next reason cannot be
+# forgotten either.
+import offer_parser as _OP                                     # noqa: E402
+_reasons = set(re.findall(r"return '([a-z]+)'", inspect.getsource(_OP.doubt)))
+ok_('the parser can refuse a card for %d reasons' % len(_reasons), len(_reasons) >= 4)
+eq('...and the panel in the car has a name for every one',
+   sorted(r for r in _reasons if r not in SP.DOUBT_LABELS), [])
 
 # And the voice, which is the whole of what a driver gets while watching the
 # road. "accept, three thousand five hundred an hour" was what this said.
