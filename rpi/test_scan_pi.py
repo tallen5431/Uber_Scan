@@ -179,6 +179,20 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     started = []
     real_start, real_emit, real_sleep = SP.start_camera, SP.emit, time.sleep
     real_look = PL.Scanner.look_many
+    # ...and how the loop asks the motion gate, which is not the same question
+    # as whether the gate works. The gate is confined to the phone by the scale
+    # the loop hands it, and a loop that stops handing it over puts the mean
+    # back over the whole cabin — where a dark-mode card scores below the
+    # threshold and is never read. Mutating that call out left every suite
+    # passing until this recorded it.
+    gate_calls = []
+    real_should = PL.Scanner.should_read
+
+    def watched_should_read(self, frame, scale=None):
+        gate_calls.append(scale)
+        return real_should(self, frame, scale)
+
+    PL.Scanner.should_read = watched_should_read
     SP.start_camera = lambda *a, **k: (started.append(1), cam)[1]
     # A stand-in for the OCR, when the case under test is one no rendering of a
     # real card can produce — a payout whose journey never reads, for one.
@@ -236,6 +250,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         SP.start_camera, SP.emit = real_start, real_emit
         SP.emit_offer = real_offer
         PL.Scanner.look_many = real_look
+        PL.Scanner.should_read = real_should
 
     rows = []
     if os.path.exists(journal):
@@ -246,7 +261,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     ready = [a for a, _ in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
     ready_kw = [k for a, k in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
     return dict(cam=cam, rows=rows, ready=ready, ready_kw=ready_kw,
-                announced=announced,
+                announced=announced, gate_calls=gate_calls,
                 config=config, journal=journal, started=len(started))
 
 
@@ -340,6 +355,21 @@ if rows:
     # to mark it as taken. Asserted against the *loop*, not against emit_offer
     # in isolation: the function returning the right shape proves nothing if
     # nothing calls it, which is exactly what a first version of this missed.
+    # ...and the loop asked the gate about the phone, not about the cabin.
+    #
+    # test_pipeline proves the gate does the right thing when it is given the
+    # scale. Only this proves the loop gives it: mutating `should_read(luma,
+    # track_scale)` back to `should_read(luma)` left every other suite passing,
+    # which is the shape of fault this project keeps finding — a function that
+    # is right and a caller that never asks it.
+    gate = run_uberx['gate_calls']
+    ok_('the loop ran the motion gate', len(gate) > 1)
+    ok_('...over the phone rather than the whole frame, every time',
+        all(g is not None for g in gate))
+    ok_('...naming how the preview maps onto the calibrated corners',
+        all(isinstance(g, tuple) and len(g) == 2 and g[0] > 1 and g[1] > 1
+            for g in gate))
+
     announced = run_uberx['announced']
     ok_('the loop announced the offer it recorded', len(announced) >= 1)
     if announced:

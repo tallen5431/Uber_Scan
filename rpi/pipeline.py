@@ -1417,7 +1417,36 @@ class Scanner:
         return int(min(max(self.card_height, round(self.ocr_height / self.card_share)),
                        MAX_READ_HEIGHT))
 
-    def _motion(self, frame):
+    def _motion(self, frame, scale=None):
+        """How much the picture changed, over the phone rather than the cabin.
+
+        The statistic is a mean over every pixel it is given, so whatever is not
+        phone divides the signal down. On this rig the phone is about a quarter
+        of the frame — scan_pi's own framing note says "perhaps a third", "call
+        it 160 pixels across" of 480 — and the rest is a dark cabin that does
+        not change, so a card appearing scored a fraction of what it should.
+
+        Measured on rendered cards mounted in a rendered cabin at 25%, 33% and
+        45% of the frame, over blank-to-card and card-to-card transitions in
+        both themes: the whole-frame statistic missed 10 of 18, and the same
+        statistic over the phone window missed none of them. Every miss was in
+        dark mode or a card-to-card swap. A card appearing on a dark-mode phone
+        at the documented framing scored 4.59 against a threshold of 6.0 — and
+        because that leaves `card_on_screen` false, neither the resample burst
+        nor the verify beat can fire either, so the card is not read late, it is
+        not read at all. This rig is driven at night.
+
+        `scale` divides quad coordinates into this frame's, exactly as
+        quad_window and the tracker use it. Without it, or before a quad is
+        known, this is the whole frame as before — an uncalibrated rig has no
+        phone to crop to, and the wide statistic is the honest one then.
+
+        The thumbnail is a fixed size either way, so a window that changes shape
+        as the tracker follows the mount still differences cleanly against the
+        last one.
+        """
+        if scale is not None and self.quad is not None:
+            frame = quad_window(frame, self.quad, scale)
         small = cv2.cvtColor(cv2.resize(frame, MOTION_SIZE, interpolation=cv2.INTER_AREA),
                              cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else \
                 cv2.resize(frame, MOTION_SIZE, interpolation=cv2.INTER_AREA)
@@ -1433,9 +1462,13 @@ class Scanner:
         """True when the picture is holding still enough to measure anything."""
         return self.last_diff <= STILL_T
 
-    def should_read(self, frame):
-        """True when the picture just changed and has since settled."""
-        diff = self.last_diff = self._motion(frame)
+    def should_read(self, frame, scale=None):
+        """True when the picture just changed and has since settled.
+
+        `scale` is the caller's frame against quad coordinates, and passing it
+        is what confines the gate to the phone. See _motion.
+        """
+        diff = self.last_diff = self._motion(frame, scale)
         if diff > CHANGE_T:
             self._dirty = True
             return False        # still moving; reading now would blur

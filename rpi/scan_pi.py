@@ -1691,7 +1691,10 @@ def main():
                     if 0 < gap < 1.0:
                         tick = gap if tick is None else tick * 0.9 + gap * 0.1
                 last_tick = now
-                do_read = scanner.should_read(luma)
+                # `track_scale` confines the gate to the phone. Without it the
+                # mean is taken over the whole cabin and a card appearing on a
+                # dark-mode screen scores below the threshold — see _motion.
+                do_read = scanner.should_read(luma, track_scale)
                 moved = False           # did the corners shift on this frame?
 
                 # Re-find the phone on this same small frame. A mount is not a

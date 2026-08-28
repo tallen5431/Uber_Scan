@@ -156,6 +156,58 @@ One thing runs continuously to stop that, and one thing used to:
 | **Corner tracking** (`track.py`) | The screen is re-found every 0.4s on the preview stream the motion gate already holds, which costs about a millisecond. A candidate must be the right **size and shape for the calibrated screen** — not for wherever the corners have got to, which is the distinction that matters, see below. Past that gate, a small correction is followed on the first check; a bigger move has to say the same thing five checks running, and is then either eased 35% of the way toward (if it is nearby) or taken whole (if it is not, which is a phone put back or a mount knocked). `--no-track` turns it off. |
 | **Crop fitting** | There used to be a second mechanism here that moved the crop about looking for the card. It is gone — see below. |
 
+### The gate was watching the cabin
+
+The motion gate decides whether a frame is worth reading, and it is a mean
+absolute difference over a thumbnail — of the **whole sensor frame**. The phone
+is about a quarter of that. `scan_pi.py`'s own framing note says as much:
+"the phone occupies perhaps a third of the frame: call it 160 pixels across"
+of 480. Everything else is a dark cabin that does not change between frames, and
+a mean divides the signal by all of it.
+
+Measured on rendered cards mounted in a rendered cabin at 25%, 33% and 45% of
+the frame, across blank-to-card and card-to-card transitions in both themes:
+
+| | fires |
+|---|---|
+| over the whole frame, as shipped | **8 of 18** |
+| over the phone window | **18 of 18** |
+
+Every miss was in dark mode or a card-to-card swap. A card arriving on a
+dark-mode phone at the documented framing scored **4.59 against a threshold of
+6.0**.
+
+The consequence is worse than a late read. A gate that does not fire leaves
+`card_on_screen` false, and neither the resample burst nor the verify beat can
+fire without it — so the card is not read late, **it is not read at all**. This
+rig is driven at night: one recorded shift ran from half past eight in the
+evening until half past two in the morning.
+
+The fix is one argument. `quad_window` already existed for the exposure
+measurement — it takes the preview frame, the calibrated quad in sensor
+coordinates, and the scale between them — so the gate now takes the same scale
+the tracker uses and measures the phone. Without a scale, or before a quad is
+known, it is the whole frame exactly as before: an uncalibrated rig has no phone
+to crop to, and the wide statistic is the honest one then.
+
+Two things this does **not** claim. A payout swapped on an otherwise identical
+card moves a few hundred pixels and no difference gate can see it — that is what
+the verify beat is for, and asserting it would be asking the gate for something
+it cannot do. And these are rendered cards in a rendered cabin; the structural
+claim that a mean over the frame divides the phone's signal down does not depend
+on the renders, but the magnitudes do.
+
+The mutation that mattered was the third one. Removing the crop was caught by
+`test_pipeline.py`; making the *loop* stop passing the scale was caught by
+nothing, because a gate that works and a caller that never asks it are different
+facts. `test_scan_pi.py` now records how the loop calls the gate. The fallback
+needed a real quad to test, too: a synthetic quad centred in the frame clamps to
+an empty box at 1:1 and `quad_window` hands back the whole image regardless, so
+it could not tell a working fallback from a broken one. The rig's own calibrated
+quad starts at x=564 of 2328, which at 1:1 on a 640-wide preview is a 76-pixel
+strip down one edge — and the mutant scored 0.00 on it, which is `feed()` never
+firing again.
+
 ### The crop stopped chasing the card
 
 There used to be a whole machine here. The crop found itself: fit the box to
@@ -2923,7 +2975,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3350 checks
+npm test                # all 29 suites, 3363 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -2945,7 +2997,7 @@ python3 rpi/test_parser.py      # 401 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 103 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
-python3 rpi/test_pipeline.py    # 206 on where to look, how big, what to log,
+python3 rpi/test_pipeline.py    # 216 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
 python3 rpi/test_exposure.py    # 133 on flicker, brightness, gain and
                                 #     exposure, and on both ends of running out
@@ -2959,7 +3011,7 @@ python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 248 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 201 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 204 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read

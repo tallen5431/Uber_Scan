@@ -866,6 +866,140 @@ moved = np.full((480, 640), 200, np.uint8)
 sc.should_read(moved)
 ok_('a changed one is not', not sc.settled)
 
+# --- the gate has to watch the phone, not the cabin -------------------------
+#
+# The gate's statistic is a mean over every pixel it is handed, so whatever is
+# not phone divides the signal down. On this rig the phone is about a quarter of
+# the frame and the rest is a dark cabin that does not change between frames.
+#
+# The consequence is not a late read. `card_on_screen` stays false, so neither
+# the resample burst nor the verify beat can fire either — the card is never
+# read at all — and it bites hardest in dark mode, which is when this rig is
+# driven: one real shift ran from half past eight at night until half past two.
+import testcards as TC2                                        # noqa: E402
+
+CAP = (2328, 1748)
+GATE_SCALE = (CAP[0] / 640.0, CAP[1] / 480.0)
+
+
+def cabin(card, share=0.33, w=640, h=480):
+    """A rendered phone on a mount, in a dark cabin, at a given framing."""
+    frame = np.full((h, w, 3), 28, np.uint8)
+    cv2.rectangle(frame, (0, int(h * 0.55)), (w, h), (52, 48, 44), -1)
+    pw = int(w * share)
+    ph = int(pw * 16 / 9)
+    if ph > int(h * 0.92):
+        ph = int(h * 0.92)
+        pw = int(ph * 9 / 16)
+    frame[(h - ph) // 2:(h - ph) // 2 + ph, (w - pw) // 2:(w - pw) // 2 + pw] = \
+        cv2.resize(card, (pw, ph), interpolation=cv2.INTER_AREA)
+    x, y = (w - pw) // 2, (h - ph) // 2
+    quad = np.array([[x * GATE_SCALE[0], y * GATE_SCALE[1]],
+                     [(x + pw) * GATE_SCALE[0], y * GATE_SCALE[1]],
+                     [(x + pw) * GATE_SCALE[0], (y + ph) * GATE_SCALE[1]],
+                     [x * GATE_SCALE[0], (y + ph) * GATE_SCALE[1]]], dtype=np.float32)
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), quad
+
+
+def fires(before, after, quad, scale):
+    sc = PL.Scanner(quad=quad)
+    sc.should_read(before, scale)
+    sc.should_read(after, scale)
+    return sc.last_diff
+
+
+# Every transition where the card genuinely changes. A payout swap on an
+# otherwise identical layout is deliberately not here: it moves a few hundred
+# pixels and no difference gate can see it, which is what the verify beat is
+# for — asserting it would be asking the gate for something it cannot do.
+wide_fired = narrow_fired = cases = 0
+worst_wide = None
+for share in (0.25, 0.33, 0.45):
+    for pal in (TC2.LIGHT, TC2.DARK):
+        for before_card, after_card in (
+                (TC2.blank(), TC2.uberx_screen(pal)),
+                (TC2.blank(), TC2.doordash_screen(pal)),
+                (TC2.uberx_screen(pal), TC2.shop_screen(pal))):
+            before, quad = cabin(before_card, share)
+            after, _ = cabin(after_card, share)
+            cases += 1
+            wide = fires(before, after, quad, None)
+            narrow = fires(before, after, quad, GATE_SCALE)
+            if wide > PL.CHANGE_T:
+                wide_fired += 1
+            elif worst_wide is None or wide > worst_wide[0]:
+                worst_wide = (wide, narrow)
+            if narrow > PL.CHANGE_T:
+                narrow_fired += 1
+
+eq('the gate notices every card that arrives (%d of %d)' % (narrow_fired, cases),
+   narrow_fired, cases)
+# ...and the wide statistic is kept beside it, because a check that only says
+# the new way works cannot say whether it was ever needed.
+ok_('...where measuring the whole cabin missed %d of them'
+    % (cases - wide_fired), wide_fired < cases)
+if worst_wide:
+    ok_('...the nearest miss scoring %.2f against a threshold of %.1f, where the'
+        ' phone window scored %.2f' % (worst_wide[0], PL.CHANGE_T, worst_wide[1]),
+        worst_wide[1] > PL.CHANGE_T)
+
+# A card appearing on a dark-mode phone at the framing scan_pi documents. This
+# is the case that costs an offer, so it is asserted on its own rather than
+# only inside the tally above.
+dark_before, dark_quad = cabin(TC2.blank(), 0.33)
+dark_after, _ = cabin(TC2.uberx_screen(TC2.DARK), 0.33)
+ok_('a dark-mode card arriving is below the threshold over the whole cabin',
+    fires(dark_before, dark_after, dark_quad, None) <= PL.CHANGE_T)
+ok_('...and above it over the phone', 
+    fires(dark_before, dark_after, dark_quad, GATE_SCALE) > PL.CHANGE_T)
+
+# An uncalibrated rig has no phone to crop to, and a caller that names no scale
+# is asking for the old statistic. Both must still work rather than throwing.
+no_quad = PL.Scanner(quad=None)
+no_quad.should_read(dark_before, GATE_SCALE)
+no_quad.should_read(dark_after, GATE_SCALE)
+ok_('with no quad known the gate still measures something',
+    isinstance(no_quad.last_diff, float))
+eq('...and it is the whole-frame statistic, unchanged',
+   round(no_quad.last_diff, 6), round(fires(dark_before, dark_after, dark_quad, None), 6))
+
+# A quad is known and the caller named no scale. This is not hypothetical:
+# Scanner.feed() calls should_read(frame) with one argument, and the quad is in
+# SENSOR coordinates — so a crop that treated a missing scale as 1:1 would index
+# a 2328-wide box into a 640-wide frame and measure a slice down one edge rather
+# than the whole picture. The statistic here has to be the wide one.
+#
+# The quad here is the rig's own calibrated one, not the synthetic one above:
+# a synthetic quad centred in the frame clamps to an empty box at 1:1 and
+# quad_window hands back the whole image regardless, so it cannot tell a
+# working fallback from a broken one. This one starts at x=564 of 2328, which
+# at 1:1 on a 640-wide preview is a 76-pixel strip down the right edge — a
+# crop, and the wrong one.
+REAL_QUAD = np.array([[564, 0], [1763, 0], [1762, 1717], [564, 1716]],
+                     dtype=np.float32)
+with_quad = PL.Scanner(quad=REAL_QUAD)
+with_quad.should_read(dark_before)
+with_quad.should_read(dark_after)
+without_quad = PL.Scanner(quad=None)
+without_quad.should_read(dark_before)
+without_quad.should_read(dark_after)
+eq('a caller that names no scale gets the whole frame, quad or no quad',
+   round(with_quad.last_diff, 6), round(without_quad.last_diff, 6))
+
+# ...and the gated read path is one of those callers, so it must still work.
+fed = PL.Scanner(quad=REAL_QUAD)
+fed.feed(dark_before)
+ok_('the gated read path still runs with a quad set',
+    isinstance(fed.last_diff, float))
+
+# A still picture is still still, whichever window it is measured over — the
+# crop must not manufacture a change out of a frame that did not move.
+quiet = PL.Scanner(quad=dark_quad)
+quiet.should_read(dark_after, GATE_SCALE)
+quiet.should_read(dark_after, GATE_SCALE)
+ok_('an unchanged picture does not fire the gate through the window',
+    quiet.last_diff <= PL.STILL_T)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d pipeline checks passed' % ok)
 sys.exit(1 if bad else 0)
