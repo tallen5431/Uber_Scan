@@ -198,21 +198,28 @@ PLACE_EDGE = re.compile(r'^[^0-9A-Za-z]+|[^0-9A-Za-z]+$', ASCII)
 MAX_PLACES = 4
 TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 
-# "Avg. wait time at pickup 4 min", which Uber prints under the pickup address.
+# What a card calls a leg of the journey. Uber labels every one — "away",
+# "trip", "total" — and prints its distance beside its time.
 #
-# It is a duration with no distance beside it, so it matches LEG, becomes a
-# third leg on a two-leg card, and trips legs_short_a_distance — which reads a
-# leg with no miles as OCR damage and marks the whole distance untrusted. rate()
-# then charges no mileage at all. On one real shift that was 67 of the 70
-# three-leg cards and 33% of every offer read: the distance was complete the
-# whole time, and the running cost was switched off by a line about waiting.
+# So a minutes-only token that also carries one of these words is a leg whose
+# distance did not read, which is the damage legs_short_a_distance exists for.
+# One WITHOUT a label is not a leg at all, and the card is full of them:
+# "Avg. wait time at pickup 4 min" under the address, a promo chip's "15 min
+# left", an ETA badge's "arrives in 9 min". Each became a third leg on a two-leg
+# card and tripped the guard, which marked the whole distance untrusted and made
+# rate() charge no mileage. On one real shift that was 67 of the 70 three-leg
+# cards and a third of every offer read, with the distance complete throughout.
 #
-# Forgiving, because this is read through a camera. The fragments that reached
-# the journal include "Avo Wait (ime at pickup", "walt time at plclaup: min" and
-# "aan at pickup", so neither word survives reliably on its own — the pattern
-# takes either. It is only ever consulted in a short window around a leg that
-# already matched, so a stray "wait" elsewhere on the card cannot invent one.
-WAIT_LEG = re.compile(r'\bw[ao@][il1|]t\b|\bat\s*p[il1|][ck]', re.IGNORECASE | ASCII)
+# Deciding it on the card's own grammar rather than on a list of phrases that
+# are not legs is what makes it hold for the next one: nothing here has to know
+# what a promo chip says.
+#
+# It also fails safe. A real leg that loses BOTH its label and its distance is
+# read as not-a-leg, so the other legs' distance is charged instead of none at
+# all — a cost that is too low rather than absent, which is the less optimistic
+# of the two errors and the only direction that matters here.
+LEG_TAIL = re.compile(r'\b(?:away|tr[il1|]p|tota?l|dropoff|drop\s*off)\b',
+                      re.IGNORECASE | ASCII)
 
 # What kind of job the card is offering, taken from the words the card prints
 # rather than inferred from its numbers.
@@ -335,17 +342,13 @@ def find_legs(text):
         miles, leg_corrected = recover_decimal(minutes, miles, had_decimal)
 
         tail = text[m.end():m.end() + 14].lower()
-        # Either side, because the card prints the phrase before the figure
-        # ("Avg. wait time at pickup 4 min") and OCR sometimes lands it after.
-        # Wider before than after for that reason.
-        around = text[max(0, m.start() - 34):m.end() + 16]
         legs.append({
             'minutes': minutes, 'miles': miles, 'hadDecimal': had_decimal or leg_corrected,
             'isTotal': bool(TOTAL_TAIL.search(tail)), 'corrected': leg_corrected,
-            # A stated wait, not a leg of the journey. Its minutes are still the
-            # driver's — they are counted — but its lack of a distance is the
-            # card being itself rather than the reader failing.
-            'isWait': bool(WAIT_LEG.search(around)),
+            # Whether the card labelled this as part of the journey. Only
+            # consulted for a leg with no distance, where it is the difference
+            # between a leg that lost its miles and a line that never had any.
+            'labelled': bool(LEG_TAIL.search(tail)),
             # Where this leg sat in the text, so the address printed after it
             # can be found without searching the whole card again.
             'start': m.start(), 'end': m.end(),
@@ -481,11 +484,16 @@ def legs_short_a_distance(legs):
     """
     if len(legs) < 2:
         return False
-    # ...and a stated wait is not an ordinary leg. It is a duration the card
-    # prints about standing still, so having no distance beside it is the card
-    # being itself and not the reader losing one. Counted before this was
-    # noticed, it switched the mileage cost off on a third of every offer read.
-    travel = [l for l in legs if not l.get('isWait')]
+    # A leg is part of the journey if it states a distance, or if the card
+    # labelled it one. A minutes-only token with no label is a wait line, a
+    # promo chip or an ETA badge — not a leg the reader failed on — and counting
+    # it here switched the mileage cost off on a third of every offer read.
+    #
+    # Their minutes are still counted. The driver really does wait at the
+    # pickup, and dropping the time would raise the rate, which is the one
+    # direction that turns a pass into an accept.
+    travel = [l for l in legs
+              if l.get('miles') is not None or l.get('labelled')]
     if len(travel) < 2:
         return False
     return any(l.get('miles') is None for l in travel)
@@ -779,8 +787,14 @@ def parse(raw_text):
         'places': find_places(text, legs),
         # The legs behind the sum, so a caller holding readings from several
         # frames can merge the ones a single frame missed.
+        # `labelled` travels with them. is_whole re-runs
+        # legs_short_a_distance over this projection, and a field the rule needs
+        # that does not survive the trip is a rule that quietly stops working:
+        # every minutes-only leg looked unlabelled here, so a two-leg card whose
+        # second distance came back as "7.3 m1" called itself whole again.
         'legDetail': [{'minutes': l['minutes'], 'miles': l['miles'],
-                       'isTotal': l['isTotal']} for l in used],
+                       'isTotal': l['isTotal'], 'labelled': l['labelled']}
+                      for l in used],
         'items': items,
         'legs': len(used),
         'milesCorrected': corrected,

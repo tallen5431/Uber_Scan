@@ -131,20 +131,24 @@
 
   var ITEMS = new RegExp('(' + DC + '{1,3})\\s*items?\\b', 'i');
 
-  /* "Avg. wait time at pickup 4 min", which Uber prints under the pickup
-     address. It is a duration with no distance beside it, so it matches LEG,
-     becomes a third leg on a two-leg card, and trips legsShortADistance —
-     which reads a leg with no miles as OCR damage and marks the whole distance
-     untrusted, after which rate() charges no mileage at all. On one real shift
-     that was 67 of the 70 three-leg cards and 33% of every offer read: the
-     distance was complete the whole time.
+  /* What a card calls a leg of the journey. Uber labels every one — "away",
+     "trip", "total" — and prints its distance beside its time.
 
-     Forgiving, because this is read through a camera. The fragments that
-     reached the journal include "Avo Wait (ime at pickup", "walt time at
-     plclaup: min" and "aan at pickup", so neither word survives reliably on its
-     own and the pattern takes either. Consulted only in a short window around a
-     leg that already matched, so a stray "wait" cannot invent one. */
-  var WAIT_LEG = /\bw[ao@][il1|]t\b|\bat\s*p[il1|][ck]/i;
+     So a minutes-only token that also carries one of these words is a leg whose
+     distance did not read, which is the damage legsShortADistance exists for.
+     One WITHOUT a label is not a leg at all, and the card is full of them:
+     "Avg. wait time at pickup 4 min" under the address, a promo chip's "15 min
+     left", an ETA badge's "arrives in 9 min". Each became a third leg on a
+     two-leg card and tripped the guard, which marked the whole distance
+     untrusted and made rate() charge no mileage. On one real shift that was 67
+     of the 70 three-leg cards and a third of every offer read.
+
+     Deciding it on the card's own grammar rather than on a list of phrases that
+     are not legs is what makes it hold for the next one. It also fails safe: a
+     real leg that loses BOTH its label and its distance is read as not-a-leg,
+     so the other legs' distance is charged instead of none at all — a cost too
+     low rather than absent, the less optimistic of the two errors. */
+  var LEG_TAIL = /\b(?:away|tr[il1|]p|tota?l|dropoff|drop\s*off)\b/i;
 
   /* --- the shape a delivery card uses instead of a duration ---
    *
@@ -388,17 +392,13 @@
       // Uber labels a combined figure "total"; a card that has one is not also
       // listing its legs, so mixing the two would double count the trip.
       var tail = text.slice(m.index + m[0].length, m.index + m[0].length + 14).toLowerCase();
-      // Either side, because the card prints the phrase before the figure
-      // ("Avg. wait time at pickup 4 min") and OCR sometimes lands it after.
-      var around = text.slice(Math.max(0, m.index - 34),
-                              m.index + m[0].length + 16);
       legs.push({
         minutes: minutes, miles: miles, hadDecimal: hadDecimal || fixed.corrected,
         isTotal: /\btota?l\b/.test(tail), corrected: fixed.corrected,
-        // A stated wait, not a leg of the journey. Its minutes are still the
-        // driver's — they are counted — but its lack of a distance is the card
-        // being itself rather than the reader failing.
-        isWait: WAIT_LEG.test(around),
+        // Whether the card labelled this as part of the journey. Only
+        // consulted for a leg with no distance, where it is the difference
+        // between a leg that lost its miles and a line that never had any.
+        labelled: LEG_TAIL.test(tail),
         // Where this leg sat in the text, so the address printed after it can
         // be found without searching the whole card again.
         start: m.index, end: m.index + m[0].length
@@ -533,12 +533,17 @@
     // median. A single leg is left alone because it can be a total, which
     // states no distance and is a whole journey by itself.
     if (list.length < 2) return false;
-    // ...and a stated wait is not an ordinary leg. It is a duration the card
-    // prints about standing still, so having no distance beside it is the card
-    // being itself and not the reader losing one. Counted before this was
-    // noticed, it switched the mileage cost off on a third of every offer read.
+    // A leg is part of the journey if it states a distance, or if the card
+    // labelled it one. A minutes-only token with no label is a wait line, a
+    // promo chip or an ETA badge — not a leg the reader failed on. Their
+    // minutes are still counted: the driver really does wait, and dropping the
+    // time would raise the rate, the one direction that turns a pass into an
+    // accept.
     var travel = [];
-    for (i = 0; i < list.length; i++) if (!list[i].isWait) travel.push(list[i]);
+    for (i = 0; i < list.length; i++) {
+      if (list[i].miles !== null && list[i].miles !== undefined) travel.push(list[i]);
+      else if (list[i].labelled) travel.push(list[i]);
+    }
     if (travel.length < 2) return false;
     for (i = 0; i < travel.length; i++) {
       if (travel[i].miles === null || travel[i].miles === undefined) return true;
@@ -634,7 +639,11 @@
       // The legs behind the sum, so a caller holding readings from several
       // frames can merge the ones a single frame missed.
       legDetail: used.map(function (l) {
-        return { minutes: l.minutes, miles: l.miles, isTotal: l.isTotal };
+        // `labelled` travels with them: isWhole re-runs legsShortADistance
+        // over this projection, and a field the rule needs that does not
+        // survive the trip is a rule that quietly stops working.
+        return { minutes: l.minutes, miles: l.miles, isTotal: l.isTotal,
+                 labelled: l.labelled };
       }),
       items: items,
       legs: used.length,

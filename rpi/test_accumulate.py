@@ -457,6 +457,47 @@ for i, corner in enumerate(CORNERS):
 eq('five corners do not become five places on a card that holds four',
    len(many['places']), 4)
 
+# --- what a leg has to carry, all the way through -------------------------
+#
+# `labelled` says the card called this a leg of the journey, and is_whole
+# re-runs legs_short_a_distance over whatever it is given. So the field has to
+# survive three hops: parse() builds the legs, legDetail projects them, and this
+# merger rebuilds them across frames. It was dropped at the second and third on
+# the way in, and each time the rule did not fail loudly — it simply stopped
+# seeing any leg as labelled, so a card whose distance read as "7.3 m1" called
+# itself whole again.
+#
+# Asserted as a property of the hop rather than as three separate cases,
+# because the next field added to a leg will take the same trip.
+LEG_FIELDS = ('minutes', 'miles', 'isTotal', 'labelled')
+
+acc_fields = OfferAccumulator()
+for _i in range(2):
+    _m = acc_fields.add(P.parse('$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip'))
+_detail = _m.get('legDetail') or []
+eq('the merger returns the legs it was given', len(_detail) >= 2, True)
+for _f in LEG_FIELDS:
+    eq('...each carrying %s through the merge' % _f,
+       [_f in l for l in _detail], [True] * len(_detail))
+
+# ...and a raw parse projects the same set, so the two shapes is_whole is asked
+# about cannot disagree about what a leg is.
+_raw = (P.parse('$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip')['legDetail'] or [])
+for _f in LEG_FIELDS:
+    eq('a raw reading projects %s too' % _f,
+       [_f in l for l in _raw], [True] * len(_raw))
+
+# The property that matters, end to end: a distance lost in one frame is not
+# whole, whether it is asked of the raw reading or of the merged one.
+_broken = '$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip'
+eq('a leg whose distance did not read is not whole, raw',
+   P.is_whole(P.parse(_broken)), False)
+acc_broken = OfferAccumulator()
+_mb = None
+for _i in range(2):
+    _mb = acc_broken.add(P.parse(_broken))
+eq('...nor once it has been merged across frames', P.is_whole(_mb), False)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

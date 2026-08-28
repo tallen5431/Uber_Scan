@@ -83,7 +83,27 @@ eq('...and the running cost', kept['costPerMile'], 0.30)
 ok_('it is stamped in epoch milliseconds', kept['at'] > 1_600_000_000_000)
 eq('the schema is stamped', kept['v'], JR.SCHEMA)
 eq('a real ride is not suspect', kept['suspect'], False)
-ok_('no OCR text reaches the file', 'text' not in kept)
+# The reading itself, which this file deliberately did NOT keep until now.
+#
+# The omission had a stated reason — "the useful part is already parsed into
+# numbers; what is left is pickup addresses" — and that reason was superseded by
+# a later change: `places` stores exactly those addresses, in the row, in the
+# CSV and in the sync. What was left out to protect is now kept beside it.
+#
+# What the omission cost is measurable. 568 real offers on record and not one
+# recoverable card, so every question about the parser has been answered against
+# rendered replicas — and the "Avg. wait time at pickup" line that switched the
+# running cost off on a third of one shift was found only from three mangled
+# fragments that survived in `places`, because the addresses were kept and the
+# text was not.
+# `.get`, not `[...]`. A missing key here raised a KeyError and took the rest of
+# the file with it, so removing the field looked like a crash rather than a
+# failed check — and every check below it stopped running. A mutation that stops
+# the suite is not the same as a mutation the suite catches.
+eq('the reading is kept, so the corpus can be this driver\'s own cards',
+   kept.get('text'), OFFER)
+eq('...and it is bounded, because a bad crop reads half the map as well',
+   len(kept.get('text') or '') <= JR.TEXT_KEPT, True)
 
 # --- two different offers are two rows --------------------------------------
 # One accumulator across both, as the scan loop has.

@@ -545,7 +545,15 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    // Where it went, joined with a semicolon so one cell holds
                    // both ends of a ride without breaking the comma-separated
                    // file it sits in.
-                   'places', 'deliverBy', 'fromDeadline', 'ms'];
+                   'places', 'deliverBy', 'fromDeadline', 'ms',
+                   // Last, deliberately. This is the only column that is not a
+                   // figure — it is what the reader read, kept so a question
+                   // about the parser can be answered against this driver's own
+                   // cards instead of against rendered replicas. A spreadsheet
+                   // puts it off the right-hand edge where it is out of the way
+                   // until it is wanted, and every column before it keeps the
+                   // position it has always had.
+                   'text'];
 
 function numOrNull(v) {
   return (typeof v === 'number' && isFinite(v)) ? v : null;

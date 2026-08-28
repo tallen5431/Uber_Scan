@@ -71,7 +71,8 @@ class OfferAccumulator:
         self.key = None
         self.started = 0.0
         self.last_add = 0.0
-        self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool, 'seen': n}]
+        self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool,
+                                #   'labelled': bool, 'seen': n}]
         self.items = []
         # Deadlines seen this window. A delivery card gives one instead of a
         # duration, so it is the denominator of the whole verdict — and it was
@@ -132,7 +133,8 @@ class OfferAccumulator:
         found = self._find_slot(leg, taken)
         if found is not None:
             return found
-        self.legs.append({'minutes': [], 'miles': [], 'isTotal': False, 'seen': 0})
+        self.legs.append({'minutes': [], 'miles': [], 'isTotal': False,
+                          'labelled': False, 'seen': 0})
         return len(self.legs) - 1
 
     def _is_a_different_card(self, detail, now):
@@ -238,6 +240,13 @@ class OfferAccumulator:
             # One frame calling it a total is enough; the word is rarely
             # hallucinated and missing it is the common failure.
             slot['isTotal'] = slot['isTotal'] or bool(leg.get('isTotal'))
+            # Whether the card ever labelled this leg part of the journey.
+            # OR across frames, like isTotal: one frame reading the word is
+            # enough, and losing it is what a glare frame does. is_whole
+            # re-runs the short-a-distance rule over the merged legs, so a
+            # label that does not survive the merge is a rule that stops
+            # working on exactly the readings the merge exists for.
+            slot['labelled'] = slot['labelled'] or bool(leg.get('labelled'))
 
         if parsed.get('items') is not None:
             self.items.append(parsed['items'])
@@ -286,7 +295,8 @@ class OfferAccumulator:
         # which keeps it out of every median on the offers page.
         merged_legs = [{'minutes': _consensus(slot['minutes']),
                         'miles': _consensus(slot['miles']) if slot['miles'] else None,
-                        'isTotal': slot['isTotal']}
+                        'isTotal': slot['isTotal'],
+                        'labelled': slot['labelled']}
                        for slot in used]
 
         # One definition of the rule, in the parser, asked about the merge's own

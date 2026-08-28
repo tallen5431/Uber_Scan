@@ -2551,9 +2551,32 @@ Three deliberate omissions:
 
 * **no accept/decline column.** The scanner cannot see the Accept button and
   must never touch it, so anything here would be a guess presented as a record.
-* **no OCR text.** The useful part is already parsed into numbers; what is left
-  is pickup addresses. `rpi/journal.jsonl` is gitignored, and the static server
-  hands over only files whose extension is one the site is built from — `.html`,
+* ~~**no OCR text.**~~ **Superseded.** The reason given here was that "the
+  useful part is already parsed into numbers; what is left is pickup addresses"
+  — and a later change added a `places` column that stores exactly those
+  addresses, in the row, in the CSV and in the sync. What was left out to
+  protect is now kept beside it, so the omission was costing evidence and
+  protecting nothing that was not already there.
+
+  It cost more than it looked. 568 real offers on record and **not one
+  recoverable card**: every figure the reader derived is in the file and the
+  text it derived them from is not, so every question about the parser has had
+  to be answered against rendered replicas. The "Avg. wait time at pickup" line
+  that switched the running cost off on a third of one shift was found from
+  three mangled fragments that happened to survive in `places` — because the
+  addresses were kept and the reading was not.
+
+  The row now carries the reading, truncated at 220 characters: a ride card
+  reads to about 80, and the headroom is for the frames where the crop takes in
+  a slice of the map, which are exactly the frames worth studying. It adds about
+  90 bytes to a 623-byte row — single-digit megabytes over a year of driving,
+  against a 64MB roll. It is the last column of the CSV so a spreadsheet puts it
+  off the right-hand edge and every column before it keeps the position it has
+  always had.
+
+  The protection that mattered is unchanged and is below: `rpi/journal.jsonl` is
+  gitignored, and the static server hands over only files whose extension is one
+  the site is built from — `.html`,
   `.css`, `.js`, the icons, the fonts, the traineddata. It used to be the other
   way round, a list of paths to refuse, and a list of paths to refuse has to be
   remembered every time something new appears beside `server.js`. It was not:
@@ -2613,6 +2636,40 @@ is private mode, a full quota, or a browser with site data turned off.
 
 Each of the five behaviours worth having is verified by breaking it: restore
 any one of them and the check named for it fails.
+
+### A leg is a leg because the card says so
+
+The wait-line fix above matched a phrase. That was the wrong shape of rule, and
+probing for others showed why: a promo chip's **"15 min left"** and an ETA
+badge's **"arrives in 9 min"** each became a third leg on a two-leg card and
+tripped the same guard. A phrase list would have needed both, and then the next
+one.
+
+Uber labels every leg of a journey — *away*, *trip*, *total* — and prints its
+distance beside its time. So the card's own grammar decides it:
+
+- a minutes-only token **with** a label is a leg whose distance did not read,
+  which is the damage the guard was written for;
+- one **without** a label was never a leg.
+
+That subsumes the wait line and needs no vocabulary of things that are not legs.
+It also **fails safe**: a real leg that loses *both* its label and its distance
+is read as not-a-leg, so the other legs' distance is charged instead of none at
+all — a cost that is too low rather than absent, which is the less optimistic of
+the two errors and the only direction that matters. That is the "charge the
+partial distance" idea this work set out to do, arrived at from the other side.
+
+A cap on leg count would have been wrong: a stacked order really does have four,
+and the corpus now pins one.
+
+**The field had to survive three hops, and it was dropped at two of them.**
+`parse()` builds the legs; `legDetail` projects them; the accumulator rebuilds
+them across frames — and `is_whole` re-runs the rule over whichever it is handed.
+Neither projection carried `labelled` at first, and neither failed loudly: the
+rule simply stopped seeing any leg as labelled, so a card whose distance read as
+"7.3 m1" called itself whole again. The suite caught both. `test_accumulate.py`
+now asserts the property rather than the instances — every field a leg carries
+survives both projections — so the next field added takes the same trip safely.
 
 ### The line about waiting that switched the running cost off
 
@@ -3159,7 +3216,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3447 checks
+npm test                # all 29 suites, 3479 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3173,12 +3230,12 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 398 checks, the shared corpus
+node tests/corpus.test.js       # 408 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  95 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 431 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 103 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 441 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 114 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
@@ -3186,7 +3243,7 @@ python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
 python3 rpi/test_exposure.py    # 133 on flicker, brightness, gain and
                                 #     exposure, and on both ends of running out
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     # 143 on keeping one row per offer, and on a
+python3 rpi/test_journal.py     # 144 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and

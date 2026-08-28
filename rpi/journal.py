@@ -454,6 +454,13 @@ class OfferLog:
         return None
 
 
+# How much of a reading to keep on the row. A ride card reads to about 80
+# characters and a delivery card to fewer; the headroom is for the frames where
+# the crop takes in a slice of the map behind the card, which are exactly the
+# frames worth studying later.
+TEXT_KEPT = 220
+
+
 def content_of(parsed, places=None):
     """What makes this reading different from the last one of the same card.
 
@@ -552,6 +559,25 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         'milesUncertain': bool(rate['milesUncertain'] if 'milesUncertain' in rate
                                else parsed.get('milesUncertain')),
         'locked': bool(locked),
+        # What the reader actually read, which is the one thing this file never
+        # kept and the one thing every fix to the parser has needed.
+        #
+        # 568 real offers on record and not a single recoverable card: every
+        # figure the reader derived is here and the text it derived them from is
+        # not, so every question about the parser has had to be answered against
+        # rendered replicas. Those replicas are honest about the shapes and say
+        # nothing about what a camera does to a real screen at night — the
+        # "Avg. wait time at pickup" line that switched the running cost off on a
+        # third of one shift was found from three mangled fragments that happened
+        # to survive in `places`, and only because the addresses were kept.
+        #
+        # Truncated, and truncated at the reading rather than the card: a real
+        # ride card is about 80 characters and the cap is there for the frames
+        # where the reader picks up half the map as well. It roughly doubles a
+        # row, which on a year of driving is single-digit megabytes against a
+        # 64MB roll — cheap for the only evidence that can settle whether a
+        # parser change helps on this driver's own phone.
+        'text': (parsed.get('text') or '')[:TEXT_KEPT] or None,
         # Whether the whole journey was in view: a line tagged as the total, or
         # both legs of a two-leg card. A reading without it is a *fragment*, and
         # a fragment always flatters the offer — the first leg of a two-leg card

@@ -549,7 +549,7 @@
     },
     {
       "name": "the pickup wait line is not a leg of the journey",
-      "_why": "Uber prints 'Avg. wait time at pickup 4 min' under the address. It is a duration with no distance beside it, so it matched LEG, became a third leg on a two-leg card, and tripped legs_short_a_distance \u2014 which reads a leg with no miles as damage and marks the whole distance untrusted, after which rate() charges no mileage at all. On one real shift that was 67 of the 70 three-leg cards and a third of every offer read. The distance was complete throughout.",
+      "_why": "Uber labels every leg of a journey \u2014 away, trip, total \u2014 and prints its distance beside its time. A minutes-only token with no label is not a leg at all, and the card is full of them. This one is 'Avg. wait time at pickup 4 min' under the address: it became a third leg on a two-leg card and tripped legs_short_a_distance, which marked the whole distance untrusted and made rate() charge no mileage. 67 of the 70 three-leg cards on one real shift, with the distance complete throughout.",
       "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avg. wait time at pickup 4 min",
       "expect": {
         "pay": 16.05,
@@ -589,6 +589,43 @@
       "text": "$16.05 5 min away 18 min trip Avg. wait time at pickup 4 min",
       "expect": {
         "miles": null
+      }
+    },
+    {
+      "name": "a promo chip is not a leg either",
+      "_why": "'15 min left' has no leg label, so it is not part of the journey. Decided by the card's own grammar rather than a list of phrases that are not legs, which is what makes it hold for the next one.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip +$2.50 promo 15 min left",
+      "expect": {
+        "miles": 8.4,
+        "milesUncertain": false
+      }
+    },
+    {
+      "name": "...nor an arrival badge",
+      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip arrives in 9 min",
+      "expect": {
+        "miles": 8.4,
+        "milesUncertain": false
+      }
+    },
+    {
+      "name": "a stacked order really does have four legs",
+      "_why": "So the rule cannot be a cap on how many legs a card may have. Every one of these states its distance, so none of them is in question.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip 6 min (2.1 mi) away 12 min (4.0 mi) trip",
+      "expect": {
+        "legs": 4,
+        "miles": 14.5,
+        "minutes": 41.0,
+        "milesUncertain": false
+      }
+    },
+    {
+      "name": "...and a labelled leg that lost its distance is still doubted",
+      "_why": "The card said 'trip', so this is a leg the reader failed on rather than a line that was never a leg. That is the damage the guard was written for and it has to keep catching it.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min trip",
+      "expect": {
+        "miles": 1.1,
+        "milesUncertain": true
       }
     }
   ],
