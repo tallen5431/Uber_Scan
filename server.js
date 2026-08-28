@@ -546,13 +546,16 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    // both ends of a ride without breaking the comma-separated
                    // file it sits in.
                    'places', 'deliverBy', 'fromDeadline', 'ms',
-                   // Last, deliberately. This is the only column that is not a
-                   // figure — it is what the reader read, kept so a question
-                   // about the parser can be answered against this driver's own
-                   // cards instead of against rendered replicas. A spreadsheet
-                   // puts it off the right-hand edge where it is out of the way
-                   // until it is wanted, and every column before it keeps the
-                   // position it has always had.
+                   // At the end, deliberately — toCsv appends `when` after
+                   // it, so this is the second-to-last column and the
+                   // human-readable timestamp keeps the edge it has always had.
+                   //
+                   // The only column that is not a figure: it is what the
+                   // reader read, kept so a question about the parser can be
+                   // answered against this driver's own cards instead of
+                   // against rendered replicas. A spreadsheet puts it out to
+                   // the right where it is out of the way until it is wanted,
+                   // and every column before it keeps its position.
                    'text'];
 
 function numOrNull(v) {
