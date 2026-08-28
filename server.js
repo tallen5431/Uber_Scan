@@ -22,6 +22,18 @@ var url = require('url');
 var os = require('os');
 var spawn = require('child_process').spawn;
 
+// The one rule about which offers count towards a figure derived from more than
+// one of them. Required rather than restated: advice.js:116 records that this
+// test existed in two places once and the copies drifted, and journal.html:480
+// records what that cost — a duplicate that never excluded hidden rows, masked
+// for as long as nobody asked the server for them.
+//
+// advice.js is a UMD whose first branch is CommonJS, it touches no browser
+// global at load time, and tests/advice.test.js has required it from Node since
+// it was written. A relative require resolves against this file's directory,
+// not the cwd, so it survives however the server is started.
+var Advice = require('./advice.js');
+
 var ROOT = __dirname;
 var PORT = parseInt(process.env.PORT, 10) || 8080;
 var HTTPS_PORT = parseInt(process.env.HTTPS_PORT, 10) || 8443;
@@ -935,6 +947,155 @@ function readJournal(done) {
   });
 }
 
+// 1 Jan 2025. Below this a timestamp is not a moment, it is a Pi that has not
+// heard from NTP yet: the board has no real-time clock, boots in 1970 and jumps
+// when the network arrives, and its systemd unit is ordered After=multi-user
+// only — so it genuinely can record offers before its clock is right.
+// scan_pi.py holds the same number for the same reason and will not judge a
+// delivery deadline below it.
+//
+// Those rows are stamped 1970 on disk forever. They cannot fall inside any
+// day window, so a shift figure has to either lie about them or say how many it
+// could not place. It says.
+var CLOCK_BELIEVABLE_AFTER = 1735689600000;
+
+// The value below which a given share of offers fall, interpolated between the
+// two straddling samples. A byte-for-byte port of journal.html's percentile()
+// on purpose: the driving screen and the offers page must not be able to print
+// different medians for the same day, and two implementations that round
+// differently would do exactly that on an even-sized window.
+function percentileOf(sorted, share) {
+  if (!sorted.length) return null;
+  if (sorted.length === 1) return sorted[0];
+  var pos = share * (sorted.length - 1);
+  var low = Math.floor(pos), high = Math.ceil(pos);
+  return sorted[low] + (sorted[high] - sorted[low]) * (pos - low);
+}
+
+// What one shift adds up to, over rows the journal has already been read into.
+//
+// Every figure here comes off ONE filtered set, which is the rule journal.html
+// learned the hard way: its median already excluded the rows it set aside and
+// the money beside it did not, so a day carrying two misread payouts announced
+// two and a half thousand dollars offered next to a median of thirteen.
+// Figures on one line that disagree about what they are counting are worse
+// than one figure.
+//
+// `counted` is journal.html's counted() — Advice.trustworthy plus a rate to
+// draw — and nothing else. The isFinite is belt over braces: JSON cannot carry
+// a NaN, so it can never change the answer for a row that came off disk, and
+// it keeps the median's arithmetic from being handed one if a caller ever
+// builds rows some other way.
+function shiftSummary(rows, since) {
+  var offers = latestPerOffer(rows);
+  var early = 0;
+  var window = [];
+  offers.forEach(function (o) {
+    var at = (typeof o.at === 'number' && isFinite(o.at)) ? o.at : null;
+    if (at === null) return;
+    if (at < CLOCK_BELIEVABLE_AFTER) { early += 1; return; }
+    if (at >= since) window.push(o);
+  });
+  var counted = window.filter(function (o) {
+    return Advice.trustworthy(o)
+      && typeof o.perHour === 'number' && isFinite(o.perHour);
+  });
+  var rates = counted.map(function (o) { return o.perHour; })
+    .sort(function (a, b) { return a - b; });
+  return {
+    // Offers, not readings. latestPerOffer folds the four-to-fourteen readings
+    // one card produces down to the one row that card became — counting rows
+    // would make a single offer look like a busy afternoon.
+    offers: window.length,
+    counted: counted.length,
+    // Named rather than dropped. A row vanishing from a figure with nothing
+    // saying so is the failure this project keeps writing sections about.
+    setAside: window.length - counted.length,
+    // Counted FIRST, then accepted — the same order journal.html uses. Taking
+    // it off the raw window instead would put a bigger number on the driving
+    // screen than the offers page shows for the same day.
+    took: counted.filter(function (o) { return o.accepted; }).length,
+    median: percentileOf(rates, 0.5),
+    beforeClock: early
+  };
+}
+
+// One answer, kept until the journal changes underneath it.
+//
+// The parse is synchronous once the file is in hand — split, then a JSON.parse
+// per line — and it runs on the event loop that also drives the 12ms MJPEG tick
+// and touches the file telling the scanner somebody is watching. A year of
+// driving is a ~19MB journal and something on the order of a second of frozen
+// loop on a Pi 4, so a page that asks repeatedly cannot be paying that every
+// time. /api/journal/newest already sets the house budget for a journal-reading
+// GET at "every few minutes"; this keeps to it and then some.
+//
+// Keyed on SIZE as well as mtime because the file is append-only apart from the
+// 64MB roll, so size is monotonic where mtime granularity is not guaranteed.
+// The cached value is the finished summary — never the parsed rows, which
+// latestPerOffer writes `hidden` and `accepted` onto, safe today only because
+// every request re-parses them fresh.
+var shiftCache = null;
+
+function todaySummary(since, done) {
+  // Whether this machine's own clock can be believed at all. The browser cannot
+  // check it — the browser's clock is fine, it is the rig's that is not — and
+  // every figure below is a window on a timeline the rig may not yet know it is
+  // on.
+  //
+  // Answered fresh on every request and deliberately NOT part of what is
+  // cached. It changes on its own, without the journal changing: a rig that
+  // boots, is looked at, and only then hears from NTP would otherwise keep
+  // serving "waiting for the clock" out of the cache until the next offer was
+  // written — through the whole first part of a shift, on a rig that by then
+  // knew perfectly well what day it was.
+  var clockSet = Date.now() >= CLOCK_BELIEVABLE_AFTER;
+  var answered = function (answer) {
+    // A shallow copy, because the cached object outlives this request and is
+    // handed to the next one. Writing the flag onto it would work today and
+    // become a shared-state bug the moment anything else is stamped per
+    // request.
+    var out = {};
+    Object.keys(answer).forEach(function (k) { out[k] = answer[k]; });
+    out.clockSet = clockSet;
+    done(out);
+  };
+  fs.stat(JOURNAL_PATH, function (statErr, st) {
+    var size = st ? st.size : -1;
+    var stamp = st ? st.mtimeMs : -1;
+    if (shiftCache && shiftCache.size === size && shiftCache.stamp === stamp
+        && shiftCache.since === since) {
+      return answered(shiftCache.answer);
+    }
+    readJournal(function (rows, readErr) {
+      // Empty and unreadable are different answers and the page says different
+      // things about them. readJournal answers [] for a journal that is not
+      // there yet and null for one that is there and could not be read.
+      var answer;
+      if (!rows) {
+        answer = { unreadable: (readErr && readErr.code) || 'unknown' };
+      } else {
+        answer = shiftSummary(rows, since);
+        answer.unreadable = null;
+        // A journal that just rolled past 64MB is empty for the same reason a
+        // brand new one is, and the difference matters: without this the panel
+        // says "no offers yet" at eleven at night. Nothing here reads the .1
+        // sibling — that is a bigger change than a status line — but it can at
+        // least decline to claim the day was quiet.
+        answer.rolled = (!answer.offers && !answer.beforeClock
+                         && fs.existsSync(JOURNAL_PATH + '.1')) || false;
+      }
+      // An unreadable journal is not cached. It is a transient the next request
+      // may not hit, and keying it on a size and mtime that did not change
+      // would hold the failure up until the file did.
+      if (size >= 0 && rows) {
+        shiftCache = { size: size, stamp: stamp, since: since, answer: answer };
+      }
+      answered(answer);
+    });
+  });
+}
+
 function toCsv(offers) {
   var lines = [CSV_COLUMNS.concat(['when']).join(',')];
   offers.forEach(function (r) {
@@ -1034,6 +1195,18 @@ function route(req, res) {
       appendLines(JSON.stringify(note) + '\n', function (writeErr) {
         if (writeErr) return send(res, 500, JSON.stringify({ ok: false, error: writeErr.message }),
                                   { 'Content-Type': 'application/json; charset=utf-8' });
+        // Remember it against the offer the driving screen is holding, so a
+        // reload does not forget. The button's state was page-local: mark an
+        // offer, reload the panel, and it offered to mark it again — while the
+        // shift line beside it had already counted it. Two figures forty pixels
+        // apart disagreeing about the same thing the driver just did.
+        //
+        // Only when it names that offer. A mark for anything else is about a
+        // row on the offers page and says nothing about what is on this screen.
+        if (note.kind === 'mark' && scanner.offer && scanner.offer.id === note.id
+            && note.accepted !== undefined) {
+          scanner.offer.accepted = note.accepted;
+        }
         send(res, 200, JSON.stringify({ ok: true, note: note }),
              { 'Content-Type': 'application/json; charset=utf-8' });
       });
@@ -1595,6 +1768,36 @@ function route(req, res) {
                                       // quiet week.
                                       unreadable: unreadable,
                                       offers: offers }),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
+
+  // What the shift adds up to so far, for the one line of it the driving screen
+  // shows. The offers page works this out for itself from the rows it already
+  // has; the driving screen has no rows and must not grow a second copy of the
+  // rule for deciding which ones count, so the arithmetic happens here.
+  if (pathname === '/api/today') {
+    var tq = url.parse(req.url, true).query || {};
+    var sinceMs = parseInt(tq.since, 10);
+    // Required, and required to be believable. /api/journal can afford
+    // clampNumber's zero fallback because `days` independently defaults to 30;
+    // alone, a zero floor means the entire journal, which the caller would then
+    // put on a panel under the word "today". A window this endpoint cannot
+    // believe is an error, never a silent all-time figure.
+    //
+    // The browser names it, for the reason /api/journal takes it from the
+    // browser too: only the page knows where the driver is, and therefore when
+    // their day began. 4am, in their timezone, is journal.html's boundary and
+    // the one the page sends.
+    if (!isFinite(sinceMs) || sinceMs < CLOCK_BELIEVABLE_AFTER
+        || sinceMs > 4102444800000) {
+      return send(res, 400, JSON.stringify({
+        ok: false,
+        error: 'since must be an epoch-ms moment in this century'
+      }), { 'Content-Type': 'application/json; charset=utf-8' });
+    }
+    return todaySummary(sinceMs, function (answer) {
+      send(res, 200, JSON.stringify(answer),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }

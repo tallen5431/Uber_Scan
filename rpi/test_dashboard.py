@@ -227,6 +227,22 @@ const LOOK = (sel) => {
       await route.fulfill({ status: 200, contentType: 'application/json',
                             body: '{"ok":true}' });
     });
+    // The shift figures, and how many times the page asked for them. The
+    // answer changes on the second ask so a refetch is visible rather than
+    // inferred — a count that never moved would look identical to one that was
+    // refetched and happened to be the same.
+    const shiftAsked = [];
+    await page.route('**/api/today*', async (route) => {
+      shiftAsked.push(route.request().url());
+      const n = shiftAsked.length;
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ offers: 9, counted: 8, setAside: 1,
+                               took: n === 1 ? 2 : 3, median: 21,
+                               beforeClock: 0, unreadable: null,
+                               rolled: false, clockSet: true }),
+      });
+    });
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
@@ -243,9 +259,28 @@ const LOOK = (sel) => {
                      <= document.documentElement.clientWidth + 1 };
     });
 
+    // The shift line, measured the same way as everything else on this panel:
+    // on-glass, on one line, and not widening the row it sits on.
+    const lookShift = () => page.evaluate(() => {
+      const s = document.getElementById('shift');
+      const r = s.getBoundingClientRect();
+      const bar = s.parentElement.getBoundingClientRect();
+      return { hidden: s.hidden, text: (s.textContent || '').trim(),
+               shown: !s.hidden && r.width > 0 && r.height > 0
+                      && r.top >= 0 && r.bottom <= window.innerHeight + 1,
+               size: Math.round(parseFloat(getComputedStyle(s).fontSize)),
+               // One line: no taller than the row it is a flex item of.
+               oneLine: r.height <= bar.height + 1,
+               fits: document.documentElement.scrollWidth
+                     <= document.documentElement.clientWidth + 1 };
+    });
+
     await page.evaluate(() => window.__es.push({ phase: 'scanning' }));
     await page.waitForTimeout(120);
     out.tookIdle = await look();
+    // Asked for at load, before any card has arrived — a shift is not about
+    // the offer on screen and must not wait for one.
+    out.shiftFirst = await lookShift();
 
     await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
     await page.evaluate(() => window.__es.push(
@@ -267,8 +302,15 @@ const LOOK = (sel) => {
     const press = () => page.click('#took', { timeout: 3000 }).then(() => true,
                                                                    () => false);
     out.tookClicked = await press();
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(400);
     out.tookMarked = await look();
+    // Marking is the one thing on this screen that changes the count, so it is
+    // the one time the figures are worth asking for off the timer. Left to the
+    // three-minute poll, a driver would press "took it" and watch the number
+    // beside it not move — the same two-figures-disagreeing failure, now inside
+    // one panel.
+    out.shiftAfterMark = await lookShift();
+    out.shiftAsked = shiftAsked.length;
 
     // A different offer arrives while the last one is STILL MARKED, which is
     // the ordering that matters and the one an undo-first test cannot reach: a
@@ -287,6 +329,101 @@ const LOOK = (sel) => {
     await page.waitForTimeout(200);
     out.tookUndone = await look();
     out.tookPosted = posted;
+    await page.close();
+    await ctx.close();
+  }
+
+  // --- the shift line when the figures cannot be trusted -------------------
+  //
+  // Every one of these is a state where a plausible-looking count would be a
+  // confidently wrong number, which is the thing this project refuses to print.
+  // The rig's clock has not been set, so it does not know what day it is on;
+  // the journal could not be read, which looks exactly like a quiet day unless
+  // it says so; the journal just rolled past 64MB and is empty for a reason
+  // that is not "no offers yet"; and the endpoint is not there at all, which is
+  // what an older build does — as a text/plain 404, so the page's .json()
+  // rejects rather than returning a status to branch on.
+  for (const [key, body, status] of [
+    ['clock', { clockSet: false }, 200],
+    ['unreadable', { offers: 0, counted: 0, setAside: 0, took: 0, median: null,
+                     beforeClock: 0, unreadable: 'EIO', clockSet: true }, 200],
+    ['rolled', { offers: 0, counted: 0, setAside: 0, took: 0, median: null,
+                 beforeClock: 0, unreadable: null, rolled: true,
+                 clockSet: true }, 200],
+    ['early', { offers: 3, counted: 3, setAside: 0, took: 1, median: 18,
+                beforeClock: 4, unreadable: null, rolled: false,
+                clockSet: true }, 200],
+  ]) {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.route('**/api/today*', async (route) => {
+      await route.fulfill(status === 404
+        ? { status: 404, contentType: 'text/plain', body: 'not found' }
+        : { status: 200, contentType: 'application/json',
+            body: JSON.stringify(body) });
+    });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    out['shift_' + key] = await page.evaluate(() => {
+      const s = document.getElementById('shift');
+      return { hidden: s.hidden, text: (s.textContent || '').trim() };
+    });
+    await page.close();
+    await ctx.close();
+  }
+
+  // --- ...and when the endpoint stops answering -----------------------------
+  //
+  // Asserting the line is hidden on a page that never got an answer proves
+  // nothing: it starts hidden in the markup. The property that matters is that
+  // figures which WERE on the panel come off it when they can no longer be
+  // vouched for — an older build one git pull behind answers text/plain to an
+  // unknown /api path, so .json() rejects rather than returning a status.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    let asks = 0;
+    await page.route('**/api/today*', async (route) => {
+      asks += 1;
+      await route.fulfill(asks === 1
+        ? { status: 200, contentType: 'application/json',
+            body: JSON.stringify({ offers: 7, counted: 7, setAside: 0, took: 2,
+                                   median: 19, beforeClock: 0,
+                                   unreadable: null, rolled: false,
+                                   clockSet: true }) }
+        : { status: 404, contentType: 'text/plain', body: 'not found' });
+    });
+    await page.route('**/api/offers/mark', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json',
+                            body: '{"ok":true}' });
+    });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    const peek = () => page.evaluate(() => {
+      const s = document.getElementById('shift');
+      return { hidden: s.hidden, text: (s.textContent || '').trim() };
+    });
+    await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
+    await page.evaluate(() => window.__es.push(
+      { offer: { id: 'g1', pay: 8.04, minutes: 23, perHour: 14.71 }, at: 1 }));
+    await page.waitForTimeout(300);
+    out.shiftBefore = await peek();
+    // Marking refetches, and this time the endpoint is not there.
+    await page.click('#took', { timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    out.shiftLost = await peek();
+    out.shiftLostAsks = asks;
     await page.close();
     await ctx.close();
   }
@@ -316,8 +453,13 @@ const LOOK = (sel) => {
                                // the only way a page that has just opened can
                                // know: the socket replays the last reading, not
                                // the last offer.
+                               // ...and whether it has already been marked.
+                               // The button's state was page-local, so a
+                               // reload offered to mark an offer that was
+                               // already on the record — while the shift count
+                               // beside it had already counted it.
                                offer: { id: 'seed-1', pay: 9.75, minutes: 21,
-                                        perHour: 27.86 },
+                                        perHour: 27.86, accepted: true },
                                offerAgeMs: 3600000,
                                status: { phase: 'scanning' } }),
       });
@@ -327,7 +469,8 @@ const LOOK = (sel) => {
     await page.waitForTimeout(700);
     out.seedTook = await page.evaluate(() => {
       const t = document.getElementById('took');
-      return { hidden: t.hidden, text: (t.textContent || '').trim() };
+      return { hidden: t.hidden, text: (t.textContent || '').trim(),
+               pressed: t.getAttribute('aria-pressed') };
     });
     out.stale = {
       detail: await page.evaluate(LOOK, '#detail'),
@@ -520,6 +663,75 @@ try:
         ok_('pressing again takes it back off',
             (undone.get('text') or '').endswith('?'))
 
+    # --- what the shift adds up to, on the row under the verdict ---------
+    first = got.get('shiftFirst') or {}
+    ok_('the shift line was measured', bool(first))
+    if first:
+        # It is not about the offer on screen, so it must not wait for one:
+        # this is read before any card has arrived.
+        ok_('the shift shows before any card has', first.get('shown'))
+        ok_('...saying how many offers', '9 offers' in (first.get('text') or ''))
+        ok_('...how many were set aside rather than dropping them',
+            'set aside' in (first.get('text') or ''))
+        ok_('...how many were taken', 'took 2' in (first.get('text') or ''))
+        ok_('...and the median rate', '$21/hr' in (first.get('text') or ''))
+        # No dollar total. `pay` is what the card offered, not what was earned,
+        # and a gross sum beside a net median is the sentence the offers page
+        # was corrected for.
+        ok_('...and does not claim a total earned',
+            'offered' not in (first.get('text') or '')
+            and '$21/hr' in (first.get('text') or '')
+            and (first.get('text') or '').count('$') == 1)
+        # On the glass and on one line, on the panel this is bolted to.
+        ok_('...on one line', first.get('oneLine'))
+        ok_('...without widening the panel', first.get('fits'))
+        ok_('...at a size that can be read from the driving seat (%spx)'
+            % first.get('size'), (first.get('size') or 0) >= 12)
+
+    after = got.get('shiftAfterMark') or {}
+    ok_('the shift line after a mark was measured', bool(after))
+    if after:
+        # Two figures forty pixels apart, about the same act the driver just
+        # performed. If the count does not follow the button they contradict
+        # each other on the panel.
+        eq('...and the count is asked for again when an offer is marked',
+           got.get('shiftAsked'), 2)
+        ok_('...so the taken figure follows the button',
+            'took 3' in (after.get('text') or ''))
+
+    # A number that cannot be right is not printed. Each of these is a state
+    # where the count would look perfectly plausible and be wrong.
+    for key, must in (('clock', 'clock'),
+                      ('unreadable', 'could not be read'),
+                      ('rolled', 'rolled')):
+        slot = got.get('shift_' + key) or {}
+        ok_('the %s state was measured' % key, bool(slot))
+        if slot:
+            ok_('...and says so rather than counting (%s)' % key,
+                must in (slot.get('text') or ''))
+            ok_('...and prints no offer count (%s)' % key,
+                'offer' not in (slot.get('text') or ''))
+
+    # An older build has no such route and answers text/plain, so .json()
+    # rejects. Asserting a hidden line on a page that never got an answer proves
+    # nothing — it starts hidden. The property is that figures which WERE on the
+    # panel come off it once they cannot be vouched for.
+    before, lost = got.get('shiftBefore') or {}, got.get('shiftLost') or {}
+    ok_('the shift line was on the panel first', bool(before))
+    if before:
+        ok_('...showing a shift', '7 offers' in (before.get('text') or ''))
+        eq('...and the failed ask really happened', got.get('shiftLostAsks'), 2)
+        ok_('...and it comes off when the figures can no longer be had',
+            lost.get('hidden'))
+
+    # Offers the rig recorded before its clock was set are stamped 1970 and
+    # cannot fall inside any day. The count is short by that many and says so.
+    early = got.get('shift_early') or {}
+    ok_('the pre-clock state was measured', bool(early))
+    if early:
+        ok_('...and names the offers no day window can hold',
+            '4 before the clock was set' in (early.get('text') or ''))
+
         # By id every time, and each mark against the offer that was on record
         # when it was pressed. Marking by pay-and-minutes would be a rule
         # catching every offer paying that to the cent.
@@ -567,6 +779,13 @@ try:
             not seed_took.get('hidden'))
         ok_('...and is named after the offer it would mark',
             '9.75' in (seed_took.get('text') or ''))
+        # ...and remembers that it was already marked. Without this the button
+        # forgot every reload and offered to mark an offer the shift count on
+        # the same row had already counted.
+        eq('...and a mark already on the record survives the reload',
+           seed_took.get('pressed'), 'true')
+        ok_('...showing it as marked rather than offering again',
+            (seed_took.get('text') or '').startswith('✓'))
 
     replay = got.get('replay') or {}
     ok_('the replayed verdict was measured', bool(replay.get('detail')))

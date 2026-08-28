@@ -392,6 +392,102 @@ try:
         pass
     ok_('...and delivers the first frame when it appears', b'--uberscanframe' in got)
     s.close()
+
+    # --- what the shift adds up to, for the driving screen's status row ------
+    #
+    # The offers page works this out from rows it already holds. The driving
+    # screen holds none, so the arithmetic happens on the server — and the whole
+    # point of putting it there is that there is then exactly one rule for which
+    # offers count. These checks are about that rule surviving the trip.
+    now = int(time.time() * 1000)
+    rows = []
+    # One card read three times is ONE offer. Counting journal rows would make a
+    # single card look like a busy afternoon — a real recording has a median of
+    # four readings per card and a maximum of fourteen.
+    for i in range(3):
+        rows.append({'v': 1, 'id': 'o1', 'at': now - 3600000 + i, 'seq': i + 1,
+                     'pay': 16.05, 'minutes': 23.0, 'perHour': 30.0, 'whole': True})
+    rows.append({'v': 1, 'id': 'o2', 'at': now - 1800000, 'seq': 4, 'pay': 8.0,
+                 'minutes': 22.0, 'perHour': 20.0, 'whole': True})
+    # Two that must be set aside rather than dropped: a partial read always
+    # flatters the offer, and a suspect one is not evidence about anything.
+    rows.append({'v': 1, 'id': 'o3', 'at': now - 900000, 'seq': 5, 'pay': 12.0,
+                 'minutes': 30.0, 'perHour': 10.0, 'whole': False})
+    rows.append({'v': 1, 'id': 'o4', 'at': now - 600000, 'seq': 6, 'pay': 9.0,
+                 'minutes': 20.0, 'perHour': 40.0, 'whole': True, 'suspect': True})
+    # Recorded before the Pi's clock was set. Stamped 1970 on disk forever, so
+    # it cannot fall inside any day window.
+    rows.append({'v': 1, 'id': 'o5', 'at': 1000, 'seq': 7, 'pay': 5.0,
+                 'minutes': 10.0, 'perHour': 25.0, 'whole': True})
+    rows.append({'kind': 'mark', 'id': 'o2', 'at': now - 1700000, 'accepted': True})
+    # Marked as taken, but its reading was partial. The offers page counts the
+    # accepted flag only on rows that already count, so this one must not
+    # appear in the taken figure either.
+    rows.append({'kind': 'mark', 'id': 'o3', 'at': now - 800000, 'accepted': True})
+    with open(journal, 'w') as fh:
+        fh.write('\n'.join(json.dumps(r) for r in rows) + '\n')
+
+    since = now - 6 * 3600000
+
+    def today(qs):
+        return json.loads(urllib.request.urlopen(base + '/api/today?' + qs,
+                                                 timeout=3).read().decode())
+
+    day = today('since=%d' % since)
+    eq('one card read many times is one offer', day.get('offers'), 4)
+    eq('...of which the ones with a rate worth drawing are counted',
+       day.get('counted'), 2)
+    eq('...and the rest are named rather than dropped', day.get('setAside'), 2)
+    # 20 and 30 straddle the middle of a two-sample set, so the median is 25 by
+    # the same interpolation journal.html uses. A different rounding here would
+    # put two different medians for one day on two screens.
+    eq('...with the median of the counted rates', day.get('median'), 25)
+    # The one that matters most: o3 was marked taken and is set aside, so it is
+    # not in this number. Counting `accepted` over the raw window instead of
+    # over the counted rows would say 2 here and the offers page would say 1.
+    eq('taken is counted first and accepted second', day.get('took'), 1)
+    eq('...and an offer stamped before the clock was set is said to be missing,'
+       ' not quietly lost', day.get('beforeClock'), 1)
+    ok_('...on a journal that could be read', day.get('unreadable') is None)
+    ok_('...by a machine that knows what day it is', day.get('clockSet'))
+
+    # A window this endpoint cannot believe is an error rather than a silent
+    # all-time figure. /api/journal can afford a zero fallback because `days`
+    # defaults to 30; alone, zero means the whole journal — which the caller
+    # would then put on a panel under the word "today".
+    # `refused`, not `bad` — the module-level failure counter is called that,
+    # and a loop variable at module scope rebinds it to a string. The tally at
+    # the bottom then dies on a %d, which is how this was caught.
+    for refused, what in (('', 'no window at all'),
+                          ('since=0', 'a window starting at the epoch'),
+                          ('since=abc', 'a window that is not a number'),
+                          ('since=99999999999999', 'a window past the year 2100')):
+        try:
+            urllib.request.urlopen(base + '/api/today?' + refused, timeout=3)
+            eq('%s is refused' % what, 'answered', '400')
+        except urllib.error.HTTPError as e:
+            eq('%s is refused' % what, e.code, 400)
+
+    # The same answer twice is not a second read of the journal — but it must
+    # still be the right answer, and it must change the moment the journal does.
+    again = today('since=%d' % since)
+    eq('asking twice gives the same answer', again, day)
+    with open(journal, 'a') as fh:
+        fh.write(json.dumps({'v': 1, 'id': 'o6', 'at': now - 300000, 'seq': 8,
+                             'pay': 20.0, 'minutes': 40.0, 'perHour': 30.0,
+                             'whole': True}) + '\n')
+    after = today('since=%d' % since)
+    eq('...and a new offer is seen, not served from the last answer',
+       after.get('offers'), 5)
+    eq('...and moves the median with it', after.get('median'), 30)
+
+    # A window that starts after everything in the file is a real, empty day —
+    # and an empty day is not the same claim as a journal that could not be read.
+    empty = today('since=%d' % (now + 60000))
+    eq('a day with nothing in it yet counts nothing', empty.get('offers'), 0)
+    eq('...and has no median to report', empty.get('median'), None)
+    ok_('...and does not call that a broken journal',
+        empty.get('unreadable') is None)
 finally:
     proc.terminate()
     try:

@@ -205,6 +205,16 @@
   }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--no); }
   .connbar a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+  /* One line, and it gives way rather than widening the row. `min-width: 0`
+     because a flex item will not shrink below its content without it, and this
+     row sits on a panel the page is held to fitting — a long shift line that
+     pushed the row wider would scroll the whole screen sideways. No colour of
+     its own: it inherits the row's muted grey, which is what a fact you glance
+     at rather than drive by should look like beside a verdict. */
+  #shift {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #shift[hidden] { display: none; }
   .dot.on { background: var(--go); }
   #viewWrap { margin: 0; }
   #viewWrap img {
@@ -372,7 +382,19 @@
        `atomic` because "ACCEPT $25.3" is one statement, not two updates. -->
   <p class="sr-only" id="spoken" role="status" aria-live="polite" aria-atomic="true"></p>
 
-  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a></div>
+  <!-- What the shift adds up to, on the status row rather than inside the
+       verdict card. The card has 20-50px of slack at 800x480 and the rules that
+       fire when a notice shows already spend a line's worth of it buying the
+       headline room back — on one real shift that was 52 of 121 offers. A
+       permanent line in there would take that reserve away, and the overflow
+       does not scroll: #verdict centres its children with plain `center`, so
+       the excess clips off the TOP and the word ACCEPT goes first.
+
+       This row is `auto` height and already holds one line, so a second item on
+       it is nearly free. It also outlives a card, which is the point — the
+       address above clears when the offer goes because it belongs to that
+       offer, and a shift does not. -->
+  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="shift" hidden></span></div>
 
   <nav class="bottombar">
     <!-- The one thing the rig cannot see: whether the driver pressed Accept.
@@ -424,7 +446,7 @@
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'working', 'places', 'spoken', 'took']
+   'working', 'places', 'spoken', 'took', 'shift']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -628,8 +650,105 @@
     }).then(function () {
       tookBusy = false;
       showTook();
+      // The count on the status row is about to be wrong by one. Marking is the
+      // only thing on this screen that changes it, so it is also the only time
+      // it is worth asking again off the timer — and leaving it until the next
+      // slow poll would mean pressing "took it" and watching the number beside
+      // it not move.
+      loadShift();
     });
   });
+
+  // --- what the shift adds up to ------------------------------------------
+  //
+  // 4am, not midnight: a shift that ran 16:47 to 03:18 is one evening's work
+  // and a calendar date cuts it in half. The same number and the same reasoning
+  // as journal.html — if the two screens disagreed about when the day started
+  // they would print different counts for the same day.
+  var DAY_STARTS_AT = 4;
+
+  // The start of the day currently being driven — 4am today, or 4am yesterday
+  // while it is still before four in the morning. Local time throughout,
+  // because "today" means today where the driver is, and the rig cannot know
+  // that: it has no real-time clock and no idea what timezone the car is in.
+  // The page says, exactly as it does for /api/journal.
+  //
+  // Shift back four hours, floor to midnight, add four back. setHours with a
+  // whole-day argument sets the field absolutely, so this is exactly 04:00
+  // local whatever daylight saving did in between.
+  function dayStart() {
+    var d = new Date();
+    d.setHours(d.getHours() - DAY_STARTS_AT);
+    d.setHours(0, 0, 0, 0);
+    d.setHours(DAY_STARTS_AT);
+    return d.getTime();
+  }
+
+  var shiftAt = 0;
+  var shiftBusy = false;
+  // Three minutes. The server has to read and parse the whole journal to
+  // answer, on the same event loop that drives the camera stream — a year of
+  // driving is around 19MB and the best part of a second of frozen loop on a
+  // Pi 4. /api/journal/newest already sets the house budget for a
+  // journal-reading GET at "every few minutes", and a shift figure is not a
+  // number anybody watches tick.
+  var SHIFT_EVERY_MS = 180000;
+
+  function showShift(s) {
+    if (!s) { el.shift.hidden = true; return; }
+    var bits;
+    if (s.clockSet === false) {
+      // The rig's own clock has not been set, so it does not yet know what day
+      // it is on. Every window over the journal is meaningless until NTP lands,
+      // and a plausible-looking count is worse than none.
+      bits = ['today: waiting for the clock'];
+    } else if (s.unreadable) {
+      // Empty and unreadable look identical on a panel unless one of them says
+      // so, and this is the one worth acting on.
+      bits = ['today: the journal could not be read'];
+    } else if (s.rolled) {
+      bits = ['today: the journal just rolled over'];
+    } else {
+      bits = [s.offers + (s.offers === 1 ? ' offer' : ' offers')];
+      if (s.setAside) bits.push(s.setAside + ' set aside');
+      bits.push('took ' + s.took);
+      // Only when there is one. A median of nothing is not zero.
+      if (typeof s.median === 'number') {
+        bits.push('median $' + Math.round(s.median) + '/hr');
+      }
+      // Offers the rig recorded before its clock was right. They are stamped
+      // 1970 on disk and cannot fall inside any day, so the count above is
+      // short by this many and says so rather than quietly losing them.
+      if (s.beforeClock) {
+        bits.push(s.beforeClock + ' before the clock was set');
+      }
+    }
+    el.shift.textContent = '· ' + bits.join(' · ');
+    el.shift.hidden = false;
+  }
+
+  function loadShift() {
+    if (shiftBusy) return;
+    shiftBusy = true;
+    shiftAt = Date.now();
+    fetch('/api/today?since=' + dayStart()).then(function (r) {
+      // An older build has no such route, and an unknown /api path on this
+      // server falls past every handler to a text/plain 404 — so `.json()`
+      // rejects with a SyntaxError rather than returning a status to branch on.
+      // Both paths have to end up in the same place.
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.json();
+    }).then(function (s) {
+      showShift(s);
+    }).catch(function () {
+      // Not a silent swallow. Leaving the last good figures up with nothing
+      // saying they are old is the failure this file keeps warning about — an
+      // hour into a shift they would still read like the truth.
+      showShift(null);
+    }).then(function () {
+      shiftBusy = false;
+    });
+  }
 
   var PHASE_LABEL = {
     check: 'CHECKING',
@@ -1002,6 +1121,11 @@
     // card goes, and only then do they look at this screen.
     if (s.offer && s.offer.id) {
       onRecord = s.offer;
+      // ...and whether it has already been marked. Without this the button was
+      // page-local: mark an offer, reload the panel, and it offered to mark it
+      // again while the count on the status row had already counted it — two
+      // figures forty pixels apart disagreeing about the same act.
+      tookState = !!s.offer.accepted;
       showTook();
     }
     scannerState = s.scanner || null;
@@ -1345,7 +1469,18 @@
   // Keeps the "last seen" counter honest, and — since silence is exactly the
   // condition worth noticing — is the only thing that can ever discover the
   // scanner has gone quiet. Nothing arrives to trigger that discovery.
-  setInterval(function () { render(); showConnection(); }, 1000);
+  setInterval(function () {
+    render();
+    showConnection();
+    // The shift figures ride the one-second tick rather than adding a timer of
+    // their own, on an elapsed check so the cadence is three minutes however
+    // many ticks it took. `document.hidden` because this tick keeps running in
+    // a background tab — only the camera stream is stopped on visibilitychange
+    // — and an unattended tab has no reason to keep asking the rig to parse its
+    // journal. The next visible tick catches up.
+    if (!document.hidden && Date.now() - shiftAt >= SHIFT_EVERY_MS) loadShift();
+  }, 1000);
+  loadShift();
 })();
 </script>
 </body>

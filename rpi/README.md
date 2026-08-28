@@ -444,6 +444,90 @@ announced the button goes back to unmarked, so a mark left set cannot be
 inherited by whatever arrives next — the same failure the address line avoids by
 clearing.
 
+### ...and what the shift adds up to
+
+Marking was write-only. A driver could put a fact into the record from the
+driving screen and never see it come back: the figures that fact feeds live on
+the offers page, which is the wrong screen to be on while driving.
+
+One line on the status row now: **`· 9 offers · 1 set aside · took 3 · median
+$26/hr`**. Three things decided it.
+
+**Where.** Not inside the verdict card. That card has 20–50px of slack at
+800×480, and the rules that fire when a notice shows already spend a line's
+worth of it buying the headline room back — on one real shift that was 52 of 121
+offers. Its overflow does not scroll either: `#verdict` centres its children with
+plain `center`, so the excess clips off the *top* and the word ACCEPT goes first.
+The status row is `auto` height and already holds one line, so a second item on
+it is nearly free, and it outlives a card — which is the point. The address above
+clears when the offer goes because it belongs to that offer. A shift does not.
+
+**Who computes it.** The server, from `require('./advice.js')`. The alternative
+was loading 25KB of advice engine onto a page that must start fast, or writing a
+third copy of "a row worth counting" — and `advice.js:116` and `journal.html:480`
+both record what happened the last time that rule existed twice: a duplicate that
+never excluded hidden rows, masked for exactly as long as nobody asked the server
+for them. `/api/today` takes `since` from the *browser*, for the same reason
+`/api/journal` does: 4am is the boundary, and only the page knows what timezone
+the car is in.
+
+Every figure comes off one filtered set, which is the rule the offers page
+learned the hard way. In particular **taken is counted first and accepted
+second**: an offer marked as taken whose reading was partial is not in the taken
+figure, because it is not in the median either. Taking `accepted` over the raw
+window instead would put a bigger number on the driving screen than the offers
+page shows for the same day.
+
+There is deliberately no dollar total. `pay` is what the card offered, not what
+was earned, and a gross sum beside a net median is the exact sentence the offers
+page was corrected for.
+
+**What it costs.** A full journal parse — split, then a `JSON.parse` per line —
+on the event loop that also drives the 12ms MJPEG tick and touches the file
+telling the scanner somebody is watching. A year of driving is ~19MB and the best
+part of a second of frozen loop on a Pi 4. So the page asks every three minutes,
+matching the budget `/api/journal/newest` already set for a journal-reading GET,
+and the answer is cached against the journal's size and mtime — append-only means
+size is monotonic where mtime granularity is not. The cache holds the finished
+summary and never the parsed rows, which `latestPerOffer` writes `hidden` and
+`accepted` onto.
+
+Four states print words instead of a count, because in each of them a plausible
+number would be a wrong one: the rig's clock has not been set (it has no RTC,
+boots in 1970, and its unit is not ordered after time-sync — so it genuinely can
+record offers before it knows what day it is); the journal could not be read,
+which looks identical to a quiet day; the journal just rolled past 64MB, which
+also looks like a quiet day; and the endpoint is not there at all, which is what
+a build one `git pull` behind does — as a *text/plain* 404, so `.json()` rejects
+rather than returning a status to branch on. Offers stamped before the clock was
+set can never fall inside a day window, so the line says how many it could not
+place rather than losing them.
+
+#### The two figures that would have disagreed
+
+Adding a count beside the mark button made an existing fault visible and
+introduced a second one, and both are the same failure: two figures forty pixels
+apart, about the same act the driver just performed.
+
+`tookState` was page-local and never seeded, so marking an offer and reloading
+the panel offered to mark it again — while the count had already counted it. The
+mark route now records `accepted` against the offer the driving screen is
+holding, and the page seeds from it. And marking refetched nothing, so pressing
+"took it" and watching the number beside it not move was the whole experience
+until the next poll. Marking is the only thing on this screen that changes the
+count, so it is the one time the figures are worth asking for off the timer.
+
+`test_dashboard.py` holds both: it asks whether the count moved, and — because
+asserting a hidden line on a page that never got an answer proves nothing, since
+it starts hidden — it puts figures on the panel first and then takes the endpoint
+away.
+
+**Known limit:** the machine at home runs the same `server.js` and will answer
+with its own journal, which the sync timer leaves up to eleven minutes behind,
+and marks made there never flow back. The line sits directly beside "no Pi
+scanner on this machine", which is the signal that it is a copy — but it is not
+suppressed there, and the figures are the copy's.
+
 ### Nothing the rig writes may become a commit
 
 `rpi/.camera.lock` is written into the checkout and holds a pid, and nothing
@@ -2736,7 +2820,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3246 checks
+npm test                # all 29 suites, 3294 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -2778,11 +2862,13 @@ python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  53 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
-python3 rpi/test_liveview.py    #  59 on the picture the driver watches, on
+python3 rpi/test_liveview.py    #  77 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
                                 #     dashboard layout being wired up, on which
-                                #     of the two views was asked for, and on the
-                                #     offer a reopened tab can still mark
+                                #     of the two views was asked for, on the
+                                #     offer a reopened tab can still mark, and
+                                #     on one shift's figures being counted the
+                                #     way the offers page counts them
 python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
 python3 rpi/test_autopilot.py   #  37 on the one command that takes the rig
                                 #     from nothing to scanning, and on the
@@ -2803,10 +2889,13 @@ python3 rpi/test_doctor.py      #  30 on the preflight running to the end, and
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 176 on what the driving screen shows while a
-                                #     card is being read, after, and once the
-                                #     card has gone and only the driver knows
-                                #     they took it (skipped without Playwright)
+python3 rpi/test_dashboard.py   # 206 on what the driving screen shows while a
+                                #     card is being read, after, once the card
+                                #     has gone and only the driver knows they
+                                #     took it, and on the shift figures saying
+                                #     words rather than a number whenever one
+                                #     would be wrong (skipped without
+                                #     Playwright)
 python3 rpi/test_layout.py      # 258 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
