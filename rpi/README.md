@@ -2614,6 +2614,56 @@ is private mode, a full quota, or a browser with site data turned off.
 Each of the five behaviours worth having is verified by breaking it: restore
 any one of them and the check named for it fails.
 
+### The line about waiting that switched the running cost off
+
+The plan was to charge the *partial* distance when a leg lost its miles, on the
+grounds that a partial distance is an under-estimate and charging it tightens
+the bound. Measuring first showed the premise was wrong, and the real fault is
+smaller and worse.
+
+Uber prints **"Avg. wait time at pickup 4 min"** under the pickup address. It is
+a duration with no distance beside it, so it matches `LEG`, becomes a **third
+leg on a two-leg card**, and trips `legs_short_a_distance` — which reads a leg
+without miles as OCR damage and marks the whole distance untrusted. `rate()`
+then charges no mileage at all.
+
+The distance was complete the entire time.
+
+The fingerprint in the data is unmissable once you look for it: **67 of the 70
+three-leg cards** on one real shift were flagged, and a ride card has exactly two
+legs. The uncertain rows are *longer* journeys than the trusted ones — 37 minutes
+against 28, 12.8 miles against 7.7 — which is the opposite of what a truncated
+distance would look like, and exactly what an extra minutes-only leg produces.
+Three of them still carry the phrase in the journal, mangled the way a camera
+mangles things: `Avo Wait (ime at pickup`, `walt time at plclaup: min`, `aan at
+pickup`.
+
+Replayed over the same 202 offers:
+
+| | before | after |
+|---|---|---|
+| rated with **no running cost** | 108 (53%) | **41 (20%)** |
+| CLOSE CALL | 58 | 27 |
+| PASS | 139 | 168 |
+| ACCEPT | 2 | **4** |
+
+Twenty-nine offers stop sitting in a capped CLOSE CALL and become honest passes,
+because their distance is now charged and they do not clear the target. Two
+become real ACCEPTs — green lights the arithmetic supports, rather than ones
+manufactured by a deduction that never happened.
+
+Two things it deliberately does not do. **The wait minutes still count**: the
+driver still waits, it is time the offer occupies them, and dropping it would
+raise the rate, which is the dangerous direction. And **a leg that really did
+lose its distance is still doubted** — the guard keeps doing the job it was
+written for; the corpus pins both directions, and the mutation that treats every
+minutes-only leg as a wait fails on the second.
+
+The pattern is forgiving because it is read through a lens, and it is consulted
+only in a short window around a leg that already matched, so a stray "wait"
+elsewhere on the card cannot invent one. It looks **before** the figure as well
+as after, because the card prints the phrase first.
+
 ### The ACCEPT that was made of a missing deduction
 
 202 offers off one real shift, and the arithmetic behind every verdict in it:
@@ -3109,7 +3159,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3429 checks
+npm test                # all 29 suites, 3447 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3123,11 +3173,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 389 checks, the shared corpus
+node tests/corpus.test.js       # 398 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       #  95 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 422 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 431 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 103 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place

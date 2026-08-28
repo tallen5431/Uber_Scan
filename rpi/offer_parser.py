@@ -198,6 +198,22 @@ PLACE_EDGE = re.compile(r'^[^0-9A-Za-z]+|[^0-9A-Za-z]+$', ASCII)
 MAX_PLACES = 4
 TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 
+# "Avg. wait time at pickup 4 min", which Uber prints under the pickup address.
+#
+# It is a duration with no distance beside it, so it matches LEG, becomes a
+# third leg on a two-leg card, and trips legs_short_a_distance — which reads a
+# leg with no miles as OCR damage and marks the whole distance untrusted. rate()
+# then charges no mileage at all. On one real shift that was 67 of the 70
+# three-leg cards and 33% of every offer read: the distance was complete the
+# whole time, and the running cost was switched off by a line about waiting.
+#
+# Forgiving, because this is read through a camera. The fragments that reached
+# the journal include "Avo Wait (ime at pickup", "walt time at plclaup: min" and
+# "aan at pickup", so neither word survives reliably on its own — the pattern
+# takes either. It is only ever consulted in a short window around a leg that
+# already matched, so a stray "wait" elsewhere on the card cannot invent one.
+WAIT_LEG = re.compile(r'\bw[ao@][il1|]t\b|\bat\s*p[il1|][ck]', re.IGNORECASE | ASCII)
+
 # What kind of job the card is offering, taken from the words the card prints
 # rather than inferred from its numbers.
 #
@@ -319,9 +335,17 @@ def find_legs(text):
         miles, leg_corrected = recover_decimal(minutes, miles, had_decimal)
 
         tail = text[m.end():m.end() + 14].lower()
+        # Either side, because the card prints the phrase before the figure
+        # ("Avg. wait time at pickup 4 min") and OCR sometimes lands it after.
+        # Wider before than after for that reason.
+        around = text[max(0, m.start() - 34):m.end() + 16]
         legs.append({
             'minutes': minutes, 'miles': miles, 'hadDecimal': had_decimal or leg_corrected,
             'isTotal': bool(TOTAL_TAIL.search(tail)), 'corrected': leg_corrected,
+            # A stated wait, not a leg of the journey. Its minutes are still the
+            # driver's — they are counted — but its lack of a distance is the
+            # card being itself rather than the reader failing.
+            'isWait': bool(WAIT_LEG.search(around)),
             # Where this leg sat in the text, so the address printed after it
             # can be found without searching the whole card again.
             'start': m.start(), 'end': m.end(),
@@ -457,7 +481,14 @@ def legs_short_a_distance(legs):
     """
     if len(legs) < 2:
         return False
-    return any(l.get('miles') is None for l in legs)
+    # ...and a stated wait is not an ordinary leg. It is a duration the card
+    # prints about standing still, so having no distance beside it is the card
+    # being itself and not the reader losing one. Counted before this was
+    # noticed, it switched the mileage cost off on a third of every offer read.
+    travel = [l for l in legs if not l.get('isWait')]
+    if len(travel) < 2:
+        return False
+    return any(l.get('miles') is None for l in travel)
 
 
 def check_distance(minutes, miles, had_decimal):

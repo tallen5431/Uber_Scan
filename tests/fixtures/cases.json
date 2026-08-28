@@ -546,6 +546,50 @@
       "expect": {
         "shop": null
       }
+    },
+    {
+      "name": "the pickup wait line is not a leg of the journey",
+      "_why": "Uber prints 'Avg. wait time at pickup 4 min' under the address. It is a duration with no distance beside it, so it matched LEG, became a third leg on a two-leg card, and tripped legs_short_a_distance \u2014 which reads a leg with no miles as damage and marks the whole distance untrusted, after which rate() charges no mileage at all. On one real shift that was 67 of the 70 three-leg cards and a third of every offer read. The distance was complete throughout.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avg. wait time at pickup 4 min",
+      "expect": {
+        "pay": 16.05,
+        "miles": 8.4,
+        "milesUncertain": false
+      }
+    },
+    {
+      "name": "...and its minutes still count, because the driver still waits",
+      "_why": "The wait is time the offer occupies you, so it belongs in the denominator. Dropping it would raise the rate, which is the dangerous direction.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avg. wait time at pickup 4 min",
+      "expect": {
+        "minutes": 27.0
+      }
+    },
+    {
+      "name": "...even as the camera actually mangles it",
+      "_why": "Real fragments out of the journal: 'Avo Wait (ime at pickup', 'walt time at plclaup: min', 'aan at pickup'. Neither word survives reliably, so either one is enough.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avo Wait (ime at pickup 4 min",
+      "expect": {
+        "miles": 8.4,
+        "milesUncertain": false
+      }
+    },
+    {
+      "name": "...and a leg that really did lose its distance is still doubted",
+      "_why": "The guard has to keep doing the job it was written for. A two-leg card whose trip leg lost its miles reads as a shorter, better-paying job than the card describes.",
+      "text": "$16.05 5 min (1.1 mi) away 18 min trip",
+      "expect": {
+        "miles": 1.1,
+        "milesUncertain": true
+      }
+    },
+    {
+      "name": "...and a wait line cannot excuse a card that lost both distances",
+      "_why": "With the wait leg set aside there is one travel leg left, which is the single-leg case the guard already exempts as a possible total \u2014 so this must not silently become trustworthy. It states no distance at all, which `uncosted` reports rather than this.",
+      "text": "$16.05 5 min away 18 min trip Avg. wait time at pickup 4 min",
+      "expect": {
+        "miles": null
+      }
     }
   ],
   "rate": [

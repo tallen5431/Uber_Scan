@@ -131,6 +131,21 @@
 
   var ITEMS = new RegExp('(' + DC + '{1,3})\\s*items?\\b', 'i');
 
+  /* "Avg. wait time at pickup 4 min", which Uber prints under the pickup
+     address. It is a duration with no distance beside it, so it matches LEG,
+     becomes a third leg on a two-leg card, and trips legsShortADistance —
+     which reads a leg with no miles as OCR damage and marks the whole distance
+     untrusted, after which rate() charges no mileage at all. On one real shift
+     that was 67 of the 70 three-leg cards and 33% of every offer read: the
+     distance was complete the whole time.
+
+     Forgiving, because this is read through a camera. The fragments that
+     reached the journal include "Avo Wait (ime at pickup", "walt time at
+     plclaup: min" and "aan at pickup", so neither word survives reliably on its
+     own and the pattern takes either. Consulted only in a short window around a
+     leg that already matched, so a stray "wait" cannot invent one. */
+  var WAIT_LEG = /\bw[ao@][il1|]t\b|\bat\s*p[il1|][ck]/i;
+
   /* --- the shape a delivery card uses instead of a duration ---
    *
    * Uber states a journey as legs: "19 min (8.5 mi)". DoorDash does not state a
@@ -373,9 +388,17 @@
       // Uber labels a combined figure "total"; a card that has one is not also
       // listing its legs, so mixing the two would double count the trip.
       var tail = text.slice(m.index + m[0].length, m.index + m[0].length + 14).toLowerCase();
+      // Either side, because the card prints the phrase before the figure
+      // ("Avg. wait time at pickup 4 min") and OCR sometimes lands it after.
+      var around = text.slice(Math.max(0, m.index - 34),
+                              m.index + m[0].length + 16);
       legs.push({
         minutes: minutes, miles: miles, hadDecimal: hadDecimal || fixed.corrected,
         isTotal: /\btota?l\b/.test(tail), corrected: fixed.corrected,
+        // A stated wait, not a leg of the journey. Its minutes are still the
+        // driver's — they are counted — but its lack of a distance is the card
+        // being itself rather than the reader failing.
+        isWait: WAIT_LEG.test(around),
         // Where this leg sat in the text, so the address printed after it can
         // be found without searching the whole card again.
         start: m.index, end: m.index + m[0].length
@@ -510,8 +533,15 @@
     // median. A single leg is left alone because it can be a total, which
     // states no distance and is a whole journey by itself.
     if (list.length < 2) return false;
-    for (i = 0; i < list.length; i++) {
-      if (list[i].miles === null || list[i].miles === undefined) return true;
+    // ...and a stated wait is not an ordinary leg. It is a duration the card
+    // prints about standing still, so having no distance beside it is the card
+    // being itself and not the reader losing one. Counted before this was
+    // noticed, it switched the mileage cost off on a third of every offer read.
+    var travel = [];
+    for (i = 0; i < list.length; i++) if (!list[i].isWait) travel.push(list[i]);
+    if (travel.length < 2) return false;
+    for (i = 0; i < travel.length; i++) {
+      if (travel[i].miles === null || travel[i].miles === undefined) return true;
     }
     return false;
   }
