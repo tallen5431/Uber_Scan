@@ -88,7 +88,31 @@
   // that survive two guesses.
   var MONEY_LOOSE = new RegExp('(?:^|[\\s(])[$S5§]\\s?(' + DC + '{1,4}[.,]' + DC + '{2})', 'g');
 
+  /* A component of the payout, printed beside it, and never the payout.
+   *
+   * Uber puts a chip under the headline — "+$0.50 included", "+$2.39 included
+   * for priority" — saying what part of the total came from where. findPay
+   * takes the LARGEST dollar figure, on the stated reasoning that the headline
+   * is the biggest number on the card. That premise holds until the chip loses
+   * its decimal point, which is the first thing a decimal does through a lens.
+   *
+   * On this driver's own shift "+$050 included" was read as FIFTY DOLLARS
+   * twice, on cards whose real payouts were $13.08 and $21.06, and both were
+   * rated ACCEPT at $71/hr and $68/hr. Nothing caught them: the sane-rate
+   * ceiling only fires above $200/hr. Eight cards in 309 took a chip as pay.
+   *
+   * Decided by the card's own grammar, like LEG_TAIL: a PLUS, an amount, and
+   * the word the card prints to say what the amount is, with nothing between
+   * them. That last part keeps it off the headline, which reads "$11.42
+   * Guaranteed (incl. tip)" — "incl" is there too, but "Guaranteed" is in the
+   * way. DC is spliced as an alternation, not nested in brackets, because the
+   * two languages disagree about what a nested class means.
+   */
+  var PAY_CHIP = new RegExp(
+    '\\+\\s*[$S5§]?\\s*((?:' + DC + '|[.,])+)\\s*incl(?:uded)?\\b', 'gi');
+
   function findPay(text) {
+    var chips = collect(text, PAY_CHIP);
     var all = collect(text, MONEY_STRICT);
     if (!all.length) all = collect(text, MONEY_LOOSE);
     if (!all.length) return null;
@@ -97,6 +121,18 @@
     // payout; the offer headline is the largest dollar figure on the card.
     var best = null;
     for (var i = 0; i < all.length; i++) {
+      // ...unless it is inside a chip, which is part of the payout rather than
+      // a candidate to be it. See PAY_CHIP.
+      var inChip = false;
+      for (var c = 0; c < chips.length; c++) {
+        if (chips[c].index <= all[i].index
+            && all[i].index + all[i].match.length
+               <= chips[c].index + chips[c].match.length) {
+          inChip = true;
+          break;
+        }
+      }
+      if (inChip) continue;
       var v = toNumber(all[i].value);
       if (v !== null && v > 0 && v < 2000 && (best === null || v > best)) best = v;
     }

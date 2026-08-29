@@ -2830,6 +2830,67 @@ the ones the column could not speak for. The cap is 600 now. The check that
 guarded it asserted only an upper bound, which any cap satisfies; it now also
 holds a real full-length card whole.
 
+### The fifty-dollar offer that was a fifty-cent chip
+
+`find_pay` takes the largest dollar figure on the card, and said so: *"the offer
+headline is the largest dollar figure; promo lines are smaller."* That premise
+is true of the card and false of the photograph.
+
+Uber prints a chip under the headline saying what part of the total came from
+where — `+$0.50 included`, `+$2.39 included for priority`. A decimal point is a
+pixel or two through a lens and it is the first thing to go, so `+$0.50` reads
+as `+$050`, and fifty dollars is a bigger number than the offer.
+
+Twice on one shift:
+
+| card's real payout | what the chip read as | verdict shown |
+|---|---|---|
+| $13.08 | **$50.00** | **ACCEPT**, $71/hr |
+| $21.06 | **$50.00** | **ACCEPT**, $68/hr |
+
+Two green lights, on offers worth a third of what the panel said. Nothing caught
+them. The sane-rate ceiling fires above $200/hr and these sat comfortably under
+it — which is the whole difficulty with a plausible wrong number: every guard
+here is built to catch the implausible ones. A third card read `+$170 included`
+over a real $12.05 and *was* caught, only because $170 over nine minutes is
+$1133/hr and no guard was needed to find that suspicious.
+
+Eight of the 309 cards took a chip as the payout. Five of those had no readable
+headline at all, so the rig was rating a job on its priority bonus: $1.85 over
+25 minutes, reported as **−$7/hr**.
+
+The rule is the card's own grammar, the same way `LEG_TAIL` is: a **plus**, an
+amount, and the word the card prints to say what the amount is, **with nothing
+in between**. That last clause is the whole safety of it. The headline reads
+`$11.42 Guaranteed (incl. tip)` — "incl" is right there too, but "Guaranteed"
+sits in the way, and a version that allows twenty characters of slack swallows
+the headline instead. Two corpus cases pin that, and the mutation that loosens
+it fails on both.
+
+Verified against all 309 cards: three recover their true payout, no card loses
+one, and the two ports agree on every row — pay, minutes and miles — which is a
+stronger check than the fixture corpus alone can make.
+
+The other five now report **no payout** rather than a small wrong one. That is
+the right answer and not a lesser one: their headline never reached the OCR, so
+the reading is incomplete, the panel says so, and the accumulator keeps looking.
+A rate of −$7/hr derived from a priority chip is not a smaller error than an
+honest blank; it is the same error wearing a number.
+
+Across all 309 cards, with this and the dropped-distance fix together:
+
+| | stored at the time | today |
+|---|---|---|
+| ACCEPT | 26 | 28 |
+| CLOSE CALL | 24 | 14 |
+| PASS | 257 | 262 |
+| refused as doubtful | 2 | 0 |
+| held incomplete | 0 | 5 |
+
+The two doubts are gone because the readings that provoked them are now correct
+rather than merely distrusted, and five cards that were being rated off a chip
+are now honestly unfinished.
+
 ### The ACCEPT that was made of a missing deduction
 
 202 offers off one real shift, and the arithmetic behind every verdict in it:
@@ -3325,7 +3386,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3615 checks
+npm test                # all 29 suites, 3645 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

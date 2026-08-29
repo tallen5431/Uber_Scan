@@ -51,6 +51,41 @@ MONEY_STRICT = re.compile(r'\$\s*(' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)', A
 # addresses are full of tokens that survive two guesses.
 MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'{2})', ASCII)
 
+# A component of the payout, printed beside it, and never the payout.
+#
+# Uber puts a chip under the headline — "+$0.50 included", "+$2.39 included for
+# priority" — saying what part of the total came from where. find_pay takes the
+# LARGEST dollar figure on the card, on the stated reasoning that "the offer
+# headline is the largest dollar figure; promo lines are smaller". That premise
+# holds until the chip loses its decimal point, which is the first thing a
+# decimal does through a lens.
+#
+# On this driver's own shift, "+$050 included" was read as FIFTY DOLLARS twice,
+# on cards whose real payouts were $13.08 and $21.06, and both were rated
+# **ACCEPT** — $71/hr and $68/hr. Nothing caught them: the sane-rate ceiling
+# only fires above $200/hr and these sat comfortably under it. A third card read
+# "+$170 included" over a real $12.05 and was only caught because $170 over nine
+# minutes is $1133/hr. Eight cards in 309 took a chip as the payout.
+#
+# Decided by the card's own grammar, like LEG_TAIL: a PLUS, an amount, and the
+# word the card prints to say what the amount is, with nothing in between. That
+# last part is what keeps it off the headline, which reads "$11.42 Guaranteed
+# (incl. tip)" — "incl" is there too, but "Guaranteed" sits in the way. Verified
+# against all 309: three cards recover their true payout and no card loses one.
+#
+# The other five stop reporting a chip as the payout and report NO payout, which
+# is the right answer. Their real headline never made it through the OCR at all,
+# so the reading is incomplete, the panel says so, and the accumulator keeps
+# looking. A rate of -$7/hr worked out from a $1.85 priority chip is not a
+# smaller error than that; it is the same error wearing a number.
+#
+# `DC` is itself a character class, so it is spliced in as an alternation rather
+# than nested inside brackets — Python warns about `[[\d...].,]` and JavaScript
+# reads it as a different class altogether, which is exactly the kind of silent
+# disagreement between the two ports this corpus exists to catch.
+PAY_CHIP = re.compile(r'\+\s*[$S5§]?\s*((?:' + DC + r'|[.,])+)\s*incl(?:uded)?\b',
+                      re.IGNORECASE | ASCII)
+
 # The minute unit has to be spelled out. It was once allowed to be a bare "m",
 # and on a map full of street names that turns any two letters into a journey:
 # "ZIM" out of the road texture became a 21-minute leg, which is enough to make
@@ -306,10 +341,16 @@ def normalize(text):
 
 
 def find_pay(text):
-    matches = MONEY_STRICT.findall(text) or MONEY_LOOSE.findall(text)
+    chips = [m.span() for m in PAY_CHIP.finditer(text)]
+    matches = list(MONEY_STRICT.finditer(text)) or list(MONEY_LOOSE.finditer(text))
     best = None
-    for raw in matches:
-        v = to_number(raw.strip())
+    for m in matches:
+        # A figure inside a "+$0.50 included" chip is part of the payout, not a
+        # candidate to be it. See PAY_CHIP: without this the largest-figure rule
+        # hands a green light to a chip whose decimal point did not read.
+        if any(start <= m.start() and m.end() <= end for start, end in chips):
+            continue
+        v = to_number(m.group(1).strip())
         # The offer headline is the largest dollar figure; promo lines are smaller.
         if v is not None and 0 < v < 2000 and (best is None or v > best):
             best = v

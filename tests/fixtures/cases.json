@@ -744,6 +744,63 @@
     "minutes": 42,
     "miles": null
    }
+  },
+  {
+   "name": "a priority chip is not the payout, even when it reads bigger",
+   "text": "Exclusive x i $13.08 ; *% 481 © Verified i © +$050 included -> 9 min (5.3 mi) Georgia State Route 237 & Morosgo Dr NE, Atlanta",
+   "expect": {
+    "pay": 13.08,
+    "minutes": 9,
+    "miles": 5.3
+   }
+  },
+  {
+   "name": "...nor when it reads a hundred times bigger",
+   "text": "re) EUs Rents A, ellis Lig x $12.05 * 496 @ VIP & Rarely cancels @ +$170 included for priority 9 min (3.1 mi) Powers Ferry Rd SE, Atlanta",
+   "expect": {
+    "pay": 12.05,
+    "minutes": 9,
+    "miles": 3.1
+   }
+  },
+  {
+   "name": "a chip with no headline is no payout, not a small one",
+   "text": "*% 490 © +$1.00 included 10 min (2.5 mi) Ponce de Leon Ave NE, Atlanta",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...however the OCR spells the chip",
+   "text": "% Tp RAGA \"= ere Paes aS he $6.08 *% 485 @ +$LO00included 4min (05 mi) Tech Square, Tech Square Bus Stop",
+   "expect": {
+    "pay": 6.08
+   }
+  },
+  {
+   "name": "...and with no space before the word",
+   "text": "$7.01 : * 487 @ +$0.75included j 5 min (0.8 mi) 5th St NW & Centennial Olympic Park Dr, Atlanta",
+   "expect": {
+    "pay": 7.01
+   }
+  },
+  {
+   "name": "a headline that happens to follow a stray plus is still the payout",
+   "text": "CCE CiGem Exclusive x i + $11.42 Guaranteed (incl. tip) 14 min (2.0 mi) total Taco Bell (930 Spring Street)",
+   "expect": {
+    "pay": 11.42,
+    "minutes": 14,
+    "miles": 2.0
+   }
+  },
+  {
+   "name": "...and 'Guaranteed (incl. tips)' is not a chip",
+   "text": "$7.50 Guaranteed (incl. tips) 8.0 mi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "pay": 7.5,
+    "minutes": 25,
+    "miles": 8.0
+   }
   }
  ],
  "rate": [
