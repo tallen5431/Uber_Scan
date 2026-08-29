@@ -30,6 +30,8 @@ Skipped where a browser cannot be had, the same way the other browser checks
 skip.
 """
 
+import base64
+import io
 import json
 import os
 import re
@@ -364,8 +366,15 @@ if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
 
 DRIVER = r'''
 const { chromium } = require('playwright');
-const [base, panelsJson, pagesJson] = process.argv.slice(2);
+const [base, panelsJson, pagesJson, framesJson] = process.argv.slice(2);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
+// Two pictures the shape the rig actually publishes: a landscape cabin for the
+// scene view, a portrait phone screen for the other. There is no camera on the
+// machine this runs on, so without them every measurement of the live view is a
+// measurement of a broken image — which is not a small thing, because a broken
+// image collapses to 2px and 2px passes "the phone is taller than the scene
+// was" as comfortably as a real picture does.
+const FRAMES = JSON.parse(framesJson);
 
 (async () => {
   let browser;
@@ -392,6 +401,15 @@ const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
     });
     for (const name of PAGES) {
       const page = await ctx.newPage();
+      // Before the navigation, or the first frame is requested before the
+      // handler exists. The mjpeg stream is answered with a single JPEG: an
+      // <img> renders the first frame of a stream and this only ever needs
+      // one, and a route that never ends would hold the page open.
+      await page.route('**/api/frame.*', (route) => {
+        const view = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
+        route.fulfill({ status: 200, contentType: 'image/jpeg',
+                        body: Buffer.from(FRAMES[view], 'base64') });
+      });
       await page.goto(base + '/' + name, { waitUntil: 'domcontentloaded' })
                 .catch(() => {});
       await page.waitForTimeout(1800);
@@ -466,18 +484,25 @@ const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
           layers: layers,
         };
       });
-      // The other thing this panel is used for: reading the phone through it
+      // The thing this panel is mostly used for: reading the phone through it
       // and working it with a bluetooth mouse. That view is only worth having
-      // if the picture is bigger than the one it replaced, which is a claim
-      // about pixels and can be measured.
+      // if the picture is bigger than the scene view it replaced, which is a
+      // claim about pixels and can be measured.
+      //
+      // Measured where the page lands, then clicked the other way — which is
+      // the reverse of how this read when it was written. Aiming the mount is
+      // a thing you do once and reading the phone is a thing you do all shift,
+      // so the phone is what the page opens on and the scene is what the
+      // driver has to ask for. Left as it was, this measured the scene view
+      // twice and called the second one the phone.
       if (name === 'live.html') {
-        const before = await page.evaluate(() => {
-          const r = document.getElementById('view').getBoundingClientRect();
-          return { w: r.width, h: r.height };
-        });
-        await page.click('#viewMode');
-        await page.waitForTimeout(1200);
-        out[panel[0] + ' phoneview'] = await page.evaluate(before => {
+        // `cut` is the whole picture minus the part of it on the glass. The
+        // page clips at #app — `overflow: hidden`, which is what stops a bar
+        // of controls scrolling out of a driver's reach — so a picture drawn
+        // taller than its row does not overflow the page and does not fail any
+        // check that asks whether the page fits. It is silently trimmed at
+        // both ends, and the end that matters is the top, where the payout is.
+        const LOOKAT = () => {
           const d = document.documentElement;
           const img = document.getElementById('view');
           const r = img.getBoundingClientRect();
@@ -486,12 +511,39 @@ const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
             src: img.getAttribute('src') || '',
             pressed: btn.getAttribute('aria-pressed'),
             label: btn.textContent.trim(),
-            h: r.height,
-            was: before.h,
+            h: r.height, w: r.width,
+            loaded: img.naturalWidth > 2 && img.naturalHeight > 2,
+            cutTop: Math.max(0, -r.top),
+            cutBottom: Math.max(0, r.bottom - d.clientHeight),
+            cutLeft: Math.max(0, -r.left),
+            cutRight: Math.max(0, r.right - d.clientWidth),
             rowH: document.getElementById('app').getBoundingClientRect().height,
             over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
           };
-        }, before);
+        };
+        const shown = await page.evaluate(LOOKAT);
+        // Bounded, and the result kept rather than thrown.
+        //
+        // A layout fault that puts the picture over the controls does not make
+        // this click fail — it makes it *wait*, because Playwright holds on for
+        // the button to become reachable. Left unbounded that is the whole
+        // driver's budget spent on one click, and the run ends in a stack trace
+        // ten minutes later with every other check unreported. Measured: a
+        // wrapper that stops filling its row draws the phone at its natural
+        // 1000px inside a 468px panel and buries the bar. A control a driver
+        // cannot reach is a result, so it is recorded as one.
+        shown.reachable = await page.click('#viewMode', { timeout: 5000 })
+          .then(() => true, () => false);
+        await page.waitForTimeout(1200);
+        const scene = await page.evaluate(LOOKAT);
+        shown.was = scene.h;
+        shown.sceneSrc = scene.src;
+        shown.scenePressed = scene.pressed;
+        shown.sceneLabel = scene.label;
+        shown.sceneLoaded = scene.loaded;
+        shown.sceneCut = Math.max(scene.cutTop, scene.cutBottom,
+                                  scene.cutLeft, scene.cutRight);
+        out[panel[0] + ' phoneview'] = shown;
       }
       await page.close();
     }
@@ -537,6 +589,26 @@ try:
 except Exception:
     skip('no PIL, so there is no frame to lay out')
 
+# ...and the same two pictures again, for the browser to answer the live view's
+# own requests with.
+#
+# The file above reaches the page through `/api/frame.jpg`, and the page does
+# not ask for that: it asks for `/api/frame.mjpeg`, a stream this server has
+# nothing to put in without a scanner. So the picture every measurement of the
+# live view was taken against was a broken image, 2px tall, and "the phone is
+# taller than the scene was" was 2px against 2px dressed up as a result.
+#
+# Two shapes, not one, because the claim being measured is that a portrait
+# picture in a landscape cell gets the height a landscape one cannot use.
+def _jpeg(size, colour):
+    buf = io.BytesIO()
+    Image.new('RGB', size, colour).save(buf, format='JPEG', quality=70)
+    return base64.b64encode(buf.getvalue()).decode('ascii')
+
+
+FRAMES = {'scene': _jpeg((640, 480), (44, 48, 56)),
+          'screen': _jpeg((573, 1000), (238, 240, 244))}
+
 port = free_port()
 proc = subprocess.Popen(
     ['node', os.path.join(ROOT, 'server.js')],
@@ -563,7 +635,8 @@ try:
                    '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
                ]))
     proc2 = subprocess.run(
-        ['node', driver, base, json.dumps(PANELS), json.dumps(PAGES)],
+        ['node', driver, base, json.dumps(PANELS), json.dumps(PAGES),
+         json.dumps(FRAMES)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -631,6 +704,44 @@ try:
                     'Scene' in phone['label'])
                 ok_('the phone view does not overflow the glass at %s' % panel,
                     not phone['over'])
+                # ...which is a weaker claim than it looks, and was the one
+                # being made. #app clips, so a picture drawn taller than its
+                # row is trimmed rather than overflowed and every fits-check
+                # goes on passing. `max-height: 100%` was resolving against a
+                # wrapper sized to its own contents, so it resolved to nothing
+                # and 109px came off the top of the phone at 800x480 — the top
+                # being where the payout is.
+                #
+                # Asserted rather than guarded on. A broken image has no shape
+                # to clip and would pass a cut-check by having nothing to cut,
+                # which is how the picture came to be measured at 2px in the
+                # first place — so "there was a picture here" is the first
+                # thing to establish and not a precondition to skip on.
+                ok_('there is a picture to measure at %s' % panel,
+                    phone['loaded'] and phone['sceneLoaded'])
+                ok_('...and nothing is cut off the phone at %s '
+                    '(%.0f top, %.0f bottom, %.0f left, %.0f right)'
+                    % (panel, phone['cutTop'], phone['cutBottom'],
+                       phone['cutLeft'], phone['cutRight']),
+                    max(phone['cutTop'], phone['cutBottom'],
+                        phone['cutLeft'], phone['cutRight']) <= 1)
+                ok_('...nor off the scene at %s (%.0fpx)'
+                    % (panel, phone['sceneCut']), phone['sceneCut'] <= 1)
+                # ...and the other direction, which is now the one that takes a
+                # press. The mount still has to be aimed sometimes, and a
+                # toggle that only travels one way is a driver stuck in the
+                # view they did not want — starting with being able to press it
+                # at all, which a picture drawn over the bar takes away.
+                ok_('the view toggle can be pressed at %s' % panel,
+                    phone['reachable'])
+                ok_('the scene view is a press away at %s (%s)'
+                    % (panel, phone['sceneSrc'][:48]),
+                    'view=scene' in phone['sceneSrc'])
+                eq('...and the button lets go at %s' % panel,
+                   phone['scenePressed'], 'false')
+                ok_('...and offers the phone back at %s (%r)'
+                    % (panel, phone['sceneLabel']),
+                    'Phone' in phone['sceneLabel'])
                 if dashboard:
                     # The whole point. A portrait phone in a landscape cell is
                     # bounded by height, so this only pays if it gets the

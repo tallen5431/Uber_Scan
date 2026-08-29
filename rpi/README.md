@@ -1557,6 +1557,38 @@ reading box either, because that box is deliberately the part of the screen a
 *price* lives in and the Accept button is outside it on every card shape here.
 A view you cannot see the button in is not one you can drive the phone from.
 
+**It is what the page opens on.** Aiming the mount is something you do once, at
+the start of a shift or after a bump; reading the phone through the panel is
+what the rest of the shift consists of. Landing in the scene view meant the
+driver pressed a button to get to the useful picture every time the page
+reloaded, and the choice is remembered anyway, so the default was costing a
+press to reach the view they had already chosen. `⛶ Scene` is the way back and
+it is one press, same as before.
+
+**And the picture is now whole.** `#viewWrap img { max-height: 100% }` was
+resolving against a wrapper that took the height of its contents rather than
+the height of the row, so the percentage had nothing to measure against and was
+ignored. The phone drew 612px tall in a 468px row and `overflow: hidden` took
+the difference off both ends — **109px off the top**, which on an offer card is
+where the payout is, and 23px off the bottom. It got worse on bigger panels:
+137px off the top at 1024x600, 138px at 1280x800. Stretching the wrapper to its
+row gives the percentage a number to resolve against, and the phone is centred
+in it whole at every panel size the suite measures.
+
+**How big it can get, which is a question with an arithmetic answer.** A phone
+is portrait and this panel is landscape, so the picture is bound by *height*:
+468 of the 800x480 panel's 480 rows, everything else being the 6px page margins.
+Given that height the phone's own shape fixes the width — 269px for the quad
+these numbers came from, narrower for a taller phone — and no arrangement of
+columns changes it. Splitting the panel 50/50 was tried and measured: the phone
+came out the same 269x468, the rest of its 400px column went black, and the
+other half paid for it — the address under the figures sliced to 11px of its
+17px line, the age line wrapped onto two, and the five controls went from 559px
+of bar to 388px, close enough that `▣ Set box` and `⟳ Re-find` touch. So the
+picture's column is sized to the picture and the rest of the panel goes to the
+verdict and the controls. The one lever that makes the phone bigger is
+`▣ Set box`: a tighter quad is a bigger warp of less phone.
+
 **What it costs.** The sensor frame, which is the copy the scene view exists to
 avoid. Composing is actually cheaper than the scene view — that one's expense
 was never the shrink but the card inset warped out of the sensor — so the price
@@ -3216,7 +3248,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3479 checks
+npm test                # all 29 suites, 3527 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

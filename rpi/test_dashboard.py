@@ -563,7 +563,27 @@ const LOOK = (sel) => {
       detail: await page.evaluate(LOOK, '#detail'),
       dimmed: await page.evaluate(
         () => document.getElementById('verdict').classList.contains('stale')),
+      // Set apart from the diagnostics it shares a line with, or it is one
+      // grey fragment among five and reads as "1517ms" does.
+      age: await page.evaluate(() => {
+        const el = document.querySelector('#detail .age');
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        const line = getComputedStyle(document.getElementById('detail'));
+        return { text: (el.textContent || '').trim(),
+                 first: document.getElementById('detail').firstChild === el,
+                 weight: Number(cs.fontWeight),
+                 lineWeight: Number(line.fontWeight),
+                 colour: cs.color, lineColour: line.color };
+      }),
     };
+    // Nothing arrives for three seconds. The age is the one figure on this
+    // page that changes while the page sits still, and a clock that only
+    // updates when a reading lands is a clock that says "just now" for as
+    // long as the rig is broken.
+    await page.waitForTimeout(3000);
+    out.aged = await page.evaluate(
+      () => (document.querySelector('#detail .age') || {}).textContent || '');
     await page.close();
     await ctx.close();
   }
@@ -913,7 +933,35 @@ try:
     ok_('the live reading was measured', bool(fresh.get('detail')))
     if fresh.get('detail'):
         ok_('a genuine read is not stale', not fresh.get('dimmed'))
-        ok_('...and does not carry an age', 'ago' not in (fresh['detail']['text'] or ''))
+        # The age used to appear only once a reading had gone stale, which is
+        # the moment it is least useful: the card is already dimmed and the
+        # driver has already stopped believing it. It is on the line always
+        # now, so this says what a fresh one reads as rather than that it reads
+        # as nothing — "does not carry an age" would still pass on "just now",
+        # which is an age, and would have gone on passing on "0s ago".
+        eq('...and a fresh one says so in words',
+           (fresh['detail']['text'] or '').split(' · ')[0], 'just now')
+        ok_('...rather than counting from zero',
+            's ago' not in (fresh['detail']['text'] or ''))
+
+    # Legible as itself, which for a figure sharing a line with four
+    # diagnostics is not the same as being present. Set in the same grey at the
+    # same weight, "12s ago" and "1517ms" are two of five `·`-separated
+    # fragments and the eye has to read the line to find the one it wanted.
+    aged = fresh.get('age') or {}
+    ok_('the age has an element of its own', bool(aged))
+    if aged:
+        ok_('...at the front of the line', aged.get('first'))
+        ok_('...heavier than the diagnostics beside it (%s vs %s)'
+            % (aged.get('weight'), aged.get('lineWeight')),
+            (aged.get('weight') or 0) > (aged.get('lineWeight') or 0))
+        ok_('...and not in their grey (%s vs %s)'
+            % (aged.get('colour'), aged.get('lineColour')),
+            aged.get('colour') and aged.get('colour') != aged.get('lineColour'))
+    # ...and it counts on its own, with nothing arriving to make it.
+    later = (got.get('aged') or '').strip()
+    ok_('the age keeps counting while the page sits still (%r)' % later,
+        later.endswith('s ago') and later != '0s ago')
 
     # The whole point of the notice case: a card whose distance could not be
     # read carries a notice for its entire life, and that is exactly when the

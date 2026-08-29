@@ -717,11 +717,20 @@ html, body {
      is the floor this file defends everywhere else. It is kept: the row of
      controls moving out of the column is what pays for it. */
   .verdict { padding: 6px 8px 8px; }
-  /* `auto-fit, minmax(74px, 1fr)` puts two of the three figures on one row and
-     the third alone underneath in a column this narrow, which reads as a
-     layout that ran out of room rather than one that was chosen. Three across,
-     and the labels give up the letter-spacing to make it. */
-  .submetrics { padding-top: 5px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Three across was right when there were three figures. There are four —
+     $/mi joined them — and three columns puts the fourth alone on a row of its
+     own, which is the exact "ran out of room" look this rule was added to
+     avoid, at the cost of 33px of a 222px card. That is the height the address
+     under it needs: at 480x320 it was being squeezed to 3.6px of a 16px line,
+     an ellipsised grey smear that the dashboard suite scored as shown because
+     3.6 is greater than nothing.
+
+     `auto-fit` asks the question the fixed count stopped it asking — how many
+     74px columns fit in the card as it actually is. Beside the phone the card
+     is most of the panel and all four go across on one row; in the scene view
+     it is half of one and they pair up two-by-two. Neither leaves an orphan.
+     The labels keep giving up their letter-spacing either way. */
+  .submetrics { padding-top: 5px; }
   .sub small { font-size: 12px; letter-spacing: .02em; }
   .fields { gap: 6px; }
   .field { padding: 5px 4px 6px; }

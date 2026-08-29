@@ -24,8 +24,11 @@
      mount and hardly at all afterwards, whereas the verdict is the entire
      reason the screen is there. */
   @media (orientation: landscape) {
+    /* Half each, for the scene view — a picture of the cabin is landscape and
+       does use the width it is given. The phone view overrides this below,
+       because a portrait picture does not. */
     #app { display: grid;
-           grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
            grid-template-rows: minmax(0, 1fr) auto auto;
            align-content: start; }
     /* `safe`, which is the difference between overflowing downward and
@@ -43,8 +46,22 @@
        rather than a label floating in the dark. */
     .live #verdict { flex: 1 1 auto; display: flex; flex-direction: column;
                      justify-content: center; min-height: 0; }
+    /* `stretch`, not `center`, and this is the difference between a picture
+       that fits and one that is cut.
+       
+       `#viewWrap img { max-height: 100% }` resolves against the wrapper, and a
+       wrapper that is `align-self: center` takes the height of its contents —
+       so the percentage had nothing to measure against and was ignored. On the
+       800x480 panel the phone drew 612px tall in a 468px row and `overflow:
+       hidden` took the difference off both ends: 109px off the TOP, which on
+       an offer card is where the payout is, and 23px off the bottom. It got
+       worse on bigger panels, 137px off the top at 1024x600.
+       
+       Stretched, the wrapper is the row, the percentage has a number to
+       resolve against, and the picture is centred inside it whole. */
     #viewWrap { grid-column: 2; grid-row: 1; margin: 0; min-height: 0;
-                align-self: center; }
+                align-self: stretch; display: flex;
+                align-items: center; justify-content: center; }
     /* Bounded by the row it is in rather than by the viewport. It used to be
        `100dvh - 132px`, which is a guess at what the bars below it cost, and a
        guess that is too big overflows the page — the whole reason the bottom
@@ -83,6 +100,21 @@
      * screen is bolted to the dashboard; it is just no longer the only thing
      * on it worth looking at, and a phone screen you cannot read the buttons
      * on is not a phone you can drive with a mouse. */
+    /* The picture takes the width it needs and no more, which is not the same
+       as taking less than half.
+
+       A phone is portrait and this panel is landscape, so the picture is bound
+       by HEIGHT. Given the 468 rows an 800x480 panel has left after the page
+       margins, the phone's own shape fixes the width, and no arrangement of
+       columns changes it. Splitting the panel evenly was tried and measured on
+       exactly this card: the phone came out the same size to the pixel, the
+       rest of its column went black, and the other half paid for it — the
+       address sliced to 11px of its 17px line, the age line wrapped onto two,
+       and five controls sharing 388px instead of 559px close enough that "Set
+       box" and "Re-find" touch.
+
+       So the column is sized to the picture and what is left goes to the
+       verdict and the controls. Same phone, room for everything else. */
     body.phoneview #app { grid-template-columns: minmax(0, 1fr) auto; }
     /* Down the whole panel, not just the row the verdict is in. The bar of
        controls and the connection line were spanning both columns, so the
@@ -95,7 +127,7 @@
     body.phoneview .connbar   { grid-column: 1; }
     body.phoneview .bottombar { grid-column: 1; }
     body.phoneview #viewWrap { align-self: stretch; display: flex;
-                               align-items: center; justify-content: flex-end; }
+                               align-items: center; justify-content: center; }
     body.phoneview #viewWrap img {
       /* Height first, and width whatever the phone's own shape makes it. The
          base rule is `width: 100%`, which on a portrait picture in a landscape
@@ -199,6 +231,12 @@
   /* Diagnostics, not a heading. It was uppercase with wide tracking, which
      made a line of read timings shout louder than the verdict above it. */
   .pending { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+  /* ...except the age, which is not a diagnostic. On a panel beside a phone
+     being worked with a mouse, "does this rate belong to the card in front of
+     me or the one before it" is the question the whole line exists to answer,
+     and it is answered in seconds. Full-strength text at the front of a dim
+     line, so it reads without being read. */
+  .pending .age { color: var(--text); font-weight: 700; }
   .connbar {
     display: flex; align-items: center; justify-content: center; gap: 8px;
     font-size: 12px; color: var(--muted); padding: 8px;
@@ -421,10 +459,15 @@
          it; working the phone through this screen — which is what a bluetooth
          mouse on the phone and the rig's display in front of you amounts to —
          wants the phone's screen and nothing else. `aria-pressed` because it
-         is a mode, not a navigation. -->
-    <button type="button" class="linkbtn" id="viewMode" aria-pressed="false"
+         is a mode, not a navigation.
+
+         Written here in the state the page starts in — the phone — so the
+         button does not spend a frame claiming the wrong mode before the
+         script gets to it. The script still owns it afterwards, because the
+         driver's last choice is remembered. -->
+    <button type="button" class="linkbtn" id="viewMode" aria-pressed="true"
             title="Switch between the whole scene and the phone's screen"
-            >⛶ Phone</button>
+            >⛶ Scene</button>
   </nav>
 </main>
 
@@ -1033,13 +1076,39 @@
     el.warn.textContent = notes.join(' ');
     el.warn.hidden = !notes.length;
 
-    el.detail.textContent = (stale ? 'last read ' + Math.round((Date.now() - readAt) / 1000) + 's ago · ' : '')
-      + (deducted ? 'after $' + Number(r.costPerMile).toFixed(2) + '/mi costs · ' : '')
-      + r.ms + 'ms'
+    // How old this offer is, always and first.
+    //
+    // It used to appear only once the reading had gone stale, which is the one
+    // moment it is least useful: by then the card is dimmed and the driver has
+    // already stopped trusting it. What they actually need to know, on a screen
+    // beside a phone they are working with a mouse, is whether the figures
+    // belong to the card in front of them or to the one before it — and that is
+    // a question about seconds, asked continuously.
+    //
+    // Rounded to whole seconds and put first so it reads at a glance from the
+    // driving seat. `readAt` is set by every reading that carries a verdict, so
+    // in this branch it is always a real moment.
+    // Given its own element, because the rest of this line is diagnostics —
+    // how long the read took, how many frames it was merged from, whether the
+    // corners are being tracked — and set in the same grey at the same weight
+    // the age was one `·`-separated fragment among five, indistinguishable at
+    // a glance from "1517ms". The age is the only part of it a driver acts on.
+    var age = Math.max(0, Math.round((Date.now() - readAt) / 1000));
+    var when = document.createElement('b');
+    when.className = 'age';
+    when.textContent = age < 1 ? 'just now' : age + 's ago';
+    // Nodes rather than innerHTML: every fragment below is built from the
+    // scanner's own JSON, and `trackNote` in particular quotes what the
+    // tracker reported.
+    el.detail.textContent = '';
+    el.detail.appendChild(when);
+    el.detail.appendChild(document.createTextNode(
+      (deducted ? ' · after $' + Number(r.costPerMile).toFixed(2) + '/mi costs' : '')
+      + ' · ' + r.ms + 'ms'
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
       + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')
       + (r.items ? ' · ' + r.items + ' items' : '')
-      + trackNote(r);
+      + trackNote(r)));
     showRaw(r.text);
   }
 
@@ -1221,8 +1290,20 @@
      server.js. It is a query parameter and not a header because the <img> tag
      is what makes these requests, and an <img> cannot set a header. */
   var VIEW_KEY = 'uberscan.liveView';
-  var phoneView = false;
-  try { phoneView = localStorage.getItem(VIEW_KEY) === 'screen'; } catch (e) { phoneView = false; }
+  // The phone, unless the driver has said otherwise.
+  //
+  // The other picture is the whole cabin with the calibrated corners drawn on
+  // it, which answers "is the mount aimed right?" — a question you ask once,
+  // while setting the rig up. During a shift the screen is being used to read
+  // and work the phone through, and in the scene view the phone is about a
+  // third of a 640px-wide thumbnail of a car interior. The stored choice still
+  // wins in both directions; only the answer for a rig nobody has told has
+  // changed.
+  var phoneView = true;
+  try {
+    var stored = localStorage.getItem(VIEW_KEY);
+    if (stored) phoneView = stored === 'screen';
+  } catch (e) { phoneView = true; }
 
   function streamUrl() {
     return '/api/frame.mjpeg?view=' + (phoneView ? 'screen' : 'scene');
