@@ -458,7 +458,21 @@ class OfferLog:
 # characters and a delivery card to fewer; the headroom is for the frames where
 # the crop takes in a slice of the map behind the card, which are exactly the
 # frames worth studying later.
-TEXT_KEPT = 220
+#
+# 220 was that estimate and the estimate was low. The first export to carry this
+# column came back with 99 of its 309 cards sitting exactly on the cap — a third
+# of the corpus cut off mid-card, and cut off at the END, which is where the
+# pickup, the dropoff and the second leg of a ride live. Re-parsing a truncated
+# card gives a different answer from the one the rig gave, so the very rows most
+# worth studying are the ones this column could not answer for.
+#
+# The headroom was for map spill and there is more of it than expected: the
+# frames that overrun are the ones where the crop took in a slice of the screen
+# behind the card, which is exactly the case the text is kept for. 600 clears
+# every card in that export with room over. The cost is about 380 bytes on the
+# offers that use it — under 80KB across a 200-offer shift, on a file that is
+# already appended to once per reading.
+TEXT_KEPT = 600
 
 
 def content_of(parsed, places=None):

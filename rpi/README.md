@@ -2753,6 +2753,83 @@ only in a short window around a leg that already matched, so a stray "wait"
 elsewhere on the card cannot invent one. It looks **before** the figure as well
 as after, because the card prints the phrase first.
 
+### The distance that was on the card and thrown away
+
+The wait-line fix above was found from three mangled fragments that happened to
+survive in `places`, because the text itself was not kept. The next shift kept
+it — 309 cards, verbatim, off this driver's own phone — and the first question
+put to that corpus found a bigger fault than the one it was built for.
+
+**37 of the 309 printed a distance the parser did not take. All 37 for the same
+reason, and it was not the OCR.**
+
+The commonest card this driver is shown is the delivery offer:
+
+```
+$7.20 Guaranteed (incl. tips) 2.4 mi + 20 min @ Pickup McDonald's
+```
+
+The distance and the time are two halves of **one line**. The card's own
+separator is an interpunct, and the camera renders it as `+`, `-`, `«`, `™`,
+`=`, `.`, `+-`, `-+-` or a stray letter — which looks like the problem and is
+not. `LONE_MILES` matches every one of those forms. It was never consulted.
+
+The "20 min" half matched `LEG` and became a minutes-only leg. The lone-distance
+branch is guarded by "only when the legs found nothing", and the guard was
+written as `not used` — which asks whether any leg was found, not whether any
+distance was. So a pseudo-leg four characters away from the number blocked it,
+and the distance was dropped.
+
+Three things follow from one dropped number, and all three were visible in the
+export:
+
+| | of 309 cards |
+|---|---|
+| distance printed, not taken | **37** |
+| ...of those, rated with no mileage charged | **37** |
+| ...of those, held `complete` but never `whole` | **37** |
+
+So the panel showed a **ceiling as if it were a rate** — median 26% high, p90
+45%, worst 133% — which is the exact failure the uncosted cap exists to contain,
+arriving through the one door the cap cannot see. And it showed it *with a
+question mark*, for the life of the offer: never spoken, set aside on the offers
+page, and resampled until the card went away, for a reading that had the pay,
+the distance and the time and nothing left to learn.
+
+The fix is one word in each port, and it is a rule the file already had.
+`legs_short_a_distance` decides what counts as part of a journey: a leg that
+states a distance, **or one the card labelled** (`away`, `trip`, `total`). Uber
+labels every leg of a ride, so a labelled leg with no distance is damage and
+another frame may still fix it; an unlabelled minutes-only token was never a leg.
+The lone distance is consulted when nothing that *travels* was found, and
+`is_whole` asks the same question of a single token: labelled means half a ride
+card, unlabelled means a whole delivery card.
+
+Replayed over the 210 cards that were not truncated — the ones where the stored
+text is exactly what the reader saw:
+
+| | before | after |
+|---|---|---|
+| distance dropped | 31 | **0** |
+| held unfinished | 31 | **0** |
+| rated with no running cost | 31 | **0** |
+| CLOSE CALL | 15 | 6 |
+| PASS | 178 | 186 |
+| ACCEPT | 17 | 18 |
+
+Almost all of the movement is a hedge becoming an honest PASS. The single new
+ACCEPT is a $25.60 GoPuff run over 8.3 miles and 36 minutes: $38.52/hr net of
+its own mileage, held at CLOSE CALL before only because the cap was doing its
+job on a rate with no cost taken off it.
+
+What the corpus could **not** answer is as much the point. 99 of the 309 cards
+sat exactly on the 220-character cap, cut off at the end — where the pickup, the
+dropoff and a ride's second leg are written — so re-parsing them gives a
+different answer from the one the rig gave, and the rows most worth studying are
+the ones the column could not speak for. The cap is 600 now. The check that
+guarded it asserted only an upper bound, which any cap satisfies; it now also
+holds a real full-length card whole.
+
 ### The ACCEPT that was made of a missing deduction
 
 202 offers off one real shift, and the arithmetic behind every verdict in it:
@@ -3248,7 +3325,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3527 checks
+npm test                # all 29 suites, 3615 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

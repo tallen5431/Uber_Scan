@@ -441,6 +441,23 @@ def is_whole(parsed):
         return True
     if (parsed.get('legs') or 0) >= 2:
         return True
+    # One token, and whether it is half a journey or a whole job is decided by
+    # whether the card labelled it — the same question `legs_short_a_distance`
+    # asks, for the same reason. Uber labels every leg of a ride (away, trip,
+    # total), so a labelled single leg has a sibling that did not read and
+    # another frame can still supply it. An unlabelled one is the "2.4 mi ·
+    # 20 min" line of a delivery card: a summary of the whole job, not a leg,
+    # and there is no second half coming.
+    #
+    # This was 37 of the driver's own 309 cards, all reading `complete` and
+    # never `whole`: shown with a question mark for the life of the offer,
+    # never spoken, set aside on the offers page, and resampled until the card
+    # went away — for a reading that had the pay, the distance and the time and
+    # nothing left to learn.
+    legs = parsed.get('legDetail') or []
+    if (parsed.get('legs') or 0) == 1 and legs and not legs[0].get('labelled'):
+        return (parsed.get('miles') is not None
+                and parsed.get('minutes') is not None)
     return (not (parsed.get('legs') or 0)
             and parsed.get('deliverBy') is not None
             and parsed.get('miles') is not None)
@@ -759,10 +776,33 @@ def parse(raw_text):
     pay = find_pay(text)
 
     # A delivery card states no duration and puts its distance on its own, so
-    # neither reaches the sum above. Consulted only when the legs found nothing,
-    # which is what keeps it from double-counting a ride card.
+    # neither reaches the sum above.
+    #
+    # "Consulted only when the legs found nothing" is what this used to say, and
+    # `not used` is not that test. The commonest card this driver is shown reads
+    #
+    #     $7.20 Guaranteed (incl. tips) 2.4 mi + 20 min @ Pickup McDonald's
+    #
+    # where the distance and the time are two halves of ONE line, not a journey
+    # leg. The "20 min" half is picked up as a minutes-only leg, `used` is
+    # therefore truthy, and the "2.4 mi" sitting four characters away is thrown
+    # out. On the driver's own 309-card export that happened 37 times — 12% of
+    # every offer read — and all 37 for this one reason. No distance means no
+    # mileage charged, which means the panel showed a ceiling as if it were a
+    # rate: the exact failure the uncosted cap exists to contain, arriving
+    # through the door the cap cannot see.
+    #
+    # The right test is the one `legs_short_a_distance` already uses. A leg is
+    # part of the journey if it states a distance or the card labelled it one;
+    # an unlabelled minutes-only token was never a leg. So a lone distance is
+    # consulted when nothing that travels was found, which still leaves a real
+    # ride card alone — its legs carry distances — and still refuses to hand a
+    # stray number to a LABELLED leg that lost its own, because that is damage
+    # and `short_a_leg` is already saying so.
     deadline = find_deadline(text)
-    if miles is None and not used:
+    travelled = [l for l in used
+                 if l['miles'] is not None or l.get('labelled')]
+    if miles is None and not travelled:
         lone = LONE_MILES.search(text)
         if lone:
             v = to_number(lone.group(1))

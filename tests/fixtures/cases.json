@@ -1,1620 +1,1757 @@
 {
-  "_comment": "Shared corpus. tests/parser.test.js and rpi/test_parser.py both run these, so the JavaScript and Python parsers cannot drift apart.",
-  "parse": [
-    {
-      "name": "shop and deliver, verbatim from a real offer",
-      "text": "Shop & Deliver Exclusive $7.09 Guaranteed (incl. tip) 6 items (6 units) 34 min (3.6 mi) total Dollar General (925 Shiloh Rd Nw) Hidden Forest Ct, Marietta Accept",
-      "expect": {
-        "pay": 7.09,
-        "minutes": 34,
-        "miles": 3.6,
-        "items": 6,
-        "complete": true
-      }
-    },
-    {
-      "name": "ocr reads $ as S and 0 as O",
-      "text": "Shop & Deliver S7.O9 Guaranteed (incl. tip) 6 items (6 units) 34 min (3.6 mi) total",
-      "expect": {
-        "pay": 7.09,
-        "minutes": 34,
-        "miles": 3.6,
-        "items": 6,
-        "complete": true
-      }
-    },
-    {
-      "name": "ocr reads decimal points as commas",
-      "text": "$7,09 Guaranteed 34 min (3,6 mi) total",
-      "expect": {
-        "pay": 7.09,
-        "minutes": 34,
-        "miles": 3.6,
-        "complete": true
-      }
-    },
-    {
-      "name": "ocr loses the spaces around units",
-      "text": "$7.09 34min (3.6mi) total",
-      "expect": {
-        "pay": 7.09,
-        "minutes": 34,
-        "miles": 3.6,
-        "complete": true
-      }
-    },
-    {
-      "name": "ocr reads 1 as l and 5 as S",
-      "text": "$l2.4S 23 min (8.4 mi) trip",
-      "expect": {
-        "pay": 12.45,
-        "minutes": 23,
-        "miles": 8.4,
-        "complete": true
-      }
-    },
-    {
-      "name": "rideshare legs are summed",
-      "text": "$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip",
-      "expect": {
-        "pay": 12.45,
-        "minutes": 28,
-        "miles": 9.6,
-        "complete": true
-      }
-    },
-    {
-      "name": "hours and minutes",
-      "text": "$41.80 1 hr 4 min (26.1 mi) total",
-      "expect": {
-        "pay": 41.8,
-        "minutes": 64,
-        "miles": 26.1,
-        "complete": true
-      }
-    },
-    {
-      "name": "a total line replaces the legs it summarises",
-      "text": "$9.00 8 min (2.0 mi) to store 14 min (4.0 mi) to customer 22 min (6.0 mi) total",
-      "expect": {
-        "pay": 9.0,
-        "minutes": 22,
-        "miles": 6.0,
-        "complete": true
-      }
-    },
-    {
-      "name": "street numbers are never pay",
-      "text": "$7.09 6 items 34 min (3.6 mi) total Dollar General (925 Shiloh Rd Nw) Hidden Forest Ct",
-      "expect": {
-        "pay": 7.09,
-        "minutes": 34,
-        "miles": 3.6,
-        "items": 6,
-        "complete": true
-      }
-    },
-    {
-      "name": "the largest dollar figure is the payout",
-      "text": "Was $4.50 now $11.25 20 min (5.0 mi) total",
-      "expect": {
-        "pay": 11.25,
-        "minutes": 20,
-        "miles": 5.0,
-        "complete": true
-      }
-    },
-    {
-      "name": "pay with no time is incomplete",
-      "text": "$7.09 Guaranteed (incl. tip) 6 items",
-      "expect": {
-        "pay": 7.09,
-        "minutes": null,
-        "miles": null,
-        "items": 6,
-        "complete": false
-      }
-    },
-    {
-      "name": "garbage yields nothing",
-      "text": "blurry nonsense with no numbers at all",
-      "expect": {
-        "pay": null,
-        "minutes": null,
-        "miles": null,
-        "complete": false
-      }
-    },
-    {
-      "name": "time without distance still computes",
-      "text": "$7.09 34 min total",
-      "expect": {
-        "pay": 7.09,
-        "minutes": 34,
-        "miles": null,
-        "complete": true
-      }
-    },
-    {
-      "name": "lost decimal in distance is recovered and flagged",
-      "text": "$7.09 6 items (6 units) 34 min (36 mi) total",
-      "expect": {
-        "pay": 7.09,
-        "minutes": 34,
-        "miles": 3.6,
-        "milesCorrected": true,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "a plausible highway distance is left alone",
-      "text": "$41.80 1 hr 4 min (26.1 mi) total",
-      "expect": {
-        "miles": 26.1,
-        "milesCorrected": false
-      }
-    },
-    {
-      "name": "53 mph is fast but real, so untouched",
-      "text": "$60.00 45 min (40 mi) trip",
-      "expect": {
-        "miles": 40,
-        "milesCorrected": false
-      }
-    },
-    {
-      "name": "implausible but clearly decimalled is uncertain, not corrected",
-      "text": "$20.00 10 min (30.5 mi) total",
-      "expect": {
-        "miles": 30.5,
-        "milesUncertain": true,
-        "milesCorrected": false
-      }
-    },
-    {
-      "name": "an address is not a payout: 'E 61 St & S Rhodes' misread as 'S 4S'",
-      "text": "3 min (1.1 mi) away E61 S 4S Rhodes Ave, 20 min (7.3 mi) trip",
-      "expect": {
-        "pay": null,
-        "minutes": 23,
-        "miles": 8.4,
-        "complete": false
-      }
-    },
-    {
-      "name": "nor is a rating with the star read as an S",
-      "text": "UberX Exclusive S 4S Verified 20 min (7.3 mi) trip",
-      "expect": {
-        "pay": null,
-        "minutes": 20,
-        "miles": 7.3,
-        "complete": false
-      }
-    },
-    {
-      "name": "a real payout with the dollar sign lost still reads, cents and all",
-      "text": "UberX Exclusive S16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
-      "expect": {
-        "pay": 16.05,
-        "minutes": 23,
-        "miles": 8.4,
-        "complete": true
-      }
-    },
-    {
-      "name": "uberx two-leg card, verbatim from a real offer",
-      "text": "UberX Exclusive $16.05 4.95 Verified 3 min (1.1 mi) away E 61 St & S Rhodes Ave, IL 20 min (7.3 mi) trip S Cottage Grove Ave & 62nd St, IL Accept",
-      "expect": {
-        "pay": 16.05,
-        "minutes": 23,
-        "miles": 8.4,
-        "complete": true
-      }
-    },
-    {
-      "name": "a leg that lost its decimal is repaired before it can become a second leg",
-      "text": "$16.05 3 min (1.1 mi) away 20 min (73 mi) trip",
-      "expect": {
-        "pay": 16.05,
-        "minutes": 23,
-        "miles": 8.4,
-        "legs": 2,
-        "milesCorrected": true,
-        "complete": true
-      }
-    },
-    {
-      "name": "a plausible short leg is left alone, however fast it rounds to",
-      "text": "$9.00 2 min (2.0 mi) away 20 min (6.0 mi) trip",
-      "expect": {
-        "minutes": 22,
-        "miles": 8.0,
-        "milesCorrected": false,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "a decimal lost from a total is still repaired",
-      "text": "$7.09 34 min (36 mi) total",
-      "expect": {
-        "minutes": 34,
-        "miles": 3.6,
-        "milesCorrected": true
-      }
-    },
-    {
-      "name": "an implausible leg that ten cannot save stays uncertain",
-      "text": "$20.00 10 min (305 mi) total",
-      "expect": {
-        "miles": 305,
-        "milesUncertain": true,
-        "milesCorrected": false
-      }
-    },
-    {
-      "name": "map noise is not a journey: 'ZIM' must not read as 21 minutes",
-      "text": "Today $142.60 12 trips ZIM Sects eae You are online Marietta, GA",
-      "expect": {
-        "minutes": null,
-        "miles": null,
-        "legs": 0,
-        "complete": false
-      }
-    },
-    {
-      "name": "nor is any bare number-plus-m",
-      "text": "$8.00 Rau WeS 34 m AC a RRC",
-      "expect": {
-        "minutes": null,
-        "complete": false
-      }
-    },
-    {
-      "name": "a minute count needs at least one real digit",
-      "text": "$8.00 SI min (2.0 mi) total",
-      "expect": {
-        "minutes": null,
-        "complete": false
-      }
-    },
-    {
-      "name": "but one real digit among lookalikes is still read",
-      "text": "$8.00 l2 min (2.0 mi) total",
-      "expect": {
-        "minutes": 12,
-        "miles": 2.0,
-        "complete": true
-      }
-    },
-    {
-      "name": "and a mangled 'min' is still a minute",
-      "text": "$7.09 34 mln (3.6 mi) total",
-      "expect": {
-        "minutes": 34,
-        "miles": 3.6,
-        "complete": true
-      }
-    },
-    {
-      "name": "a leg whose minutes have rubbish stuck to them is not a leg",
-      "text": "$47.53 9 min (3.1 mi) trip 53L min (18.6 mi) away",
-      "expect": {
-        "pay": 47.53,
-        "minutes": 9.0,
-        "miles": 3.1,
-        "legs": 1,
-        "complete": true
-      }
-    },
-    {
-      "name": "a leg whose distance did not read keeps its minutes and makes the distance uncertain",
-      "text": "$16.05 25 min (11.q5 mi) away 17 min (3.7 mi) trip",
-      "expect": {
-        "pay": 16.05,
-        "minutes": 42.0,
-        "miles": 3.7,
-        "legs": 2,
-        "complete": true,
-        "milesUncertain": true
-      }
-    },
-    {
-      "name": "...the same thing one letter further along, which is what a blown-out card does",
-      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip",
-      "expect": {
-        "pay": 16.05,
-        "minutes": 23.0,
-        "miles": 1.1,
-        "legs": 2,
-        "complete": true,
-        "milesUncertain": true
-      }
-    },
-    {
-      "name": "...and both legs losing theirs is the same fault, not an exemption",
-      "text": "$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip",
-      "expect": {
-        "pay": 16.05,
-        "minutes": 42.0,
-        "miles": null,
-        "legs": 2,
-        "complete": true,
-        "milesUncertain": true
-      }
-    },
-    {
-      "name": "...while a lone total states no distance and is not damaged",
-      "text": "$7.09 34 min total",
-      "expect": {
-        "pay": 7.09,
-        "minutes": 34.0,
-        "miles": null,
-        "legs": 1,
-        "complete": true,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "...and legs that all read leave it certain",
-      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
-      "expect": {
-        "pay": 16.05,
-        "minutes": 23.0,
-        "miles": 8.4,
-        "legs": 2,
-        "complete": true,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "a payout with a stray mark in it is refused, not half-read",
-      "text": "$16\".l87 12 min (3.0 mi) total",
-      "expect": {
-        "pay": 16.0,
-        "minutes": 12.0,
-        "miles": 3.0,
-        "legs": 1,
-        "complete": true
-      }
-    },
-    {
-      "name": "trailing rubbish after a clean number is still rubbish",
-      "text": "$12.50 20 min (4.5# mi) total",
-      "expect": {
-        "pay": 12.5,
-        "minutes": 20.0,
-        "legs": 1,
-        "complete": true
-      }
-    },
-    {
-      "name": "doordash, deadline instead of a duration",
-      "text": "Decline High paying offer! Your Platinum status gave you priority for this offer. $41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa John's Store 3317 (2 orders) Customer dropoff Customer dropoff Accept 27",
-      "expect": {
-        "pay": 41.11,
-        "minutes": null,
-        "miles": 9.8,
-        "deliverBy": 1155,
-        "complete": true
-      }
-    },
-    {
-      "name": "doordash, a stacked order added to a route",
-      "text": "Decline High pay order! Your high ratings gave you priority for this order. +$16.00 Guaranteed Additional 6.9 mi Deliver by 7:08 PM Pickup Buffalo Wild Wings Customer dropoff Add to route 82",
-      "expect": {
-        "pay": 16.0,
-        "minutes": null,
-        "miles": 6.9,
-        "deliverBy": 1148,
-        "complete": true
-      }
-    },
-    {
-      "name": "doordash, merchant under the deadline",
-      "text": "Decline Deliver by 6:39 PM Cherry Cricket 32 4 items 0.6 mi $8.00 Includes DoorDash pay and customer tip (Total may be higher) Accept",
-      "expect": {
-        "pay": 8.0,
-        "minutes": null,
-        "miles": 0.6,
-        "items": 4,
-        "deliverBy": 1119,
-        "complete": true
-      }
-    },
-    {
-      "name": "uber dark mode, two legs with addresses",
-      "text": "UberX Exclusive $10.30 5.00 19 min (8.5 mi) Mae Dell Rd & Riggins Dr, Chattanooga 12 mins (6.6 mi) Camp Jordan Pkwy, Chattanooga 4 mi from fast charger Accept",
-      "expect": {
-        "pay": 10.3,
-        "minutes": 31,
-        "miles": 15.1,
-        "deliverBy": null,
-        "legs": 2,
-        "complete": true
-      }
-    },
-    {
-      "name": "a fast but real highway run keeps its distance",
-      "text": "$52.00 2 hr 5 min (115.0 mi) total",
-      "expect": {
-        "pay": 52.0,
-        "minutes": 125,
-        "miles": 115.0,
-        "milesCorrected": false,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "...and so does one a shade under the unreadable line",
-      "text": "$40.00 40 min (49.0 mi) trip",
-      "expect": {
-        "miles": 49.0,
-        "milesCorrected": false,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "past it, the distance is still called unreadable",
-      "text": "$12.00 20 min (61.0 mi) total",
-      "expect": {
-        "miles": 61.0,
-        "milesCorrected": false,
-        "milesUncertain": true
-      }
-    },
-    {
-      "name": "a non-ascii digit is not a digit, in either language",
-      "text": "$16.05 3 min (1.1 mi) away \u0662\u0660 min (7.3 mi) trip",
-      "expect": {
-        "legs": 1,
-        "miles": 1.1,
-        "minutes": 3,
-        "pay": 16.05
-      }
-    },
-    {
-      "name": "...on either leg",
-      "text": "$16.05 \u0663 min (1.1 mi) away 20 min (7.3 mi) trip",
-      "expect": {
-        "legs": 1,
-        "miles": 7.3,
-        "minutes": 20,
-        "pay": 16.05
-      }
-    },
-    {
-      "name": "...nor in a payout",
-      "text": "\u0664.50 8 min (2.0 mi) total",
-      "expect": {
-        "complete": false,
-        "minutes": 8,
-        "pay": null
-      }
-    },
-    {
-      "name": "an accent does not end a word for one port and not the other",
-      "text": "$7.09 34 min (3.6 mi) total\u00e9",
-      "expect": {
-        "miles": 3.6,
-        "minutes": 34,
-        "pay": 7.09
-      }
-    },
-    {
-      "name": "...before it either",
-      "text": "$7.09 34 min (3.6 mi) \u00e9total",
-      "expect": {
-        "miles": 3.6,
-        "minutes": 34,
-        "pay": 7.09
-      }
-    },
-    {
-      "name": "an accented unit is not the unit",
-      "text": "$16.05 3 m\u00edn (1.1 mi) away",
-      "expect": {
-        "legs": 0,
-        "minutes": null,
-        "pay": 16.05
-      }
-    },
-    {
-      "name": "a shop card says so, and is believed rather than inferred",
-      "text": "Shop & Deliver Exclusive $7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "expect": {
-        "items": 6,
-        "shop": true
-      }
-    },
-    {
-      "name": "...however the ampersand came out",
-      "text": "Shop and Deliver $7.09 34 min (3.6 mi) total",
-      "expect": {
-        "shop": true
-      }
-    },
-    {
-      "name": "a ride card does not claim to be one",
-      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
-      "expect": {
-        "shop": null
-      }
-    },
-    {
-      "name": "and a card whose top never made it into the crop says nothing",
-      "text": "$7.09 34 min (3.6 mi) total",
-      "expect": {
-        "shop": null
-      }
-    },
-    {
-      "name": "the pickup wait line is not a leg of the journey",
-      "_why": "Uber labels every leg of a journey \u2014 away, trip, total \u2014 and prints its distance beside its time. A minutes-only token with no label is not a leg at all, and the card is full of them. This one is 'Avg. wait time at pickup 4 min' under the address: it became a third leg on a two-leg card and tripped legs_short_a_distance, which marked the whole distance untrusted and made rate() charge no mileage. 67 of the 70 three-leg cards on one real shift, with the distance complete throughout.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avg. wait time at pickup 4 min",
-      "expect": {
-        "pay": 16.05,
-        "miles": 8.4,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "...and its minutes still count, because the driver still waits",
-      "_why": "The wait is time the offer occupies you, so it belongs in the denominator. Dropping it would raise the rate, which is the dangerous direction.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avg. wait time at pickup 4 min",
-      "expect": {
-        "minutes": 27.0
-      }
-    },
-    {
-      "name": "...even as the camera actually mangles it",
-      "_why": "Real fragments out of the journal: 'Avo Wait (ime at pickup', 'walt time at plclaup: min', 'aan at pickup'. Neither word survives reliably, so either one is enough.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avo Wait (ime at pickup 4 min",
-      "expect": {
-        "miles": 8.4,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "...and a leg that really did lose its distance is still doubted",
-      "_why": "The guard has to keep doing the job it was written for. A two-leg card whose trip leg lost its miles reads as a shorter, better-paying job than the card describes.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min trip",
-      "expect": {
-        "miles": 1.1,
-        "milesUncertain": true
-      }
-    },
-    {
-      "name": "...and a wait line cannot excuse a card that lost both distances",
-      "_why": "With the wait leg set aside there is one travel leg left, which is the single-leg case the guard already exempts as a possible total \u2014 so this must not silently become trustworthy. It states no distance at all, which `uncosted` reports rather than this.",
-      "text": "$16.05 5 min away 18 min trip Avg. wait time at pickup 4 min",
-      "expect": {
-        "miles": null
-      }
-    },
-    {
-      "name": "a promo chip is not a leg either",
-      "_why": "'15 min left' has no leg label, so it is not part of the journey. Decided by the card's own grammar rather than a list of phrases that are not legs, which is what makes it hold for the next one.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip +$2.50 promo 15 min left",
-      "expect": {
-        "miles": 8.4,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "...nor an arrival badge",
-      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip arrives in 9 min",
-      "expect": {
-        "miles": 8.4,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "a stacked order really does have four legs",
-      "_why": "So the rule cannot be a cap on how many legs a card may have. Every one of these states its distance, so none of them is in question.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip 6 min (2.1 mi) away 12 min (4.0 mi) trip",
-      "expect": {
-        "legs": 4,
-        "miles": 14.5,
-        "minutes": 41.0,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "...and a labelled leg that lost its distance is still doubted",
-      "_why": "The card said 'trip', so this is a leg the reader failed on rather than a line that was never a leg. That is the damage the guard was written for and it has to keep catching it.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min trip",
-      "expect": {
-        "miles": 1.1,
-        "milesUncertain": true
-      }
-    }
-  ],
-  "rate": [
-    {
-      "name": "the real offer, gross",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0
-      },
-      "expect": {
-        "perHour": 12.51,
-        "state": "no",
-        "grossPerHour": 12.51
-      }
-    },
-    {
-      "name": "the real offer, less mileage cost",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0.3
-      },
-      "expect": {
-        "perHour": 10.61,
-        "state": "no",
-        "grossPerHour": 12.51
-      }
-    },
-    {
-      "name": "the real offer, with 90s per item of shopping",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0.3,
-        "secondsPerItem": 90
-      },
-      "expect": {
-        "perHour": 8.39,
-        "state": "no",
-        "shopMinutes": 9,
-        "grossPerHour": 9.89
-      }
-    },
-    {
-      "name": "the same offer against a target it clears",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": 10,
-        "costPerMile": 0
-      },
-      "expect": {
-        "perHour": 12.51,
-        "state": "go"
-      }
-    },
-    {
-      "name": "a distrusted distance is never charged as cost",
-      "text": "$20.00 10 min (30.5 mi) total",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0.7
-      },
-      "expect": {
-        "net": 20,
-        "milesUncertain": true
-      }
-    },
-    {
-      "name": "the guard keeps a recovered read positive",
-      "text": "$7.09 34 min (36 mi) total",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0.3
-      },
-      "expect": {
-        "perHour": 10.61,
-        "state": "no"
-      }
-    },
-    {
-      "name": "a target with the quotes left on is still that target",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": "30",
-        "costPerMile": 0
-      },
-      "expect": {
-        "perHour": 12.51,
-        "state": "no",
-        "target": 30.0,
-        "band": 15
-      }
-    },
-    {
-      "name": "a target deleted falls back to the default, not to an accept-everything floor",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": null,
-        "costPerMile": 0
-      },
-      "expect": {
-        "perHour": 12.51,
-        "state": "no",
-        "target": 25,
-        "band": 15
-      }
-    },
-    {
-      "name": "a deliberate zero target is a zero target",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": 0,
-        "costPerMile": 0
-      },
-      "expect": {
-        "perHour": 12.51,
-        "state": "go",
-        "target": 0.0,
-        "band": 15
-      }
-    },
-    {
-      "name": "a running cost with the quotes left on still costs",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": 25,
-        "costPerMile": "0.30"
-      },
-      "expect": {
-        "perHour": 10.61,
-        "state": "no",
-        "target": 25.0,
-        "band": 15
-      }
-    },
-    {
-      "name": "settings that are not numbers at all fall back rather than crash",
-      "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
-      "settings": {
-        "target": "abc",
-        "band": "",
-        "costPerMile": "nonsense"
-      },
-      "expect": {
-        "perHour": 12.51,
-        "state": "no",
-        "target": 25,
-        "band": 15
-      }
-    },
-    {
-      "name": "a 56 mph highway run is charged for its miles, not excused them",
-      "text": "$52.00 2 hr 5 min (115.0 mi) total",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0.3
-      },
-      "expect": {
-        "perHour": 8.4,
-        "cost": 34.5,
-        "state": "no"
-      }
-    },
-    {
-      "name": "a distance that could not be trusted may not clear a net target",
-      "_why": "One leg lost its miles, so no running cost could be charged and the rate is an upper bound. On the owner's own shift 108 of 202 offers were rated this way and 33 of the 35 ACCEPTs came out of that pool.",
-      "text": "$9.08 6 min (1.2 mi) away 14 min trip",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0.3
-      },
-      "expect": {
-        "state": "warn",
-        "uncosted": true
-      }
-    },
-    {
-      "name": "...and with no running cost configured there is nothing to cap",
-      "_why": "costPerMile 0 means the driver has opted out of costing, so gross IS net and the rate is the offer rather than a ceiling on it.",
-      "text": "$9.08 6 min (1.2 mi) away 14 min trip",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0
-      },
-      "expect": {
-        "state": "go",
-        "uncosted": false
-      }
-    },
-    {
-      "name": "...and a trusted distance still earns a green light",
-      "_why": "The cap must not swallow the offers it exists to protect.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0.3
-      },
-      "expect": {
-        "state": "go",
-        "uncosted": false
-      }
-    },
-    {
-      "name": "a rate below the floor is still a pass, not a close call",
-      "_why": "The cap lowers a green light to a close call; it must not raise a pass into one.",
-      "text": "$4.05 6 min (1.2 mi) away 40 min trip",
-      "settings": {
-        "target": 25,
-        "costPerMile": 0.3
-      },
-      "expect": {
-        "state": "no",
-        "uncosted": true
-      }
-    },
-    {
-      "name": "a delivery distance that lost its decimal is recovered against the deadline",
-      "_why": "A delivery card states a distance with no time beside it, so parse() had no denominator and check_distance returned it untouched. 2.4 mi read as 24 mi was charged $7.20 of mileage instead of $0.72 \u2014 $18.1/hr shown as $2.5/hr, unflagged. rate() knows the clock.",
-      "text": "$8.25 Guaranteed (incl. tip) 24 mi Deliver by 6:05 PM",
-      "settings": {
-        "target": 25,
-        "band": 15,
-        "costPerMile": 0.3,
-        "nowMinutes": 1060
-      },
-      "expect": {
-        "miles": 2.4,
-        "cost": 0.72,
-        "milesCorrected": true,
-        "milesUncertain": false
-      }
-    },
-    {
-      "name": "...and the same card read correctly is left alone",
-      "text": "$8.25 Guaranteed (incl. tip) 2.4 mi Deliver by 6:05 PM",
-      "settings": {
-        "target": 25,
-        "band": 15,
-        "costPerMile": 0.3,
-        "nowMinutes": 1060
-      },
-      "expect": {
-        "miles": 2.4,
-        "cost": 0.72,
-        "milesCorrected": false
-      }
-    },
-    {
-      "name": "...and a printed decimal is not 'recovered' away",
-      "_why": "The decimal point is what says whether one was lost, and it has to be tested where it decides the answer: 60.0 miles with 25 minutes to run is 144 mph, so the recovery WOULD fire and turn it into 6.0 \u2014 the printed decimal is the only thing stopping it. The card is doubted instead, which is the honest answer to a distance that cannot be right and cannot be explained by a lost point. A 10.0 mi card at an ordinary speed proves nothing here, because check_distance never reaches the recovery at all.",
-      "text": "$8.25 Guaranteed (incl. tip) 60.0 mi Deliver by 6:05 PM",
-      "settings": {
-        "target": 25,
-        "band": 15,
-        "costPerMile": 0.3,
-        "nowMinutes": 1060
-      },
-      "expect": {
-        "miles": 60.0,
-        "milesCorrected": false,
-        "milesUncertain": true
-      }
-    },
-    {
-      "name": "a delivery distance plausible against its deadline is not touched",
-      "_why": "24 miles with 45 minutes to run is 32 mph and perfectly ordinary. The recovery only fires on a speed that cannot be true.",
-      "text": "$18.00 Guaranteed (incl. tip) 24 mi Deliver by 6:25 PM",
-      "settings": {
-        "target": 25,
-        "band": 15,
-        "costPerMile": 0.3,
-        "nowMinutes": 1060
-      },
-      "expect": {
-        "miles": 24.0,
-        "milesCorrected": false
-      }
-    },
-    {
-      "name": "a ride card is checked by parse() and not re-checked here",
-      "_why": "Its legs carry their own minutes, so the correction has already happened. Re-running it against the billed minutes would be a second bite at a number that was already judged.",
-      "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip",
-      "settings": {
-        "target": 25,
-        "band": 15,
-        "costPerMile": 0.3,
-        "nowMinutes": 1060
-      },
-      "expect": {
-        "miles": 8.4,
-        "milesCorrected": false
-      }
-    },
-    {
-      "name": "a card that lost a leg is not a $310/hr ACCEPT",
-      "_why": "This card is already in the parse fixtures: the '53L min' leg is correctly dropped as rubbish, which leaves the 9-minute pickup leg carrying the whole payout. It parses complete, is_whole is False, and it rated as a green ACCEPT at $310.67/hr where the truth over 62 minutes is $46. A lost leg makes pay, minutes and miles each individually plausible \u2014 it is the rate they imply together that cannot be true, which is what the continuous ceiling now sees.",
-      "text": "$47.53 9 min (3.1 mi) trip 53L min (18.6 mi) away",
-      "settings": {
-        "target": 25,
-        "band": 15,
-        "costPerMile": 0.3
-      },
-      "expect": {
-        "state": "doubt",
-        "doubt": "rate"
-      }
-    }
-  ],
-  "_coerce_comment": "The three functions that decide what an offer is judged against, checked in both languages from one list. Every one of these had drifted: Number('  ') is 0 in JavaScript so a whitespace target meant every offer was an ACCEPT while Python fell back to 25; float() takes '1e3' and '1_0' and parseFloat does not; and Infinity and NaN were guarded out of doubt() in JavaScript and compared against the bounds in Python. None of it was reachable from a test. '@inf', '@-inf' and '@nan' stand in for values JSON cannot hold.",
-  "coerce": {
-    "toNumber": [
-      {
-        "name": "a plain figure",
-        "in": "25",
-        "expect": 25.0
-      },
-      {
-        "name": "a decimal",
-        "in": "1.5",
-        "expect": 1.5
-      },
-      {
-        "name": "a comma read for a point",
-        "in": "1,5",
-        "expect": 1.5
-      },
-      {
-        "name": "a leading point",
-        "in": ".5",
-        "expect": 0.5
-      },
-      {
-        "name": "a signed figure",
-        "in": "-3",
-        "expect": -3.0
-      },
-      {
-        "name": "surrounding space",
-        "in": " 25 ",
-        "expect": 25.0
-      },
-      {
-        "name": "scientific notation",
-        "in": "1e3",
-        "expect": null
-      },
-      {
-        "name": "a digit separator",
-        "in": "1_0",
-        "expect": null
-      },
-      {
-        "name": "the word nan",
-        "in": "nan",
-        "expect": null
-      },
-      {
-        "name": "the word Infinity",
-        "in": "Infinity",
-        "expect": null
-      },
-      {
-        "name": "letters",
-        "in": "abc",
-        "expect": null
-      },
-      {
-        "name": "nothing at all",
-        "in": "",
-        "expect": null
-      },
-      {
-        "name": "only space",
-        "in": "   ",
-        "expect": null
-      },
-      {
-        "name": "two points",
-        "in": "1.2.3",
-        "expect": null
-      },
-      {
-        "name": "a trailing point",
-        "in": "12.",
-        "expect": 12.0
-      }
-    ],
-    "setting": [
-      {
-        "name": "a number",
-        "in": 30,
-        "fallback": 25,
-        "expect": 30.0
-      },
-      {
-        "name": "a numeric string",
-        "in": "30",
-        "fallback": 25,
-        "expect": 30.0
-      },
-      {
-        "name": "an empty string",
-        "in": "",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "whitespace",
-        "in": "  ",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "a tab",
-        "in": "\t",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "letters",
-        "in": "abc",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "nothing",
-        "in": null,
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "a boolean",
-        "in": true,
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "a list",
-        "in": [],
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "zero",
-        "in": 0,
-        "fallback": 25,
-        "expect": 0.0
-      },
-      {
-        "name": "a negative",
-        "in": -5,
-        "fallback": 25,
-        "expect": -5.0
-      },
-      {
-        "name": "not a number",
-        "in": "@nan",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "infinity",
-        "in": "@inf",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "an underscore is not a thousands separator",
-        "in": "1_0",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "nor is hexadecimal a target",
-        "in": "0x10",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "nor exponent notation",
-        "in": "1e3",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "not-a-number spelled out",
-        "in": "nan",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "...nor infinity",
-        "in": "Infinity",
-        "fallback": 25,
-        "expect": 25.0
-      },
-      {
-        "name": "a signed number typed as text still counts",
-        "in": "+25",
-        "fallback": 99,
-        "expect": 25.0
-      },
-      {
-        "name": "...and a bare decimal point",
-        "in": ".5",
-        "fallback": 99,
-        "expect": 0.5
-      },
-      {
-        "name": "...and a trailing one",
-        "in": "25.",
-        "fallback": 99,
-        "expect": 25.0
-      }
-    ],
-    "doubt": [
-      {
-        "name": "an ordinary offer",
-        "pay": 16.05,
-        "minutes": 23,
-        "miles": 8.4,
-        "expect": null
-      },
-      {
-        "name": "a lost decimal point",
-        "pay": 1184,
-        "minutes": 20,
-        "miles": 3.9,
-        "expect": "pay"
-      },
-      {
-        "name": "another lost point",
-        "pay": 1251,
-        "minutes": 11,
-        "miles": 2.1,
-        "expect": "pay"
-      },
-      {
-        "name": "pay under a dollar",
-        "pay": 0.5,
-        "minutes": 20,
-        "miles": 4,
-        "expect": "pay"
-      },
-      {
-        "name": "a card read as one minute",
-        "pay": 10,
-        "minutes": 1,
-        "miles": 0.5,
-        "expect": "time"
-      },
-      {
-        "name": "a card read as two",
-        "pay": 10,
-        "minutes": 2,
-        "miles": 0.5,
-        "expect": null
-      },
-      {
-        "name": "a five-hour trip",
-        "pay": 100,
-        "minutes": 300,
-        "miles": 200,
-        "expect": "time"
-      },
-      {
-        "name": "110 mph",
-        "pay": 56.65,
-        "minutes": 63,
-        "miles": 115.6,
-        "expect": "speed"
-      },
-      {
-        "name": "120 mph",
-        "pay": 60.86,
-        "minutes": 60,
-        "miles": 120.0,
-        "expect": "speed"
-      },
-      {
-        "name": "the same trip read right",
-        "pay": 56.65,
-        "minutes": 123,
-        "miles": 115.6,
-        "expect": null
-      },
-      {
-        "name": "crawling in traffic",
-        "pay": 7.09,
-        "minutes": 34,
-        "miles": 3.6,
-        "expect": null
-      },
-      {
-        "name": "a short hop",
-        "pay": 5,
-        "minutes": 3,
-        "miles": 0.9,
-        "expect": null
-      },
-      {
-        "name": "no distance read",
-        "pay": 12,
-        "minutes": 20,
-        "miles": null,
-        "expect": null
-      },
-      {
-        "name": "a pay that is infinite",
-        "pay": "@inf",
-        "minutes": 20,
-        "miles": 4,
-        "expect": "pay"
-      },
-      {
-        "name": "a pay that is not a number",
-        "pay": "@nan",
-        "minutes": 20,
-        "miles": 4,
-        "expect": "pay"
-      },
-      {
-        "name": "a time that is infinite",
-        "pay": 12,
-        "minutes": "@inf",
-        "miles": 4,
-        "expect": "time"
-      },
-      {
-        "name": "a distance that is not a number",
-        "pay": 12,
-        "minutes": 20,
-        "miles": "@nan",
-        "expect": null
-      },
-      {
-        "name": "a payout whose decimal point did not survive the read",
-        "_why": "$1.36 read as $136 is $816/hr over ten minutes. Each half is sane on its own \u2014 $136 is inside SANE_PAY, ten minutes inside SANE_MINUTES \u2014 and nothing tested the pair, so five readings of one real shift reached the panel as ACCEPT at between $103 and $816 an hour.",
-        "pay": 136.0,
-        "minutes": 10.0,
-        "miles": 3.1,
-        "expect": "rate"
-      },
-      {
-        "name": "...and the same card read correctly is not doubted",
-        "pay": 1.36,
-        "minutes": 10.0,
-        "miles": 3.1,
-        "expect": null
-      },
-      {
-        "name": "a short hop that really does pay well is not a misread",
-        "_why": "$/hr is unbounded as the duration shrinks, so a bare rate ceiling clips real offers. $10 over two minutes is $300/hr and ordinary; the ceiling applies only once the trip is long enough for a rate to describe it.",
-        "pay": 10.0,
-        "minutes": 2.0,
-        "miles": 0.5,
-        "expect": null
-      },
-      {
-        "name": "...and just past the boundary the same rate is impossible",
-        "_why": "$50 over ten minutes is $300/hr for a trip long enough that the rate means something. No app pays it.",
-        "pay": 50.0,
-        "minutes": 10.0,
-        "miles": 2.0,
-        "expect": "rate"
-      },
-      {
-        "name": "an hour's work at a plausible rate is not doubted",
-        "pay": 40.0,
-        "minutes": 60.0,
-        "miles": 25.0,
-        "expect": null
-      },
-      {
-        "name": "the ceiling does not loosen as the trip gets shorter",
-        "_why": "Written as two branches, the guard was a STEP: below ten minutes nothing but SANE_PAY's own $300 applied, so $136 over ten minutes was doubted while the same $136 over NINE was a green ACCEPT at $899/hr. A guard a shorter trip walks under is not a guard.",
-        "pay": 136.0,
-        "minutes": 9.0,
-        "miles": 3.6,
-        "expect": "rate"
-      },
-      {
-        "name": "...nor at three minutes",
-        "pay": 136.0,
-        "minutes": 3.0,
-        "miles": 3.6,
-        "expect": "rate"
-      },
-      {
-        "name": "...and the boundary payout itself is still allowed",
-        "_why": "$33.33 is the payout that reaches SANE_RATE at ten minutes, so it is the flat cap below the boundary. The bound has to admit its own boundary value or it is a tighter bound than it says it is.",
-        "pay": 33.0,
-        "minutes": 9.0,
-        "miles": 2.0,
-        "expect": null
-      },
-      {
-        "name": "...while a dollar past it is not",
-        "pay": 34.0,
-        "minutes": 9.0,
-        "miles": 2.0,
-        "expect": "rate"
-      },
-      {
-        "name": "a five dollar errand over three minutes is an ordinary offer",
-        "_why": "The largest sub-ten-minute payout across 568 real offers is $5.00. A cap that refused this would be the guard-clips-a-real-offer failure, which costs exactly as much as letting a misread through.",
-        "pay": 5.0,
-        "minutes": 3.0,
-        "miles": 1.0,
-        "expect": null
-      }
-    ],
-    "round2": [
-      {
-        "name": "a half rounds away from zero",
-        "in": 2.675,
-        "expect": 2.68
-      },
-      {
-        "name": "...not to the nearest even",
-        "in": 8.845,
-        "expect": 8.85
-      },
-      {
-        "name": "and again",
-        "in": 3.345,
-        "expect": 3.35
-      },
-      {
-        "name": "a value below the half",
-        "in": 0.145,
-        "expect": 0.14
-      },
-      {
-        "name": "float noise from a sum",
-        "in": 9.600000000000001,
-        "expect": 9.6
-      },
-      {
-        "name": "...and the other direction",
-        "in": 17.299999999999997,
-        "expect": 17.3
-      },
-      {
-        "name": "an exact value is left alone",
-        "in": 2.5,
-        "expect": 2.5
-      },
-      {
-        "name": "a whole number",
-        "in": 12.0,
-        "expect": 12.0
-      },
-      {
-        "name": "zero",
-        "in": 0,
-        "expect": 0.0
-      }
-    ]
+ "_comment": "Shared corpus. tests/parser.test.js and rpi/test_parser.py both run these, so the JavaScript and Python parsers cannot drift apart.",
+ "parse": [
+  {
+   "name": "shop and deliver, verbatim from a real offer",
+   "text": "Shop & Deliver Exclusive $7.09 Guaranteed (incl. tip) 6 items (6 units) 34 min (3.6 mi) total Dollar General (925 Shiloh Rd Nw) Hidden Forest Ct, Marietta Accept",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": 3.6,
+    "items": 6,
+    "complete": true
+   }
   },
-  "_places_comment": "Where an offer went, so it can be found again months later. Checked as an exact list because the risk is not missing one, it is inventing one: a journal full of half-read map furniture is worse than one that cannot be searched by place. The 'from fast charger' badge on the Uber card and the '(2 orders)' after the Papa John's name are both things a looser reader would have swallowed.",
-  "places": [
-    {
-      "name": "a delivery merchant behind a Pickup label",
-      "text": "Decline High paying offer! Your Platinum status gave you priority for this offer. $41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa John's Store 3317 (2 orders) Customer dropoff Customer dropoff Accept 27",
-      "expect": [
-        "Papa John's Store 3317"
-      ]
-    },
-    {
-      "name": "...and one on a stacked order",
-      "text": "Decline High pay order! Your high ratings gave you priority for this order. +$16.00 Guaranteed Additional 6.9 mi Deliver by 7:08 PM Pickup Buffalo Wild Wings Customer dropoff Add to route 82",
-      "expect": [
-        "Buffalo Wild Wings"
-      ]
-    },
-    {
-      "name": "...and one printed under the deadline instead",
-      "text": "Decline Deliver by 6:39 PM Cherry Cricket 32 4 items 0.6 mi $8.00 Includes DoorDash pay and customer tip (Total may be higher) Accept",
-      "expect": [
-        "Cherry Cricket"
-      ]
-    },
-    {
-      "name": "both addresses off a ride card",
-      "text": "UberX Exclusive $10.30 5.00 19 min (8.5 mi) Mae Dell Rd & Riggins Dr, Chattanooga 12 mins (6.6 mi) Camp Jordan Pkwy, Chattanooga 4 mi from fast charger Accept",
-      "expect": [
-        "Mae Dell Rd & Riggins Dr, Chattanooga",
-        "Camp Jordan Pkwy, Chattanooga"
-      ]
-    },
-    {
-      "name": "a card with nowhere named",
-      "text": "$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip",
-      "expect": []
-    },
-    {
-      "name": "nothing at all",
-      "text": "",
-      "expect": []
-    },
-    {
-      "name": "a branch address in brackets keeps its brackets",
-      "text": "Shop & Deliver $7.09 6 items (6 units) 34 min (3.6 mi) total Pickup Dollar General (925 Shiloh Rd Nw) Customer dropoff Accept",
-      "expect": [
-        "Dollar General (925 Shiloh Rd Nw)"
-      ]
-    },
-    {
-      "name": "the furniture under a pickup address is not part of it",
-      "text": "UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw Avg. wait time at pickup: 1 min 23 min (8.4 mi) trip Celebration Blvd, Acworth Accept",
-      "expect": [
-        "Old 41 Hwy NW, Kennesaw",
-        "Celebration Blvd, Acworth"
-      ]
-    },
-    {
-      "name": "the card's icon row is not part of a street name",
-      "text": "UberX $10.30 5 min (1.1 mi) away Chastain Rd NW, Kennesaw 4 19 min (8.5 mi) trip Canton Rd, Marietta %",
-      "expect": [
-        "Chastain Rd NW, Kennesaw",
-        "Canton Rd, Marietta"
-      ]
-    },
-    {
-      "name": "a shop card does not put \"total\" in the merchant name",
-      "text": "Shop & Deliver $7.09 6 items 34 min (3.6 mi) total Five Guys (3450 Cobb Pkwy. NW) Accept",
-      "expect": [
-        "Five Guys (3450 Cobb Pkwy. NW)"
-      ]
-    },
-    {
-      "name": "the map behind the card is not somewhere the job went",
-      "text": "UberX $8.04 4 min (1.1 mi) away a we, a oo 1 we, a in i ie. a 22 min (6.9 mi) trip . a ae eS My on - J ee ae",
-      "expect": []
-    },
-    {
-      "name": "sludge in front of an address does not take the address with it",
-      "text": "UberX $9.05 3 min (0.9 mi) away oN | Cobb Pkwy NW, Kennesaw 'a 27 min (9.2 mi) trip",
-      "expect": [
-        "Cobb Pkwy NW, Kennesaw"
-      ]
-    }
+  {
+   "name": "ocr reads $ as S and 0 as O",
+   "text": "Shop & Deliver S7.O9 Guaranteed (incl. tip) 6 items (6 units) 34 min (3.6 mi) total",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": 3.6,
+    "items": 6,
+    "complete": true
+   }
+  },
+  {
+   "name": "ocr reads decimal points as commas",
+   "text": "$7,09 Guaranteed 34 min (3,6 mi) total",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": 3.6,
+    "complete": true
+   }
+  },
+  {
+   "name": "ocr loses the spaces around units",
+   "text": "$7.09 34min (3.6mi) total",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": 3.6,
+    "complete": true
+   }
+  },
+  {
+   "name": "ocr reads 1 as l and 5 as S",
+   "text": "$l2.4S 23 min (8.4 mi) trip",
+   "expect": {
+    "pay": 12.45,
+    "minutes": 23,
+    "miles": 8.4,
+    "complete": true
+   }
+  },
+  {
+   "name": "rideshare legs are summed",
+   "text": "$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip",
+   "expect": {
+    "pay": 12.45,
+    "minutes": 28,
+    "miles": 9.6,
+    "complete": true
+   }
+  },
+  {
+   "name": "hours and minutes",
+   "text": "$41.80 1 hr 4 min (26.1 mi) total",
+   "expect": {
+    "pay": 41.8,
+    "minutes": 64,
+    "miles": 26.1,
+    "complete": true
+   }
+  },
+  {
+   "name": "a total line replaces the legs it summarises",
+   "text": "$9.00 8 min (2.0 mi) to store 14 min (4.0 mi) to customer 22 min (6.0 mi) total",
+   "expect": {
+    "pay": 9.0,
+    "minutes": 22,
+    "miles": 6.0,
+    "complete": true
+   }
+  },
+  {
+   "name": "street numbers are never pay",
+   "text": "$7.09 6 items 34 min (3.6 mi) total Dollar General (925 Shiloh Rd Nw) Hidden Forest Ct",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": 3.6,
+    "items": 6,
+    "complete": true
+   }
+  },
+  {
+   "name": "the largest dollar figure is the payout",
+   "text": "Was $4.50 now $11.25 20 min (5.0 mi) total",
+   "expect": {
+    "pay": 11.25,
+    "minutes": 20,
+    "miles": 5.0,
+    "complete": true
+   }
+  },
+  {
+   "name": "pay with no time is incomplete",
+   "text": "$7.09 Guaranteed (incl. tip) 6 items",
+   "expect": {
+    "pay": 7.09,
+    "minutes": null,
+    "miles": null,
+    "items": 6,
+    "complete": false
+   }
+  },
+  {
+   "name": "garbage yields nothing",
+   "text": "blurry nonsense with no numbers at all",
+   "expect": {
+    "pay": null,
+    "minutes": null,
+    "miles": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "time without distance still computes",
+   "text": "$7.09 34 min total",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": null,
+    "complete": true
+   }
+  },
+  {
+   "name": "lost decimal in distance is recovered and flagged",
+   "text": "$7.09 6 items (6 units) 34 min (36 mi) total",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": 3.6,
+    "milesCorrected": true,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "a plausible highway distance is left alone",
+   "text": "$41.80 1 hr 4 min (26.1 mi) total",
+   "expect": {
+    "miles": 26.1,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "53 mph is fast but real, so untouched",
+   "text": "$60.00 45 min (40 mi) trip",
+   "expect": {
+    "miles": 40,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "implausible but clearly decimalled is uncertain, not corrected",
+   "text": "$20.00 10 min (30.5 mi) total",
+   "expect": {
+    "miles": 30.5,
+    "milesUncertain": true,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "an address is not a payout: 'E 61 St & S Rhodes' misread as 'S 4S'",
+   "text": "3 min (1.1 mi) away E61 S 4S Rhodes Ave, 20 min (7.3 mi) trip",
+   "expect": {
+    "pay": null,
+    "minutes": 23,
+    "miles": 8.4,
+    "complete": false
+   }
+  },
+  {
+   "name": "nor is a rating with the star read as an S",
+   "text": "UberX Exclusive S 4S Verified 20 min (7.3 mi) trip",
+   "expect": {
+    "pay": null,
+    "minutes": 20,
+    "miles": 7.3,
+    "complete": false
+   }
+  },
+  {
+   "name": "a real payout with the dollar sign lost still reads, cents and all",
+   "text": "UberX Exclusive S16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 23,
+    "miles": 8.4,
+    "complete": true
+   }
+  },
+  {
+   "name": "uberx two-leg card, verbatim from a real offer",
+   "text": "UberX Exclusive $16.05 4.95 Verified 3 min (1.1 mi) away E 61 St & S Rhodes Ave, IL 20 min (7.3 mi) trip S Cottage Grove Ave & 62nd St, IL Accept",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 23,
+    "miles": 8.4,
+    "complete": true
+   }
+  },
+  {
+   "name": "a leg that lost its decimal is repaired before it can become a second leg",
+   "text": "$16.05 3 min (1.1 mi) away 20 min (73 mi) trip",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 23,
+    "miles": 8.4,
+    "legs": 2,
+    "milesCorrected": true,
+    "complete": true
+   }
+  },
+  {
+   "name": "a plausible short leg is left alone, however fast it rounds to",
+   "text": "$9.00 2 min (2.0 mi) away 20 min (6.0 mi) trip",
+   "expect": {
+    "minutes": 22,
+    "miles": 8.0,
+    "milesCorrected": false,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "a decimal lost from a total is still repaired",
+   "text": "$7.09 34 min (36 mi) total",
+   "expect": {
+    "minutes": 34,
+    "miles": 3.6,
+    "milesCorrected": true
+   }
+  },
+  {
+   "name": "an implausible leg that ten cannot save stays uncertain",
+   "text": "$20.00 10 min (305 mi) total",
+   "expect": {
+    "miles": 305,
+    "milesUncertain": true,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "map noise is not a journey: 'ZIM' must not read as 21 minutes",
+   "text": "Today $142.60 12 trips ZIM Sects eae You are online Marietta, GA",
+   "expect": {
+    "minutes": null,
+    "miles": null,
+    "legs": 0,
+    "complete": false
+   }
+  },
+  {
+   "name": "nor is any bare number-plus-m",
+   "text": "$8.00 Rau WeS 34 m AC a RRC",
+   "expect": {
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "a minute count needs at least one real digit",
+   "text": "$8.00 SI min (2.0 mi) total",
+   "expect": {
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "but one real digit among lookalikes is still read",
+   "text": "$8.00 l2 min (2.0 mi) total",
+   "expect": {
+    "minutes": 12,
+    "miles": 2.0,
+    "complete": true
+   }
+  },
+  {
+   "name": "and a mangled 'min' is still a minute",
+   "text": "$7.09 34 mln (3.6 mi) total",
+   "expect": {
+    "minutes": 34,
+    "miles": 3.6,
+    "complete": true
+   }
+  },
+  {
+   "name": "a leg whose minutes have rubbish stuck to them is not a leg",
+   "text": "$47.53 9 min (3.1 mi) trip 53L min (18.6 mi) away",
+   "expect": {
+    "pay": 47.53,
+    "minutes": 9.0,
+    "miles": 3.1,
+    "legs": 1,
+    "complete": true
+   }
+  },
+  {
+   "name": "a leg whose distance did not read keeps its minutes and makes the distance uncertain",
+   "text": "$16.05 25 min (11.q5 mi) away 17 min (3.7 mi) trip",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 42.0,
+    "miles": 3.7,
+    "legs": 2,
+    "complete": true,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "...the same thing one letter further along, which is what a blown-out card does",
+   "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 23.0,
+    "miles": 1.1,
+    "legs": 2,
+    "complete": true,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "...and both legs losing theirs is the same fault, not an exemption",
+   "text": "$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 42.0,
+    "miles": null,
+    "legs": 2,
+    "complete": true,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "...while a lone total states no distance and is not damaged",
+   "text": "$7.09 34 min total",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34.0,
+    "miles": null,
+    "legs": 1,
+    "complete": true,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...and legs that all read leave it certain",
+   "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 23.0,
+    "miles": 8.4,
+    "legs": 2,
+    "complete": true,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "a payout with a stray mark in it is refused, not half-read",
+   "text": "$16\".l87 12 min (3.0 mi) total",
+   "expect": {
+    "pay": 16.0,
+    "minutes": 12.0,
+    "miles": 3.0,
+    "legs": 1,
+    "complete": true
+   }
+  },
+  {
+   "name": "trailing rubbish after a clean number is still rubbish",
+   "text": "$12.50 20 min (4.5# mi) total",
+   "expect": {
+    "pay": 12.5,
+    "minutes": 20.0,
+    "legs": 1,
+    "complete": true
+   }
+  },
+  {
+   "name": "doordash, deadline instead of a duration",
+   "text": "Decline High paying offer! Your Platinum status gave you priority for this offer. $41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa John's Store 3317 (2 orders) Customer dropoff Customer dropoff Accept 27",
+   "expect": {
+    "pay": 41.11,
+    "minutes": null,
+    "miles": 9.8,
+    "deliverBy": 1155,
+    "complete": true
+   }
+  },
+  {
+   "name": "doordash, a stacked order added to a route",
+   "text": "Decline High pay order! Your high ratings gave you priority for this order. +$16.00 Guaranteed Additional 6.9 mi Deliver by 7:08 PM Pickup Buffalo Wild Wings Customer dropoff Add to route 82",
+   "expect": {
+    "pay": 16.0,
+    "minutes": null,
+    "miles": 6.9,
+    "deliverBy": 1148,
+    "complete": true
+   }
+  },
+  {
+   "name": "doordash, merchant under the deadline",
+   "text": "Decline Deliver by 6:39 PM Cherry Cricket 32 4 items 0.6 mi $8.00 Includes DoorDash pay and customer tip (Total may be higher) Accept",
+   "expect": {
+    "pay": 8.0,
+    "minutes": null,
+    "miles": 0.6,
+    "items": 4,
+    "deliverBy": 1119,
+    "complete": true
+   }
+  },
+  {
+   "name": "uber dark mode, two legs with addresses",
+   "text": "UberX Exclusive $10.30 5.00 19 min (8.5 mi) Mae Dell Rd & Riggins Dr, Chattanooga 12 mins (6.6 mi) Camp Jordan Pkwy, Chattanooga 4 mi from fast charger Accept",
+   "expect": {
+    "pay": 10.3,
+    "minutes": 31,
+    "miles": 15.1,
+    "deliverBy": null,
+    "legs": 2,
+    "complete": true
+   }
+  },
+  {
+   "name": "a fast but real highway run keeps its distance",
+   "text": "$52.00 2 hr 5 min (115.0 mi) total",
+   "expect": {
+    "pay": 52.0,
+    "minutes": 125,
+    "miles": 115.0,
+    "milesCorrected": false,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...and so does one a shade under the unreadable line",
+   "text": "$40.00 40 min (49.0 mi) trip",
+   "expect": {
+    "miles": 49.0,
+    "milesCorrected": false,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "past it, the distance is still called unreadable",
+   "text": "$12.00 20 min (61.0 mi) total",
+   "expect": {
+    "miles": 61.0,
+    "milesCorrected": false,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "a non-ascii digit is not a digit, in either language",
+   "text": "$16.05 3 min (1.1 mi) away ٢٠ min (7.3 mi) trip",
+   "expect": {
+    "legs": 1,
+    "miles": 1.1,
+    "minutes": 3,
+    "pay": 16.05
+   }
+  },
+  {
+   "name": "...on either leg",
+   "text": "$16.05 ٣ min (1.1 mi) away 20 min (7.3 mi) trip",
+   "expect": {
+    "legs": 1,
+    "miles": 7.3,
+    "minutes": 20,
+    "pay": 16.05
+   }
+  },
+  {
+   "name": "...nor in a payout",
+   "text": "٤.50 8 min (2.0 mi) total",
+   "expect": {
+    "complete": false,
+    "minutes": 8,
+    "pay": null
+   }
+  },
+  {
+   "name": "an accent does not end a word for one port and not the other",
+   "text": "$7.09 34 min (3.6 mi) totalé",
+   "expect": {
+    "miles": 3.6,
+    "minutes": 34,
+    "pay": 7.09
+   }
+  },
+  {
+   "name": "...before it either",
+   "text": "$7.09 34 min (3.6 mi) étotal",
+   "expect": {
+    "miles": 3.6,
+    "minutes": 34,
+    "pay": 7.09
+   }
+  },
+  {
+   "name": "an accented unit is not the unit",
+   "text": "$16.05 3 mín (1.1 mi) away",
+   "expect": {
+    "legs": 0,
+    "minutes": null,
+    "pay": 16.05
+   }
+  },
+  {
+   "name": "a shop card says so, and is believed rather than inferred",
+   "text": "Shop & Deliver Exclusive $7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "expect": {
+    "items": 6,
+    "shop": true
+   }
+  },
+  {
+   "name": "...however the ampersand came out",
+   "text": "Shop and Deliver $7.09 34 min (3.6 mi) total",
+   "expect": {
+    "shop": true
+   }
+  },
+  {
+   "name": "a ride card does not claim to be one",
+   "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
+   "expect": {
+    "shop": null
+   }
+  },
+  {
+   "name": "and a card whose top never made it into the crop says nothing",
+   "text": "$7.09 34 min (3.6 mi) total",
+   "expect": {
+    "shop": null
+   }
+  },
+  {
+   "name": "the pickup wait line is not a leg of the journey",
+   "_why": "Uber labels every leg of a journey — away, trip, total — and prints its distance beside its time. A minutes-only token with no label is not a leg at all, and the card is full of them. This one is 'Avg. wait time at pickup 4 min' under the address: it became a third leg on a two-leg card and tripped legs_short_a_distance, which marked the whole distance untrusted and made rate() charge no mileage. 67 of the 70 three-leg cards on one real shift, with the distance complete throughout.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avg. wait time at pickup 4 min",
+   "expect": {
+    "pay": 16.05,
+    "miles": 8.4,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...and its minutes still count, because the driver still waits",
+   "_why": "The wait is time the offer occupies you, so it belongs in the denominator. Dropping it would raise the rate, which is the dangerous direction.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avg. wait time at pickup 4 min",
+   "expect": {
+    "minutes": 27.0
+   }
+  },
+  {
+   "name": "...even as the camera actually mangles it",
+   "_why": "Real fragments out of the journal: 'Avo Wait (ime at pickup', 'walt time at plclaup: min', 'aan at pickup'. Neither word survives reliably, so either one is enough.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip Avo Wait (ime at pickup 4 min",
+   "expect": {
+    "miles": 8.4,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...and a leg that really did lose its distance is still doubted",
+   "_why": "The guard has to keep doing the job it was written for. A two-leg card whose trip leg lost its miles reads as a shorter, better-paying job than the card describes.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min trip",
+   "expect": {
+    "miles": 1.1,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "...and a wait line cannot excuse a card that lost both distances",
+   "_why": "With the wait leg set aside there is one travel leg left, which is the single-leg case the guard already exempts as a possible total — so this must not silently become trustworthy. It states no distance at all, which `uncosted` reports rather than this.",
+   "text": "$16.05 5 min away 18 min trip Avg. wait time at pickup 4 min",
+   "expect": {
+    "miles": null
+   }
+  },
+  {
+   "name": "a promo chip is not a leg either",
+   "_why": "'15 min left' has no leg label, so it is not part of the journey. Decided by the card's own grammar rather than a list of phrases that are not legs, which is what makes it hold for the next one.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip +$2.50 promo 15 min left",
+   "expect": {
+    "miles": 8.4,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...nor an arrival badge",
+   "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip arrives in 9 min",
+   "expect": {
+    "miles": 8.4,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "a stacked order really does have four legs",
+   "_why": "So the rule cannot be a cap on how many legs a card may have. Every one of these states its distance, so none of them is in question.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip 6 min (2.1 mi) away 12 min (4.0 mi) trip",
+   "expect": {
+    "legs": 4,
+    "miles": 14.5,
+    "minutes": 41.0,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...and a labelled leg that lost its distance is still doubted",
+   "_why": "The card said 'trip', so this is a leg the reader failed on rather than a line that was never a leg. That is the damage the guard was written for and it has to keep catching it.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min trip",
+   "expect": {
+    "miles": 1.1,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "delivery card: distance and time are one line, not a leg",
+   "text": "Qe lio ' ¥ Sg Acworth Kennesaw © meer $7.50 Guaranteed (incl. tips 8.0 mi- 25min @ Pickup Crumbl f¥ Customer dropoff UN hg ci) {| O < x",
+   "expect": {
+    "pay": 7.5,
+    "minutes": 25,
+    "miles": 8.0
+   }
+  },
+  {
+   "name": "...the same card, interpunct read as a plus",
+   "text": "BY keouors 2 \\ the Acworth Kennesaw ©)mepioes $7.50 Guaranteed (incl. tips 8.0 mi+ 25min @ Pickup Crumbl f¥ Customer dropoff {| O < x",
+   "expect": {
+    "pay": 7.5,
+    "minutes": 25,
+    "miles": 8.0
+   }
+  },
+  {
+   "name": "...read as a guillemet, with the spacing the other way",
+   "text": "; 4 vs e. MIM Coa mae | P 7 5 } ! ¢ | ovmpias @ aa $8.05 Guaranteed (incl. tips) r 5.8 mi «22 min = = Pickup Panda Express f¥ Customer dropoff",
+   "expect": {
+    "pay": 8.05,
+    "minutes": 22,
+    "miles": 5.8
+   }
+  },
+  {
+   "name": "...read as a hyphen sandwich",
+   "text": "\\ ©) Gel $6.25 Guaranteed (incl. tips) 5.5 mi-+- 22 min . Pickup Chipotle Mexican Grill f¥ Customer dropoff aa hs 2: )",
+   "expect": {
+    "pay": 6.25,
+    "minutes": 22,
+    "miles": 5.5
+   }
+  },
+  {
+   "name": "...with a comma for the decimal point and no space at all",
+   "text": ". | a © Axe. $4.05 Guaranteed (incl. tips) 3,1mi +15 min @ Pickup Dunkin' f% Customer dropoff PX +) 9 ES) {| O < i",
+   "expect": {
+    "pay": 4.05,
+    "minutes": 15,
+    "miles": 3.1
+   }
+  },
+  {
+   "name": "a whole-dollar payout on the same layout",
+   "text": "Yr - ~ Age ™~ 3 > tal te) Exclusive a $8 Guaranteed (incl. tip) © 20 min (7.3 mi) total [ La Parrilla Mexican Restaurant | (Acworth) McEvers Branch Ct & McEvers Branch Lndg, Acworth iI O < x",
+   "expect": {
+    "pay": 8.0,
+    "minutes": 20,
+    "miles": 7.3
+   }
+  },
+  {
+   "name": "a lost decimal point inside a total, recovered",
+   "text": "Acworth 'any c) HAMI LOST MOUNTAIN Dallas Maem Exclusive x $11.88 Guaranteed (incl. tip) © 35 min (179 mi) total | Mellow Mushroom (Acworth) \\ Lakeview Ter & Windmill Dr, Dallas ill oO < x",
+   "expect": {
+    "pay": 11.88,
+    "minutes": 35,
+    "miles": 17.9
+   }
+  },
+  {
+   "name": "parens and interpunct both mangled on a total",
+   "text": "| UR jiedmont Park a ; y ees ae ave ied nA SS S ANKHEAD ¥: ' ; - CCE CiGem Exclusive x i + $11.42 Guaranteed (incl. tip) © +14 min (+ 2.0 mi) total Taco Bell (930 Spring Street) I Ivan Allen Jr Blvd NW & Spring St NW, At",
+   "expect": {
+    "pay": 11.42,
+    "minutes": 14,
+    "miles": 2.0
+   }
+  },
+  {
+   "name": "a labelled leg that lost its distance is not handed a stray one",
+   "text": "$16.05 5 min (1.2 mi) away 20 min (7.3 m1) trip 4 mi from fast charger",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 25,
+    "miles": 1.2
+   }
+  },
+  {
+   "name": "...nor when BOTH legs lost theirs and a number is sitting there",
+   "text": "$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip 9.9 mi",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 42,
+    "miles": null
+   }
+  },
+  {
+   "name": "a card that really does state no distance still states none",
+   "text": "$7.09 34 min total",
+   "expect": {
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": null
+   }
+  },
+  {
+   "name": "a labelled leg with no distance is not given a chip's",
+   "text": "$16.05 2.5 mi to the pickup zone 25 min away 17 min trip",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 42,
+    "miles": null
+   }
+  },
+  {
+   "name": "...and the same card still says it is short a distance",
+   "text": "$16.05 Promo 4.8 mi 25 min away 17 min trip",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 42,
+    "miles": null
+   }
+  }
+ ],
+ "rate": [
+  {
+   "name": "the real offer, gross",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0
+   },
+   "expect": {
+    "perHour": 12.51,
+    "state": "no",
+    "grossPerHour": 12.51
+   }
+  },
+  {
+   "name": "the real offer, less mileage cost",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "perHour": 10.61,
+    "state": "no",
+    "grossPerHour": 12.51
+   }
+  },
+  {
+   "name": "the real offer, with 90s per item of shopping",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0.3,
+    "secondsPerItem": 90
+   },
+   "expect": {
+    "perHour": 8.39,
+    "state": "no",
+    "shopMinutes": 9,
+    "grossPerHour": 9.89
+   }
+  },
+  {
+   "name": "the same offer against a target it clears",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": 10,
+    "costPerMile": 0
+   },
+   "expect": {
+    "perHour": 12.51,
+    "state": "go"
+   }
+  },
+  {
+   "name": "a distrusted distance is never charged as cost",
+   "text": "$20.00 10 min (30.5 mi) total",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0.7
+   },
+   "expect": {
+    "net": 20,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "the guard keeps a recovered read positive",
+   "text": "$7.09 34 min (36 mi) total",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "perHour": 10.61,
+    "state": "no"
+   }
+  },
+  {
+   "name": "a target with the quotes left on is still that target",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": "30",
+    "costPerMile": 0
+   },
+   "expect": {
+    "perHour": 12.51,
+    "state": "no",
+    "target": 30.0,
+    "band": 15
+   }
+  },
+  {
+   "name": "a target deleted falls back to the default, not to an accept-everything floor",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": null,
+    "costPerMile": 0
+   },
+   "expect": {
+    "perHour": 12.51,
+    "state": "no",
+    "target": 25,
+    "band": 15
+   }
+  },
+  {
+   "name": "a deliberate zero target is a zero target",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": 0,
+    "costPerMile": 0
+   },
+   "expect": {
+    "perHour": 12.51,
+    "state": "go",
+    "target": 0.0,
+    "band": 15
+   }
+  },
+  {
+   "name": "a running cost with the quotes left on still costs",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": 25,
+    "costPerMile": "0.30"
+   },
+   "expect": {
+    "perHour": 10.61,
+    "state": "no",
+    "target": 25.0,
+    "band": 15
+   }
+  },
+  {
+   "name": "settings that are not numbers at all fall back rather than crash",
+   "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
+   "settings": {
+    "target": "abc",
+    "band": "",
+    "costPerMile": "nonsense"
+   },
+   "expect": {
+    "perHour": 12.51,
+    "state": "no",
+    "target": 25,
+    "band": 15
+   }
+  },
+  {
+   "name": "a 56 mph highway run is charged for its miles, not excused them",
+   "text": "$52.00 2 hr 5 min (115.0 mi) total",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "perHour": 8.4,
+    "cost": 34.5,
+    "state": "no"
+   }
+  },
+  {
+   "name": "a distance that could not be trusted may not clear a net target",
+   "_why": "One leg lost its miles, so no running cost could be charged and the rate is an upper bound. On the owner's own shift 108 of 202 offers were rated this way and 33 of the 35 ACCEPTs came out of that pool.",
+   "text": "$9.08 6 min (1.2 mi) away 14 min trip",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "state": "warn",
+    "uncosted": true
+   }
+  },
+  {
+   "name": "...and with no running cost configured there is nothing to cap",
+   "_why": "costPerMile 0 means the driver has opted out of costing, so gross IS net and the rate is the offer rather than a ceiling on it.",
+   "text": "$9.08 6 min (1.2 mi) away 14 min trip",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0
+   },
+   "expect": {
+    "state": "go",
+    "uncosted": false
+   }
+  },
+  {
+   "name": "...and a trusted distance still earns a green light",
+   "_why": "The cap must not swallow the offers it exists to protect.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "state": "go",
+    "uncosted": false
+   }
+  },
+  {
+   "name": "a rate below the floor is still a pass, not a close call",
+   "_why": "The cap lowers a green light to a close call; it must not raise a pass into one.",
+   "text": "$4.05 6 min (1.2 mi) away 40 min trip",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "state": "no",
+    "uncosted": true
+   }
+  },
+  {
+   "name": "a delivery distance that lost its decimal is recovered against the deadline",
+   "_why": "A delivery card states a distance with no time beside it, so parse() had no denominator and check_distance returned it untouched. 2.4 mi read as 24 mi was charged $7.20 of mileage instead of $0.72 — $18.1/hr shown as $2.5/hr, unflagged. rate() knows the clock.",
+   "text": "$8.25 Guaranteed (incl. tip) 24 mi Deliver by 6:05 PM",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3,
+    "nowMinutes": 1060
+   },
+   "expect": {
+    "miles": 2.4,
+    "cost": 0.72,
+    "milesCorrected": true,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...and the same card read correctly is left alone",
+   "text": "$8.25 Guaranteed (incl. tip) 2.4 mi Deliver by 6:05 PM",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3,
+    "nowMinutes": 1060
+   },
+   "expect": {
+    "miles": 2.4,
+    "cost": 0.72,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "...and a printed decimal is not 'recovered' away",
+   "_why": "The decimal point is what says whether one was lost, and it has to be tested where it decides the answer: 60.0 miles with 25 minutes to run is 144 mph, so the recovery WOULD fire and turn it into 6.0 — the printed decimal is the only thing stopping it. The card is doubted instead, which is the honest answer to a distance that cannot be right and cannot be explained by a lost point. A 10.0 mi card at an ordinary speed proves nothing here, because check_distance never reaches the recovery at all.",
+   "text": "$8.25 Guaranteed (incl. tip) 60.0 mi Deliver by 6:05 PM",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3,
+    "nowMinutes": 1060
+   },
+   "expect": {
+    "miles": 60.0,
+    "milesCorrected": false,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "a delivery distance plausible against its deadline is not touched",
+   "_why": "24 miles with 45 minutes to run is 32 mph and perfectly ordinary. The recovery only fires on a speed that cannot be true.",
+   "text": "$18.00 Guaranteed (incl. tip) 24 mi Deliver by 6:25 PM",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3,
+    "nowMinutes": 1060
+   },
+   "expect": {
+    "miles": 24.0,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "a ride card is checked by parse() and not re-checked here",
+   "_why": "Its legs carry their own minutes, so the correction has already happened. Re-running it against the billed minutes would be a second bite at a number that was already judged.",
+   "text": "$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3,
+    "nowMinutes": 1060
+   },
+   "expect": {
+    "miles": 8.4,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "a card that lost a leg is not a $310/hr ACCEPT",
+   "_why": "This card is already in the parse fixtures: the '53L min' leg is correctly dropped as rubbish, which leaves the 9-minute pickup leg carrying the whole payout. It parses complete, is_whole is False, and it rated as a green ACCEPT at $310.67/hr where the truth over 62 minutes is $46. A lost leg makes pay, minutes and miles each individually plausible — it is the rate they imply together that cannot be true, which is what the continuous ceiling now sees.",
+   "text": "$47.53 9 min (3.1 mi) trip 53L min (18.6 mi) away",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "state": "doubt",
+    "doubt": "rate"
+   }
+  }
+ ],
+ "_coerce_comment": "The three functions that decide what an offer is judged against, checked in both languages from one list. Every one of these had drifted: Number('  ') is 0 in JavaScript so a whitespace target meant every offer was an ACCEPT while Python fell back to 25; float() takes '1e3' and '1_0' and parseFloat does not; and Infinity and NaN were guarded out of doubt() in JavaScript and compared against the bounds in Python. None of it was reachable from a test. '@inf', '@-inf' and '@nan' stand in for values JSON cannot hold.",
+ "coerce": {
+  "toNumber": [
+   {
+    "name": "a plain figure",
+    "in": "25",
+    "expect": 25.0
+   },
+   {
+    "name": "a decimal",
+    "in": "1.5",
+    "expect": 1.5
+   },
+   {
+    "name": "a comma read for a point",
+    "in": "1,5",
+    "expect": 1.5
+   },
+   {
+    "name": "a leading point",
+    "in": ".5",
+    "expect": 0.5
+   },
+   {
+    "name": "a signed figure",
+    "in": "-3",
+    "expect": -3.0
+   },
+   {
+    "name": "surrounding space",
+    "in": " 25 ",
+    "expect": 25.0
+   },
+   {
+    "name": "scientific notation",
+    "in": "1e3",
+    "expect": null
+   },
+   {
+    "name": "a digit separator",
+    "in": "1_0",
+    "expect": null
+   },
+   {
+    "name": "the word nan",
+    "in": "nan",
+    "expect": null
+   },
+   {
+    "name": "the word Infinity",
+    "in": "Infinity",
+    "expect": null
+   },
+   {
+    "name": "letters",
+    "in": "abc",
+    "expect": null
+   },
+   {
+    "name": "nothing at all",
+    "in": "",
+    "expect": null
+   },
+   {
+    "name": "only space",
+    "in": "   ",
+    "expect": null
+   },
+   {
+    "name": "two points",
+    "in": "1.2.3",
+    "expect": null
+   },
+   {
+    "name": "a trailing point",
+    "in": "12.",
+    "expect": 12.0
+   }
   ],
-  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day \u2014 so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
-  "deadline": [
-    {
-      "name": "an evening deadline",
-      "text": "Deliver by 7:15 PM",
-      "expect": 1155
-    },
-    {
-      "name": "a morning one",
-      "text": "Deliver by 7:15 AM",
-      "expect": 435
-    },
-    {
-      "name": "noon",
-      "text": "Deliver by 12:30 PM",
-      "expect": 750
-    },
-    {
-      "name": "midnight",
-      "text": "Deliver by 12:05 AM",
-      "expect": 5
-    },
-    {
-      "name": "lower case, no space",
-      "text": "deliver by 6:39pm",
-      "expect": 1119
-    },
-    {
-      "name": "a dot for the colon",
-      "text": "Deliver by 6.39 PM",
-      "expect": 1119
-    },
-    {
-      "name": "an impossible hour",
-      "text": "Deliver by 19:15 PM",
-      "expect": null
-    },
-    {
-      "name": "an impossible minute",
-      "text": "Deliver by 7:75 PM",
-      "expect": null
-    },
-    {
-      "name": "no half of the day stated",
-      "text": "Deliver by 7:15",
-      "expect": null
-    },
-    {
-      "name": "no deadline at all",
-      "text": "23 min (8.4 mi) trip",
-      "expect": null
-    }
+  "setting": [
+   {
+    "name": "a number",
+    "in": 30,
+    "fallback": 25,
+    "expect": 30.0
+   },
+   {
+    "name": "a numeric string",
+    "in": "30",
+    "fallback": 25,
+    "expect": 30.0
+   },
+   {
+    "name": "an empty string",
+    "in": "",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "whitespace",
+    "in": "  ",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "a tab",
+    "in": "\t",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "letters",
+    "in": "abc",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "nothing",
+    "in": null,
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "a boolean",
+    "in": true,
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "a list",
+    "in": [],
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "zero",
+    "in": 0,
+    "fallback": 25,
+    "expect": 0.0
+   },
+   {
+    "name": "a negative",
+    "in": -5,
+    "fallback": 25,
+    "expect": -5.0
+   },
+   {
+    "name": "not a number",
+    "in": "@nan",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "infinity",
+    "in": "@inf",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "an underscore is not a thousands separator",
+    "in": "1_0",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "nor is hexadecimal a target",
+    "in": "0x10",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "nor exponent notation",
+    "in": "1e3",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "not-a-number spelled out",
+    "in": "nan",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "...nor infinity",
+    "in": "Infinity",
+    "fallback": 25,
+    "expect": 25.0
+   },
+   {
+    "name": "a signed number typed as text still counts",
+    "in": "+25",
+    "fallback": 99,
+    "expect": 25.0
+   },
+   {
+    "name": "...and a bare decimal point",
+    "in": ".5",
+    "fallback": 99,
+    "expect": 0.5
+   },
+   {
+    "name": "...and a trailing one",
+    "in": "25.",
+    "fallback": 99,
+    "expect": 25.0
+   }
   ],
-  "_until_comment": "Minutes left, wrapping midnight. A deadline already past is a stale card, not a short job, and the sanity bounds refuse what wrapping turns it into.",
-  "until": [
-    {
-      "name": "later today",
-      "deadline": 1155,
-      "now": 1109,
-      "expect": 46
-    },
-    {
-      "name": "ten minutes away",
-      "deadline": 1119,
-      "now": 1109,
-      "expect": 10
-    },
-    {
-      "name": "across midnight",
-      "deadline": 15,
-      "now": 1430,
-      "expect": 25
-    },
-    {
-      "name": "exactly now",
-      "deadline": 600,
-      "now": 600,
-      "expect": 0
-    },
-    {
-      "name": "no deadline",
-      "deadline": null,
-      "now": 600,
-      "expect": null
-    },
-    {
-      "name": "no clock",
-      "deadline": 600,
-      "now": null,
-      "expect": null
-    }
+  "doubt": [
+   {
+    "name": "an ordinary offer",
+    "pay": 16.05,
+    "minutes": 23,
+    "miles": 8.4,
+    "expect": null
+   },
+   {
+    "name": "a lost decimal point",
+    "pay": 1184,
+    "minutes": 20,
+    "miles": 3.9,
+    "expect": "pay"
+   },
+   {
+    "name": "another lost point",
+    "pay": 1251,
+    "minutes": 11,
+    "miles": 2.1,
+    "expect": "pay"
+   },
+   {
+    "name": "pay under a dollar",
+    "pay": 0.5,
+    "minutes": 20,
+    "miles": 4,
+    "expect": "pay"
+   },
+   {
+    "name": "a card read as one minute",
+    "pay": 10,
+    "minutes": 1,
+    "miles": 0.5,
+    "expect": "time"
+   },
+   {
+    "name": "a card read as two",
+    "pay": 10,
+    "minutes": 2,
+    "miles": 0.5,
+    "expect": null
+   },
+   {
+    "name": "a five-hour trip",
+    "pay": 100,
+    "minutes": 300,
+    "miles": 200,
+    "expect": "time"
+   },
+   {
+    "name": "110 mph",
+    "pay": 56.65,
+    "minutes": 63,
+    "miles": 115.6,
+    "expect": "speed"
+   },
+   {
+    "name": "120 mph",
+    "pay": 60.86,
+    "minutes": 60,
+    "miles": 120.0,
+    "expect": "speed"
+   },
+   {
+    "name": "the same trip read right",
+    "pay": 56.65,
+    "minutes": 123,
+    "miles": 115.6,
+    "expect": null
+   },
+   {
+    "name": "crawling in traffic",
+    "pay": 7.09,
+    "minutes": 34,
+    "miles": 3.6,
+    "expect": null
+   },
+   {
+    "name": "a short hop",
+    "pay": 5,
+    "minutes": 3,
+    "miles": 0.9,
+    "expect": null
+   },
+   {
+    "name": "no distance read",
+    "pay": 12,
+    "minutes": 20,
+    "miles": null,
+    "expect": null
+   },
+   {
+    "name": "a pay that is infinite",
+    "pay": "@inf",
+    "minutes": 20,
+    "miles": 4,
+    "expect": "pay"
+   },
+   {
+    "name": "a pay that is not a number",
+    "pay": "@nan",
+    "minutes": 20,
+    "miles": 4,
+    "expect": "pay"
+   },
+   {
+    "name": "a time that is infinite",
+    "pay": 12,
+    "minutes": "@inf",
+    "miles": 4,
+    "expect": "time"
+   },
+   {
+    "name": "a distance that is not a number",
+    "pay": 12,
+    "minutes": 20,
+    "miles": "@nan",
+    "expect": null
+   },
+   {
+    "name": "a payout whose decimal point did not survive the read",
+    "_why": "$1.36 read as $136 is $816/hr over ten minutes. Each half is sane on its own — $136 is inside SANE_PAY, ten minutes inside SANE_MINUTES — and nothing tested the pair, so five readings of one real shift reached the panel as ACCEPT at between $103 and $816 an hour.",
+    "pay": 136.0,
+    "minutes": 10.0,
+    "miles": 3.1,
+    "expect": "rate"
+   },
+   {
+    "name": "...and the same card read correctly is not doubted",
+    "pay": 1.36,
+    "minutes": 10.0,
+    "miles": 3.1,
+    "expect": null
+   },
+   {
+    "name": "a short hop that really does pay well is not a misread",
+    "_why": "$/hr is unbounded as the duration shrinks, so a bare rate ceiling clips real offers. $10 over two minutes is $300/hr and ordinary; the ceiling applies only once the trip is long enough for a rate to describe it.",
+    "pay": 10.0,
+    "minutes": 2.0,
+    "miles": 0.5,
+    "expect": null
+   },
+   {
+    "name": "...and just past the boundary the same rate is impossible",
+    "_why": "$50 over ten minutes is $300/hr for a trip long enough that the rate means something. No app pays it.",
+    "pay": 50.0,
+    "minutes": 10.0,
+    "miles": 2.0,
+    "expect": "rate"
+   },
+   {
+    "name": "an hour's work at a plausible rate is not doubted",
+    "pay": 40.0,
+    "minutes": 60.0,
+    "miles": 25.0,
+    "expect": null
+   },
+   {
+    "name": "the ceiling does not loosen as the trip gets shorter",
+    "_why": "Written as two branches, the guard was a STEP: below ten minutes nothing but SANE_PAY's own $300 applied, so $136 over ten minutes was doubted while the same $136 over NINE was a green ACCEPT at $899/hr. A guard a shorter trip walks under is not a guard.",
+    "pay": 136.0,
+    "minutes": 9.0,
+    "miles": 3.6,
+    "expect": "rate"
+   },
+   {
+    "name": "...nor at three minutes",
+    "pay": 136.0,
+    "minutes": 3.0,
+    "miles": 3.6,
+    "expect": "rate"
+   },
+   {
+    "name": "...and the boundary payout itself is still allowed",
+    "_why": "$33.33 is the payout that reaches SANE_RATE at ten minutes, so it is the flat cap below the boundary. The bound has to admit its own boundary value or it is a tighter bound than it says it is.",
+    "pay": 33.0,
+    "minutes": 9.0,
+    "miles": 2.0,
+    "expect": null
+   },
+   {
+    "name": "...while a dollar past it is not",
+    "pay": 34.0,
+    "minutes": 9.0,
+    "miles": 2.0,
+    "expect": "rate"
+   },
+   {
+    "name": "a five dollar errand over three minutes is an ordinary offer",
+    "_why": "The largest sub-ten-minute payout across 568 real offers is $5.00. A cap that refused this would be the guard-clips-a-real-offer failure, which costs exactly as much as letting a misread through.",
+    "pay": 5.0,
+    "minutes": 3.0,
+    "miles": 1.0,
+    "expect": null
+   }
   ],
-  "_whole_comment": "Whether a reading is finished, as opposed to merely judgeable. Its own block because it is a function of the reading rather than a field on it, and because it was written out by hand in two places that both got delivery cards wrong.",
-  "whole": [
-    {
-      "name": "a total is a whole journey by itself",
-      "text": "$7.09 34 min (3.6 mi) total",
-      "expect": true
-    },
-    {
-      "name": "two legs are a whole ride card",
-      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
-      "expect": true
-    },
-    {
-      "name": "one plain leg is half a card",
-      "text": "$16.05 20 min (7.3 mi) trip",
-      "expect": false
-    },
-    {
-      "name": "two legs are not whole when one of their distances did not read",
-      "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip",
-      "expect": false
-    },
-    {
-      "name": "...whichever leg it was",
-      "text": "$16.05 25 min (11.q5 mi) away 17 min (3.7 mi) trip",
-      "expect": false
-    },
-    {
-      "name": "...or both of them, which used to look like a card with no distance",
-      "text": "$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip",
-      "expect": false
-    },
-    {
-      "name": "a total stating no distance is still a whole journey",
-      "text": "$7.09 34 min total",
-      "expect": true
-    },
-    {
-      "name": "a delivery card with a distance is finished",
-      "text": "$41.11 Guaranteed 9.8 mi Deliver by 7:15 PM Pickup Papa Johns",
-      "expect": true
-    },
-    {
-      "name": "...and without one it is not, since a later frame can add it",
-      "text": "$41.11 Guaranteed Deliver by 7:15 PM Pickup Papa Johns",
-      "expect": false
-    },
-    {
-      "name": "nothing readable is not whole",
-      "text": "blurry nonsense",
-      "expect": false
-    }
+  "round2": [
+   {
+    "name": "a half rounds away from zero",
+    "in": 2.675,
+    "expect": 2.68
+   },
+   {
+    "name": "...not to the nearest even",
+    "in": 8.845,
+    "expect": 8.85
+   },
+   {
+    "name": "and again",
+    "in": 3.345,
+    "expect": 3.35
+   },
+   {
+    "name": "a value below the half",
+    "in": 0.145,
+    "expect": 0.14
+   },
+   {
+    "name": "float noise from a sum",
+    "in": 9.600000000000001,
+    "expect": 9.6
+   },
+   {
+    "name": "...and the other direction",
+    "in": 17.299999999999997,
+    "expect": 17.3
+   },
+   {
+    "name": "an exact value is left alone",
+    "in": 2.5,
+    "expect": 2.5
+   },
+   {
+    "name": "a whole number",
+    "in": 12.0,
+    "expect": 12.0
+   },
+   {
+    "name": "zero",
+    "in": 0,
+    "expect": 0.0
+   }
   ]
+ },
+ "_places_comment": "Where an offer went, so it can be found again months later. Checked as an exact list because the risk is not missing one, it is inventing one: a journal full of half-read map furniture is worse than one that cannot be searched by place. The 'from fast charger' badge on the Uber card and the '(2 orders)' after the Papa John's name are both things a looser reader would have swallowed.",
+ "places": [
+  {
+   "name": "a delivery merchant behind a Pickup label",
+   "text": "Decline High paying offer! Your Platinum status gave you priority for this offer. $41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa John's Store 3317 (2 orders) Customer dropoff Customer dropoff Accept 27",
+   "expect": [
+    "Papa John's Store 3317"
+   ]
+  },
+  {
+   "name": "...and one on a stacked order",
+   "text": "Decline High pay order! Your high ratings gave you priority for this order. +$16.00 Guaranteed Additional 6.9 mi Deliver by 7:08 PM Pickup Buffalo Wild Wings Customer dropoff Add to route 82",
+   "expect": [
+    "Buffalo Wild Wings"
+   ]
+  },
+  {
+   "name": "...and one printed under the deadline instead",
+   "text": "Decline Deliver by 6:39 PM Cherry Cricket 32 4 items 0.6 mi $8.00 Includes DoorDash pay and customer tip (Total may be higher) Accept",
+   "expect": [
+    "Cherry Cricket"
+   ]
+  },
+  {
+   "name": "both addresses off a ride card",
+   "text": "UberX Exclusive $10.30 5.00 19 min (8.5 mi) Mae Dell Rd & Riggins Dr, Chattanooga 12 mins (6.6 mi) Camp Jordan Pkwy, Chattanooga 4 mi from fast charger Accept",
+   "expect": [
+    "Mae Dell Rd & Riggins Dr, Chattanooga",
+    "Camp Jordan Pkwy, Chattanooga"
+   ]
+  },
+  {
+   "name": "a card with nowhere named",
+   "text": "$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip",
+   "expect": []
+  },
+  {
+   "name": "nothing at all",
+   "text": "",
+   "expect": []
+  },
+  {
+   "name": "a branch address in brackets keeps its brackets",
+   "text": "Shop & Deliver $7.09 6 items (6 units) 34 min (3.6 mi) total Pickup Dollar General (925 Shiloh Rd Nw) Customer dropoff Accept",
+   "expect": [
+    "Dollar General (925 Shiloh Rd Nw)"
+   ]
+  },
+  {
+   "name": "the furniture under a pickup address is not part of it",
+   "text": "UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw Avg. wait time at pickup: 1 min 23 min (8.4 mi) trip Celebration Blvd, Acworth Accept",
+   "expect": [
+    "Old 41 Hwy NW, Kennesaw",
+    "Celebration Blvd, Acworth"
+   ]
+  },
+  {
+   "name": "the card's icon row is not part of a street name",
+   "text": "UberX $10.30 5 min (1.1 mi) away Chastain Rd NW, Kennesaw 4 19 min (8.5 mi) trip Canton Rd, Marietta %",
+   "expect": [
+    "Chastain Rd NW, Kennesaw",
+    "Canton Rd, Marietta"
+   ]
+  },
+  {
+   "name": "a shop card does not put \"total\" in the merchant name",
+   "text": "Shop & Deliver $7.09 6 items 34 min (3.6 mi) total Five Guys (3450 Cobb Pkwy. NW) Accept",
+   "expect": [
+    "Five Guys (3450 Cobb Pkwy. NW)"
+   ]
+  },
+  {
+   "name": "the map behind the card is not somewhere the job went",
+   "text": "UberX $8.04 4 min (1.1 mi) away a we, a oo 1 we, a in i ie. a 22 min (6.9 mi) trip . a ae eS My on - J ee ae",
+   "expect": []
+  },
+  {
+   "name": "sludge in front of an address does not take the address with it",
+   "text": "UberX $9.05 3 min (0.9 mi) away oN | Cobb Pkwy NW, Kennesaw 'a 27 min (9.2 mi) trip",
+   "expect": [
+    "Cobb Pkwy NW, Kennesaw"
+   ]
+  }
+ ],
+ "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
+ "deadline": [
+  {
+   "name": "an evening deadline",
+   "text": "Deliver by 7:15 PM",
+   "expect": 1155
+  },
+  {
+   "name": "a morning one",
+   "text": "Deliver by 7:15 AM",
+   "expect": 435
+  },
+  {
+   "name": "noon",
+   "text": "Deliver by 12:30 PM",
+   "expect": 750
+  },
+  {
+   "name": "midnight",
+   "text": "Deliver by 12:05 AM",
+   "expect": 5
+  },
+  {
+   "name": "lower case, no space",
+   "text": "deliver by 6:39pm",
+   "expect": 1119
+  },
+  {
+   "name": "a dot for the colon",
+   "text": "Deliver by 6.39 PM",
+   "expect": 1119
+  },
+  {
+   "name": "an impossible hour",
+   "text": "Deliver by 19:15 PM",
+   "expect": null
+  },
+  {
+   "name": "an impossible minute",
+   "text": "Deliver by 7:75 PM",
+   "expect": null
+  },
+  {
+   "name": "no half of the day stated",
+   "text": "Deliver by 7:15",
+   "expect": null
+  },
+  {
+   "name": "no deadline at all",
+   "text": "23 min (8.4 mi) trip",
+   "expect": null
+  }
+ ],
+ "_until_comment": "Minutes left, wrapping midnight. A deadline already past is a stale card, not a short job, and the sanity bounds refuse what wrapping turns it into.",
+ "until": [
+  {
+   "name": "later today",
+   "deadline": 1155,
+   "now": 1109,
+   "expect": 46
+  },
+  {
+   "name": "ten minutes away",
+   "deadline": 1119,
+   "now": 1109,
+   "expect": 10
+  },
+  {
+   "name": "across midnight",
+   "deadline": 15,
+   "now": 1430,
+   "expect": 25
+  },
+  {
+   "name": "exactly now",
+   "deadline": 600,
+   "now": 600,
+   "expect": 0
+  },
+  {
+   "name": "no deadline",
+   "deadline": null,
+   "now": 600,
+   "expect": null
+  },
+  {
+   "name": "no clock",
+   "deadline": 600,
+   "now": null,
+   "expect": null
+  }
+ ],
+ "_whole_comment": "Whether a reading is finished, as opposed to merely judgeable. Its own block because it is a function of the reading rather than a field on it, and because it was written out by hand in two places that both got delivery cards wrong.",
+ "whole": [
+  {
+   "name": "a total is a whole journey by itself",
+   "text": "$7.09 34 min (3.6 mi) total",
+   "expect": true
+  },
+  {
+   "name": "two legs are a whole ride card",
+   "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
+   "expect": true
+  },
+  {
+   "name": "one plain leg is half a card",
+   "text": "$16.05 20 min (7.3 mi) trip",
+   "expect": false
+  },
+  {
+   "name": "two legs are not whole when one of their distances did not read",
+   "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip",
+   "expect": false
+  },
+  {
+   "name": "...whichever leg it was",
+   "text": "$16.05 25 min (11.q5 mi) away 17 min (3.7 mi) trip",
+   "expect": false
+  },
+  {
+   "name": "...or both of them, which used to look like a card with no distance",
+   "text": "$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip",
+   "expect": false
+  },
+  {
+   "name": "a total stating no distance is still a whole journey",
+   "text": "$7.09 34 min total",
+   "expect": true
+  },
+  {
+   "name": "a delivery card with a distance is finished",
+   "text": "$41.11 Guaranteed 9.8 mi Deliver by 7:15 PM Pickup Papa Johns",
+   "expect": true
+  },
+  {
+   "name": "...and without one it is not, since a later frame can add it",
+   "text": "$41.11 Guaranteed Deliver by 7:15 PM Pickup Papa Johns",
+   "expect": false
+  },
+  {
+   "name": "nothing readable is not whole",
+   "text": "blurry nonsense",
+   "expect": false
+  },
+  {
+   "name": "a labelled leg that lost its distance is still not whole",
+   "text": "$16.05 5 min (1.2 mi) away 20 min (7.3 m1) trip 4 mi from fast charger",
+   "expect": false
+  },
+  {
+   "name": "...nor when both legs lost theirs and a stray number is sitting there",
+   "text": "$16.05 25 min (11.q5 mi) away 17 min (3.q mi) trip 9.9 mi",
+   "expect": false
+  },
+  {
+   "name": "a delivery card whose distance and time share one line is whole",
+   "text": "$7.20 Guaranteed (incl. tips) 2.4 mi + 20 min @ Pickup McDonald's",
+   "expect": true
+  },
+  {
+   "name": "a labelled leg robbed of its distance is still not whole",
+   "text": "$16.05 2.5 mi to the pickup zone 25 min away 17 min trip",
+   "expect": false
+  }
+ ]
 }

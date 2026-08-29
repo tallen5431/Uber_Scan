@@ -19,10 +19,25 @@ def eq(name, got, want):
         bad += 1
         print('FAIL  %s: got %r want %r' % (name, got, want))
 
+SENTINEL = object()
+
 for c in cases['parse']:
     p = P.parse(c['text'])
     for key, want in c['expect'].items():
-        eq(c['name'] + ' / ' + key, p[key], want)
+        # `.get`, not `[]`, and a sentinel rather than None. A case naming a key
+        # parse() does not return used to raise KeyError here, which stops the
+        # whole file — every check below it goes unreported and the run ends in
+        # a traceback instead of a count. The JavaScript half printed it as a
+        # failure and carried on, so the two disagreed about what a corpus
+        # mistake even is. A sentinel rather than None because None is a real
+        # expected value in this corpus: `miles: null` is the assertion that a
+        # card states no distance, and it must not read as "key missing".
+        got = p.get(key, SENTINEL)
+        if got is SENTINEL:
+            eq(c['name'] + ' / ' + key + ' (parse() returns no such key)',
+               sorted(p.keys()), want)
+            continue
+        eq(c['name'] + ' / ' + key, got, want)
 
 for c in cases['rate']:
     r = P.rate(P.parse(c['text']), c['settings'])

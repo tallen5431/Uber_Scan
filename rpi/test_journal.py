@@ -105,6 +105,28 @@ eq('the reading is kept, so the corpus can be this driver\'s own cards',
 eq('...and it is bounded, because a bad crop reads half the map as well',
    len(kept.get('text') or '') <= JR.TEXT_KEPT, True)
 
+# ...and bounded is only half of it. The bound was 220, and the first export to
+# carry this column came back with 99 of its 309 cards sitting exactly on it: a
+# third of the corpus cut off, and cut off at the END, where the pickup, the
+# dropoff and a ride's second leg are written. The check above passes at any cap
+# at all, including one that keeps nothing useful — an upper bound cannot say
+# whether the column does its job.
+#
+# This is a real card off the driver's own phone, at the length a real card
+# actually runs to. Kept whole or the column is not worth having.
+LONG_CARD = (
+    "| UR jiedmont Park a ; y ees ae ave ied nA SS S ANKHEAD : ' ; - CCE "
+    "CiGem Exclusive x i + $11.42 Guaranteed (incl. tip) 14 min (2.0 mi) "
+    "total Taco Bell (930 Spring Street) I Ivan Allen Jr Blvd NW & Spring "
+    "St NW, Atlanta Avg. wait time at pickup: 3 min Accept Decline")
+long_log = fresh('long.jsonl')
+feed(long_log, [LONG_CARD] * 3)
+long_kept = (long_log.journal.rows()[0] if long_log.journal.rows() else {}).get('text') or ''
+ok_('a real card is longer than the old cap (%d chars)' % len(LONG_CARD),
+    len(LONG_CARD) > 220)
+eq('...and the cap keeps one whole rather than cutting its addresses off',
+   long_kept, LONG_CARD)
+
 # --- two different offers are two rows --------------------------------------
 # One accumulator across both, as the scan loop has.
 log = fresh()

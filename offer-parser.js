@@ -503,6 +503,23 @@
       if (detail[i] && detail[i].isTotal) return true;
     }
     if ((parsed.legs || 0) >= 2) return true;
+    // One token, and whether it is half a journey or a whole job is decided by
+    // whether the card labelled it — the same question legsShortADistance
+    // asks, for the same reason. Uber labels every leg of a ride (away, trip,
+    // total), so a labelled single leg has a sibling that did not read and
+    // another frame can still supply it. An unlabelled one is the "2.4 mi ·
+    // 20 min" line of a delivery card: a summary of the whole job, not a leg,
+    // and there is no second half coming.
+    //
+    // This was 37 of the driver's own 309 cards, all reading `complete` and
+    // never `whole`: shown with a question mark for the life of the offer,
+    // never spoken, set aside on the offers page, and resampled until the card
+    // went away — for a reading that had the pay, the distance and the time and
+    // nothing left to learn.
+    if ((parsed.legs || 0) === 1 && detail.length && !detail[0].labelled) {
+      return parsed.miles !== null && parsed.miles !== undefined
+        && parsed.minutes !== null && parsed.minutes !== undefined;
+    }
     return !(parsed.legs || 0)
       && parsed.deliverBy !== null && parsed.deliverBy !== undefined
       && parsed.miles !== null && parsed.miles !== undefined;
@@ -611,10 +628,36 @@
     var pay = findPay(text);
 
     // A delivery card states no duration and puts its distance on its own, so
-    // neither reaches the sum above. Consulted only when the legs found
-    // nothing, which is what keeps it from double-counting a ride card.
+    // neither reaches the sum above.
+    //
+    // "Consulted only when the legs found nothing" is what this used to say,
+    // and `!used.length` is not that test. The commonest card this driver is
+    // shown reads
+    //
+    //     $7.20 Guaranteed (incl. tips) 2.4 mi + 20 min @ Pickup McDonald's
+    //
+    // where the distance and the time are two halves of ONE line, not a
+    // journey leg. The "20 min" half is picked up as a minutes-only leg, `used`
+    // is therefore non-empty, and the "2.4 mi" sitting four characters away is
+    // thrown out. On the driver's own 309-card export that happened 37 times —
+    // 12% of every offer read — and all 37 for this one reason. No distance
+    // means no mileage charged, which means the panel showed a ceiling as if it
+    // were a rate: the exact failure the uncosted cap exists to contain,
+    // arriving through the door the cap cannot see.
+    //
+    // The right test is the one legsShortADistance already uses. A leg is part
+    // of the journey if it states a distance or the card labelled it one; an
+    // unlabelled minutes-only token was never a leg. So a lone distance is
+    // consulted when nothing that travels was found, which still leaves a real
+    // ride card alone — its legs carry distances — and still refuses to hand a
+    // stray number to a LABELLED leg that lost its own, because that is damage
+    // and legsShortADistance is already saying so.
     var deadline = findDeadline(text);
-    if (miles === null && !used.length) {
+    var travelled = [];
+    for (var t = 0; t < used.length; t++) {
+      if (used[t].miles !== null || used[t].labelled) travelled.push(used[t]);
+    }
+    if (miles === null && !travelled.length) {
       var lone = text.match(LONE_MILES);
       if (lone) {
         var v = toNumber(lone[1]);
