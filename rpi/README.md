@@ -2753,6 +2753,60 @@ only in a short window around a leg that already matched, so a stray "wait"
 elsewhere on the card cannot invent one. It looks **before** the figure as well
 as after, because the card prints the phrase first.
 
+### Both ends of the job, lost to a length check
+
+Stacking two orders needs to know where they go, and the first measurement of
+that said only **26%** of cards yielded both ends. That number was not about the
+cards. It was about a `> 60` in `find_places`.
+
+The commonest delivery card states one total leg and then both ends of the job:
+
+```
+27 min (7.3 mi) total   Rick's Hotwings (Kennesaw)   Hamby Place Dr NW &
+Travistock Pl NW, Acworth
+```
+
+There is no `Pickup` label to anchor on and only one leg, so the leg-tail rule
+took the whole thing as ONE place — 71 characters of merchant and address
+together — and the 60-character cap threw it away entire. Not truncated:
+**discarded**, both ends, silently, on 53 of one shift's 210 cards.
+
+The card's own grammar separates them. Uber prints the merchant with its branch
+in brackets, so the closing bracket is the seam. Two more rules came out of the
+same measurement:
+
+- **An address ends at its town.** Nothing on the card marks the end of one,
+  which is what left `Lakeview Ter & Windmill Dr, Dallas ill` in the journal —
+  the `ill` is the bottom icon row. A comma, a capitalised name or two, and
+  stop. The possessive is allowed, because a card does not always end on a town:
+  `Roswell Road, Johnny's Hideaway` ends on the venue, and a first version cut
+  it to `Roswell Road, Johnny`.
+- **The leg-tail window is 130 characters, not 80.** With merchant and address
+  sharing one tail, 80 cut the town off the end of the half that matters:
+  `Double Branches Ln & Sagamore Ct. Dal`.
+
+And one that was never about this card at all. **The two parser ports had
+drifted**: the JavaScript split a tail on a pipe and kept both halves, and the
+Python cut at the pipe and dropped everything past it. A pipe is what a camera
+makes of a divider, so no hand-written fixture had one and the shared corpus
+never saw the disagreement — while on 21 of one shift's 309 cards the phone
+stored a dropoff the rig did not.
+
+| of 210 untruncated cards | before | after |
+|---|---|---|
+| no address at all | 64 | **14** |
+| one end only | 68 | 54 |
+| **both ends** | 78 | **142** |
+
+The two ports now agree on all 309 real cards across pay, time, distance and
+addresses — a stronger check than the fixtures alone can make.
+
+**A stray that the corpus caught.** Somewhere in this work `'L': '1'` got into
+`DIGIT_FIX` in both ports. It looks harmless and it is not: `53L min` becomes
+531 minutes, and the corpus has a case for exactly that shape — "a leg whose
+minutes have rubbish stuck to them is not a leg" — because two stacked guesses
+is how noise becomes data. It failed four checks in both languages.
+
 ### Two orders at once, and the question this rig can honestly answer
 
 Working two apps, the driver accepts an order and a second offer arrives while
@@ -3483,7 +3537,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3739 checks
+npm test                # all 30 suites, 3751 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

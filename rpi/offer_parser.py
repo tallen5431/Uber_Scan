@@ -242,6 +242,33 @@ PLACE_EDGE = re.compile(r'^[^0-9A-Za-z]+|[^0-9A-Za-z]+$', ASCII)
 # collections at the same number and three copies of it is three chances to
 # disagree about what a card can hold.
 MAX_PLACES = 4
+
+# The commonest delivery card puts BOTH ends of the job after one total leg:
+#
+#     27 min (7.3 mi) total  Rick's Hotwings (Kennesaw)  Hamby Place Dr NW &
+#     Travistock Pl NW, Acworth
+#
+# There is no "Pickup" label to anchor on and only one leg, so the leg-tail rule
+# picked the whole thing up as a single place — 71 characters of merchant and
+# address together, which the 60-character cap then threw away entire. Both ends
+# of the job, lost to a length check, on 53 of one shift's 210 cards.
+#
+# The card's own grammar separates them: Uber prints the merchant with its
+# branch in brackets, and where the job goes after that. So the closing bracket
+# is the seam.
+PLACE_MERCHANT = re.compile(r'^(.{2,44}?\([^)]{2,34}\))\s*(.{4,})$', ASCII)
+
+# ...and an address ends at its town. Nothing on the card marks the end of one,
+# which is what left "Lakeview Ter & Windmill Dr, Dallas ill" in the journal —
+# the "ill" is the bottom icon row. A comma, a capitalised name or two, and that
+# is the whole address; what follows is furniture.
+#
+# The possessive is allowed because a card does not always end on a town: "1min
+# (0.2 mi) Roswell Road, Johnny's Hideaway" ends on the venue, and a rule that
+# stopped at the first capitalised word after a comma cut it to "Roswell Road,
+# Johnny". Lower case still ends it, which is what keeps the icon row out.
+PLACE_ENDS_AT_TOWN = re.compile(
+    r"^(.*?,\s*[A-Z][A-Za-z]+(?:'s)?(?:\s+[A-Z][A-Za-z]+(?:'s)?)?)\b", ASCII)
 TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 
 # What a card calls a leg of the journey. Uber labels every one — "away",
@@ -765,13 +792,22 @@ def find_places(text, legs):
                          after, maxsplit=1, flags=re.IGNORECASE | ASCII)[0]
         keep(after)
 
+    def ends_at_town(value):
+        m = PLACE_ENDS_AT_TOWN.match(value)
+        return m.group(1) if m else value
+
     # The tail of each leg, up to whatever comes next.
+    #
+    # 130 characters rather than 80. On the single-total delivery card the tail
+    # holds the merchant AND the address, and 80 cut the town off the end of the
+    # one that matters: "Double Branches Ln & Sagamore Ct. Dal". The window can
+    # afford it now that the tail is split rather than stored whole.
     for i, leg in enumerate(legs):
         start = leg.get('end')
         if start is None:
             continue
         stop = legs[i + 1].get('start') if i + 1 < len(legs) else len(text)
-        tail = text[start:stop][:80]
+        tail = text[start:stop][:130]
         # Cut at the first thing that is plainly not part of an address.
         tail = re.split(r'\b(?:accept|decline|verified|exclusive|guaranteed'
                         r'|add\s+to\s+route|\d+\s*mi\b)', tail,
@@ -781,13 +817,34 @@ def find_places(text, legs):
         # stored — `1 min ~ 4 . mins | . = | i oO < * ~~ agama ae ae; i Old
         # Mountain Rd NW, Kennesaw` passes on the address buried at the end of
         # it and then goes into the journal sludge and all.
+        # A pipe with an address after it is two places, not one. The card's
+        # own dividers and its icon row both come back as pipes, so `trim_place`
+        # cuts at the first one — and everything past it went with it.
+        #
+        # The JavaScript port has always split here and this one never did,
+        # which is the two readers disagreeing about the same card: on 21 of one
+        # shift's 309 the phone stored a dropoff the rig did not. Neither corpus
+        # case reached it, because a pipe is what a camera makes of a line and
+        # no hand-written fixture had one.
         pieces = [tail]
-        if '|' in tail:
-            near, far = tail.split('|', 1)
-            if looks_like_a_place(trim_place(far)):
-                pieces = [near, far]
+        bar = tail.find('|')
+        if bar >= 0 and looks_like_a_place(trim_place(tail[bar + 1:])):
+            pieces = [tail[:bar], tail[bar + 1:]]
         for piece in pieces:
             piece = trim_place(piece)
+            # Two places in one piece, when the card wrote them that way. The
+            # merchant is kept without asking looks_like_a_place: "Rick's
+            # Hotwings (Kennesaw)" names no street and no town, so that test
+            # refuses it, and it is still exactly where the driver goes first.
+            # The bracketed branch is the card vouching for it.
+            pair = PLACE_MERCHANT.match(piece)
+            if pair:
+                keep(pair.group(1))
+                drop = ends_at_town(trim_place(pair.group(2)))
+                if looks_like_a_place(drop):
+                    keep(drop)
+                continue
+            piece = ends_at_town(piece)
             if looks_like_a_place(piece):
                 keep(piece)
 

@@ -1660,6 +1660,53 @@
     "Windy Hill Rd SE, Smyrna",
     "Cumberland Blvd SE, Atlanta"
    ]
+  },
+  {
+   "name": "a single-total delivery card names both ends of the job",
+   "text": "Q Early look - Order in progress Delivery $7.25 Includes expected tip © 27 min (7.3 mi) total I Rick's Hotwings (Kennesaw) Hamby Place Dr NW & Travistock PI NW, Acworth @ Matching may take longer",
+   "expect": [
+    "Rick's Hotwings (Kennesaw)",
+    "Hamby Place Dr NW & Travistock PI NW, Acworth"
+   ]
+  },
+  {
+   "name": "...with a street address for the branch instead of a town",
+   "text": "Exclusive x $12.62 Guaranteed (incl. tip) © 33 min (12.9 mi) total Chick-fil-A (1790 Mars Hill Road) I Double Branches Ln & Sagamore Ct. Dallas x",
+   "expect": [
+    "Chick-fil-A (1790 Mars Hill Road)",
+    "Double Branches Ln & Sagamore Ct. Dallas"
+   ]
+  },
+  {
+   "name": "...and the icon row after the town is not part of the address",
+   "text": "Acworth Maem Exclusive x $11.88 Guaranteed (incl. tip) © 35 min (17.9 mi) total | Mellow Mushroom (Acworth) \\ Lakeview Ter & Windmill Dr, Dallas ill oO < x",
+   "expect": [
+    "Mellow Mushroom (Acworth)",
+    "Lakeview Ter & Windmill Dr, Dallas"
+   ]
+  },
+  {
+   "name": "a card that ends on a venue keeps the whole name",
+   "text": "$9.09 *% 497 @vIP © Verified 1min (0.2 mi) Roswell Road, Johnny's Hideaway Avg. wait time at pickup: 1 min 14 mins (7.6 mi) W Peachtree St NW, Atlanta",
+   "expect": [
+    "Roswell Road, Johnny's Hideaway",
+    "W Peachtree St NW, Atlanta"
+   ]
+  },
+  {
+   "name": "a merchant with no branch in brackets is left whole",
+   "text": "$7.01 Guaranteed (incl. tip) © 28 min (9.8 mi) total Tacos Del Chavo, Acworth",
+   "expect": [
+    "Tacos Del Chavo, Acworth"
+   ]
+  },
+  {
+   "name": "a divider between the two ends is not the end of the address",
+   "text": "° o $6.51 Includes expected tip © 21 min (6.5 mi) total Zaxbys (Old 41 Hwy) | Bartleson Dr NW & Smithwell Pt NW, Kennesaw",
+   "expect": [
+    "Zaxbys (Old 41 Hwy)",
+    "Bartleson Dr NW & Smithwell Pt NW, Kennesaw"
+   ]
   }
  ],
  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",

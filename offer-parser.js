@@ -283,6 +283,37 @@
      a charger advert stapled to its end. Three of one shift's 210 cards. */
   var PLACE_TAIL = /(?:\||\bfast\s*charg|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline|verified|exclusive|guaranteed|included|customer|dropoff|orders?)\b)/i;
 
+  /* The commonest delivery card puts BOTH ends of the job after one total leg:
+   *
+   *   27 min (7.3 mi) total  Rick's Hotwings (Kennesaw)  Hamby Place Dr NW &
+   *   Travistock Pl NW, Acworth
+   *
+   * There is no "Pickup" label to anchor on and only one leg, so the leg-tail
+   * rule picked the whole thing up as ONE place — 71 characters of merchant and
+   * address together, which the 60-character cap then threw away entire. Both
+   * ends of the job, lost to a length check, on 53 of one shift's 210 cards.
+   *
+   * The card's own grammar separates them: Uber prints the merchant with its
+   * branch in brackets and where the job goes after that, so the closing
+   * bracket is the seam. */
+  var PLACE_MERCHANT = /^(.{2,44}?\([^)]{2,34}\))\s*(.{4,})$/;
+
+  /* ...and an address ends at its town. Nothing on the card marks the end of
+   * one, which is what left "Lakeview Ter & Windmill Dr, Dallas ill" in the
+   * journal — the "ill" is the bottom icon row. A comma, a capitalised name or
+   * two, and that is the whole address.
+   *
+   * The possessive is allowed because a card does not always end on a town:
+   * "1min (0.2 mi) Roswell Road, Johnny's Hideaway" ends on the venue, and a
+   * rule stopping at the first capitalised word cut it to "Roswell Road,
+   * Johnny". Lower case still ends it, which keeps the icon row out. */
+  var PLACE_ENDS_AT_TOWN = /^(.*?,\s*[A-Z][A-Za-z]+(?:'s)?(?:\s+[A-Z][A-Za-z]+(?:'s)?)?)\b/;
+
+  function endsAtTown(value) {
+    var m = String(value || '').match(PLACE_ENDS_AT_TOWN);
+    return m ? m[1] : value;
+  }
+
   /* The card's bottom bar — a row of icons — comes back as one and two
      character scraps: `Kennesaw 4`, `Marietta %`, `Acworth ¥`, `Kennesaw 2c 4`.
      Two lists, not one: `S Main St NW` starts with a real single letter and
@@ -393,7 +424,10 @@
       if (typeof legs[j].end !== 'number') continue;
       var stop = (j + 1 < legs.length && typeof legs[j + 1].start === 'number')
         ? legs[j + 1].start : text.length;
-      var tail = text.slice(legs[j].end, stop).slice(0, 80);
+      // 130 rather than 80. On the single-total delivery card the tail holds
+      // the merchant AND the address, and 80 cut the town off the end of the
+      // one that matters: "Double Branches Ln & Sagamore Ct. Dal".
+      var tail = text.slice(legs[j].end, stop).slice(0, 130);
       tail = tail.split(PLACE_STOP)[0];
       // Trimmed before it is judged, not after. The test asks whether this is
       // an address, and the thing to ask it about is the string that would be
@@ -406,6 +440,18 @@
       }
       for (var k = 0; k < pieces.length; k++) {
         var piece = trimPlace(pieces[k]);
+        // Two places in one tail, when the card wrote them that way. See
+        // PLACE_MERCHANT: the merchant is kept without asking looksLikeAPlace,
+        // because "Rick's Hotwings (Kennesaw)" names no street and no town and
+        // is still exactly where the driver goes first.
+        var pair = piece.match(PLACE_MERCHANT);
+        if (pair) {
+          keep(pair[1]);
+          var drop = endsAtTown(trimPlace(pair[2]));
+          if (looksLikeAPlace(drop)) keep(drop);
+          continue;
+        }
+        piece = endsAtTown(piece);
         if (looksLikeAPlace(piece)) keep(piece);
       }
     }

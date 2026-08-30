@@ -95,7 +95,7 @@
   // than no number.
   var ENOUGH_OFFERS = 40;
   var ENOUGH_HOURS = 2;
-  var ENOUGH_TRIPS = 6;
+  var ENOUGH_TRIPS = 12;
 
   var LADDER_MAX = 60;
 
