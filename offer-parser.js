@@ -152,8 +152,37 @@
     '\\$\\s*(' + DC + '{1,3})\\s+(' + DC + '{1,2}[.,]' + DC + '{2})'
     + '\\s*(?=guarant|includ)', 'gi');
 
+  /* A number that is a duration or a distance, wearing a dollar sign.
+   *
+   * The rig photographs whatever is on the phone, and between jobs that is the
+   * map. One screen off this driver's own shift:
+   *
+   *   The Townes at Chastain ... Windsor Drive ... 3min  11 min  $ 22min
+   *   3 min (1.0 mi)  Fastest route now due to traffic conditions
+   *
+   * Route alternatives, with a map glyph in front of one that read as a dollar
+   * sign. findPay took $22, the four times added to 39 minutes, and the panel
+   * showed a green ACCEPT at $33.38/hr for a road - journalled as an offer and
+   * counted in the medians as a rate.
+   *
+   * The grammar is the card's own and needs no list of screens: a payout says
+   * what it is, or says nothing, but it is never glued to a unit. "$13.05 ...
+   * $ 12 min (6.3 mi)" is a real card off the same shift, where a stray glyph
+   * sits in front of the leg - the $12 is refused and the $13.05 headline is
+   * untouched, which is the whole test of whether this rule is narrow enough. */
+  // Only the abbreviations these screens actually print - "min", "mins", "mi" -
+  // and not the spelled-out forms LEG tolerates. A merchant is what sits next to
+  // a payout when the label between them does not read, and "$12 Minute Maid
+  // Park" would lose its payout to a rule that accepts "minute". "Mi Casa" is
+  // the collision that remains, and it is the safe direction: no payout, so no
+  // verdict, rather than the wrong one.
+  var PAY_IS_A_DURATION = new RegExp(
+    '\\$\\s*(?:' + DC + '{1,4}(?:[.,]' + DC + '{1,2})?)\\s*'
+    + '(?:m[il1|]ns?|mi)\\b', 'gi');
+
   function findPay(text) {
     var chips = collect(text, PAY_CHIP);
+    var units = collectSpans(text, PAY_IS_A_DURATION);
     var all = collect(text, MONEY_STRICT);
     if (!all.length) all = collect(text, MONEY_LOOSE);
 
@@ -183,6 +212,18 @@
         }
       }
       if (inChip) continue;
+      // ...and a figure that is really a duration or a distance is not a
+      // candidate either. See PAY_IS_A_DURATION.
+      var inUnit = false;
+      for (var u = 0; u < units.length; u++) {
+        if (units[u].index <= all[i].index
+            && all[i].index + all[i].match.length
+               <= units[u].index + units[u].match.length) {
+          inUnit = true;
+          break;
+        }
+      }
+      if (inUnit) continue;
       // An amount has to contain a real digit. DC lets a letter stand in for a
       // digit inside a number that is otherwise confirmed, which is right — but
       // a token made ENTIRELY of those stand-ins is not a number that lost a
@@ -204,6 +245,17 @@
       if (v !== null && v > 0 && v < 2000 && (best === null || v > best)) best = v;
     }
     return best;
+  }
+
+  // Spans of a pattern that captures nothing of its own.
+  function collectSpans(text, re) {
+    var out = [], m;
+    re.lastIndex = 0;
+    while ((m = re.exec(text)) !== null) {
+      out.push({ index: m.index, match: m[0] });
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+    return out;
   }
 
   function collect(text, re) {

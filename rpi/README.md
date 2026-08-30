@@ -3135,6 +3135,48 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### The ACCEPT that was a road
+
+The rig photographs whatever is on the phone, and between jobs that is the map.
+One screen off this driver's own shift, read as an offer:
+
+    The Townes at Chastain ... Windsor Drive ...
+    3min   8   11 min   $ 22min   &   Ti min   3 min (1.0 mi)
+    Fastest route now due to traffic conditions   Saves gas   Add stops   Share
+
+Route alternatives, with a map glyph in front of one of them that read as a
+dollar sign. `find_pay` took **$22**, the four durations summed to 39 minutes,
+and the panel showed a green **ACCEPT at $33.38/hr — for a road**. It went into
+the journal as an offer and into the medians as a rate. Its door-to-door speed
+was 2 mph, against a median of 17 for the shift's real offers.
+
+No list of screens, and no attempt to decide what an offer "looks like": that
+road was found by asking what the *payout* is, and a payout is never glued to a
+unit. A card says what its money is — `Guaranteed`, `Includes expected tip` — or
+says nothing, and the ride cards say nothing at all: 231 of the 604 print no such
+word, so a rule keyed on the label would have thrown away a third of the shift.
+
+The narrow version is the shipped one. Only the abbreviations these screens
+print — `min`, `mins`, `mi` — and not the spelled-out forms `LEG` tolerates,
+because a merchant is exactly what sits beside a payout when the label between
+them does not read, and `$12 Minute Maid Park` would otherwise lose its payout.
+`Mi Casa` is the collision that remains, and it fails in the safe direction: no
+payout, so no verdict, rather than a wrong one.
+
+The test of whether it is narrow enough is a real card off the same shift:
+
+    $13.05  *% 493  © Verified   $ 12 min (6.3 mi)   Paces Ferry Rd NW, Atlanta
+
+A stray glyph in front of the leg, on an offer the driver actually took. The $12
+is refused and the $13.05 headline is untouched. One card in 604 changes — the
+map stops being an offer and becomes an unfinished reading, which is what it is.
+Eleven mutations, eleven caught.
+
+**43 of the shift's 49 green lights survive a re-read and a speed check.** The
+six that do not are the two priority chips, the two `$ Bound Ct` phantoms, this
+road, and one card where a star rating ate a journey leg. The driver took none
+of them.
+
 ### A street name that read as an eighty-dollar offer
 
 `DC` is the parser's list of characters OCR swaps for digits — `O` for 0, `S`
@@ -3724,7 +3766,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3889 checks
+npm test                # all 30 suites, 3921 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3738,11 +3780,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 524 checks, the shared corpus
+node tests/corpus.test.js       # 540 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       # 122 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 557 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 573 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 114 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place

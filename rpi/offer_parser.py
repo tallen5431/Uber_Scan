@@ -420,8 +420,45 @@ def normalize(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 
+# A number that is a duration or a distance, wearing a dollar sign.
+#
+# The rig photographs whatever is on the phone, and between jobs that is the map.
+# One screen off this driver's own shift:
+#
+#     The Townes at Chastain ... Windsor Drive ... 3min  11 min  $ 22min
+#     3 min (1.0 mi)  Fastest route now due to traffic conditions
+#
+# Route alternatives, with a map glyph in front of one of them that read as a
+# dollar sign. find_pay took $22, the four times added to 39 minutes, and the
+# panel showed a green **ACCEPT at $33.38/hr** for a road. It went into the
+# journal as an offer and into the medians as a rate.
+#
+# The grammar is the card's own and needs no list of screens: a payout says what
+# it is, or says nothing, but it is never glued to a unit. "$13.05 ... $ 12 min
+# (6.3 mi)" is a real card off the same shift, where a stray glyph sits in front
+# of the leg — the $12 is refused and the $13.05 headline is untouched, which is
+# the whole test of whether this rule is narrow enough.
+#
+# One card in 604 changes: the map stops being an offer and becomes an
+# unfinished reading, which is what it is. No corpus text moves.
+#
+# Only the abbreviations these screens actually print — "min", "mins", "mi" —
+# and not the spelled-out forms LEG tolerates. A merchant is what sits next to a
+# payout when the label between them does not read, and "$12 Minute Maid Park"
+# would lose its payout to a rule that accepts "minute". Narrowing to the
+# printed grammar is the same move LEG_TAIL makes, and it costs nothing: no card
+# in 604 is read differently either way. "Mi Casa" is the collision that
+# remains, and it is the safe direction — no payout, so no verdict, rather than
+# the wrong one.
+PAY_IS_A_DURATION = re.compile(
+    r'\$\s*(?:' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)\s*'
+    r'(?:m[il1|]ns?|mi)\b',
+    re.IGNORECASE | ASCII)
+
+
 def find_pay(text):
     chips = [m.span() for m in PAY_CHIP.finditer(text)]
+    units = [m.span() for m in PAY_IS_A_DURATION.finditer(text)]
 
     def in_chip(m):
         # A figure inside a "+$0.50 included" chip is part of the payout, not a
@@ -450,6 +487,10 @@ def find_pay(text):
         # min' is two guesses stacked, and stacked guesses are how noise becomes
         # data." Money never got it. Two cards in 604 change, both from a
         # phantom $80 to their true $9.03, and no corpus text moves.
+        # ...and a figure that is really a duration or a distance is not a
+        # candidate either. See PAY_IS_A_DURATION.
+        if any(start <= m.start() and m.end() <= end for start, end in units):
+            continue
         if not HAS_DIGIT.search(m.group(1)):
             continue
         v = to_number(m.group(1).strip())

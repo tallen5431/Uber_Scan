@@ -915,6 +915,58 @@
    }
   },
   {
+   "name": "a map screen is not an offer, however many dollar signs it has",
+   "text": "= = \u00a3 \\ The Townes at CHastain \u00a9 f = g e g 3 le pg e s + cer Joe's) <3 a af - Winds?' = coe Drive ~ =e \u20ac 3min 8 11 min $ 22min & Ti min 3 min (1.0 mi) Fastest route now due to traffic conditions & Saves gas - \u00a9 Easy Seas @ Add stops < Share",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...and a stray glyph in front of a leg does not cost the card its payout",
+   "text": "er Exclusive x . 1 \u00a2 $13.05 *% 493 \u00a9 Verified $ 12 min (6.3 mi) Paces Ferry Rd NW & Paces Ferry Rd SE, Atlanta",
+   "expect": {
+    "pay": 13.05,
+    "minutes": 12,
+    "miles": 6.3
+   }
+  },
+  {
+   "name": "...a stray glyph in front of the DISTANCE cannot take the payout either",
+   "text": "$7.50 Guaranteed (incl. tips) $ 8.0 mi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "pay": 7.5,
+    "minutes": 25,
+    "miles": 8.0
+   }
+  },
+  {
+   "name": "...a merchant whose name starts like a unit keeps the payout",
+   "text": "$12 Minute Maid Park 20 min (7.3 mi) total",
+   "expect": {
+    "pay": 12,
+    "minutes": 20,
+    "miles": 7.3
+   }
+  },
+  {
+   "name": "...and so does one that merely begins with the letters",
+   "text": "$12 Mini Mart (Kennesaw) 20 min (7.3 mi) total",
+   "expect": {
+    "pay": 12,
+    "minutes": 20,
+    "miles": 7.3
+   }
+  },
+  {
+   "name": "...a payout with a number between it and the unit is still a payout",
+   "text": "$8 20 min (7.3 mi) total",
+   "expect": {
+    "pay": 8,
+    "minutes": 20,
+    "miles": 7.3
+   }
+  },
+  {
    "name": "an amount made only of letter-lookalikes is a word, not a payout",
    "text": "YA ~*~ q LEGACY PARK ' OBB Pkwy, { $9.03 Guaranteed (incl. tip) i \u00a9 30 min (10.8 mi) total re H Doro's Italian Restaurant (Acworth) t I S$ Bound Ct & Shoals",
    "expect": {
