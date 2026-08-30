@@ -3228,6 +3228,10 @@ Measured on one card fed to the real accumulator:
 | a different card, same payout, 10 minutes later | 2 | 2 |
 | a replacement card, same payout, immediately | 2 | 2 |
 
+The distance is voted on now too, because it rides on the leg: a delivery card
+read as 7.9, 7.9, 1.9, 7.9 and 79 miles published the wrong number in 48 of 120
+arrival orders and now publishes 7.9 in all 120.
+
 The two that must still separate, still separate — and neither relies on the
 clock. A different payout keys differently; a replacement paying the same to the
 cent is caught by `_is_a_different_card`, which outranks the window and was
@@ -3953,7 +3957,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4042 checks
+npm test                # all 30 suites, 4045 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3972,7 +3976,7 @@ node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       # 122 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 620 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 122 on merging readings across frames, on a
+python3 rpi/test_accumulate.py  # 125 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,

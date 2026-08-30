@@ -539,6 +539,19 @@ eq('a frame that misreads the minutes does not start a new offer', _n, 1)
 eq('...and the misreadings are outvoted', _m.get('minutes'), 28.0)
 eq('...leaving the distance alone', _m.get('miles'), 7.7)
 
+# The distance is voted on too, now that it rides on the leg. Before that it
+# was whatever the last frame said: a delivery card read 7.9, 7.9, 1.9, 7.9 and
+# 79 published the wrong number in 48 of 120 arrival orders.
+GOPUFF = ("$15.60 Guaranteed (incl. tips) 7.9 mi + 37 min "
+          "@ Retail pickup GoPuff (Drive)")
+_n, _m = _episodes([(GOPUFF, None), (GOPUFF, None),
+                    (GOPUFF.replace('7.9 mi', '1.9 mi'), None),
+                    (GOPUFF, None),
+                    (GOPUFF.replace('7.9 mi', '79 mi'), None)])
+eq('a delivery card whose distance wobbles is still one offer', _n, 1)
+eq('...and the distance is the one most frames read', _m.get('miles'), 7.9)
+eq('...not the one the last frame happened to read', _m.get('mergedFrom'), 5)
+
 # What must still separate two offers, and does not depend on the clock.
 _n, _ = _episodes([(CARD, 1000.0), (CARD, 1003.0), (CARD, 1006.0),
                    (OTHER, 1600.0), (OTHER, 1603.0)])
