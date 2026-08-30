@@ -259,18 +259,27 @@
    * when the two agree on everything they both state, and "elsewhere" the
    * moment they disagree on anything.
    *
-   * Returns 'near', 'elsewhere', or null for "the card did not say enough" -
-   * which is half the time on real pairs, and is the honest answer rather than
-   * a guess dressed up as one. */
+   * It says what it checked rather than how far apart they are, because how far
+   * apart they are is not something these cards can support. A town and a
+   * quadrant that both agree is 'same-side'; a town alone is 'same-town', which
+   * is a weaker claim and is reported as one - 354 of the agreeing pairs on
+   * file are Atlanta NE to Atlanta NE, and northeast Atlanta is not a
+   * neighbourhood. The driver knows which of their towns are big.
+   *
+   * Returns 'elsewhere', 'same-side', 'same-town', or null for "the card did
+   * not say enough" - which is about half of real pairs, and is the honest
+   * answer rather than a guess dressed up as one. */
   function sameArea(a, b) {
     var x = area(a), y = area(b);
     if (!x || !y) return null;
     if (x.town && y.town && x.town !== y.town) return 'elsewhere';
     if (x.quadrant && y.quadrant && x.quadrant !== y.quadrant) return 'elsewhere';
-    if (x.town && y.town) return 'near';
-    // Same quadrant, no town on one of them: a quadrant is a whole side of the
-    // metro, and on its own that is not enough to promise anything.
-    return null;
+    if (!x.town || !y.town) {
+      // Same quadrant, no town on one of them: a quadrant is a whole side of
+      // the metro, and on its own that is not enough to promise anything.
+      return null;
+    }
+    return (x.quadrant && y.quadrant) ? 'same-side' : 'same-town';
   }
 
   function stack(active, offer, settings, now) {

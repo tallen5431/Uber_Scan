@@ -646,11 +646,17 @@ function offer(atMinutes, pay, minutes, cost) {
  * costs a stack that could have been taken, a wrong "near" costs an hour and a
  * late delivery. All the addresses below are the driver's own, off real cards. */
 
-eq('two dropoffs in the same town are near',
-   A.sameArea('Park Pl, Atlanta', 'Cobalt Dr NW & Ember Ln NW, Atlanta'), 'near');
-eq('...and in the same town and quadrant, still near',
+eq('a town agreeing with only one quadrant known is the weaker claim',
+   A.sameArea('Park Pl, Atlanta', 'Cobalt Dr NW & Ember Ln NW, Atlanta'), 'same-town');
+eq('...and a town AND quadrant agreeing is the stronger one',
    A.sameArea('Hamby Place Dr NW & Travistock Pl NW, Acworth',
-              'Brookstone Walk NW & Downington Trl NW, Acworth'), 'near');
+              'Brookstone Walk NW & Downington Trl NW, Acworth'), 'same-side');
+// 354 of the agreeing pairs on file are Atlanta NE to Atlanta NE, and northeast
+// Atlanta is not a neighbourhood. Saying "same side of town" is what was
+// actually checked; saying "nearby" would be a promise the cards cannot keep.
+eq('...which is a side of town, not a neighbourhood',
+   A.sameArea('Armour Cir NE & Armour Dr NE, Atlanta',
+              'N Highland Ave NE & Saint Louis Pl NE, Atlanta'), 'same-side');
 eq('a different town is somewhere else',
    A.sameArea('Hamby Place Dr NW & Travistock Pl NW, Acworth',
               'Lakeview Ter & Windmill Dr, Dallas'), 'elsewhere');
@@ -689,12 +695,12 @@ eq('...and a two-letter state code is not one either',
 // sides of it.
 eq('a capitalised town does not donate a quadrant',
    A.sameArea('HOME DEPOT 0156 I Stonewall Dr, KENNESAW',
-              'Cobb Place Ln NW, Kennesaw'), 'near');
+              'Cobb Place Ln NW, Kennesaw'), 'same-town');
 
 // OCR shouts: this driver's cards carry "COBB PKWY & MARS" and "shallowford rd".
 // A town that came back in capitals is the same town.
 eq('a town in capitals is the same town',
-   A.sameArea('Cobb Pkwy NW, ACWORTH', 'Main St NW, Acworth'), 'near');
+   A.sameArea('Cobb Pkwy NW, ACWORTH', 'Main St NW, Acworth'), 'same-side');
 
 // Half of real pairs land here, and saying nothing is the answer they get.
 eq('a dropoff the card did not name says nothing',
@@ -716,7 +722,7 @@ eq('...and still reports the money, which the geography only qualifies',
 var near = A.stack(heldFar,
    { pay: 10, minutes: 20, cost: 1, dropoff: 'Jewel Cole Rd, Hiram' },
    { target: 25 }, 0);
-eq('...and says so when they end in the same place', near.ends, 'near');
+eq('...and says so when they end in the same place', near.ends, 'same-town');
 var blind = A.stack(heldFar, { pay: 10, minutes: 20, cost: 1 }, { target: 25 }, 0);
 eq('...and says nothing when the second card named nowhere', blind.ends, null);
 

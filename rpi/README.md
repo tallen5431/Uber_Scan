@@ -3180,8 +3180,17 @@ Measured against the driver's own stacked pairs — every one correct:
 | Cochran Ridge Rd, **Hiram** → Chastain Meadows Pkwy NW, **Marietta** | elsewhere — the twenty-mile pair |
 | Luckie St NW, Atlanta → *Taco Bell (930 Spring Street)* | nothing said |
 
+It says **what it checked**, not how far apart they are, because how far apart
+they are is not something these cards can support. A town and a quadrant that
+both agree is `same side of town`; a town alone is `same town`, a weaker claim
+reported as one. That distinction was not there at first, and the data insisted
+on it: **354 of the agreeing pairs on file are Atlanta NE to Atlanta NE**, and
+northeast Atlanta is not a neighbourhood. The word "nearby" was a promise the
+cards cannot keep. The driver knows which of their towns are big; the rig should
+not pretend to.
+
 Over all 10,007 pairs of offers that appeared within twenty minutes of each
-other: **39% elsewhere, 13% near, 48% nothing said.**
+other: **39% elsewhere, 8% same town, 5% same side of town, 48% nothing said.**
 
 That last number started at a worse place. Of the 135 dropoffs the rig could not
 put on a map, **112 were not dropoffs at all** — they were shop names the card
@@ -4089,7 +4098,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4107 checks
+npm test                # all 30 suites, 4108 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -4105,7 +4114,7 @@ The Pi parser is a port of the browser one, and both run the same corpus:
 ```sh
 node tests/corpus.test.js       # 602 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
-node tests/advice.test.js       # 143 on what line to tell a driver to draw
+node tests/advice.test.js       # 144 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 python3 rpi/test_parser.py      # 635 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 132 on merging readings across frames, on a

@@ -693,7 +693,8 @@
       // print enough - about half the time - because a guess here costs an
       // hour and a late delivery. See Advice.sameArea.
       + (s.ends === 'elsewhere' ? ' \u00b7 ENDS ELSEWHERE'
-         : s.ends === 'near' ? ' \u00b7 ends nearby' : '');
+         : s.ends === 'same-side' ? ' \u00b7 same side of town'
+         : s.ends === 'same-town' ? ' \u00b7 same town' : '');
     if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
     el.stack.hidden = false;
   }
