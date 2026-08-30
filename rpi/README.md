@@ -3135,6 +3135,35 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### Six invisible characters deciding whether a road is an offer
+
+The two parsers are held to one corpus, and the corpus is text. Whitespace is
+where that stops being enough: **Python's `\s` is Unicode and JavaScript's is
+not**, and they disagree about exactly six characters — U+001C to U+001F and
+U+0085 collapse in Python only, U+FEFF in JavaScript only.
+
+`normalize()` runs `\s+` in both ports, so a card carrying one of the six
+arrives as two different strings and every rule downstream reads a different
+card. It reaches a published number, and in both directions. The map screen two
+sections down is refused because a payout is never glued to a unit — and with
+one space swapped:
+
+| the character between `22` and `min` | the Pi | the browser |
+|---|---|---|
+| an ordinary space | refuses it | refuses it |
+| U+0085, U+001C–U+001F | refuses it | **publishes a $22 offer** |
+| U+FEFF | **publishes a $22 offer** | refuses it |
+
+Whichever port collapsed the character does the right thing and the other rates
+a road. Same card, same rule, two answers — decided by something with no
+appearance at all.
+
+So each port is told about the other's set and both collapse the union. No card
+on file carries any of the six, so this is a hole closed rather than a bug
+repaired; the corpus now holds all six, which is what keeps it closed. Five
+mutations, five caught, including each port reverting to its own language's
+idea of a space.
+
 ### Does the second order END anywhere near the first?
 
 `stack()` has always answered half the question. It knows what two jobs pay
@@ -4098,7 +4127,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4108 checks
+npm test                # all 30 suites, 4120 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -4112,11 +4141,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 602 checks, the shared corpus
+node tests/corpus.test.js       # 608 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       # 144 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 635 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 641 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 132 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place

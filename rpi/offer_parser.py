@@ -443,12 +443,32 @@ def to_number(token):
         return None
 
 
+# Whitespace, as the UNION of what the two languages call it.
+#
+# Python's `\s` is Unicode and JavaScript's is not, and they disagree about
+# exactly six characters: U+001C to U+001F and U+0085 collapse in Python only,
+# U+FEFF in JavaScript only. normalize() runs `\s+` in both ports, so a card
+# carrying one of those six arrives as two different strings and every rule
+# downstream reads a different card.
+#
+# It reaches a published number, and in both directions. The map screen this
+# parser refuses - "$ 22min" among route times - is refused by whichever port
+# collapsed the character and taken as a $22 payout by the other: U+0085 makes
+# the browser publish it, U+FEFF makes the Pi. Six invisible characters
+# deciding whether a road is rated as an offer.
+#
+# So each port is told about the other's set, and both collapse the union. No
+# card on file carries any of the six; this is a hole closed rather than a bug
+# repaired, and the corpus now holds all six so it stays closed.
+WHITESPACE = re.compile(r'[\s\ufeff]+')
+
+
 def normalize(text):
     text = str(text or '')
     text = re.sub(r'[‘’“”]', "'", text)
     text = re.sub(r'[–—−]', '-', text)
     text = text.replace(' ', ' ')
-    return re.sub(r'\s+', ' ', text).strip()
+    return WHITESPACE.sub(' ', text).strip()
 
 
 # A number that is a duration or a distance, wearing a dollar sign.

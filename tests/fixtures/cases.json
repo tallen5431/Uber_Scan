@@ -1090,6 +1090,49 @@
    }
   },
   {
+   "name": "...whatever invisible character stands in for its space",
+   "_why": "Python's \\s is Unicode and JavaScript's is not, and they disagree about exactly six characters. normalize() collapses \\s+ in both ports, so a card carrying one of them arrives as two different strings and every rule downstream reads a different card. U+0085 made the browser publish this road as a $22 offer while the Pi refused it; U+FEFF did it the other way round. No card on file carries any of the six: a hole closed rather than a bug repaired, and these six keep it closed.",
+   "text": "The Townes at Chastain 3min 8 11 min $ 22\u001cmin & 3 min (1.0 mi) Fastest route now due to traffic conditions",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...U+001D too",
+   "text": "The Townes at Chastain 3min 8 11 min $ 22\u001dmin & 3 min (1.0 mi) Fastest route now due to traffic conditions",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...U+001E too",
+   "text": "The Townes at Chastain 3min 8 11 min $ 22\u001emin & 3 min (1.0 mi) Fastest route now due to traffic conditions",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...U+001F too",
+   "text": "The Townes at Chastain 3min 8 11 min $ 22\u001fmin & 3 min (1.0 mi) Fastest route now due to traffic conditions",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...U+0085 too",
+   "text": "The Townes at Chastain 3min 8 11 min $ 22\u0085min & 3 min (1.0 mi) Fastest route now due to traffic conditions",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...U+FEFF too",
+   "text": "The Townes at Chastain 3min 8 11 min $ 22\ufeffmin & 3 min (1.0 mi) Fastest route now due to traffic conditions",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
    "name": "...and a stray glyph in front of a leg does not cost the card its payout",
    "text": "er Exclusive x . 1 \u00a2 $13.05 *% 493 \u00a9 Verified $ 12 min (6.3 mi) Paces Ferry Rd NW & Paces Ferry Rd SE, Atlanta",
    "expect": {

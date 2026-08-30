@@ -67,7 +67,12 @@
       .replace(/[‘’“”]/g, "'")
       .replace(/[–—−]/g, '-')
       .replace(/ /g, ' ')
-      .replace(/\s+/g, ' ')
+      // The UNION of what the two languages call whitespace. Python's \s is
+      // Unicode and JavaScript's is not; they disagree about U+001C-U+001F and
+      // U+0085 (Python only) and U+FEFF (JavaScript only). Six invisible
+      // characters that decide whether a map screen is rated as an offer - see
+      // WHITESPACE in offer_parser.py, which adds U+FEFF at the other end.
+      .replace(/[\s\u001c-\u001f\u0085]+/g, ' ')
       .trim();
   }
 
