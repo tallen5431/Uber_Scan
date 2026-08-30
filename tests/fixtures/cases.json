@@ -2384,6 +2384,40 @@
    "expect": true
   },
   {
+   "name": "two legs named by an address, one distance unread, is not whole",
+   "_why": "The shape this driver's ride cards actually use. LEG_TAIL is a word list - away, trip, total - and these cards label a leg with an ADDRESS instead, so both legs count as travel only because they carry distances. The moment one loses its distance it drops out of the set legs_short_a_distance counts, the count falls to one, and the rule written for exactly this damage returned False. Measured: it fired on ONE of 604 real cards and on none of 1080 readings with a leg's distance broken. Left unflagged, 845 of 1061 damaged readings published a HIGHER rate than the truth and 289 crossed a verdict boundary - a pass shown as a green accept, because the missing miles are missing cost.",
+   "text": "$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw 12 min (8.1 m1) Oak Ln, Marietta",
+   "expect": false
+  },
+  {
+   "name": "...whichever of the two addresses lost it",
+   "text": "$21.08 5 min (1.8 m1) Grace St & Main St, Kennesaw 12 min (8.1 mi) Oak Ln, Marietta",
+   "expect": false
+  },
+  {
+   "name": "...and the same card read properly is whole",
+   "text": "$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw 12 min (8.1 mi) Oak Ln, Marietta",
+   "expect": true
+  },
+  {
+   "name": "...and when the distance vanished rather than misread",
+   "_why": "Nothing is asked about what is inside the bracket, and requiring a digit there sounds like a second belt but is a hole: the number is exactly what the damage removes. Measured over 3466 readings damaged four ways, the digit clause halved what this rule caught - 2096 down to 1052 - and bought nothing, since both versions fire on zero of the 604 clean cards.",
+   "text": "$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw 12 min (~ mi) Oak Ln, Marietta",
+   "expect": false
+  },
+  {
+   "name": "a pickup wait between two good legs is still not a leg",
+   "_why": "The non-regression that matters. What tells a damaged leg from a wait line is a bracket holding a digit sitting where the distance would be, and it has to be the FIRST thing after the minutes - because a bracket appears in this wait line's tail too, belonging to the leg after it. Searching the tail loosely instead fires on 43% of clean cards.",
+   "text": "Exclusive x $9.05 12 min (4.4 mi) Gresham Rd Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd",
+   "expect": true
+  },
+  {
+   "name": "a single leg whose bracket did not read is left alone",
+   "_why": "The Add a delivery shape, where a plus inside the bracket defeats the leg's own distance group. One leg, so the rule exempts it - and it must, because the lone-distance branch a few lines later recovers the 7.2 miles and the reading is correct. Doubting it would throw away a good number, which is the same failure pointed the other way.",
+   "text": "$5.85 Guaranteed (incl. tip) +18 min (+ 7.2 mi) total Taj Mahal",
+   "expect": true
+  },
+  {
    "name": "a labelled leg robbed of its distance is still not whole",
    "text": "$16.05 2.5 mi to the pickup zone 25 min away 17 min trip",
    "expect": false

@@ -80,7 +80,7 @@ class OfferAccumulator:
         self.started = 0.0
         self.last_add = 0.0
         self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool,
-                                #   'labelled': bool, 'seen': n}]
+                                #   'labelled': bool, 'lostMiles': bool, 'seen': n}]
         self.items = []
         # Deadlines seen this window. A delivery card gives one instead of a
         # duration, so it is the denominator of the whole verdict — and it was
@@ -176,7 +176,7 @@ class OfferAccumulator:
         if found is not None:
             return found
         self.legs.append({'minutes': [], 'miles': [], 'isTotal': False,
-                          'labelled': False, 'seen': 0})
+                          'labelled': False, 'lostMiles': False, 'seen': 0})
         return len(self.legs) - 1
 
     def _is_a_different_card(self, detail, now):
@@ -321,6 +321,12 @@ class OfferAccumulator:
             # label that does not survive the merge is a rule that stops
             # working on exactly the readings the merge exists for.
             slot['labelled'] = slot['labelled'] or bool(leg.get('labelled'))
+            # ...and the same for the other way a leg says it travels: a
+            # bracket printed where its distance should be. ORed for the
+            # same reason, and harmless on a slot that later gains a
+            # distance, since a slot with miles is part of the journey
+            # already and the rule only asks about the ones without.
+            slot['lostMiles'] = slot['lostMiles'] or bool(leg.get('lostMiles'))
 
         if parsed.get('items') is not None:
             self.items.append(parsed['items'])
@@ -370,7 +376,8 @@ class OfferAccumulator:
         merged_legs = [{'minutes': _consensus(slot['minutes']),
                         'miles': _consensus(slot['miles']) if slot['miles'] else None,
                         'isTotal': slot['isTotal'],
-                        'labelled': slot['labelled']}
+                        'labelled': slot['labelled'],
+                        'lostMiles': slot['lostMiles']}
                        for slot in used]
 
         # One definition of the rule, in the parser, asked about the merge's own

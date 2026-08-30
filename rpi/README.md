@@ -3135,6 +3135,76 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### A guard that could not fire, because the damage removed its own evidence
+
+`legs_short_a_distance` exists for one failure: a two-leg journey where one
+leg's distance did not read, so the sum is a whole journey's *time* against part
+of its distance. The missing miles are missing **cost**, so the rate comes out
+too high — the one direction that turns a pass into a green accept.
+
+It fired on **one of the driver's 604 cards**, and on **none** of 1080 readings
+with a leg's distance deliberately broken. Not because the damage is rare, but
+because of what the rule counts. A leg is part of the journey if it states a
+distance or if the card *labelled* it one, and `LEG_TAIL` is a word list —
+`away`, `trip`, `total`. This driver's ride cards do not use those words. They
+label a leg with an **address**:
+
+    $21.08   5 min (1.8 mi) Grace St & Main St, Kennesaw
+             12 min (8.1 mi) Oak Ln, Marietta
+
+Both legs count as travel purely because they carry distances. The moment one
+loses its distance it drops out of the set the rule counts, the count falls to
+one, and the rule returns False. **The damage removed the evidence of itself.**
+
+What that cost, measured: of 1061 readings with one distance broken, **845
+published a higher rate than the truth with nothing flagged, and 289 crossed a
+verdict boundary** — a $17.30/hr pass shown as a green $29.34/hr accept, a
+$22.50/hr close call shown as $34.36/hr.
+
+**The third clause.** A leg is also part of the journey when a distance is
+printed beside it that did not read — a bracket sitting where the distance
+should be, on a leg that has none. That is grammar, not vocabulary, and it is
+what a wait line, a promo chip and an ETA badge do not have.
+
+The whole rule is in where the bracket sits. It must be the **first** thing
+after the minutes:
+
+    20 min (7.3 m1) trip                    <- the bracket is this leg's
+    Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd
+
+A bracket appears in the wait line's tail too — it belongs to the leg after it.
+Searching the tail loosely fires on **43% of clean cards**, which is worse than
+the version this rule already rejected for firing on a third of them. Anchored,
+it fires on 3%, and every one of those is an `Add a delivery` card whose
+distance really is printed and really did not read.
+
+**The measurement that changed the design.** The first version also required a
+digit inside the bracket — a second belt, and a hole: the number is exactly what
+the damage removes, so `9 min (~ mi)` carries no digit to find. Over 3466
+readings damaged four different ways, the digit clause **halved** what the rule
+caught, 2096 down to 1052, and bought nothing — both versions fire on zero of
+the 604 clean cards. It was measured against one kind of damage and would have
+shipped looking fine.
+
+**What it does:** 845 optimistic-unflagged readings fall to 337, and the verdict
+crossings from 289 to 109. Not one clean card is newly doubted. Both ports agree
+on all 771 clean and 5064 damaged texts, every field.
+
+**What is left, and it is now the bigger half:** 335 of the remaining 337 have a
+**single** leg, which the rule exempts on purpose because a single leg can be a
+total — `$7.09 34 min total` states no distance and is a whole journey by itself.
+`lostMiles` can tell those apart too, and that is the next piece of work rather
+than a clause bolted onto this one.
+
+Nineteen mutations of twenty caught, across both ports and all three hops the
+field takes — the clause removed, the anchor dropped, the anchor loosened to let
+another leg's minutes through, the digit clause restored, the field forced true,
+forced false, set on a leg that has its distance, dropped from `legDetail`,
+dropped from the merge, and ANDed there instead of ORed. The survivor is the
+gap width, `{0,3}` against `{0,8}`: **zero differences across 4070 readings**, so
+it is arbitrary and is written down as arbitrary rather than pinned by a fixture
+invented to make it look otherwise.
+
 ### The decimal point that belonged to a number it was no longer attached to
 
 Three fields on a merged reading were still being taken from whichever frame
@@ -3557,9 +3627,10 @@ divide that must be doubted rather than charged, and a distance that printed its
 decimal being believed at 60 mph.
 
 **What it does not fix,** because the same audit measured these and they stay
-open: `legs_short_a_distance` still fires zero times on all 604 cards, and a
-lone distance that reads too *small* is still unguarded in both versions, since
-`check_distance` only ever divides. The third one on this list — the accumulator
+open: a lone distance that reads too *small* is still unguarded in both
+versions, since `check_distance` only ever divides. The other two are done —
+`legs_short_a_distance` firing zero times on all 604 cards is fixed four
+sections up, and the third one on this list — the accumulator
 not voting on a lone distance, so the $15.60 GoPuff card published 1.9 miles in
 two of six arrival orders — is fixed three sections up, along with the two flags
 that decide what may be done to the number it publishes.
@@ -4214,7 +4285,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4174 checks
+npm test                # all 30 suites, 4214 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

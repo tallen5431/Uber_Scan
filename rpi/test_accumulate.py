@@ -469,7 +469,7 @@ eq('five corners do not become five places on a card that holds four',
 #
 # Asserted as a property of the hop rather than as three separate cases,
 # because the next field added to a leg will take the same trip.
-LEG_FIELDS = ('minutes', 'miles', 'isTotal', 'labelled')
+LEG_FIELDS = ('minutes', 'miles', 'isTotal', 'labelled', 'lostMiles')
 
 acc_fields = OfferAccumulator()
 for _i in range(2):
@@ -724,6 +724,98 @@ eq('...and so is one that replaces it straight away', _n, 2)
 _n, _ = _episodes([(CARD, 1000.0), (CARD, 1003.0),
                    (CARD, 9000.0), (CARD, 9003.0)])
 eq('the same card an hour later is a second offer', _n, 2)
+
+# --- a leg that lost its distance says so, all the way through the merge ----
+#
+# This driver's ride cards label a leg with an ADDRESS, not with `away` or
+# `trip`, so a leg that loses its distance drops out of the set
+# legs_short_a_distance counts and the rule cannot fire. `lostMiles` is the
+# third clause that fixes it — a bracket sitting where the distance should be —
+# and it takes the same three hops `labelled` does, which is why it is in
+# LEG_FIELDS above. Here it is asserted through the merge, in both directions.
+_ADDR_HURT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
+              '12 min (8.1 m1) Oak Ln, Marietta')
+_ADDR_OK = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
+            '12 min (8.1 mi) Oak Ln, Marietta')
+
+eq('a damaged address card is not whole on its own',
+   P.is_whole(P.parse(_ADDR_HURT)), False)
+
+# The flag is about a leg that LOST a distance, so a leg that has one never
+# claims it. Nothing in the rule depends on that — a leg with miles is already
+# part of the journey — but the field is projected into legDetail and written to
+# the journal, where it is read as a statement about the card. A field that says
+# "a distance here did not read" beside a distance that did is a lie in a file
+# somebody will one day measure from.
+#
+# A real card off this driver's shift does exactly this: a stray bracket
+# between a leg's distance and the address after it. Thirteen legs across the
+# clean and damaged corpora sit like that, and every one of them has its
+# distance.
+_STRAY = ('| Exclusive x le a ; $10.04 *% 497 @ Verified 16 min (6.6 mi) ; '
+          '( Roswell Rd, Atlanta Avg. wait time at pickup: 1 min } 18 mins '
+          '(10.2 mi) ¢ Dunwoody Xing, Atlanta 4, 7 mi from fast charger')
+eq('a stray bracket after a leg that has its distance claims nothing',
+   [l.get('lostMiles') for l in P.parse(_STRAY)['legDetail']],
+   [False, False, False])
+eq('...and the card is read whole', P.is_whole(P.parse(_STRAY)), True)
+eq('...with both legs in the journey', P.parse(_STRAY)['miles'], 16.8)
+
+eq('a leg that read its distance does not claim to have lost one',
+   [l.get('lostMiles') for l in P.parse(_ADDR_OK)['legDetail']],
+   [False, False])
+_n, _m = _episodes([(_ADDR_OK, None)] * 3)
+eq('...and merging three good frames does not invent one',
+   [l.get('lostMiles') for l in _m['legDetail']], [False, False])
+# ...including the frame where the bracket really is sitting there unread, once
+# another frame has supplied the distance the merge now carries.
+_n, _m = _episodes([(_ADDR_HURT, None), (_ADDR_OK, None)])
+eq('...nor keep one after the distance arrives', P.is_whole(_m), True)
+
+_n, _m = _episodes([(_ADDR_HURT, None)] * 3)
+eq('...nor once three frames of it have been merged', P.is_whole(_m), False)
+eq('...and the merged leg still says its distance was there',
+   [l.get('lostMiles') for l in _m['legDetail']], [False, True])
+eq('...so the reading is doubted rather than published short',
+   _m['milesUncertain'], True)
+
+# One frame that read the distance settles it, in either order — the same
+# property the rest of the merge keeps, and the reason the loop goes on
+# sampling a reading that is not whole.
+_n, _m = _episodes([(_ADDR_HURT, None), (_ADDR_OK, None), (_ADDR_HURT, None)])
+eq('one frame that read the distance makes it whole', P.is_whole(_m), True)
+eq('...with both legs\' distance in the sum', _m['miles'], 9.9)
+_n, _m = _episodes([(_ADDR_HURT, None), (_ADDR_HURT, None), (_ADDR_OK, None)])
+eq('...whichever order that frame arrives in', P.is_whole(_m), True)
+
+# And the line that is not a leg stays not a leg. A pickup wait has a bracket
+# in its tail too — belonging to the leg after it — so the bracket has to be
+# the FIRST thing after the minutes or this card stops being whole.
+_WAIT = ('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd '
+         'Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd')
+_n, _m = _episodes([(_WAIT, None)] * 3)
+eq('a pickup wait between two good legs is still whole', P.is_whole(_m), True)
+eq('...and nothing about it is doubted', _m['milesUncertain'], False)
+eq('...and no leg of it claims a lost distance',
+   [l.get('lostMiles') for l in _m['legDetail']], [False, False, False])
+
+# And the case that decides the anchor's shape. Loosen it from "no word
+# character before the bracket" to "any three characters" and this card breaks:
+# the leg after the wait line has lost its `mins`, leaving " 9 (2.6 mi)", so the
+# bracket falls within three characters of the WAIT LINE's minutes and the wait
+# line becomes a leg of the journey. The reading is damaged either way — the
+# mirror rule catches it, a distance with no time — but the wait line is still
+# not a leg, and a rule that decides it is has stopped answering the question it
+# was written for.
+_WAIT_HURT = ('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd '
+              'Avg. wait time at pickup: 1 min 9 (2.6 mi) Sedgefield Rd')
+_hurtp = P.parse(_WAIT_HURT)
+eq('a wait line is not a leg even when the next leg lost its unit',
+   [l.get('lostMiles') for l in _hurtp['legDetail']], [False, False])
+eq('...so the distance that did read is not doubted',
+   _hurtp['milesUncertain'], False)
+eq('...and the card is unfinished for the reason that is true of it',
+   (P.is_whole(_hurtp), _hurtp['shortATime']), (False, True))
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)

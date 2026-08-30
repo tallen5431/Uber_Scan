@@ -367,6 +367,41 @@ TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 LEG_TAIL = re.compile(r'\b(?:away|tr[il1|]p|tota?l|dropoff|drop\s*off)\b',
                       re.IGNORECASE | ASCII)
 
+# The other way a leg says it is part of the journey: it printed a distance and
+# the reader did not get it. Matched against the same tail LEG_TAIL sees, on a
+# leg that came out with no distance.
+#
+# LEG_TAIL is a word list, and this driver's ride cards do not use those words.
+# They label a leg with an ADDRESS — "12 min (8.1 mi) Oak Ln, Marietta" — so
+# both legs of a two-leg card count as travel only because they carry
+# distances. The moment one of them loses its distance it drops out of the set
+# legs_short_a_distance counts, the count falls to one, and the rule that exists
+# for exactly this damage returns False. Measured: it fires on ONE of the
+# driver's 604 cards, and on none of 1080 readings with a leg's distance broken.
+#
+# A bracket holding a digit is the distance still sitting on the card. It has to
+# be the FIRST thing after the minutes, which is the whole difference between
+#
+#     20 min (7.3 m1) trip                      <- the bracket is this leg's
+#     Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd
+#
+# where a bracket appears in the wait line's tail too, but another leg's minutes
+# come first. Searching the tail loosely instead fires on 43% of clean cards;
+# anchored it fires on 3%, and every one of those is an "Add a delivery" card
+# whose distance really is printed and really did not read.
+#
+# This is what a wait line, a promo chip and an ETA badge do not have, which is
+# the objection the `travel` set was built to answer: they are followed by the
+# next leg, and a leg begins with a word.
+#
+# Nothing is asked about what is INSIDE the bracket. Requiring a digit there
+# sounds like a second belt and is a hole: the number is exactly what the damage
+# removes, so "9 min (~ mi)" — the distance gone altogether — carries no digit to
+# find. Measured over 3466 readings damaged four different ways, the digit
+# clause halved what the rule caught, 2096 down to 1052, and bought nothing: both
+# versions fire on zero of the 604 clean cards.
+LEG_LOST_MILES = re.compile(r'^[^\w(]{0,3}\(', ASCII)
+
 # What kind of job the card is offering, taken from the words the card prints
 # rather than inferred from its numbers.
 #
@@ -627,6 +662,12 @@ def find_legs(text):
             # consulted for a leg with no distance, where it is the difference
             # between a leg that lost its miles and a line that never had any.
             'labelled': bool(LEG_TAIL.search(tail)),
+            # The same question asked of the card's punctuation rather than its
+            # vocabulary: a bracket sitting where this leg's distance should be,
+            # on a leg that has none. See LEG_LOST_MILES. Only meaningful when
+            # the distance did not read, so it is not set when one did — a leg
+            # that has its miles is already part of the journey.
+            'lostMiles': miles is None and bool(LEG_LOST_MILES.search(tail)),
             # Where this leg sat in the text, so the address printed after it
             # can be found without searching the whole card again.
             'start': m.start(), 'end': m.end(),
@@ -833,16 +874,23 @@ def legs_short_a_distance(legs):
     """
     if len(legs) < 2:
         return False
-    # A leg is part of the journey if it states a distance, or if the card
-    # labelled it one. A minutes-only token with no label is a wait line, a
-    # promo chip or an ETA badge — not a leg the reader failed on — and counting
-    # it here switched the mileage cost off on a third of every offer read.
+    # A leg is part of the journey if it states a distance, if the card labelled
+    # it one, or if a distance is printed beside it that did not read. A
+    # minutes-only token with none of those is a wait line, a promo chip or an
+    # ETA badge — not a leg the reader failed on — and counting it here switched
+    # the mileage cost off on a third of every offer read.
     #
     # Their minutes are still counted. The driver really does wait at the
     # pickup, and dropping the time would raise the rate, which is the one
     # direction that turns a pass into an accept.
+    #
+    # `lostMiles` is the third clause, and without it this rule was unreachable:
+    # the label words are ride-card vocabulary this driver's cards do not print,
+    # so damage that removed a leg's distance also removed the leg from the set
+    # counted here, and the count fell below two. See LEG_LOST_MILES.
     travel = [l for l in legs
-              if l.get('miles') is not None or l.get('labelled')]
+              if l.get('miles') is not None or l.get('labelled')
+              or l.get('lostMiles')]
     if len(travel) < 2:
         return False
     return any(l.get('miles') is None for l in travel)
@@ -1332,7 +1380,8 @@ def parse(raw_text):
         # every minutes-only leg looked unlabelled here, so a two-leg card whose
         # second distance came back as "7.3 m1" called itself whole again.
         'legDetail': [{'minutes': l['minutes'], 'miles': l['miles'],
-                       'isTotal': l['isTotal'], 'labelled': l['labelled']}
+                       'isTotal': l['isTotal'], 'labelled': l['labelled'],
+                       'lostMiles': l['lostMiles']}
                       for l in used],
         'items': items,
         'legs': len(used),

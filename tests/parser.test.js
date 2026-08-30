@@ -219,5 +219,49 @@ check('largest dollar figure wins over a promo line',
   eq('...to a distance a card could have printed', String(two.miles), '9.6');
 })();
 
+/* ---- a leg that read its distance never claims to have lost one ---- */
+/* `lostMiles` says a distance was printed beside this leg and did not read, and
+   legsShortADistance only ever asks it of a leg with no distance — so dropping
+   the "miles === null" guard changes no verdict and no test that watches one.
+   It still has to be guarded, because the field is projected into legDetail and
+   written to the journal, where it is read as a statement about the card.
+
+   A real card off the driver's shift puts a stray bracket between a leg's
+   distance and the address after it; thirteen legs across the clean and damaged
+   corpora sit like that, and every one has its distance. */
+(function () {
+  var stray = P.parse(
+    '| Exclusive x le a ; $10.04 *% 497 @ Verified 16 min (6.6 mi) ; ' +
+    '( Roswell Rd, Atlanta Avg. wait time at pickup: 1 min } 18 mins ' +
+    '(10.2 mi) ¢ Dunwoody Xing, Atlanta 4, 7 mi from fast charger');
+  var claims = stray.legDetail.map(function (l) { return !!l.lostMiles; });
+  eq('a stray bracket after a leg with its distance claims nothing',
+     claims.join(','), 'false,false,false');
+  eq('...and the card is read whole', P.isWhole(stray), true);
+  eq('...with both legs in the journey', stray.miles, 16.8);
+
+  /* The case that decides the anchor's shape. Loosen it from "no word character
+     before the bracket" to "any three characters" and this breaks: the leg
+     after the wait line has lost its `mins`, leaving " 9 (2.6 mi)", so the
+     bracket falls within three characters of the WAIT LINE's minutes and the
+     wait line becomes a leg of the journey. */
+  var waitHurt = P.parse('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd ' +
+    'Avg. wait time at pickup: 1 min 9 (2.6 mi) Sedgefield Rd');
+  eq('a wait line is not a leg even when the next leg lost its unit',
+     waitHurt.legDetail.map(function (l) { return !!l.lostMiles; }).join(','),
+     'false,false');
+  eq('...so the distance that did read is not doubted',
+     waitHurt.milesUncertain, false);
+
+  /* ...and the shape it must still catch: a leg whose distance did not read,
+     on a card that labels its legs with an address rather than "trip". */
+  var hurt = P.parse('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw ' +
+                     '12 min (8.1 m1) Oak Ln, Marietta');
+  eq('a leg that lost its distance says so',
+     hurt.legDetail.map(function (l) { return !!l.lostMiles; }).join(','),
+     'false,true');
+  eq('...so the reading is not whole', P.isWhole(hurt), false);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');
 process.exit(fail ? 1 : 0);

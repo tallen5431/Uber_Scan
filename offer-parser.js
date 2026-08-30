@@ -347,6 +347,43 @@
      low rather than absent, the less optimistic of the two errors. */
   var LEG_TAIL = /\b(?:away|tr[il1|]p|tota?l|dropoff|drop\s*off)\b/i;
 
+  /* The other way a leg says it is part of the journey: it printed a distance
+     and the reader did not get it. Matched against the same tail LEG_TAIL sees,
+     on a leg that came out with no distance.
+
+     LEG_TAIL is a word list, and this driver's ride cards do not use those
+     words. They label a leg with an ADDRESS — "12 min (8.1 mi) Oak Ln,
+     Marietta" — so both legs of a two-leg card count as travel only because
+     they carry distances. The moment one loses its distance it drops out of the
+     set legsShortADistance counts, the count falls to one, and the rule that
+     exists for exactly this damage returns false. Measured: it fires on ONE of
+     the driver's 604 cards, and on none of 1080 readings with a leg's distance
+     broken.
+
+     A bracket holding a digit is the distance still sitting on the card. It has
+     to be the FIRST thing after the minutes, which is the whole difference
+     between
+
+         20 min (7.3 m1) trip                    <- the bracket is this leg's
+         Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd
+
+     where a bracket appears in the wait line's tail too, but another leg's
+     minutes come first. Searching the tail loosely instead fires on 43% of
+     clean cards; anchored it fires on 3%, and every one of those is an "Add a
+     delivery" card whose distance really is printed and really did not read.
+
+     This is what a wait line, a promo chip and an ETA badge do not have, which
+     is the objection the `travel` set was built to answer: they are followed by
+     the next leg, and a leg begins with a word.
+
+     Nothing is asked about what is INSIDE the bracket. Requiring a digit there
+     sounds like a second belt and is a hole: the number is exactly what the
+     damage removes, so "9 min (~ mi)" — the distance gone altogether — carries
+     no digit to find. Measured over 3466 readings damaged four different ways,
+     the digit clause halved what the rule caught, 2096 down to 1052, and bought
+     nothing: both versions fire on zero of the 604 clean cards. */
+  var LEG_LOST_MILES = /^[^\w(]{0,3}\(/;
+
   /* --- the shape a delivery card uses instead of a duration ---
    *
    * Uber states a journey as legs: "19 min (8.5 mi)". DoorDash does not state a
@@ -730,6 +767,12 @@
         // consulted for a leg with no distance, where it is the difference
         // between a leg that lost its miles and a line that never had any.
         labelled: LEG_TAIL.test(tail),
+        // The same question asked of the card's punctuation rather than its
+        // vocabulary: a bracket sitting where this leg's distance should be, on
+        // a leg that has none. See LEG_LOST_MILES. Only meaningful when the
+        // distance did not read, so it is not set when one did — a leg that has
+        // its miles is already part of the journey.
+        lostMiles: miles === null && LEG_LOST_MILES.test(tail),
         // Where this leg sat in the text, so the address printed after it can
         // be found without searching the whole card again.
         start: m.index, end: m.index + m[0].length
@@ -925,16 +968,21 @@
     // median. A single leg is left alone because it can be a total, which
     // states no distance and is a whole journey by itself.
     if (list.length < 2) return false;
-    // A leg is part of the journey if it states a distance, or if the card
-    // labelled it one. A minutes-only token with no label is a wait line, a
-    // promo chip or an ETA badge — not a leg the reader failed on. Their
-    // minutes are still counted: the driver really does wait, and dropping the
-    // time would raise the rate, the one direction that turns a pass into an
-    // accept.
+    // A leg is part of the journey if it states a distance, if the card
+    // labelled it one, or if a distance is printed beside it that did not read.
+    // A minutes-only token with none of those is a wait line, a promo chip or
+    // an ETA badge — not a leg the reader failed on. Their minutes are still
+    // counted: the driver really does wait, and dropping the time would raise
+    // the rate, the one direction that turns a pass into an accept.
+    //
+    // `lostMiles` is the third clause, and without it this rule was
+    // unreachable: the label words are ride-card vocabulary this driver's cards
+    // do not print, so damage that removed a leg's distance also removed the
+    // leg from the set counted here. See LEG_LOST_MILES.
     var travel = [];
     for (i = 0; i < list.length; i++) {
       if (list[i].miles !== null && list[i].miles !== undefined) travel.push(list[i]);
-      else if (list[i].labelled) travel.push(list[i]);
+      else if (list[i].labelled || list[i].lostMiles) travel.push(list[i]);
     }
     if (travel.length < 2) return false;
     for (i = 0; i < travel.length; i++) {
@@ -1098,7 +1146,7 @@
         // over this projection, and a field the rule needs that does not
         // survive the trip is a rule that quietly stops working.
         return { minutes: l.minutes, miles: l.miles, isTotal: l.isTotal,
-                 labelled: l.labelled };
+                 labelled: l.labelled, lostMiles: l.lostMiles };
       }),
       items: items,
       legs: used.length,
