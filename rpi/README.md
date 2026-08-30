@@ -3135,6 +3135,61 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### Letting the driver check the map, because the rig cannot
+
+The stack line says what it *checked* — same town, same side, elsewhere — in the
+card's own words, because a town and a compass quadrant are all these cards
+print. It cannot say how far apart the two jobs finish in minutes, and the
+obvious way to fix that is to geocode the addresses and subtract.
+
+**That is the wrong tool, and the reason is the failure mode.** A geocoder run
+by this rig turns a misread street into a confident coordinate, and the
+coordinate into a distance on the panel: wrong, precise-looking, and silent —
+the failure this project refuses above all others. Feed it `Daffodll Ln` and it
+answers as readily as for the real street.
+
+Handed to a map instead, the same misreading is **a pin in the wrong place**,
+which a person spots instantly and dismisses. The check moves from the machine,
+which cannot perform it, to the driver, who can. And no coordinates are needed
+at all: the cards name places in words — `Duval Ct & Manchester Ln, Villa Rica` —
+and a map takes words.
+
+    https://www.google.com/maps/dir/?api=1&origin=<held dropoff>
+                                   &destination=<offer dropoff>&travelmode=driving
+
+So the offers page grows `⚑ pickup`, `⚑ dropoff` and `⤳ route` on every row that
+named somewhere, and the driving screen's stack line grows a `⤳ route` between
+the two **dropoffs** — which is how far apart the two jobs finish, the half the
+arithmetic cannot reach and the half the driver said decides it.
+
+It answers better than the thing it replaces, too: real driving time with live
+traffic, where a straight line between two ends is three miles that might be
+five minutes or twenty. No API key, no rate limit, no cost. And because the
+request is made by the driver's browser rather than by the rig, **no customer's
+home address is sent anywhere by the rig itself** — which matters, because these
+are not the driver's addresses to hand to a third party, and there are about two
+hundred of them a shift.
+
+The ampersand is why this is encoded rather than pasted: **72% of this driver's
+distinct dropoffs are cross-streets**, so an unencoded `&` would truncate the
+query on nearly three quarters of them.
+
+**It refuses more than it links.** Icon-row scrap, a single letter, a pair of
+bare initials — every real place has a word in it, so two letters running is the
+floor. A link to a map of somewhere irrelevant is worse than no link: it costs a
+press and a moment's belief, and the driver is deciding. Half of real pairs name
+one end or neither, and those get no route rather than a route to nowhere.
+
+Eight mutations, eight caught — the ampersand left raw, scrap searched anyway, a
+single letter and a pair of initials accepted, a route built from one end, the
+route reversed, the route dropped, and the route drawn between the *pickups*
+instead of the ends.
+
+**What this does not do:** it is a press, not a number. The panel still cannot
+tell you at a glance how far apart two jobs end — that needs coordinates, and
+the measurement that would justify them is in the section above. This is the
+90% of the value at 5% of the risk, and it may well be enough.
+
 ### The address the card will not show you until you have taken the job
 
 106 of the driver's 604 offer cards print **"Customer dropoff"** and no address.
@@ -4361,7 +4416,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4277 checks
+npm test                # all 30 suites, 4297 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

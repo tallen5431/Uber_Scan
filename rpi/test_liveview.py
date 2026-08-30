@@ -715,6 +715,38 @@ ok_('a reloaded panel only claims a destination that was scanned',
 ok_('the stack line can say the two ends share a ZIP',
     "'same-zip'" in _page and 'same ZIP' in _page)
 
+# --- handing the two ends to a map ----------------------------------------
+#
+# The stack line says what it CHECKED - same town, same side, elsewhere - in the
+# card's own words, because a town and a quadrant are all these cards print. A
+# map answers the same question in driving minutes with live traffic, which the
+# arithmetic here cannot reach: three miles apart is five minutes or twenty.
+#
+# No coordinates are computed for it. The query goes as text and Google resolves
+# it in this browser, which also moves the check for a misread street from the
+# machine - which cannot do it - to the driver, who spots a pin in the wrong
+# place at a glance.
+ok_('the stack line offers a route between the two ends', 's.route' in _page)
+ok_('...as a real link, so it can be pressed',
+    re.search(r"a\.className\s*=\s*'maplink'", _page) is not None)
+ok_('...opened away from the driving screen, which stays up',
+    re.search(r"a\.target\s*=\s*'_blank'", _page) is not None)
+ok_('...without handing the new tab a grip on this one',
+    re.search(r"a\.rel\s*=\s*'noopener", _page) is not None)
+
+# Only when there is a route. Half of real pairs name one end or neither, and a
+# control that opens a map of the wrong thing costs a press and a moment's
+# belief - which on this screen is the expensive thing.
+ok_('...and only when both ends were named',
+    re.search(r'if\s*\(s\.route\)', _page) is not None)
+
+# The style is shared with the offers page rather than written twice, so the two
+# screens cannot drift about what a map link looks like.
+_css = open(os.path.join(ROOT, 'styles.css')).read()
+ok_('the map link is styled where both pages can see it', '.maplink {' in _css)
+ok_('...and not a second time on the offers page',
+    '.maplink {' not in open(os.path.join(ROOT, 'journal.html')).read())
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d live-view checks passed' % ok)
 sys.exit(1 if bad else 0)

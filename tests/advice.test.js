@@ -667,6 +667,69 @@ eq('...and the same town on opposite sides of it is too',
    A.sameArea('Cobalt Dr NW & Ember Ln NW, Atlanta',
               'E Twin Oaks Dr SE & Spruce Dr, Smyrna'), 'elsewhere');
 
+/* --- handing a place to a map --------------------------------------------
+ *
+ * No coordinates are computed anywhere for this, and none are needed: the card
+ * names places in words and a map takes words. The query goes to Google as
+ * text and Google resolves it, in the driver's browser, when they press it.
+ *
+ * That is the safer design and not merely the cheaper one. A geocoder run by
+ * the rig turns a misread street into a confident coordinate and then into a
+ * distance on the panel - wrong, and silent. Opened as a map, the same
+ * misreading is a pin in the wrong place, which a person spots at a glance. */
+
+eq('a cross-street goes to a map as the card wrote it',
+   A.mapSearch('Duval Ct & Manchester Ln, Villa Rica'),
+   'https://www.google.com/maps/search/?api=1&query='
+   + 'Duval%20Ct%20%26%20Manchester%20Ln%2C%20Villa%20Rica');
+// The ampersand is the whole point of encoding this rather than pasting it:
+// 72% of this driver's distinct dropoffs are cross-streets, so an unencoded
+// "&" would truncate the query on nearly three quarters of them.
+eq('...with the ampersand encoded, not ending the query',
+   A.mapSearch('Oak Ln & Elm St').indexOf('%26') > 0, true);
+// ...and a pair of bare initials is not a cross-street. Every real place has a
+// word in it, so two letters running is the floor - without it "S & B" from an
+// icon row opens a map of somewhere confident and irrelevant.
+eq('two initials are not a place', A.mapSearch('A & B'), null);
+
+eq('two ends become a route with driving directions',
+   A.mapRoute('Grace St & Hidden Forest Ct, Marietta', 'Canton Rd, Marietta'),
+   'https://www.google.com/maps/dir/?api=1'
+   + '&origin=Grace%20St%20%26%20Hidden%20Forest%20Ct%2C%20Marietta'
+   + '&destination=Canton%20Rd%2C%20Marietta&travelmode=driving');
+
+// The refusals. A link to a map of somewhere irrelevant is worse than no link:
+// it costs a press and a moment's belief, and the driver is deciding.
+eq('icon-row scrap is not a place', A.mapSearch('} :'), null);
+eq('a single letter is not a place', A.mapSearch('j'), null);
+eq('nothing is not a place', A.mapSearch(''), null);
+eq('and neither is a missing one', A.mapSearch(null), null);
+eq('a route needs both ends', A.mapRoute('Canton Rd, Marietta', null), null);
+eq('...either of them', A.mapRoute(null, 'Canton Rd, Marietta'), null);
+
+// The route rides on the stack advice, because that is where the question is
+// asked: both ends are DROPOFFS, which is how far apart the two jobs finish.
+(function () {
+  var now = 1700000000000;
+  var held = { pay: 16.05, minutes: 36, acceptedAt: now - 5 * 60000,
+               dropoff: 'Grace St & Hidden Forest Ct, Marietta' };
+  var offer = { pay: 12.0, minutes: 24, miles: 6.6, ready: true,
+                dropoff: 'Duval Ct & Manchester Ln, Villa Rica' };
+  var cfg = { target: 25, band: 15, costPerMile: 0.3 };
+  var s = A.stack(held, offer, cfg, now);
+  eq('the stack line carries a route between the two ends',
+     typeof s.route === 'string' && s.route.indexOf('Villa%20Rica') > 0, true);
+  eq('...and still says what it checked in the card\'s own words',
+     s.ends, 'elsewhere');
+
+  // Half of real pairs name only one end, and a route to nowhere is not an
+  // answer - it is a control that opens a map of the wrong thing.
+  var blind = A.stack({ pay: 16.05, minutes: 36, acceptedAt: now - 5 * 60000,
+                        dropoff: null }, offer, cfg, now);
+  eq('no route when the order in the car ends nowhere named',
+     blind.route, null);
+}());
+
 /* --- the address scanned off the screen after the accept ------------------
  *
  * An offer card carries no ZIP - Uber prints "Customer dropoff" and no address

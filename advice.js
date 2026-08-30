@@ -301,6 +301,57 @@
    * Returns 'same-zip', 'elsewhere', 'same-side', 'same-town', or null for "the
    * cards did not say enough" - which is about half of real pairs, and is the
    * honest answer rather than a guess dressed up as one. */
+  /* --- handing a place to a map ------------------------------------------
+   *
+   * The cards name places in words - "Duval Ct & Manchester Ln, Villa Rica" -
+   * and a map takes words. So no coordinates are computed here, and none are
+   * needed: the query goes to Google as text and Google resolves it, on the
+   * driver's own device, at the moment they ask.
+   *
+   * That is not a shortcut, it is the safer design, and the reason is the
+   * failure mode. A geocoder run by this rig would turn a misread street into a
+   * confident coordinate and then into a distance on the panel, wrong and
+   * silent - the failure this project refuses above all others. A map opened by
+   * the driver puts the same misreading on a screen as a PIN IN THE WRONG
+   * PLACE, which a person spots instantly and dismisses. The check moves from
+   * the machine, which cannot do it, to the human, who can.
+   *
+   * It also answers the harder question the arithmetic here cannot: a route
+   * gives real driving time with real traffic, where a straight line between
+   * two dropoffs would be three miles that might be five minutes or twenty.
+   *
+   * No API key, no rate limit, no cost, and - because the request is made by
+   * the driver's browser and not by this rig - no customer's home address is
+   * ever sent anywhere by the rig itself. See the Maps URLs API, which is the
+   * documented keyless form. */
+  function mapQuery(place) {
+    if (typeof place !== 'string') return null;
+    var text = place.replace(/\s+/g, ' ').trim();
+    // Enough of a place to be worth searching. Two letters somewhere and a few
+    // characters: below that it is icon-row scrap, and a map given scrap
+    // answers with somewhere confident and irrelevant.
+    if (text.length < 4 || !/[A-Za-z]{2}/.test(text)) return null;
+    return text;
+  }
+
+  function mapSearch(place) {
+    var q = mapQuery(place);
+    return q ? 'https://www.google.com/maps/search/?api=1&query='
+             + encodeURIComponent(q) : null;
+  }
+
+  function mapRoute(from, to) {
+    var a = mapQuery(from), b = mapQuery(to);
+    if (!a || !b) return null;
+    // Deliberately no waypoint and no second leg. This asks one question -
+    // how far apart do these two ends sit, in driving time, right now - and a
+    // route the rig invented through a pickup it is guessing at would answer a
+    // question nobody asked.
+    return 'https://www.google.com/maps/dir/?api=1&origin='
+         + encodeURIComponent(a) + '&destination=' + encodeURIComponent(b)
+         + '&travelmode=driving';
+  }
+
   function sameArea(a, b) {
     var x = area(a), y = area(b);
     if (!x || !y) return null;
@@ -370,6 +421,13 @@
       // decided by geography. 'elsewhere' means the range above should be read
       // from its worst end. See sameArea.
       ends: sameArea(active && active.dropoff, offer && offer.dropoff),
+      // ...and the same question handed to a map, which can answer it in
+      // driving minutes where `ends` can only answer it in the card's own
+      // words. Both ends are DROPOFFS: this asks how far apart the two jobs
+      // finish, which is the half the arithmetic above cannot reach and the
+      // half the driver said decides it. Null when either end was not named,
+      // which is about half of real pairs. See mapRoute.
+      route: mapRoute(active && active.dropoff, offer && offer.dropoff),
       state: worst >= target ? 'go' : (best >= target ? 'warn' : 'no')
     };
   }
@@ -716,5 +774,6 @@
   return { advise: advise, usable: usable, runs: runs, replay: replay,
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
            unexplained: unexplained, stack: stack, sameArea: sameArea, area: area,
+           mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,
            THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT };
 }));

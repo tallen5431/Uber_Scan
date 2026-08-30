@@ -550,6 +550,36 @@
     return 'No rate could be worked out from this reading.';
   }
 
+  /* The map links for one offer: each end on its own, and the route between
+     them when both are known.
+
+     The route is the one worth having. It answers with real driving time and
+     real traffic, which is the question the rig's own arithmetic cannot reach -
+     a straight line between two ends is three miles that might be five minutes
+     or twenty. */
+  function mapRow(r) {
+    var links = [];
+    var pick = Advice.mapSearch(r.pickup);
+    var drop = Advice.mapSearch(r.dropoff);
+    var route = Advice.mapRoute(r.pickup, r.dropoff);
+    if (pick) links.push(link(pick, '\u2691 pickup'));
+    if (drop) links.push(link(drop, '\u2691 dropoff'));
+    if (route) links.push(link(route, '\u2933 route'));
+    // Nothing at all when the card named nowhere searchable, rather than a row
+    // of dead controls. A link that opens a map of somewhere irrelevant is
+    // worse than no link: it costs a tap and a moment's belief.
+    return links.length ? row('On a map', links.join(' ')) : '';
+  }
+
+  /* Opened away from this page on purpose. The offers page is often the thing
+     being read while the rig keeps scanning, and navigating it away to a map
+     loses the place in the log. `noopener` because a foreign tab must not get a
+     handle on this one. */
+  function link(href, label) {
+    return '<a class="maplink" href="' + esc(href) + '" target="_blank"'
+         + ' rel="noopener noreferrer">' + label + '</a>';
+  }
+
   function row(label, value, quiet) {
     if (value === null || value === undefined || value === '') return '';
     return '<div' + (quiet ? ' class="quiet"' : '') + '><dt>' + label
@@ -666,7 +696,20 @@
             ? money(r.target, 0) + '/hr' + (typeof r.band === 'number'
               ? ', amber within ' + r.band + '%' : '') : null)
       + ((r.places && r.places.length)
-         ? row('Where', esc(r.places.join(' → '))) : '')
+         ? row('Where', esc(r.places.join(' \u2192 '))) : '')
+      // ...and the same places handed to a map.
+      //
+      // No coordinates are computed anywhere for this. The card names places in
+      // words and a map takes words, so the query goes to Google as text and
+      // Google resolves it, in this browser, when the link is pressed.
+      //
+      // That is the safer design and not merely the cheaper one. A geocoder run
+      // by the rig would turn a misread street into a confident coordinate and
+      // then into a distance on the panel - wrong, and silent. Opened as a map,
+      // the same misreading is a PIN IN THE WRONG PLACE, which a person spots
+      // at a glance. The check moves from the machine, which cannot do it, to
+      // the driver, who can. See Advice.mapSearch.
+      + mapRow(r)
       + (r.fromDeadline
          ? row('Time from', 'the delivery deadline, not a stated duration')
          : '')

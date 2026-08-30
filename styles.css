@@ -227,6 +227,36 @@ html, body {
 .stackline.elsewhere { color: var(--warn); }
 .stackline[hidden] { display: none; }
 
+/* Handing a place to a map.
+ *
+ * Shared by the offers page and the driving screen, so the two cannot drift
+ * about what a map link looks like. Words rather than figures, so it clears the
+ * tabular numerals and the full weight it would otherwise inherit from a
+ * `.facts` value or from the stack line.
+ *
+ * Sized to be hit, not to be pretty: on the dashboard this is pressed with a
+ * bluetooth mouse while stopped at a light. The padding is the target - the
+ * line-height is left alone deliberately, because the stack line is one line on
+ * an 800x480 panel and a 44px box inside it grows the row and pushes the
+ * verdict. A wide short target is what a mouse needs; a finger-sized one is
+ * what would break the layout. */
+.maplink {
+  display: inline-block;
+  padding: 3px 10px;
+  margin-left: 6px;
+  font-weight: 600;
+  font-variant-numeric: normal;
+  color: var(--text);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.maplink:hover, .maplink:focus-visible {
+  border-color: var(--text);
+  background: var(--panel-2);
+}
+
 /* The button that records a decision the rig cannot see.
  *
  * Marked when it is set, so a glance says whether this offer is already on the

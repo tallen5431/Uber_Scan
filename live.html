@@ -717,6 +717,27 @@
          : s.ends === 'same-side' ? ' \u00b7 same side of town'
          : s.ends === 'same-town' ? ' \u00b7 same town' : '');
     if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
+    // ...and the same question handed to a map, which answers it in driving
+    // minutes with live traffic where the line above can only answer it in the
+    // card's own words. Appended as a real link rather than folded into the
+    // text, because it is the one thing on this panel a driver is meant to
+    // press — and only when both ends were named, which is about half the time.
+    //
+    // Opened in another tab so the driving screen is still there behind it. It
+    // is also the panel's browser, not the phone's: the phone keeps showing the
+    // offer and the rig does not lose the card while the map is up.
+    if (s.route) {
+      var a = document.createElement('a');
+      a.className = 'maplink';
+      a.href = s.route;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = '\u2933 route';
+      a.title = 'Open the drive from where the order you have ends to where '
+              + 'this one ends, with current traffic.';
+      el.stack.appendChild(document.createTextNode(' '));
+      el.stack.appendChild(a);
+    }
     el.stack.hidden = false;
   }
 
