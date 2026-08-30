@@ -3098,6 +3098,43 @@ The two doubts are gone because the readings that provoked them are now correct
 rather than merely distrusted, and five cards that were being rated off a chip
 are now honestly unfinished.
 
+### The red run that was nothing to do with the code
+
+`crop.test.js` failed on a parser change:
+
+    FAIL  the scanner reads back the box this server wrote: got null
+
+It had nothing to do with the parser. The three handoff files live in
+`/dev/shm` under fixed names, and `take_request()` *removes* the request as it
+reads it — so any other process on the machine that calls it takes this test's
+box away. A second checkout, a scanner already running, another copy of the
+suite: any of them, and the round trip reads nothing and blames whatever was
+being changed at the time. It cost the better part of a debugging session, and
+the change it accused was innocent.
+
+That is worse than a missing test. A suite that fails for reasons outside the
+code under test teaches you to re-run it rather than read it, and the next real
+failure gets the same shrug.
+
+`UBERSCAN_HANDOFF_DIR` now overrides the directory, honoured by `handoffDir()`
+in server.js and `_dir()` in `rpi/handoff.py` alike, and only when it names a
+directory the process can actually write to — a stale line in a shell profile
+must not be able to quietly disconnect the two halves of the rig, so an
+unusable value falls back to the rule that was there before. The crop test gives
+itself a private directory and hands the same one to both the server it spawns
+and the python it calls.
+
+It is not only a test fixture. Two copies of this project on one machine — a
+development checkout beside the live rig — have always shared those three
+filenames, which means a crop drawn on one screen moves the other one's camera.
+
+`test_handoff.py` already ran the real `handoffDir` out of server.js and
+compared it path-for-path with the Python; it now does that under the override
+too, because an override only one side honours is exactly the
+button-that-does-nothing failure the module exists to prevent. Proved by running
+the crop test against a loop hammering `take_request()` on the shared path: it
+passes.
+
 ### A street name that read as an eighty-dollar offer
 
 `DC` is the parser's list of characters OCR swaps for digits — `O` for 0, `S`
@@ -3687,7 +3724,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3883 checks
+npm test                # all 30 suites, 3889 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

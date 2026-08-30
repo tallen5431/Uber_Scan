@@ -365,6 +365,21 @@ function watchForSilence() {
  * restarted since the last `git pull` still hears these.
  */
 function handoffDir() {
+  // One machine, more than one rig. The three filenames are fixed and the
+  // directory is shared with everything else on the box, so two copies of this
+  // project running at once — a second rig, a development checkout beside the
+  // live one, a test suite while the scanner is up — write to and consume each
+  // other's requests. A crop drawn on one screen moves the other one's camera.
+  // Set UBERSCAN_HANDOFF_DIR and both sides use it. Honoured only when it names
+  // a directory this process can write to, so a stale value in a profile cannot
+  // quietly disconnect the two halves of the rig. Mirrors _dir() in handoff.py.
+  var asked = process.env.UBERSCAN_HANDOFF_DIR;
+  if (asked) {
+    try {
+      fs.accessSync(asked, fs.constants.W_OK);
+      if (fs.statSync(asked).isDirectory()) return asked;
+    } catch (e) { /* not a directory, or not ours to write in */ }
+  }
   try {
     fs.accessSync('/dev/shm', fs.constants.W_OK);
     if (fs.statSync('/dev/shm').isDirectory()) return '/dev/shm';
@@ -374,11 +389,12 @@ function handoffDir() {
 
 function handoffPath(base) {
   var dir = handoffDir();
-  // Invisible-by-dot is right in a checkout and useless in /dev/shm, which is
+  // Invisible-by-dot is right in a checkout and useless anywhere else, which is
   // where you look to find out what is holding memory. Named so it is obvious
-  // whose it is and safe to delete. Mirrors _name() in handoff.py.
-  return path.join(dir, dir === '/dev/shm'
-    ? 'uberscan-' + base.replace(/^\./, '') : base);
+  // whose it is and safe to delete. Mirrors _name() in handoff.py, which asks
+  // the same question the same way round: dotted only in the checkout itself.
+  return path.join(dir, dir === path.join(ROOT, 'rpi')
+    ? base : 'uberscan-' + base.replace(/^\./, ''));
 }
 
 var WATCH_PATH = handoffPath('.viewing');

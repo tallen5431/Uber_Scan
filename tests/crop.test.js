@@ -9,22 +9,31 @@
 
 var http = require('http');
 var fs = require('fs');
+var os = require('os');
 var path = require('path');
 var spawn = require('child_process').spawn;
 
 var ROOT = path.join(__dirname, '..');
-/* Where the request lands, asked of the shipped rule rather than written out
-   again here. The three handoff files moved to /dev/shm — see rpi/handoff.py —
-   and a test carrying its own copy of a path is a test that goes on passing
-   against a server writing somewhere else, which is the one failure this file
+
+/* A directory of this test's own, so nothing else on the machine can take the
+   request out from under it.
+
+   The three handoff filenames are fixed and /dev/shm is shared with everything
+   else on the box, so any other process that calls take_request() consumes this
+   test's box — a second checkout, a running scanner, or simply another copy of
+   the suite. That produced a red run whose message ("the scanner reads back the
+   box this server wrote: got null") pointed straight at a parser change that had
+   nothing to do with it. A test that fails for reasons outside the code it is
+   testing is worse than no test: it teaches you to ignore the colour.
+
+   UBERSCAN_HANDOFF_DIR is honoured by handoffDir() in server.js and _dir() in
+   rpi/handoff.py alike, and rpi/test_handoff.py holds the two to the same
+   answer under it. The path is still asked of the shipped rule rather than
+   written out here, because a test carrying its own copy of a path goes on
+   passing against a server writing somewhere else — the one failure this file
    exists to catch. */
-var CROP_PATH = (function () {
-  try {
-    fs.accessSync('/dev/shm', fs.constants.W_OK);
-    if (fs.statSync('/dev/shm').isDirectory()) return '/dev/shm/uberscan-cropbox.json';
-  } catch (e) { /* no shm here */ }
-  return path.join(ROOT, 'rpi', '.cropbox.json');
-})();
+var HANDOFF_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'uberscan-crop-'));
+var CROP_PATH = path.join(HANDOFF_DIR, 'uberscan-cropbox.json');
 var PORT = 8791;
 
 var ok = 0, bad = 0;
@@ -65,7 +74,10 @@ function clear() {
 
 // SCANNER=0 so the test does not try to start a camera it does not have.
 var server = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-  env: Object.assign({}, process.env, { PORT: String(PORT), SCANNER: '0', HTTPS_PORT: '0' }),
+  env: Object.assign({}, process.env, {
+    PORT: String(PORT), SCANNER: '0', HTTPS_PORT: '0',
+    UBERSCAN_HANDOFF_DIR: HANDOFF_DIR
+  }),
   stdio: ['ignore', 'ignore', 'inherit']
 });
 
@@ -147,6 +159,7 @@ function waitForServer(tries) {
   } finally {
     clear();
     server.kill('SIGTERM');
+    try { fs.rmdirSync(HANDOFF_DIR); } catch (e) { /* not empty, or already gone */ }
   }
 
   console.log(bad ? '\n' + ok + ' passed, ' + bad + ' FAILED'
@@ -169,7 +182,10 @@ function pythonReadsIt() {
   return new Promise(function (resolve) {
     var code = 'import json, sys; sys.path.insert(0, "rpi"); import cropbox; ' +
                'print(json.dumps(cropbox.take_request()))';
-    var py = spawn('python3', ['-c', code], { cwd: ROOT });
+    var py = spawn('python3', ['-c', code], {
+      cwd: ROOT,
+      env: Object.assign({}, process.env, { UBERSCAN_HANDOFF_DIR: HANDOFF_DIR })
+    });
     var out = '', err = '';
     py.stdout.on('data', function (c) { out += c; });
     py.stderr.on('data', function (c) { err += c; });

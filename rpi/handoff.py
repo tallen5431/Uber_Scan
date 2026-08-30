@@ -45,8 +45,25 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RAM = '/dev/shm'
 
 
+# One machine, more than one rig.
+#
+# The three filenames are fixed and the directory is shared with everything else
+# on the box, so two copies of this project running at once — a second rig, a
+# development checkout beside the live one, a test suite while the scanner is up
+# — write to and consume each other's requests. A crop drawn on one screen moves
+# the other one's camera. A test that reads a request a neighbouring process has
+# already taken fails for a reason that has nothing to do with the code under
+# test, which is worse than a bug: it teaches you to ignore a red suite.
+#
+# Set this and both sides use it. Honoured only when it names a directory this
+# process can write to, so a stale value left in a profile cannot quietly
+# disconnect the two halves of the rig — it falls back to the shared rule, which
+# is the behaviour that was there before.
+ENV_DIR = 'UBERSCAN_HANDOFF_DIR'
+
+
 def _dir():
-    """RAM if there is any this process may write to, the checkout if not.
+    """Where the requests go: asked for, else RAM, else the checkout.
 
     Answered per call rather than once at import, because the scanner is
     started before the desktop on a Pi and this file is imported early enough
@@ -54,6 +71,9 @@ def _dir():
     Three syscalls that the kernel answers from cache; this is not the loop's
     expensive part.
     """
+    asked = os.environ.get(ENV_DIR)
+    if asked and os.path.isdir(asked) and os.access(asked, os.W_OK):
+        return asked
     if os.path.isdir(RAM) and os.access(RAM, os.W_OK):
         return RAM
     return HERE

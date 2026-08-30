@@ -112,6 +112,45 @@ else:
     ok_('the server knows the RAM name for the frame', HO.FRAME_RAM in server)
     ok_('...and the checkout one', HO.FRAME_LEGACY in server)
 
+# --- and a rig can be told to keep its requests to itself -------------------
+# Two copies of this on one machine share three fixed filenames in a directory
+# everything else can see, so they consume each other's requests. The override
+# only matters if BOTH sides honour it, and honour it identically: a server
+# writing to the private directory while the scanner still watches /dev/shm is
+# the button-that-does-nothing failure this whole module exists to prevent.
+private = tempfile.mkdtemp()
+was = os.environ.get(HO.ENV_DIR)
+try:
+    os.environ[HO.ENV_DIR] = private
+    eq('a writable directory that was asked for is used', HO._dir(), private)
+    ok_('...and the names are prefixed there, as anywhere but the checkout',
+        all(os.path.basename(HO.path(b)).startswith('uberscan-') for b in BASES))
+
+    if shutil.which('node') is not None:
+        got = subprocess.run(['node', '-e', probe],
+                             capture_output=True, text=True, timeout=60)
+        eq('the server-side rule honours it too', got.returncode, 0)
+        if got.returncode == 0:
+            eq('...and lands on the very same files',
+               json.loads(got.stdout.strip()), [HO.path(b) for b in BASES])
+
+    # A value that is not somewhere this process can write is not an instruction
+    # to write there anyway. Falling back is what keeps a stale line in a shell
+    # profile from silently splitting the rig in two.
+    os.environ[HO.ENV_DIR] = os.path.join(private, 'not-a-directory')
+    eq('a directory that is not there is ignored', HO._dir(),
+       HO.RAM if os.path.isdir(HO.RAM) and os.access(HO.RAM, os.W_OK) else HO.HERE)
+    os.environ[HO.ENV_DIR] = ''
+    eq('...and so is an empty one', HO._dir(),
+       HO.RAM if os.path.isdir(HO.RAM) and os.access(HO.RAM, os.W_OK) else HO.HERE)
+finally:
+    if was is None:
+        os.environ.pop(HO.ENV_DIR, None)
+    else:
+        os.environ[HO.ENV_DIR] = was
+    shutil.rmtree(private, ignore_errors=True)
+
+
 # --- a reader still hears an older writer ----------------------------------
 # The dangerous direction: the web server is restarted more often than the
 # scanner, so for a few minutes after a pull it can be the newer of the two.
