@@ -2200,6 +2200,39 @@
    "expect": true
   },
   {
+   "name": "a distance no leg claimed means a leg lost its minutes",
+   "_why": "The mirror of the short-a-distance rule, and the more dangerous half: minutes are the denominator, so a leg dropped for having none makes the journey shorter in time AND in miles. On this real card the star rating sits where the duration goes and its '00' reads as zero minutes, so the 44-mile leg vanished: $49.62/hr ACCEPT on a frame the eight-frame vote rated $19.86 PASS.",
+   "text": "Exclusive x $9.05 * 5.00 min (44 mi) . Gresham Rd & Wallace Rd NE, Marietta Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd",
+   "expect": false
+  },
+  {
+   "name": "...however the minutes were lost",
+   "_why": "The same shape from the other cause: minutes spelled entirely in letter stand-ins, which the real-digit rule correctly refuses. The refusal is right; taking the leg's distance with it is not.",
+   "text": "x $8.07 *% 490 \u00a9 Verified ll min (35 mi) E Wesley Rd NE & Rumson Rd NE, Atlanta Avg. wait time at pickup: 1 min 12 mins (3.3 mi) Peachtree Rd",
+   "expect": false
+  },
+  {
+   "name": "...but a bracket of stand-ins is not a distance the card stated",
+   "_why": "The same real-digit rule the minutes beside it keep. Without it a bracket spelled entirely in lookalikes is evidence of a lost leg, and evidence is exactly what it is not — two guesses stacked cannot show that a third thing existed.",
+   "text": "x $8.07 *% 490 \u00a9 Verified ll min (SO mi) E Wesley Rd NE, Atlanta Avg. wait time at pickup: 1 min 12 mins (3.3 mi) Peachtree Rd",
+   "expect": true
+  },
+  {
+   "name": "...and the same card read properly is whole again",
+   "text": "Exclusive x $9.05 * 12 min (4.4 mi) . Gresham Rd & Wallace Rd NE, Marietta Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd",
+   "expect": true
+  },
+  {
+   "name": "...a bracket that is not a distance is not a lost leg",
+   "text": "$7.09 Guaranteed (incl. tip) 6 items (6 units) 34 min (3.6 mi) total",
+   "expect": true
+  },
+  {
+   "name": "...nor is the distance-first card, whose leg keeps its own",
+   "text": "$7.50 Guaranteed (incl. tips) 8.0 mi + 25 min @ Pickup Crumbl",
+   "expect": true
+  },
+  {
    "name": "two legs are a whole ride card",
    "text": "$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
    "expect": true

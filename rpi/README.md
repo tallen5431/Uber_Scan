@@ -3135,6 +3135,49 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### The leg that lost its minutes, and took its distance with it
+
+`legs_short_a_distance` catches a leg that lost its miles. This is its mirror,
+and the more dangerous half: **minutes are the denominator**, so a leg dropped
+for having none makes the journey shorter in time *and* in miles, and the rate
+looks bigger twice over.
+
+Five of the 604 cards, from two causes, and four of the five turn a PASS into an
+ACCEPT:
+
+| what the card printed | what happened | the frame alone | the eight frames voted |
+|---|---|---|---|
+| `$9.05 ★5.00 min (44 mi)` | the star rating sits where the duration goes; `00` reads as zero minutes | **$49.62/hr ACCEPT** | $19.86/hr PASS |
+| `$8.07 ★490 ll min (35 mi)` | the minutes spelled entirely in stand-ins | **$35.40/hr ACCEPT** | $15.89/hr PASS |
+| `$12.04 … 1 min ll mins (5.4 mi)` | the same | **$40.24/hr ACCEPT** | $19.48/hr PASS |
+| `$11.02 ★5.00 min (5.2 mi)` | the rating again | **$59.82/hr ACCEPT** | $45.87/hr ACCEPT |
+
+Both refusals are *right*. `HAS_DIGIT` is correct to refuse `ll min` — "stacked
+guesses are how noise becomes data" — and `5.00` is a rating, not a duration.
+What was wrong is that **the leg's distance went with them**.
+
+The rule needs no phrase list, because the card already says it: a bracketed
+distance belongs to the time printed beside it, which is exactly what `LEG`'s
+trailing group encodes. So a bracketed distance sitting outside every leg is a
+leg the reader failed on. Zero false positives across the 604 — not on a shop
+card's `(6 units)`, not on the distance-first card whose leg keeps its own
+distance, not on the `+14 min (+ 2.0 mi)` shape.
+
+And the answer is not to guess the missing time. It is to stop calling the
+reading whole: the rig keeps looking, the panel says it has not finished, and a
+later frame supplies the leg — which is what already rescued three of these five
+at scan time. Five cards go from `whole` to unfinished and nothing else moves.
+
+The flag is **ANDed** across the merge window, unlike everything else in
+`accumulate.py`, which ORs. The others ask "did any frame see this?"; this one
+asks "has any frame managed to read the whole journey yet?", and one that did is
+the answer. Fed the damaged frame twice and the good one once, in any order, the
+merge publishes 7.0 miles over 22 minutes and $18.95/hr — the truth — instead of
+2.6 miles over 10 minutes and $49.62.
+
+Thirteen mutations, thirteen caught, including a straight revert and both halves
+of the merge rule.
+
 ### Two screens, one card, two answers
 
 Found by pointing five adversaries at work that had already shipped, with one
@@ -3957,7 +4000,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4045 checks
+npm test                # all 30 suites, 4064 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3971,12 +4014,12 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 587 checks, the shared corpus
+node tests/corpus.test.js       # 592 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       # 122 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 620 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 125 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 625 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 132 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,

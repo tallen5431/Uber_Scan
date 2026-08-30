@@ -552,6 +552,29 @@ eq('a delivery card whose distance wobbles is still one offer', _n, 1)
 eq('...and the distance is the one most frames read', _m.get('miles'), 7.9)
 eq('...not the one the last frame happened to read', _m.get('mergedFrom'), 5)
 
+# A leg that lost its minutes is dropped whole, taking its distance with it, so
+# the reading is not finished — and one frame that reads the card properly is
+# what finishes it. ANDed across the window rather than ORed, unlike everything
+# else here, and taken from the last frame before that.
+_LOST = ("Exclusive x $9.05 * 5.00 min (44 mi) . Gresham Rd "
+         "Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd")
+_READ = ("Exclusive x $9.05 * 12 min (4.4 mi) . Gresham Rd "
+         "Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd")
+
+_n, _m = _episodes([(_LOST, None)] * 3)
+eq('every frame short a time leaves the reading unfinished',
+   _m.get('shortATime'), True)
+eq('...so it is not whole', P.is_whole(_m), False)
+
+_n, _m = _episodes([(_LOST, None), (_READ, None), (_LOST, None)])
+eq('one frame that read the card clears it', _m.get('shortATime'), False)
+eq('...even though a later frame lost the leg again', P.is_whole(_m), True)
+eq('...and the merged journey has both legs', _m.get('miles'), 7.0)
+eq('...and the time the lost leg was hiding', _m.get('minutes'), 22.0)
+
+_n, _m = _episodes([(_LOST, None), (_LOST, None), (_READ, None)])
+eq('...whichever order the good frame arrives in', _m.get('shortATime'), False)
+
 # What must still separate two offers, and does not depend on the clock.
 _n, _ = _episodes([(CARD, 1000.0), (CARD, 1003.0), (CARD, 1006.0),
                    (OTHER, 1600.0), (OTHER, 1603.0)])

@@ -771,6 +771,10 @@
     // however many legs were found. `legs >= 2` below counts legs; it does not
     // ask whether they read. Another frame is exactly what fixes it.
     if (legsShortADistance(detail)) return false;
+    // ...and its mirror: a distance the card printed that no leg claimed. The
+    // leg that lost its minutes was dropped whole, so the journey is short a
+    // time AND short a distance, which flatters the rate twice.
+    if (parsed.shortATime) return false;
     if (parsed.hasTotal) return true;
     for (var i = 0; i < detail.length; i++) {
       if (detail[i] && detail[i].isTotal) return true;
@@ -813,6 +817,46 @@
    * unflagged, and rated — $41.01/hr for an offer worth $35.30/hr, because the
    * missing miles are missing *cost*. It errs optimistic, which is the one
    * direction that turns a pass into an accept. */
+  /* A distance the card printed that no leg claimed.
+   *
+   * The mirror of legsShortADistance, and the more dangerous half: that one
+   * catches a leg that lost its miles, this one catches a leg that lost its
+   * MINUTES - and minutes are the denominator, so losing them makes the rate
+   * look bigger twice over. The leg goes entirely, taking its distance with it.
+   *
+   * On these cards a bracketed distance belongs to the time printed beside it,
+   * which is what LEG's own trailing group says. So a bracketed distance
+   * sitting outside every leg is a leg the reader failed on.
+   *
+   * Five of this driver's 604 cards, two causes, four of them turning a PASS
+   * into an ACCEPT: "$9.05 * 5.00 min (44 mi)", where the star rating sits
+   * where the duration goes and "00" reads as zero minutes; and "ll min
+   * (35 mi)", where the minutes are spelled entirely in stand-ins and are
+   * correctly refused. Both refusals are right. What was wrong is that the
+   * distance went with them.
+   *
+   * The answer is not to guess the missing time but to stop calling the
+   * reading whole, so the rig keeps looking and a later frame supplies it. */
+  var LEG_ORPHAN = new RegExp(
+    '\\(\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b\\s*\\)', 'gi');
+
+  function distanceWithoutATime(text, legs) {
+    var m, i, inside;
+    LEG_ORPHAN.lastIndex = 0;
+    while ((m = LEG_ORPHAN.exec(text)) !== null) {
+      if (m.index === LEG_ORPHAN.lastIndex) LEG_ORPHAN.lastIndex++;
+      // The same real-digit rule the minutes beside it keep.
+      if (!/\d/.test(m[1])) continue;
+      inside = false;
+      for (i = 0; i < legs.length; i++) {
+        if (legs[i].start <= m.index
+            && m.index + m[0].length <= legs[i].end) { inside = true; break; }
+      }
+      if (!inside) return true;
+    }
+    return false;
+  }
+
   function legsShortADistance(legs) {
     var list = [], i;
     for (i = 0; i < (legs || []).length; i++) if (legs[i]) list.push(legs[i]);
@@ -1009,6 +1053,10 @@
       // all - and this flag gates rate()'s second attempt.
       milesChecked: minutes !== null,
       milesHadDecimal: hadDecimal,
+      // Whether the card printed a distance no leg claimed, which means a leg
+      // lost its minutes and took its miles with it. See distanceWithoutATime:
+      // not a number, but the reason the reading is not finished.
+      shortATime: distanceWithoutATime(text, legs),
       // Enough to act on: without pay and time there is no rate to show.
       complete: isComplete(pay, minutes, deadline),
       // Null when the card did not say — the top chip may simply not have been

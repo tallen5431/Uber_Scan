@@ -694,6 +694,12 @@ def is_whole(parsed):
     # fixes that: the accumulator merges legs across frames for this reason.
     if legs_short_a_distance(parsed.get('legDetail') or []):
         return False
+    # ...and its mirror: a distance the card printed that no leg claimed. The
+    # leg that lost its minutes was dropped whole, so the journey is short a
+    # time AND short a distance, which flatters the rate twice. Another frame is
+    # the answer, exactly as above.
+    if parsed.get('shortATime'):
+        return False
     if parsed.get('hasTotal') or any(
             leg.get('isTotal') for leg in (parsed.get('legDetail') or [])):
         return True
@@ -719,6 +725,54 @@ def is_whole(parsed):
     return (not (parsed.get('legs') or 0)
             and parsed.get('deliverBy') is not None
             and parsed.get('miles') is not None)
+
+
+# A distance the card printed that no leg claimed.
+#
+# The mirror of legs_short_a_distance, and the more dangerous half: that one
+# catches a leg that lost its miles, this one catches a leg that lost its
+# MINUTES — and minutes are the denominator, so losing them makes the rate look
+# bigger twice over. The leg goes entirely, taking its distance with it, so the
+# journey comes out shorter in both time and miles.
+#
+# On these cards a bracketed distance belongs to the time printed beside it —
+# that is what LEG's own trailing group says. So a bracketed distance sitting
+# outside every leg is a leg the reader failed on, and no list of phrases is
+# needed to say so.
+#
+# Five of this driver's 604 cards, from two different causes, and four of the
+# five turn a PASS into an ACCEPT:
+#
+#   $9.05 * 5.00 min (44 mi)    the star rating sits where the duration goes,
+#                               "00" reads as zero minutes -> $49.62/hr ACCEPT
+#                               against the eight-frame answer of $19.86 PASS
+#   $8.07 *% 490 ll min (35 mi) the minutes spelled entirely in stand-ins, which
+#                               HAS_DIGIT correctly refuses -> $35.40/hr ACCEPT
+#                               against $15.89 PASS
+#
+# Both refusals are right. What was wrong is that the distance went with them.
+#
+# The answer is not to guess the missing time. It is to stop calling the reading
+# whole: the rig keeps looking, the panel says it has not finished, and the
+# accumulator merges a later frame that read the leg properly — which is what
+# already rescued three of these five at scan time.
+LEG_ORPHAN = re.compile(
+    r'\(\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b\s*\)',
+    re.IGNORECASE | ASCII)
+
+
+def distance_without_a_time(text, legs):
+    """True when the card printed a bracketed distance that no leg claimed."""
+    spans = [(l['start'], l['end']) for l in legs]
+    for m in LEG_ORPHAN.finditer(text):
+        # The same real-digit rule the minutes beside it keep: a bracket full of
+        # stand-ins is not a distance the card stated.
+        if not HAS_DIGIT.search(m.group(1)):
+            continue
+        if any(start <= m.start() and m.end() <= end for start, end in spans):
+            continue
+        return True
+    return False
 
 
 def legs_short_a_distance(legs):
@@ -1192,6 +1246,11 @@ def parse(raw_text):
         # false stamp shut that door too.
         'milesChecked': minutes is not None,
         'milesHadDecimal': had_decimal,
+        # Whether the card printed a distance no leg claimed, which means a leg
+        # lost its minutes and took its miles with it. See
+        # distance_without_a_time: this is not a number, it is the reason the
+        # reading is not finished, and is_whole is where it is spent.
+        'shortATime': distance_without_a_time(text, legs),
         'complete': is_complete(pay, minutes, deadline),
         # What the card says it is. None when the card did not say — the top
         # chip may simply not have been inside the crop — which is different

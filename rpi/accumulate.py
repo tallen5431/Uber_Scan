@@ -118,6 +118,12 @@ class OfferAccumulator:
         self.samples = 0
         self.max_legs = 0
         self.corrected = False
+        # Whether EVERY frame so far has seen a distance it could not attribute
+        # to a leg. True until a frame reads the card whole, because that is the
+        # direction that clears it: one good frame is enough, the way one frame
+        # reading the word "total" is enough. Starts True so the first frame's
+        # own answer is what it becomes. See OP.distance_without_a_time.
+        self.short_a_time = True
 
     def _find_slot(self, leg, taken):
         """The slot this reading belongs in, or None if it belongs in no slot yet."""
@@ -268,6 +274,7 @@ class OfferAccumulator:
         # to, and nothing outvotes it because it sits in a slot of its own.
         self.max_legs = max(self.max_legs, len(detail))
         self.corrected = self.corrected or bool(parsed.get('milesCorrected'))
+        self.short_a_time = self.short_a_time and bool(parsed.get('shortATime'))
 
         # What this frame read, kept beside what the others did. Raw where the
         # reader gave it raw: the line breaks are the part a later question is
@@ -386,6 +393,13 @@ class OfferAccumulator:
         # whichever frame happened to be last. If any frame needed a decimal put
         # back, the distance is worth a glance.
         merged['milesCorrected'] = self.corrected
+        # ANDed rather than ORed, unlike everything above it. The others ask
+        # "did any frame see this?"; this one asks "has any frame managed to
+        # read the whole journey yet?", and a single frame that did is the
+        # answer. Without it, `dict(parsed)` hands the merge whichever frame
+        # happened to arrive last, so a card the rig had already read properly
+        # goes back to unfinished the moment one glare frame loses a leg.
+        merged['shortATime'] = self.short_a_time
         # Every distinct frame's reading, so a question about the OCR can be
         # asked of what it really produced rather than of the one frame that
         # happened to win. See `self.texts`.
