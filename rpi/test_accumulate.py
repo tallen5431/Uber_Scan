@@ -498,6 +498,62 @@ for _i in range(2):
     _mb = acc_broken.add(P.parse(_broken))
 eq('...nor once it has been merged across frames', P.is_whole(_mb), False)
 
+# --- one card is one offer, for as long as it is on screen -----------------
+#
+# The window used to be measured from the FIRST reading, so it expired while the
+# driver was still looking at the card and the same offer was filed again. On
+# this driver's journal 90 cards were filed more than once — 104 surplus rows,
+# 7.6% of it, each counted again in every median. A burst is bounded by silence,
+# which is what QUIET already says; the window now closes after `window` seconds
+# of nothing.
+CARD = ("$12.99 Guaranteed (incl. tips) 7.7 mi + 28 min "
+        "@ Pickup Dave's Hot Chicken f\u00a5 Customer dropoff")
+OTHER = ("$12.99 Guaranteed (incl. tips) 3.1 mi + 11 min "
+         "@ Pickup Chipotle f\u00a5 Customer dropoff")
+
+
+def _episodes(frames, step=3.0, start=1000.0):
+    """Feed frames as the rig would and count the offers that get filed."""
+    box = OfferAccumulator()
+    seen, last = [], None
+    for i, (text, when) in enumerate(frames):
+        last = box.add(P.parse(text), now=when if when is not None
+                       else start + i * step)
+        seen.append(box.episode)
+    return len(set(seen)), last
+
+
+_n, _m = _episodes([(CARD, None)] * 40)
+eq('a card on screen for two minutes is one offer', _n, 1)
+eq('...built from every frame of it', _m.get('mergedFrom'), 40)
+
+# A frame misreading the minutes used to line up with no slot, which made it a
+# replacement card. The distance now on the leg is the second signal that keeps
+# it attached — see LEG in offer_parser.py.
+_wobble = ([(CARD, None), (CARD.replace('28 min', '26 min'), None)]
+           + [(CARD, None)] * 6
+           + [(CARD.replace('28 min', '2B min'), None)]
+           + [(CARD, None)] * 7)
+_n, _m = _episodes(_wobble)
+eq('a frame that misreads the minutes does not start a new offer', _n, 1)
+eq('...and the misreadings are outvoted', _m.get('minutes'), 28.0)
+eq('...leaving the distance alone', _m.get('miles'), 7.7)
+
+# What must still separate two offers, and does not depend on the clock.
+_n, _ = _episodes([(CARD, 1000.0), (CARD, 1003.0), (CARD, 1006.0),
+                   (OTHER, 1600.0), (OTHER, 1603.0)])
+eq('a different card with the same payout, ten minutes later, is a new offer',
+   _n, 2)
+_n, _ = _episodes([(CARD, 1000.0), (CARD, 1003.0), (CARD, 1006.0),
+                   (OTHER, 1012.0), (OTHER, 1015.0)])
+eq('...and so is one that replaces it straight away', _n, 2)
+
+# Silence is what ends a window, so the same card seen again much later is a
+# second offer rather than a continuation of the first.
+_n, _ = _episodes([(CARD, 1000.0), (CARD, 1003.0),
+                   (CARD, 9000.0), (CARD, 9003.0)])
+eq('the same card an hour later is a second offer', _n, 2)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -133,7 +133,38 @@ PAY_CHIP = re.compile(
 # "ZIM" out of the road texture became a 21-minute leg, which is enough to make
 # a screen with no offer on it look like an offer. The "i" may still be a
 # lookalike, because that is one guess inside a word already confirmed.
+# A leg's two numbers sit side by side, and the card decides which comes first.
+#
+# This used to read time-then-distance only, because that is what the older card
+# printed: "23 min (8.4 mi) trip". The card this driver is mostly shown now
+# prints the other way round —
+#
+#     $7.50 Guaranteed (incl. tips)  8.0 mi + 25 min  @ Pickup Crumbl
+#
+# — and against that, LEG matched "25 min" alone. The leg came out with a time
+# and no distance, the distance arrived separately through LONE_MILES, and the
+# whole per-leg machinery went past it: 142 of 604 cards on file.
+#
+# It is not only the parse that suffers. accumulate.py matches a leg to a slot
+# on EITHER its time or its distance agreeing, and a leg with no distance has
+# only the one signal — exact equality of minutes. One frame reading "28 min" as
+# "26 min" then lines up with nothing, `_is_a_different_card` calls it a
+# replacement, and the window resets. Measured on one real card read sixteen
+# times over 45 seconds: five separate offers filed, for one card the driver was
+# looking at once. Across the driver's journal, 90 cards were filed more than
+# once — 104 surplus rows, 7.6% of it.
+#
+# So the rule is adjacency in EITHER order, and the glue is the card's own
+# bullet: at least one non-space non-word glyph, at most three. Measured over
+# the 604: every distance-then-time pair on file is joined by punctuation
+# ('+', '-', '«', '+-'), never by a bare space and never by more than three
+# glyphs. A bare space is two things next to each other rather than one printed
+# line, which is what keeps "$16.05 Promo 4.8 mi 25 min away" from claiming the
+# promo's distance. Brackets are excluded from the glue because a distance the
+# card closed a bracket on belonged to what came before it.
 LEG = re.compile(
+    r'(?:(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
+    r'\s*[^\s\w()]{1,3}\s*)?'
     r'(?:(\d{1,2})\s*h(?:r|rs|our|ours)?\s*)?'
     r'(' + DC + r'{1,3})\s*m[il1|]n(?:s|ute|utes)?\b'
     r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b\s*\)?)?',
@@ -519,14 +550,26 @@ def find_pay(text):
 def find_legs(text):
     legs = []
     for m in LEG.finditer(text):
-        mins = to_number(m.group(2))
-        if mins is None or not HAS_DIGIT.search(m.group(2)):
+        mins = to_number(m.group(3))
+        if mins is None or not HAS_DIGIT.search(m.group(3)):
             continue
-        minutes = (to_number(m.group(1)) or 0) * 60 + mins
+        minutes = (to_number(m.group(2)) or 0) * 60 + mins
         if minutes <= 0 or minutes > 600:
             continue
 
-        miles = to_number(m.group(3))
+        # The distance printed BEFORE the time, if the card put it there. It
+        # keeps the two rules a lone distance already keeps: a real digit, and
+        # not preceded by a digit or a decimal point — without the second,
+        # "1.9 mi" damaged to ".9 mi" reads as nine miles.
+        lead = m.group(1)
+        if lead is not None and (
+                not HAS_DIGIT.search(lead)
+                or (m.start(1) > 0 and text[m.start(1) - 1] in '0123456789.,')):
+            lead = None
+        # The bracketed one wins when a card prints both: the bracket is the
+        # card saying which time this distance belongs to.
+        side = m.group(4) if m.group(4) is not None else lead
+        miles = to_number(side)
         # NOT the real-digit rule that money and the lone distance now keep,
         # and the reason is worth writing down so it is not "fixed" later.
         #
@@ -546,7 +589,7 @@ def find_legs(text):
             miles = None
         # A decimal point is a pixel or two through a lens and is the first
         # thing to be lost, so remember whether this reading actually had one.
-        had_decimal = m.group(3) is not None and bool(re.search(r'[.,]', m.group(3)))
+        had_decimal = side is not None and bool(re.search(r'[.,]', side))
 
         # Recover a decimal lost from this leg alone, before it reaches the sum.
         # "20 min (7.3 mi)" read as "(73 mi)" is a 219 mph leg, and left alone it

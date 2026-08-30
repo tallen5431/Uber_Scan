@@ -3135,6 +3135,60 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### One card, filed as five offers
+
+A journal row is an offer the rig finished with. Two rows carrying the same
+payout and the same duration a few seconds apart are not two offers a driver was
+shown; they are one card whose window closed and re-opened while it was still on
+screen. **90 cards in this driver's journal were filed more than once — 104
+surplus rows, 7.6% of it**, every one of them counted again in every median on
+the offers page, and eleven disagreeing with themselves about the distance. One
+`$12.99` card off Dave's Hot Chicken appears three times inside 35 seconds, and
+the first copy says 17 miles where the other two say 7.7.
+
+Two mechanisms, and they turned out to be the same root cause as everything else
+in this section.
+
+**The leg had nothing to be recognised by.** `accumulate.py` matches a reading
+to a leg slot on *either* its time or its distance agreeing — deliberately, and
+the reasoning is in `_slot_for`: each field fails differently and neither is
+reliable alone. But on the distance-first card the leg carried no distance, so
+only exact equality of minutes was left. One frame reading `28 min` as `26 min`
+lined up with nothing, `_is_a_different_card` called it a replacement, and the
+window reset. Teaching `LEG` the distance-first shape gives the slot its second
+signal back.
+
+**The window was a stopwatch, not a silence.** It was measured from the *first*
+reading — `now - self.started` — so it expired while the driver was still
+looking at the card. The module's own `QUIET` constant already had the right
+idea one screen up: *"readings of one card arrive in a burst; a gap means the
+burst ended."* A burst is bounded by silence. It now closes after twelve seconds
+of nothing.
+
+Measured on one card fed to the real accumulator:
+
+| | today | with both |
+|---|---|---|
+| 16 frames over 45s, minutes wobbling twice | **5 offers** | **1** |
+| 40 frames over 2 minutes, clean | **8 offers** | **1** |
+| a different card, same payout, 10 minutes later | 2 | 2 |
+| a replacement card, same payout, immediately | 2 | 2 |
+
+The two that must still separate, still separate — and neither relies on the
+clock. A different payout keys differently; a replacement paying the same to the
+cent is caught by `_is_a_different_card`, which outranks the window and was
+written for exactly that case.
+
+The `LEG` change is a group renumber in both ports, which is the real hazard:
+Python's unmatched groups are `None` and JavaScript's are `undefined`, and a
+port that misses one index is a silent wrong number rather than a crash. Both
+ports agree on all 741 texts on file, every field. **121 of the 604 cards get an
+honest leg, and not one published number moves** — no pay, no miles, no minutes,
+no flag, no verdict. The distance was always being found; it just was not part
+of the leg it belonged to.
+
+Fifteen mutations, fifteen caught, including a straight revert of each half.
+
 ### The distance check that ran before the distance arrived
 
 Five lines of code motion, and the largest correctness change in this file's
@@ -3187,8 +3241,13 @@ cares about most. A genuine long haul whose decimal the camera lost is now
 silently shortened: `$45.00 ... 60 mi + 55 min` is 60 miles and $29.45/hr today
 and becomes 6 miles and $47.13/hr, with $16.20 of real mileage cost gone. Three
 things bound it, and none is a proof. The card prints the decimal on 131 of the
-140 lone-path cards, and `60.0 mi` is refused. `MAX_MPH` is 55, while this
-driver's fastest real offer runs at 43 mph door to door and the median at 17.
+140 lone-path cards, and `60.0 mi` is refused. `MAX_MPH` is 55; this driver's fastest
+*confirmed* offer runs 41.4 miles in 47 minutes — 52.9 mph — so the headroom is
+about two miles an hour, not the twelve an earlier version of this section
+claimed. (The 43 mph figure quoted there was the fastest of the shift's *green*
+offers, not of all of them.) One journal row does sit above the line, 115.6
+miles in 123 minutes at 56.4 mph, and the rig had already marked its distance
+uncertain.
 And zero of the 604 cards land in the 55–75 mph band where a lost decimal is
 neither recovered nor doubted. It is the same exposure `recover_decimal` has
 always carried on the time-first format, where it fired 36 times and was right
@@ -3840,7 +3899,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3959 checks
+npm test                # all 30 suites, 4020 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3854,12 +3913,12 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 559 checks, the shared corpus
+node tests/corpus.test.js       # 576 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       # 122 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 592 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 114 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 609 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 122 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,

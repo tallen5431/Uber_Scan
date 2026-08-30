@@ -234,7 +234,26 @@ class OfferAccumulator:
         # it is stored after: this is the one signal that separates a
         # replacement card from a re-read, and the journal has no other.
         different = self._is_a_different_card(detail, now)
-        if (key != self.key or (now - self.started) > self.window or different):
+        # Stale is measured from the LAST reading, not the first.
+        #
+        # It used to be `now - self.started`: a stopwatch begun when the card was
+        # first seen, which expired while the driver was still looking at the
+        # card and filed the same offer again. One real card read sixteen times
+        # over 45 seconds became FIVE offers. Across this driver's journal, 90
+        # cards were filed more than once — 104 surplus rows, 7.6% of it, each
+        # one counted again in every median on the offers page, and eleven of
+        # them disagreeing with themselves about the distance.
+        #
+        # A burst is bounded by silence, which is what QUIET a few lines up
+        # already says: "readings of one card arrive in a burst; a gap means the
+        # burst ended". So the window now closes after `window` seconds of
+        # nothing, and a card stays one offer for as long as it is on screen.
+        # What separates two offers is unchanged and does not rely on this: a
+        # different payout keys differently, and a replacement paying the same
+        # to the cent is caught by _is_a_different_card, which outranks the
+        # clock and was written for exactly that case.
+        stale = bool(self.last_add) and (now - self.last_add) > self.window
+        if key != self.key or stale or different:
             self.reset()
             self.new_card = different
             self.key = key

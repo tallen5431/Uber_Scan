@@ -294,7 +294,27 @@
   // journey: "ZIM" out of the road texture became a 21-minute leg, which is
   // enough to make a screen with no offer on it look like an offer. The "i" may
   // still be a lookalike, because that is one guess inside a confirmed word.
+  /* A leg's two numbers sit side by side, and the card decides which comes
+   * first. This used to read time-then-distance only, because that is what the
+   * older card printed. The card this driver is mostly shown now prints the
+   * other way round - "8.0 mi + 25 min" - and against that LEG matched the
+   * minutes alone: 142 of 604 cards on file came out with a time and no
+   * distance, and the whole per-leg machinery went past them.
+   *
+   * It is not only the parse that suffers. accumulate.py matches a leg to a
+   * slot on EITHER its time or its distance agreeing, and a leg with no
+   * distance has only the one signal. One frame misreading the minutes lines up
+   * with nothing, the window resets, and the same card is filed again.
+   *
+   * So the rule is adjacency in EITHER order, and the glue is the card's own
+   * bullet: at least one non-space non-word glyph, at most three. Measured over
+   * the 604, every distance-then-time pair on file is joined by punctuation,
+   * never by a bare space - a bare space is two things next to each other
+   * rather than one printed line. Brackets are excluded because a distance the
+   * card closed a bracket on belonged to what came before it. */
   var LEG = new RegExp(
+    '(?:(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b' +
+    '\\s*[^\\s\\w()]{1,3}\\s*)?' +                 // distance, then the card's bullet
     '(?:(\\d{1,2})\\s*h(?:r|rs|our|ours)?\\s*)?' +   // optional hours
     '(' + DC + '{1,3})\\s*m[il1|]n(?:s|ute|utes)?\\b' +
     '(?:[^(\\d]{0,6}\\(?\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b\\s*\\)?)?',
@@ -598,15 +618,28 @@
     var legs = [], m;
     LEG.lastIndex = 0;
     while ((m = LEG.exec(text)) !== null) {
-      var hours = toNumber(m[1]) || 0;
-      var mins = toNumber(m[2]);
+      var hours = toNumber(m[2]) || 0;
+      var mins = toNumber(m[3]);
       // The number has to contain a real digit. "SI min" is two guesses
       // stacked, and stacked guesses are how noise becomes data.
-      if (mins === null || !/\d/.test(String(m[2]))) continue;
+      if (mins === null || !/\d/.test(String(m[3]))) continue;
       var minutes = hours * 60 + mins;
       if (minutes <= 0 || minutes > 600) continue;
 
-      var miles = toNumber(m[3]);
+      // The distance printed BEFORE the time, if the card put it there. It
+      // keeps the two rules a lone distance already keeps: a real digit, and
+      // not preceded by a digit or a decimal point - without the second,
+      // "1.9 mi" damaged to ".9 mi" reads as nine miles. When the lead matched
+      // it begins the match, so m.index is where it starts.
+      var lead = (m[1] === undefined || m[1] === null) ? null : m[1];
+      if (lead !== null && (!/\d/.test(lead)
+          || (m.index > 0 && '0123456789.,'.indexOf(text.charAt(m.index - 1)) >= 0))) {
+        lead = null;
+      }
+      // The bracketed one wins when a card prints both: the bracket is the card
+      // saying which time this distance belongs to.
+      var side = (m[4] === undefined || m[4] === null) ? lead : m[4];
+      var miles = toNumber(side);
       // NOT the real-digit rule money and the lone distance now keep, and the
       // reason is worth writing down so it is not "fixed" later. Refusing
       // "(SO mi)" leaves the leg with a time and no distance, and on a single
@@ -619,7 +652,7 @@
       if (miles !== null && (miles < 0 || miles > 500)) miles = null;
       // A decimal point is one or two pixels through a camera and is the first
       // thing to be lost, so remember whether this reading actually had one.
-      var hadDecimal = m[3] !== undefined && /[.,]/.test(String(m[3]));
+      var hadDecimal = side !== null && side !== undefined && /[.,]/.test(String(side));
 
       // Recover a decimal lost from this leg alone, before it reaches the sum.
       // "20 min (7.3 mi)" read as "(73 mi)" is a 219 mph leg, and left alone it

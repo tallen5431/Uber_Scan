@@ -915,6 +915,71 @@
    }
   },
   {
+   "name": "a card printing its distance first states a whole leg",
+   "text": "$7.50 Guaranteed (incl. tips) 8.0 mi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "pay": 7.5,
+    "minutes": 25,
+    "miles": 8.0
+   }
+  },
+  {
+   "name": "...so two such offers in one frame owe BOTH distances",
+   "text": "$25.60 Guaranteed (incl. tips) 8.3 mi + 36 min @ Retail pickup GoPuff (Drive) $10.40 Guaranteed (incl. tips) 12.1 mi + 40 min @ Pickup Talkin Tacos",
+   "expect": {
+    "minutes": 76,
+    "miles": 20.4
+   }
+  },
+  {
+   "name": "...the card's own bullet is what joins them",
+   "text": "$8.00 Guaranteed 4.0 mi + 25 min @ Pickup X 3.1 mi + 11 min @ Pickup Y",
+   "expect": {
+    "minutes": 36,
+    "miles": 7.1
+   }
+  },
+  {
+   "name": "...a bare space is two things side by side, not one line",
+   "text": "$8.00 Guaranteed 4.0 mi 25 min @ Pickup X 3.1 mi 11 min @ Pickup Y",
+   "expect": {
+    "minutes": 36,
+    "miles": 4.0
+   }
+  },
+  {
+   "name": "...and neither is four glyphs of noise",
+   "text": "$8.00 Guaranteed 4.0 mi +-+- 25 min @ Pickup X 3.1 mi +-+- 11 min @ Pickup Y",
+   "expect": {
+    "minutes": 36,
+    "miles": 4.0
+   }
+  },
+  {
+   "name": "...a distance the card closed a bracket on belongs to what came before",
+   "text": "$8.00 Guaranteed (4.0 mi) 25 min @ Pickup X (3.1 mi) 11 min @ Pickup Y",
+   "expect": {
+    "minutes": 36,
+    "miles": 4.0
+   }
+  },
+  {
+   "name": "...a lead that follows a decimal point is the tail of another number",
+   "text": "$7.50 Guaranteed (incl. tips) 1..9 mi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "minutes": 25,
+    "miles": null
+   }
+  },
+  {
+   "name": "...and when a card prints both, the bracketed one wins",
+   "text": "$8.00 Guaranteed 4.0 mi + 25 min (8.4 mi) trip",
+   "expect": {
+    "minutes": 25,
+    "miles": 8.4
+   }
+  },
+  {
    "name": "a lone distance is checked against the time, like any other",
    "text": "o a iis (ARBRE mcusne + $7.09 Guaranteed (incl. tip) \u00a9 +21 min (+55 mi) total I Applebee's (Town Center) Roswell Rd, Marietta",
    "expect": {
