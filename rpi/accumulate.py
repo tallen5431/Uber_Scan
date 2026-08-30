@@ -118,6 +118,20 @@ class OfferAccumulator:
         self.samples = 0
         self.max_legs = 0
         self.corrected = False
+        # Whether any frame's distance token printed a decimal point. ORed like
+        # `hasTotal` and for the same reason: one frame reading the point is
+        # enough, and losing it is what a glare frame does. Used only where the
+        # merged distance came off the legs, which is also the case where
+        # nothing reads it — see `merged['milesHadDecimal']`.
+        self.had_decimal = False
+        # A distance no leg carried, and whether the frame that read it printed
+        # a decimal point: [(miles, had_decimal), ...]. Kept as pairs, not as
+        # two lists, because the flag is a fact about the reading and not about
+        # the card — see `merged['milesHadDecimal']` for why that distinction is
+        # the whole point. Voted on like everything else that moves money: 19
+        # cards on file take this path, the "Add a delivery" shape, where a plus
+        # inside the bracket defeats the leg's own distance group.
+        self.lone_miles = []
         # Whether EVERY frame so far has seen a distance it could not attribute
         # to a leg. True until a frame reads the card whole, because that is the
         # direction that clears it: one good frame is enough, the way one frame
@@ -274,6 +288,11 @@ class OfferAccumulator:
         # to, and nothing outvotes it because it sits in a slot of its own.
         self.max_legs = max(self.max_legs, len(detail))
         self.corrected = self.corrected or bool(parsed.get('milesCorrected'))
+        self.had_decimal = self.had_decimal or bool(parsed.get('milesHadDecimal'))
+        if parsed.get('miles') is not None and not any(
+                l.get('miles') is not None for l in detail):
+            self.lone_miles.append((parsed['miles'],
+                                    bool(parsed.get('milesHadDecimal'))))
         self.short_a_time = self.short_a_time and bool(parsed.get('shortATime'))
 
         # What this frame read, kept beside what the others did. Raw where the
@@ -367,6 +386,29 @@ class OfferAccumulator:
         # one shift's 234 offers reached the journal as 9.600000000000001 or
         # 17.299999999999997, and from there the CSV export and everything
         # reading it. A card gives one decimal place; so does a sum of them.
+        # A distance no leg claimed is voted on like everything that moves
+        # money. It used to be whichever frame arrived last: a card reading
+        # "2.4 mi" as "24 mi" in one frame out of five published the misread one
+        # in every arrival order that put it at the end, and there is no leg
+        # duration beside it for check_distance to catch it with.
+        had_decimal = self.had_decimal
+        if miles is None and self.lone_miles:
+            miles = _consensus([v for v, _ in self.lone_miles])
+            # ...and the decimal point travels WITH the winning reading, rather
+            # than being ORed across the window like the flags above it. The
+            # difference is the whole case this flag exists for. "2.4 mi" read
+            # as "24 mi" by three frames of four is published as 24 miles, and
+            # the one frame that saw the point would — under an OR — be enough
+            # to tell rate() the card printed one, which is exactly what forbids
+            # recovering the 24 back to 2.4. The flag would then block the fix
+            # for the misreading that its own evidence proves.
+            #
+            # Asked of the winning value's own frames it is right either way: if
+            # 24 won and none of those frames saw a point, recovery is allowed
+            # and lands on 2.4; if the card really says "24.0" and one frame
+            # dropped the point, the frames that read 24 still carry it and
+            # recovery stays forbidden.
+            had_decimal = any(d for v, d in self.lone_miles if v == miles)
         merged['miles'] = (OP.round2(miles) if miles is not None
                            else parsed.get('miles'))
 
@@ -393,6 +435,25 @@ class OfferAccumulator:
         # whichever frame happened to be last. If any frame needed a decimal put
         # back, the distance is worth a glance.
         merged['milesCorrected'] = self.corrected
+        # Both of these used to come from `dict(parsed)`, which is the frame
+        # that happened to arrive last. Together they decide whether rate() may
+        # divide the merged distance by ten — so on a card with no stated
+        # duration the journal stored 24 miles or 2.4 depending on nothing but
+        # frame order, and neither is a fact about a frame.
+        #
+        # `milesChecked` is a fact about the merged MINUTES: it says a duration
+        # stood beside the distance when check_distance ran, and the duration
+        # that matters is the merged one, not the one the last frame happened to
+        # read. It is also the gate on rate()'s second attempt, so a frame
+        # arriving with a stray `True` shuts a door the merge had open.
+        #
+        # `milesHadDecimal` is a fact about the merged DISTANCE, and follows it:
+        # from the winning lone reading when the distance came from there, and
+        # otherwise from the whole window, where it decides nothing — a distance
+        # off the legs always has minutes beside it, so `milesChecked` is True
+        # and rate() never asks.
+        merged['milesHadDecimal'] = had_decimal
+        merged['milesChecked'] = merged['minutes'] is not None
         # ANDed rather than ORed, unlike everything above it. The others ask
         # "did any frame see this?"; this one asks "has any frame managed to
         # read the whole journey yet?", and a single frame that did is the

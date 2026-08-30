@@ -3135,6 +3135,73 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### The decimal point that belonged to a number it was no longer attached to
+
+Three fields on a merged reading were still being taken from whichever frame
+arrived last. Two of them decide whether the distance may be divided by ten:
+
+* **`milesChecked`** says a duration stood beside the distance when
+  `check_distance` ran, and it is the gate on `rate()`'s second attempt. It is a
+  fact about the *merged* minutes, so a frame that lost the leg and arrived last
+  could report `False` on a window that had a duration — opening a recovery on
+  the **sum** of the legs, which is the one thing the merge deliberately
+  forbids: dividing a sum by ten is not a correction any single misread can
+  justify.
+* **`milesHadDecimal`** says the card printed a point, which is what stops a
+  card that really reads `10.0 mi` being "recovered" to `1.0`.
+* and the **lone distance** — the one no leg claimed, the `Add a delivery`
+  shape where a plus inside the bracket defeats the leg's own distance group —
+  was not voted on at all. Everything else that moves money is: the minutes, the
+  legs' distances, the item count, the deadline. This one was whatever the last
+  frame said, and it is the one number with no leg duration beside it for
+  `check_distance` to catch a misread with.
+
+**Voting is not enough, and the obvious fix is wrong.** The natural move is to
+OR `milesHadDecimal` across the window, the way `hasTotal` and `labelled` are
+ORed: one frame seeing the point is enough, and losing it is what a glare frame
+does. That is right for a distance off the legs and **backwards** for a lone
+one. Take a card printing `2.4 mi`, read as `24 mi` by three frames of four.
+The vote publishes 24 — and the single frame that saw the point would, under an
+OR, be enough to tell `rate()` the card printed one, which is exactly what
+forbids recovering the 24 back to 2.4. The flag would use one frame's evidence
+of the error to block the fix for it.
+
+So the point travels **with the winning reading** rather than across the window:
+`self.lone_miles` holds `(miles, had_decimal)` pairs, and the published flag is
+what the frames that read the winning value said. It comes out right in both
+directions — if 24 won and none of those frames saw a point, recovery is allowed
+and lands on 2.4; if the card really says `24.0` and one frame dropped the
+point, the frames that read 24 still carry it and recovery stays forbidden. A
+distance off the legs keeps the OR, where it decides nothing: a leg carries its
+own minutes, so `milesChecked` is `True` and `rate()` never asks.
+
+**Reach: zero, measured twice.** Replaying all 604 real frames through the
+accumulator in their recorded time order, before and after, moves **not one of
+604 readings** on any of sixteen fields, nor the verdict, nor the rate. Planting
+the damage this exists for — the decimal point stripped from one, two and three
+frames of the same card, 559 damaged replays — gives the identical 545 repaired
+/ 1 flagged / 13 wrong before and after. This is a hole closed, not a bug
+repaired, and the tests are synthetic because the corpus cannot reach it.
+
+**Why the corpus cannot reach it,** and a caution about a number this file will
+not print: these 604 texts are *distinct* texts, one per journal row after
+deduplication, so a card read eight times with the same result appears once.
+That makes almost every offer in this corpus look like a single frame, which
+would say the merge is idle on 98% of cards — and it is an artifact of the
+export, not a fact about the rig. The `scans` column added on 2026-08-30 keeps
+every frame; it is what will answer the question, and until it does the question
+is open.
+
+Twenty-three mutations, twenty-three caught: the flag reverting to the last
+frame, `milesChecked` reverting, inverted, pinned true and pinned false, the
+point ORed across the window and ANDed across the winners, forced true and
+forced false, taken from the first and from the last lone frame, the lone
+distance taken from the first frame, the last, the smallest and the largest,
+consulted when the legs already had one and never consulted at all, and the
+window's own OR turned into an AND. Fifty-four new checks, most of them asserting
+the *property* — that every arrival order of the same frames merges to the same
+thing — rather than a case, because the defect was the order dependence itself.
+
 ### Six invisible characters deciding whether a road is an offer
 
 The two parsers are held to one corpus, and the corpus is text. Whitespace is
@@ -3490,11 +3557,12 @@ divide that must be doubted rather than charged, and a distance that printed its
 decimal being believed at 60 mph.
 
 **What it does not fix,** because the same audit measured these and they stay
-open: `legs_short_a_distance` still fires zero times on all 604 cards; the
-accumulator still does not vote on a lone distance, so the $15.60 GoPuff card
-still publishes 1.9 miles in two of six arrival orders; and a lone distance that
-reads too *small* is still unguarded in both versions, since `check_distance`
-only ever divides.
+open: `legs_short_a_distance` still fires zero times on all 604 cards, and a
+lone distance that reads too *small* is still unguarded in both versions, since
+`check_distance` only ever divides. The third one on this list — the accumulator
+not voting on a lone distance, so the $15.60 GoPuff card published 1.9 miles in
+two of six arrival orders — is fixed three sections up, along with the two flags
+that decide what may be done to the number it publishes.
 
 ### The ACCEPT that was a road
 
@@ -4111,11 +4179,30 @@ target, accept versus pass.
 
 So readings of the same offer are merged over a short window. The pay is the
 key — a different payout is a different offer, and the window resets rather than
-lending one card's distance to another. Legs are identified by their distance,
-so re-reading the same leg does not add it twice; only a genuinely different leg
-extends the total. Where two readings of one leg disagree, the more frequent
-wins, and a tie takes the shorter time, which errs towards making an offer look
-worse rather than better.
+lending one card's distance to another. A leg is matched to one already seen
+when *either* its duration or its distance agrees, so re-reading the same leg
+does not add it twice and a misread field lands in the slot it belongs to; only
+a genuinely different leg extends the total.
+
+Where two readings of one leg disagree, the more frequent wins, and a tie takes
+the **larger** value. Two arguments, and they agree: OCR drops a digit far more
+often than it adds one, so of two equally popular readings the larger is the one
+that was not corrupted; and more minutes is a lower `$/hr` while more miles is
+more running cost, so the larger reading is the one that understates the offer.
+(This used to take the *smaller* value, on the stated grounds that a shorter
+time makes an offer look worse. It does the opposite — `$/hr` is pay over time —
+and one frame reading `23 min` as `3 min` tied one-all and won, reporting a
+$20.51/hr pass as $93.38/hr, the strongest accept of the shift.)
+
+Everything that moves money is decided this way and not by whichever frame
+arrived last: the minutes, each leg's distance, a distance no leg claimed, the
+item count and the deadline. The two flags that decide what may be *done* to the
+distance — whether a duration stood beside it, and whether the card printed a
+decimal point — are rebuilt from the merge too, and the decimal point travels
+with the reading that won the vote rather than across the window.
+
+Addresses are the exception: they are kept rather than voted on, because an
+address is not arithmetic and the failure that matters is not seeing one at all.
 
 This needs more than one look, and the motion gate only fires once per card
 because a card sitting still is not a change. After anything with a payout is
@@ -4127,7 +4214,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4120 checks
+npm test                # all 30 suites, 4174 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

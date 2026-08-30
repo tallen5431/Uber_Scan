@@ -575,6 +575,141 @@ eq('...and the time the lost leg was hiding', _m.get('minutes'), 22.0)
 _n, _m = _episodes([(_LOST, None), (_LOST, None), (_READ, None)])
 eq('...whichever order the good frame arrives in', _m.get('shortATime'), False)
 
+# --- the distance's own two markers describe the merge, not the last frame ---
+#
+# `milesChecked` and `milesHadDecimal` are not numbers, they are the two things
+# rate() consults before it decides whether the distance may be divided by ten.
+# Both came out of `dict(parsed)` — the frame that happened to arrive last — so
+# on a card with no stated duration the answer moved with frame order and
+# nothing else. Neither is a fact about a frame: one describes the merged
+# minutes, the other the merged distance.
+#
+# `_orders` asserts the property rather than a case, because the defect IS the
+# order dependence: every arrival order of the same frames has to agree.
+def _perms(items):
+    if len(items) <= 1:
+        return [tuple(items)]
+    out = []
+    for i, item in enumerate(items):
+        for rest in _perms(items[:i] + items[i + 1:]):
+            out.append((item,) + rest)
+    return out
+
+
+def _agree(name, frames, keys, want):
+    """Assert every distinct arrival order of `frames` merges to the same thing.
+
+    Permuted by position rather than by text, so a card fed to it twice is fed
+    to it twice and the label says which frame went where.
+    """
+    for order in sorted(set(_perms(tuple(range(len(frames)))))):
+        box = OfferAccumulator()
+        last = None
+        for i, at in enumerate(order):
+            last = box.add(P.parse(frames[at]), now=3000.0 + i * 0.5)
+        eq('%s [%s]' % (name, ''.join(str(at) for at in order)),
+           dict((k, last.get(k)) for k in keys), want)
+
+
+# The commonest card this driver is shown. "20 min" is a minutes-only leg and
+# the "2.4 mi" four characters away belongs to it, so a frame that reads the
+# card whole has a duration beside its distance. A frame that loses the "+ 20
+# min" half to glare does not, and reports milesChecked False.
+W_hole = "$7.20 Guaranteed (incl. tips) 2.4 mi + 20 min @ Pickup McDonald's"
+H_alf = "$7.20 Guaranteed (incl. tips) 24 mi @ Pickup McDonald's"
+
+MARKERS = ('minutes', 'miles', 'milesChecked', 'milesHadDecimal')
+
+# One frame that read the duration is enough, in any position — and a lone 24
+# read by two frames does not touch a distance the legs already carry.
+_agree('a duration one frame read is a duration the merge has',
+       [W_hole, H_alf, H_alf], MARKERS,
+       {'minutes': 20.0, 'miles': 2.4,
+        'milesChecked': True, 'milesHadDecimal': True})
+_agree('...and two of them do not make it any more true',
+       [W_hole, W_hole, H_alf], MARKERS,
+       {'minutes': 20.0, 'miles': 2.4,
+        'milesChecked': True, 'milesHadDecimal': True})
+
+# ...and when no frame ever read one, the merge says so, which is what leaves
+# rate() free to check the distance against the deadline instead.
+_agree('a card no frame timed is not checked', [H_alf, H_alf, H_alf], MARKERS,
+       {'minutes': None, 'miles': 24.0,
+        'milesChecked': False, 'milesHadDecimal': False})
+
+# Where the distance came off the legs the flag decides nothing — a leg carries
+# its own minutes, so milesChecked is True and rate() never asks — but it is
+# written to the journal and read by a person, so it still has to say what the
+# card printed rather than something convenient. ORed there, like hasTotal: one
+# frame seeing the point is enough, and losing it is what a glare frame does.
+_BARE = '$16.05 5 min (1 mi) away 18 min (7 mi) trip'
+_POINT = '$16.05 5 min (1.1 mi) away 18 min (7 mi) trip'
+eq('a card can print no decimal point at all',
+   P.parse(_BARE)['milesHadDecimal'], False)
+
+_agree('...and the merge does not invent one', [_BARE, _BARE, _BARE],
+       ('miles', 'milesHadDecimal', 'milesChecked'),
+       {'miles': 8.0, 'milesHadDecimal': False, 'milesChecked': True})
+# The distance itself is still voted on, so the outvoted "1.1" does not move
+# the sum — but the point it printed is remembered, which is the whole
+# difference between this field and the number beside it.
+_agree('...nor lose the one frame that saw it', [_BARE, _BARE, _POINT],
+       ('miles', 'milesHadDecimal', 'milesChecked'),
+       {'miles': 8.0, 'milesHadDecimal': True, 'milesChecked': True})
+
+# The lone distance — the one no leg claimed — is voted on like the minutes and
+# the items. It used to be whichever frame arrived last, and there is no leg
+# duration beside it for check_distance to catch a misread with.
+GOOD_LONE = '$18.55 Add a delivery (+2.4 mi) Deliver by 7:15 PM'
+LOST_LONE = '$18.55 Add a delivery (+24 mi) Deliver by 7:15 PM'
+eq('the two readings really do differ',
+   (P.parse(GOOD_LONE)['miles'], P.parse(LOST_LONE)['miles']), (2.4, 24.0))
+eq('...and disagree about the decimal point too',
+   (P.parse(GOOD_LONE)['milesHadDecimal'],
+    P.parse(LOST_LONE)['milesHadDecimal']), (True, False))
+
+_agree('the popular lone reading wins', [GOOD_LONE, GOOD_LONE, LOST_LONE],
+       ('miles', 'milesHadDecimal'), {'miles': 2.4, 'milesHadDecimal': True})
+
+# And the case the pairing exists for. When the misreading is the popular one
+# the published distance is 24, and the decimal point must NOT be ORed in from
+# the single frame that saw it: that flag is what forbids recovering 24 back to
+# 2.4, so an OR would use one frame's evidence of the error to block the fix for
+# it. Asked of the winning reading's own frames it comes out False, and rate()
+# recovers the distance against the deadline.
+_agree('a decimal point does not survive the reading that carried it',
+       [GOOD_LONE, LOST_LONE, LOST_LONE],
+       ('miles', 'milesHadDecimal'), {'miles': 24.0, 'milesHadDecimal': False})
+
+# ...and the other direction, which is what a blanket "never OR" would break: a
+# card that really says 24.0, read once as 24, still forbids the recovery.
+REAL_LONE = '$18.55 Add a delivery (+24.0 mi) Deliver by 7:15 PM'
+_agree('a card that really says 24.0 keeps its point',
+       [REAL_LONE, REAL_LONE, LOST_LONE],
+       ('miles', 'milesHadDecimal'), {'miles': 24.0, 'milesHadDecimal': True})
+
+# What all of that is spent on. Twenty minutes to the deadline makes 24 miles a
+# 72 mph delivery and 2.4 miles a 7.2 mph one, so the two cards are told apart
+# by the money and not by a flag.
+_CFG = {'target': 25.0, 'costPerMile': 0.30, 'pad': 0,
+        'nowMinutes': 18 * 60 + 55}
+
+
+def _rate(frames):
+    box = OfferAccumulator()
+    last = None
+    for i, text in enumerate(frames):
+        last = box.add(P.parse(text), now=3100.0 + i * 0.5)
+    return P.rate(last, _CFG)
+
+
+eq('a 2.4 mile job is rated as one, however the point read',
+   round(_rate([GOOD_LONE, LOST_LONE, LOST_LONE])['perHour'], 2), 53.49)
+eq('...and so is the same card read right',
+   round(_rate([GOOD_LONE, GOOD_LONE, LOST_LONE])['perHour'], 2), 53.49)
+eq('...while a card that really is 24 miles is charged for them',
+   round(_rate([REAL_LONE, REAL_LONE, LOST_LONE])['perHour'], 2), 34.05)
+
 # What must still separate two offers, and does not depend on the clock.
 _n, _ = _episodes([(CARD, 1000.0), (CARD, 1003.0), (CARD, 1006.0),
                    (OTHER, 1600.0), (OTHER, 1603.0)])
