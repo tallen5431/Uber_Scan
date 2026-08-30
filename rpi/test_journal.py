@@ -677,6 +677,29 @@ for _name, _body in _cases.items():
        _j.count(), len(_j.rows()))
 shutil.rmtree(_endwork, ignore_errors=True)
 
+# --- which end is which -----------------------------------------------------
+# A row records what the card printed AND which of those is the shop and which
+# is somebody's front door, because that is what a second offer gets judged
+# against. Derived from the row's own `places` so a trimmed list stays honest.
+_ends = JR.row_for(
+    P.parse("Exclusive x $11.88 Guaranteed (incl. tip) 35 min (17.9 mi) total "
+            "| Mellow Mushroom (Acworth) \\ Lakeview Ter & Windmill Dr, Dallas"),
+    {'ready': True, 'state': 'no'}, at=1000)
+eq('a row names the shop it starts at', _ends['pickup'], 'Mellow Mushroom (Acworth)')
+eq('...and the door it ends at', _ends['dropoff'], 'Lakeview Ter & Windmill Dr, Dallas')
+
+_shoponly = JR.row_for(
+    P.parse("$15.60 Guaranteed (incl. tips) 7.9 mi + 37 min @ Retail pickup GoPuff (Drive)"),
+    {'ready': True, 'state': 'no'}, at=1000)
+eq('a card that named only the shop records no dropoff', _shoponly['dropoff'], None)
+
+_trimmed = JR.row_for(
+    P.parse("Exclusive x $11.88 Guaranteed (incl. tip) 35 min (17.9 mi) total "
+            "| Mellow Mushroom (Acworth) \\ Lakeview Ter & Windmill Dr, Dallas"),
+    {'ready': True, 'state': 'no'}, at=1000, places=[])
+eq('...and a row whose places were trimmed away records neither',
+   (_trimmed['pickup'], _trimmed['dropoff']), (None, None))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)

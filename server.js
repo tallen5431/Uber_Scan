@@ -623,6 +623,12 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    // card silently mixed into it and no way to tell which row
                    // it is — which is the entire reason they hid it.
                    'suspect', 'doubt', 'accepted', 'hidden',
+                   // Which end is which. `places` below is what the card
+                   // printed; these say which of them is the shop and which is
+                   // somebody's front door, so an export can be replayed
+                   // through Advice.sameArea to see what the rig would have
+                   // said about stacking any two of these offers.
+                   'pickup', 'dropoff',
                    // Where it went, joined with a semicolon so one cell holds
                    // both ends of a ride without breaking the comma-separated
                    // file it sits in.

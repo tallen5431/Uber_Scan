@@ -727,6 +727,14 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # copied to a machine at home, and `"keepPlaces": false` in the settings
         # turns it off without touching anything else.
         'places': list(places or []),
+        # Which of those is which. `places` is what the card printed and is what
+        # the offers page shows; these two say which end is the shop and which
+        # is somebody's front door, which is the whole basis on which a second
+        # order gets judged against the one already in the car. Derived here
+        # rather than carried from the reading so that a row rebuilt from a
+        # trimmed `places` list stays consistent with it. See OP.find_dropoff.
+        'pickup': OP.find_pickup(places),
+        'dropoff': OP.find_dropoff(places),
         # A delivery deadline, as minutes since midnight, and whether the time
         # this offer was judged over came from that rather than from a stated
         # duration. Different claims about the same field, and a record that

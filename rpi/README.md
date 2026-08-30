@@ -3186,6 +3186,12 @@ honest limit, not a bug — it is cards where one dropoff carried neither a town
 nor a quadrant, and half the time saying so is better than a guess that costs an
 hour.
 
+The journal and the CSV export record both ends beside `places`, so a shift can
+be replayed through `sameArea` afterwards and the rule argued with on real data
+rather than on the four pairs above. That is not decoration: the pairing itself
+lives in the web server's memory and never reaches a file, so without the two
+ends written down a test shift produces no evidence about this feature at all.
+
 One trap worth writing down. A quadrant has to be a word of its own. 28 of the
 places on file contain an ALL-CAPS word — `HOME DEPOT 0156`, `GOODFELLAS PIZZA &
 WINGS`, `MIDTOWN` — and **KENNESAW has an NE inside it**. Without the word
@@ -4058,7 +4064,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4089 checks
+npm test                # all 30 suites, 4093 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -4085,7 +4091,7 @@ python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
 python3 rpi/test_exposure.py    # 133 on flicker, brightness, gain and
                                 #     exposure, and on both ends of running out
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     # 172 on keeping one row per offer, and on a
+python3 rpi/test_journal.py     # 176 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
