@@ -3135,6 +3135,60 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### Two screens, one card, two answers
+
+Found by pointing five adversaries at work that had already shipped, with one
+instruction: break it. All five landed something.
+
+**The browser doubted a reading it had already repaired.** `rate()` reaches a
+verdict with `miles` — the distance after its own recovery pass — and then asks
+`doubt()` whether to stand behind it. The Python passed `miles`. The JavaScript
+passed `parsed.miles`, the number *before* the repair. On a delivery card with
+19 minutes left on the deadline:
+
+    $8.25 Guaranteed (incl. tip)  24 mi  Deliver by 6:05 PM
+
+both ports publish 2.4 miles, charge $0.72 of mileage on 2.4, and print
+$23.78/hr — and then the Pi says CLOSE CALL while the browser withholds the
+verdict entirely, because 24 miles over 19 minutes is 75.8 mph. Not the cautious
+port; the incoherent one. `d4cb918` changed the Python line and touched the
+JavaScript file in the same commit without making the matching change, and the
+shared corpus missed it by a hair: its fixture for that card sits at 25 minutes,
+where the original speed is under `doubt()`'s limit, and asserts miles and cost
+but never `state`. It does now.
+
+**A guard failing in both directions at once.** The real-digit rule two sections
+up was applied to the lone distance as well, and there it has no backstop:
+refusing the token leaves the card with *no* distance, so no mileage is charged,
+the rate goes UP, and the verdict is capped. `l.S mi + 25 min` on a $12.50 offer
+published **$30.00/hr CLOSE CALL** where the truth is 1.5 miles and a **$28.92/hr
+ACCEPT** — a real green light clipped, and the number it was clipped to inflated.
+A `1` lost to an `l` or an `I` is this OCR's commonest single confusion.
+
+The amendment is the shape of the thing rather than a longer list: the badges the
+rule was written against are bare — `Smi`, `Lmi`, `Imi`, `4, Smi ~ fast charger`
+— while a real distance on this card prints a decimal point. A token that kept
+its point kept its structure, so it is read; a bare one is still refused. Zero of
+the 604 cards change either way; this closes a hole rather than fixing an
+observed error.
+
+**And a correction to the section below.** Its first version said this driver's
+fastest real offer runs at 43 mph. That was the fastest of one shift's *green*
+offers, not of all of them. The fastest confirmed offer on file is 41.4 miles in
+47 minutes — 52.9 mph — so `MAX_MPH` at 55 has about two miles an hour of
+headroom, not twelve.
+
+The attack that produced that correction also argued the recovery should not fire
+between 55 and 75 mph at all. It was tried, and the corpus refused it: `$7.09
+34 min (36 mi) total` is a real card at 63.5 mph whose distance really is 3.6
+miles, and three long-standing fixtures rest on it. Every *confirmed* real offer
+on file sits at or below 52.9 mph, and the one row above the line — 115.6 miles
+in 123 minutes — had already been marked uncertain by the rig itself. So
+recovery in that band is right for this rig on the evidence available, and the
+change was reverted rather than shipped. The exposure is real and stated here
+rather than closed: a genuine offer above 55 mph whose distance printed no
+decimal would be cut to a tenth of itself.
+
 ### One card, filed as five offers
 
 A journal row is an offer the rig finished with. Two rows carrying the same
@@ -3899,7 +3953,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4020 checks
+npm test                # all 30 suites, 4042 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3913,11 +3967,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 576 checks, the shared corpus
+node tests/corpus.test.js       # 587 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       # 122 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 609 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 620 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 122 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place

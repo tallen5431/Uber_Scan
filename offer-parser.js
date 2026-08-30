@@ -933,7 +933,15 @@
       // "4, Smi ~ fast charger" is on a real card, and S reads as 5. A lone
       // distance is already the least anchored number the parser takes; one
       // spelled entirely in stand-ins is not anchored at all.
-      if (lone && /\d/.test(lone[1])) {
+      //
+      // ...unless it printed a decimal point, which is structure the badge does
+      // not have. The badge shapes are bare - "Smi", "Lmi", "Imi" - while a
+      // real distance reads "l.S" or "ll.l", and a "1" lost to an l or an I is
+      // this OCR's commonest single confusion. Without this clause the card has
+      // NO distance, so no mileage is charged, the rate goes UP and the verdict
+      // is capped: "l.S mi + 25 min" on a $12.50 offer published $30.00/hr
+      // CLOSE CALL where the truth is 1.5 miles and a $28.92/hr ACCEPT.
+      if (lone && (/\d/.test(lone[1]) || LONE_DECIMAL.test(lone[1]))) {
         var v = toNumber(lone[1]);
         if (v !== null && v > 0 && v <= 500) {
           miles = Math.round(v * 100) / 100;
@@ -1227,7 +1235,19 @@
     // Judged on what the card said, not on what the arithmetic made of it:
     // `pad` and the shopping allowance are the driver's own additions and a
     // card is not misread for having them applied.
-    var why = doubt(parsed.pay, cardMinutes, parsed.miles);
+    //
+    // `miles`, not `parsed.miles`: the distance this verdict was actually
+    // reached with, including the recovery a few lines up. This line said
+    // `parsed.miles` and the Python said `miles`, so on a delivery card the
+    // browser doubted a reading it had already repaired - it published 2.4
+    // miles, charged $0.72 of mileage on 2.4, printed the rate, and then
+    // withheld the verdict because the number BEFORE the repair was 75.8 mph.
+    // The Pi showed CLOSE CALL and the phone showed no verdict at all, for the
+    // same card on the same clock. Introduced by d4cb918, which changed the
+    // Python line and touched this file without making the matching change;
+    // the shared corpus missed it because its fixture for that card asserts
+    // miles and cost but never `state`.
+    var why = doubt(parsed.pay, cardMinutes, miles);
 
     return {
       ready: true,

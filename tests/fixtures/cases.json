@@ -1139,6 +1139,25 @@
    }
   },
   {
+   "name": "...but one that printed a decimal point kept its structure",
+   "_why": "A '1' lost to an l or an I is this OCR's commonest single confusion, and the badge shapes the stand-in rule was written against are bare — 'Smi', 'Lmi', 'Imi'. Refusing 'l.S mi' leaves the card with NO distance, so no mileage is charged, the rate goes UP and the verdict is capped: $30.00/hr CLOSE CALL where the truth is 1.5 miles and a $28.92/hr ACCEPT. A guard that clips a real green light and inflates the number it clips it to is failing in both directions at once.",
+   "text": "$12.50 Guaranteed (incl. tips) l.S mi + 25 min @ Pickup Pizza Hut",
+   "expect": {
+    "pay": 12.5,
+    "minutes": 25,
+    "miles": 1.5
+   }
+  },
+  {
+   "name": "...and two of them together, which is one confusion, not three",
+   "text": "$12.50 Guaranteed (incl. tips) ll.l mi + 25 min @ Pickup Hungry AF",
+   "expect": {
+    "pay": 12.5,
+    "minutes": 25,
+    "miles": 11.1
+   }
+  },
+  {
    "name": "...and the same card with a real digit still reads its distance",
    "text": "$8.50 Guaranteed (incl. tips) 5 mi + 25 min @ Pickup Crumbl",
    "expect": {
@@ -1369,6 +1388,24 @@
    "expect": {
     "state": "no",
     "uncosted": true
+   }
+  },
+  {
+   "name": "...and the verdict is judged on the distance the repair produced",
+   "_why": "The same card with less time left. 24 mi over the 19 minutes to the deadline is 75.8 mph, which doubt() refuses — but the reading published is the REPAIRED 2.4 mi, and that is what the verdict must be reached with. This pinned nothing until it was written down: rate() passed the recovered distance in Python and the original one in JavaScript, so the Pi showed CLOSE CALL and the browser showed no verdict at all for the same card on the same clock. The fixture above misses it because 25 minutes puts the original under doubt()'s speed limit, and because it never asserts `state`.",
+   "text": "$8.25 Guaranteed (incl. tip) 24 mi Deliver by 6:05 PM",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3,
+    "nowMinutes": 1066
+   },
+   "expect": {
+    "miles": 2.4,
+    "cost": 0.72,
+    "milesCorrected": true,
+    "doubt": null,
+    "state": "warn"
    }
   },
   {

@@ -1100,7 +1100,20 @@ def parse(raw_text):
         # "4, Smi ~ fast charger" is on a real card, and S reads as 5. A lone
         # distance is already the least anchored number the parser takes; one
         # spelled entirely in stand-ins is not anchored at all.
-        if lone and HAS_DIGIT.search(lone.group(1)):
+        #
+        # ...unless it printed a decimal point, which is structure the badge
+        # does not have. The badge shapes are bare — "Smi", "Lmi", "Imi" — while
+        # a real distance on this card reads "l.S" or "ll.l", and a "1" lost to
+        # an l or an I is this OCR's commonest single confusion. Without this
+        # clause the card has NO distance, so no mileage is charged, and the
+        # rate goes UP while the verdict is capped: "l.S mi + 25 min" on a
+        # $12.50 offer published $30.00/hr CLOSE CALL where the truth is 1.5
+        # miles and a $28.92/hr ACCEPT. That is a guard failing in both
+        # directions at once — clipping a real green light and inflating the
+        # number it clips it to — which is exactly what the same rule refuses
+        # to do to a leg's distance a few hundred lines up.
+        if lone and (HAS_DIGIT.search(lone.group(1))
+                     or LONE_DECIMAL.search(lone.group(1))):
             v = to_number(lone.group(1))
             if v is not None and 0 < v <= 500:
                 miles = round2(v)
