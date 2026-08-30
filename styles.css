@@ -217,6 +217,14 @@ html, body {
 .stackline.go { color: var(--go); }
 .stackline.warn { color: var(--warn); }
 .stackline.no { color: var(--muted); }
+/* A second job that ends somewhere else is not a shade of the same answer, so
+   it is not a shade of the same colour. The range above is still true — it is
+   the range that is being qualified — but the driver should read it from its
+   worst end, and the one word that says so has to survive being glanced at
+   from the driver's seat. Overrides the state colour deliberately: geography
+   outranks the arithmetic here, because the arithmetic's optimistic end is
+   exactly what geography has just ruled out. */
+.stackline.elsewhere { color: var(--warn); }
 .stackline[hidden] { display: none; }
 
 /* The button that records a decision the rig cannot see.

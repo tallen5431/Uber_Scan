@@ -549,6 +549,36 @@
     return parts.join(' ').replace(/^[\s.,\-;:|]+|[\s.,\-;:|]+$/g, '');
   }
 
+  /* A name the card put a bracket after - "Kroger (Shiloh Square)", "GoPuff
+   * (Drive)". That is how these cards write a shop, and it is the one thing
+   * that distinguishes the place a job STARTS from the place it ENDS. */
+  var PLACE_IS_A_SHOP = /\([^)]{2,40}\)\s*$/;
+
+  /* Where the job ENDS, or null when the card did not say.
+   *
+   * The driver's own description: "the drop off locations will always pretty
+   * much be someone's home address and not the restaurant". So the dropoff is
+   * the last place the card named, unless that place is a shop - and a shop is
+   * a name the card bracketed, which is the card's own grammar rather than a
+   * list of chains. Over 562 cards naming any place the last is a bracketed
+   * shop on 9, every one a card where only the merchant read at all. */
+  function findDropoff(places) {
+    for (var i = (places || []).length - 1; i >= 0; i--) {
+      if (PLACE_IS_A_SHOP.test(places[i])) continue;
+      return places[i];
+    }
+    return null;
+  }
+
+  /* Where it STARTS - for showing rather than judging, because the driver does
+   * not take a second order whose pickup is far away in the first place. */
+  function findPickup(places) {
+    for (var i = 0; i < (places || []).length; i++) {
+      if (PLACE_IS_A_SHOP.test(places[i])) return places[i];
+    }
+    return (places && places.length) ? places[0] : null;
+  }
+
   function findPlaces(text, legs) {
     var out = [];
     function keep(value) {
@@ -1016,6 +1046,7 @@
     dist.corrected = dist.corrected || checked.corrected;
     dist.uncertain = dist.uncertain || checked.uncertain;
 
+    var places = findPlaces(text, legs);
     return {
       pay: pay,
       minutes: minutes,
@@ -1026,7 +1057,12 @@
       deliverBy: deadline,
       // Where it goes, for finding this offer again months later. Empty unless
       // the card printed something anchored enough to trust.
-      places: findPlaces(text, legs),
+      places: places,
+      // The two ends, named. `places` is what the card said; these say which of
+      // them is which, so a second offer can be judged against the one already
+      // in the car. See findDropoff, which is the half that decides.
+      pickup: findPickup(places),
+      dropoff: findDropoff(places),
       // The legs behind the sum, so a caller holding readings from several
       // frames can merge the ones a single frame missed.
       legDetail: used.map(function (l) {

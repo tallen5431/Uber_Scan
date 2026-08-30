@@ -989,6 +989,53 @@ def trim_place(value):
     return ' '.join(parts).strip(' .,-;:|')
 
 
+# A name the card put a bracket after — "Kroger (Shiloh Square)", "GoPuff
+# (Drive)", "McDonald's® (Wade Green)". That is how these cards write a shop,
+# and it is the one thing that distinguishes the place a job STARTS from the
+# place it ENDS.
+PLACE_IS_A_SHOP = re.compile(r'\([^)]{2,40}\)\s*$', ASCII)
+
+
+def find_dropoff(places):
+    """Where the job ENDS, or None when the card did not say.
+
+    The driver's own description of these cards: "the drop off locations will
+    always pretty much be someone's home address and not the restaurant". So
+    the dropoff is the last place the card named, unless that place is a shop —
+    and a shop is a name the card bracketed, which is the card's own grammar
+    rather than a list of chains.
+
+    Measured over 562 cards that name any place: the last one is a bracketed
+    shop on 9 of them, every one a card where only the merchant read at all, so
+    the honest answer there is None rather than the restaurant.
+
+    Two other shapes land here and both come out right. A ride card names the
+    pickup street and then the dropoff street, so the last is still the end. And
+    an address split across two entries — "Northeast Expy NE & Westcheste" then
+    "Ln NE, Atlanta" — leaves the tail last, which is the half carrying the town.
+    """
+    for place in reversed(places or []):
+        if PLACE_IS_A_SHOP.search(place):
+            continue
+        return place
+    return None
+
+
+def find_pickup(places):
+    """Where the job STARTS, or None when the card did not say.
+
+    The mirror of find_dropoff and the weaker of the two, which is the right
+    weighting: the driver does not take a second order whose pickup is far away
+    in the first place, so this is for showing rather than for judging. A shop
+    is what the card brackets; when nothing is bracketed the first place is the
+    pickup, because that is the order a card prints its journey in.
+    """
+    for place in places or []:
+        if PLACE_IS_A_SHOP.search(place):
+            return place
+    return (places or [None])[0]
+
+
 def find_places(text, legs):
     """Where the job goes, as the card writes it. Never invented.
 
@@ -1207,6 +1254,7 @@ def parse(raw_text):
     corrected = corrected or checked_corrected
     uncertain = uncertain or checked_uncertain
 
+    places = find_places(text, legs)
     return {
         'pay': pay,
         'minutes': minutes,
@@ -1217,7 +1265,13 @@ def parse(raw_text):
         'deliverBy': deadline,
         # Where it goes, for finding this offer again months later. Empty
         # unless the card actually printed something anchored enough to trust.
-        'places': find_places(text, legs),
+        'places': places,
+        # The two ends, named. `places` is what the card said and is what the
+        # journal and the offers page show; these say which of them is which,
+        # so a second offer can be judged against the one already in the car.
+        # See find_dropoff, which is the half that decides.
+        'pickup': find_pickup(places),
+        'dropoff': find_dropoff(places),
         # The legs behind the sum, so a caller holding readings from several
         # frames can merge the ones a single frame missed.
         # `labelled` travels with them. is_whole re-runs

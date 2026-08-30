@@ -638,6 +638,73 @@ function offer(atMinutes, pay, minutes, cost) {
   ok_('mileage is deducted from the pair', free.pay > s.pay);
 })();
 
+/* ---- where the two jobs end ---------------------------------------------
+ *
+ * Not a distance. The driver's ask was "close enough so that I don't take two
+ * orders that end up in completely different places", so the only output that
+ * matters is a veto, and it is deliberately asymmetric: a wrong "elsewhere"
+ * costs a stack that could have been taken, a wrong "near" costs an hour and a
+ * late delivery. All the addresses below are the driver's own, off real cards. */
+
+eq('two dropoffs in the same town are near',
+   A.sameArea('Park Pl, Atlanta', 'Cobalt Dr NW & Ember Ln NW, Atlanta'), 'near');
+eq('...and in the same town and quadrant, still near',
+   A.sameArea('Hamby Place Dr NW & Travistock Pl NW, Acworth',
+              'Brookstone Walk NW & Downington Trl NW, Acworth'), 'near');
+eq('a different town is somewhere else',
+   A.sameArea('Hamby Place Dr NW & Travistock Pl NW, Acworth',
+              'Lakeview Ter & Windmill Dr, Dallas'), 'elsewhere');
+eq('...the twenty-mile pair the driver actually stacked',
+   A.sameArea('Cochran Ridge Rd & Jewel Cole Rd, Hiram',
+              'Chastain Meadows Pkwy NW, Marietta'), 'elsewhere');
+eq('...and the same town on opposite sides of it is too',
+   A.sameArea('Cobalt Dr NW & Ember Ln NW, Atlanta',
+              'E Twin Oaks Dr SE & Spruce Dr, Smyrna'), 'elsewhere');
+
+// Atlanta alone covers 250 of the 960 places the parser reads off these cards,
+// so the town on its own is far too coarse. The quadrant is what splits it, and
+// the split is real: the Atlanta dropoffs on file run NE 50, NW 20, SE 10, SW 5.
+eq('the same town on opposite quadrants is somewhere else',
+   A.sameArea('Cobalt Dr NW & Ember Ln NW, Atlanta',
+              'Ormewood Ave SE & Woodland Ave SE, Atlanta'), 'elsewhere');
+// A quadrant has to be a word of its own. 28 of the places on file contain an
+// ALL-CAPS word - "HOME DEPOT 0156", "GOODFELLAS PIZZA & WINGS", "MIDTOWN" - and
+// KENNESAW has an NE inside it. A town that shouts must not donate a compass
+// point it never printed, or two dropoffs in the same town read as opposite
+// sides of it.
+eq('a capitalised town does not donate a quadrant',
+   A.sameArea('HOME DEPOT 0156 I Stonewall Dr, KENNESAW',
+              'Cobb Place Ln NW, Kennesaw'), 'near');
+
+// OCR shouts: this driver's cards carry "COBB PKWY & MARS" and "shallowford rd".
+// A town that came back in capitals is the same town.
+eq('a town in capitals is the same town',
+   A.sameArea('Cobb Pkwy NW, ACWORTH', 'Main St NW, Acworth'), 'near');
+
+// Half of real pairs land here, and saying nothing is the answer they get.
+eq('a dropoff the card did not name says nothing',
+   A.sameArea('Luckie St NW & Spring St NW, Atlanta', null), null);
+eq('...nor does a place with neither a town nor a quadrant',
+   A.sameArea('Somewhere', 'Elsewhere'), null);
+eq('a shared quadrant alone is a whole side of the metro, not a promise',
+   A.sameArea('George Busbee Pkwy NW', 'Cobb Place Ln NW, Kennesaw'), null);
+
+// The veto rides on stack(), which is what the driving screen reads.
+var heldFar = { pay: 12, minutes: 30, cost: 1, acceptedAt: 0,
+                dropoff: 'Cochran Ridge Rd & Jewel Cole Rd, Hiram' };
+var offerFar = { pay: 10, minutes: 20, cost: 1,
+                 dropoff: 'Chastain Meadows Pkwy NW, Marietta' };
+var far = A.stack(heldFar, offerFar, { target: 25 }, 0);
+eq('stack() reports where the pair ends', far.ends, 'elsewhere');
+eq('...and still reports the money, which the geography only qualifies',
+   typeof far.worst === 'number' && typeof far.best === 'number', true);
+var near = A.stack(heldFar,
+   { pay: 10, minutes: 20, cost: 1, dropoff: 'Jewel Cole Rd, Hiram' },
+   { target: 25 }, 0);
+eq('...and says so when they end in the same place', near.ends, 'near');
+var blind = A.stack(heldFar, { pay: 10, minutes: 20, cost: 1 }, { target: 25 }, 0);
+eq('...and says nothing when the second card named nowhere', blind.ends, null);
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);

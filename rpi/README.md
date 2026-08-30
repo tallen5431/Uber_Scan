@@ -3135,6 +3135,64 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### Does the second order END anywhere near the first?
+
+`stack()` has always answered half the question. It knows what two jobs pay
+together and returns an honest RANGE — `worst` where the times simply add,
+`best` where the new job rides along inside the old one — because which of those
+is true depends on geography it could not see. This is that missing half.
+
+The driver put the requirement precisely: *"close enough so that I don't take two
+orders that end up in completely different places"*. Not a distance. A veto.
+And: *"the drop off locations will always pretty much be someone's home address
+and not the restaurant"*, which turns out to be the rule the parser needed.
+
+**Which end is which.** `find_places` returned an unlabelled list, and on some
+cards the last entry is the merchant. A shop is a name the card bracketed —
+`Kroger (Shiloh Square)`, `GoPuff (Drive)`, `McDonald's® (Wade Green)` — so the
+dropoff is the last place that is *not* bracketed. Over 562 cards naming any
+place, the last is a bracketed shop on 9, every one a card where only the
+merchant read at all, so the honest answer there is nothing rather than a
+restaurant. A ride card names the pickup street then the dropoff street, so the
+last is still the end; an address split across two entries leaves the tail last,
+which is the half carrying the town.
+
+**Where a place is, as coarsely as the card allows.** Two signals, both printed:
+the town after the last comma (65% of places) and the compass quadrant these
+addresses carry (47%). A town alone is far too coarse — Atlanta is 250 of the
+960 places on file — and the quadrant is what splits it: the Atlanta dropoffs
+run NE 50, NW 20, SE 10, SW 5. Together they are about the granularity of *side
+of town*, which is what was asked for.
+
+**Deliberately asymmetric**, because the two mistakes cost different amounts. A
+wrong "elsewhere" costs a stack that could have been taken. A wrong "near" costs
+an hour, a late delivery and a rating. So `near` is said only when the two agree
+on everything they both state, and `elsewhere` the moment they disagree on
+anything. A shared quadrant with no town is a whole side of the metro and
+promises nothing.
+
+Measured against the driver's own stacked pairs — every one correct:
+
+| the two dropoffs | verdict |
+|---|---|
+| Park Pl, **Atlanta** → Cobalt Dr **NW, Atlanta** | near |
+| Cobalt Dr NW, **Atlanta** → E Twin Oaks Dr SE, **Smyrna** | elsewhere |
+| Cochran Ridge Rd, **Hiram** → Chastain Meadows Pkwy NW, **Marietta** | elsewhere — the twenty-mile pair |
+| Luckie St NW, Atlanta → *Taco Bell (930 Spring Street)* | nothing said |
+
+Over all 10,007 pairs of offers that appeared within twenty minutes of each
+other: **38% elsewhere, 12% near, 50% nothing said.** That last number is the
+honest limit, not a bug — it is cards where one dropoff carried neither a town
+nor a quadrant, and half the time saying so is better than a guess that costs an
+hour.
+
+One trap worth writing down. A quadrant has to be a word of its own. 28 of the
+places on file contain an ALL-CAPS word — `HOME DEPOT 0156`, `GOODFELLAS PIZZA &
+WINGS`, `MIDTOWN` — and **KENNESAW has an NE inside it**. Without the word
+boundary a shouting town donates a compass point it never printed, and two
+dropoffs in the same town read as opposite sides of it. Twelve mutations, twelve
+caught, and that one needed a test of its own.
+
 ### The leg that lost its minutes, and took its distance with it
 
 `legs_short_a_distance` catches a leg that lost its miles. This is its mirror,
@@ -4000,7 +4058,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4064 checks
+npm test                # all 30 suites, 4089 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -4014,11 +4072,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 592 checks, the shared corpus
+node tests/corpus.test.js       # 598 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
-node tests/advice.test.js       # 122 on what line to tell a driver to draw
+node tests/advice.test.js       # 137 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 625 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 631 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 132 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place

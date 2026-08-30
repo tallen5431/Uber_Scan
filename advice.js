@@ -217,6 +217,51 @@
    * is not earning the entire fare in the last five minutes, and treating them
    * as if they were makes "just finish it" beat everything on earth in the last
    * moments of every order. */
+  /* Where a place is, as coarsely as the card honestly allows.
+   *
+   * Two signals, both printed on the card and neither invented: the town after
+   * the last comma, and the compass quadrant these addresses carry - NW, NE,
+   * SW, SE. Of 960 places the parser reads off this driver's cards, 65% end in
+   * a town and 47% carry a quadrant.
+   *
+   * A town alone is coarse: "Atlanta" covers 250 of those places. The quadrant
+   * is what splits it, and it splits it well - the Atlanta dropoffs on file run
+   * NE 50, NW 20, SE 10, SW 5. Together they are about the granularity of "side
+   * of town", which is exactly what was asked for: not a distance, just enough
+   * not to take two orders that end up in completely different places. */
+  var PLACE_TOWN = /,\s*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\s*$/;
+  var PLACE_QUADRANT = /\b(NW|NE|SW|SE)\b/;
+
+  function area(place) {
+    if (typeof place !== 'string' || !place) return null;
+    var t = PLACE_TOWN.exec(place);
+    var q = PLACE_QUADRANT.exec(place);
+    if (!t && !q) return null;
+    return { town: t ? t[1].toLowerCase() : null, quadrant: q ? q[1] : null };
+  }
+
+  /* Do these two jobs end anywhere near each other?
+   *
+   * Deliberately asymmetric, because the two mistakes cost different amounts. A
+   * wrong "elsewhere" costs a stack the driver could have taken. A wrong
+   * "near" costs an hour, a late delivery and a rating. So "near" is only said
+   * when the two agree on everything they both state, and "elsewhere" the
+   * moment they disagree on anything.
+   *
+   * Returns 'near', 'elsewhere', or null for "the card did not say enough" -
+   * which is half the time on real pairs, and is the honest answer rather than
+   * a guess dressed up as one. */
+  function sameArea(a, b) {
+    var x = area(a), y = area(b);
+    if (!x || !y) return null;
+    if (x.town && y.town && x.town !== y.town) return 'elsewhere';
+    if (x.quadrant && y.quadrant && x.quadrant !== y.quadrant) return 'elsewhere';
+    if (x.town && y.town) return 'near';
+    // Same quadrant, no town on one of them: a quadrant is a whole side of the
+    // metro, and on its own that is not enough to promise anything.
+    return null;
+  }
+
   function stack(active, offer, settings, now) {
     if (!active || !offer) return null;
     var target = (settings && typeof settings.target === 'number')
@@ -263,6 +308,13 @@
       // the claim that does not depend on the geography, so it is the only one
       // stated without a hedge.
       sure: worst >= alone,
+      // Where the two jobs END, compared as coarsely as the cards allow. This
+      // is the half of the question the time arithmetic above cannot reach:
+      // `maxMinutes` assumes nothing is shared and `minMinutes` assumes the
+      // new job rides along inside the old one, and which of those is true is
+      // decided by geography. 'elsewhere' means the range above should be read
+      // from its worst end. See sameArea.
+      ends: sameArea(active && active.dropoff, offer && offer.dropoff),
       state: worst >= target ? 'go' : (best >= target ? 'warn' : 'no')
     };
   }
@@ -608,6 +660,6 @@
 
   return { advise: advise, usable: usable, runs: runs, replay: replay,
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
-           unexplained: unexplained, stack: stack,
+           unexplained: unexplained, stack: stack, sameArea: sameArea, area: area,
            THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT };
 }));

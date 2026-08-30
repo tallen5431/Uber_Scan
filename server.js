@@ -496,7 +496,9 @@ function holding(now) {
 function withStack(read, now) {
   if (!read || !read.ready) return read;
   var held = holding(now);
-  read.holding = held ? { pay: held.pay, minutes: held.minutes } : null;
+  read.holding = held
+    ? { pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null }
+    : null;
   read.stack = held
     ? Advice.stack(held, read, { target: read.target, band: read.band,
                                  costPerMile: read.costPerMile }, now)
@@ -1348,6 +1350,12 @@ function route(req, res) {
                 ? scanner.offer.billedMinutes : scanner.offer.minutes,
               miles: scanner.offer.miles,
               cost: scanner.offer.cost,
+              // Where this one ENDS, so the next offer can be judged on more
+              // than the clock. See Advice.sameArea: two pickups on the same
+              // block are ordinary, two dropoffs twenty miles apart is the
+              // trap, and only the second is worth refusing over.
+              dropoff: scanner.offer.dropoff || null,
+              pickup: scanner.offer.pickup || null,
               acceptedAt: Date.now()
             };
           } else if (scanner.holding && scanner.holding.id === note.id) {

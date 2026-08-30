@@ -915,6 +915,30 @@
    }
   },
   {
+   "name": "the card says which end is which: a shop is bracketed, a home is not",
+   "_why": "The driver: \"the drop off locations will always pretty much be someone's home address and not the restaurant\". A shop is a name the card bracketed, which is the card's own grammar rather than a list of chains.",
+   "text": "Acworth Dallas Maem Exclusive x $11.88 Guaranteed (incl. tip) \u00a9 35 min (17.9 mi) total | Mellow Mushroom (Acworth) \\ Lakeview Ter & Windmill Dr, Dallas",
+   "expect": {
+    "pickup": "Mellow Mushroom (Acworth)",
+    "dropoff": "Lakeview Ter & Windmill Dr, Dallas"
+   }
+  },
+  {
+   "name": "...a ride card names two streets, and the last is still the end",
+   "text": "$8.03 * 490 9 min (3.9 mi) Celebration Blvd, Acworth Avg. wait time at pickup: 1 min 10 mins (4.6 mi) N Cobb Pkwy NW, Acworth",
+   "expect": {
+    "pickup": "Celebration Blvd, Acworth",
+    "dropoff": "N Cobb Pkwy NW, Acworth"
+   }
+  },
+  {
+   "name": "...and a card that named only the shop has no dropoff at all",
+   "text": "$15.60 Guaranteed (incl. tips) 7.9 mi + 37 min @ Retail pickup GoPuff (Drive)",
+   "expect": {
+    "dropoff": null
+   }
+  },
+  {
    "name": "a card printing its distance first states a whole leg",
    "text": "$7.50 Guaranteed (incl. tips) 8.0 mi + 25 min @ Pickup Crumbl",
    "expect": {

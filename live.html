@@ -684,7 +684,17 @@
       // finishing what you have, even sharing nothing. Worth saying out loud
       // because it is the only part of this a driver can act on without
       // checking the map.
-      + (s.sure ? ' \u00b7 beats finishing alone' : '');
+      + (s.sure ? ' \u00b7 beats finishing alone' : '')
+      // Where the two jobs END, which is the half the arithmetic above cannot
+      // reach: the range assumes either nothing is shared or the new job rides
+      // along inside the old one, and geography decides which. Said in the
+      // card's own words rather than a distance, because a town and a compass
+      // quadrant are all these cards print. Nothing is said when they did not
+      // print enough - about half the time - because a guess here costs an
+      // hour and a late delivery. See Advice.sameArea.
+      + (s.ends === 'elsewhere' ? ' \u00b7 ENDS ELSEWHERE'
+         : s.ends === 'near' ? ' \u00b7 ends nearby' : '');
+    if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
     el.stack.hidden = false;
   }
 
