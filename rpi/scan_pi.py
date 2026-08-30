@@ -1465,10 +1465,14 @@ def main():
         offer_log = JR.OfferLog(
             JR.Journal(args.journal),
             keep_places=cfg.get('settings', {}).get('keepPlaces', True) is not False)
-        kept = offer_log.journal.rows()
+        # Counted, not built. This line says how many offers are on record and
+        # it used to ask for every one of them as a Python object to find out —
+        # 68MB on a year of driving, at every startup, on a Pi, beside a
+        # resume() that was doing the same thing again.
+        kept = offer_log.journal.count()
         resumed = offer_log.resume()
         log('journal: %s (%d offer%s so far)%s'
-            % (args.journal, len(kept), '' if len(kept) == 1 else 's',
+            % (args.journal, kept, '' if kept == 1 else 's',
                ', still on the last one' if resumed else ''))
     def digest(out, frame):
         """Everything a read means, once the reading itself is done.

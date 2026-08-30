@@ -86,6 +86,13 @@ RESUME_WINDOW_MS = 90 * 1000
 SANE_PAY = OP.SANE_PAY
 SANE_MINUTES = OP.SANE_MINUTES
 
+# How much of the tail to read at a time when walking backwards for the last
+# offer. Big enough that the ordinary case — an offer within a few rows of the
+# end — is one read, small enough that a file with a very long run of
+# annotations on it is not pulled into memory whole, which is the thing the
+# backwards walk exists to avoid.
+_TAIL_BLOCK = 64 * 1024
+
 SCHEMA = 1
 
 
@@ -196,11 +203,88 @@ class Journal:
         an offer does not. Handing one of those back would have the scanner
         resume from an annotation on restart and record the card in front of it
         a second time, which is the one thing resume() exists to prevent.
+
+        Read backwards from the end rather than forwards from the start. The
+        old version built every row in the file into memory to look at the last
+        one: on a year of driving — 40,000 rows, 68MB — that is 287ms and 68MB
+        of Python objects, at every startup, on a Pi, to answer one question
+        about the tail. The watchdog restarts the scanner mid-shift, and every
+        restart paid it.
+
+        The block reading is where this kind of rewrite goes wrong, so it is
+        written for the three cases that break it and `test_journal.py` holds it
+        against the old implementation on each. A row may STRADDLE the boundary
+        between two reads, so the first fragment of each block is carried
+        forward rather than parsed — parse it and half a row is either lost or
+        read as a row of its own. A file may have NO TRAILING NEWLINE, so the
+        final fragment is a whole row and must not be discarded. And the tail
+        may be a long run of ANNOTATIONS, which is the ordinary case after a
+        shift of marking offers, so the walk keeps going back through blocks
+        until it finds something that is not one.
         """
-        for row in reversed(self.rows()):
-            if not row.get('kind'):
-                return row
-        return None
+        try:
+            if not os.path.exists(self.path):
+                return None
+            with open(self.path, 'rb') as fh:
+                fh.seek(0, os.SEEK_END)
+                pos = fh.tell()
+                held = b''
+                while pos > 0:
+                    step = min(_TAIL_BLOCK, pos)
+                    pos -= step
+                    fh.seek(pos)
+                    held = fh.read(step) + held
+                    parts = held.split(b'\n')
+                    # Everything but the first piece is a whole line. The first
+                    # is only whole once the read has reached the start of the
+                    # file; until then it is the far half of a straddling row.
+                    #
+                    # Belt and braces rather than load-bearing, and worth saying
+                    # which: reading backwards, that first piece is a PREFIX of
+                    # a line, and no prefix of a JSON object parses as one —
+                    # checked over every cut of a real row. What a fragment can
+                    # do is parse as something that is not a row at all ("123",
+                    # "null"), which is what the isinstance below refuses. Skip
+                    # both guards and the walk still answers correctly; skip the
+                    # isinstance alone and it can hand back an integer.
+                    whole = parts if pos == 0 else parts[1:]
+                    for chunk in reversed(whole):
+                        chunk = chunk.strip()
+                        if not chunk:
+                            continue
+                        try:
+                            row = json.loads(chunk.decode('utf-8', 'replace'))
+                        except ValueError:
+                            continue
+                        if isinstance(row, dict) and not row.get('kind'):
+                            return row
+                    held = b'' if pos == 0 else parts[0]
+            return None
+        except Exception as e:
+            self._complain(e)
+            return None
+
+    def count(self):
+        """How many rows the file holds, without building one of them.
+
+        The startup line says how many offers are on record, and it used to ask
+        `len(rows())` — which is the same 68MB the walk above exists to avoid,
+        paid a second time in the same second. Lines rather than parsed rows,
+        because the question is how many were written and a line that will not
+        parse was still written.
+        """
+        try:
+            if not os.path.exists(self.path):
+                return 0
+            n = 0
+            with open(self.path) as fh:
+                for line in fh:
+                    if line.strip():
+                        n += 1
+            return n
+        except Exception as e:
+            self._complain(e)
+            return 0
 
     def _roll_if_huge(self):
         if self.cap and os.path.exists(self.path) \
