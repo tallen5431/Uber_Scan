@@ -379,6 +379,12 @@
            figures, because it is what you scan to recognise a job rather than
            what you judge it by. -->
       <div class="places" id="places" hidden></div>
+      <!-- Both jobs at once, when there is already one in the car.
+           A RANGE, never a single figure: the low end is the two jobs sharing
+           nothing and the high end is the new one riding along inside the old,
+           and which it turns out to be is a fact about two maps that this rig
+           cannot see. Naming one number would be claiming that geography. -->
+      <div class="stackline" id="stack" hidden></div>
       <div id="warn" class="notice" hidden></div>
     </section>
     <div class="pending" id="detail" style="text-align:center"></div>
@@ -450,8 +456,14 @@
          screen, reads no card, and the verdict clears. A button saying only
          "took it" would be marking something they can no longer see. -->
     <button type="button" class="linkbtn" id="took" hidden></button>
-    <a class="linkbtn" href="index.html">⌨ Type</a>
-    <a class="linkbtn" href="journal.html">▤ Offers</a>
+    <!-- Put the order down. Shown only while one is being carried, because a
+         control for a state you are not in is a control that teaches people to
+         ignore the bar. It expires on its own clock too — see holding() in
+         server.js — so this is the driver saying "sooner than that", not the
+         only way out of it. -->
+    <button type="button" class="linkbtn" id="drop" hidden>Drop</button>
+    <a class="linkbtn parked" href="index.html">⌨ Type</a>
+    <a class="linkbtn parked" href="journal.html">▤ Offers</a>
     <button type="button" class="linkbtn" id="setBox">▣ Set box</button>
     <button type="button" class="linkbtn" id="reset">⟳ Re-find</button>
     <!-- Two things this picture gets used for, and they want opposite
@@ -494,7 +506,7 @@
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'working', 'places', 'spoken', 'took', 'shift']
+   'working', 'places', 'spoken', 'took', 'shift', 'stack', 'drop']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -646,6 +658,36 @@
     el.places.hidden = !where.length;
   }
 
+  // Both jobs at once, when there is already one in the car.
+  //
+  // A range and not a figure. The low end is the two sharing no road at all and
+  // the high end is the new one riding along inside the old; where between them
+  // the truth sits is a fact about two maps, and this rig has no map. It says
+  // what it knows \u2014 what the pair pays over a time bounded at both ends \u2014 and
+  // leaves the geography to the driver, who is looking at the phone anyway.
+  //
+  // The class follows the verdict's own three states so it reads at a glance
+  // from the driving seat, and `go` is only ever set when the WHOLE range
+  // clears the target: a range straddling the line is a maybe, and a maybe
+  // drawn in green is a wrong answer. See stack() in advice.js.
+  function showStack(s) {
+    if (!s) { el.stack.hidden = true; el.stack.className = 'stackline'; return; }
+    var lo = Math.round(s.worst), hi = Math.round(s.best);
+    el.stack.className = 'stackline ' + s.state;
+    el.stack.textContent = '+ the one you have: $'
+      + (lo === hi ? lo : lo + '\u2013' + hi) + '/hr over '
+      + (s.minMinutes === s.maxMinutes
+         ? Math.round(s.minMinutes)
+         : Math.round(s.minMinutes) + '\u2013' + Math.round(s.maxMinutes))
+      + ' min'
+      // The one claim that does not depend on the geography: better than just
+      // finishing what you have, even sharing nothing. Worth saying out loud
+      // because it is the only part of this a driver can act on without
+      // checking the map.
+      + (s.sure ? ' \u00b7 beats finishing alone' : '');
+    el.stack.hidden = false;
+  }
+
   // The last offer the scanner wrote to the journal, and whether the driver has
   // said they took it.
   //
@@ -707,6 +749,41 @@
       // slow poll would mean pressing "took it" and watching the number beside
       // it not move.
       loadShift();
+    });
+  });
+
+  // --- the order in the car ------------------------------------------------
+  //
+  // Held by the server, not here. Several panels may be open — the dashboard,
+  // a phone, a laptop indoors — and an order tracked per page would have each
+  // of them measuring the next offer against a different job, or against none.
+  //
+  // The button only appears while there is one to put down. A control for a
+  // state you are not in is a control that teaches people to ignore the bar,
+  // and this bar is the one a driver reaches for without looking.
+  var holdingNow = false;
+  var dropBusy = false;
+
+  function showDrop() {
+    el.drop.hidden = !holdingNow;
+    el.drop.textContent = dropBusy ? '…' : 'Drop';
+    el.drop.title = 'Put the order down, so the next offer is judged on its own '
+                  + 'again. It does not touch your phone.';
+  }
+
+  el.drop.addEventListener('click', function () {
+    if (dropBusy) return;
+    dropBusy = true;
+    showDrop();
+    fetch('/api/delivered', { method: 'POST' }).then(function (r) {
+      // Believe the server, not the press. If the write failed the order is
+      // still in the car and the next offer must still be measured against it.
+      if (r.ok) { holdingNow = false; showStack(null); }
+    }).catch(function () {
+      /* Left as it was: an order the server still holds is the truth. */
+    }).then(function () {
+      dropBusy = false;
+      showDrop();
     });
   });
 
@@ -900,6 +977,7 @@
       // No card, no address. Leaving the last one up would have it read as
       // belonging to whatever comes next.
       showPlaces(null);
+      showStack(null);
       var quiet = Date.now() - seenAt;
       el.detail.textContent = aiming
         ? 'the view below is live — move the mount until this says good'
@@ -1037,6 +1115,10 @@
                  + ' <span><i>=</i> <b>' + rate(r.perHour) + '/hr</b> <i>net</i></span>']);
     }
     showPlaces(r.places);
+    // Sent by the server, which is where the order in the car is known. A page
+    // works it out for nobody: several may be open and each would answer
+    // slightly differently as its own clock drifted.
+    showStack(r.stack);
     el.working.innerHTML = rows.map(function (row) {
       return '<div class="' + row[0] + '">' + row[1] + '</div>';
     }).join('');
@@ -1213,6 +1295,14 @@
       }
       if (msg.phase) phase = msg;
       if (msg.ready !== undefined) last = msg;
+      // Every reading carries whether an order is being held, because the
+      // server's own clock can end one — see holding() — with nothing pressed
+      // here to say so. Without this the button outlives the order it puts
+      // down, and a driver presses it on nothing.
+      if (msg.ready) {
+        holdingNow = !!msg.holding;
+        showDrop();
+      }
       render();
       showConnection();
     };
@@ -1261,6 +1351,11 @@
       tookState = !!s.offer.accepted;
       showTook();
     }
+    // ...and so does the order in the car. A panel opened mid-delivery — which
+    // is exactly when a second app's offer arrives — would otherwise show no
+    // way to put it down, and no sign that anything was being carried.
+    holdingNow = !!s.holding;
+    showDrop();
     scannerState = s.scanner || null;
     render();
     showConnection();

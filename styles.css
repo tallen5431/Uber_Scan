@@ -190,6 +190,35 @@ html, body {
 }
 .places[hidden] { display: none; }
 
+/* Both jobs at once, when there is already one in the car.
+ *
+ * Sits under the address for the same reason the address sits under the
+ * figures: it is a second question, asked only sometimes, and it must never
+ * push the headline rate off the glass. One line, ellipsised, like its
+ * neighbour.
+ *
+ * It borrows the verdict's three colours because a driver reads colour before
+ * they read words, and this line is answering the same kind of question the
+ * panel above it is. `go` is set only when the WHOLE range clears the target —
+ * a range that straddles the line is amber, never green. Named `.stackline`
+ * rather than `.stack` so a bare state class here can never collide with the
+ * verdict panel's own `.go`/`.warn`/`.no`, which is a mistake this stylesheet
+ * has already made once with `.warn`. */
+.stackline {
+  margin-top: 6px;
+  font-size: clamp(12px, 3.2vw, 16px);
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stackline.go { color: var(--go); }
+.stackline.warn { color: var(--warn); }
+.stackline.no { color: var(--muted); }
+.stackline[hidden] { display: none; }
+
 /* The button that records a decision the rig cannot see.
  *
  * Marked when it is set, so a glance says whether this offer is already on the
@@ -329,8 +358,44 @@ html, body {
 
    `minmax(0, 1fr)` removes the floor, so the row is exactly as wide as the
    screen and the labels give way instead of the layout. */
-.bottombar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
+.bottombar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+             gap: 8px; container-type: inline-size; }
 .bottombar [hidden] { display: none; }
+
+/* Seven controls do not fit a narrow panel, and something has to give.
+ *
+ * Two of this bar's buttons only appear when there is something to do with
+ * them — "Took $8.04" with an offer on the record, "Drop" with an order in the
+ * car — so with both up the bar goes from five to seven. Measured across the
+ * panels this ships on, with both showing:
+ *
+ *   1280x800  bar 804px   7 give 107px, "Took $12.45?" wants ~110
+ *   1024x600  bar 662px   7 give  88px
+ *   800x480   bar 559px   7 give  71px, "Set box" wants 78
+ *   480x320   bar 280px   7 give  34px
+ *
+ * Wrapping to a second row is the usual answer and there is no room for it on
+ * the 3.5" panel: the verdict card is 222px of 320 and a second 44px row does
+ * not fit under it.
+ *
+ * The two that stand down lead to the keypad and the offer log, which are read
+ * parked. The five that stay are the ones used while the car is moving. They
+ * come back the moment either conditional button goes away.
+ *
+ * Not one of them has room, so there is no width test here — a threshold that
+ * every panel falls below is a threshold pretending to be a decision. The bar
+ * is narrower than the window on every one of these, because the phone picture
+ * sits beside it: on the 800x480 panel the picture takes 269px and this bar is
+ * 559, which is how a first attempt keyed on the WINDOW read 800, decided there
+ * was plenty of room, and clipped four labels on the one screen this thing is
+ * bolted to.
+ *
+ * Six buttons are left alone even though some labels overflow on the 3.5" hat:
+ * losing a control the driver can still see is a worse trade than a clipped
+ * word, and at six the word is still most of the button. */
+.bottombar:has(#took:not([hidden])):has(#drop:not([hidden])) .parked {
+  display: none;
+}
 .bottombar button, .bottombar .linkbtn {
   appearance: none;
   border: 1px solid var(--line);

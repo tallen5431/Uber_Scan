@@ -133,10 +133,11 @@ function waitForServer(tries) {
     // camera side parses. Skipped rather than failed where python3 is absent.
     await post({ box: [0.12, 0.34, 0.5, 0.4] });
     var read = await pythonReadsIt();
-    if (read === null) {
-      console.log('note: python3 not available, skipped the cropbox.py round trip');
+    if (!read.ran) {
+      console.log('note: python3 did not run (' + read.why
+                  + '), skipped the cropbox.py round trip');
     } else {
-      eq('the scanner reads back the box this server wrote', read,
+      eq('the scanner reads back the box this server wrote', read.value,
          [[0.12, 0.34], [0.62, 0.34], [0.62, 0.74], [0.12, 0.74]]);
       eq('...and takes it away with it, so it is applied once', written(), null);
     }
@@ -153,17 +154,35 @@ function waitForServer(tries) {
   process.exit(bad ? 1 : 0);
 })();
 
+/* Runs the camera side's reader and says which of three things happened.
+ *
+ * `null` used to mean both "python3 is not here, skip this" and "python3 ran
+ * and there was no pending box" — and the second is a FAILURE dressed as the
+ * first. take_request() legitimately returns JSON null when the file is not
+ * there, so a round trip that silently wrote nothing reported itself as an
+ * absent interpreter and the suite printed "All 16 passed" with 14 of them
+ * run. The count moving is the only trace it left.
+ *
+ * So the outcome is discriminated: `ran` says the interpreter worked, `value`
+ * is whatever it said, and only `ran === false` is a reason to skip. */
 function pythonReadsIt() {
   return new Promise(function (resolve) {
     var code = 'import json, sys; sys.path.insert(0, "rpi"); import cropbox; ' +
                'print(json.dumps(cropbox.take_request()))';
     var py = spawn('python3', ['-c', code], { cwd: ROOT });
-    var out = '';
+    var out = '', err = '';
     py.stdout.on('data', function (c) { out += c; });
-    py.on('error', function () { resolve(null); });
+    py.stderr.on('data', function (c) { err += c; });
+    py.on('error', function (e) { resolve({ ran: false, why: e.message }); });
     py.on('close', function (status) {
-      if (status !== 0) return resolve(null);
-      try { resolve(JSON.parse(out.trim())); } catch (e) { resolve(null); }
+      if (status !== 0) {
+        return resolve({ ran: false, why: 'exit ' + status + ': ' + err.trim().slice(-200) });
+      }
+      try {
+        resolve({ ran: true, value: JSON.parse(out.trim()) });
+      } catch (e) {
+        resolve({ ran: false, why: 'unparsable output: ' + JSON.stringify(out.slice(0, 120)) });
+      }
     });
   });
 }

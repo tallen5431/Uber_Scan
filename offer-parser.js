@@ -273,8 +273,15 @@
      Acworth Avg. wait time at pickup; Canton Rd, Marietta`.
 
      A pipe ends one too. It is never in a street name and it is what the card's
-     own dividers and its bottom icon row come back as. */
-  var PLACE_TAIL = /(?:\||\b(?:avg|wait\s*time|fast\s*charg|add\s+to\s+route|accept|decline|verified|exclusive|guaranteed|included|customer|dropoff|orders?)\b)/i;
+     own dividers and its bottom icon row come back as.
+
+     The charger badge is spelled out separately because it is the one entry
+     here that is a word STEM. Inside the \b(?:...)\b group, "fast\s*charg"
+     can never match "fast charger": the closing boundary would have to fall
+     between "charg" and "e", and there is no boundary there. So the one badge
+     this stopper was written for walked straight past it, and the address kept
+     a charger advert stapled to its end. Three of one shift's 210 cards. */
+  var PLACE_TAIL = /(?:\||\bfast\s*charg|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline|verified|exclusive|guaranteed|included|customer|dropoff|orders?)\b)/i;
 
   /* The card's bottom bar — a row of icons — comes back as one and two
      character scraps: `Kennesaw 4`, `Marietta %`, `Acworth ¥`, `Kennesaw 2c 4`.
@@ -393,8 +400,14 @@
       // stored — `1 min ~ 4 . mins | . = | i oO < * ~~ agama ae ae; i Old
       // Mountain Rd NW, Kennesaw` passes on the address buried at the end of it
       // and then goes into the journal sludge and all.
-      tail = trimPlace(tail);
-      if (looksLikeAPlace(tail)) keep(tail);
+      var pieces = [tail], bar = tail.indexOf('|');
+      if (bar >= 0 && looksLikeAPlace(trimPlace(tail.slice(bar + 1)))) {
+        pieces = [tail.slice(0, bar), tail.slice(bar + 1)];
+      }
+      for (var k = 0; k < pieces.length; k++) {
+        var piece = trimPlace(pieces[k]);
+        if (looksLikeAPlace(piece)) keep(piece);
+      }
     }
     return out.slice(0, 4);
   }

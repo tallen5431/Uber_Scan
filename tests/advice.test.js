@@ -554,6 +554,90 @@ function offer(atMinutes, pay, minutes, cost) {
   });
 })();
 
+
+/* --- two orders at once ---------------------------------------------------
+ *
+ * The arithmetic behind stacking, and — as much the point — the cases where it
+ * has to refuse. This rig cannot see a map, so every claim it makes here has to
+ * be true whatever the two routes turn out to look like.
+ */
+(function () {
+  var SET = { target: 25, band: 15, costPerMile: 0.3 };
+  var T0 = 1700000000000;
+  function active(o) {
+    return { pay: 12, minutes: 30, miles: 8, cost: 2.4, acceptedAt: T0,
+             ...o };
+  }
+  function newOffer(o) { return { pay: 9, minutes: 20, miles: 6, cost: 1.8, ...o }; }
+
+  // Ten minutes into a thirty-minute job: twenty left, two thirds of the fare
+  // still to earn.
+  var s = A.stack(active(), newOffer(), SET, T0 + 10 * 60000);
+  ok_('a stack is worked out', !!s);
+  eq('...with the right time left on the old order', s.leftMinutes, 20);
+  // 12 - 2.4 = 9.60 net, two thirds of it = 6.40, plus 9 - 1.8 = 7.20.
+  eq('...pro-rating the old order rather than counting it whole', s.pay, 13.6);
+  eq('...worst case is the two times added', s.maxMinutes, 40);
+  eq('...best case is the longer of the two', s.minMinutes, 20);
+  eq('...and the worst rate divides by the worst time', s.worst, 20.4);
+  eq('...the best rate by the best', s.best, 40.8);
+
+  // The bound has to be a bound: nothing that could happen on any map may fall
+  // outside it, and the order must never invert.
+  ok_('the range is the right way round', s.best >= s.worst);
+  ok_('...and the honest floor is the no-sharing case', s.worst <= s.best);
+
+  // ACCEPT only when the WHOLE range clears the line. A range straddling the
+  // target is a maybe, and a maybe drawn in green is a wrong answer.
+  eq('a range straddling the target is not a green light', s.state, 'warn');
+  eq('...it is green only when even the worst case clears it',
+     A.stack(active(), newOffer({ pay: 30 }), SET, T0 + 10 * 60000).state, 'go');
+  eq('...and red when even the best case does not',
+     A.stack(active(), newOffer({ pay: 1, cost: 0 }), SET, T0 + 10 * 60000).state, 'no');
+
+  // The claim that does not need the geography: better than just finishing,
+  // even with nothing shared.
+  ok_('a better-paying second job beats finishing alone',
+      A.stack(active(), newOffer({ pay: 40, cost: 0 }), SET, T0 + 10 * 60000).sure);
+  eq('...and a worse-paying one does not',
+     A.stack(active(), newOffer({ pay: 1, cost: 0 }), SET, T0 + 10 * 60000).sure, false);
+
+  // Refusals. Each of these would otherwise put a second job's time against a
+  // first job's pay and call it a rate.
+  eq('no active order, no stack', A.stack(null, newOffer(), SET, T0), null);
+  eq('no offer, no stack', A.stack(active(), null, SET, T0), null);
+  eq('an order already over is not stacked onto',
+     A.stack(active(), newOffer(), SET, T0 + 31 * 60000), null);
+  eq('...nor one that ends exactly now',
+     A.stack(active(), newOffer(), SET, T0 + 30 * 60000), null);
+  eq('an order with no stated time is not stacked onto',
+     A.stack(active({ minutes: null }), newOffer(), SET, T0), null);
+  eq('...nor an offer with none', A.stack(active(), newOffer({ minutes: null }), SET, T0), null);
+  eq('an offer with no payout is not stacked',
+     A.stack(active(), newOffer({ pay: null }), SET, T0), null);
+  eq('a zero-length order is refused rather than divided by',
+     A.stack(active({ minutes: 0 }), newOffer(), SET, T0), null);
+  // ...and so is a zero-length OFFER, which is the same division one field
+  // along. `null` was already refused above by the is-it-a-number test, so a
+  // guard covering only null looks complete and divides by zero on a real 0.
+  eq('a zero-length offer is refused too',
+     A.stack(active(), newOffer({ minutes: 0 }), SET, T0), null);
+  eq('...and a negative one, which no card states and OCR can still produce',
+     A.stack(active(), newOffer({ minutes: -5 }), SET, T0), null);
+
+  // No accept time is not the same as no order. A rig restarted mid-delivery
+  // knows the order and not the clock, and the honest reading of that is that
+  // none of it has run yet — which is the pessimistic one.
+  var noClock = A.stack(active({ acceptedAt: null }), newOffer(), SET, T0 + 99 * 60000);
+  ok_('an order with no start time is still stacked, from the top', !!noClock);
+  eq('...with all of its minutes still ahead', noClock.leftMinutes, 30);
+
+  // Costs come off both sides, or the stacked figure is gross while every other
+  // number on the same screen is net.
+  var free = A.stack(active({ cost: 0 }), newOffer({ cost: 0 }), SET, T0 + 10 * 60000);
+  ok_('mileage is deducted from the pair', free.pay > s.pay);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);

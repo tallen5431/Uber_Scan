@@ -191,6 +191,8 @@ function startScanner() {
   scanner.heardAt = null;          // nothing from the scan loop yet
   scanner.offer = null;            // ...and no offer on the record yet
   scanner.offerAt = null;
+  // The order in the car, if there is one. See holding().
+  scanner.holding = null;
   console.log('scanner: started ' + bin + ' ' + args.join(' '));
 
   // Without this, a missing python3 or a bad SCANNER_CMD emits an 'error' with
@@ -426,7 +428,68 @@ function touchWatchFile(view) {
   });
 }
 
+/* The order the driver is currently carrying, or null.
+ *
+ * Marking an offer taken is already recorded — it is what the shift line counts
+ * — but it was only ever a fact about the past. Working two apps at once needs
+ * it as a fact about the present: while an order is in the car, the next offer
+ * is not a standalone job, it is a second one to fit around the first.
+ *
+ * It expires on its own clock. A driver who has just accepted on their phone
+ * and is pulling into traffic will not reliably press a second button when they
+ * drop off, and an order that never ends would put a stale job's minutes
+ * against every offer for the rest of the shift — a wrong number that gets more
+ * wrong the longer it sits. So the card's own stated duration ends it, with a
+ * margin: an order runs long, and finishing a little late is normal.
+ *
+ * The margin is generous on purpose. Ending it early costs a stacking figure
+ * the driver could have used; ending it late costs a wrong one. Neither is
+ * free, but the panel only shows this alongside the standalone verdict, which
+ * is unaffected either way — so the cheaper mistake is to keep offering it.
+ */
+var HOLD_OVERRUN = 1.5;      // an order may take half again its stated time
+var HOLD_GRACE_MS = 10 * 60000;  // ...plus ten minutes, before it is forgotten
+
+function holding(now) {
+  var h = scanner.holding;
+  if (!h) return null;
+  var stated = (typeof h.minutes === 'number' && isFinite(h.minutes) && h.minutes > 0)
+    ? h.minutes : null;
+  if (stated === null) return null;
+  var over = (now - h.acceptedAt) - (stated * HOLD_OVERRUN * 60000) - HOLD_GRACE_MS;
+  if (over > 0) {
+    scanner.holding = null;
+    return null;
+  }
+  return h;
+}
+
+/* What the pair would pay, when there is a pair.
+ *
+ * Worked out here rather than on the page because the order being carried is
+ * this process's knowledge — several panels may be open and a figure computed
+ * in each of them is a figure that can disagree with itself.
+ *
+ * Applied to the replay a new listener gets as well as to live readings, and
+ * that is not a tidiness point: a panel opened in the middle of a delivery is
+ * precisely when a second app's offer is on the phone, and a replay without
+ * this shows the driver a standalone verdict for a job they cannot do alone.
+ * Computed against the clock at the moment it is sent, so a reading replayed
+ * ten minutes later is stacked against ten fewer minutes.
+ */
+function withStack(read, now) {
+  if (!read || !read.ready) return read;
+  var held = holding(now);
+  read.holding = held ? { pay: held.pay, minutes: held.minutes } : null;
+  read.stack = held
+    ? Advice.stack(held, read, { target: read.target, band: read.band,
+                                 costPerMile: read.costPerMile }, now)
+    : null;
+  return read;
+}
+
 function broadcast(read) {
+  withStack(read, Date.now());
   var payload = 'data: ' + JSON.stringify(read) + '\n\n';
   listeners = listeners.filter(function (res) {
     try {
@@ -1245,11 +1308,48 @@ function route(req, res) {
         if (note.kind === 'mark' && scanner.offer && scanner.offer.id === note.id
             && note.accepted !== undefined) {
           scanner.offer.accepted = note.accepted;
+          // ...and it becomes the order in the car, which is what the next
+          // offer gets measured against. Taking the mark back puts it down
+          // again: the driver pressed it twice because they did not take it,
+          // and stacking onto a job they refused is the same wrong number as
+          // stacking onto one they already delivered.
+          if (note.accepted) {
+            scanner.holding = {
+              id: scanner.offer.id,
+              pay: scanner.offer.pay,
+              minutes: typeof scanner.offer.billedMinutes === 'number'
+                ? scanner.offer.billedMinutes : scanner.offer.minutes,
+              miles: scanner.offer.miles,
+              cost: scanner.offer.cost,
+              acceptedAt: Date.now()
+            };
+          } else if (scanner.holding && scanner.holding.id === note.id) {
+            scanner.holding = null;
+          }
         }
         send(res, 200, JSON.stringify({ ok: true, note: note }),
              { 'Content-Type': 'application/json; charset=utf-8' });
       });
     });
+  }
+
+  /* Put the order down. The driver has dropped it off and the next offer is a
+   * standalone job again.
+   *
+   * Separate from the mark, and deliberately: the mark is a permanent fact
+   * about the journal — this offer was taken — and dropping it off does not
+   * make that untrue. Only one of the two belongs on disk. This changes nothing
+   * but what the panel measures the next card against, so it is memory only,
+   * and a restarted server simply has no order in hand, which is the safe way
+   * to be wrong.
+   *
+   * It answers the same either way. Pressing "delivered" with nothing in the
+   * car is not an error a driver needs told about; it is the state they wanted. */
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/delivered') {
+    var wasHolding = !!scanner.holding;
+    scanner.holding = null;
+    return send(res, 200, JSON.stringify({ ok: true, wasHolding: wasHolding }),
+                { 'Content-Type': 'application/json; charset=utf-8' });
   }
 
   // The one thing on this server that is not a read. It asks the scanner to
@@ -1600,6 +1700,14 @@ function route(req, res) {
       // duration-not-timestamp rule as everything else here.
       offer: scanner.offer || null,
       offerAgeMs: scanner.offerAt ? Math.max(0, Date.now() - scanner.offerAt) : null,
+      // The order in the car, so a panel opened or reloaded mid-delivery knows
+      // there is one. An age rather than a timestamp, like everything else
+      // here: the two machines' clocks are not the same clock.
+      holding: (function () {
+        var h = holding(Date.now());
+        return h ? { pay: h.pay, minutes: h.minutes,
+                     heldMs: Math.max(0, Date.now() - h.acceptedAt) } : null;
+      }()),
       lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
         ? Math.max(0, Date.now() - scanner.last.at) : null,
       heardAgeMs: scanner.heardAt
@@ -1722,11 +1830,14 @@ function route(req, res) {
     // dropped socket coming back re-aged a dead rig's verdict to zero — once
     // per reconnect, for as long as the tab stayed open.
     if (scanner.last) {
-      res.write('data: ' + JSON.stringify(Object.assign({}, scanner.last, {
+      // A copy, and `withStack` writes onto the copy. Stacking the stored
+      // reading itself would leave a figure on it that goes stale the moment
+      // the order is put down, and every later replay would carry it.
+      res.write('data: ' + JSON.stringify(withStack(Object.assign({}, scanner.last, {
         replay: true,
         ageMs: (typeof scanner.last.at === 'number')
           ? Math.max(0, Date.now() - scanner.last.at) : null
-      })) + '\n\n');
+      }), Date.now())) + '\n\n');
     }
     listeners.push(res);
     req.on('close', function () {

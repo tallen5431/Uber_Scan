@@ -206,8 +206,19 @@ PLACE_JUNK = re.compile(
 #
 # A pipe ends one too. It is never in a street name and it is what the card's
 # own dividers and its bottom icon row come back as.
+#
+# The charger badge is spelled out on its own because it is the one entry here
+# that is a word STEM. Inside the `\b(?:...)\b` group, `fast\s*charg` can never
+# match "fast charger": the closing boundary has to fall between "charg" and
+# "e", and there is no boundary there. So the one badge that appears on the very
+# cards this stopper was written for — `Cumberland Blvd SE, Atlanta 4, 7 mi from
+# fast charger` — walked straight past it, and the address a driver reads to
+# recognise the job months later has a charger advert stapled to the end of it.
+# Three of one shift's 210 cards.
 PLACE_TAIL = re.compile(
-    r'(?:\||\b(?:avg|wait\s*time|fast\s*charg|add\s+to\s+route|accept|decline'
+    r'(?:\|'
+    r'|\bfast\s*charg'
+    r'|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline'
     r'|verified|exclusive|guaranteed|included|customer|dropoff|orders?)\b)',
     re.IGNORECASE | ASCII)
 
@@ -770,9 +781,15 @@ def find_places(text, legs):
         # stored — `1 min ~ 4 . mins | . = | i oO < * ~~ agama ae ae; i Old
         # Mountain Rd NW, Kennesaw` passes on the address buried at the end of
         # it and then goes into the journal sludge and all.
-        tail = trim_place(tail)
-        if looks_like_a_place(tail):
-            keep(tail)
+        pieces = [tail]
+        if '|' in tail:
+            near, far = tail.split('|', 1)
+            if looks_like_a_place(trim_place(far)):
+                pieces = [near, far]
+        for piece in pieces:
+            piece = trim_place(piece)
+            if looks_like_a_place(piece):
+                keep(piece)
 
     return out[:MAX_PLACES]
 

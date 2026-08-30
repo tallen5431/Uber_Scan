@@ -1644,6 +1644,22 @@
    "expect": [
     "Cobb Pkwy NW, Kennesaw"
    ]
+  },
+  {
+   "name": "a charger badge is not part of the dropoff",
+   "text": "$9.09 *% 497 @vIP © Verified 1min (0.2 mi) Roswell Road, Johnny's Hideaway Avg. wait time at pickup: 1 min 14 mins (7.6 mi) W Peachtree St NW, Atlanta 4, 1 mi from fast charger",
+   "expect": [
+    "Roswell Road, Johnny's Hideaway",
+    "W Peachtree St NW, Atlanta"
+   ]
+  },
+  {
+   "name": "...however far the word runs on",
+   "text": "$10 *% 492 © Verified 10 min (4.5 mi) Windy Hill Rd SE, Smyrna Avg. wait time at pickup: 1 min 11 mins (4.4 mi) Cumberland Blvd SE, Atlanta 4, 7 mi from fast charging",
+   "expect": [
+    "Windy Hill Rd SE, Smyrna",
+    "Cumberland Blvd SE, Atlanta"
+   ]
   }
  ],
  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",

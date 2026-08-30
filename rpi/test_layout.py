@@ -522,6 +522,53 @@ const FRAMES = JSON.parse(framesJson);
           };
         };
         const shown = await page.evaluate(LOOKAT);
+        // The bar of controls with everything on it at once.
+        //
+        // Two of its buttons are conditional — "Took $8.04" appears when there
+        // is an offer on the record, "Dropped off" while an order is in the car
+        // — and both are hidden on a freshly loaded page, so every measurement
+        // above is of a bar two buttons short of its widest. That is the bar a
+        // driver never sees at the moment it matters: an offer on screen while
+        // a job is already in the car is exactly when both show.
+        shown.bar = await page.evaluate(() => {
+          const took = document.getElementById('took');
+          const drop = document.getElementById('drop');
+          const bar = document.querySelector('.bottombar');
+          const box = (el) => el.getBoundingClientRect();
+          const measure = () => {
+            const kids = [].slice.call(bar.children).filter((el) => {
+              const r = box(el);
+              return r.width > 0 && r.height > 0;
+            });
+            return {
+              count: kids.length,
+              width: Math.round(box(bar).width),
+              shortest: kids.length ? Math.min(...kids.map((el) => box(el).height)) : 0,
+              // A label wider than the button holding it. On a control pressed
+              // without looking that is worse than a small one: the driver
+              // cannot tell which button they are on.
+              clipped: kids.filter((el) => el.scrollWidth > Math.ceil(box(el).width) + 1)
+                           .map((el) => (el.textContent || '').trim())
+            };
+          };
+          // Three states, because the interesting comparison is not against an
+          // empty bar. `plain` is the five fixed controls; `before` adds the
+          // "Took ..." button, which is the bar as it stood before an order in
+          // the car was a thing this panel knew about; `full` adds "Drop" on
+          // top. What has to hold is that `full` clips nothing `before` did not
+          // — anything else is this feature making the bar worse.
+          took.hidden = true;
+          drop.hidden = true;
+          const plain = measure();
+          took.hidden = false;
+          took.textContent = 'Took $12.45?';
+          const before = measure();
+          drop.hidden = false;
+          const full = measure();
+          const d = document.documentElement;
+          return { plain: plain, before: before, full: full,
+                   over: d.scrollWidth > d.clientWidth + 1 };
+        });
         // Bounded, and the result kept rather than thrown.
         //
         // A layout fault that puts the picture over the controls does not make
@@ -704,6 +751,44 @@ try:
                     'Scene' in phone['label'])
                 ok_('the phone view does not overflow the glass at %s' % panel,
                     not phone['over'])
+                # ...and with every control on the bar at once, which is the
+                # state a driver is in exactly when it matters: a card on screen
+                # while a job is already in the car.
+                bar = phone.get('bar') or {}
+                plain, full = bar.get('plain') or {}, bar.get('full') or {}
+                # With both conditional buttons up, the two links that lead
+                # somewhere else stand down — on every panel, because not one of
+                # them has room for seven. The five that stay are the ones used
+                # while the car is moving.
+                eq('the crowded bar sheds the parked-use links at %s (bar %spx)'
+                   % (panel, full.get('width')),
+                   full.get('count'), 5)
+                ok_('...and still fits the glass at %s' % panel,
+                    not bar.get('over'))
+                ok_('...with every control still 44px tall at %s (%.4gpx)'
+                    % (panel, full.get('shortest') or 0),
+                    (full.get('shortest') or 0) >= 43.5)
+                # Against the bar as it stood before, not against an empty one.
+                #
+                # Some labels already overrun their buttons on the narrowest
+                # panels — "Set box" wants 78px and a 280px bar gives it 48 —
+                # and that predates any of this. What must not happen is the new
+                # control making it worse. Measured in the same browser at the
+                # same size a moment apart, so the comparison is like for like.
+                before = bar.get('before') or {}
+                fresh = [c for c in (full.get('clipped') or [])
+                         if c not in (before.get('clipped') or [])]
+                eq('...clipping no label the bar did not already clip at %s '
+                   '(%d before, %d now)'
+                   % (panel, len(before.get('clipped') or []),
+                      len(full.get('clipped') or [])),
+                   fresh, [])
+                # ...and the five fixed controls are clean wherever the bar is
+                # not being squeezed, which is what says the squeeze is the
+                # cause rather than the labels being too long everywhere.
+                if (plain.get('width') or 0) >= 400:
+                    eq('...with the five fixed controls clipping nothing at %s'
+                       % panel, plain.get('clipped'), [])
                 # ...which is a weaker claim than it looks, and was the one
                 # being made. #app clips, so a picture drawn taller than its
                 # row is trimmed rather than overflowed and every fits-check

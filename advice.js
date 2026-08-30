@@ -173,6 +173,104 @@
       && typeof row.costPerMile === 'number' && row.costPerMile > 0;
   }
 
+  /* Two orders at once, and the one question the rig can honestly answer.
+   *
+   * Working two apps, the driver accepts an order and then a second offer
+   * arrives while the first is still in the car. The question is whether both
+   * fit. The obvious way to answer it is to map the four addresses and route
+   * them, and this rig cannot do that — the measurement, from the driver's own
+   * 836-offer export:
+   *
+   *   - The car is offline most of the time, so nothing can be geocoded at the
+   *     moment the offer is on screen.
+   *   - Caching geocodes ahead of time does not help. 971 place sightings hold
+   *     814 distinct places: a cache built from three days of driving covers
+   *     11% of the next day's. Restaurants repeat; customers do not.
+   *   - 69% of the addresses name a town, but 66 of 177 name "Atlanta", which
+   *     is twenty miles across. A centroid there is not a location.
+   *   - Not one card in 836 stated a deadline, so "in time" has nothing on the
+   *     card to be measured against.
+   *
+   * So this does not pretend to know the geography. It answers the part that is
+   * arithmetic, which is the part a driver cannot do at a glance and the part
+   * the card really does state: what the two jobs pay together, over a time
+   * that is bounded at both ends.
+   *
+   *   worst — nothing is shared. The new job starts when the old one ends and
+   *           the minutes simply add. This is a real lower bound: any route
+   *           overlap at all makes it better.
+   *   best  — the new job rides along inside the old one and costs only the
+   *           longer of the two. Nothing can beat it.
+   *
+   * The truth is between, and where between is a fact about two maps on a phone
+   * the driver is already looking at. That is the right division: the rig does
+   * the arithmetic the driver cannot do while driving, and the driver does the
+   * geography the rig cannot see. Claiming a single number here would be
+   * claiming the geography, which is the one thing this file must not do.
+   *
+   * ACCEPT only when even the WORST case clears the line, for the same reason a
+   * rate with no running cost taken off it cannot: a range that straddles the
+   * target is a maybe, and a maybe drawn in green is a wrong answer.
+   *
+   * The active order's remaining pay is pro-rated by its remaining time rather
+   * than counted whole. A driver twenty minutes into a twenty-five minute job
+   * is not earning the entire fare in the last five minutes, and treating them
+   * as if they were makes "just finish it" beat everything on earth in the last
+   * moments of every order. */
+  function stack(active, offer, settings, now) {
+    if (!active || !offer) return null;
+    var target = (settings && typeof settings.target === 'number')
+      ? settings.target : 0;
+    var totalA = num(active.minutes);
+    var payA = num(active.pay);
+    var minB = num(offer.minutes);
+    var payB = num(offer.pay);
+    if (totalA === null || payA === null || minB === null || payB === null) return null;
+    if (!(totalA > 0) || !(minB > 0)) return null;
+
+    var startedAt = num(active.acceptedAt);
+    var elapsed = (startedAt === null || typeof now !== 'number')
+      ? 0 : Math.max(0, (now - startedAt) / 60000);
+    var left = Math.max(0, totalA - elapsed);
+    // The old order is done, or as good as. There is nothing to stack onto and
+    // saying otherwise would put a second job's time against a first job's pay.
+    if (left <= 0) return null;
+
+    var costA = num(active.cost) || 0;
+    var costB = num(offer.cost) || 0;
+    var netA = (payA - costA) * (left / totalA);
+    var netB = payB - costB;
+    var money = netA + netB;
+
+    var maxMinutes = left + minB;              // nothing shared
+    var minMinutes = Math.max(left, minB);     // the new one rides along
+    var worst = money / (maxMinutes / 60);
+    var best = money / (minMinutes / 60);
+    // What the minutes already committed pay if this offer is declined. Not a
+    // full picture of declining — something better may well arrive — but it is
+    // the one alternative that is certain, and it is the floor to beat.
+    var alone = netA / (left / 60);
+
+    return {
+      leftMinutes: Math.round(left * 10) / 10,
+      minMinutes: Math.round(minMinutes * 10) / 10,
+      maxMinutes: Math.round(maxMinutes * 10) / 10,
+      pay: Math.round(money * 100) / 100,
+      worst: Math.round(worst * 100) / 100,
+      best: Math.round(best * 100) / 100,
+      alone: Math.round(alone * 100) / 100,
+      // Better than finishing alone even with no route shared at all. This is
+      // the claim that does not depend on the geography, so it is the only one
+      // stated without a hedge.
+      sure: worst >= alone,
+      state: worst >= target ? 'go' : (best >= target ? 'warn' : 'no')
+    };
+  }
+
+  function num(v) {
+    return (typeof v === 'number' && isFinite(v)) ? v : null;
+  }
+
   function usable(offers) {
     var out = [];
     for (var i = 0; i < (offers || []).length; i++) {
@@ -510,6 +608,6 @@
 
   return { advise: advise, usable: usable, runs: runs, replay: replay,
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
-           unexplained: unexplained,
+           unexplained: unexplained, stack: stack,
            THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT };
 }));

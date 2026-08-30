@@ -2753,6 +2753,103 @@ only in a short window around a leg that already matched, so a stray "wait"
 elsewhere on the card cannot invent one. It looks **before** the figure as well
 as after, because the card prints the phrase first.
 
+### Two orders at once, and the question this rig can honestly answer
+
+Working two apps, the driver accepts an order and a second offer arrives while
+the first is still in the car. The question is whether both fit.
+
+The obvious answer is to map the four addresses and route them. **This rig
+cannot do that, and the driver's own 836-offer export is what says so:**
+
+| | |
+|---|---|
+| the car's network | offline most of the time — nothing can be geocoded while the card is on screen |
+| caching geocodes ahead of time | 971 place sightings, **814 distinct**. A cache built from three days of driving covers **11%** of the next day's. Restaurants repeat; customers do not. |
+| the town, where it is stated | on 69% of addresses — but 66 of 177 say "Atlanta", which is twenty miles across. A centroid there is not a location. |
+| a deadline to be "in time" against | **not one card in 836 stated one** |
+
+So the rig does not pretend to know the geography. It answers the part that is
+arithmetic — the part a driver cannot do at a glance, and the part the card
+really does state — and it answers it as a **range**:
+
+```
++ the one you have: $20–34/hr over 30–50 min · beats finishing alone
+```
+
+**worst** is the two jobs sharing no road at all: the new one starts when the
+old one ends and the minutes add. Any overlap at all makes it better, so it is a
+true floor. **best** is the new one riding along inside the old, costing only
+the longer of the two. Nothing can beat it. Where between them the truth sits is
+a fact about two maps on a phone the driver is already holding.
+
+That is the division of labour: the rig does the arithmetic the driver cannot do
+while driving, and the driver does the geography the rig cannot see. Naming a
+single number would be claiming that geography, which is the one thing it must
+not do.
+
+**ACCEPT only when the whole range clears the line**, for the same reason a rate
+with no running cost taken off it cannot earn one: a range that straddles the
+target is a maybe, and a maybe drawn in green is a wrong answer.
+
+The order in hand is pro-rated by its remaining time rather than counted whole.
+A driver twenty minutes into a twenty-five minute job is not earning the entire
+fare in the last five minutes, and treating them as if they were makes "just
+finish it" beat everything on earth in the closing moments of every order.
+
+**It expires on its own clock.** A driver pulling into traffic will not reliably
+press a second button when they drop off, and an order that never ends puts a
+stale job's minutes against every offer for the rest of the shift — a wrong
+number that gets more wrong the longer it sits. The card's stated duration ends
+it, at half again that plus ten minutes, because orders run long. Ending it
+early costs a figure the driver could have used; ending it late costs a wrong
+one, and only the standalone verdict is unaffected either way.
+
+`Drop` puts it down sooner. It is memory only and deliberately not written to
+the journal: the mark is a permanent fact — this offer was taken — and dropping
+it off does not make that untrue. A restarted server simply has nothing in hand,
+which is the safe way to be wrong.
+
+**What it cost the bar of controls.** Two of the six are conditional — "Took
+$8.04" with an offer on the record, "Drop" with an order in the car — so with
+both up the bar goes from five buttons to seven, and measured across every panel
+this ships on, not one has room:
+
+| panel | bar | seven buttons |
+|---|---|---|
+| 1280x800 | 804px | 107px each — "Took $12.45?" wants ~110 |
+| 1024x600 | 662px | 88px |
+| 800x480 | 559px | 71px — "Set box" wants 78 |
+| 480x320 | 280px | 34px |
+
+The bar is narrower than the window on all of them because the phone picture
+sits beside it, which is how a first attempt keyed on the *window* read 800px,
+decided there was room, and clipped four labels on the one screen this thing is
+bolted to. So there is no width threshold: with both conditional buttons up, the
+two links that lead somewhere else — the keypad and the offer log, both read
+parked — stand down, and the five used while the car is moving stay. The layout
+suite measures the bar in all three states and holds the crowded one to clipping
+nothing the six-button bar did not already clip.
+
+### A suite that skipped two checks and said it passed
+
+The crop-box suite hands the file the web server wrote to `rpi/cropbox.py`, so
+the two halves of that contract are held to one format. Its check count had been
+moving between 14 and 16 between runs, which is the only trace it left.
+
+`pythonReadsIt()` returned `null` for "python3 is not here, skip this" — and
+`take_request()` legitimately returns JSON `null` when there is no pending box.
+Two different facts, one value. So a round trip where nothing was written
+reported itself as a missing interpreter, printed a friendly note, and the run
+said **All 16 passed** with fourteen of them run.
+
+The outcome is discriminated now: `ran` says whether the interpreter worked,
+`value` is whatever it said, and only `ran === false` skips — with the reason
+printed, so the next time it does skip there is something to act on.
+
+Still outstanding: the suite binds port 8791 by name, so two runs in quick
+succession can collide and one fails. Every other browser suite here takes a
+free port from the OS.
+
 ### The distance that was on the card and thrown away
 
 The wait-line fix above was found from three mangled fragments that happened to
@@ -3386,7 +3483,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 29 suites, 3645 checks
+npm test                # all 30 suites, 3739 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
