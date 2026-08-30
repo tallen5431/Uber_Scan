@@ -613,6 +613,128 @@
   // (4.6 mi) N Cobb Pkwy NW". So "no letters in between" is the discriminator.
   var PICKUP_LABEL = /\bpick\s?up\b[^A-Za-z]*$/i;
 
+  /* --- the address the card will not show you until you have taken the job ---
+   *
+   * 106 of the driver's 604 offer cards print "Customer dropoff" and no address
+   * at all: Uber does not say where a delivery ends until it has been accepted.
+   * That is 18% of every card the rig sees and it drives 39% of the pairs where
+   * the stacking advice can say nothing. No parser reaches an address that is
+   * not on the screen, so this reads the screen that comes AFTER the accept.
+   *
+   * The anchor is a two-letter state code followed by five digits. It is the
+   * one part of a US address that is short, positional and CHECKABLE - "GA
+   * 30127" is a state and a ZIP or it is not, where a street name misread by
+   * one letter is still a perfectly plausible street name and nothing
+   * downstream can tell. That checkability is the whole reason this is worth
+   * doing: the alternative was sending the address to a geocoder, and a
+   * geocoder returns a confident coordinate for "Daffodll Ln" as readily as for
+   * the real one - a wrong distance wearing decimal precision. */
+  var ZIP_RX = '[\\dOoQlIiSsBbZz]{5}';
+
+  /* The fifty states, DC and the inhabited territories. A list, deliberately:
+     the rule against phrase-lists is about lists that do not generalise to the
+     next card. This alphabet is closed, national and older than the app, and it
+     is doing the opposite job - it is here to REFUSE, so a misread lands on "no
+     address" rather than on a confident wrong one. */
+  var STATES = {};
+  ('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS ' +
+   'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV ' +
+   'WI WY DC AS GU MP PR VI').split(' ').forEach(function (s) { STATES[s] = true; });
+
+  var ADDRESS = new RegExp(
+    '([A-Za-z][A-Za-z.\'’-]*(?:\\s+[A-Za-z][A-Za-z.\'’-]*){0,3})' +
+    '\\s*,\\s*([A-Za-z]{2})\\s+(' + ZIP_RX + ')' +
+    '(?:\\s*-\\s*[\\dOoQlIiSsBbZz]{4})?(?!\\d)', 'g');
+
+  /* A house number and a street, shown and never decided on - but WORDS, not
+     "anything but a comma". A card printing "28 min (11.2 mi) total 100
+     Rosemont Ct" satisfies the loose version from the "28", and the driver is
+     shown the offer's own arithmetic dressed up as a street name. */
+  var STREET = /([\dOoQlIiSsBbZz]{1,6}\s+[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z0-9.'-]+){0,4})\s*$/;
+
+  /* Where a street stops and a town starts when the address did not say with a
+     comma - the case to EXPECT, not the exception: a screen puts the street and
+     the town on two lines and normalize joins them with a space. The USPS
+     suffix abbreviations, a list for the same reason STATES is one. The
+     optional trailing quadrant belongs to the street: "Chastain Rd NW
+     Kennesaw". */
+  var STREET_ENDS = /\b(?:st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd|boulevard|ct|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend)\b\.?(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?\s+/gi;
+
+  /* A single letter alone in front of a town is the icon row, not a word: "l
+     Atlanta", "j Powder Springs". PLACE_TOWN in advice.js tolerates exactly
+     this, and the two have to agree about what a town is called or the same
+     place read twice compares unequal to itself. */
+  var CITY_JUNK = /^(?:[A-Za-z]\s+)+/;
+
+  function findAddress(text) {
+    if (!text) return null;
+    text = normalize(text);
+    var best = null, after = 0, m;
+    ADDRESS.lastIndex = 0;
+    while ((m = ADDRESS.exec(text)) !== null) {
+      if (m.index === ADDRESS.lastIndex) ADDRESS.lastIndex++;
+      var state = m[2].toUpperCase();
+      // fixDigits first: the ZIP is five characters of small type through a
+      // lens and "3O127" is this OCR's commonest confusion, not a different
+      // number. The state gets no such help - two letters have no digits in
+      // them, and "6A" corrected to "GA" would be inventing the one token that
+      // is here to refuse.
+      var digits = fixDigits(m[3]);
+      if (!STATES[state] || !/^\d{5}$/.test(digits)) continue;
+      var code = parseInt(digits, 10);
+      if (!(code >= 501 && code <= 99950)) continue;
+      var city = m[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '')
+                     .replace(CITY_JUNK, '');
+      if (city.length < 3) continue;
+      var cityAt = m.index;
+      var before = text.slice(after, cityAt).replace(/\s+$/, '');
+      if (before && before.charAt(before.length - 1) !== ',') {
+        // ...unless the street named its own end. The LAST suffix in the group:
+        // a town that contains one - "Powder Springs Rd Marietta" - puts the
+        // real break at the later of the two.
+        var split = null, sm;
+        STREET_ENDS.lastIndex = 0;
+        while ((sm = STREET_ENDS.exec(m[1])) !== null) {
+          split = sm.index + sm[0].length;
+          if (sm.index === STREET_ENDS.lastIndex) STREET_ENDS.lastIndex++;
+        }
+        if (split !== null && m[1].length - split >= 3) {
+          cityAt = m.index + split;
+          city = text.slice(cityAt, m.index + m[1].length)
+                     .replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '');
+        } else {
+          city = null;
+        }
+      }
+      // From the end of the PREVIOUS address, never before it: a screen listing
+      // two stops puts a ZIP between them, and a street search over the whole
+      // head reaches back across it. Up to where the city starts, not where the
+      // match does, so the half of the group that turned out to be the street is
+      // still shown as one.
+      var head = text.slice(after, cityAt).replace(/[\s,]+$/, '');
+      var sme = STREET.exec(head);
+      var street = sme ? sme[1].replace(/\s+/g, ' ')
+                            .replace(/^[\s.,]+|[\s.,]+$/g, '') : null;
+      var parts = [];
+      if (street) parts.push(street);
+      if (city) parts.push(city);
+      // What to SHOW, as opposed to what to decide on. When the city could not
+      // be trusted the driver still gets everything that was read - they are
+      // looking at this to judge whether the scan worked, and "GA 30127" does
+      // not tell them that. `city` stays null either way, so nothing downstream
+      // treats the unsplit text as a town.
+      var line = parts.length
+        ? parts.concat([state + ' ' + digits]).join(', ')
+        : m[0].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '');
+      // The LAST one on the screen: a navigation screen shows where you are
+      // going, and a pickup already made comes above it. Same reasoning as
+      // findDropoff.
+      best = { line: line, street: street, city: city, state: state, zip: digits };
+      after = m.index + m[0].length;
+    }
+    return best;
+  }
+
   function labelledPickup(text, place) {
     var at = text ? text.indexOf(place) : -1;
     if (at <= 0) return false;
@@ -1139,6 +1261,11 @@
       // in the car. See findDropoff, which is the half that decides.
       pickup: findPickup(places),
       dropoff: findDropoff(places, text),
+      // A full street address, which an offer card never shows - Uber does not
+      // say where a delivery ends until it has been accepted. Here so the
+      // screen AFTER the accept can go through the same pipeline; null on every
+      // one of the 604 offer cards on file bar three. See findAddress.
+      address: findAddress(text),
       // The legs behind the sum, so a caller holding readings from several
       // frames can merge the ones a single frame missed.
       legDetail: used.map(function (l) {
@@ -1473,6 +1600,7 @@
            setting: setting, doubt: doubt, DEFAULT_SETTINGS: DEFAULT_SETTINGS,
            findDeadline: findDeadline, minutesUntil: minutesUntil,
            findPlaces: findPlaces, trimPlace: trimPlace,
+           findAddress: findAddress,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole,
            SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH,

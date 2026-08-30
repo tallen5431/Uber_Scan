@@ -250,6 +250,30 @@ function startScanner() {
           scanner.offer = read.offer;
           scanner.offerAt = Date.now();
         }
+        // The destination, read off the screen that comes AFTER the accept.
+        //
+        // It goes onto the order in the car and nowhere else. An offer card
+        // does not name where a delivery ends - 106 of this driver's 604 cards
+        // print "Customer dropoff" and no address - so `holding.dropoff` was
+        // null on 18% of accepted jobs, which is what makes the stacking advice
+        // silent on 39% of the pairs it is asked about.
+        //
+        // Only when there IS an order in the car. Read with nothing held, this
+        // is an address belonging to no job, and storing it would measure the
+        // next offer against wherever the driver happened to be pointing the
+        // camera. It is also why nothing here touches `scanner.offer`: the
+        // offer is a card that was read, and this is not one.
+        if (read.dropoff && typeof read.dropoff.line === 'string') {
+          if (scanner.holding) {
+            scanner.holding.dropoff = read.dropoff.line;
+            scanner.holding.dropoffScanned = true;
+          }
+          // Kept either way, so the page can say what was read even when there
+          // was nothing to attach it to - a driver who presses the button with
+          // no order held needs to see that, not silence.
+          scanner.dropoff = read.dropoff;
+          scanner.dropoffAt = Date.now();
+        }
         // The scan loop's own voice — a reading or a heartbeat — as opposed to
         // the autopilot's progress messages. Only this arms the watchdog, and
         // only this feeds it.
@@ -399,6 +423,7 @@ function handoffPath(base) {
 
 var WATCH_PATH = handoffPath('.viewing');
 var RESET_PATH = handoffPath('.recalibrate');
+var DROPOFF_PATH = handoffPath('.dropoff');
 var CROP_PATH = handoffPath('.cropbox.json');
 var cropSeq = 0;
 var lastTouch = 0;
@@ -1396,6 +1421,23 @@ function route(req, res) {
   // The one thing on this server that is not a read. It asks the scanner to
   // forget where it thinks the phone is; POST because it changes something, and
   // because a GET would be followed by anything that prefetches links.
+  // "Read the screen in front of you as a destination."
+  //
+  // A request file rather than a reply, like every other thing the web side
+  // asks the camera side for: the scanner is sometimes a child of this process
+  // and sometimes a systemd unit that has never heard of it, and a file works
+  // identically either way. The answer comes back up the scanner's own stdout
+  // as a `dropoff` line, which is why this returns as soon as the ask is
+  // written rather than waiting for one.
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/dropoff') {
+    return fs.writeFile(DROPOFF_PATH, '', function (err) {
+      if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
+                           { 'Content-Type': 'application/json; charset=utf-8' });
+      send(res, 200, JSON.stringify({ ok: true, holding: !!scanner.holding }),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
+
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/recalibrate') {
     return fs.writeFile(RESET_PATH, '', function (err) {
       if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
@@ -1747,6 +1789,14 @@ function route(req, res) {
       holding: (function () {
         var h = holding(Date.now());
         return h ? { pay: h.pay, minutes: h.minutes,
+                     // Where it ends, and whether that came off the card or
+                     // off a scan of the screen after the accept. The panel
+                     // needs the difference: a card-derived dropoff is a
+                     // cross-street, a scanned one is a full address, and the
+                     // button that asks for one should stop offering itself
+                     // once it has been answered.
+                     dropoff: h.dropoff || null,
+                     dropoffScanned: !!h.dropoffScanned,
                      heldMs: Math.max(0, Date.now() - h.acceptedAt) } : null;
       }()),
       lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')

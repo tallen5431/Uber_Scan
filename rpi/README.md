@@ -3135,6 +3135,82 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### The address the card will not show you until you have taken the job
+
+106 of the driver's 604 offer cards print **"Customer dropoff"** and no address.
+Uber does not say where a delivery ends until it has been accepted. That is 18%
+of every card the rig sees, and it is what drives **39% of the pairs** where the
+stacking advice can say nothing:
+
+    silent: 1 side named no dropoff at all       2968  (30%)
+    silent: 2 sides named no dropoff at all       905  (9%)
+    silent: a dropoff named, no town read off it  583  (6%)
+    silent: both placed, only a quadrant matched  358  (4%)
+
+**81% of the silence is "there is no address to work with."** No parser reaches
+an address that is not on the screen, and no geocoder does either — so the fix
+is to read the screen that comes *after* the accept. The driver presses
+**⌖ Dropoff** on the driving screen and the rig reads whatever the phone is
+showing as an address.
+
+**The anchor is a state code followed by five digits,** and that choice is the
+whole design. It is the one part of a US address that is short, positional and
+**checkable**: `GA 30127` is a state and a ZIP or it is not, where a street name
+misread by one letter is still a perfectly plausible street name and nothing
+downstream can tell. A state that is not a state produces `None` and the panel
+says it did not read — the ZIP is repaired from stand-ins (`3O127` is this OCR's
+commonest confusion), the state deliberately is not, because repairing the check
+is inventing the one token that exists to refuse.
+
+**Why the ZIP and not a geocoder.** A geocoder returns a confident coordinate
+for `Daffodll Ln` as readily as for the real one — a wrong distance wearing
+decimal precision, which is the failure this project refuses above all others.
+A ZIP needs no service, no network in a car, and no relevance score nobody can
+calibrate. It is also the right *resolution*: a metro ZIP is a few square miles,
+where "same town" in Atlanta is a hundred and thirty-five of them and **44% of
+this driver's placed dropoffs are in Atlanta**.
+
+**The integration that had to land with it.** `PLACE_TOWN` anchors on the END of
+a string and a full address ends in a ZIP — so before `PLACE_ZIP` was stripped
+first, `area()` of a scanned address returned **null**, and the geography would
+have gone *silent on exactly the orders the scan was added to rescue*. Caught by
+asking the question before writing the code, not after.
+
+**`same-zip` only strengthens, never vetoes.** Two ZIPs that merely differ are
+not evidence of distance — they tile finely, so neighbours are next door, and
+concluding `elsewhere` from that would refuse stacks a mile apart. A wrong
+`elsewhere` costs a fare; a wrong `near` costs an hour and a rating. So a
+fine-grained key is safe for sharpening an agreement and never for manufacturing
+a disagreement. How far apart two *different* ZIPs are needs their centroids,
+which this rig does not have and will not guess at.
+
+**What the grammar has to do that a regex alone does not.** A real screen puts
+the street and the town on two lines, so `normalize()` joins them with a space
+and there is no comma to split on. `1234 Daffodil Ln Powder Springs` has no
+grammar for where the street stops, and the group takes four words back — so the
+town reads as `Daffodil Ln Powder Springs` and two readings of the same street
+disagree about where they are. The USPS suffix list is the break, taken at the
+**last** suffix in the group: `Powder Springs Rd Marietta` puts the real break at
+the later of two, and so does `Mill Run Ct Marietta` from the other direction.
+Where no suffix is found the city is `None` rather than a guess — per-field
+refusal, the same as a leg that keeps its minutes and gives up its distance.
+
+Both ports agree on 772 corpus texts, 5064 damaged ones and 5700 address-shaped
+ones. Twenty-one mutations, twenty-one caught — the state check removed, the
+state repaired like a number, the ZIP range widened, the ZIP left unrepaired,
+the first address on the screen taken instead of the last, the comma requirement
+dropped, the split taken at the first suffix, the street loosened to
+anything-but-a-comma, the street reaching back over the previous address, the
+icon row left in front of the town, the ZIP stripped but not reported, and every
+way of making `same-zip` say more than it should.
+
+**What is still open, and it is the honest part:** none of this has met a real
+post-acceptance screen. The shapes above are reasoned from what a US address is,
+not measured from what Uber draws, and the one that decides the layout — whether
+the full address appears at accept or only after pickup — is unanswered. The ZIP
+anchor survives almost any layout; the street/city split is where a surprise
+would land.
+
 ### A guard that could not fire, because the damage removed its own evidence
 
 `legs_short_a_distance` exists for one failure: a two-leg journey where one
@@ -4285,7 +4361,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4214 checks
+npm test                # all 30 suites, 4277 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

@@ -2283,6 +2283,87 @@
    "expect": null
   }
  ],
+  "_address_comment": "A full street address off the screen that comes AFTER the accept. An offer card never carries one - Uber prints \"Customer dropoff\" and no address on 106 of this driver's 604 cards, 18% of everything the rig sees, and that drives 39% of the pairs where the stacking advice can say nothing. `expect` is [line, city, zip], or null when the reading is refused. It refuses far more readily than anything else in this file and on purpose: every other rule reads a card the driver can also see and decides a number they can sanity-check, while this fills in a fact they cannot check later, against an offer that has not arrived yet.",
+ "address": [
+  {
+   "name": "a plain address, as a screen would print it",
+   "text": "1234 Daffodil Ln, Powder Springs, GA 30127",
+   "expect": ["1234 Daffodil Ln, Powder Springs, GA 30127", "Powder Springs", "30127"]
+  },
+  {
+   "name": "...on two lines, which is how a screen really prints it",
+   "_why": "normalize() joins the lines with a space, so there is no comma between the street and the town and no grammar for where one stops. The USPS suffix is what splits it. Without that the town comes out as \"Daffodil Ln Powder Springs\" and two readings of the same street disagree about where they are.",
+   "text": "Deliver to 1234 Daffodil Ln Powder Springs, GA 30127 Navigate",
+   "expect": ["1234 Daffodil Ln, Powder Springs, GA 30127", "Powder Springs", "30127"]
+  },
+  {
+   "name": "...with a quadrant, which belongs to the street and not the town",
+   "text": "1234 Chastain Rd NW Kennesaw, GA 30144",
+   "expect": ["1234 Chastain Rd NW, Kennesaw, GA 30144", "Kennesaw", "30144"]
+  },
+  {
+   "name": "a town that contains a street suffix splits at the later one",
+   "_why": "\"900 Powder Springs Rd Marietta\" has two candidate breaks and only the second is real.",
+   "text": "900 Powder Springs Rd Marietta, GA 30064",
+   "expect": ["900 Powder Springs Rd, Marietta, GA 30064", "Marietta", "30064"]
+  },
+  {
+   "name": "a street with two suffixes splits at the last one",
+   "_why": "\"Mill Run Ct\" is an ordinary street name and it contains two of the USPS suffixes. Splitting at the first leaves the town as \"Ct Marietta\", which compares unequal to every other reading of Marietta. Only the LAST one is the real break - the same reasoning as the town that contains a suffix, from the other direction.",
+   "text": "100 Mill Run Ct Marietta, GA 30064",
+   "expect": ["100 Mill Run Ct, Marietta, GA 30064", "Marietta", "30064"]
+  },
+  {
+   "name": "a ZIP+4 keeps the five that matter",
+   "text": "4821 Chastain Rd NW, Kennesaw, GA 30144-1234",
+   "expect": ["4821 Chastain Rd NW, Kennesaw, GA 30144", "Kennesaw", "30144"]
+  },
+  {
+   "name": "a ZIP spelled in stand-ins is still that ZIP",
+   "_why": "Five characters of small type through a lens: \"3O127\" is this OCR's commonest confusion, not a different number. The STATE gets no such help - see the case below.",
+   "text": "Powder Springs, GA 3O127",
+   "expect": ["Powder Springs, GA 30127", "Powder Springs", "30127"]
+  },
+  {
+   "name": "a state that did not read is refused, not corrected",
+   "_why": "The state is the check, so repairing it would be inventing the one token that is here to refuse. \"6A\" is not Georgia; it is a reading that failed, and the driver can press the button again.",
+   "text": "Daffodil Ln, Powder Springs, 6A 30127",
+   "expect": null
+  },
+  {
+   "name": "two letters that are not a state are not a state",
+   "text": "Daffodil Ln, Powder Springs, ZZ 30127",
+   "expect": null
+  },
+  {
+   "name": "five digits that are not a ZIP are not a ZIP",
+   "text": "Suite 12, Atlanta, GA 00001",
+   "expect": null
+  },
+  {
+   "name": "the last address on the screen is the one you are going to",
+   "_why": "A navigation screen shows where you are going, and a pickup already made comes above it. The street must not reach back across the earlier ZIP either: \"...GA 30339 then 12 Oak Ln\" was stored as the street.",
+   "text": "pickup 900 Battery Ave SE, Atlanta, GA 30339 then 12 Oak Ln, Marietta, GA 30060",
+   "expect": ["12 Oak Ln, Marietta, GA 30060", "Marietta", "30060"]
+  },
+  {
+   "name": "a stray letter in front of the town is the icon row, not a word",
+   "_why": "\"l Atlanta\", \"j Powder Springs\" - PLACE_TOWN in advice.js tolerates exactly this, and the two have to agree about what a town is called or the same place read twice compares unequal to itself.",
+   "text": "800 Forrest St NW, l Atlanta, GA 30318",
+   "expect": ["800 Forrest St NW, Atlanta, GA 30318", "Atlanta", "30318"]
+  },
+  {
+   "name": "an offer card is not an address",
+   "text": "$16.05 36 min (16.1 mi) total Volcano Steak & Sushi (Mars Hill Rd) Customer dropoff",
+   "expect": null
+  },
+  {
+   "name": "the street is words, not everything up to a comma",
+   "_why": "A card printing \"28 min (11.2 mi) total 100 Rosemont Ct\" satisfies a loose street rule from the \"28\", and the driver is shown the offer's own arithmetic dressed up as a street name.",
+   "text": "Exclusive $6.44 Verified 28 min (11.2 mi) total 100 Rosemont Ct, Hiram, GA 30141",
+   "expect": ["100 Rosemont Ct, Hiram, GA 30141", "Hiram", "30141"]
+  }
+ ],
  "_whole_comment": "Whether a reading is finished, as opposed to merely judgeable. Its own block because it is a function of the reading rather than a field on it, and because it was written out by hand in two places that both got delivery cards wrong.",
  "whole": [
   {

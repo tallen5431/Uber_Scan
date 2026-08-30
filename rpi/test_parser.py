@@ -83,6 +83,15 @@ for c in cases.get('coerce', {}).get('doubt', []):
 for c in cases.get('places', []):
     eq('places / ' + c['name'], P.parse(c['text'])['places'], c['expect'])
 
+# The address off the screen after the accept. Compared as [line, city, zip]
+# rather than field by field, because those three are what the rest of the rig
+# actually consumes: `line` is shown and stored, `city` and `zip` are what the
+# geography is decided on. See OP.find_address.
+for c in cases.get('address', []):
+    got = P.find_address(c['text'])
+    eq('address / ' + c['name'],
+       [got['line'], got['city'], got['zip']] if got else None, c['expect'])
+
 for c in cases.get('whole', []):
     eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])
 

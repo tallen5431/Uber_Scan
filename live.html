@@ -462,6 +462,19 @@
          server.js — so this is the driver saying "sooner than that", not the
          only way out of it. -->
     <button type="button" class="linkbtn" id="drop" hidden>Drop</button>
+    <!-- Read the destination off the phone, once an order is in the car.
+
+         An offer card does not say where a delivery ends: Uber prints
+         "Customer dropoff" and the address only appears on the screen after the
+         accept. 106 of 604 real cards are like that — 18% of everything the rig
+         sees — and it is what leaves the stack line silent on 39% of the pairs
+         it is asked about.
+
+         Shown only while an order is held, for the same reason Drop is: a
+         control for a state you are not in teaches people to ignore the bar.
+         It stays available after a successful read, because the first thing a
+         driver will want when it reads the wrong screen is to press it again. -->
+    <button type="button" class="linkbtn" id="dest" hidden>⌖ Dropoff</button>
     <a class="linkbtn parked" href="index.html">⌨ Type</a>
     <a class="linkbtn parked" href="journal.html">▤ Offers</a>
     <button type="button" class="linkbtn" id="setBox">▣ Set box</button>
@@ -506,7 +519,7 @@
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'working', 'places', 'spoken', 'took', 'shift', 'stack', 'drop']
+   'working', 'places', 'spoken', 'took', 'shift', 'stack', 'drop', 'dest']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -692,7 +705,15 @@
       // quadrant are all these cards print. Nothing is said when they did not
       // print enough - about half the time - because a guess here costs an
       // hour and a late delivery. See Advice.sameArea.
+      //
+      // 'same-zip' is the strongest of these and only reachable once the
+      // destination has been scanned off the screen after the accept - an
+      // offer card prints no ZIP. It is worth its own words because "same
+      // town" is nearly meaningless where this driver works: 44% of their
+      // placed dropoffs are in Atlanta, which is 135 square miles, and a metro
+      // ZIP is a few.
       + (s.ends === 'elsewhere' ? ' \u00b7 ENDS ELSEWHERE'
+         : s.ends === 'same-zip' ? ' \u00b7 same ZIP'
          : s.ends === 'same-side' ? ' \u00b7 same side of town'
          : s.ends === 'same-town' ? ' \u00b7 same town' : '');
     if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
@@ -795,6 +816,52 @@
     }).then(function () {
       dropBusy = false;
       showDrop();
+    });
+  });
+
+  // --- reading the destination off the screen after the accept -------------
+  //
+  // The one thing the offer card cannot tell you. Uber prints "Customer
+  // dropoff" and no address on 106 of this driver's 604 cards — 18% of
+  // everything the rig sees — so the order in the car has no destination and
+  // the stack line has nothing to compare the next offer against. The address
+  // is on the screen that comes AFTER the accept, and this is the driver
+  // saying "that is what you are looking at now".
+  //
+  // The press only opens a window; the scanner keeps reading for a few seconds
+  // (see DROPOFF_WINDOW) because the driver still has to get the destination
+  // up, and a phone in a mount showing a navigation screen is exactly what the
+  // motion gate scores as nothing happening.
+  var destBusy = false;
+  var destSaid = '';
+
+  function showDest() {
+    el.dest.hidden = !holdingNow;
+    el.dest.textContent = destBusy ? '⌖ reading…' : (destSaid || '⌖ Dropoff');
+    el.dest.title = destSaid
+      ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
+      : 'Read the destination off your phone, so the next offer can be judged '
+        + 'on where it ends as well as what it pays. It does not touch your phone.';
+  }
+
+  el.dest.addEventListener('click', function () {
+    if (destBusy) return;
+    destBusy = true;
+    destSaid = '';
+    showDest();
+    fetch('/api/dropoff', { method: 'POST' }).catch(function () {
+      /* The scanner answers on its own stream; a failed ask just reads as one
+         that found nothing, which is the same thing from here. */
+    }).then(function () {
+      // Cleared on a timer rather than on a reply, because the reply to this
+      // is not the response — it is a `dropoff` line arriving from the scanner
+      // seconds later, through the same stream the verdicts come down. The
+      // window is the scanner's; this only has to stop saying "reading…" once
+      // it has certainly closed.
+      setTimeout(function () {
+        destBusy = false;
+        showDest();
+      }, 13000);
     });
   });
 
@@ -1313,6 +1380,17 @@
       if (msg.ready) {
         holdingNow = !!msg.holding;
         showDrop();
+        showDest();
+      }
+      // The destination, arriving seconds after the button was pressed. Its own
+      // message, carrying no verdict: there is no offer on the screen it was
+      // read from, there is a navigation app, so it must not be able to stand
+      // in for a reading. `line` is what the driver reads to tell whether the
+      // scan caught the right screen.
+      if (msg.dropoff && msg.dropoff.line) {
+        destSaid = msg.dropoff.line;
+        destBusy = false;
+        showDest();
       }
       render();
       showConnection();
@@ -1367,6 +1445,17 @@
     // way to put it down, and no sign that anything was being carried.
     holdingNow = !!s.holding;
     showDrop();
+    // ...and what it was read as, so a panel opened or reloaded mid-delivery
+    // shows the destination already scanned rather than offering to scan one
+    // that is on the record. Only a SCANNED one: a dropoff that came off the
+    // offer card is a cross-street the card printed, not an answer to this
+    // button, and showing it here would say the question had been asked.
+    if (s.holding && s.holding.dropoffScanned && s.holding.dropoff) {
+      destSaid = s.holding.dropoff;
+    } else if (!s.holding) {
+      destSaid = '';
+    }
+    showDest();
     scannerState = s.scanner || null;
     render();
     showConnection();

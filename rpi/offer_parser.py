@@ -1076,6 +1076,177 @@ PLACE_IS_A_SHOP = re.compile(r'\([^)]{2,40}\)\s*$', ASCII)
 PICKUP_LABEL = re.compile(r'\bpick\s?up\b[^A-Za-z]*$', re.IGNORECASE | ASCII)
 
 
+# --- the address the card will not show you until you have taken the job ------
+#
+# 106 of the driver's 604 offer cards print "Customer dropoff" and no address at
+# all: Uber does not say where the job ends until it is accepted. That is 18% of
+# every card the rig sees, and it is what drives 39% of the pairs where the
+# stacking advice can say nothing. No parser reaches an address that is not on
+# the screen, so this reads the screen that comes AFTER the accept.
+#
+# The anchor is a two-letter state code followed by five digits. It is the one
+# part of a US address that is short, positional, and CHECKABLE — "GA 30127" is
+# a state and a ZIP or it is not, where a street name misread by one letter is
+# still a perfectly plausible street name and nothing downstream can tell.
+#
+# That checkability is the whole reason this is worth doing at all. The
+# alternative on the table was sending the address to a geocoder, and a geocoder
+# returns a confident coordinate for "Daffodll Ln" as readily as for the real
+# one — a wrong distance wearing decimal precision, which is the failure this
+# project refuses above all others. Here a state that is not a state, or a ZIP
+# that is not five digits, produces None and the rig says it did not read it.
+ZIP = DC + r'{5}'
+
+# The fifty states, DC and the inhabited territories. A list, and deliberately
+# one: the rule against phrase-lists is about lists that do not generalise to
+# the next card — merchants, towns, the words a promo chip happens to use. This
+# alphabet is closed, national, and older than the app. It is also doing the
+# opposite job to a phrase-list: it is here to REFUSE, so an OCR misread lands
+# on "no address" rather than on a confident wrong one.
+STATES = set((
+    'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS '
+    'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV '
+    'WI WY DC AS GU MP PR VI'
+).split())
+
+# "…, Powder Springs, GA 30127" and the ZIP+4 form. The city is taken back to a
+# comma or the start, because that is where a US address puts the break; the
+# street is whatever preceded it, and is kept only for showing.
+ADDRESS = re.compile(
+    r'([A-Za-z][A-Za-z.\'’-]*(?:\s+[A-Za-z][A-Za-z.\'’-]*){0,3})'
+    r'\s*,\s*([A-Za-z]{2})\s+(' + ZIP + r')(?:\s*-\s*' + DC + r'{4})?(?!\d)',
+    ASCII)
+
+# A house number and a street, taken only to show the driver what was read. It
+# never decides anything, so it is the loosest rule here — but WORDS, not
+# "anything but a comma". A card printing "28 min (11.2 mi) total 100 Rosemont
+# Ct" satisfies the loose version from the "28", and the driver is shown the
+# offer's own arithmetic dressed up as a street name.
+STREET = re.compile(
+    r'(' + DC + r"{1,6}\s+[A-Za-z][A-Za-z.'-]*"
+    r"(?:\s+[A-Za-z0-9.'-]+){0,4})\s*$", ASCII)
+
+# A single letter standing alone in front of a town is the icon row, not a word:
+# "l Atlanta", "j Powder Springs", "} Marietta". PLACE_TOWN in advice.js already
+# tolerates exactly this, and the two have to agree about what a town is called
+# or the same place read twice compares unequal to itself.
+CITY_JUNK = re.compile(r'^(?:[A-Za-z]\s+)+', ASCII)
+
+# Where a street stops and a town starts, when the address did not say with a
+# comma — which is the case to expect, not the exception: a screen puts the
+# street and the town on two lines and `normalize` joins them with a space.
+#
+# The USPS street-suffix abbreviations, and a list for the same reason STATES is
+# one: closed, national, older than the app, and here to draw a line rather than
+# to recognise a place. Without it "1234 Daffodil Ln Powder Springs, GA 30127"
+# has no grammar for where the street ends, and the town comes out as "Daffodil
+# Ln Powder Springs" — which two readings of the same street would disagree
+# about. The optional trailing quadrant is part of the street, not the town:
+# "Chastain Rd NW Kennesaw".
+STREET_ENDS = re.compile(
+    r'\b(?:st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd|boulevard|ct'
+    r'|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace'
+    r'|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend)\b'
+    r'\.?(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?\s+', re.IGNORECASE | ASCII)
+
+
+def find_address(text):
+    """A full street address off a post-acceptance screen, or None.
+
+    Returns {'line', 'street', 'city', 'state', 'zip'} — `line` is what to show
+    and what to store, `zip` is what the geography is actually decided on. See
+    Advice.area: a ZIP is a few square miles, where "same town" in Atlanta is a
+    hundred and thirty-five of them and 44% of this driver's dropoffs are in
+    Atlanta.
+
+    Refuses far more readily than the rest of this file, and on purpose. Every
+    other rule here is reading a card the driver can also see and is deciding a
+    number they can sanity-check; this one is filling in a fact they cannot
+    check later, against an offer that has not arrived yet. So a state that is
+    not a state, or five digits that are not a plausible ZIP, is None.
+    """
+    if not text:
+        return None
+    text = normalize(text)
+    best = None
+    after = 0          # where the previous address ended; see `head` below.
+    for m in ADDRESS.finditer(text):
+        state = m.group(2).upper()
+        # `fix_digits` first: the ZIP is five characters of small type through a
+        # lens, and "3O127" is this OCR's commonest confusion, not a different
+        # number. The state gets no such help — two letters have no digits in
+        # them, and "6A" corrected to "GA" would be inventing the one token that
+        # is here to refuse.
+        digits = fix_digits(m.group(3))
+        if state not in STATES or not digits.isdigit() or len(digits) != 5:
+            continue
+        # 00501 is the lowest ZIP in use and 99950 the highest. A five-digit
+        # number outside that is a phone fragment or an order id, not a place.
+        code = int(digits)
+        if not (501 <= code <= 99950):
+            continue
+        city = CITY_JUNK.sub('', re.sub(r'\s+', ' ', m.group(1)).strip(' .,'))
+        if len(city) < 3:
+            continue
+        # ...but only call it a city when the address said where it began. A US
+        # address separates the street from the city with a comma; without one,
+        # "1234 Daffodil Ln Powder Springs" gives no grammar for where the
+        # street stops, and the group takes up to four words back — so the town
+        # comes out as "Daffodil Ln Powder Springs" and two readings of the same
+        # street disagree about where they are.
+        #
+        # There is no honest way to split it, so it is not split. The ZIP is
+        # what the geography is decided on and it is unaffected; `line` still
+        # shows the driver everything that was read, and `city` — the field
+        # anything downstream would treat as a town — is None rather than a
+        # guess. Per-field refusal, the same as a leg that keeps its minutes
+        # and gives up its distance.
+        # Where the city begins in the original text — which is not where the
+        # group begins when the group swallowed the street.
+        city_at = m.start(1)
+        before = text[after:city_at].rstrip()
+        if before and not before.endswith(','):
+            # ...unless the street named its own end. Take the LAST suffix in
+            # the group: "Old Mill Rd Powder Springs" has one, and a town that
+            # happens to contain one — "Powder Springs Rd Marietta" — puts the
+            # real break at the later of the two.
+            split = None
+            for s in STREET_ENDS.finditer(m.group(1)):
+                split = s.end()
+            if split is not None and len(m.group(1)) - split >= 3:
+                city_at = m.start(1) + split
+                city = re.sub(r'\s+', ' ', text[city_at:m.end(1)]).strip(' .,')
+            else:
+                city = None
+        # From the end of the previous address, never before it. A screen
+        # listing two stops puts a ZIP between them, and a street search over
+        # the whole head reaches back across it: "…GA 30339 then 12 Oak Ln"
+        # was stored as the street.
+        #
+        # Up to where the CITY starts, not where the match does, so the half of
+        # the group that turned out to be the street is still shown as one.
+        head = text[after:city_at].rstrip(' ,')
+        street = STREET.search(head)
+        street = re.sub(r'\s+', ' ', street.group(1)).strip(' .,') if street else None
+        # What to show, as opposed to what to decide on. When the city could not
+        # be trusted, the driver still gets everything that was read — they are
+        # looking at this to judge whether the scan worked, and "GA 30127" does
+        # not tell them that. `city` stays None either way, so nothing
+        # downstream treats the unsplit text as a town.
+        line = ', '.join([p for p in (street, city) if p]
+                         + ['%s %s' % (state, digits)]) if (street or city) \
+            else re.sub(r'\s+', ' ', m.group(0)).strip(' .,')
+        found = {'line': line, 'street': street, 'city': city,
+                 'state': state, 'zip': digits}
+        after = m.end()
+        # The LAST one on the screen. A navigation screen shows where you are
+        # going, and anything above it — a pickup already made, a previous stop
+        # — comes first. Same reasoning as find_dropoff, which takes the last
+        # place a card names for the same reason.
+        best = found
+    return best
+
+
 def find_dropoff(places, text=None):
     """Where the job ENDS, or None when the card did not say.
 
@@ -1372,6 +1543,11 @@ def parse(raw_text):
         # See find_dropoff, which is the half that decides.
         'pickup': find_pickup(places),
         'dropoff': find_dropoff(places, text),
+        # A full street address, which an offer card never shows — Uber does not
+        # say where a delivery ends until it has been accepted. This is here so
+        # the screen AFTER the accept can be read by the same pipeline, and it
+        # is None on every one of the 604 offer cards on file. See find_address.
+        'address': find_address(text),
         # The legs behind the sum, so a caller holding readings from several
         # frames can merge the ones a single frame missed.
         # `labelled` travels with them. is_whole re-runs

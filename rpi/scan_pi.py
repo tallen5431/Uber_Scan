@@ -446,6 +446,35 @@ def reset_requested():
     return True
 
 
+def dropoff_requested():
+    """True once per press of "read the dropoff". Same shape as reset_requested.
+
+    Separate from the reading itself: this only says the driver asked. What it
+    buys is a window — see DROPOFF_WINDOW — because the phone is showing a
+    navigation screen that is not going to move, and the motion gate reads a
+    still picture as nothing happening.
+    """
+    try:
+        asked = any(os.path.exists(p) for p in HO.candidates(HO.DROPOFF))
+    except OSError:
+        return False
+    if not asked:
+        return False
+    HO.clear(HO.DROPOFF)
+    return True
+
+
+# How long to keep reading after the button. The driver presses it, then has to
+# get the destination onto the screen — a tap or two, or just waiting for the
+# app to settle after the accept. One read at the instant of the press would
+# photograph whatever was there before they did any of that.
+#
+# Twelve seconds is the same figure the offer window uses and for the same
+# reason: long enough to cover a person doing one thing on a phone, short enough
+# that the rig is not still hunting for an address when the next offer arrives.
+DROPOFF_WINDOW = 12.0
+
+
 def use_manual_box(scanner, quad_px):
     """Read exactly the box a person drew, and stop deriving one inside it.
 
@@ -1074,6 +1103,31 @@ def emit_reading():
           flush=True)
 
 
+def emit_dropoff(address, ms=None):
+    """The destination, once the driver has asked for it and it has been read.
+
+    Its own line, like the offer id and for the same reason: it is not part of a
+    verdict and must not be able to stand in for one. Nothing about this reading
+    says anything about an offer — there is no offer on the screen, there is a
+    navigation app — so it carries no `ready`, no rate and no pay.
+
+    Emitted once per press. The window stays open afterwards only until an
+    address is found; a second one arriving would be the driver having moved on
+    to a different screen, and the first is the one they asked about.
+    """
+    print(json.dumps({'dropoff': {
+        # What to show and what to store. `city` and `zip` are what the
+        # geography is actually decided on — see Advice.sameArea — and `line` is
+        # what the driver reads to tell whether the scan worked.
+        'line': address.get('line'),
+        'street': address.get('street'),
+        'city': address.get('city'),
+        'state': address.get('state'),
+        'zip': address.get('zip'),
+        'ms': ms,
+        'at': int(time.time() * 1000)}}), flush=True)
+
+
 def emit_offer(offer_id, parsed, rate):
     """Which offer is now on the record, so the driver can say they took it.
 
@@ -1435,6 +1489,11 @@ def main():
     # Which card the burst above is for, so it is armed once per card rather
     # than once per read. See where it is set.
     resample_for = None
+    # Until when the driver's "read the dropoff" press is still live, and the
+    # last address it produced. See DROPOFF_WINDOW and dropoff_requested.
+    dropoff_until = 0.0
+    dropoff_seen = None
+    last_dropoff_read = 0.0
     last_resample = 0.0
     last_verify = 0.0
     verify_every = VERIFY_EVERY
@@ -1487,6 +1546,7 @@ def main():
         # is how a loop rewritten into a closure loses its memory without
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
+        nonlocal dropoff_until, dropoff_seen
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer
@@ -1501,6 +1561,28 @@ def main():
             settings['nowMinutes'] = minutes_now
         rate = OP.rate(parsed, settings)
         out['parsed'], out['rate'] = parsed, rate
+
+        # The destination, when the driver asked for one and this reading has
+        # it. Taken from the frame's OWN parse, not from the merged reading:
+        # the accumulator exists to vote between frames of one offer card, and
+        # a navigation screen is not an offer — it has no payout, so it never
+        # enters a window and the merge has nothing to say about it.
+        #
+        # Ahead of everything below, because none of that applies either. A
+        # screen with an address and no payout is `complete: False`, which is
+        # the branch that decides the reading is not worth a verdict — correct
+        # for an offer, and it would throw this away.
+        if time.time() < dropoff_until and dropoff_seen is None:
+            found = (out['parsed'] or {}).get('address')
+            if found:
+                dropoff_seen = found
+                # Closed the moment it is answered. Left open, the next screen
+                # the driver brings up would overwrite the address they asked
+                # for with one they did not.
+                dropoff_until = 0.0
+                if args.json:
+                    emit_dropoff(found, ms=out.get('ms'))
+                log('destination read: %s' % found.get('line'))
         # Anything with a payout is worth a second look; anything without is
         # not an offer and should not hold the loop open.
         #
@@ -1842,6 +1924,26 @@ def main():
                         log('outline reset asked for, but tracking is off '
                             '(--no-track), so the corners are already fixed')
 
+                # "The screen in front of you is the destination."
+                #
+                # An offer card does not say where a delivery ends - 106 of this
+                # driver's 604 cards print "Customer dropoff" and no address, so
+                # 18% of everything the rig sees can never name a destination
+                # before it is accepted. The address is on the screen that comes
+                # after, and this is the driver saying so.
+                #
+                # It opens a window rather than taking one reading, because the
+                # press and the address are not simultaneous: the driver still
+                # has to get the destination up, and the phone then sits
+                # perfectly still showing it - which is precisely what the
+                # motion gate scores as nothing happening.
+                if dropoff_requested():
+                    dropoff_until = now + DROPOFF_WINDOW
+                    dropoff_seen = None
+                    moved = do_read = True
+                    log('reading the destination for the next %d seconds: put '
+                        'the address on the phone' % int(DROPOFF_WINDOW))
+
                 # A box drawn on the live view. It arrives as fractions of the
                 # frame, which is the only form that survives the trip: what the
                 # driver drew on was a 480px JPEG of a 2328px sensor frame.
@@ -2045,6 +2147,14 @@ def main():
                 if not do_read and now < resample_until and (now - last_resample) > RESAMPLE_EVERY:
                     do_read = True
                     last_resample = now
+
+                # ...and through a dropoff window, on the same beat, for the
+                # same reason: a still picture produces no reads at all and the
+                # address is on a still picture by definition.
+                if not do_read and now < dropoff_until \
+                        and (now - last_dropoff_read) > RESAMPLE_EVERY:
+                    do_read = True
+                    last_dropoff_read = now
 
                 # ...and the slow beat, for as long as there is a card there.
                 # See VERIFY_EVERY: a new offer arriving in place of the old one

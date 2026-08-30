@@ -677,6 +677,44 @@ if shutil.which('python3'):
             quiet.kill()
         shutil.rmtree(work2, ignore_errors=True)
 
+# --- the button that reads the destination --------------------------------
+#
+# An offer card does not say where a delivery ends: Uber prints "Customer
+# dropoff" and no address on 106 of this driver's 604 cards - 18% of everything
+# the rig sees - and that is what leaves the stack line silent on 39% of the
+# pairs it is asked about. The address is on the screen AFTER the accept, and
+# this button is the driver saying "that is what you are looking at now".
+_page = open(os.path.join(ROOT, 'live.html')).read()
+
+ok_('the driving screen has a dropoff button', 'id="dest"' in _page)
+ok_('...and it is hidden until there is an order to attach one to',
+    re.search(r'el\.dest\.hidden\s*=\s*!holdingNow', _page) is not None)
+ok_('...and asks the server for a read',
+    "fetch('/api/dropoff'" in _page)
+ok_('...and is registered like every other control',
+    re.search(r"'drop',\s*'dest'\]", _page) is not None)
+
+# The destination arrives seconds later on the scanner's own stream, not as the
+# reply to the press - so the page has to be listening for it. Without this the
+# button fires and nothing on the screen ever says what was read.
+ok_('the page listens for the destination coming back',
+    re.search(r'msg\.dropoff\s*&&\s*msg\.dropoff\.line', _page) is not None)
+ok_('...and shows the driver what it was read as',
+    'destSaid = msg.dropoff.line' in _page)
+
+# Only a SCANNED dropoff refills the button on reload. A dropoff that came off
+# the offer card is a cross-street the card printed, not an answer to this
+# button, and showing it here would claim the question had been asked.
+ok_('a reloaded panel only claims a destination that was scanned',
+    's.holding.dropoffScanned' in _page)
+
+# The strongest thing the geography can say, and only reachable once an address
+# has been scanned - an offer card prints no ZIP. Worth its own words because
+# 44% of this driver's placed dropoffs are in Atlanta, which is 135 square
+# miles, where a metro ZIP is a few.
+ok_('the stack line can say the two ends share a ZIP',
+    "'same-zip'" in _page and 'same ZIP' in _page)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d live-view checks passed' % ok)
 sys.exit(1 if bad else 0)

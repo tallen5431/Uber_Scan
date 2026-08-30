@@ -52,7 +52,12 @@ def ok_(name, cond):
     eq(name, bool(cond), True)
 
 
-BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX]
+# Every request both sides share. Adding one here is what holds the new file to
+# the same rule as the other three — where it is written, that both sides derive
+# the same path for it, and that a private directory moves it for both of them.
+# A request written where the reader is not looking is not a stale picture, it
+# is a button that does nothing.
+BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF]
 
 # --- the rule --------------------------------------------------------------
 for base in BASES:
@@ -64,8 +69,11 @@ for base in BASES:
         HO.legacy(base) in HO.candidates(base))
     ok_('...best first', HO.candidates(base)[0] == chosen)
 
+# Derived from BASES rather than written out, so adding a fourth request does
+# not need this line edited to keep passing — which is the failure mode of a
+# hardcoded expectation: it is edited to match, and stops asking the question.
 eq('nothing is looked for twice', [len(HO.candidates(b)) for b in BASES],
-   [2, 2, 2] if HO._dir() != HO.HERE else [1, 1, 1])
+   [2 if HO._dir() != HO.HERE else 1] * len(BASES))
 
 # A dot in a shared directory hides a file from exactly the person trying to
 # find out what is holding memory; a name with no owner in it is worse.

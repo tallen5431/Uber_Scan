@@ -128,6 +128,16 @@ def clear(base):
 VIEWING = '.viewing'
 RECALIBRATE = '.recalibrate'
 CROPBOX = '.cropbox.json'
+# "The screen in front of you is the destination — read it as an address."
+#
+# The fourth request, and the only one that is about what a read MEANS rather
+# than about where to point. An offer card does not say where a delivery ends;
+# Uber prints "Customer dropoff" and the address arrives on the screen after the
+# accept. So the driver presses a button, this appears, and the scanner takes a
+# reading whether the picture moved or not — because a phone sitting in a mount
+# showing a navigation screen is exactly what the motion gate calls "nothing
+# happening".
+DROPOFF = '.dropoff'
 
 
 # The live picture is the fourth file the two sides share, and it moved here

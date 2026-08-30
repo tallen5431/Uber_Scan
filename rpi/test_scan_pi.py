@@ -1624,6 +1624,70 @@ ok_('...and the ones kept are the newest',
     all('many-' in n for n in _left) and 'many-11' in _left[-1])
 shutil.rmtree(_scanwork, ignore_errors=True)
 
+# --- "read the screen in front of you as a destination" --------------------
+#
+# The fourth request the web side makes of the camera side, and the only one
+# about what a read MEANS rather than where to point. An offer card does not say
+# where a delivery ends - 106 of this driver's 604 cards print "Customer
+# dropoff" and no address - so the address is on the screen after the accept and
+# this is the driver saying so.
+#
+# Held to the same contract as reset_requested, because a request left lying
+# around is not a stale picture, it is a button that fires later for no reason
+# the driver can see.
+import handoff as _HO                                          # noqa: E402
+
+_HO.clear(_HO.DROPOFF)
+eq('nothing asked for, nothing to do', SP.dropoff_requested(), False)
+
+for _where in _HO.candidates(_HO.DROPOFF):
+    open(_where, 'w').close()
+eq('a request written anywhere is seen', SP.dropoff_requested(), True)
+eq('...and is taken exactly once', SP.dropoff_requested(), False)
+eq('...from every place it could have been left',
+   [os.path.exists(p) for p in _HO.candidates(_HO.DROPOFF)],
+   [False] * len(_HO.candidates(_HO.DROPOFF)))
+
+# It opens a window rather than taking one reading. The driver presses the
+# button and THEN gets the destination onto the screen, and the phone sits
+# perfectly still showing it - which is precisely what the motion gate scores as
+# nothing happening, so a single read at the moment of the press would
+# photograph whatever was there before.
+eq('the window is long enough for a person to work a phone',
+   SP.DROPOFF_WINDOW >= 5.0, True)
+eq('...and short enough not to still be hunting at the next offer',
+   SP.DROPOFF_WINDOW <= 20.0, True)
+
+# What it emits, and what it must NOT. A navigation screen carries no offer, so
+# this line has to be incapable of standing in for a verdict: the driving screen
+# treats anything with `ready` as a reading, and a destination is not one.
+_said = []
+_was_stdout = sys.stdout
+
+
+class _Catch(object):
+    def write(self, text):
+        _said.append(text)
+
+    def flush(self):
+        pass
+
+
+sys.stdout = _Catch()
+try:
+    SP.emit_dropoff({'line': '1234 Daffodil Ln, Powder Springs, GA 30127',
+                     'street': '1234 Daffodil Ln', 'city': 'Powder Springs',
+                     'state': 'GA', 'zip': '30127'}, ms=1200)
+finally:
+    sys.stdout = _was_stdout
+_msg = json.loads(''.join(_said).strip())
+eq('the destination goes out on its own line', 'dropoff' in _msg, True)
+eq('...carrying what the driver reads to check it',
+   _msg['dropoff']['line'], '1234 Daffodil Ln, Powder Springs, GA 30127')
+eq('...and what the geography is decided on', _msg['dropoff']['zip'], '30127')
+eq('...and nothing that could be mistaken for a verdict',
+   [k for k in ('ready', 'state', 'perHour', 'pay') if k in _msg], [])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

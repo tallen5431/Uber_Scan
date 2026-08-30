@@ -667,6 +667,65 @@ eq('...and the same town on opposite sides of it is too',
    A.sameArea('Cobalt Dr NW & Ember Ln NW, Atlanta',
               'E Twin Oaks Dr SE & Spruce Dr, Smyrna'), 'elsewhere');
 
+/* --- the address scanned off the screen after the accept ------------------
+ *
+ * An offer card carries no ZIP - Uber prints "Customer dropoff" and no address
+ * until the job is taken - so everything below is reachable only once the
+ * driver has pressed the button and the rig has read the screen that follows.
+ * It is the finest key available and it changes the answer where the answer was
+ * weakest: 44% of this driver's placed dropoffs are in Atlanta, which is 135
+ * square miles, and a metro ZIP is a few. */
+
+// The integration that had to land with the parser or the feature would have
+// gone backwards. PLACE_TOWN anchors on the END of the string and a full
+// address ends in a ZIP, so before PLACE_ZIP was stripped first, area() of a
+// scanned address was null - and the geography went SILENT on exactly the
+// orders the scan was added to rescue.
+eq('an address is a place, not a null',
+   JSON.stringify(A.area('1234 Daffodil Ln, Powder Springs, GA 30127')),
+   JSON.stringify({ town: 'powder springs', quadrant: null, zip: '30127' }));
+eq('...and a card-derived place still is one',
+   JSON.stringify(A.area('Chastain Rd NW, Kennesaw')),
+   JSON.stringify({ town: 'kennesaw', quadrant: 'NW', zip: null }));
+
+eq('one ZIP is the strongest thing these two can agree on',
+   A.sameArea('1234 Daffodil Ln, Powder Springs, GA 30127',
+              '88 Lilac Springs Dr, Powder Springs, GA 30127'), 'same-zip');
+eq('...and it outranks the town, which is the point of scanning at all',
+   A.sameArea('55 Peachtree St NE, Atlanta, GA 30303',
+              '9 Piedmont Ave NE, Atlanta, GA 30303'), 'same-zip');
+
+// The asymmetry, and the reason it is not symmetric. ZIPs tile finely, so two
+// that merely differ are often next door - concluding "elsewhere" from that
+// would refuse stacks a mile apart. A fine-grained key is safe for
+// STRENGTHENING a near and never for manufacturing a far, because a wrong
+// "elsewhere" costs a fare and a wrong "near" costs an hour and a rating.
+// Deciding how far apart two different ZIPs are needs their centroids, which
+// this rig does not have and will not guess at.
+eq('two ZIPs that differ are not evidence of distance',
+   A.sameArea('55 Peachtree St NE, Atlanta, GA 30303',
+              '9 Boulevard NE, Atlanta, GA 30312'), 'same-side');
+eq('...and inside one town they are still the same town',
+   A.sameArea('1 Oak Ln, Powder Springs, GA 30127',
+              '2 Elm St, Powder Springs, GA 30144'), 'same-town');
+// ...but a different TOWN still is, exactly as before. The ZIP adds a stronger
+// agreement; it takes nothing away from the veto that was already there.
+eq('a different town is still somewhere else, ZIP or no ZIP',
+   A.sameArea('1234 Daffodil Ln, Powder Springs, GA 30127',
+              '12 Oak Ln, Marietta, GA 30060'), 'elsewhere');
+
+// A scanned address on one side and a card-read cross-street on the other,
+// which is the ordinary case: the order in the car was scanned, the offer being
+// judged is a card. One being precise says nothing about the other.
+eq('a scanned end and a card-read end still compare',
+   A.sameArea('1234 Daffodil Ln, Powder Springs, GA 30127',
+              'Lilac Springs Dr, Powder Springs'), 'same-town');
+eq('...and disagree when they should',
+   A.sameArea('1234 Daffodil Ln, Powder Springs, GA 30127',
+              'Canton Rd, Marietta'), 'elsewhere');
+eq('a ZIP on one side alone promises nothing',
+   A.sameArea('Chastain Rd NW, Kennesaw', 'GA 30127'), null);
+
 // Atlanta alone covers 250 of the 960 places the parser reads off these cards,
 // so the town on its own is far too coarse. The quadrant is what splits it, and
 // the split is real: the Atlanta dropoffs on file run NE 50, NW 20, SE 10, SW 5.

@@ -66,6 +66,20 @@ function sameList(a, b) {
                             + ' want ' + JSON.stringify(c.expect)); }
 });
 
+/* The address off the screen after the accept. [line, city, zip] rather than
+   field by field: those three are what the rest of the rig consumes - `line` is
+   shown and stored, `city` and `zip` are what the geography is decided on. */
+(cases.address || []).forEach(function (c) {
+  var a = P.findAddress(c.text);
+  var got = a ? [a.line, a.city, a.zip] : null;
+  var same = (got === null && c.expect === null) ||
+             (got !== null && c.expect !== null && sameList(got, c.expect));
+  if (same) ok++;
+  else { bad++; console.log('FAIL  address / ' + c.name + ': got '
+                            + JSON.stringify(got) + ' want '
+                            + JSON.stringify(c.expect)); }
+});
+
 (cases.whole || []).forEach(function (c) {
   var got = P.isWhole(P.parse(c.text));
   if (got === c.expect) ok++;

@@ -243,12 +243,27 @@
   var PLACE_TOWN = /[,.]\s*(?:[^A-Za-z\s]\s*|[A-Z]\s+){0,3}([A-Z][A-Za-z]{2,}(?:\s+[A-Z][A-Za-z]{2,})?)\s*$/;
   var PLACE_QUADRANT = /\b(NW|NE|SW|SE)\b/;
 
+  /* The tail of a full street address: "…, Powder Springs, GA 30127".
+   *
+   * An offer card almost never prints one - Uber does not say where a delivery
+   * ends until it has been accepted - so this is here for the screen AFTER the
+   * accept, read by OP.find_address and stored against the order in the car.
+   *
+   * It has to be stripped before PLACE_TOWN runs, because PLACE_TOWN anchors on
+   * the END of the string and an address ends in a ZIP. Without this, feeding a
+   * scanned address to area() returns null and the geography goes SILENT on
+   * exactly the orders the scan was added to rescue. */
+  var PLACE_ZIP = /,\s*([A-Za-z]{2})\s+(\d{5})(?:\s*-\s*\d{4})?\s*$/;
+
   function area(place) {
     if (typeof place !== 'string' || !place) return null;
+    var z = PLACE_ZIP.exec(place);
+    if (z) place = place.slice(0, z.index);
     var t = PLACE_TOWN.exec(place);
     var q = PLACE_QUADRANT.exec(place);
-    if (!t && !q) return null;
-    return { town: t ? t[1].toLowerCase() : null, quadrant: q ? q[1] : null };
+    if (!t && !q && !z) return null;
+    return { town: t ? t[1].toLowerCase() : null, quadrant: q ? q[1] : null,
+             zip: z ? z[2] : null };
   }
 
   /* Do these two jobs end anywhere near each other?
@@ -266,17 +281,37 @@
    * file are Atlanta NE to Atlanta NE, and northeast Atlanta is not a
    * neighbourhood. The driver knows which of their towns are big.
    *
-   * Returns 'elsewhere', 'same-side', 'same-town', or null for "the card did
-   * not say enough" - which is about half of real pairs, and is the honest
-   * answer rather than a guess dressed up as one. */
+   * A ZIP outranks both, and is the reason scanning the post-acceptance screen
+   * is worth doing at all. It is the finest thing available - a metro ZIP is a
+   * few square miles, where "same town" in Atlanta is a hundred and thirty-five
+   * of them and 44% of this driver's placed dropoffs are in Atlanta. So two
+   * addresses in one ZIP get their own answer rather than being flattened into
+   * the claim that covers half the county.
+   *
+   * But only in the AGREEING direction, and that asymmetry is deliberate.
+   * Different ZIPs are not evidence of distance: they tile finely, so
+   * neighbouring ones are next door to each other, and concluding 'elsewhere'
+   * from a ZIP that merely differs would refuse stacks that are a mile apart.
+   * Saying it the other way round - a wrong 'elsewhere' costs a fare, a wrong
+   * 'near' costs an hour and a rating - the safe use of a fine-grained key is
+   * to STRENGTHEN a near, never to manufacture a far. Deciding how far apart
+   * two different ZIPs are needs their centroids, which this rig does not have
+   * and will not guess at.
+   *
+   * Returns 'same-zip', 'elsewhere', 'same-side', 'same-town', or null for "the
+   * cards did not say enough" - which is about half of real pairs, and is the
+   * honest answer rather than a guess dressed up as one. */
   function sameArea(a, b) {
     var x = area(a), y = area(b);
     if (!x || !y) return null;
+    if (x.zip && y.zip && x.zip === y.zip) return 'same-zip';
     if (x.town && y.town && x.town !== y.town) return 'elsewhere';
     if (x.quadrant && y.quadrant && x.quadrant !== y.quadrant) return 'elsewhere';
     if (!x.town || !y.town) {
       // Same quadrant, no town on one of them: a quadrant is a whole side of
-      // the metro, and on its own that is not enough to promise anything.
+      // the metro, and on its own that is not enough to promise anything. A
+      // ZIP on one side and not the other lands here too, and for the same
+      // reason - one address being precise says nothing about the other.
       return null;
     }
     return (x.quadrant && y.quadrant) ? 'same-side' : 'same-town';
