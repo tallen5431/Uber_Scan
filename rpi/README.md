@@ -3593,7 +3593,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3785 checks
+npm test                # all 30 suites, 3802 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

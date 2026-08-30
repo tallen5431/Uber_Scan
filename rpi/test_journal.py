@@ -335,8 +335,12 @@ log.journal.append({'v': 1, 'kind': 'mark', 'id': 'whatever', 'at': JR.now_ms(),
 log.journal.append({'v': 1, 'kind': 'rule', 'at': JR.now_ms(),
                     'match': {'pay': 7.09, 'minutes': 34, 'miles': 3.6}, 'hidden': True})
 eq('every line is still readable', len(log.journal.rows()), 3)
-last = log.journal.last()
-eq('...but the last *offer* is the offer', last['pay'], 12.45)
+last = log.journal.last() or {}
+# `.get`, and `or {}` above. A mutation that makes last() return the annotation
+# — or nothing — used to raise KeyError here and take every check below it with
+# it, so a broken reader looked like a crashed file rather than a failed claim.
+# A mutation that stops the suite is not the same as one the suite catches.
+eq('...but the last *offer* is the offer', last.get('pay'), 12.45)
 ok_('...not the annotation', not last.get('kind'))
 
 # ...so a restart under the same card still resumes rather than duplicating.
@@ -591,6 +595,87 @@ eq('a clean two-leg reading is costed', clean['milesUncertain'], False)
 ok_('...and is whole', clean['whole'])
 ok_('...and is not suspect', not clean['suspect'])
 ok_('...and its mileage actually came off the top', (clean['cost'] or 0) > 0)
+
+# --- reading the end of the journal without reading all of it ---------------
+#
+# `last()` reads backwards from the end of the file and `count()` counts lines,
+# where both used to build every row into memory first. On a year of driving —
+# 40,000 rows, 68MB — that was 287ms and 68MB of Python objects at every
+# startup, on a Pi, to answer "what was the last offer".
+#
+# The saving comes from byte handling, and byte handling is where this kind of
+# rewrite goes wrong: a row that straddles the read block, a file with no
+# trailing newline, an annotation at the end that has to be skipped past. Each
+# of those is a way to return the wrong row or none at all, and the old
+# implementation is the thing to be right against.
+def _old_last(j):
+    for row in reversed(j.rows()):
+        if not row.get('kind'):
+            return row
+    return None
+
+
+_endwork = tempfile.mkdtemp()
+
+
+def _journal_of(name, lines):
+    path = os.path.join(_endwork, name)
+    with open(path, 'w') as fh:
+        fh.write(lines)
+    return JR.Journal(path)
+
+
+_cases = {
+    'an empty file': '',
+    'a single offer': json.dumps({'at': 1, 'pay': 5}) + '\n',
+    # The last LINE is an annotation; the last OFFER is the row before it.
+    # Reading backwards has to walk past it rather than stop at it.
+    'an annotation written last':
+        json.dumps({'at': 1, 'pay': 5}) + '\n' + json.dumps({'at': 2, 'kind': 'mark'}) + '\n',
+    'nothing but annotations':
+        json.dumps({'at': 1, 'kind': 'mark'}) + '\n' + json.dumps({'at': 2, 'kind': 'mark'}) + '\n',
+    'blank lines in the middle':
+        json.dumps({'at': 1, 'pay': 5}) + '\n\n\n' + json.dumps({'at': 2, 'pay': 9}) + '\n\n',
+    # No trailing newline: the last row is the partial-looking one, and it is
+    # a whole row. A reader that discards the fragment loses the offer.
+    'no trailing newline':
+        json.dumps({'at': 1, 'pay': 5}) + '\n' + json.dumps({'at': 2, 'pay': 9}),
+}
+# ...and a file big enough that the last offer is not in the final read block,
+# with a long tail of annotations after it so the walk has to cross a boundary.
+_big = ''.join(json.dumps({'at': i, 'pay': 5.0, 'pad': 'x' * 300}) + '\n'
+               for i in range(300))
+_big += ''.join(json.dumps({'at': 900 + i, 'kind': 'mark'}) + '\n' for i in range(400))
+_cases['the last offer is several blocks back'] = _big
+
+# ...and the case the block reading actually turns on: the last offer's row
+# STRADDLES the boundary, so half of it arrives in one read and half in the
+# next. Get the joining wrong and the row is either lost — the answer becomes
+# an older offer, or none — or its first half is parsed as a row in its own
+# right. The count is searched for rather than written down, so this keeps
+# meaning what it says if a row's shape changes.
+_OFFER = json.dumps({'at': 1, 'pay': 5.0, 'pad': 'x' * 120}) + '\n'
+_HEAD = ''.join(json.dumps({'at': 100 + i, 'pay': 1.0, 'pad': 'y' * 200}) + '\n'
+                for i in range(20))
+_straddle = None
+for _n in range(1500, 2600):
+    _notes = ''.join(json.dumps({'at': 900 + i, 'kind': 'mark'}) + '\n'
+                     for i in range(_n))
+    _body = _HEAD + _OFFER + _notes
+    _edge = len(_body) - 65536          # the first byte of the final read
+    if len(_HEAD) < _edge < len(_HEAD) + len(_OFFER):
+        _straddle = _body
+        break
+ok_('a straddling case could be built', _straddle is not None)
+if _straddle:
+    _cases['the last offer straddles a block boundary'] = _straddle
+
+for _name, _body in _cases.items():
+    _j = _journal_of(_name.replace(' ', '_') + '.jsonl', _body)
+    eq('the end of the journal is found with %s' % _name, _j.last(), _old_last(_j))
+    eq('...and counted without building it, with %s' % _name,
+       _j.count(), len(_j.rows()))
+shutil.rmtree(_endwork, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
