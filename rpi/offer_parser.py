@@ -434,6 +434,24 @@ def find_pay(text):
     for m in matches:
         if in_chip(m):
             continue
+        # An amount has to contain a real digit. `DC` lets a letter stand in for
+        # a digit inside a number that is otherwise confirmed, which is right —
+        # but a token made ENTIRELY of those stand-ins is not a number that lost
+        # a character, it is a word.
+        #
+        # "$ Bound Ct & Shoals" came off a real card. B reads as 8, o reads as
+        # 0, and a street name two lines below the headline became an EIGHTY
+        # DOLLAR payout on a $9.03 delivery — published at $153.52/hr, the
+        # highest ACCEPT of that shift. The dollar sign was real; every digit
+        # after it was a guess.
+        #
+        # This is the rule find_legs already applies to a duration, in the same
+        # words: "the number in front of it has to contain a real digit; 'SI
+        # min' is two guesses stacked, and stacked guesses are how noise becomes
+        # data." Money never got it. Two cards in 604 change, both from a
+        # phantom $80 to their true $9.03, and no corpus text moves.
+        if not HAS_DIGIT.search(m.group(1)):
+            continue
         v = to_number(m.group(1).strip())
         # The offer headline is the largest dollar figure; promo lines are smaller.
         if v is not None and 0 < v < 2000 and (best is None or v > best):
@@ -446,6 +464,10 @@ def find_pay(text):
     # — so the largest-figure rule picks it up without any special standing.
     for m in PAY_SPLIT.finditer(text):
         if in_chip(m):
+            continue
+        # Both halves, because joining two guessed halves is the same two
+        # guesses stacked with an extra step in between.
+        if not (HAS_DIGIT.search(m.group(1)) and HAS_DIGIT.search(m.group(2))):
             continue
         v = to_number(m.group(1).strip() + m.group(2).strip())
         if v is not None and 0 < v < 2000 and (best is None or v > best):
@@ -464,6 +486,21 @@ def find_legs(text):
             continue
 
         miles = to_number(m.group(3))
+        # NOT the real-digit rule that money and the lone distance now keep,
+        # and the reason is worth writing down so it is not "fixed" later.
+        #
+        # Refusing "(SO mi)" leaves the leg with a time and no distance, and on
+        # a single leg the card labelled `total` that reading calls itself
+        # WHOLE: no distance means no mileage charged, so `$12.45 20 min (SO
+        # mi) total` goes from $32.85/hr with a distance to $37.35/hr without
+        # one, unflagged, and into the medians. Today the same token becomes
+        # 50 miles, which check_distance catches as 150 mph and pulls back.
+        #
+        # A guard that turns a caught error into a silent one is not a guard.
+        # The honest fix is for a leg that lost its distance to stop the
+        # reading being whole — which legs_short_a_distance already does for
+        # two legs and cannot do for one — and that belongs with that work,
+        # not here.
         if miles is not None and (miles < 0 or miles > 500):
             miles = None
         # A decimal point is a pixel or two through a lens and is the first
@@ -977,7 +1014,10 @@ def parse(raw_text):
                  if l['miles'] is not None or l.get('labelled')]
     if miles is None and not travelled:
         lone = LONE_MILES.search(text)
-        if lone:
+        # "4, Smi ~ fast charger" is on a real card, and S reads as 5. A lone
+        # distance is already the least anchored number the parser takes; one
+        # spelled entirely in stand-ins is not anchored at all.
+        if lone and HAS_DIGIT.search(lone.group(1)):
             v = to_number(lone.group(1))
             if v is not None and 0 < v <= 500:
                 miles = round2(v)

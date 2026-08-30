@@ -3098,6 +3098,49 @@ The two doubts are gone because the readings that provoked them are now correct
 rather than merely distrusted, and five cards that were being rated off a chip
 are now honestly unfinished.
 
+### A street name that read as an eighty-dollar offer
+
+`DC` is the parser's list of characters OCR swaps for digits — `O` for 0, `S`
+for 5, `B` for 8. It exists so a number that lost one character to the lens is
+still read as the number it is, and that is right. What it did not say is that a
+token made ENTIRELY of those stand-ins is not a number missing a character. It
+is a word.
+
+Off a real card, two lines under the headline:
+
+    $9.03 Guaranteed (incl. tip)  30 min (10.8 mi) total
+    Doro's Italian Restaurant (Acworth)   $ Bound Ct & Shoals
+
+`B` reads as 8, `o` reads as 0, and **"$ Bound" became an $80.00 payout**. The
+largest dollar figure wins, so a $9.03 delivery was published at **$153.52/hr,
+ACCEPT** — the highest-rated green of that shift. The dollar sign was real. Every
+digit after it was a guess.
+
+The rule was already in the file, one function away, in these words: *"the number
+in front of it has to contain a real digit. 'SI min' is two guesses stacked, and
+stacked guesses are how noise becomes data."* Durations had it. Money never did.
+
+It now applies to the payout, to **both halves** of a rejoined split headline —
+`$S 8.75 Guaranteed` would otherwise glue a guessed `S` to a confirmed `8.75` and
+invent $58.75 — and to a lone distance, where `4, Smi ~ fast charger` off a real
+card reads as five miles.
+
+Two cards in 604 change, both from the phantom $80 to their true $9.03 and from
+ACCEPT to PASS. No corpus text moves. Ten mutations, ten caught — and one of
+them, "the split rule checks only the cents half", survived the first pass and is
+the reason the `$S 8.75` case exists.
+
+**Not applied to a leg's distance,** and the reason is worth keeping. Refusing
+`(SO mi)` leaves the leg with a time and no distance, and on a single leg the
+card labelled `total` that reading calls itself *whole*: no distance means no
+mileage charged, so `$12.45 20 min (SO mi) total` goes from $32.85/hr with a
+distance to **$37.35/hr without one**, unflagged, and into the medians. Today the
+same token becomes 50 miles, which `check_distance` catches as 150 mph and pulls
+back. A guard that turns a caught error into a silent one is not a guard. The
+honest fix is for a leg that lost its distance to stop the reading being whole,
+which `legs_short_a_distance` does for two legs and cannot do for one — and that
+belongs with that work.
+
 ### One payout, read as two numbers, filed as two offers
 
 The headline is the biggest type on the card, and the crop's own edge runs
@@ -3644,7 +3687,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3864 checks
+npm test                # all 30 suites, 3883 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3658,11 +3701,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 505 checks, the shared corpus
+node tests/corpus.test.js       # 524 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       # 122 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 538 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 557 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 114 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place

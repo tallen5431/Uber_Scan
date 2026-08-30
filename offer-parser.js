@@ -183,6 +183,23 @@
         }
       }
       if (inChip) continue;
+      // An amount has to contain a real digit. DC lets a letter stand in for a
+      // digit inside a number that is otherwise confirmed, which is right — but
+      // a token made ENTIRELY of those stand-ins is not a number that lost a
+      // character, it is a word.
+      //
+      // "$ Bound Ct & Shoals" came off a real card. B reads as 8, o reads as 0,
+      // and a street name two lines under the headline became an EIGHTY DOLLAR
+      // payout on a $9.03 delivery, published at $153.52/hr — the highest
+      // ACCEPT of that shift. The dollar sign was real; every digit after it
+      // was a guess. This is the rule findLegs already applies to a duration,
+      // in the same words, and the split-headline join needs both halves to
+      // pass it because joining two guesses is the same two guesses stacked.
+      var parts = all[i].halves || [all[i].value], allDigits = true;
+      for (var h = 0; h < parts.length; h++) {
+        if (!/\d/.test(parts[h])) { allDigits = false; break; }
+      }
+      if (!allDigits) continue;
       var v = toNumber(all[i].value);
       if (v !== null && v > 0 && v < 2000 && (best === null || v > best)) best = v;
     }
@@ -206,7 +223,11 @@
     var out = [], m;
     re.lastIndex = 0;
     while ((m = re.exec(text)) !== null) {
-      out.push({ value: m[1].trim() + m[2].trim(), index: m.index, match: m[0] });
+      // Both halves kept beside the joined value: the real-digit rule has to
+      // see them separately, or "$1 O.SO" passes on the strength of the 1 and
+      // joins a confirmed digit to a guessed one.
+      out.push({ value: m[1].trim() + m[2].trim(), index: m.index, match: m[0],
+                 halves: [m[1].trim(), m[2].trim()] });
       if (m.index === re.lastIndex) re.lastIndex++;
     }
     return out;
@@ -534,6 +555,15 @@
       if (minutes <= 0 || minutes > 600) continue;
 
       var miles = toNumber(m[3]);
+      // NOT the real-digit rule money and the lone distance now keep, and the
+      // reason is worth writing down so it is not "fixed" later. Refusing
+      // "(SO mi)" leaves the leg with a time and no distance, and on a single
+      // leg the card labelled `total` that reading calls itself WHOLE: no
+      // distance means no mileage charged, so "$12.45 20 min (SO mi) total"
+      // goes from $32.85/hr with a distance to $37.35/hr without one,
+      // unflagged. Today the same token becomes 50 miles, which checkDistance
+      // catches as 150 mph and pulls back. A guard that turns a caught error
+      // into a silent one is not a guard.
       if (miles !== null && (miles < 0 || miles > 500)) miles = null;
       // A decimal point is one or two pixels through a camera and is the first
       // thing to be lost, so remember whether this reading actually had one.
@@ -817,7 +847,10 @@
     }
     if (miles === null && !travelled.length) {
       var lone = text.match(LONE_MILES);
-      if (lone) {
+      // "4, Smi ~ fast charger" is on a real card, and S reads as 5. A lone
+      // distance is already the least anchored number the parser takes; one
+      // spelled entirely in stand-ins is not anchored at all.
+      if (lone && /\d/.test(lone[1])) {
         var v = toNumber(lone[1]);
         if (v !== null && v > 0 && v <= 500) {
           miles = Math.round(v * 100) / 100;

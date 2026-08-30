@@ -915,6 +915,67 @@
    }
   },
   {
+   "name": "an amount made only of letter-lookalikes is a word, not a payout",
+   "text": "YA ~*~ q LEGACY PARK ' OBB Pkwy, { $9.03 Guaranteed (incl. tip) i \u00a9 30 min (10.8 mi) total re H Doro's Italian Restaurant (Acworth) t I S$ Bound Ct & Shoals",
+   "expect": {
+    "pay": 9.03,
+    "minutes": 30,
+    "miles": 10.8
+   }
+  },
+  {
+   "name": "...and the rule holds when the stand-ins would make a bigger number",
+   "text": "$9.03 Guaranteed (incl. tip) 30 min (10.8 mi) total $ BOO Ct",
+   "expect": {
+    "pay": 9.03
+   }
+  },
+  {
+   "name": "...both halves of a split headline have to carry a real digit",
+   "text": "$1 O.SO Guaranteed (incl. tips) 8.0 mi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "pay": 1,
+    "minutes": 25,
+    "miles": 8.0
+   }
+  },
+  {
+   "name": "...including the dollars half, where S reads as 5",
+   "text": "$S 8.75 Guaranteed (incl. tips) 18.0 mi - 39 min @ Pickup Buffalo Luke's",
+   "expect": {
+    "pay": null,
+    "minutes": 39,
+    "miles": 18.0
+   }
+  },
+  {
+   "name": "...and with a real 5 there the same card reads $58.75",
+   "text": "$5 8.75 Guaranteed (incl. tips) 18.0 mi - 39 min @ Pickup Buffalo Luke's",
+   "expect": {
+    "pay": 58.75,
+    "minutes": 39,
+    "miles": 18.0
+   }
+  },
+  {
+   "name": "a lone distance spelled entirely in stand-ins is not a distance",
+   "text": "$8.50 Guaranteed (incl. tips) Smi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "pay": 8.5,
+    "minutes": 25,
+    "miles": null
+   }
+  },
+  {
+   "name": "...and the same card with a real digit still reads its distance",
+   "text": "$8.50 Guaranteed (incl. tips) 5 mi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "pay": 8.5,
+    "minutes": 25,
+    "miles": 5.0
+   }
+  },
+  {
    "name": "a priority chip split the same way is still a chip, not the payout",
    "text": "Exclusive x i $13.08 ; *% 481 © Verified i © +$5 0.00 included 9 min (5.3 mi) Georgia State Route 237 & Morosgo Dr NE, Atlanta",
    "expect": {
