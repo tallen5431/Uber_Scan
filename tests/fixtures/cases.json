@@ -915,6 +915,61 @@
    }
   },
   {
+   "name": "a lone distance is checked against the time, like any other",
+   "text": "o a iis (ARBRE mcusne + $7.09 Guaranteed (incl. tip) \u00a9 +21 min (+55 mi) total I Applebee's (Town Center) Roswell Rd, Marietta",
+   "expect": {
+    "miles": 5.5,
+    "minutes": 21,
+    "milesCorrected": true
+   }
+  },
+  {
+   "name": "...on the card shape that prints its distance first",
+   "text": "$7.50 Guaranteed (incl. tips) 80 mi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "miles": 8.0,
+    "minutes": 25,
+    "milesCorrected": true
+   }
+  },
+  {
+   "name": "...and the same card undamaged is left alone",
+   "text": "$7.50 Guaranteed (incl. tips) 8.0 mi + 25 min @ Pickup Crumbl",
+   "expect": {
+    "miles": 8.0,
+    "minutes": 25,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "...a believable whole-number distance is not a lost decimal",
+   "text": "$17.70 Guaranteed (incl. tips) 5 mi + 55 min @ Pickup Wingstop",
+   "expect": {
+    "miles": 5.0,
+    "minutes": 55,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "...one too far gone to divide is doubted, not charged",
+   "text": "$15.60 Guaranteed (incl. tips) 74 mi + 2 min @ Pickup Wingstop",
+   "expect": {
+    "miles": 74.0,
+    "minutes": 2,
+    "milesUncertain": true,
+    "milesCorrected": false
+   }
+  },
+  {
+   "name": "...and a distance that printed its decimal is believed at any speed",
+   "text": "$12.00 Guaranteed (incl. tips) 12.0 mi + 12 min @ Pickup Crumbl",
+   "expect": {
+    "miles": 12.0,
+    "minutes": 12,
+    "milesCorrected": false
+   }
+  },
+  {
    "name": "a map screen is not an offer, however many dollar signs it has",
    "text": "= = \u00a3 \\ The Townes at CHastain \u00a9 f = g e g 3 le pg e s + cer Joe's) <3 a af - Winds?' = coe Drive ~ =e \u20ac 3min 8 11 min $ 22min & Ti min 3 min (1.0 mi) Fastest route now due to traffic conditions & Saves gas - \u00a9 Easy Seas @ Add stops < Share",
    "expect": {

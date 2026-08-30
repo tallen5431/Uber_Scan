@@ -3135,6 +3135,80 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### The distance check that ran before the distance arrived
+
+Five lines of code motion, and the largest correctness change in this file's
+history by the number of readings it rescues.
+
+`check_distance` sat above the `LONE_MILES` branch. On every card whose distance
+the *legs* do not carry — which is the delivery card this driver is mostly shown,
+`8.0 mi + 25 min`, where the `25 min` half is a minutes-only leg and the distance
+arrives a few lines below — the check ran while `miles` was still `None`,
+returned immediately, and the distance was then set **after the last thing that
+could have looked at it**. And then stamped `milesChecked: True`, whose own
+comment claimed the check had already run against the legs' own minutes. It had
+not. That flag also gates `rate()`'s second attempt at recovery, so the false
+stamp shut the other door too.
+
+**140 of the 604 cards on file take that path.** Five of them are damaged, and
+were being published at 98, 117, 157, 196 and 2220 mph — three at a *negative*
+dollars per hour, because the phantom distance ate the whole fare as mileage
+cost:
+
+| what the card printed | before | after |
+|---|---|---|
+| `+21 min (+55 mi) total` — a real Applebee's run | 157 mph, −$26.89/hr, refused | 5.5 mi, **$15.54/hr** |
+| `+23 min (+75 mi) total` | 196 mph, −$40.25/hr, refused | 7.5 mi, **$12.57/hr** |
+| `+18 min (+35 mi) total` | 117 mph, −$14.93/hr, refused | 3.5 mi, **$16.57/hr** |
+| `+8 min (+13 mi) total` | 98 mph, $4.50/hr, refused | 1.3 mi, **$30.83/hr — an ACCEPT** |
+| `74mi+-thr2min` | 2220 mph, cost $22.20 charged | distrusted, uncosted, still refused |
+
+And the class, not just the instances. Strip the decimal from the distance of
+every card that takes the lone path and ask what each version does:
+
+| | repaired | refused outright | silently wrong |
+|---|---|---|---|
+| before | 0 | 115 | 13 |
+| after | **119** | 0 | 9 |
+
+A lost decimal on the driver's dominant card format meant *no verdict at all*,
+115 times over. It now means the right number, 119 times.
+
+**It is code motion and nothing else.** `check_distance` never returns `None`,
+so the `miles is None` test in the branch above is unchanged by moving the call
+below it, and every card whose distance came from a leg gets the identical
+answer. Measured twice: all 604 cards clean, zero differences; and again with the
+decimal stripped from all 462 leg-borne texts, zero differences. Twelve
+mutations, twelve caught.
+
+**What it costs, stated plainly.** It extends the divide-by-ten recovery to the
+lone-distance path, and that is the optimistic direction — the one this project
+cares about most. A genuine long haul whose decimal the camera lost is now
+silently shortened: `$45.00 ... 60 mi + 55 min` is 60 miles and $29.45/hr today
+and becomes 6 miles and $47.13/hr, with $16.20 of real mileage cost gone. Three
+things bound it, and none is a proof. The card prints the decimal on 131 of the
+140 lone-path cards, and `60.0 mi` is refused. `MAX_MPH` is 55, while this
+driver's fastest real offer runs at 43 mph door to door and the median at 17.
+And zero of the 604 cards land in the 55–75 mph band where a lost decimal is
+neither recovered nor doubted. It is the same exposure `recover_decimal` has
+always carried on the time-first format, where it fired 36 times and was right
+every time.
+
+**Why the fixtures came with it.** All 27 lone-path texts already in the corpus
+sit far below `MAX_MPH`, so every one of the 573 checks passed identically with
+and without the motion — the suite could not have caught a revert. Six new cases
+pin it: the real Applebee's card, the same delivery card damaged and undamaged, a
+believable whole-number distance that must *not* be divided, one too far gone to
+divide that must be doubted rather than charged, and a distance that printed its
+decimal being believed at 60 mph.
+
+**What it does not fix,** because the same audit measured these and they stay
+open: `legs_short_a_distance` still fires zero times on all 604 cards; the
+accumulator still does not vote on a lone distance, so the $15.60 GoPuff card
+still publishes 1.9 miles in two of six arrival orders; and a lone distance that
+reads too *small* is still unguarded in both versions, since `check_distance`
+only ever divides.
+
 ### The ACCEPT that was a road
 
 The rig photographs whatever is on the phone, and between jobs that is the map.
@@ -3766,7 +3840,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3921 checks
+npm test                # all 30 suites, 3959 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3780,11 +3854,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 540 checks, the shared corpus
+node tests/corpus.test.js       # 559 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
 node tests/advice.test.js       # 122 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 573 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 592 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 114 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place

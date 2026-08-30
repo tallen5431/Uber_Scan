@@ -1015,9 +1015,8 @@ def parse(raw_text):
     # the stored number and the shown number are the same number.
     if miles is not None:
         miles = round2(miles)
-    miles, corrected, uncertain = check_distance(minutes, miles, had_decimal)
-    corrected = corrected or corrected_leg
-    uncertain = uncertain or short_a_leg
+    corrected = corrected_leg
+    uncertain = short_a_leg
 
     m = ITEMS.search(text)
     items = to_number(m.group(1)) if m else None
@@ -1068,6 +1067,36 @@ def parse(raw_text):
                 # "10.0 mi" and one printing "10 mi" arrive here identical.
                 had_decimal = bool(LONE_DECIMAL.search(lone.group(1)))
 
+    # The distance is checked HERE, below the lone-distance branch, and not
+    # above it where this call used to sit.
+    #
+    # Above it, the check ran while `miles` was still None on every card whose
+    # distance the legs did not carry — the delivery card that prints
+    # "8.0 mi + 25 min", where the "25 min" half is a minutes-only leg and the
+    # distance arrives from LONE_MILES four lines below. So the distance was set
+    # after the last check that could have looked at it, and then stamped
+    # `milesChecked: True`, whose own comment claims check_distance has already
+    # run against the legs' own minutes. It had not. That flag is also what
+    # gates rate()'s recovery re-check, so the false stamp closed the second
+    # door as well.
+    #
+    # 140 of the 604 cards on file take that path. Five of them are damaged, and
+    # they were being published at 98, 117, 157, 196 and 2220 mph — three at a
+    # NEGATIVE dollars per hour, because the phantom distance ate the fare as
+    # mileage cost. "+21 min (+55 mi) total" is a real Applebee's run: 157 mph,
+    # -$26.89/hr and refused as doubtful, where the truth is 5.5 miles and
+    # $15.54/hr.
+    #
+    # Nothing else moves. check_distance never returns None, so `miles is None`
+    # in the branch above is unchanged by the motion, and every card whose
+    # distance came from a leg gets the identical answer — measured on all 604
+    # clean, and again with the decimal stripped from all 424 leg-borne texts:
+    # zero differences either time.
+    miles, checked_corrected, checked_uncertain = check_distance(
+        minutes, miles, had_decimal)
+    corrected = corrected or checked_corrected
+    uncertain = uncertain or checked_uncertain
+
     return {
         'pay': pay,
         'minutes': minutes,
@@ -1093,11 +1122,18 @@ def parse(raw_text):
         'legs': len(used),
         'milesCorrected': corrected,
         'milesUncertain': uncertain,
-        # A distance is only as checkable as the time beside it. On a ride card
-        # check_distance has already run against the legs' own minutes; on a
-        # delivery card there are no minutes at all, so it returned the number
-        # untouched and this says whether it may still be recovered later. See
+        # A distance is only as checkable as the time beside it. Where the card
+        # states a time, check_distance has run against it — whatever the
+        # distance's source, since the call moved below the lone-distance
+        # branch; on a card with no minutes at all it returned the number
+        # untouched, and this says whether it may still be recovered later. See
         # rate(), which is where the clock is.
+        #
+        # The wording used to say "on a ride card", and that was the whole
+        # defect: the delivery cards this driver is mostly shown DO state a
+        # time, so they were stamped checked while their distance had met no
+        # check at all — and this flag gates rate()'s second attempt, so the
+        # false stamp shut that door too.
         'milesChecked': minutes is not None,
         'milesHadDecimal': had_decimal,
         'complete': is_complete(pay, minutes, deadline),
