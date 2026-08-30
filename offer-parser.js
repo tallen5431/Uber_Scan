@@ -107,14 +107,64 @@
    * Guaranteed (incl. tip)" — "incl" is there too, but "Guaranteed" is in the
    * way. DC is spliced as an alternation, not nested in brackets, because the
    * two languages disagree about what a nested class means.
+   *
+   * The amount may arrive in two pieces, for the same reason a headline can:
+   * see PAY_SPLIT. A chip reading "+$5 0.00 included" over a real $13.08
+   * headline is the same fifty-dollar lie as "+$050 included", so the chip has
+   * to cover the split form too — otherwise the rule that puts split numbers
+   * back together would hand it straight back as the payout.
    */
   var PAY_CHIP = new RegExp(
-    '\\+\\s*[$S5§]?\\s*((?:' + DC + '|[.,])+)\\s*incl(?:uded)?\\b', 'gi');
+    '\\+\\s*[$S5§]?\\s*((?:' + DC + '|[.,])+(?:\\s(?:' + DC + '|[.,])+)?)'
+    + '\\s*incl(?:uded)?\\b', 'gi');
+
+  /* One payout, cut in half by the reader.
+   *
+   * The headline is the biggest type on the card and the crop's own edge runs
+   * through it: the space between the dollars and the cents comes back wider
+   * than it is, and "$18.75" arrives as "$1 8.75". findPay then reads the
+   * largest dollar figure it can see, which is $1.
+   *
+   * Nine of this driver's 309 cards, four distinct offers, and the worst of
+   * them is an offer worth $38.52/hr shown as a red DECLINE. It is worse than
+   * a wrong number: some frames of the same card read the headline whole and
+   * some split it, so the accumulator — which keys a card by its payout —
+   * files one physical offer as two, and the panel alternates between two
+   * verdicts while the driver is looking at it. One card in the export
+   * flickers between $28.85/hr and $1.54/hr five times in seventeen seconds.
+   *
+   * Glued only where the card's own label follows, and that is the whole
+   * safety of it. A payout says what it is — "Guaranteed", "Includes expected
+   * tip" — and gluing on the digits alone would read "$8 5.00" on a ride card,
+   * where the 5.00 is the driver's star rating, as an eighty-five dollar
+   * offer. That is the one direction this project will not go: a fabricated
+   * payout that is LARGER reads as a green light. With the label required it
+   * fires on all nine real cards, changes no payout that was already right,
+   * and matches none of the 140 texts in the shared corpus.
+   *
+   * Only a plain space may sit between the halves, because that space IS the
+   * defect: one number printed with too wide a gap. Anything else between them
+   * means they are two different things, and this driver's cards are full of
+   * stray marks that would happily glue an $8 offer into an $85 one — 60 of
+   * the 420 texts on file change what they match if the gap may hold junk.
+   */
+  var PAY_SPLIT = new RegExp(
+    '\\$\\s*(' + DC + '{1,3})\\s+(' + DC + '{1,2}[.,]' + DC + '{2})'
+    + '\\s*(?=guarant|includ)', 'gi');
 
   function findPay(text) {
     var chips = collect(text, PAY_CHIP);
     var all = collect(text, MONEY_STRICT);
     if (!all.length) all = collect(text, MONEY_LOOSE);
+
+    // A headline the reader cut in half. See PAY_SPLIT: the halves are put
+    // back together only where the card's own label follows them, and the
+    // joined figure then competes as an ordinary candidate. It always beats
+    // the "$1" fragment it was built from — joining digits can only make a
+    // number larger — so the largest-figure rule picks it up with no special
+    // standing of its own.
+    var joined = collectPair(text, PAY_SPLIT);
+    all = all.concat(joined);
     if (!all.length) return null;
 
     // Cards can show a promo or a struck-through figure alongside the real
@@ -144,6 +194,19 @@
     re.lastIndex = 0;
     while ((m = re.exec(text)) !== null) {
       out.push({ value: m[1].trim(), index: m.index, match: m[0] });
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+    return out;
+  }
+
+  // Like collect, but for a pattern whose number arrives in two pieces: the
+  // halves are joined as text, before any parsing, so "1" + "8.75" is read as
+  // the one number 18.75 rather than arithmetic on two.
+  function collectPair(text, re) {
+    var out = [], m;
+    re.lastIndex = 0;
+    while ((m = re.exec(text)) !== null) {
+      out.push({ value: m[1].trim() + m[2].trim(), index: m.index, match: m[0] });
       if (m.index === re.lastIndex) re.lastIndex++;
     }
     return out;

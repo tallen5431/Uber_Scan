@@ -51,6 +51,40 @@ MONEY_STRICT = re.compile(r'\$\s*(' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)', A
 # addresses are full of tokens that survive two guesses.
 MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'{2})', ASCII)
 
+# One payout, cut in half by the reader.
+#
+# The headline is the biggest type on the card and the crop's own edge runs
+# through it: the space between the dollars and the cents comes back wider than
+# it is, and "$18.75" arrives as "$1 8.75". find_pay then reads the largest
+# dollar figure it can see, which is $1.
+#
+# Nine of this driver's 309 cards, four distinct offers, and the worst of them
+# is an offer worth $38.52/hr shown as a red DECLINE. It is worse than a wrong
+# number: some frames of the same card read the headline whole and some split
+# it, so the accumulator — which keys a card by its payout — files one physical
+# offer as two, and the panel alternates between two verdicts while the driver
+# is looking at it. One card in the export flickers between $28.85/hr and
+# $1.54/hr five times in seventeen seconds.
+#
+# Glued only where the card's own label follows, and that is the whole safety of
+# it. A payout says what it is — "Guaranteed", "Includes expected tip" — and
+# gluing on the digits alone would read "$8 5.00" on a ride card, where the 5.00
+# is the driver's star rating, as an eighty-five dollar offer. That is the one
+# direction this project will not go: a fabricated payout that is LARGER reads
+# as a green light. With the label required it fires on all nine real cards,
+# changes no payout that was already right, and matches none of the 140 texts in
+# the shared corpus.
+#
+# Only a plain space may sit between the halves, because that space IS the
+# defect: one number printed with too wide a gap. Anything else between them
+# means they are two different things, and this driver's cards are full of
+# stray marks that would happily glue an $8 offer into an $85 one — 60 of the
+# 420 texts on file change what they match if the gap is allowed to hold junk.
+PAY_SPLIT = re.compile(
+    r'\$\s*(' + DC + r'{1,3})\s+(' + DC + r'{1,2}[.,]' + DC + r'{2})'
+    r'\s*(?=guarant|includ)',
+    re.IGNORECASE | ASCII)
+
 # A component of the payout, printed beside it, and never the payout.
 #
 # Uber puts a chip under the headline — "+$0.50 included", "+$2.39 included for
@@ -83,8 +117,16 @@ MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'
 # than nested inside brackets — Python warns about `[[\d...].,]` and JavaScript
 # reads it as a different class altogether, which is exactly the kind of silent
 # disagreement between the two ports this corpus exists to catch.
-PAY_CHIP = re.compile(r'\+\s*[$S5§]?\s*((?:' + DC + r'|[.,])+)\s*incl(?:uded)?\b',
-                      re.IGNORECASE | ASCII)
+#
+# The amount may arrive in two pieces, for the same reason a headline can: see
+# PAY_SPLIT. A chip that reads "+$5 0.00 included" over a real $13.08 headline
+# is the same fifty-dollar lie as "+$050 included", so the chip has to cover
+# the split form too — otherwise the rule that puts split numbers back together
+# would hand it back as the payout.
+PAY_CHIP = re.compile(
+    r'\+\s*[$S5§]?\s*((?:' + DC + r'|[.,])+(?:\s(?:' + DC + r'|[.,])+)?)'
+    r'\s*incl(?:uded)?\b',
+    re.IGNORECASE | ASCII)
 
 # The minute unit has to be spelled out. It was once allowed to be a bare "m",
 # and on a map full of street names that turns any two letters into a journey:
@@ -380,16 +422,32 @@ def normalize(text):
 
 def find_pay(text):
     chips = [m.span() for m in PAY_CHIP.finditer(text)]
-    matches = list(MONEY_STRICT.finditer(text)) or list(MONEY_LOOSE.finditer(text))
-    best = None
-    for m in matches:
+
+    def in_chip(m):
         # A figure inside a "+$0.50 included" chip is part of the payout, not a
         # candidate to be it. See PAY_CHIP: without this the largest-figure rule
         # hands a green light to a chip whose decimal point did not read.
-        if any(start <= m.start() and m.end() <= end for start, end in chips):
+        return any(start <= m.start() and m.end() <= end for start, end in chips)
+
+    matches = list(MONEY_STRICT.finditer(text)) or list(MONEY_LOOSE.finditer(text))
+    best = None
+    for m in matches:
+        if in_chip(m):
             continue
         v = to_number(m.group(1).strip())
         # The offer headline is the largest dollar figure; promo lines are smaller.
+        if v is not None and 0 < v < 2000 and (best is None or v > best):
+            best = v
+
+    # A headline the reader cut in half. See PAY_SPLIT: the halves are put back
+    # together only where the card's own label follows them, and the joined
+    # figure then competes as an ordinary candidate. It always beats the "$1"
+    # fragment it was built from — joining digits can only make a number larger
+    # — so the largest-figure rule picks it up without any special standing.
+    for m in PAY_SPLIT.finditer(text):
+        if in_chip(m):
+            continue
+        v = to_number(m.group(1).strip() + m.group(2).strip())
         if v is not None and 0 < v < 2000 and (best is None or v > best):
             best = v
     return best

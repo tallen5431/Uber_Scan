@@ -801,6 +801,127 @@
     "minutes": 25,
     "miles": 8.0
    }
+  },
+  {
+   "name": "a headline split between its dollars and its cents is one payout",
+   "text": "Marietta I MAO Bae © 5 $1 8.75 Guaranteed (incl. tips) 18.0 mi - 39 min @ Pickup Buffalo Luke's ft Customer dropoff",
+   "expect": {
+    "pay": 18.75,
+    "minutes": 39,
+    "miles": 18.0
+   }
+  },
+  {
+   "name": "...the split reads $2 on a $25.60 offer worth $38/hr",
+   "text": "} 2 © {x $2 5.60 Guaranteed (incl. tips) 8.3 mi « 36 min @ Retail pickup GoPuff (Drive) (2 orders, 3 items) f¥ Customer dropoff",
+   "expect": {
+    "pay": 25.6,
+    "minutes": 36,
+    "miles": 8.3
+   }
+  },
+  {
+   "name": "...and the cents half may lead with a zero",
+   "text": "Sy F % i} Oana @ $1 0.40 Guaranteed (incl. tips) 12.1 mi + 40 min @ Pickup Talkin Tacos (2 orders) f¥ Customer dropoff",
+   "expect": {
+    "pay": 10.4,
+    "minutes": 40,
+    "miles": 12.1
+   }
+  },
+  {
+   "name": "a star rating beside the payout is never glued onto it",
+   "text": "Exclusive x $9.05 * 5.00 min (44 mi)",
+   "expect": {
+    "pay": 9.05
+   }
+  },
+  {
+   "name": "...and neither is one printed with no label of its own",
+   "text": "$8 5.00 12 min (3.1 mi) trip",
+   "expect": {
+    "pay": 8
+   }
+  },
+  {
+   "name": "a whole-dollar payout keeps its own label and stays whole",
+   "text": "Exclusive $8 Guaranteed (incl. tip) 20 min (7.3 mi) total",
+   "expect": {
+    "pay": 8,
+    "minutes": 20,
+    "miles": 7.3
+   }
+  },
+  {
+   "name": "...'Includes expected tip' is a headline label too",
+   "text": "$1 8.75 Includes expected tip 12.1 mi + 40 min @ Pickup Talkin Tacos",
+   "expect": {
+    "pay": 18.75,
+    "minutes": 40,
+    "miles": 12.1
+   }
+  },
+  {
+   "name": "...even with no space before the label",
+   "text": "$1 8.75Includes expected tip 12.1 mi + 40 min @ Pickup Talkin Tacos",
+   "expect": {
+    "pay": 18.75,
+    "minutes": 40,
+    "miles": 12.1
+   }
+  },
+  {
+   "name": "the halves are joined as text, so the cents stay cents",
+   "text": "$2 5.60 Guaranteed (incl. tips) 8.3 mi + 36 min @ Retail pickup GoPuff",
+   "expect": {
+    "pay": 25.6
+   }
+  },
+  {
+   "name": "a second half with no decimal point is not cents, and is not joined",
+   "text": "$1 875 Guaranteed (incl. tips) 18.0 mi - 39 min @ Pickup Buffalo Luke's",
+   "expect": {
+    "pay": 1
+   }
+  },
+  {
+   "name": "anything but a space between the halves means they are two things",
+   "text": "Exclusive a $8 x 5.00 Guaranteed (incl. tip) 20 min (7.3 mi) total",
+   "expect": {
+    "pay": 8,
+    "minutes": 20,
+    "miles": 7.3
+   }
+  },
+  {
+   "name": "a guessed dollar sign is one guess; joining digits onto it is two",
+   "text": "Marietta I MAO Bae © 5 8.75 Guaranteed (incl. tips) 18.0 mi - 39 min @ Pickup Buffalo Luke's",
+   "expect": {
+    "pay": 8.75
+   }
+  },
+  {
+   "name": "a joined figure is still only a candidate, and the largest one wins",
+   "text": "$2 5.60 Guaranteed (incl. tips) 8.3 mi + 36 min @ Retail pickup GoPuff (Drive) $1 0.40 Guaranteed (incl. tips) 12.1 mi + 40 min @ Pickup Talkin Tacos",
+   "expect": {
+    "pay": 25.6
+   }
+  },
+  {
+   "name": "a joined figure is held to the same sane bound as any other",
+   "text": "$999 99.99 Guaranteed (incl. tips) 18.0 mi - 39 min @ Pickup Buffalo Luke's",
+   "expect": {
+    "pay": 999
+   }
+  },
+  {
+   "name": "a priority chip split the same way is still a chip, not the payout",
+   "text": "Exclusive x i $13.08 ; *% 481 © Verified i © +$5 0.00 included 9 min (5.3 mi) Georgia State Route 237 & Morosgo Dr NE, Atlanta",
+   "expect": {
+    "pay": 13.08,
+    "minutes": 9,
+    "miles": 5.3
+   }
   }
  ],
  "rate": [

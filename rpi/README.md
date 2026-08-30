@@ -3098,6 +3098,57 @@ The two doubts are gone because the readings that provoked them are now correct
 rather than merely distrusted, and five cards that were being rated off a chip
 are now honestly unfinished.
 
+### One payout, read as two numbers, filed as two offers
+
+The headline is the biggest type on the card, and the crop's own edge runs
+through it. The space between the dollars and the cents comes back wider than it
+is, and `$18.75` arrives as `$1 8.75`. `find_pay` reads the largest dollar
+figure it can see, which is **$1**.
+
+Nine of the 309 cards on file, four distinct offers:
+
+| what the card said | what the panel said | verdict shown | verdict owed |
+|---|---|---|---|
+| $25.60, 36 min, 8.3 mi | $2 | PASS, −$0.82/hr | **ACCEPT, $38.52/hr** |
+| $18.75, 39 min, 18.0 mi | $1 | PASS, −$6.77/hr | PASS, $20.54/hr |
+| $15.60, 37 min, 7.9 mi | $1 | PASS, −$2.22/hr | **CLOSE CALL, $21.45/hr** |
+| $10.40, 40 min, 12.1 mi | $1 | PASS, −$3.95/hr | PASS, $10.16/hr |
+
+The first row is a real green light the driver never saw. But the worse fault is
+the one in the middle column: **some frames of the same card read the headline
+whole and some split it**, and the accumulator keys a card by its payout. One
+physical offer files as two, and the panel alternates between two verdicts while
+the driver is looking at it — one card in the export flickers between $28.85/hr
+and $1.54/hr five times in seventeen seconds.
+
+The halves are only put back together where **the card's own label follows** —
+`Guaranteed`, `Includes expected tip`. That is the whole safety of it, and the
+direction of the danger decides the design: a fabricated payout is a *larger*
+number, and a larger number is a green light. Gluing on digits alone would read
+`$8 5.00`, where the 5.00 is a star rating, as an eighty-five dollar offer.
+
+Two things the rule refuses, both from the same reasoning:
+
+- **Only a plain space may sit between the halves**, because that space *is* the
+  defect — one number printed with too wide a gap. Anything else between them
+  means they are two things. Let the gap hold four characters of slack and 60 of
+  the 420 texts on file change what they match.
+- **A chip split the same way is still a chip.** `+$5 0.00 included` over a real
+  $13.08 headline is the same fifty-dollar lie as `+$050 included` two sections
+  up, so `PAY_CHIP` had to learn the split form too — otherwise the rule that
+  rejoins numbers hands the chip straight back as the payout. That was a real
+  defect in the first draft of this, caught by mutation rather than by a card.
+
+Fourteen mutations, twelve caught. The two survivors are equivalent, and
+provably rather than by inspection: allowing the gap to be empty only ever
+re-reads a number `MONEY_STRICT` already read to the same value, and widening
+the dollars half past three digits can only produce five integer digits, which
+is above the sane bound in every case.
+
+Across the 309: nine cards recover their payout, **no card's payout changes that
+was already right**, and none of the 140 texts in the shared corpus matches at
+all.
+
 ### The ACCEPT that was made of a missing deduction
 
 202 offers off one real shift, and the arithmetic behind every verdict in it:
@@ -3593,7 +3644,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3802 checks
+npm test                # all 30 suites, 3864 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -3607,11 +3658,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 408 checks, the shared corpus
+node tests/corpus.test.js       # 505 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
-node tests/advice.test.js       #  95 on what line to tell a driver to draw
+node tests/advice.test.js       # 122 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 441 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 538 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 114 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -3620,7 +3671,7 @@ python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
 python3 rpi/test_exposure.py    # 133 on flicker, brightness, gain and
                                 #     exposure, and on both ends of running out
 python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     # 144 on keeping one row per offer, and on a
+python3 rpi/test_journal.py     # 172 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
