@@ -229,7 +229,18 @@
    * NE 50, NW 20, SE 10, SW 5. Together they are about the granularity of "side
    * of town", which is exactly what was asked for: not a distance, just enough
    * not to take two orders that end up in completely different places. */
-  var PLACE_TOWN = /,\s*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\s*$/;
+  // A comma OR a full stop, because a street abbreviation eats the comma:
+  // "Double Branches Ln & Sagamore Ct. Dallas" is a real dropoff on file. Three
+  // letters at least, which is what keeps the abbreviation itself out - "Cobb
+  // Pkwy. NW" must not report a town called NW - and keeps a state code like
+  // "IL" from standing in for one.
+  // ...and a short run of junk is allowed between the separator and the town,
+  // because the card's icon row lands there: "Grace St & Hidden Forest Ct, }
+  // Marietta", "Grady Grier Dr & New Towne Dr, , : Powder Springs", "Crestmont
+  // Pkwy & Haygoode Dr, E Marietta". Either a non-letter glyph or a single
+  // stray capital, at most three of them. Reads 15 more towns off this driver's
+  // dropoffs and no false ones.
+  var PLACE_TOWN = /[,.]\s*(?:[^A-Za-z\s]\s*|[A-Z]\s+){0,3}([A-Z][A-Za-z]{2,}(?:\s+[A-Z][A-Za-z]{2,})?)\s*$/;
   var PLACE_QUADRANT = /\b(NW|NE|SW|SE)\b/;
 
   function area(place) {

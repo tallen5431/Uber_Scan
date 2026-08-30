@@ -932,6 +932,30 @@
    }
   },
   {
+   "name": "...a place the card labelled Pickup is a pickup, bracket or not",
+   "_why": "The delivery card that prints \"@ Pickup Crumbl\" and nothing else was offering \"Crumbl\" as somewhere to deliver to. 112 of the 135 dropoffs the rig could not place on a map were this: an unbracketed shop name standing in for somebody's front door.",
+   "text": "$7.50 Guaranteed (incl. tips) 8.0 mi + 25 min @ Pickup Crumbl f\u00a5 Customer dropoff",
+   "expect": {
+    "pickup": "Crumbl",
+    "dropoff": null
+   }
+  },
+  {
+   "name": "...with nothing but the icon row between the label and the shop",
+   "text": "$10.20 Guaranteed (incl. tips) 10.2 mi + 26 min q @ Pickup | Ted's Montana Grill",
+   "expect": {
+    "dropoff": null
+   }
+  },
+  {
+   "name": "...but the word has to end where the place begins",
+   "_why": "\"Avg. wait time at pickup: 1 min\" sits between the label and the address on every ride card, and a looser rule would disown a real dropoff.",
+   "text": "$8.03 * 490 9 min (3.9 mi) Celebration Blvd, Acworth Avg. wait time at pickup: 1 min 10 mins (4.6 mi) N Cobb Pkwy NW, Acworth",
+   "expect": {
+    "dropoff": "N Cobb Pkwy NW, Acworth"
+   }
+  },
+  {
    "name": "...and a card that named only the shop has no dropoff at all",
    "text": "$15.60 Guaranteed (incl. tips) 7.9 mi + 37 min @ Retail pickup GoPuff (Drive)",
    "expect": {

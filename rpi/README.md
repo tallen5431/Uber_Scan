@@ -3181,10 +3181,35 @@ Measured against the driver's own stacked pairs — every one correct:
 | Luckie St NW, Atlanta → *Taco Bell (930 Spring Street)* | nothing said |
 
 Over all 10,007 pairs of offers that appeared within twenty minutes of each
-other: **38% elsewhere, 12% near, 50% nothing said.** That last number is the
-honest limit, not a bug — it is cards where one dropoff carried neither a town
-nor a quadrant, and half the time saying so is better than a guess that costs an
-hour.
+other: **39% elsewhere, 13% near, 48% nothing said.**
+
+That last number started at a worse place. Of the 135 dropoffs the rig could not
+put on a map, **112 were not dropoffs at all** — they were shop names the card
+had labelled, standing in for somebody's front door. `PLACE_IS_A_SHOP` only
+catches a *bracketed* name, and the commonest delivery card prints `@ Pickup
+Crumbl` with no bracket and nothing else. So the card's own label decides it
+now: a place printed after the word "Pickup" is a pickup however it is named.
+
+The discriminator is the card's layout rather than a list of separators. Between
+the label and the shop there is nothing but marks — `@ Pickup |`, `@ Pickup 3)`,
+the icon row the crop catches. Between the label and a *later* leg's address
+there is always a leg, and a leg is spelled with letters: `at pickup: 1 min
+10 mins (4.6 mi) N Cobb Pkwy NW`. So "no letters in between" is the whole rule.
+
+A character window sat beside it and was deleted: on all 604 cards the two
+agreed exactly, so the number was a second thing to get wrong rather than a
+second guard — and with it gone, every mutation of the rule is caught.
+
+Two smaller reads came with it. A town can follow a full stop, because a street
+abbreviation eats the comma (`Sagamore Ct. Dallas`), and a short run of icon-row
+junk can sit between the two (`Hidden Forest Ct, } Marietta`, `New Towne Dr, , :
+Powder Springs`). Fifteen more towns read, none of them false. Together:
+unplaceable dropoffs **135 → 25**, and the pairs the rig can call rose from 50%
+to 52%.
+
+The 48% that remain are the honest limit — cards where the dropoff carried
+neither a town nor a quadrant — and saying so is better than a guess that costs
+an hour.
 
 The journal and the CSV export record both ends beside `places`, so a shift can
 be replayed through `sameArea` afterwards and the rule argued with on real data
@@ -4064,7 +4089,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4093 checks
+npm test                # all 30 suites, 4107 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -4078,11 +4103,11 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 598 checks, the shared corpus
+node tests/corpus.test.js       # 602 checks, the shared corpus
 node tests/parser.test.js       #  83 on the browser side alone
-node tests/advice.test.js       # 137 on what line to tell a driver to draw
+node tests/advice.test.js       # 143 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 631 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 635 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 132 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place

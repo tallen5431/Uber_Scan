@@ -667,6 +667,21 @@ eq('...and the same town on opposite sides of it is too',
 eq('the same town on opposite quadrants is somewhere else',
    A.sameArea('Cobalt Dr NW & Ember Ln NW, Atlanta',
               'Ormewood Ave SE & Woodland Ave SE, Atlanta'), 'elsewhere');
+// The card's icon row lands between the comma and the town. All four of these
+// are real dropoffs off this driver's cards.
+eq('a stray glyph before the town does not hide it',
+   A.area('Grace St & Hidden Forest Ct, } Marietta').town, 'marietta');
+eq('...nor do several of them',
+   A.area('Grady Grier Dr & New Towne Dr, , : Powder Springs').town, 'powder springs');
+eq('...nor a stray capital',
+   A.area('Crestmont Pkwy & Haygoode Dr, E Marietta').town, 'marietta');
+eq('a town after a full stop is still the town',
+   A.area('Double Branches Ln & Sagamore Ct. Dallas').town, 'dallas');
+// ...but the abbreviation that ate the comma must not become one.
+eq('a street abbreviation is not a town', A.area('Cobb Pkwy. NW').town, null);
+eq('...and a two-letter state code is not one either',
+   A.area('Somewhere, IL'), null);
+
 // A quadrant has to be a word of its own. 28 of the places on file contain an
 // ALL-CAPS word - "HOME DEPOT 0156", "GOODFELLAS PIZZA & WINGS", "MIDTOWN" - and
 // KENNESAW has an NE inside it. A town that shouts must not donate a compass

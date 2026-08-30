@@ -562,9 +562,32 @@
    * a name the card bracketed, which is the card's own grammar rather than a
    * list of chains. Over 562 cards naming any place the last is a bracketed
    * shop on 9, every one a card where only the merchant read at all. */
-  function findDropoff(places) {
+  /* The card's own word for where a job starts. A place printed right after it
+   * is a pickup however it is named - "@ Pickup Crumbl" - and brackets have
+   * nothing to do with it. */
+  // Between the label and the shop there is nothing but marks - "@ Pickup |",
+  // "@ Pickup 3)". Between the label and a LATER leg's address there is always
+  // a leg, and a leg is spelled with letters: "at pickup: 1 min 10 mins
+  // (4.6 mi) N Cobb Pkwy NW". So "no letters in between" is the discriminator.
+  var PICKUP_LABEL = /\bpick\s?up\b[^A-Za-z]*$/i;
+
+  function labelledPickup(text, place) {
+    var at = text ? text.indexOf(place) : -1;
+    if (at <= 0) return false;
+    // Everything before the place, not a window of it: a window was an
+    // arbitrary number doing a job the letter rule already does, and on all 604
+    // cards the two agree exactly.
+    return PICKUP_LABEL.test(text.slice(0, at));
+  }
+
+  function findDropoff(places, text) {
     for (var i = (places || []).length - 1; i >= 0; i--) {
       if (PLACE_IS_A_SHOP.test(places[i])) continue;
+      // ...and a place the card LABELLED as the pickup is a pickup, bracket or
+      // no bracket. 112 of the 135 dropoffs the rig could not place on a map
+      // were exactly this: an unbracketed shop name standing in for somebody's
+      // front door. The word has to end right where the place begins.
+      if (text && labelledPickup(text, places[i])) continue;
       return places[i];
     }
     return null;
@@ -1062,7 +1085,7 @@
       // them is which, so a second offer can be judged against the one already
       // in the car. See findDropoff, which is the half that decides.
       pickup: findPickup(places),
-      dropoff: findDropoff(places),
+      dropoff: findDropoff(places, text),
       // The legs behind the sum, so a caller holding readings from several
       // frames can merge the ones a single frame missed.
       legDetail: used.map(function (l) {

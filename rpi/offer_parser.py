@@ -996,7 +996,19 @@ def trim_place(value):
 PLACE_IS_A_SHOP = re.compile(r'\([^)]{2,40}\)\s*$', ASCII)
 
 
-def find_dropoff(places):
+# The card's own word for where a job starts. A place printed right after it is
+# a pickup however it is named — "@ Pickup Crumbl", "Retail pickup GoPuff" — and
+# brackets have nothing to do with it.
+# Between the label and the shop there is nothing but marks — "@ Pickup |",
+# "@ Pickup 3)", the icon row the crop catches. Between the label and a LATER
+# leg's address there is always a leg, and a leg is spelled with letters:
+# "at pickup: 1 min 10 mins (4.6 mi) N Cobb Pkwy NW". So "no letters in
+# between" is the whole discriminator, and it is the card's own layout rather
+# than a list of separators.
+PICKUP_LABEL = re.compile(r'\bpick\s?up\b[^A-Za-z]*$', re.IGNORECASE | ASCII)
+
+
+def find_dropoff(places, text=None):
     """Where the job ENDS, or None when the card did not say.
 
     The driver's own description of these cards: "the drop off locations will
@@ -1017,8 +1029,28 @@ def find_dropoff(places):
     for place in reversed(places or []):
         if PLACE_IS_A_SHOP.search(place):
             continue
+        # ...and a place the card LABELLED as the pickup is a pickup, bracket or
+        # no bracket. Without this, the delivery card that prints "@ Pickup
+        # Crumbl" and nothing else offers "Crumbl" as a destination: 112 of the
+        # 135 dropoffs the rig could not place on a map were exactly this, an
+        # unbracketed shop name standing in for somebody's front door. The word
+        # has to end right where the place begins, or "Avg. wait time at pickup:
+        # 1 min 10 mins (4.6 mi) N Cobb Pkwy NW" would disown a real address.
+        if text and _labelled_pickup(text, place):
+            continue
         return place
     return None
+
+
+def _labelled_pickup(text, place):
+    at = text.find(place)
+    if at <= 0:
+        return False
+    # Everything before the place, not a window of it. A window was here and it
+    # was an arbitrary number doing a job the letter rule already does: on all
+    # 604 cards the two agree exactly, so the number was a second thing to get
+    # wrong rather than a second guard.
+    return bool(PICKUP_LABEL.search(text[:at]))
 
 
 def find_pickup(places):
@@ -1271,7 +1303,7 @@ def parse(raw_text):
         # so a second offer can be judged against the one already in the car.
         # See find_dropoff, which is the half that decides.
         'pickup': find_pickup(places),
-        'dropoff': find_dropoff(places),
+        'dropoff': find_dropoff(places, text),
         # The legs behind the sum, so a caller holding readings from several
         # frames can merge the ones a single frame missed.
         # `labelled` travels with them. is_whole re-runs
