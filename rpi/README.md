@@ -2753,6 +2753,62 @@ only in a short window around a leg that already matched, so a stray "wait"
 elsewhere on the card cannot invent one. It looks **before** the figure as well
 as after, because the card prints the phrase first.
 
+### Keeping enough to answer the next question
+
+Every parser fix on this page was found from evidence that happened to survive.
+The wait-line was found from three mangled fragments that lived on in `places`
+because the addresses were kept and the text was not. The distance thrown away
+by a length check was found because the text finally *was* kept. Each time, the
+question could only be asked because something had been recorded for a different
+reason.
+
+Three things were still being discarded, and each is the answer to a question
+that has already come up.
+
+**The line breaks.** `parse()` works on `normalize()`'s output — whitespace
+flattened to single spaces — so no rule has to care how the engine broke the
+lines. That flattening throws away *which line each figure sat on*, and a card's
+meaning is partly in its lines: `2.4 mi · 20 min` on one line is one journey,
+while a distance and a duration on separate lines are two different facts. Both
+of the last two parser fixes were rediscovering line structure from punctuation
+because the structure itself had been dropped before anything could look at it.
+The journal keeps the unflattened reading now; `normalize()` is deterministic,
+so the flat form can always be made again from it.
+
+**Every frame, not the one that won.** A card is read four to eight times and the
+frames disagree — that disagreement is the entire reason the accumulator exists.
+Only the winner reached disk, with no account of what it beat, so the one record
+of what this camera does to a real screen at night was the single reading that
+happened to come out on top. Distinct readings are kept, deduplicated (a card
+sitting still says the same thing repeatedly) and capped at eight, and they go
+into the CSV as a `scans` column joined with pipes.
+
+**The picture itself** — `--keep-scans`. This is the one that changes what can be
+asked. Whether a crop was too tight, whether a threshold ate a decimal point,
+whether a different psm would have found the missing leg: all of it is
+answerable offline from the card image and *none* of it is answerable from the
+text, because the text is what the damage left behind. What is written is the
+greyscale card as it came off the warp, **before** `preprocess()` — a picture of
+preprocess's own output cannot be used to judge preprocess.
+
+Off by default, because this writes to an SD card in a car and a feature that
+quietly fills one is worse than a feature nobody has. Bounded even when on: 400
+pictures, oldest first, about 40kB each. Written only on the reads that land a
+row, so what is on disk is the offers in the journal rather than every glance at
+an empty mount. Named by offer id and stamped, so a row and a picture can be put
+back together months later with no second index to go wrong — and sorting the
+names sorts them by time, which is what lets the pruning be a slice. Never fatal:
+this is evidence, not the job.
+
+They land in `rpi/scans/`, which is gitignored for the same reason the journal
+is, and more so — a photograph of the driver's phone with the addresses on it is
+the same fact in a stronger form.
+
+**And the export had no test at all.** It is the one path by which a shift's
+readings leave the rig, and every question on this page was answered from the
+file it produces, so a column silently missing from it costs a whole shift of
+evidence and shows up as nothing. It is checked now.
+
 ### Both ends of the job, lost to a length check
 
 Stacking two orders needs to know where they go, and the first measurement of
@@ -3537,7 +3593,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 3751 checks
+npm test                # all 30 suites, 3785 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

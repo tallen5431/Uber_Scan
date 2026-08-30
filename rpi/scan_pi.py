@@ -16,6 +16,7 @@ mid-offer costs more time than the OCR does.
 import argparse
 import json
 import os
+import re
 import queue
 import subprocess
 import sys
@@ -734,6 +735,71 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None,
     _snapshot_error = message
 
 
+# --- keeping the picture the reader was given -------------------------------
+#
+# The journal keeps what the OCR produced. It cannot keep what the OCR was
+# LOOKING at, and that is the half every question about read quality needs:
+# whether a crop was too tight, whether a threshold ate a decimal point,
+# whether a different psm would have found the leg that went missing. All of it
+# is answerable offline from the card image and none of it is answerable from
+# the text, because the text is what the damage left behind.
+#
+# The greyscale card as it came off the warp, before preprocess(): that is the
+# input to the decisions worth changing, and a picture of preprocess's own
+# output cannot be used to judge preprocess.
+#
+# Off by default. This writes to an SD card in a car, and a feature that quietly
+# fills one is worse than a feature nobody has. Turned on for a shift when there
+# is a question worth answering, and bounded even then.
+SCANS_KEEP = 400          # ...and the oldest go first
+SCAN_QUALITY = 72         # ~40KB a card at the height the reader uses
+
+
+def scan_dir(journal_path):
+    """Where card pictures go: beside the journal, in a directory of their own."""
+    return os.path.join(os.path.dirname(os.path.abspath(journal_path)), 'scans')
+
+
+def prune_scans(where, keep=SCANS_KEEP):
+    """Oldest first, so a long shift cannot outgrow the card it is written to."""
+    try:
+        names = sorted(n for n in os.listdir(where) if n.endswith('.jpg'))
+    except OSError:
+        return 0
+    dropped = 0
+    for name in names[:max(0, len(names) - keep)]:
+        try:
+            os.remove(os.path.join(where, name))
+            dropped += 1
+        except OSError:
+            pass
+    return dropped
+
+
+def save_scan(image, offer_id, where, at=None, keep=SCANS_KEEP):
+    """Keep one card picture. Never fatally: this is evidence, not the job.
+
+    Named by the offer it belongs to and stamped, so a row in the journal and a
+    picture on disk can be put back together months later without a second index
+    to go wrong. Sorting the names sorts them by time, which is what lets the
+    pruning above be a slice.
+    """
+    if image is None or not offer_id:
+        return None
+    try:
+        os.makedirs(where, exist_ok=True)
+        stamp = int((time.time() if at is None else at) * 1000)
+        safe = re.sub(r'[^A-Za-z0-9_.-]', '_', str(offer_id))[:40]
+        path = os.path.join(where, '%013d-%s.jpg' % (stamp, safe))
+        problem = PL.write_jpeg(path, image, quality=SCAN_QUALITY)
+        if problem:
+            return None
+        prune_scans(where, keep)
+        return path
+    except Exception:
+        return None
+
+
 def log(message):
     """A human-readable line for the log file.
 
@@ -1165,6 +1231,13 @@ def main():
                     help='write frames that failed to parse, for tuning')
     ap.add_argument('--snapshot', default=DEFAULT_SNAPSHOT,
                     help='where to write the live view the web UI shows ("" to disable)')
+    # Off unless asked for. See save_scan: this writes to an SD card in a car,
+    # and a feature that quietly fills one is worse than a feature nobody has.
+    ap.add_argument('--keep-scans', type=int, nargs='?', const=SCANS_KEEP,
+                    default=0, metavar='N',
+                    help='keep the last N card pictures beside the journal, for '
+                         'working out why a read came back wrong (default off; '
+                         'bare flag keeps %d)' % SCANS_KEEP)
     ap.add_argument('--journal', default=JR.DEFAULT_PATH,
                     help='where to keep every confident offer, for looking at '
                          'a shift afterwards. The web side reads the default '
@@ -1386,6 +1459,7 @@ def main():
     # restarted with a backoff when it dies, and a card sits on screen far
     # longer than a restart takes, so starting empty meant coming back to the
     # same offer and recording it twice.
+    scans_where = scan_dir(args.journal)
     offer_log = None
     if not args.no_journal:
         offer_log = JR.OfferLog(
@@ -1597,6 +1671,16 @@ def main():
             if (landed or offer_log.id is not None) and not seen_kept:
                 seen_kept = True
                 health.kept += 1
+            # The picture the reader was given, against the offer it produced.
+            #
+            # Written on the reads that land a row rather than on every read, so
+            # what is on disk is the offers in the journal and not every glance
+            # at an empty mount. `landed` is false on a re-read that said
+            # nothing new, and that is the right moment to skip: the card has
+            # not changed and neither would its picture.
+            if args.keep_scans and landed and offer_log.id:
+                save_scan(out.get('fitted'), offer_log.id, scans_where,
+                          keep=args.keep_scans)
             # ...and say which offer that is, once per card rather than once
             # per read. The driving screen holds it so the driver can mark it
             # as taken without going and finding the row afterwards.

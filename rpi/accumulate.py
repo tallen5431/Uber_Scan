@@ -44,6 +44,14 @@ SAME_LEG_MILES = 0.15
 # reported.
 MAX_PLACES = OP.MAX_PLACES
 
+# How many distinct readings of one card to keep. A card is read four to eight
+# times and the texts run to a few hundred characters, so this is a few kilobytes
+# an offer and a megabyte or so across a shift — on a file that is already
+# appended to once per reading. Bounded all the same: a card that will not settle
+# is exactly the one that produces the most distinct texts, and it must not be
+# the one that fills the card.
+SCANS_PER_OFFER = 8
+
 
 class OfferAccumulator:
     """Merges parsed readings of one offer. Feed it every read; use what it returns."""
@@ -93,6 +101,20 @@ class OfferAccumulator:
         # checked. Never voted on — an address is not arithmetic and a rate is
         # not computed from it — so what one frame saw is kept.
         self.places = []
+        # Every distinct reading of this card, in the order they arrived.
+        #
+        # The merged row keeps ONE frame's text, and the whole reason this class
+        # exists is that frames disagree — a leg lost to glare here, a decimal
+        # dropped there, and the merge voting between them. The disagreements
+        # are the record of what the OCR actually does to a real screen at
+        # night, and until now every one of them was discarded the moment it was
+        # outvoted. What reached the journal was the winner with no account of
+        # what it beat.
+        #
+        # Deduplicated, because a card sitting still gives the same text several
+        # times and those add nothing; capped, because this is written to an SD
+        # card in a car. See SCANS_PER_OFFER.
+        self.texts = []
         self.samples = 0
         self.max_legs = 0
         self.corrected = False
@@ -228,6 +250,13 @@ class OfferAccumulator:
         self.max_legs = max(self.max_legs, len(detail))
         self.corrected = self.corrected or bool(parsed.get('milesCorrected'))
 
+        # What this frame read, kept beside what the others did. Raw where the
+        # reader gave it raw: the line breaks are the part a later question is
+        # most likely to need, and normalize() can always flatten it again.
+        seen = parsed.get('rawText') or parsed.get('text') or ''
+        if seen and seen not in self.texts and len(self.texts) < SCANS_PER_OFFER:
+            self.texts.append(seen)
+
         taken = set()
         for leg in detail:
             index = self._slot_for(leg, taken)
@@ -338,6 +367,10 @@ class OfferAccumulator:
         # whichever frame happened to be last. If any frame needed a decimal put
         # back, the distance is worth a glance.
         merged['milesCorrected'] = self.corrected
+        # Every distinct frame's reading, so a question about the OCR can be
+        # asked of what it really produced rather than of the one frame that
+        # happened to win. See `self.texts`.
+        merged['scans'] = list(self.texts)
         # Voted on, like the minutes and the distance. This took whichever
         # frame happened to be last, so a single misread outvoted every good
         # reading before it purely by arriving after them — and the item count

@@ -1730,6 +1730,16 @@ class Scanner:
             # The exact picture the reader was given, so a caller can measure how
             # bright it was and whether it was rippling.
             'card': prepped,
+            # ...and the same card BEFORE preprocess() touched it.
+            #
+            # `card` above is contrast-stretched, thresholded and sometimes
+            # inverted — a picture of a page, and the end of a decision chain
+            # rather than the input to one. Every question about how to read
+            # these cards better is a question about what preprocess() should
+            # have done, and that cannot be asked of its own output. This is the
+            # greyscale card as it came off the warp, which is where a different
+            # threshold, a different scale or a different psm would start.
+            'fitted': fitted,
             'ms': {
                 'warp': (t1 - t0) * 1000,
                 'prep': (t2 - t1) * 1000,

@@ -29,3 +29,9 @@ ssl/
 # the Pi, like the calibration and the live frame.
 rpi/journal.jsonl
 rpi/journal.jsonl.*
+
+# ...and the pictures those offers were read from, which sit beside the journal
+# by default and are the same fact in a stronger form: a photograph of the
+# driver's phone, with the addresses on it. They are written only when the
+# scanner is asked for them (`--keep-scans`), and never into a commit.
+rpi/scans/

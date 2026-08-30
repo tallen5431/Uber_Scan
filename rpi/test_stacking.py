@@ -301,6 +301,29 @@ try:
        (timeless or {}).get('stack'), None)
     post(base, '/api/delivered')
 
+    # --- the export, which is how any of this reaches anyone -----------------
+    #
+    # Nothing checked this. It is the one path by which a shift's readings leave
+    # the rig, and every question about the parser is answered from the file it
+    # produces — so a column silently missing from it costs a whole shift of
+    # evidence and shows up as nothing at all.
+    import csv as _csv
+    import io as _io
+    body = urllib.request.urlopen(base + '/api/journal.csv', timeout=10)
+    text = body.read().decode('utf-8')
+    reader = _csv.reader(_io.StringIO(text))
+    header = next(reader, [])
+    ok_('the export has a header', bool(header))
+    for column in ('at', 'pay', 'minutes', 'miles', 'perHour', 'state',
+                   'places', 'text', 'scans', 'when'):
+        ok_('...naming %s' % column, column in header)
+    # A card is read several times and the readings differ; the export carries
+    # the ones that lost as well as the one that won. Joined with pipes, because
+    # the separator here is a comma and a mangled card is full of them — and of
+    # semicolons, which is what the addresses use.
+    eq('every frame\'s reading has its own column', header.count('scans'), 1)
+    ok_('...and the winning reading keeps its own', 'text' in header)
+
 finally:
     proc.terminate()
     try:

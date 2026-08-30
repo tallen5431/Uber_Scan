@@ -17,6 +17,7 @@ it counts every request handed out and every one given back.
 
 import json
 import os
+import shutil
 import inspect
 import re
 import sys
@@ -1573,6 +1574,55 @@ page = open(os.path.join(os.path.dirname(os.path.dirname(
 for field in ('tooBright', 'tooDim'):
     ok_('live.html reads %s off the heartbeat' % field,
         'msg.%s' % field in page)
+
+# --- keeping the picture the reader was given --------------------------------
+#
+# The journal keeps what the OCR produced; it cannot keep what the OCR was
+# looking at, and that is the half every question about read quality needs.
+# Written to an SD card in a car, so what matters as much as keeping them is
+# that they cannot pile up and that a failure to write one is never fatal.
+import numpy as _np
+
+_scanwork = tempfile.mkdtemp()
+_where = SP.scan_dir(os.path.join(_scanwork, 'offers.jsonl'))
+eq('pictures go beside the journal, not into the repo',
+   os.path.dirname(_where), _scanwork)
+
+_card = _np.full((60, 40), 128, dtype=_np.uint8)
+_first = SP.save_scan(_card, 'offer-a', _where, at=1_700_000_000.0)
+ok_('a card picture is written', bool(_first) and os.path.exists(_first))
+ok_('...named after the offer it belongs to, so the row can find it',
+    'offer-a' in os.path.basename(_first))
+ok_('...and stamped, so sorting the names sorts them by time',
+    os.path.basename(_first).split('-')[0].isdigit())
+
+# An id from a card is not a filename. Nothing on the rig makes one with a
+# slash in it today, and "today" is not a guarantee worth writing a path on.
+_odd = SP.save_scan(_card, '../../etc/passwd', _where, at=1_700_000_001.0)
+ok_('an id that is not a filename cannot escape the directory', bool(_odd))
+if _odd:
+    eq('...it stays where it was put', os.path.dirname(_odd), _where)
+    ok_('...with the path characters taken out',
+        '/' not in os.path.basename(_odd)[14:])
+
+# Nothing to write is not an error; it is an ordinary read with no card in it.
+eq('no picture means nothing is written', SP.save_scan(None, 'x', _where), None)
+eq('no offer means nothing is written', SP.save_scan(_card, '', _where), None)
+
+# Never fatal. This is evidence, not the job — a directory that cannot be
+# written must not end a shift.
+eq('an unwritable place is survived, not raised',
+   SP.save_scan(_card, 'offer-b', '/proc/nope/scans'), None)
+
+# The cap. A long shift must not outgrow the card it is written to, and the
+# oldest are the ones worth losing.
+for _i in range(12):
+    SP.save_scan(_card, 'many-%02d' % _i, _where, at=1_700_001_000.0 + _i, keep=5)
+_left = sorted(n for n in os.listdir(_where) if n.endswith('.jpg'))
+eq('the oldest pictures go first', len(_left), 5)
+ok_('...and the ones kept are the newest',
+    all('many-' in n for n in _left) and 'many-11' in _left[-1])
+shutil.rmtree(_scanwork, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)

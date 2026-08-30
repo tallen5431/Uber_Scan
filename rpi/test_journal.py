@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import journal as JR
 import offer_parser as P
 from accumulate import OfferAccumulator
+from accumulate import SCANS_PER_OFFER as ACCUM_SCANS
 
 ok = bad = 0
 MONEY = {'target': 25, 'band': 15, 'costPerMile': 0.30}
@@ -126,6 +127,61 @@ ok_('a real card is longer than the old cap (%d chars)' % len(LONG_CARD),
     len(LONG_CARD) > 220)
 eq('...and the cap keeps one whole rather than cutting its addresses off',
    long_kept, LONG_CARD)
+
+# --- what the reader saw, all of it -----------------------------------------
+#
+# Two separate things the journal keeps so a question about the OCR can be asked
+# of what the camera really produced.
+#
+# The LINE BREAKS. Every parser rule works on the flattened text, and flattening
+# throws away which line each figure sat on — which is the part of a card's
+# meaning the last two parser fixes had to rediscover from punctuation.
+LINED = ('$8.40 Guaranteed (incl. tip)\n'
+         '2.4 mi \u00b7 20 min\n'
+         'Pickup McDonald\'s\n'
+         'Cobb Pkwy NW, Acworth')
+lines_log = fresh('lines.jsonl')
+feed(lines_log, [LINED] * 3)
+lined = (lines_log.journal.rows() or [{}])[-1]
+ok_('the reading is kept with its line breaks', '\n' in (lined.get('text') or ''))
+eq('...exactly as the reader gave it', lined.get('text'), LINED)
+
+# ...and EVERY FRAME, not the one that won. A card is read several times and the
+# frames disagree; that disagreement is the whole reason the accumulator exists,
+# and only the winner used to reach disk.
+DIM = "$8.40 Guaranteed (incl. tip) 2.4 mi + 20 min Pickup McDonald's"
+GLARE = "$8.40 Guaranteed (incl. tip) 2.4 mi + 20 min Pickup McDonaId's"   # a misread
+frames_log = fresh('frames.jsonl')
+feed(frames_log, [DIM, GLARE, DIM, GLARE])
+# The LAST row, not the first. A reading that improves is appended, and the
+# export takes the latest per offer — so the first row is what was known
+# after one frame, which is exactly what this is checking is not all there is.
+kept_row = (frames_log.journal.rows() or [{}])[-1]
+scans = kept_row.get('scans') or []
+ok_('every distinct reading of the card is kept', len(scans) >= 2)
+ok_('...including the one that lost the vote', GLARE in scans)
+ok_('...and the one that won', DIM in scans)
+eq('...with the repeats left out, because a still card says the same thing',
+   len(scans), len(set(scans)))
+ok_('...and each of them bounded like the reading itself',
+    all(len(t) <= JR.TEXT_KEPT for t in scans))
+
+# A card read once has nothing to disagree with, and must not grow a list for
+# the sake of it.
+one_log = fresh('one.jsonl')
+feed(one_log, [DIM])
+only = (one_log.journal.rows() or [{}])[-1]
+ok_('a card read once still records what was read',
+    (only.get('scans') or [None])[0] == DIM)
+
+# The bound. A card that will not settle is exactly the one producing the most
+# distinct texts, and it must not be the one that fills the SD card.
+many_log = fresh('many.jsonl')
+feed(many_log, ["$8.40 Guaranteed (incl. tip) 2.4 mi + 20 min Pickup McDonald's %d" % i
+                for i in range(20)])
+many = (many_log.journal.rows() or [{}])[-1]
+ok_('...and a card that never settles cannot grow without bound',
+    len(many.get('scans') or []) <= ACCUM_SCANS)
 
 # --- two different offers are two rows --------------------------------------
 # One accumulator across both, as the scan loop has.

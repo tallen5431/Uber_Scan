@@ -609,6 +609,13 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
                    // both ends of a ride without breaking the comma-separated
                    // file it sits in.
                    'places', 'deliverBy', 'fromDeadline', 'ms',
+                   // Every OTHER frame's reading of the same card, joined with
+                   // a pipe. The row's `text` is the one that won; a card is
+                   // read four to eight times and where those readings DIFFER
+                   // is the only record of what this camera does to a real
+                   // screen at night. Pipes because the separator here is a
+                   // comma and a mangled card is full of them.
+                   'scans',
                    // At the end, deliberately — toCsv appends `when` after
                    // it, so this is the second-to-last column and the
                    // human-readable timestamp keeps the edge it has always had.
@@ -1208,7 +1215,11 @@ function toCsv(offers) {
       if (typeof v === 'number') return String(v);
       // A list — the places an offer went — as one cell. Semicolons, because
       // the separator here is a comma and an address is full of them.
-      if (Array.isArray(v)) v = v.join('; ');
+      // A list — the places an offer went, or every frame's reading of it — as
+      // one cell. Semicolons for addresses, because the separator here is a
+      // comma and an address is full of them; pipes for readings, because a
+      // mangled card is full of semicolons too.
+      if (Array.isArray(v)) v = v.join(k === 'scans' ? ' | ' : '; ');
       return '"' + String(v).replace(/"/g, '""') + '"';
     });
     // A second, human-readable stamp. A spreadsheet will not turn epoch

@@ -591,7 +591,22 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # row, which on a year of driving is single-digit megabytes against a
         # 64MB roll — cheap for the only evidence that can settle whether a
         # parser change helps on this driver's own phone.
-        'text': (parsed.get('text') or '')[:TEXT_KEPT] or None,
+        # Raw where the reader gave it raw. `text` is the flattened form every
+        # parser rule works on, and the flattening throws away which LINE each
+        # figure sat on — which is the part of a card's meaning that the last
+        # two parser fixes had to rediscover from punctuation because it had
+        # been discarded before anything could look at it.
+        'text': ((parsed.get('rawText') or parsed.get('text') or '')[:TEXT_KEPT]
+                 or None),
+        # ...and what every OTHER frame of the same card read.
+        #
+        # A card is read four to eight times and the frames disagree — that
+        # disagreement is the whole reason the accumulator exists. Only the
+        # winner used to be written, with no account of what it beat, so the
+        # one record of what this camera does to a real screen at night was
+        # the one reading that happened to come out on top. See
+        # accumulate.SCANS_PER_OFFER for the bound.
+        'scans': [t[:TEXT_KEPT] for t in (parsed.get('scans') or [])] or None,
         # Whether the whole journey was in view: a line tagged as the total, or
         # both legs of a two-leg card. A reading without it is a *fragment*, and
         # a fragment always flatters the offer — the first leg of a two-leg card

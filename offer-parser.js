@@ -799,7 +799,19 @@
       // Null when the card did not say — the top chip may simply not have been
       // inside the crop — which is different from "not a shop order".
       shop: SHOP_CARD.test(text) ? true : null,
-      text: text
+      text: text,
+      /* ...and the same reading before normalize() flattened it.
+       *
+       * `text` above is what this parser works on: whitespace collapsed to
+       * single spaces, so every rule can be written without caring how the
+       * engine broke the lines. That flattening throws away WHICH LINE each
+       * figure was on, and the card's meaning is partly in its lines: "2.4 mi
+       * + 20 min" is one line and therefore one journey, while a distance and
+       * a duration on separate lines are two different facts.
+       *
+       * Kept beside rather than instead: normalize() is deterministic, so the
+       * flattened form can always be made again from this one. */
+      rawText: typeof rawText === 'string' ? rawText : String(rawText || '')
     };
   }
 
