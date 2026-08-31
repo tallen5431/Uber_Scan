@@ -3454,6 +3454,39 @@ the full address appears at accept or only after pickup — is unanswered. The Z
 anchor survives almost any layout; the street/city split is where a surprise
 would land.
 
+#### …and the button for it could not be reached on the path it was built for
+
+Worth stating plainly, because it is the third time in one sitting: the scanner
+end worked, the server end worked, both were tested end to end — and **the panel
+never opened the door**.
+
+The flow this feature exists for is exactly one sequence. The driver accepts on
+their phone. The card vanishes from the mount. They press **Took** on the panel.
+*The destination is on the phone right now.* That is the moment.
+
+But `holdingNow` in `live.html` was only ever set from a **reading**:
+
+    if (msg.ready) { holdingNow = !!msg.holding; showDrop(); showDest(); }
+
+and there is no reading — there is no card. `/api/status` is fetched once, at
+page load, and never polled. So `#drop` and `#dest` stayed hidden until the
+**next** offer card arrived, by which time the phone is showing that card and
+pressing ⌖ Dropoff photographs the wrong screen. The one feature built for the
+18% of cards that print "Customer dropoff" and no address could not be used the
+way it was designed to be used.
+
+Marking is the only moment the panel can learn this in time, so `/api/offers/mark`
+now answers with `holding` — through `holding(Date.now())` like everything else,
+so a hold the server has already expired does not put a button back on the
+panel — and the took handler reveals both controls from it, believing the server
+rather than the press.
+
+**What the test had to do to be worth anything.** The existing browser check
+already pressed Took, and its route stub answered `{"ok":true}` — which is
+precisely the shape that hid this. The stub now returns `holding`, and the two
+buttons are measured **on the glass** after the mark: on screen, sized, not
+`display:none`, not scrolled off. Reverting the handler fails both.
+
 #### The tests covered every piece of this and none of the path
 
 A review made the point by breaking it. Replace the body of the request branch
@@ -4853,7 +4886,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4447 checks
+npm test                # all 30 suites, 4452 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

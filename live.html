@@ -790,7 +790,31 @@
       // project has already met — see rpi/test_repeats.py.
       body: JSON.stringify({ id: onRecord.id, accepted: want })
     }).then(function (r) {
-      if (r.ok) tookState = want;
+      if (!r.ok) return null;
+      tookState = want;
+      return r.json().catch(function () { return null; });
+    }).then(function (body) {
+      // The order in the car, learned HERE and not from the next reading.
+      //
+      // This is the moment the destination is on the phone: the driver has
+      // just accepted, the card is gone from the mount, and they pressed the
+      // button that says so. But `holdingNow` was only ever set from a reading
+      // — and there is no reading, because there is no card. So Drop and
+      // ⌖ Dropoff stayed hidden until the NEXT offer arrived, by which point
+      // the phone is showing that offer and pressing ⌖ Dropoff photographs the
+      // wrong screen. The one feature that exists for the 18% of cards naming
+      // no address could not be reached on the path it was built for.
+      //
+      // Believing the server rather than the press, like Drop below: the mark
+      // may have been refused, or the hold may already have expired on the
+      // server's own clock, and a button for an order that is not there is
+      // worse than no button.
+      if (body && typeof body.holding === 'boolean') {
+        if (holdingNow && !body.holding) destSaid = '';
+        holdingNow = body.holding;
+        showDrop();
+        showDest();
+      }
     }).catch(function () {
       /* The record is the point; a failed write must not look like a success. */
     }).then(function () {

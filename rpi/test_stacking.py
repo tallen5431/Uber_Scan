@@ -320,6 +320,12 @@ try:
     marked = post(base, '/api/offers/mark',
                   {'id': 'held-1', 'accepted': True})
     eq('the offer marks as taken', marked.get('ok'), True)
+    # ...and the answer says there is now an order in the car. This is the ONLY
+    # moment the panel can learn that in time to matter: the driver accepted on
+    # the phone, the card is gone from the mount, and the destination is on the
+    # screen RIGHT NOW - but no reading is coming, so nothing else will tell it.
+    # See the took handler in live.html.
+    eq('...and says an order is now being carried', marked.get('holding'), True)
 
     status = get(base, '/api/status')
     ok_('...and becomes the order in the car', bool(status.get('holding')))
@@ -372,8 +378,12 @@ try:
     #     the hold: the driver pressed it twice because they did not take it.
     post(base, '/api/offers/mark', {'id': 'held-1', 'accepted': True})
     ok_('marking again picks it back up', bool(get(base, '/api/status').get('holding')))
-    post(base, '/api/offers/mark', {'id': 'held-1', 'accepted': False})
+    unmarked = post(base, '/api/offers/mark', {'id': 'held-1', 'accepted': False})
     eq('unmarking puts it down', get(base, '/api/status').get('holding'), None)
+    # ...and says so in the same breath, so the panel hides the two controls
+    # rather than leaving them offering a job that is no longer in the car.
+    eq('...and the answer says nothing is being carried',
+       unmarked.get('holding'), False)
 
     # --- the offer on screen is not the order in the car ---------------------
     #

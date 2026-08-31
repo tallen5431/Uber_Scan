@@ -239,10 +239,18 @@ const LOOK = (sel) => {
     });
     const page = await ctx.newPage();
     const posted = [];
+    // The response carries `holding`, because the real one does and because
+    // that is the whole point of the two checks below: marking is the ONLY
+    // moment the panel can learn there is an order in the car in time to be
+    // useful. A stub that answered `{"ok":true}` and nothing else is what let
+    // the destination button stay hidden on the one path it was built for.
     await page.route('**/api/offers/mark', async (route) => {
-      posted.push(JSON.parse(route.request().postData() || '{}'));
-      await route.fulfill({ status: 200, contentType: 'application/json',
-                            body: '{"ok":true}' });
+      const body = JSON.parse(route.request().postData() || '{}');
+      posted.push(body);
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, holding: !!body.accepted }),
+      });
     });
     // The shift figures, and how many times the page asked for them. The
     // answer changes on the second ask so a refetch is visible rather than
@@ -329,6 +337,27 @@ const LOOK = (sel) => {
     out.tookClicked = await press();
     await page.waitForTimeout(400);
     out.tookMarked = await look();
+    // ...and the two controls for the order now in the car.
+    //
+    // THIS is the moment the destination is on the phone: the driver accepted,
+    // the card went, and they pressed "Took". No reading is coming - there is
+    // no card to read - so a panel that only learns about a held order from a
+    // reading leaves ⌖ Dropoff hidden until the NEXT offer arrives, by which
+    // point the phone shows that offer and the button photographs the wrong
+    // screen. Measured on the glass, not off a variable.
+    const lookBar = (id) => page.evaluate((sel) => {
+      const el = document.getElementById(sel);
+      if (!el) return { there: false, shown: false, text: '' };
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return { there: true,
+               shown: !el.hidden && r.width > 0 && r.height > 0
+                      && cs.display !== 'none' && r.top >= 0
+                      && r.bottom <= window.innerHeight + 1,
+               text: (el.textContent || '').trim() };
+    }, id);
+    out.destAfterMark = await lookBar('dest');
+    out.dropAfterMark = await lookBar('drop');
     // Marking is the one thing on this screen that changes the count, so it is
     // the one time the figures are worth asking for off the timer. Left to the
     // three-minute poll, a driver would press "took it" and watch the number
@@ -735,6 +764,24 @@ try:
 
         ok_('marking says so', (marked.get('text') or '').startswith('\u2713'))
         eq('...to assistive tech as well', marked.get('pressed'), 'true')
+
+        # ...and the two controls for the order that is now in the car appear
+        # ON THE MARK, which is the only moment they are any use.
+        #
+        # The driver accepts on the phone, the card goes, they press "Took" \u2014
+        # and the destination is on the phone RIGHT NOW. No reading is coming,
+        # because there is no card to read. The panel used to learn about a
+        # held order only from a reading, so \u2316 Dropoff stayed hidden until the
+        # NEXT offer card arrived; by then the phone shows that card, and the
+        # button reads the wrong screen. The one feature built for the 18% of
+        # cards that name no address could not be reached on its own path.
+        dest_now = got.get('destAfterMark') or {}
+        drop_now = got.get('dropAfterMark') or {}
+        ok_('the destination button appears the moment the offer is marked',
+            dest_now.get('shown'))
+        ok_('...saying what it reads', 'Dropoff' in (dest_now.get('text') or ''))
+        ok_('...and so does the one that puts the order down',
+            drop_now.get('shown'))
 
         # A mark belongs to an offer, not to the button. This is asked while
         # the previous offer is still marked: a tick carried onto the next card

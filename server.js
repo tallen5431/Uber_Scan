@@ -1432,7 +1432,22 @@ function route(req, res) {
             if (carried && carried.id === note.id) scanner.holding = null;
           }
         }
-        send(res, 200, JSON.stringify({ ok: true, note: note }),
+        // ...and whether there is now an order in the car, because marking is
+        // the ONLY moment the panel can learn it in time to matter.
+        //
+        // The driver accepts on their phone, the card vanishes from the mount,
+        // they press "Took" here - and the destination is on the phone RIGHT
+        // NOW. But the panel only heard about a held order through a reading
+        // (see withStack, which attaches `holding` when `read.ready`), and
+        // there is no reading: the card is gone. So the two buttons that exist
+        // for this exact moment, Drop and the destination scan, stayed hidden
+        // until the NEXT offer card arrived - by which time the phone is
+        // showing that card and not the address.
+        //
+        // Answered off the same question as everywhere else, so a hold the
+        // server has already expired does not put a button back on the panel.
+        send(res, 200, JSON.stringify({ ok: true, note: note,
+                                        holding: !!holding(Date.now()) }),
              { 'Content-Type': 'application/json; charset=utf-8' });
       });
     });
