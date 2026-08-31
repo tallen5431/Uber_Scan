@@ -700,8 +700,17 @@
         }
         if (split !== null && m[1].length - split >= 3) {
           cityAt = m.index + split;
+          /* CITY_JUNK here as well as on the comma path above. The icon row
+             lands between the street and the town whichever way the address was
+             punctuated, and this is the path the code itself calls "the case to
+             expect". Stripped only there, "800 Forrest St NW l Atlanta, GA
+             30318" gave the town as "l Atlanta", which PLACE_TOWN in advice.js
+             cannot read at all - its junk allowance covers a single UPPERCASE
+             letter, not a lowercase one - so area() returns no town and the
+             geography goes silent on exactly the orders the scan rescues. */
           city = text.slice(cityAt, m.index + m[1].length)
-                     .replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '');
+                     .replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '')
+                     .replace(CITY_JUNK, '');
         } else {
           city = null;
         }

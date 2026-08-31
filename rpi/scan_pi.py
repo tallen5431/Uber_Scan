@@ -1203,6 +1203,28 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
         'fromDeadline': bool(rate.get('fromDeadline')),
         'deliverBy': parsed.get('deliverBy'),
         'places': parsed.get('places') or [],
+        # Which of those places is which end, and the line the verdict was
+        # judged against. All four were missing, and between them they made the
+        # whole stacking half of the driving screen a fiction.
+        #
+        # `dropoff` and `pickup`: Advice.stack asks sameArea(active.dropoff,
+        # offer.dropoff) to say whether two jobs END near each other, and
+        # server.js stores the same field against the order in the car. Neither
+        # side ever had it - the reading carried `places` and nothing named the
+        # two ends - so `ends` and `route` were null on EVERY real reading. The
+        # town rule, the ZIP rule and the map link had never once fired in the
+        # car; every measurement of them was made on journal rows, which derive
+        # the fields separately and therefore have them.
+        'dropoff': parsed.get('dropoff'),
+        'pickup': parsed.get('pickup'),
+        # `target` and `band`: Advice.stack takes the target from the reading
+        # and falls back to ZERO when it is not a number - and `worst >= 0` is
+        # true of almost every pair, so the stack line was painted GREEN, "take
+        # both", for pairs that lose money against simply finishing the order
+        # already in the car. rate() has returned both of these all along; they
+        # simply never made it onto the wire.
+        'target': rate.get('target'),
+        'band': rate.get('band'),
         # The distance the verdict was made over. On a delivery card parse()
         # had no time to check it against and rate() recovers a lost decimal
         # there, so taking it from parsed would put 24 miles on the panel

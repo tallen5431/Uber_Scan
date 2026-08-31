@@ -734,7 +734,15 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # rather than carried from the reading so that a row rebuilt from a
         # trimmed `places` list stays consistent with it. See OP.find_dropoff.
         'pickup': OP.find_pickup(places),
-        'dropoff': OP.find_dropoff(places),
+        # The card's TEXT goes with it. Without it the "a place the card
+        # labelled Pickup is a pickup" rule cannot run, and on the commonest
+        # delivery card - "@ Pickup Crumbl / Customer dropoff", which names no
+        # address at all - the row recorded the restaurant as the destination.
+        # parse() has always passed the text and got None; this call did not,
+        # so the stored row and the live reading disagreed about the same card,
+        # and the stored one is what the offers page shows and what a replayed
+        # stacking answer would compare.
+        'dropoff': OP.find_dropoff(places, parsed.get('text')),
         # A delivery deadline, as minutes since midnight, and whether the time
         # this offer was judged over came from that rather than from a stated
         # duration. Different claims about the same field, and a record that

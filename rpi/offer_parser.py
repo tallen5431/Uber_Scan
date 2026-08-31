@@ -1215,7 +1215,20 @@ def find_address(text):
                 split = s.end()
             if split is not None and len(m.group(1)) - split >= 3:
                 city_at = m.start(1) + split
-                city = re.sub(r'\s+', ' ', text[city_at:m.end(1)]).strip(' .,')
+                # CITY_JUNK here as well as on the comma path above. The icon
+                # row lands between the street and the town whichever way the
+                # address was punctuated, and this is the path the code itself
+                # calls "the case to expect": a screen puts the street and the
+                # town on two lines and normalize joins them with a space.
+                #
+                # Stripped only here and not there, "800 Forrest St NW l
+                # Atlanta, GA 30318" gave the town as "l Atlanta" - which
+                # PLACE_TOWN in advice.js cannot read at all, because its junk
+                # allowance covers a single UPPERCASE letter and not a lowercase
+                # one. area() then returns no town and the geography goes SILENT
+                # on exactly the orders the scan was added to rescue.
+                city = CITY_JUNK.sub(
+                    '', re.sub(r'\s+', ' ', text[city_at:m.end(1)]).strip(' .,'))
             else:
                 city = None
         # From the end of the previous address, never before it. A screen

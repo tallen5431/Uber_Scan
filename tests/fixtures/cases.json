@@ -2353,6 +2353,12 @@
    "expect": ["800 Forrest St NW, Atlanta, GA 30318", "Atlanta", "30318"]
   },
   {
+   "name": "...and the icon row is stripped on the no-comma path too",
+   "_why": "The stray letter is stripped when the address printed its own comma, and was not when the street suffix had to split it - which is the path this parser calls the case to EXPECT, since a screen puts the street and the town on two lines and normalize joins them with a space. The town then read as 'l Atlanta', which PLACE_TOWN in advice.js cannot parse at all: its junk allowance covers a single uppercase letter, not a lowercase one. area() returned no town and the geography went silent on exactly the orders the scan was added to rescue.",
+   "text": "800 Forrest St NW l Atlanta, GA 30318",
+   "expect": ["800 Forrest St NW, Atlanta, GA 30318", "Atlanta", "30318"]
+  },
+  {
    "name": "an offer card is not an address",
    "text": "$16.05 36 min (16.1 mi) total Volcano Steak & Sushi (Mars Hill Rd) Customer dropoff",
    "expect": null
