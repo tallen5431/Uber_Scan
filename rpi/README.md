@@ -4029,6 +4029,52 @@ on file:
 apart on nothing but a junk word now say nothing, and 382 that were saying
 nothing now have a town to compare.
 
+### The stack line said two things and could show neither
+
+The line that answers "can I take both?" had **no browser check at all**, which
+is how it shipped as one `nowrap`, ellipsised string with the map link appended
+as a child element. Measured on the rig's own panel:
+
+| | 800x480 | 480x320 |
+|---|---|---|
+| text wanted / box | 784px / 750px | 754px / 434px |
+| `⤳ route` box, relative to its parent | 34px outside | **235px outside** |
+| `elementFromPoint` at the link's centre | the link | **nothing** |
+| `#places` height, for a 15px font | **9px** | **0px** |
+
+Three separate failures, one cause each.
+
+**Both of the things this line alone can say were at the END of the string,** so
+both were the first thing the ellipsis ate. `ENDS ELSEWHERE` went first, leaving
+amber — and amber already means "the range straddles your target". The driver
+was shown one colour standing for two different claims, with the words that tell
+them apart cut off. That is the claim that costs an hour when it is missed.
+
+**An inline-block child of an `overflow: hidden` box is laid out past the edge,
+not wrapped.** So the link — the one thing on this panel a driver is meant to
+press — had its box entirely outside the parent on the small panel, where
+`elementFromPoint` at its centre found nothing at all. It could not be pressed.
+
+**And a flex item with `overflow: hidden` has no automatic minimum size.** Both
+the address and the stack line have it, to ellipsise — so in the verdict column
+both were shrinkable to *nothing* while the 125px rate block beside them kept
+every pixel. The address of the job, on the one screen a driver looks at while
+deciding, drew nine pixels tall for a fifteen-pixel font.
+
+It is now a flex row with the priority stated: the arithmetic shrinks and
+ellipsises, because the same figures are on the panel above it; the geography
+and the link never shrink, because nothing else says them. The geography became
+a **chip** rather than more words in the same run — the complaint was that one
+colour meant two things, and a shape the arithmetic cannot take is readable at a
+glance in a way another shade is not. And the one-line facts are `flex: none`,
+because there is no such thing as most of a line.
+
+Ten checks on the glass, at both panels, measuring what a driver can actually
+see and reach: the row unclipped, the arithmetic actually giving way (or the
+rest proves nothing), the chip and the link inside their box and
+`elementFromPoint`-reachable, and the address at a full line. Reverting the
+layout fails ten of them; reverting the `flex: none` fails two more at 0px.
+
 ### Two ways the rig could go quiet and never come back
 
 Both in `startScanner()`, both found by an adversarial review of the lifecycle,
@@ -4963,7 +5009,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4461 checks
+npm test                # all 30 suites, 4483 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

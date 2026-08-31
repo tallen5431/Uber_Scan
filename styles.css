@@ -204,15 +204,59 @@ html, body {
  * rather than `.stack` so a bare state class here can never collide with the
  * verdict panel's own `.go`/`.warn`/`.no`, which is a mistake this stylesheet
  * has already made once with `.warn`. */
+/* A ROW, not a run of text, and that is the fix for two failures at once.
+ *
+ * It used to be one nowrap, ellipsised string with the map link appended as a
+ * child. Both of the things this line alone can tell you sat at the END of that
+ * string, so both were the first thing the ellipsis ate — measured on the rig's
+ * own 800x480 panel, the text wanted 784px in a 750px box, and at 480x320 it
+ * wanted 754 in 434. The words "ENDS ELSEWHERE" went first, leaving only amber
+ * — and amber already means "the range straddles your target", so the driver
+ * was shown one colour standing for two different claims with the words that
+ * told them apart cut off.
+ *
+ * The link was worse. An inline-block child of an overflow:hidden box is laid
+ * out past the edge and clipped, not wrapped: its box started 235px outside the
+ * parent at 480x320, and elementFromPoint at its centre returned nothing at
+ * all. The one thing on this panel a driver is meant to press could not be
+ * pressed.
+ *
+ * As a flex row the priority is explicit: the arithmetic shrinks and ellipsises
+ * because it is also on the panel above, and the geography chip and the link
+ * never shrink because nothing else says them. */
 .stackline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   margin-top: 6px;
   font-size: clamp(12px, 3.2vw, 16px);
   font-weight: 700;
   color: var(--muted);
   text-align: center;
+}
+/* The half that gives way. `min-width: 0` is what allows it to: a flex item
+   will not shrink below its content's own width without it, which would put the
+   overflow back on the row and undo all of the above. */
+.stackline .sum {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* ...and the half that does not.
+ *
+ * A CHIP rather than more words in the same run, because the complaint this
+ * answers is that one colour meant two things. A shape the arithmetic cannot
+ * take is readable at a glance in a way another shade is not — present or
+ * absent, before you have read anything. */
+.stackline .ends {
+  flex: none;
+  padding: 2px 9px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.88em;
+  white-space: nowrap;
 }
 .stackline.go { color: var(--go); }
 .stackline.warn { color: var(--warn); }
@@ -225,6 +269,14 @@ html, body {
    outranks the arithmetic here, because the arithmetic's optimistic end is
    exactly what geography has just ruled out. */
 .stackline.elsewhere { color: var(--warn); }
+/* Filled, not outlined, for the one verdict that overrides the arithmetic. This
+   is the claim that costs an hour when it is missed, and it is now the only
+   thing on the line that is a solid block of colour. */
+.stackline.elsewhere .ends {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--bg);
+}
 .stackline[hidden] { display: none; }
 
 /* Handing a place to a map.
@@ -242,6 +294,10 @@ html, body {
  * what would break the layout. */
 .maplink {
   display: inline-block;
+  /* Never shrinks, and never gives up its place in the row. See .stackline:
+     as an inline-block child of a clipped box this used to be laid out
+     entirely outside the panel and could not be pressed at all. */
+  flex: none;
   min-height: 34px;
   padding: 6px 14px;
   margin-left: 6px;

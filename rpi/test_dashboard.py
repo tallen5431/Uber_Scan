@@ -387,6 +387,81 @@ const LOOK = (sel) => {
     await ctx.close();
   }
 
+  // --- both jobs at once, and the two things only that line can say --------
+  //
+  // The stack line had no browser check at all, which is how it shipped as one
+  // nowrap ellipsised string with the map link appended as a child. Everything
+  // this line alone can tell you sat at the END of that string, so it was the
+  // first thing cut; and an inline-block child of a clipped box is laid out
+  // past the edge rather than wrapped, so at 480x320 the link's box started
+  // 235px outside its parent and elementFromPoint at its centre found nothing.
+  //
+  // Measured on the glass at both panels the rig is actually used on.
+  for (const panel of [['800x480', 800, 480], ['480x320', 480, 320]]) {
+    const ctx = await browser.newContext({
+      viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    // The worst realistic shape: a range, the "beats finishing alone" clause,
+    // a geography verdict, and a route link — everything competing for the row.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, {
+        holding: { pay: 12, minutes: 30,
+                   dropoff: 'Cochran Ridge Rd & Jewel Cole Rd, Hiram' },
+        stack: { pay: 16.8, minMinutes: 30, maxMinutes: 50, worst: 20.2,
+                 best: 33.6, state: 'warn', sure: true, ends: 'elsewhere',
+                 route: 'https://www.google.com/maps/dir/?api=1&origin=A'
+                      + '&destination=B&travelmode=driving' } }));
+    await page.waitForTimeout(200);
+    out['stack ' + panel[0]] = await page.evaluate(() => {
+      const row = document.querySelector('#stack');
+      const inside = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const p = row.getBoundingClientRect();
+        const hit = document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                              Math.round(r.top + r.height / 2));
+        return { there: true,
+                 inside: r.right <= p.right + 1 && r.left >= p.left - 1
+                         && r.bottom <= p.bottom + 1 && r.top >= p.top - 1,
+                 reachable: !!hit && (hit === el || el.contains(hit)),
+                 text: (el.textContent || '').trim() };
+      };
+      const sum = document.querySelector('#stack .sum');
+      // The address, measured against its own line box. A flex item with
+      // `overflow: hidden` has no automatic minimum size, so in the verdict
+      // column both of these were shrinkable to NOTHING while the rate block
+      // beside them kept every pixel.
+      const pl = document.querySelector('#places');
+      const plcs = pl && getComputedStyle(pl);
+      const line = plcs
+        ? (parseFloat(plcs.lineHeight) || parseFloat(plcs.fontSize) * 1.2) : 0;
+      return {
+        shown: !row.hidden,
+        places: pl ? { h: Math.round(pl.getBoundingClientRect().height),
+                       line: Math.round(line),
+                       shown: !pl.hidden } : null,
+        rowClipped: row.scrollWidth > row.clientWidth + 1,
+        // The half that is MEANT to give way, and it has to actually be doing
+        // so or the checks below prove nothing about priority.
+        sumEllipsised: !!sum && sum.scrollWidth > sum.clientWidth + 1,
+        ends: inside(document.querySelector('#stack .ends')),
+        link: inside(document.querySelector('#stack .maplink')),
+        fits: document.documentElement.scrollWidth
+              <= document.documentElement.clientWidth + 1
+           && document.documentElement.scrollHeight
+              <= document.documentElement.clientHeight + 1,
+      };
+    });
+    await page.close();
+    await ctx.close();
+  }
+
   // --- a rate the rig could not cost, and one that cannot be true ----------
   //
   // Two states a driver has to be able to tell apart at a glance from the
@@ -811,6 +886,51 @@ try:
             ok_('...with nothing clipped off it when %s' % name,
                 not slot.get('clipped'))
             ok_('...and the panel still fits when %s' % name, slot.get('fits'))
+
+    # --- both jobs at once, on the glass ---------------------------------
+    #
+    # This line had no browser check at all. It shipped as one nowrap,
+    # ellipsised string with the map link appended as a child, and both of the
+    # things it alone can say sat at the END of that string: the geography
+    # words went first, leaving amber that also means "the range straddles your
+    # target", and the link — the one thing on this panel a driver is meant to
+    # press — was laid out 235px outside its own box at 480x320, where
+    # elementFromPoint found nothing at all.
+    for panel in ('800x480', '480x320'):
+        row = got.get('stack ' + panel) or {}
+        ok_('%s: the stacked figure is shown' % panel, row.get('shown'))
+        if not row.get('shown'):
+            continue
+        ok_('%s: ...and the row itself is not clipped' % panel,
+            not row.get('rowClipped'))
+        # The priority has to be REAL, not just declared: the arithmetic is the
+        # half that gives way, and if it is not actually being cut here then the
+        # two checks below are passing on a row with room to spare and would say
+        # nothing about what happens when there is none.
+        ok_('%s: ...with the arithmetic the part that gives way' % panel,
+            row.get('sumEllipsised'))
+        ends = row.get('ends') or {}
+        ok_('%s: where the pair ends survives whole' % panel,
+            ends.get('inside'))
+        ok_('%s: ...and can be read, not just measured' % panel,
+            ends.get('reachable'))
+        eq('%s: ...saying which' % panel, ends.get('text'), 'ENDS ELSEWHERE')
+        link = row.get('link') or {}
+        ok_('%s: the route link is inside its own box' % panel,
+            link.get('inside'))
+        ok_('%s: ...and can actually be pressed' % panel, link.get('reachable'))
+        ok_('%s: ...and the panel still fits' % panel, row.get('fits'))
+
+        # ...and the address above it, which is the other item in that column
+        # with no minimum size. It drew 9px tall for a 15px font on the rig's
+        # own panel, and 0px once the stack line grew — the address of the job,
+        # on the one screen a driver looks at while deciding, at no height at
+        # all. There is no such thing as most of a line.
+        pl = row.get('places') or {}
+        ok_('%s: the address is shown' % panel, pl.get('shown'))
+        ok_('%s: ...at a full line, not squeezed to a sliver (%spx of %spx)'
+            % (panel, pl.get('h'), pl.get('line')),
+            (pl.get('h') or 0) >= (pl.get('line') or 99) * 0.9)
 
     # --- a rate the rig could not cost, and one that cannot be true ------
     #

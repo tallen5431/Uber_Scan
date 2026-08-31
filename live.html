@@ -46,6 +46,21 @@
        rather than a label floating in the dark. */
     .live #verdict { flex: 1 1 auto; display: flex; flex-direction: column;
                      justify-content: center; min-height: 0; }
+    /* ...and inside that column, the one-line facts do not shrink.
+
+       A flex item's automatic minimum size is its content — except when it has
+       `overflow: hidden`, which removes that floor entirely. Both of these do,
+       to ellipsise, so both were shrinkable to NOTHING while the big rate block
+       beside them kept every pixel. Measured on the rig's own 800x480 panel:
+       `#places` drew 9px tall for a 15px font, and 0px once the stack line
+       grew — the address of the job, on the one screen the driver looks at
+       while deciding, painted at no height at all.
+
+       The rate block is the item with room to give: it is 125px of figure and
+       loses nothing legible by giving up ten. These two are one line each and
+       there is no such thing as most of a line. */
+    .live #verdict > .places,
+    .live #verdict > .stackline { flex: none; }
     /* `stretch`, not `center`, and this is the difference between a picture
        that fits and one that is cut.
        
@@ -687,7 +702,14 @@
     if (!s) { el.stack.hidden = true; el.stack.className = 'stackline'; return; }
     var lo = Math.round(s.worst), hi = Math.round(s.best);
     el.stack.className = 'stackline ' + s.state;
-    el.stack.textContent = '+ the one you have: $'
+    // Built from parts rather than one string, because the parts have different
+    // priorities when the row runs out of room. See .stackline in styles.css:
+    // this is the half that gives way, and it can because the same figures are
+    // on the panel above it.
+    while (el.stack.firstChild) el.stack.removeChild(el.stack.firstChild);
+    var sum = document.createElement('span');
+    sum.className = 'sum';
+    sum.textContent = '+ the one you have: $'
       + (lo === hi ? lo : lo + '\u2013' + hi) + '/hr over '
       + (s.minMinutes === s.maxMinutes
          ? Math.round(s.minMinutes)
@@ -712,10 +734,22 @@
       // town" is nearly meaningless where this driver works: 44% of their
       // placed dropoffs are in Atlanta, which is 135 square miles, and a metro
       // ZIP is a few.
-      + (s.ends === 'elsewhere' ? ' \u00b7 ENDS ELSEWHERE'
-         : s.ends === 'same-zip' ? ' \u00b7 same ZIP'
-         : s.ends === 'same-side' ? ' \u00b7 same side of town'
-         : s.ends === 'same-town' ? ' \u00b7 same town' : '');
+      ;
+    el.stack.appendChild(sum);
+    // ...and the half that does not give way. Its own element, so the ellipsis
+    // above can never reach it: these words are the only place this claim is
+    // made, and losing them leaves the driver an amber line that also means
+    // "the range straddles your target".
+    var ends = s.ends === 'elsewhere' ? 'ENDS ELSEWHERE'
+             : s.ends === 'same-zip' ? 'same ZIP'
+             : s.ends === 'same-side' ? 'same side of town'
+             : s.ends === 'same-town' ? 'same town' : '';
+    if (ends) {
+      var chip = document.createElement('span');
+      chip.className = 'ends';
+      chip.textContent = ends;
+      el.stack.appendChild(chip);
+    }
     if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
     // ...and the same question handed to a map, which answers it in driving
     // minutes with live traffic where the line above can only answer it in the
@@ -735,7 +769,6 @@
       a.textContent = '\u2933 route';
       a.title = 'Open the drive from where the order you have ends to where '
               + 'this one ends, with current traffic.';
-      el.stack.appendChild(document.createTextNode(' '));
       el.stack.appendChild(a);
     }
     el.stack.hidden = false;
