@@ -360,11 +360,42 @@ try:
                    'places', 'text', 'scans', 'when'):
         ok_('...naming %s' % column, column in header)
     # A card is read several times and the readings differ; the export carries
-    # the ones that lost as well as the one that won. Joined with pipes, because
-    # the separator here is a comma and a mangled card is full of them — and of
-    # semicolons, which is what the addresses use.
+    # the ones that lost as well as the one that won.
     eq('every frame\'s reading has its own column', header.count('scans'), 1)
     ok_('...and the winning reading keeps its own', 'text' in header)
+
+    # ...and the frames come back OUT as frames.
+    #
+    # They were joined with " | ", and the frames are OCR of a phone screen:
+    # this project's own comments record that the card's icon row and its
+    # dividers both arrive as pipes, and trim_place cuts at the first one for
+    # exactly that reason. So the column added to make the frames analysable was
+    # splitting 19% of its own rows mid-frame - 57 of 296 on the first export
+    # that carried it - and the damage was invisible, because a fragment of a
+    # card still looks like a card.
+    #
+    # The reading below is one this rig really produces: a pipe, inside a frame.
+    # Asked of the writer rather than of this fixture's rows, which are a
+    # scanner replay and need not have reached the journal by the time the
+    # export is fetched. What matters is the FORM, and the form is decided in
+    # one line of server.js.
+    server_src = open(os.path.join(ROOT, 'server.js')).read()
+    ok_('the export no longer joins frames with a separator the frames contain',
+        "v.join(k === 'scans' ? ' | ' : '; ')" not in server_src)
+    ok_('...and writes them as JSON, which cannot collide with their content',
+        "k === 'scans' ? JSON.stringify(v)" in server_src)
+    # ...and any row that did land round-trips.
+    for row in _csv.DictReader(_io.StringIO(text)):
+        raw = row.get('scans') or ''
+        if not raw.strip():
+            continue
+        try:
+            frames = json.loads(raw)
+        except Exception:
+            frames = None
+        ok_('a row of scans parses back into whole frames',
+            isinstance(frames, list) and all(isinstance(f, str) for f in frames))
+        break
 
 finally:
     proc.terminate()

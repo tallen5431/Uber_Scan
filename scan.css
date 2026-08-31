@@ -208,7 +208,18 @@ body.locked .corner { border-color: var(--go); }
      had them at 43px on a phone and 37px on a small panel. Centred rather
      than top-aligned, or the label sits against the top edge of the taller
      box. */
-  min-height: 44px;
+  /* 52px, not the 44px both platform guidelines give as a floor. That number
+     is written for a phone held in the hand by somebody looking at it; this is
+     a tablet bolted to a dashboard, pressed at arm's length by somebody who
+     has just parked. Matches .bottombar in styles.css, and rpi/test_layout.py
+     holds both there by measuring the rendered page in a real browser at every
+     panel this ships on - so a control that quietly shrinks fails, wherever
+     the shrinking came from.
+
+     This is also the rule that decides it. An identical selector higher up the
+     file sets the rest of these buttons' box, and a min-height put THERE is
+     silently overridden by this one - same specificity, later wins. */
+  min-height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -247,7 +258,7 @@ body.adjusting #btnBox { background: #0d5c31; color: #d7ffe6; }
 @media (orientation: landscape) {
   #statusline { font-size: 16px; }
   #adjustNote { font-size: 16px; }
-  .scanbar button, .scanbar .filebtn, .scanbar .linkbtn { font-size: 16px; padding: 12px 2px; }
+  .scanbar button, .scanbar .filebtn, .scanbar .linkbtn { font-size: 17px; padding: 12px 2px; }
   #stage .notice { font-size: 15px; }
 
   #stage > .verdict { top: calc(env(safe-area-inset-top) + 6px); padding: 5px 10px 7px; }
@@ -273,8 +284,8 @@ body.adjusting #btnBox { background: #0d5c31; color: #d7ffe6; }
 @media (orientation: landscape) and (max-height: 380px) {
   #stage > .verdict .submetrics { display: none; }
   #stage > .verdict .rate { margin: 0; }
-  .scanbar button, .scanbar .filebtn, .scanbar .linkbtn { font-size: 14px; padding: 10px 2px; }
-  #statusline { bottom: calc(env(safe-area-inset-bottom) + 62px); font-size: 14px; }
+  .scanbar button, .scanbar .filebtn, .scanbar .linkbtn { font-size: 15px; padding: 10px 2px; }
+  #statusline { bottom: calc(env(safe-area-inset-bottom) + 62px); font-size: 15px; }
   #adjustNote { bottom: calc(env(safe-area-inset-bottom) + 84px); }
   #reticle { top: 30%; height: 42%; }
   #reticle.full { top: 26%; height: 48%; }

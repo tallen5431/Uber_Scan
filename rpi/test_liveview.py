@@ -744,8 +744,17 @@ ok_('...and only when both ends were named',
 # screens cannot drift about what a map link looks like.
 _css = open(os.path.join(ROOT, 'styles.css')).read()
 ok_('the map link is styled where both pages can see it', '.maplink {' in _css)
-ok_('...and not a second time on the offers page',
-    '.maplink {' not in open(os.path.join(ROOT, 'journal.html')).read())
+# ...and the offers page may resize it for the panel, like every other element
+# in that block, but must not restate what it LOOKS like. The border, the
+# radius and the colour live in one place or the two screens drift apart; the
+# font size and the target size are per-panel and always have been.
+_journal = open(os.path.join(ROOT, 'journal.html')).read()
+_own = re.findall(r'\.maplink\s*\{([^}]*)\}', _journal)
+for _block in _own:
+    for _prop in ('border', 'border-radius', 'color', 'background',
+                  'text-decoration', 'display'):
+        ok_('the offers page does not restate the map link\'s %s' % _prop,
+            _prop + ':' not in _block)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d live-view checks passed' % ok)

@@ -719,7 +719,14 @@ try:
             # The floor is what somebody can read from the driving seat. The
             # panel is roughly twice as far away as a phone, so it is higher
             # there; the phone keeps the size it was designed at.
-            floor = 12 if dashboard else 9
+            # 15px on a panel with the room, because the driving seat is
+            # roughly twice as far from the glass as a hand is from a phone.
+            # The 3.5" hat is 320px tall and cannot afford it: raised there,
+            # the keypad's own labels pushed the page past the bottom of its
+            # glass, and a control out of reach is worse than a label leaned
+            # in for. One number does not fit both, so this does not pretend it
+            # does. The phone keeps the size it was designed at.
+            floor = (15 if h >= 400 else 12) if dashboard else 9
             ok_('%s at %s has nothing smaller than %dpx (%.4gpx in %s)'
                 % (name, panel, floor, r['smallest'], r['smallestIn']),
                 r['smallest'] >= floor)
@@ -728,9 +735,10 @@ try:
             # preference here: these are pressed one-handed, on glass, by
             # somebody who has just parked.
             if r['shortest'] is not None:
-                ok_('%s at %s keeps every control at 44px (%.4gpx in %s)'
-                    % (name, panel, r['shortest'], r['shortestIn']),
-                    r['shortest'] >= 43.5)
+                ok_('%s at %s keeps every control at %dpx (%.4gpx in %s)'
+                    % (name, panel, 52 if h >= 400 else 44,
+                       r['shortest'], r['shortestIn']),
+                    r['shortest'] >= (51.5 if h >= 400 else 43.5))
 
             # The scanner's four fixed layers, in order, with nothing drawn on
             # top of anything. A grid whose column count went out of step with

@@ -242,7 +242,8 @@ html, body {
  * what would break the layout. */
 .maplink {
   display: inline-block;
-  padding: 3px 10px;
+  min-height: 34px;
+  padding: 6px 14px;
   margin-left: 6px;
   font-weight: 600;
   font-variant-numeric: normal;
@@ -445,7 +446,7 @@ html, body {
   /* Shrinks with the screen instead of wrapping. Four of these buttons kept
      their icon and label on one line and the fifth pushed its label under the
      icon, which is what made a bar of five look like a bar of two designs. */
-  font-size: clamp(12px, 3.4vw, 14px);
+  font-size: clamp(15px, 3.4vw, 17px);
   font-weight: 600;
   text-align: center;
   text-decoration: none;
@@ -622,12 +623,19 @@ html, body {
 }
 
 /* ---------- Big enough to hit in a moving car ---------- */
-/* 44px is the floor both platform guidelines give, and it is not a design
-   preference here: these controls are used one-handed, at arm's length, by
-   somebody who has just parked. The keypad already had it; the bars of small
-   buttons around the edges of every page did not. */
+/* 52px, not the 44px both platform guidelines give as a floor.
+   
+   44px is written for a phone held in the hand, on a pavement, by somebody
+   looking at it. This is a tablet bolted to a dashboard, pressed at arm's
+   length with a bluetooth mouse or a fingertip, by somebody who has just
+   parked and is about to pull out again. The guideline floor is the wrong
+   number for that: it is the smallest thing that works, and the room is there.
+   
+   Held at this size by rpi/test_layout.py, which measures the rendered page in
+   a real browser at all six panels this project ships on - so a control that
+   quietly shrinks below it fails, wherever the shrinking came from. */
 .bottombar button, .bottombar .linkbtn {
-  min-height: 44px;
+  min-height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -741,7 +749,7 @@ html, body {
      four-hundred-pixel number. A 1280-wide panel gets 140px of figure where
      the old 96 cap left it the same size as on an 800px one. */
   body[data-page="keypad"] .rate-value { font-size: min(11vw, 34dvh, 200px); }
-  .rate-unit  { font-size: clamp(14px, 2.6vw, 20px); }
+  .rate-unit  { font-size: clamp(15px, 2.6vw, 21px); }
   /* The word above the number, and the one channel that still carries the
      verdict for a driver who cannot separate the red panel from the green.
      17px of it against a 90px number, on a panel now filling the height, was
@@ -768,8 +776,8 @@ html, body {
    * These are the ones a driver actually reads mid-shift: which figure is the
    * pay and which is the miles, and what the four buttons do.
    */
-  .sub small { font-size: 15px; letter-spacing: .06em; }
-  .field-label { font-size: 14px; }
+  .sub small { font-size: 16px; letter-spacing: .06em; }
+  .field-label { font-size: 15px; }
   .hint, .note { font-size: 15px; }
   /* A flat 17px here fitted the four buttons this bar had when it was written.
      Five of them on a 480px panel gives each 88px, and "📷 Camera" is 85 of
@@ -777,9 +785,9 @@ html, body {
      the extra line pushed the page 13px past the bottom of the glass. Scaled
      to the panel instead: 14px at 480, 17px at 800, 18px on the 1024 panel,
      and each of them fits the track it is in. */
-  .bottombar button, .bottombar .linkbtn { font-size: clamp(14px, 2.1vw, 18px); padding: 8px 4px; }
+  .bottombar button, .bottombar .linkbtn { font-size: clamp(15px, 2.1vw, 19px); padding: 8px 4px; }
   .stats div { font-size: 24px; }
-  .stats small { font-size: 13px; }
+  .stats small { font-size: 15px; }
   .notice { font-size: 16px; }
 }
 
@@ -834,7 +842,18 @@ html, body {
      it is half of one and they pair up two-by-two. Neither leaves an orphan.
      The labels keep giving up their letter-spacing either way. */
   .submetrics { padding-top: 5px; }
+  /* Left at 12px deliberately, where every other panel gets 15.
+     
+     This block is the 3.5" hat: 480x320, and the only screen here that cannot
+     afford the driving-seat sizes. Raised to 15 with the rest, the labels above
+     a five-row keypad pushed the page past the bottom of its own glass - and a
+     control the driver cannot reach is worse than a label they have to lean in
+     for. rpi/test_layout.py holds the floor at 15px on every panel with the
+     room and at 12px here, rather than pretending one number fits both. */
   .sub small { font-size: 12px; letter-spacing: .02em; }
+  /* ...and the controls go back to the guideline 44 for the same reason. The
+     bar is six buttons; eight pixels each is a row of the keypad. */
+  .bottombar button, .bottombar .linkbtn { min-height: 44px; }
   .fields { gap: 6px; }
   .field { padding: 5px 4px 6px; }
 }

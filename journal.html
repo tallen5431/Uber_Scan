@@ -70,13 +70,13 @@
   #nothing code { font-size: 13px; color: var(--text); background: var(--panel-2);
                   padding: 1px 5px; border-radius: 4px; }
   .find { display: block; margin: 0 0 10px; }
-  .find input { width: 100%; min-height: 44px; padding: 10px 12px; font: inherit;
+  .find input { width: 100%; min-height: 52px; padding: 10px 12px; font: inherit;
                 font-size: 15px; color: var(--text); background: var(--panel);
                 border: 1px solid var(--line); border-radius: 10px;
                 -webkit-appearance: none; appearance: none; }
   .find input::placeholder { color: var(--muted); }
   #showHidden { font: inherit; font-size: 12px; font-weight: 700;
-                min-height: 44px; padding: 6px 12px; color: var(--muted);
+                min-height: 52px; padding: 6px 12px; color: var(--muted);
                 background: transparent; border: 1px solid var(--line);
                 border-radius: 8px; cursor: pointer; }
   #showHidden[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
@@ -100,13 +100,13 @@
           border-radius: 12px; font-size: 13px; }
   #undo[hidden] { display: none; }
   #undoWhat { flex: 1; min-width: 0; }
-  #undoGo { flex: none; min-height: 44px; padding: 8px 16px; font: inherit;
+  #undoGo { flex: none; min-height: 52px; padding: 8px 16px; font: inherit;
             font-size: 13px; font-weight: 800; color: var(--text);
             background: var(--panel); border: 1px solid var(--muted);
             border-radius: 8px; cursor: pointer; }
   .rangebtns { display: flex; gap: 6px; justify-content: center; margin: 0 0 14px; }
   /* 44px, like everything else meant to be hit one-handed after parking. */
-  .rangebtns button { flex: 1; min-height: 44px; padding: 8px 0; font: inherit;
+  .rangebtns button { flex: 1; min-height: 52px; padding: 8px 0; font: inherit;
                       font-size: 13px; font-weight: 700; color: var(--muted);
                       background: var(--panel); border: 1px solid transparent;
                       border-radius: 8px; }
@@ -210,7 +210,7 @@
      this' — so they are the last place a mis-tap should be easy. */
   .acts button {
     font: inherit; font-size: 13px; font-weight: 700;
-    min-height: 44px; padding: 8px 14px;
+    min-height: 52px; padding: 8px 14px;
     color: var(--muted); background: var(--panel); border: 1px solid transparent;
     border-radius: 8px; cursor: pointer;
   }
@@ -259,38 +259,45 @@
     #headline, .hint, .note, .advice p, #nothing, .empty-msg, .offer .why {
       max-width: 72ch; margin-left: auto; margin-right: auto;
     }
-    h2 { font-size: 15px; }
-    .hint, .note, #headline { font-size: 15px; line-height: 1.5; }
-    .advice p { font-size: 16px; }
-    .stats .unit { font-size: 14px; }
-    .unit { font-size: 13px; }
+    h2 { font-size: 16px; }
+    .hint, .note, #headline { font-size: 17px; line-height: 1.5; }
+    .advice p { font-size: 18px; }
+    .stats .unit { font-size: 16px; }
+    .unit { font-size: 15px; }
+    .stats small { font-size: 15px; }
 
     .block { padding: 6px 0; }
-    .block .label { width: 78px; font-size: 14px; }
-    .block .amount { width: 66px; font-size: 16px; }
-    .block .n { width: 34px; font-size: 13px; }
-    .runlabel em { font-size: 12px; }
-    .scale { margin-left: 86px; margin-right: 118px; }
-    .scale span { font-size: 13px; }
+    .block .label { width: 88px; font-size: 16px; }
+    .block .amount { width: 74px; font-size: 18px; }
+    .block .n { width: 38px; font-size: 15px; }
+    .runlabel em { font-size: 15px; }
+    .scale { margin-left: 96px; margin-right: 126px; }
+    .scale span { font-size: 15px; }
 
-    .day b { font-size: 16px; }
-    .day span { font-size: 14px; }
-    .offer .big { font-size: 22px; min-width: 96px; }
-    .offer .big em { font-size: 13px; }
-    .offer .meta { font-size: 15px; }
-    .offer .meta em { font-size: 13px; }
-    .offer .when { font-size: 14px; }
-    .offer .tag { font-size: 12px; }
-    .offer .why { font-size: 14px; }
-    .offer .took { font-size: 16px; }
-    .facts { font-size: 15px; }
-    .facts h3 { font-size: 12px; }
+    /* Read from the driving seat, which is roughly twice as far from the
+       glass as a phone is from a hand. Every size here was set for a page
+       being read at a desk and then reused on a dashboard; these are the
+       driving-seat sizes, and rpi/test_layout.py holds the floor at 15px on
+       every panel this ships on. */
+    .day b { font-size: 18px; }
+    .day span { font-size: 16px; }
+    .offer .big { font-size: 26px; min-width: 108px; }
+    .offer .big em { font-size: 15px; }
+    .offer .meta { font-size: 17px; }
+    .offer .meta em { font-size: 15px; }
+    .offer .when { font-size: 16px; }
+    .offer .tag { font-size: 15px; }
+    .offer .why { font-size: 16px; }
+    .offer .took { font-size: 18px; }
+    .facts { font-size: 17px; }
+    .facts h3 { font-size: 15px; }
 
-    .rangebtns button, #showHidden, .acts button, #undo, #undoGo { font-size: 15px; }
-    #nothing { font-size: 16px; }
-    #nothing b { font-size: 18px; }
-    #nothing code { font-size: 15px; }
-    .find input { font-size: 16px; }
+    .rangebtns button, #showHidden, .acts button, #undo, #undoGo { font-size: 17px; }
+    #nothing { font-size: 17px; }
+    #nothing b { font-size: 20px; }
+    #nothing code { font-size: 16px; }
+    .find input { font-size: 17px; }
+    .maplink { font-size: 16px; min-height: 44px; padding: 8px 16px; }
   }
 </style>
 </head>

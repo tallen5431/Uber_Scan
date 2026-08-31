@@ -3135,6 +3135,65 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### Sized for the driving seat, and a column that ate its own frames
+
+**The controls are 52px, not the 44px both platform guidelines give.** That
+number is written for a phone held in the hand by somebody looking at it; this
+is a tablet bolted to a dashboard, pressed at arm's length by somebody who has
+just parked and is about to pull out. The guideline floor is the smallest thing
+that works, and the room was there. Text on the offers page — the one screen
+that is *read* rather than glanced at — goes up with it: the log rows to 17px,
+the payout to 26px, and nothing on a panel below 15px.
+
+Both floors are enforced by `rpi/test_layout.py`, which renders every page in a
+real browser at all six panels this ships on. **The floors were raised first and
+the CSS made to meet them**, which is how the work stayed honest: 32 failures,
+then 12, then 1, then none.
+
+**Neither floor is a flat number, and pretending otherwise broke the 3.5" hat.**
+480x320 cannot show 15px labels above a five-row keypad — raised there, the page
+went past the bottom of its own glass, and a control out of reach is worse than
+a label leaned in for. So the floor is 52px and 15px on a panel with the room,
+44px and 12px where there is none.
+
+Two things fell out of doing it:
+
+* **`scan.css` set the scan bar's controls twice**, and the later of the two
+  identical selectors won. A `min-height` put in the first rule was silently
+  overridden — the exact hazard the comment beside `.bottombar [hidden]` in
+  `styles.css` was written about, in a different file.
+* **`.scanbar` is styled in `scan.css`, not `styles.css`.** I added a
+  duplicate set of rules to the shared sheet before checking, and they were
+  dead weight that broke two structural checks. Removed.
+
+**And the `scans` column was eating its own frames.** It was added so the OCR's
+disagreements could be measured, and exported joined with `" | "` — while the
+frames are OCR of a phone screen, whose icon row and dividers both come back as
+pipes. `trim_place` cuts at the first one for exactly that reason.
+
+Measured on the first export that carried the column: **57 of 296 rows, 19%,
+split mid-frame**, and the damage is invisible because a fragment of a card
+still looks like a card. It is JSON now, which cannot collide with its own
+content.
+
+**What that export finally settles.** Two sections up, this file says the
+corpus cannot say how many frames the rig really gets per card, because the 604
+texts are *distinct* texts and a card read eight times identically appears once.
+The `scans` export answers it:
+
+    2 frames   20  (6.8%)
+    3 frames    6  (2.0%)
+    4 frames  164  (55.4%)
+    6 frames   44  (14.9%)
+    8 frames   20  (6.8%)
+    12+        13
+
+**Not one single-frame offer in 296.** The merge gets four or more looks at 93%
+of cards, so every rule in this file that votes across frames is doing real
+work — and the "98% single frame" that the deduplicated corpus implied was the
+artifact this file warned it would be. The same export shows **zero duplicate
+rows**, where 7.6% of the old journal was surplus.
+
 ### Six more the same review found, and what they had in common
 
 The first pass on that review fixed four findings. Fifteen survived refutation,
@@ -4544,7 +4603,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4330 checks
+npm test                # all 30 suites, 4337 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

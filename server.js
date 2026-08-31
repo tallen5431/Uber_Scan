@@ -1268,7 +1268,21 @@ function toCsv(offers) {
       // one cell. Semicolons for addresses, because the separator here is a
       // comma and an address is full of them; pipes for readings, because a
       // mangled card is full of semicolons too.
-      if (Array.isArray(v)) v = v.join(k === 'scans' ? ' | ' : '; ');
+      // `scans` as JSON, everything else joined for a spreadsheet to read.
+      //
+      // The separator used to be " | " and the frames are OCR of a phone
+      // screen: this project's own comments record that the card's icon row
+      // and its dividers both come back as pipes, and `trim_place` cuts at the
+      // first one for exactly that reason. So the column added to make the
+      // frames analysable was splitting 19% of its own rows mid-frame -
+      // measured on the first export that carried it, 57 of 296.
+      //
+      // JSON has no such collision: the quoting below already handles commas
+      // and quotes, and a reader gets the frames back exactly as the rig saw
+      // them. The other list columns keep the readable join - `places` is two
+      // or three short strings a person reads in a cell, not something parsed
+      // back.
+      if (Array.isArray(v)) v = k === 'scans' ? JSON.stringify(v) : v.join('; ');
       return '"' + String(v).replace(/"/g, '""') + '"';
     });
     // A second, human-readable stamp. A spreadsheet will not turn epoch
