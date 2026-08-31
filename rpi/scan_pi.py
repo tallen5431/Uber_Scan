@@ -1163,6 +1163,23 @@ def emit_offer(offer_id, parsed, rate):
         # would never have been reached.
         'minutes': rate.get('cardMinutes') or parsed.get('minutes'),
         'perHour': round(rate['perHour'], 2) if rate.get('ready') else None,
+        # Everything server.js builds `scanner.holding` out of when the driver
+        # marks this offer as taken. It read six fields off this object and was
+        # sent four, so the order in the car had no distance, no running cost
+        # and no ends.
+        #
+        # `cost` is the one that moved money: Advice.stack subtracts the NEW
+        # offer's running cost and took the held job's as zero, so the "+ the
+        # one you have" range on the driving screen came out silently high -
+        # about $1.80/hr on a five-mile job at 30c a mile, with nothing on the
+        # screen saying so. `billedMinutes` is what the pair's time is measured
+        # over, and `dropoff` is the end sameArea compares against.
+        'billedMinutes': rate.get('billedMinutes', parsed.get('minutes')),
+        'miles': rate.get('miles', parsed.get('miles')),
+        'cost': (round(rate['cost'], 2)
+                 if rate.get('ready') and rate.get('cost') is not None else None),
+        'dropoff': parsed.get('dropoff'),
+        'pickup': parsed.get('pickup'),
     }, 'at': int(time.time() * 1000)}), flush=True)
 
 

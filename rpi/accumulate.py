@@ -80,7 +80,7 @@ class OfferAccumulator:
         self.started = 0.0
         self.last_add = 0.0
         self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool,
-                                #   'labelled': bool, 'lostMiles': bool, 'seen': n}]
+                                #   'labelled': bool, 'lostSeen': n, 'seen': n}]
         self.items = []
         # Deadlines seen this window. A delivery card gives one instead of a
         # duration, so it is the denominator of the whole verdict — and it was
@@ -176,10 +176,10 @@ class OfferAccumulator:
         if found is not None:
             return found
         self.legs.append({'minutes': [], 'miles': [], 'isTotal': False,
-                          'labelled': False, 'lostMiles': False, 'seen': 0})
+                          'labelled': False, 'lostSeen': 0, 'seen': 0})
         return len(self.legs) - 1
 
-    def _is_a_different_card(self, detail, now):
+    def _is_a_different_card(self, parsed, detail, now):
         """Is this reading a new offer that happens to pay the same to the cent?
 
         The payout alone cannot tell them apart, and getting it wrong is not a
@@ -214,6 +214,23 @@ class OfferAccumulator:
         second frame clears any count-based bar and resets away the first —
         losing exactly the merge this class exists to perform.
         """
+        # A card with no legs at all - the delivery card that states a
+        # deadline instead of a duration - used to stop here and be declared
+        # the same card forever. Nothing about it could ever line up or fail to
+        # line up, because there was nothing to line up WITH, so the only
+        # remaining guard was the stale window: a genuinely different offer
+        # paying the same to the cent inside twelve seconds merged into the old
+        # episode and was published with the old card's distance and the old
+        # card's deadline. Measured: a $21.53/hr offer shown as a $53.49/hr
+        # ACCEPT, filed as no journal row at all because `episode` never moved.
+        #
+        # Such a card states two things this class can compare instead: where it
+        # goes, and when it is due. ONE of them differing is OCR - the deadline
+        # is voted on for precisely that reason, and the distance is too. BOTH
+        # differing is a different card, and requiring both is what keeps a
+        # misread frame from throwing away a good window.
+        if not self.legs and not detail:
+            return self._legless_replacement(parsed, now)
         if not self.legs:
             return False
         if not detail:
@@ -231,7 +248,50 @@ class OfferAccumulator:
         # second offer. A reading that lines up with the card on record is that
         # card, however long it took to arrive.
         quiet = bool(self.last_add) and (now - self.last_add) > QUIET
-        return quiet or len(detail) >= 2 or any(l.get('isTotal') for l in detail)
+        # `len(detail) >= 2` is deliberately NOT enough on its own any more.
+        #
+        # A card that prints its legs AND a total line parses to the total
+        # alone, so the window's record is one total leg. A later frame that
+        # loses the total line reports the two ordinary legs, they line up with
+        # nothing, and two legs used to mean "replacement card" - resetting the
+        # window inside the burst, with no quiet gap, on a frame that is the
+        # SAME card read slightly worse. Measured on the corpus's own card:
+        # 22 min and 6.0 mi became 22 min and 2.0 mi, whole and unflagged, and
+        # the journal filed it a second time.
+        #
+        # The whole-journey signal is still worth having - a fragment must never
+        # be allowed to replace a card - but it has to be a signal about the
+        # NEW frame being complete, not merely plural. A frame carrying a total
+        # is a whole journey; a frame carrying two legs is a whole journey only
+        # when the card on record is not itself a total.
+        held_total = any(slot['isTotal'] for slot in self.legs)
+        whole_frame = (any(l.get('isTotal') for l in detail)
+                       or (len(detail) >= 2 and not held_total))
+        return quiet or whole_frame
+
+    def _legless_replacement(self, parsed, now):
+        """Is this a different card, on a shape that states no legs at all?
+
+        Only the deadline delivery card reaches here. It gives a payout, a
+        distance and a time it is due, and the payout is already the key - so
+        the two fields left to compare are the distance and the deadline.
+
+        Both must disagree. A single field differing is what OCR does all day,
+        and it is exactly why the deadline and the lone distance are voted on
+        rather than taken from one frame; treating one disagreement as a new
+        card would throw away a good window every time a frame misread a digit.
+        Two independent fields disagreeing at once is not a misreading.
+        """
+        deadline = parsed.get('deliverBy')
+        miles = parsed.get('miles')
+        seen_by = _consensus(self.deadlines) if self.deadlines else None
+        seen_miles = (_consensus([v for v, _ in self.lone_miles])
+                      if self.lone_miles else None)
+        moved_by = (deadline is not None and seen_by is not None
+                    and deadline != seen_by)
+        moved_miles = (miles is not None and seen_miles is not None
+                       and abs(miles - seen_miles) > SAME_LEG_MILES)
+        return moved_by and moved_miles
 
     def add(self, parsed, now=None):
         """Merge one reading in, and return the combined view of the offer.
@@ -253,7 +313,7 @@ class OfferAccumulator:
         # away the leg slots it reads. The answer has to survive the reset, so
         # it is stored after: this is the one signal that separates a
         # replacement card from a re-read, and the journal has no other.
-        different = self._is_a_different_card(detail, now)
+        different = self._is_a_different_card(parsed, detail, now)
         # Stale is measured from the LAST reading, not the first.
         #
         # It used to be `now - self.started`: a stopwatch begun when the card was
@@ -321,12 +381,26 @@ class OfferAccumulator:
             # label that does not survive the merge is a rule that stops
             # working on exactly the readings the merge exists for.
             slot['labelled'] = slot['labelled'] or bool(leg.get('labelled'))
-            # ...and the same for the other way a leg says it travels: a
-            # bracket printed where its distance should be. ORed for the
-            # same reason, and harmless on a slot that later gains a
-            # distance, since a slot with miles is part of the journey
-            # already and the rule only asks about the ones without.
-            slot['lostMiles'] = slot['lostMiles'] or bool(leg.get('lostMiles'))
+            # ...and the other way a leg says it travels: a bracket printed
+            # where its distance should be. COUNTED, not ORed, and the
+            # difference is a card this rig really reads.
+            #
+            # ORing it looked safe on the grounds that a slot which later gains
+            # a distance is part of the journey anyway. The slot it lands on
+            # falsely is the one that never gains one: a pickup-wait line. On
+            # "Avg. wait time at pickup: 1 min 18 mins (2.6 mi) Sedgefield Rd",
+            # a single frame truncated at the crop edge loses the "18 mins" and
+            # the wait line's tail then BEGINS with the bracket that belongs to
+            # the leg after it. One such frame anywhere in the window stamped
+            # the wait line for good: the merge still recovered the card exactly,
+            # 31 minutes and 7.0 miles, and came back permanently uncertain and
+            # never whole - so rate() dropped the mileage, $13.45/hr was
+            # published as $17.52/hr, and the card was never spoken.
+            #
+            # A majority is what the rest of this class does with a field that
+            # frames disagree about, and it is right here for the same reason:
+            # this is one frame's claim about damage, not a fact about the card.
+            slot['lostSeen'] += 1 if leg.get('lostMiles') else 0
 
         if parsed.get('items') is not None:
             self.items.append(parsed['items'])
@@ -377,7 +451,9 @@ class OfferAccumulator:
                         'miles': _consensus(slot['miles']) if slot['miles'] else None,
                         'isTotal': slot['isTotal'],
                         'labelled': slot['labelled'],
-                        'lostMiles': slot['lostMiles']}
+                        # A strict majority of the frames that saw this slot.
+                        # See where lostSeen is counted.
+                        'lostMiles': slot['lostSeen'] * 2 > slot['seen']}
                        for slot in used]
 
         # One definition of the rule, in the parser, asked about the merge's own
@@ -399,6 +475,7 @@ class OfferAccumulator:
         # in every arrival order that put it at the end, and there is no leg
         # duration beside it for check_distance to catch it with.
         had_decimal = self.had_decimal
+        lone_uncertain = False
         if miles is None and self.lone_miles:
             miles = _consensus([v for v, _ in self.lone_miles])
             # ...and the decimal point travels WITH the winning reading, rather
@@ -416,6 +493,33 @@ class OfferAccumulator:
             # dropped the point, the frames that read 24 still carry it and
             # recovery stays forbidden.
             had_decimal = any(d for v, d in self.lone_miles if v == miles)
+            # ...and then judged against the merged minutes, by the same rule
+            # that judges a single frame's distance.
+            #
+            # Two frames of ONE token can arrive here as two different numbers:
+            # the frame that also caught the duration has had its decimal point
+            # put back by the parser, and the frame that lost both reports the
+            # raw ten-times-larger reading. A tie breaks towards the larger
+            # value - the cautious choice for two genuinely different readings,
+            # and exactly the wrong one here - so the corrupt reading won and
+            # `milesChecked` then locked it in, because the minutes came from
+            # the good frame's leg and rate() therefore never re-checked it.
+            # Measured: 24 miles published on a 2.4 mile job, $25.29/hr where
+            # the good frame alone rates $43.80/hr.
+            #
+            # Folding a ten-times reading back before the vote was the obvious
+            # fix and it is wrong in the other direction: a card that really
+            # says 24 miles, misread once as "2.4", would fold to 2.4 and
+            # publish a green ACCEPT on a job with ten times the driving. So the
+            # question is not "do these look like one token" but "is this
+            # distance possible in this time", which is check_distance's whole
+            # job and is already tuned for it. It is asked here with the winning
+            # reading's OWN decimal flag, exactly as parse() asks it of one
+            # frame, so one frame and eight agree about the same card.
+            miles, lone_fixed, lone_doubt = OP.check_distance(
+                minutes, miles, had_decimal)
+            self.corrected = self.corrected or lone_fixed
+            lone_uncertain = lone_doubt
         merged['miles'] = (OP.round2(miles) if miles is not None
                            else parsed.get('miles'))
 
@@ -436,7 +540,7 @@ class OfferAccumulator:
         # by ten is not a correction any single misread can justify.
         _, _, uncertain = OP.check_distance(merged['minutes'], merged['miles'],
                                             had_decimal=True)
-        merged['milesUncertain'] = uncertain or short_a_leg
+        merged['milesUncertain'] = uncertain or short_a_leg or lone_uncertain
         # Correcting is only ever advisory — it colours a note, it does not move
         # money — so it is remembered across the window rather than taken from
         # whichever frame happened to be last. If any frame needed a decimal put

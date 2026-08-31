@@ -831,7 +831,7 @@
     fetch('/api/delivered', { method: 'POST' }).then(function (r) {
       // Believe the server, not the press. If the write failed the order is
       // still in the car and the next offer must still be measured against it.
-      if (r.ok) { holdingNow = false; showStack(null); }
+      if (r.ok) { holdingNow = false; destSaid = ''; showStack(null); showDest(); }
     }).catch(function () {
       /* Left as it was: an order the server still holds is the truth. */
     }).then(function () {
@@ -1399,6 +1399,13 @@
       // here to say so. Without this the button outlives the order it puts
       // down, and a driver presses it on nothing.
       if (msg.ready) {
+        // An order ending is what clears the destination read for it. Without
+        // this, `destSaid` outlived its order: press Drop, or let the server's
+        // own clock expire the hold, accept the next job, and the button came
+        // back reading the PREVIOUS order's address with "press again to read
+        // it afresh" — for an order whose destination has never been scanned,
+        // so the driver has no reason to press it.
+        if (holdingNow && !msg.holding) destSaid = '';
         holdingNow = !!msg.holding;
         showDrop();
         showDest();

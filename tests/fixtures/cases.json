@@ -2493,6 +2493,12 @@
    "expect": false
   },
   {
+   "name": "damage that lands on the digits is caught too",
+   "_why": "The tail test can only ever see a bracket the LEG regex FAILED to consume, so it catches damage on the unit - (8.1 m1) - and was blind to damage on the DIGITS, which is the class this rule was written for. Here a 1 is read as an L, which this parser calls the commonest single confusion there is: DC accepts the L, the bracket is swallowed by the match, the tail begins at the address, and the leg dropped silently out of the journey. 17 minutes were charged against 1.8 of the journey's 9.9 miles, whole and unflagged, a green $72.49/hr where the truth is $63.92.",
+   "text": "$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw 12 min (8.L mi) Oak Ln, Marietta",
+   "expect": false
+  },
+  {
    "name": "a pickup wait between two good legs is still not a leg",
    "_why": "The non-regression that matters. What tells a damaged leg from a wait line is a bracket holding a digit sitting where the distance would be, and it has to be the FIRST thing after the minutes - because a bracket appears in this wait line's tail too, belonging to the leg after it. Searching the tail loosely instead fires on 43% of clean cards.",
    "text": "Exclusive x $9.05 12 min (4.4 mi) Gresham Rd Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd",

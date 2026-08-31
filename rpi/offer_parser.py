@@ -667,7 +667,25 @@ def find_legs(text):
             # on a leg that has none. See LEG_LOST_MILES. Only meaningful when
             # the distance did not read, so it is not set when one did — a leg
             # that has its miles is already part of the journey.
-            'lostMiles': miles is None and bool(LEG_LOST_MILES.search(tail)),
+            # ...or the leg's own distance group matched and the token inside
+            # it would not become a number.
+            #
+            # The tail test can only ever see a bracket the LEG regex FAILED to
+            # consume, so it catches damage that lands on the unit - "(8.1 m1)"
+            # - and is blind to damage that lands on the digits, which is the
+            # class this rule was written for. "(8.L mi)" is a "1" read as an
+            # "L", which this file calls the commonest single confusion there
+            # is: DC accepts the L, the bracket is swallowed by the match, the
+            # tail begins at the address, and the leg dropped silently out of
+            # the journey. Measured on a two-leg card: 17 minutes charged
+            # against 1.8 of the journey's 9.9 miles, whole and unflagged, a
+            # green $72.49/hr where the truth is $63.92.
+            #
+            # `side` is what the card printed in the distance slot. Non-empty
+            # with no number out of it is the same statement the bracket makes,
+            # read from the other side.
+            'lostMiles': miles is None and (side is not None
+                                            or bool(LEG_LOST_MILES.search(tail))),
             # Where this leg sat in the text, so the address printed after it
             # can be found without searching the whole card again.
             'start': m.start(), 'end': m.end(),

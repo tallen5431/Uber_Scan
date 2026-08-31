@@ -2,7 +2,8 @@
 *.pyc
 __pycache__/
 # Requests in flight between the web side and the camera side: someone is
-# looking, re-find the phone, read this box. All three exist for seconds and
+# looking, re-find the phone, read this box, read the destination. All four
+# exist for seconds and
 # live in /dev/shm on any machine that has it — see rpi/handoff.py. These are
 # the fallback names, used where there is no RAM disk to write in, and still
 # read on either machine so an upgrade cannot drop a request between the two
@@ -15,6 +16,11 @@ __pycache__/
 rpi/.viewing*
 rpi/.recalibrate*
 rpi/.cropbox.json*
+# The fourth. Committed, it is worse than untidy: every checkout and pull
+# restores it, dropoff_requested() finds it on the first camera frame after
+# startup, and the scanner opens an unasked-for twelve-second destination
+# window against whatever happens to be in front of the camera.
+rpi/.dropoff*
 rpi/live-frame.jpg*
 # Advisory between this project's own scripts, so a second one says which pid
 # holds the camera instead of dying with a traceback about a device. It contains

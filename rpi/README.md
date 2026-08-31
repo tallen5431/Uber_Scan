@@ -3135,6 +3135,76 @@ button-that-does-nothing failure the module exists to prevent. Proved by running
 the crop test against a loop hammering `take_request()` on the shared path: it
 passes.
 
+### Six more the same review found, and what they had in common
+
+The first pass on that review fixed four findings. Fifteen survived refutation,
+and every one of the rest reproduced exactly as reported. What they published:
+
+| | shown | true |
+|---|---|---|
+| `(8.L mi)` — a 1 read as an L | **$72.49/hr green** | $63.92/hr |
+| the lone vote elects the 10x reading | $25.29/hr | $43.80/hr |
+| a replacement card inherits the old one | **$53.49/hr green** | $21.53/hr |
+| one truncated frame poisons a card | $17.52/hr uncosted | $13.45/hr |
+| losing the total line resets the merge | 2.0 mi, filed twice | 6.0 mi |
+
+**A card with no legs could never be a replacement.** The deadline delivery card
+states no duration and no legs, so nothing could line up *or fail to* line up,
+and `_is_a_different_card` returned False before reaching any other test. A
+genuinely different offer paying the same to the cent inside the twelve-second
+window merged into the old episode and was published with the old card's
+distance **and** the old card's deadline — and never filed at all, because
+`episode` never moved. Such a card states two things that can be compared
+instead: where it goes and when it is due. **Both** must differ: one field is
+what OCR does all day, which is why both are voted on in the first place.
+
+**A frame that lost the total line was called a replacement.** A card printing
+legs *and* a total parses to the total alone, so a later frame that loses that
+line reports two ordinary legs, they line up with nothing, and "two legs means a
+whole journey" reset the window mid-burst — on a frame that is the same card
+read slightly worse. The whole-journey signal is still there; two legs only
+count as one when the card on record is not itself a total.
+
+**`lostMiles` is now counted, not ORed.** It is one frame's claim about damage,
+and the slot it lands on falsely is the one that never gains a distance: a
+pickup-wait line whose tail begins with the *next* leg's bracket once that leg
+is truncated away. One such frame stamped the wait line for the life of the
+offer. A majority is what the rest of this class does with a field frames
+disagree about.
+
+**The lone-distance vote elected the corrupt reading.** One token read twice
+arrives as two numbers — the frame that also caught the duration has had its
+decimal point put back, the frame that lost both reports the raw ten-times value
+— and a tie breaks towards the larger. `milesChecked` then locked it in, because
+the minutes came from the good frame and `rate()` therefore never re-checked it.
+The obvious fix, folding a ten-times reading back on sight, **is wrong in the
+other direction**: a card that really says 24 miles, misread once as `2.4`,
+would fold to 2.4 and publish a green accept on a job with ten times the
+driving. So the winner is judged against the merged minutes by `check_distance`
+— the rule already tuned for exactly this — asked with the winning reading's own
+decimal flag, so one frame and eight agree about the same card.
+
+**And the rule could not see the damage it was written for.** `lostMiles` only
+inspected the 14 characters *after* the leg match, so it could only ever see a
+bracket the LEG regex **failed** to consume. That catches damage on the unit,
+`(8.1 m1)`, and is blind to damage on the digits — which is the class the rule
+exists for. `(8.L mi)` is a 1 read as an L, which this parser calls the
+commonest single confusion there is: `DC` accepts the L, the bracket is
+swallowed by the match, the tail begins at the address, and the leg drops
+silently out of the journey. A leg's distance group that matched and produced no
+number is the same statement, read from the other side.
+
+**What they had in common.** Five of the six are places where a *per-frame*
+observation was treated as a fact about the card, or where a rule could only see
+one of the two shapes its own damage takes. That is the same mistake as the
+missing wire fields one section down: a thing was checked on the path it was
+written for and not on the path it actually runs.
+
+Nine mutations, nine caught — including the one that mattered most, whether a
+majority is really needed or a unanimity would do. It is: a leg mangled in two
+frames of three and merely absent in the third is a leg the card printed a
+distance for.
+
 ### The stacking advice had never once run in the car
 
 An adversarial review of this session's work - seven independent reviewers, each
@@ -4474,7 +4544,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4307 checks
+npm test                # all 30 suites, 4330 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

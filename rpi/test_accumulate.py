@@ -817,6 +817,136 @@ eq('...so the distance that did read is not doubted',
 eq('...and the card is unfinished for the reason that is true of it',
    (P.is_whole(_hurtp), _hurtp['shortATime']), (False, True))
 
+# --- four things an adversarial review found in this merge -----------------
+#
+# Every one reproduced exactly as reported, and every one published a wrong
+# number on the driving screen.
+
+# 1. A card with NO LEGS could never be seen as a replacement. The deadline
+# delivery card states no duration and no legs, so nothing could line up or fail
+# to line up, and a genuinely different offer paying the same to the cent inside
+# the stale window merged into the old episode - published with the old card's
+# distance AND the old card's deadline, and never filed at all because
+# `episode` did not move.
+_C1 = '$18.55 Add a delivery (+2.4 mi) Deliver by 7:15 PM'
+_C2 = '$18.55 Add a delivery (+8.0 mi) Deliver by 7:40 PM'
+acc = OfferAccumulator()
+for _i in range(3):
+    _m = acc.add(P.parse(_C1), now=9000.0 + _i * 0.5)
+eq('the first deadline card reads as itself', (_m['miles'], _m['deliverBy']),
+   (2.4, 1155))
+_first = _m['episode']
+_m = acc.add(P.parse(_C2), now=9004.5)
+eq('a different deadline card is a different card', _m['episode'] != _first, True)
+eq('...and says so, which is how the journal files it', _m['newCard'], True)
+eq('...carrying its own distance', _m['miles'], 8.0)
+eq('...and its own deadline', _m['deliverBy'], 1180)
+
+# ...but ONE field differing is what OCR does all day, and both the deadline and
+# the lone distance are voted on for exactly that reason. A frame that misreads
+# one of them must not throw the window away.
+for _bad, _name in (('$18.55 Add a delivery (+2.4 mi) Deliver by 7:45 PM',
+                     'a misread deadline'),
+                    ('$18.55 Add a delivery (+8.0 mi) Deliver by 7:15 PM',
+                     'a misread distance')):
+    acc = OfferAccumulator()
+    for _i in range(3):
+        _m = acc.add(P.parse(_C1), now=9100.0 + _i * 0.5)
+    _was = _m['episode']
+    _m = acc.add(P.parse(_bad), now=9104.5)
+    eq('%s alone is not a new card' % _name, _m['episode'], _was)
+
+# 2. A frame that loses the TOTAL line was declared a replacement card. A card
+# printing legs and a total parses to the total alone, so a later frame that
+# loses that line reports two ordinary legs, they line up with nothing, and
+# "two legs means a whole journey" reset the window mid-burst - on a frame that
+# is the same card read slightly worse.
+_T = ('$9.00 8 min (2.0 mi) to store 14 min (4.0 mi) to customer '
+      '22 min (6.0 mi) total')
+_NOTOTAL = '$9.00 8 min (2.0 mi) to store 14 min (4.q mi) to customer'
+acc = OfferAccumulator()
+for _i, _t in enumerate([_T, _T, _NOTOTAL]):
+    _m = acc.add(P.parse(_t), now=9200.0 + _i * 0.5)
+eq('losing the total line does not start a new offer', _m['newCard'], False)
+eq('...and the journey the good frames read is kept', _m['miles'], 6.0)
+eq('...along with its time', _m['minutes'], 22.0)
+
+# 3. One damaged frame poisoned a wait-line slot for the life of the offer.
+# `lostMiles` is one frame's claim about damage, not a fact about the card, and
+# ORing it stamped a slot that never gains a distance: a pickup-wait line whose
+# tail begins with the NEXT leg's bracket once that leg is truncated away.
+_GOOD = ('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd '
+         'Avg. wait time at pickup: 1 min 18 mins (2.6 mi) Sedgefield Rd')
+_CUT = ('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd '
+        'Avg. wait time at pickup: 1 min (2.6 m')
+acc = OfferAccumulator()
+for _i, _t in enumerate([_GOOD, _CUT, _GOOD, _GOOD]):
+    _m = acc.add(P.parse(_t), now=9300.0 + _i * 0.5)
+eq('one truncated frame does not poison the card', _m['milesUncertain'], False)
+eq('...and the reading is still finished', P.is_whole(_m), True)
+eq('...with the journey the good frames read', (_m['minutes'], _m['miles']),
+   (31.0, 7.0))
+
+# ...and a leg that really did lose its distance in most frames still says so.
+_HURT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
+         '12 min (8.1 m1) Oak Ln, Marietta')
+acc = OfferAccumulator()
+for _i in range(3):
+    _m = acc.add(P.parse(_HURT), now=9400.0 + _i * 0.5)
+eq('a leg damaged in every frame is still doubted', _m['milesUncertain'], True)
+
+# ...and MOST frames is enough, which is the difference between a majority and
+# a unanimity and the reason this is the former. A leg whose distance is
+# mangled in two frames of three and simply absent in the third is a leg the
+# card printed a distance for; requiring every frame to agree would let one
+# clean-looking frame excuse the damage the others saw.
+_MANGLED = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
+            '12 min (8.1 m1) Oak Ln, Marietta')
+_ABSENT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
+           '12 min Oak Ln, Marietta')
+acc = OfferAccumulator()
+for _i, _t in enumerate([_MANGLED, _MANGLED, _ABSENT]):
+    _m = acc.add(P.parse(_t), now=9450.0 + _i * 0.5)
+eq('damaged in two frames of three still counts',
+   [l['lostMiles'] for l in _m['legDetail']], [False, True])
+eq('...so the reading is doubted', _m['milesUncertain'], True)
+
+# ...and a single frame's claim, outvoted, is not enough - the other half of
+# the same rule, and the case the pickup-wait line above is a real instance of.
+acc = OfferAccumulator()
+for _i, _t in enumerate([_MANGLED, _ABSENT, _ABSENT]):
+    _m = acc.add(P.parse(_t), now=9460.0 + _i * 0.5)
+eq('one frame of three is outvoted',
+   [l['lostMiles'] for l in _m['legDetail']], [False, False])
+
+# 4. The lone-distance vote elected the decimal-dropped reading. One token read
+# twice arrives as two numbers - the frame that also caught the duration has had
+# its point put back, the frame that lost both reports the raw ten-times value -
+# and a tie breaks towards the larger. `milesChecked` was then True, because the
+# minutes came from the good frame, so rate() never re-checked it either.
+_A = '$16.05 Add a delivery (+2.4 mi) 21 min'
+_B = '$16.05 Add a delivery (+24 mi)'
+for _order, _name in (([_A, _B], 'good then damaged'),
+                      ([_B, _A], 'damaged then good'),
+                      ([_A, _A, _B, _B], 'two of each')):
+    acc = OfferAccumulator()
+    for _i, _t in enumerate(_order):
+        _m = acc.add(P.parse(_t), now=9500.0 + _i * 0.5)
+    eq('a lost point does not win the lone vote [%s]' % _name, _m['miles'], 2.4)
+
+# The fold that was NOT used, and why. Judging the winner against the time is
+# check_distance's job and is already tuned for it; folding a ten-times reading
+# back on sight is wrong in the other direction - a card that really says 24
+# miles, misread once as "2.4", would fold to 2.4 and publish a green accept on
+# a job with ten times the driving.
+_REAL = '$16.05 Add a delivery (+24 mi) 55 min'
+_SLIP = '$16.05 Add a delivery (+2.4 mi) 55 min'
+acc = OfferAccumulator()
+for _i, _t in enumerate([_REAL, _REAL, _SLIP]):
+    _m = acc.add(P.parse(_t), now=9600.0 + _i * 0.5)
+eq('a real long trip is not folded away by one slipped point',
+   _m['miles'], 24.0)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

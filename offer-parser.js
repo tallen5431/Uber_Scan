@@ -903,7 +903,17 @@
         // a leg that has none. See LEG_LOST_MILES. Only meaningful when the
         // distance did not read, so it is not set when one did — a leg that has
         // its miles is already part of the journey.
-        lostMiles: miles === null && LEG_LOST_MILES.test(tail),
+        /* ...or the leg's own distance group matched and the token inside it
+           would not become a number. The tail test can only ever see a bracket
+           the LEG regex FAILED to consume, so it catches damage on the unit -
+           "(8.1 m1)" - and is blind to damage on the DIGITS, which is the class
+           this rule was written for. "(8.L mi)" is a 1 read as an L, the
+           commonest single confusion there is: the bracket is swallowed by the
+           match, the tail begins at the address, and the leg drops silently out
+           of the journey - 17 minutes charged against 1.8 of 9.9 miles, whole
+           and unflagged, a green $72.49/hr where the truth is $63.92. */
+        lostMiles: miles === null && (side !== null && side !== undefined
+                                      || LEG_LOST_MILES.test(tail)),
         // Where this leg sat in the text, so the address printed after it can
         // be found without searching the whole card again.
         start: m.index, end: m.index + m[0].length
