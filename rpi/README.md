@@ -3501,14 +3501,71 @@ key. Told apart by the key, a scanned address would be overwritten by a
 cross-street belonging to a different card within 200ms, and the test asserts
 exactly that it is not.
 
-Sixteen mutations, sixteen caught, starting with the reviewer's own two: the
+Sixteen mutations, fourteen caught, starting with the reviewer's own two: the
 press does nothing, the digest branch never fires, the window opens but is never
-read through, the press does not force the first read, the window never closes
-so the next screen overwrites the answer, the request is never taken so the
-button fires forever, nothing is emitted, the button writes no request or writes
-it where the scanner is not looking, the answer never reaches the order in the
-car, it is stored but not marked as scanned, it is attached with nothing in the
-car, and the page is never told.
+read through, the window never closes so the next screen overwrites the answer,
+the request is never taken so the button fires forever, nothing is emitted, the
+button writes no request or writes it where the scanner is not looking, the
+answer never reaches the order in the car, it is stored but not marked as
+scanned, and the page is never told.
+
+**And the two that lived were worth more than the fourteen.**
+
+The first was small: *the press does not force the first read.* It is nearly
+equivalent — `last_dropoff_read` starts at zero, so the beat further down the
+loop fires on the same pass anyway. Nearly, not quite: a *second* press within
+half a second of the first window's last read would wait for the beat. Half a
+second, not worth a timing-sensitive test, and now written down in the code so
+the line is not deleted as dead on the strength of the first press alone.
+
+The second opened up a real defect.
+
+#### One question, four different ways of asking it
+
+The mutation was *attach the destination even with nothing in the car* — invent
+an order for the address to land on. It survived, and the reason it survived was
+the interesting part: the test asked `/api/status`, which answers through
+`holding(now)`, and `holding()` refuses an object with no positive stated time.
+The fabricated order was invisible *exactly where the assertion looked*.
+
+Following that back, **four places read `scanner.holding` raw** while everything
+else asked `holding(now)` — and they are not the same question. `scanner.holding`
+is the slot; `holding(now)` is "is an order being carried *right now*", and it
+expires one whose stated time has run out, plus half again, plus ten minutes.
+
+| | reads the slot | should ask |
+|---|---|---|
+| the scanner-read attach | `if (scanner.holding)` | `holding(now)` |
+| `/api/dropoff` | `holding: !!scanner.holding` | `holding(now)` |
+| `/api/delivered` | `wasHolding: !!scanner.holding` | `holding(now)` |
+| un-marking an offer | `scanner.holding.id === note.id` | `holding(now)` |
+
+So an order the panel had already forgotten was still an order to three of these.
+Press **⌖ Dropoff** and the page says yes, there is a job to attach this address
+to. Press **dropped off** and it says you put one down. Neither is true, and the
+screen in front of the driver has been showing no order for an hour.
+
+**Why it had never been caught, and it is two obstacles rather than one.** Ten
+minutes of grace is ten minutes of waiting, so every path was only ever checked
+on orders plainly still alive — `HOLD_GRACE_MS` is now settable, the way
+`SCANNER_SILENT_MS` already was, and the suite runs with it at zero. And a live
+scanner sends a reading five times a second, every one of which goes through
+`withStack` and therefore through `holding()`, which expires the order as a side
+effect — so within 200ms the raw slot is null too and the two ways of asking
+agree again. The fake scanner needed a way to go **quiet**. That is not a
+contrivance: a camera side that has died, with no panel open polling it, is
+exactly the shape of the real failure.
+
+One more trap, met twice while writing it: `holding()` **nulls** an expired order
+as it answers, so the first endpoint asked properly hides the difference from
+every endpoint asked after it. The checks now use one order per question, each
+asked first.
+
+Eight mutations of the corrected code, five caught, and **three are equivalent
+by construction — which is what the fix was for**: with every reader asking the
+same question, an invented order is unreachable, a field written onto an expired
+one is unreachable, and un-marking reaches `scanner.holding === null` down both
+paths (the raw version nulls it; the correct version's `holding()` already did).
 
 ### A guard that could not fire, because the damage removed its own evidence
 
@@ -4796,7 +4853,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4441 checks
+npm test                # all 30 suites, 4447 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

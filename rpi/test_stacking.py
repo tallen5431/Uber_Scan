@@ -118,6 +118,13 @@ QUEUE = os.path.join(work, 'next')
 # Separate from QUEUE because it is a different message on the same stdout and
 # the server tells them apart by shape - see the dropoff block far below.
 DROP = os.path.join(work, 'drop')
+# ...and a way to make the scanner stop sending READINGS while still answering
+# the two queues above. A reading goes through withStack(), which asks
+# holding() - so a live scanner expires a carried order within 200ms of its
+# time running out, and every path that reads `scanner.holding` raw looks
+# identical to one that asks properly. The case where they differ is a scanner
+# that has gone silent, which is exactly what this file cannot otherwise stage.
+QUIET = os.path.join(work, 'quiet')
 
 # The card the second reading is of, put through the real parser, the real
 # rate() and the real emit(). $9.00 over 20 minutes is $27/hr gross and
@@ -180,9 +187,10 @@ eq('...and the reading it must not be confused with carries a string',
 fake = os.path.join(work, 'fakescan.py')
 with open(fake, 'w') as fh:
     fh.write(
-        'import json, time\n'
+        'import json, os, time\n'
         'QUEUE = %r\n'
         'DROP = %r\n'
+        'QUIET = %r\n'
         'READ = %r\n'
         'DROPPED = %r\n'
         'sent = dropped = None\n'
@@ -201,8 +209,10 @@ with open(fake, 'w') as fh:
         '    if ask and ask != dropped:\n'
         '        dropped = ask\n'
         '        print(json.dumps(DROPPED), flush=True)\n'
-        '    print(json.dumps(READ), flush=True)\n'
-        '    time.sleep(0.2)\n' % (QUEUE, DROP, READ_PAYLOAD, DROP_PAYLOAD))
+        '    if not os.path.exists(QUIET):\n'
+        '        print(json.dumps(READ), flush=True)\n'
+        '    time.sleep(0.2)\n'
+        % (QUEUE, DROP, QUIET, READ_PAYLOAD, DROP_PAYLOAD))
 
 
 def put_dropoff(tag):
@@ -243,6 +253,12 @@ proc = subprocess.Popen(
     ['node', os.path.join(ROOT, 'server.js')],
     env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=journal,
              UBERSCAN_HANDOFF_DIR=handoff,
+             # No grace, so a carried order can be made to expire inside a test
+             # instead of ten minutes from now. Everything else in this file
+             # marks orders of 12 to 30 minutes, which still run for 18 to 45
+             # minutes of overrun - far longer than this suite lives - so this
+             # changes nothing except making the one case reachable.
+             HOLD_GRACE_MS='0',
              SCANNER='1', SCANNER_CMD='python3', SCANNER_ARGS=fake),
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 base = 'http://127.0.0.1:%d' % port
@@ -434,6 +450,17 @@ try:
        get(base, '/api/status').get('holding'), None)
     ok_('...and does not become the offer on the record',
         (get(base, '/api/status').get('offer') or {}).get('id') != 'loose')
+    # Asked of the endpoints that read the slot rather than the question.
+    #
+    # /api/status answers through holding(), which refuses anything without a
+    # positive stated time - so a loose address stored into a fabricated order
+    # is INVISIBLE there, and asserting only through status left a mutation
+    # alive that made the server invent one. These two read `scanner.holding`,
+    # and they are what the driver is actually told.
+    eq('...and the button still says there is nothing to attach to',
+       post(base, '/api/dropoff').get('holding'), False)
+    eq('...and putting down still says there was nothing to put down',
+       post(base, '/api/delivered').get('wasHolding'), False)
 
     # ...and with an order in the car it goes onto it.
     ok_('an offer to carry reaches the record',
@@ -476,6 +503,57 @@ try:
        held.get('dropoff'), '1234 Daffodil Ln, Powder Springs, GA 30127')
     eq('...nor un-mark it as scanned', held.get('dropoffScanned'), True)
     post(base, '/api/delivered')
+
+    # --- an order that ran out of time, asked four different ways ------------
+    #
+    # `holding(now)` is the question "is an order being carried RIGHT NOW", and
+    # it is not the same as reading `scanner.holding`: an order past its stated
+    # time plus half again plus the grace is already gone from the panel and
+    # from the stack line. Four places answered it off the raw slot instead -
+    # the scanner-read attach, /api/dropoff, /api/delivered, and un-marking -
+    # so the driver could be told an order was being carried by three of them
+    # while the screen in front of them showed none.
+    #
+    # It could not be reached before, and that is TWO obstacles, not one. Ten
+    # minutes of grace is ten minutes of waiting - HOLD_GRACE_MS='0' above
+    # removes that. And a live scanner sends a reading five times a second,
+    # every one of which goes through withStack() and so through holding(),
+    # which expires the order as a side effect: within 200ms the raw slot is
+    # null too and the two ways of asking agree again. So the scanner has to go
+    # QUIET, which is also the real-world shape of this - a rig whose camera
+    # side has died, with no panel open polling it either.
+    open(QUIET, 'w').close()
+    time.sleep(0.5)
+
+    # A third of a minute of stated time, so with no grace it runs out two
+    # seconds after it is taken - long enough to mark it before it dies.
+    ok_('a short order reaches the record',
+        put_offer({'id': 'brief-5', 'pay': 8.0, 'minutes': 0.0222,
+                   'billedMinutes': 0.0222, 'miles': 1.0, 'cost': 0.3,
+                   'perHour': 20.0}))
+    post(base, '/api/offers/mark', {'id': 'brief-5', 'accepted': True})
+    time.sleep(2.5)
+
+    # ONE ORDER PER QUESTION, and each question asked FIRST. holding() nulls an
+    # expired order as a side effect of answering, so the first endpoint that
+    # asks it properly hides the difference from every endpoint asked after -
+    # which is how the first version of this block passed while three of the
+    # four raw-slot readers were still in place.
+    eq('an expired order is not something to attach an address to',
+       post(base, '/api/dropoff').get('holding'), False)
+    post(base, '/api/delivered')
+
+    ok_('a second short order reaches the record',
+        put_offer({'id': 'brief-6', 'pay': 8.0, 'minutes': 0.0222,
+                   'billedMinutes': 0.0222, 'miles': 1.0, 'cost': 0.3,
+                   'perHour': 20.0}))
+    post(base, '/api/offers/mark', {'id': 'brief-6', 'accepted': True})
+    time.sleep(2.5)
+    eq('...and putting an expired order down says there was nothing to put down',
+       post(base, '/api/delivered').get('wasHolding'), False)
+
+    os.remove(QUIET)
+    time.sleep(0.5)
 
     # --- the export, which is how any of this reaches anyone -----------------
     #

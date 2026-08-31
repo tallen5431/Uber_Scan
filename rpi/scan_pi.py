@@ -1987,6 +1987,14 @@ def main():
                 if dropoff_requested():
                     dropoff_until = now + DROPOFF_WINDOW
                     dropoff_seen = None
+                    # `do_read` here looks redundant against the beat further
+                    # down, and on the FIRST press it is: last_dropoff_read
+                    # starts at 0.0, so the beat fires on this same pass. It is
+                    # not redundant on a second press within half a second of
+                    # the last read of the first window, which is the only case
+                    # that separates them - worth half a second, not worth a
+                    # timing-sensitive test, and written down so it does not get
+                    # deleted as dead on the strength of the first press alone.
                     moved = do_read = True
                     log('reading the destination for the next %d seconds: put '
                         'the address on the phone' % int(DROPOFF_WINDOW))

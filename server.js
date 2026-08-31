@@ -263,10 +263,19 @@ function startScanner() {
         // next offer against wherever the driver happened to be pointing the
         // camera. It is also why nothing here touches `scanner.offer`: the
         // offer is a card that was read, and this is not one.
+        //
+        // Asked through holding(), never off `scanner.holding` directly. That
+        // field is the raw slot; holding() is the question "is an order being
+        // carried RIGHT NOW", and it is not the same question - an order whose
+        // stated time has run out, plus half again, plus ten minutes, is
+        // already forgotten by the panel and by the stack line. Reading the
+        // slot here would attach the address to a job everything else has
+        // given up on.
         if (read.dropoff && typeof read.dropoff.line === 'string') {
-          if (scanner.holding) {
-            scanner.holding.dropoff = read.dropoff.line;
-            scanner.holding.dropoffScanned = true;
+          var carrying = holding(Date.now());
+          if (carrying) {
+            carrying.dropoff = read.dropoff.line;
+            carrying.dropoffScanned = true;
           }
           // Kept either way, so the page can say what was read even when there
           // was nothing to attach it to - a driver who presses the button with
@@ -489,7 +498,19 @@ function touchWatchFile(view) {
  * is unaffected either way — so the cheaper mistake is to keep offering it.
  */
 var HOLD_OVERRUN = 1.5;      // an order may take half again its stated time
-var HOLD_GRACE_MS = 10 * 60000;  // ...plus ten minutes, before it is forgotten
+// ...plus ten minutes, before it is forgotten.
+//
+// Settable, like SCANNER_SILENT_MS and for the same reason. Expiry is the one
+// thing about a carried order that no test could reach: ten minutes of grace
+// is ten minutes of waiting, so every path that asks "is an order being
+// carried" was checked only on orders that were plainly still live, and the
+// four places that answered it off the raw slot instead of through holding()
+// were indistinguishable from the ones that did it properly.
+//
+// Written the long way rather than `Number(env) || default`, because the value
+// this exists to allow is ZERO and that idiom would throw it away.
+var HOLD_GRACE_MS = Number(process.env.HOLD_GRACE_MS);
+if (!isFinite(HOLD_GRACE_MS) || HOLD_GRACE_MS < 0) HOLD_GRACE_MS = 10 * 60000;
 
 function holding(now) {
   var h = scanner.holding;
@@ -1403,8 +1424,12 @@ function route(req, res) {
               pickup: scanner.offer.pickup || null,
               acceptedAt: Date.now()
             };
-          } else if (scanner.holding && scanner.holding.id === note.id) {
-            scanner.holding = null;
+          } else {
+            // Through holding() as well: taking the mark back off an order the
+            // rest of the rig has already forgotten should not depend on which
+            // of the two ways of asking this line happens to use.
+            var carried = holding(Date.now());
+            if (carried && carried.id === note.id) scanner.holding = null;
           }
         }
         send(res, 200, JSON.stringify({ ok: true, note: note }),
@@ -1426,7 +1451,10 @@ function route(req, res) {
    * It answers the same either way. Pressing "delivered" with nothing in the
    * car is not an error a driver needs told about; it is the state they wanted. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/delivered') {
-    var wasHolding = !!scanner.holding;
+    // holding(), not the raw slot: "there was an order to put down" has to mean
+    // the same thing here as it does on the panel, or the driver is told they
+    // put down a job the rig stopped counting an hour ago.
+    var wasHolding = !!holding(Date.now());
     scanner.holding = null;
     return send(res, 200, JSON.stringify({ ok: true, wasHolding: wasHolding }),
                 { 'Content-Type': 'application/json; charset=utf-8' });
@@ -1447,7 +1475,11 @@ function route(req, res) {
     return fs.writeFile(DROPOFF_PATH, '', function (err) {
       if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
                            { 'Content-Type': 'application/json; charset=utf-8' });
-      send(res, 200, JSON.stringify({ ok: true, holding: !!scanner.holding }),
+      // ...and the same question the same way. This is what the page uses to
+      // tell the driver whether the address it is about to read has a job to go
+      // onto; answered off the raw slot it would promise one that no longer
+      // exists, and the address would land somewhere nothing reads.
+      send(res, 200, JSON.stringify({ ok: true, holding: !!holding(Date.now()) }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }
