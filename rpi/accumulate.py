@@ -459,8 +459,9 @@ class OfferAccumulator:
         # One definition of the rule, in the parser, asked about the merge's own
         # legs. A second copy here would be a second thing to get wrong, and the
         # first version of it already was: it exempted the case where no leg had
-        # a distance at all, which is the worse one.
-        short_a_leg = OP.legs_short_a_distance(merged_legs)
+        # a distance at all, which is the worse one. It is asked further down,
+        # once the merged distance exists — the single-leg clause turns on what
+        # the reading ended up with, not on what the legs alone carried.
 
         merged = dict(parsed)
         merged['minutes'] = minutes if minutes else parsed.get('minutes')
@@ -540,6 +541,7 @@ class OfferAccumulator:
         # by ten is not a correction any single misread can justify.
         _, _, uncertain = OP.check_distance(merged['minutes'], merged['miles'],
                                             had_decimal=True)
+        short_a_leg = OP.legs_short_a_distance(merged_legs, merged['miles'])
         merged['milesUncertain'] = uncertain or short_a_leg or lone_uncertain
         # Correcting is only ever advisory — it colours a note, it does not move
         # money — so it is remembered across the window rather than taken from

@@ -144,7 +144,8 @@ class FakeCam(object):
 
 
 def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
-        until=None, look=None, spoil=None, config_extra=None):
+        until=None, look=None, spoil=None, config_extra=None,
+        press_dropoff=False):
     """Drive scan_pi.main() over a fake camera and collect what came out.
 
     `until(state)` ends the run as soon as the thing being tested has happened,
@@ -211,6 +212,27 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     announced = []
     real_offer = SP.emit_offer
     SP.emit_offer = lambda *a, **k: (announced.append(a), real_offer(*a, **k))[1]
+    # ...and every destination it read. Recorded here rather than scraped out of
+    # stdout because what is being tested is the WIRING — that the press opens a
+    # window, that the window keeps reading a still picture, and that an address
+    # found inside it leaves the process. emit_dropoff on its own was already
+    # covered, and covering the piece is not covering the path.
+    destinations = []
+    real_dropoff = SP.emit_dropoff
+    SP.emit_dropoff = lambda *a, **k: (destinations.append(a),
+                                       real_dropoff(*a, **k))[1]
+
+    # The button. Written before the loop starts, which is the same file the
+    # server's /api/dropoff writes and the same one dropoff_requested() clears.
+    # Confined to this run's own directory so a scanner running on the same
+    # machine cannot eat the request or leave one behind — see handoff.ENV_DIR.
+    import handoff as HOF
+    had_dir = os.environ.get(HOF.ENV_DIR)
+    if press_dropoff:
+        os.environ[HOF.ENV_DIR] = workdir
+        HOF.clear(HOF.DROPOFF)
+        for where in HOF.candidates(HOF.DROPOFF):
+            open(where, 'w').close()
 
     argv = sys.argv
     sys.argv = ['scan_pi', '--config', config, '--json', '--snapshot', '',
@@ -218,7 +240,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     deadline = time.time() + seconds
 
     def state():
-        return dict(verdicts=verdicts,
+        return dict(verdicts=verdicts, destinations=len(destinations),
                     # How many times the loop has reached a verdict, and how
                     # many times it has named the offer on record. A run that
                     # stops the instant a row lands cannot tell "once per card"
@@ -251,8 +273,15 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         sys.argv = argv
         SP.start_camera, SP.emit = real_start, real_emit
         SP.emit_offer = real_offer
+        SP.emit_dropoff = real_dropoff
         PL.Scanner.look_many = real_look
         PL.Scanner.should_read = real_should
+        if press_dropoff:
+            HOF.clear(HOF.DROPOFF)
+            if had_dir is None:
+                os.environ.pop(HOF.ENV_DIR, None)
+            else:
+                os.environ[HOF.ENV_DIR] = had_dir
 
     rows = []
     if os.path.exists(journal):
@@ -264,6 +293,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     ready_kw = [k for a, k in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
     return dict(cam=cam, rows=rows, ready=ready, ready_kw=ready_kw,
                 announced=announced, gate_calls=gate_calls,
+                destinations=destinations, verdicts=verdicts,
                 config=config, journal=journal, started=len(started))
 
 
@@ -1687,6 +1717,99 @@ eq('...carrying what the driver reads to check it',
 eq('...and what the geography is decided on', _msg['dropoff']['zip'], '30127')
 eq('...and nothing that could be mistaken for a verdict',
    [k for k in ('ready', 'state', 'perHour', 'pay') if k in _msg], [])
+
+
+# --- ...and the same thing through the loop that has to do it ---------------
+#
+# Everything above tests a PIECE. dropoff_requested() takes a request,
+# DROPOFF_WINDOW is a plausible number, emit_dropoff() writes a line. None of it
+# says the main loop joins them up, and a reviewer proved exactly that: replacing
+# the body of the request branch with `pass` and the digest branch with
+# `if False and ...` left every check above passing while the button did nothing
+# at all. Three separate pieces of wiring have to hold:
+#
+#   the press opens a window          (the request branch in the loop)
+#   the window keeps taking reads     (the beat beside the resample beat)
+#   an address found there goes out   (the branch at the top of digest)
+#
+# The middle one is the one nothing else could catch. The screen showing an
+# address is a NAVIGATION screen: it does not move, so the motion gate scores it
+# as nothing happening and produces no reads on its own. Without that beat the
+# driver presses the button, brings up the destination, and the rig never looks.
+_nav_reads = [0]
+
+
+def _nav_then_address(self, frames, now=None, geom=None):
+    """A phone that is not showing the destination yet, and then is.
+
+    Two reads of the wrong screen first, because the press and the address are
+    not simultaneous — the driver still has to get it up. A window that only
+    ever reads once, at the instant of the press, photographs whatever was there
+    before they did anything, and this is what tells that apart.
+    """
+    _nav_reads[0] += 1
+    text = ('Home 22 min ETA 8:41 PM Navigate' if _nav_reads[0] <= 2 else
+            'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start')
+    parsed = OP2.parse(text)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+# The card never appears: `appear_at` is past the end of the run, so the camera
+# shows a still, blank cabin throughout and the motion gate has nothing to fire
+# on. Every read in this run is one the dropoff window asked for.
+#
+# Run past the end of the window rather than stopped at the first answer, and
+# taken from the constant so the two cannot drift apart. Stopping on the answer
+# would make the last check below vacuous: what it asserts is that the reads
+# STOP once the address is found, and that can only be seen by carrying on.
+run_drop = run(TC.uberx_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
+               appear_at=10_000.0,
+               extra_argv=['--no-parallel'], look=_nav_then_address,
+               press_dropoff=True)
+
+eq('the button, pressed, gets a destination out of the loop',
+   len(run_drop['destinations']) >= 1, True)
+if run_drop['destinations']:
+    _got = run_drop['destinations'][0][0]
+    eq('...the one that was on the screen, not the one before it',
+       _got.get('line'), '1234 Daffodil Ln, Powder Springs, GA 30127')
+    eq('...with the geography the stacking advice is decided on',
+       (_got.get('city'), _got.get('zip')), ('Powder Springs', '30127'))
+ok_('...found on a later read than the press, since a still picture '
+    'produces none by itself', _nav_reads[0] >= 3)
+eq('...and said exactly once', len(run_drop['destinations']), 1)
+# ...and the window shuts, which is the read beat stopping rather than this
+# branch. The run carries on for four seconds past the end of the window, and
+# on a still blank screen nothing else asks for a read - so a window left open
+# shows up here as two dozen more, half a minute of a Pi's whole attention
+# spent photographing a phone the driver has already finished with.
+ok_('...after which the rig stops reading, rather than burning the rest of '
+    'the window on a picture that is not going to change', _nav_reads[0] <= 5)
+# A navigation screen has no payout, so nothing about it may reach the driving
+# screen as a reading. `ready` is what live.html treats as a verdict.
+eq('a destination is not a verdict', run_drop['ready'], [])
+eq('...and not an offer on the record', run_drop['announced'], [])
+eq('...and not a journal row', run_drop['rows'], [])
+
+# The control: with no press, the same screens produce nothing at all. Without
+# it the checks above would pass on a loop that read every frame as a
+# destination.
+#
+# The card DOES appear in this one, which is the difference that makes the check
+# mean anything. On the still blank screen used above the motion gate never
+# fires, so the reader is never called, and "no destination came out" would be
+# true of a loop that had not looked at anything — a check that goes quiet
+# exactly when the thing it watches does. So the reads are asserted too.
+_nav_reads[0] = 2
+run_nodrop = run(TC.uberx_screen(), seconds=10.0, extra_argv=['--no-parallel'],
+                 look=_nav_then_address)
+ok_('a run with no press still reads the screen', _nav_reads[0] > 2)
+eq('...and an address nobody asked for is not a destination',
+   run_nodrop['destinations'], [])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)

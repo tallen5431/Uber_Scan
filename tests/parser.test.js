@@ -263,5 +263,35 @@ check('largest dollar figure wins over a promo line',
   eq('...so the reading is not whole', P.isWhole(hurt), false);
 })();
 
+/* ---- what a caller that forgets the distance gets ---- */
+/* legsShortADistance takes the distance the READING ended up with, and on a
+   single leg that argument is the whole guard: with it, an "Add a delivery"
+   card whose distance was recovered elsewhere is left alone; without it, that
+   good reading is thrown away. Every caller that ships passes it, so nothing
+   reached through parse() or isWhole() exercises the omitted argument — and in
+   JavaScript that is a missing argument rather than a declared default, so the
+   check has to name `undefined` as well as `null`.
+
+   It lands on doubt rather than on a number, because the two failures are not
+   symmetric: a forgetful caller that lands on "certain" publishes a rate
+   flattered by a distance that was never read. */
+(function () {
+  var lost = [{minutes: 18, miles: null, isTotal: true,
+               labelled: true, lostMiles: true}];
+  var kept = [{minutes: 18, miles: 7.2, isTotal: true,
+               labelled: true, lostMiles: false}];
+  eq('a lone leg that lost its distance, asked without one, is doubted',
+     P.legsShortADistance(lost), true);
+  eq('...and asked with an explicit null, the same',
+     P.legsShortADistance(lost, null), true);
+  eq('...and told the distance was recovered, is not',
+     P.legsShortADistance(lost, 7.2), false);
+  eq('...while a lone leg that never lost one is never doubted',
+     [P.legsShortADistance(kept), P.legsShortADistance(kept, 7.2)].join(','),
+     'false,false');
+  eq('no legs at all is not a journey short of anything',
+     P.legsShortADistance([]), false);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');
 process.exit(fail ? 1 : 0);

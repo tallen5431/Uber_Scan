@@ -803,6 +803,24 @@ eq('...nor do several of them',
    A.area('Grady Grier Dr & New Towne Dr, , : Powder Springs').town, 'powder springs');
 eq('...nor a stray capital',
    A.area('Crestmont Pkwy & Haygoode Dr, E Marietta').town, 'marietta');
+// ...and the same mark in lower case, which is the same mark. Taking one and
+// refusing the other is not a rule about towns, it is an accident of which
+// glyph tesseract picked - and it left area() returning null on 25 of the 1528
+// places on file, with the town printed perfectly plainly beside the furniture.
+// All four of these are real dropoffs off this driver's cards.
+eq('...nor a stray letter in lower case, which is the same icon',
+   A.area('Daffodil Ln & Lilac Springs Dr, j Powder Springs').town,
+   'powder springs');
+eq('...whichever letter the icon came back as',
+   A.area('Grant Dr NW & Russell Dr NW, i Kennesaw').town, 'kennesaw');
+eq('...including one that is also an English word',
+   A.area('Campus Loop Rd NW & Owl Dr, a Kennesaw').town, 'kennesaw');
+eq('...and mixed in among the glyphs',
+   A.area('Holly Springs Rd & Skylane Dr, j 4 Marietta').town, 'marietta');
+// A whole lower-case WORD is not the icon row, and must not be skipped: it is
+// either part of the name or evidence this is not an address at all.
+eq('a whole lower-case word before the town is not stray furniture',
+   A.area('Cobalt Dr NW, near Marietta').town, null);
 eq('a town after a full stop is still the town',
    A.area('Double Branches Ln & Sagamore Ct. Dallas').town, 'dallas');
 // ...but the abbreviation that ate the comma must not become one.
@@ -823,6 +841,38 @@ eq('a capitalised town does not donate a quadrant',
 // A town that came back in capitals is the same town.
 eq('a town in capitals is the same town',
    A.sameArea('Cobb Pkwy NW, ACWORTH', 'Main St NW, Acworth'), 'same-side');
+
+// --- one town, read two ways ------------------------------------------------
+//
+// PLACE_TOWN allows a second capitalised word because towns have them, and it
+// anchors on the end of the string - so one more capitalised word out of the
+// OCR joins the town. 21 of the 73 distinct town readings on file are a real
+// town with a junk word stuck to it (`Acworth Page`, `Kennesaw State`,
+// `Marietta BORE`), and 96 pairs of real dropoffs were being called `elsewhere`
+// on that alone.
+eq('a junk word stuck to the town does not make it another town',
+   A.sameArea('Cobb Pkwy NW, Acworth', 'Main St, Acworth Page'), null);
+eq('...in either order',
+   A.sameArea('Main St, Acworth Page', 'Cobb Pkwy NW, Acworth'), null);
+// The other shape, and the reason dropping the second word is not the fix: the
+// regex anchors on the end, so `Sandy Springs` would read as `springs` and the
+// two readings would stop relating at all.
+eq('...and a town clipped short of its second word is the same town',
+   A.sameArea('Alastair Dr, Sandy Springs',
+              'Peachtree Dunwoody Rd, Sandy'), null);
+// It withdraws an `elsewhere`; it never manufactures a `near`. Staking the
+// expensive mistake - an hour and a rating - on a guess about OCR damage is
+// exactly what this rule must not do.
+eq('...but two readings that merely COULD be one town are never called near',
+   ['same-town', 'same-side', 'same-zip'].indexOf(
+     A.sameArea('Cobb Pkwy NW, Acworth', 'Main St, Acworth Page')), -1);
+// The word boundary is what makes it safe. Douglas and Douglasville are two
+// different Georgia towns, 150 miles apart.
+eq('a town whose name merely starts the same is still elsewhere',
+   A.sameArea('Main St, Douglas', 'Bankhead Hwy, Douglasville'), 'elsewhere');
+// And getting past the town veto is not a pass on the quadrant one.
+eq('two readings that could be one town still disagree about a quadrant',
+   A.sameArea('Cobb Pkwy NW, Acworth', 'Main St SE, Acworth Page'), 'elsewhere');
 
 // Half of real pairs land here, and saying nothing is the answer they get.
 eq('a dropoff the card did not name says nothing',

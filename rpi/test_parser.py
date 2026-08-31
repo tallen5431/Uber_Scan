@@ -217,5 +217,32 @@ eq('two legs are summed', two_legs['legs'], 2)
 eq('...to a distance a card could have printed', two_legs['miles'], 9.6)
 
 
+# --- what a caller that forgets the distance gets ---------------------------
+# legs_short_a_distance takes the distance the READING ended up with, and on a
+# single leg that argument is the whole guard: with it, an "Add a delivery" card
+# whose distance was recovered elsewhere is left alone; without it, that good
+# reading is thrown away. Every caller that ships passes it, so nothing reached
+# through parse() or is_whole() exercises the default — and a default nothing
+# exercises is a default nobody checked.
+#
+# It defaults to doubt rather than to a number, because the two failures are not
+# symmetric only in the abstract: a forgetful caller that lands on "certain"
+# publishes a rate flattered by a distance that was never read, and one that
+# lands on "uncertain" asks for another frame.
+_lost = [{'minutes': 18.0, 'miles': None, 'isTotal': True,
+          'labelled': True, 'lostMiles': True}]
+_kept = [{'minutes': 18.0, 'miles': 7.2, 'isTotal': True,
+          'labelled': True, 'lostMiles': False}]
+eq('a lone leg that lost its distance, asked without one, is doubted',
+   P.legs_short_a_distance(_lost), True)
+eq('...and told the distance was recovered, is not',
+   P.legs_short_a_distance(_lost, 7.2), False)
+eq('...while a lone leg that never lost one is never doubted',
+   [P.legs_short_a_distance(_kept), P.legs_short_a_distance(_kept, 7.2)],
+   [False, False])
+eq('no legs at all is not a journey short of anything',
+   P.legs_short_a_distance([]), False)
+
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)

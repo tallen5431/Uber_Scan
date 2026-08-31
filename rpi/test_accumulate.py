@@ -817,6 +817,45 @@ eq('...so the distance that did read is not doubted',
 eq('...and the card is unfinished for the reason that is true of it',
    (P.is_whole(_hurtp), _hurtp['shortATime']), (False, True))
 
+# --- ...and the single-leg half of the same rule, through the merge ---------
+#
+# A card with ONE leg used to be exempt from legs_short_a_distance outright, on
+# the grounds that a single leg can be a total — and a total states no distance
+# without being damaged. The exemption was never about the count: it was about
+# not being able to tell those apart, and `lostMiles` is what tells them apart.
+# Once the two-leg hole was closed this was the bigger half of what was left:
+# 335 of the 337 damaged readings that still published an optimistic rate had
+# exactly one leg.
+#
+# The merge has to ask it of the distance the MERGE ended up with, not of what
+# the legs alone carry, and that is a separate mistake from making the same
+# error in parse(). The two cards below differ only in that.
+_ADD = '$5.85 Guaranteed (incl. tip) +18 min (+ 7.2 mi) total Taj Mahal'
+_LONE_HURT = '$7.06 Guaranteed (incl. tip) 26 min (g3 mi) total Taco Mac'
+_LONE_OK = '$7.09 34 min total'
+
+_n, _m = _episodes([(_ADD, None)] * 3)
+eq('an Add a delivery card keeps a single leg whose bracket did not read',
+   [(l.get('miles'), l.get('lostMiles')) for l in _m['legDetail']],
+   [(None, True)])
+# The whole risk the clause carries, and the reason the merge asks it AFTER the
+# merged distance exists. The lone-distance branch recovered 7.2 correctly; ask
+# the rule of the legs alone and this good reading is thrown away, which this
+# project treats as exactly as bad as publishing a wrong one.
+eq('...and the distance recovered beside it, so nothing is doubted',
+   (_m['miles'], _m['milesUncertain']), (7.2, False))
+eq('...and the reading is finished', P.is_whole(_m), True)
+
+_n, _m = _episodes([(_LONE_HURT, None)] * 3)
+eq('...but the same shape with nothing to recover is doubted',
+   (_m['miles'], _m['milesUncertain']), (None, True))
+eq('...and is not finished, so the loop goes on sampling it',
+   P.is_whole(_m), False)
+
+_n, _m = _episodes([(_LONE_OK, None)] * 3)
+eq('...while a lone total that printed no distance is neither',
+   (_m['miles'], _m['milesUncertain'], P.is_whole(_m)), (None, False, True))
+
 # --- four things an adversarial review found in this merge -----------------
 #
 # Every one reproduced exactly as reported, and every one published a wrong

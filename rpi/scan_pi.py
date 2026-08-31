@@ -1615,9 +1615,17 @@ def main():
             found = (out['parsed'] or {}).get('address')
             if found:
                 dropoff_seen = found
-                # Closed the moment it is answered. Left open, the next screen
-                # the driver brings up would overwrite the address they asked
-                # for with one they did not.
+                # Closed the moment it is answered, and what that closes is the
+                # READ BEAT below - not this branch. `dropoff_seen` already
+                # stops a second answer on its own, so an earlier comment
+                # claiming this guards against overwriting was naming a job it
+                # does not do, which is how a line like it gets deleted later.
+                #
+                # What it saves is up to two dozen more forced reads over the
+                # rest of the window, and on a Pi a read is several seconds of
+                # the whole computer's attention. Left open, the driver presses
+                # the button, gets their address, and then finds the rig
+                # unresponsive until the twelve seconds run out.
                 dropoff_until = 0.0
                 if args.json:
                     emit_dropoff(found, ms=out.get('ms'))

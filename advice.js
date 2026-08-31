@@ -238,9 +238,24 @@
   // because the card's icon row lands there: "Grace St & Hidden Forest Ct, }
   // Marietta", "Grady Grier Dr & New Towne Dr, , : Powder Springs", "Crestmont
   // Pkwy & Haygoode Dr, E Marietta". Either a non-letter glyph or a single
-  // stray capital, at most three of them. Reads 15 more towns off this driver's
+  // stray letter, at most three of them. Reads 15 more towns off this driver's
   // dropoffs and no false ones.
-  var PLACE_TOWN = /[,.]\s*(?:[^A-Za-z\s]\s*|[A-Z]\s+){0,3}([A-Z][A-Za-z]{2,}(?:\s+[A-Z][A-Za-z]{2,})?)\s*$/;
+  //
+  // A single stray letter of EITHER case, and the case is the correction. The
+  // first version took an uppercase one only, and that is not a rule about
+  // towns - it is an accident of which glyph tesseract picked for the same icon.
+  // The identical mark comes back as "E Marietta" and as "j Powder Springs",
+  // and taking one and refusing the other left `area()` returning **null** on
+  // 25 of the 1528 places on file - the geography going silent on a town that
+  // is printed perfectly plainly beside a piece of furniture. `offer_parser.py`
+  // has said so in a comment since the address reader was written; this is the
+  // other half of it.
+  //
+  // No US town name is preceded by a standalone one-letter word, so nothing
+  // real is being skipped. On the driver's 210 distinct dropoffs it places
+  // three more and moves 414 pairs off "cannot say" onto an answer - 382
+  // `elsewhere`, 32 `same-town` - and changes no answer that was already given.
+  var PLACE_TOWN = /[,.]\s*(?:[^A-Za-z\s]\s*|[A-Za-z]\s+){0,3}([A-Z][A-Za-z]{2,}(?:\s+[A-Z][A-Za-z]{2,})?)\s*$/;
   var PLACE_QUADRANT = /\b(NW|NE|SW|SE)\b/;
 
   /* The tail of a full street address: "…, Powder Springs, GA 30127".
@@ -352,17 +367,60 @@
          + '&travelmode=driving';
   }
 
+  /* Two readings of one town, or two towns?
+   *
+   * PLACE_TOWN allows a second capitalised word, because towns really have
+   * them - Powder Springs, Sandy Springs and Lithia Springs are all on this
+   * driver's cards - and it anchors on the END of the string. So when the OCR
+   * puts one more capitalised word after the town, that word joins the town:
+   * `Cobb Pkwy NW, Acworth Page`, `Canton Pl NW, Kennesaw State`,
+   * `Farmington Dr SW & Hereford Ct SW, Marietta BORE`.
+   *
+   * Twenty-one of the 73 distinct town readings on file are a real town with
+   * one junk word stuck to it, and one more is the other shape - `sandy` where
+   * the card said Sandy Springs. Between them they were turning 96 pairs of
+   * real dropoffs into `elsewhere` on nothing but OCR damage.
+   *
+   * Dropping the second word is not the fix. The regex anchors on the end, so
+   * `Sandy Springs` would then read as `springs` and the two readings of it
+   * would stop relating at all.
+   *
+   * What every one of these has in common is that one reading is the other
+   * plus or minus a WHOLE WORD at the end. That is the test, and the word
+   * boundary is what makes it safe: Douglas and Douglasville are two different
+   * Georgia towns and this does not join them.
+   *
+   * It only ever withdraws an `elsewhere`. It never manufactures a `near` -
+   * see where it lands below. Over every pair of the 210 distinct dropoffs on
+   * file it moves 96 pairs from `elsewhere` to null and nothing else moves: no
+   * new `same-town` is created, and not one of the 22 town pairs it stops
+   * calling `elsewhere` is actually two different towns. When it is wrong the
+   * cost is silence, which is what this line already gives on half of real
+   * pairs; calling them `same-town` instead would stake the expensive mistake
+   * - an hour and a rating - on a guess about OCR damage. */
+  function couldBeOneTown(a, b) {
+    if (a === b) return true;
+    var shorter = a.length <= b.length ? a : b;
+    var longer = a.length <= b.length ? b : a;
+    return longer.indexOf(shorter + ' ') === 0;
+  }
+
   function sameArea(a, b) {
     var x = area(a), y = area(b);
     if (!x || !y) return null;
     if (x.zip && y.zip && x.zip === y.zip) return 'same-zip';
-    if (x.town && y.town && x.town !== y.town) return 'elsewhere';
+    if (x.town && y.town && !couldBeOneTown(x.town, y.town)) return 'elsewhere';
     if (x.quadrant && y.quadrant && x.quadrant !== y.quadrant) return 'elsewhere';
-    if (!x.town || !y.town) {
+    if (!x.town || !y.town || x.town !== y.town) {
       // Same quadrant, no town on one of them: a quadrant is a whole side of
       // the metro, and on its own that is not enough to promise anything. A
       // ZIP on one side and not the other lands here too, and for the same
       // reason - one address being precise says nothing about the other.
+      //
+      // Two readings that COULD be one town land here as well, and this is
+      // where couldBeOneTown is kept honest. Getting past the veto above is
+      // not the same as agreeing: "these might be the same town" must not be
+      // reported as "these are near each other".
       return null;
     }
     return (x.quadrant && y.quadrant) ? 'same-side' : 'same-town';

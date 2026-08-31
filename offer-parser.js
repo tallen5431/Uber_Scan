@@ -1012,7 +1012,7 @@
     // A journey whose legs disagree about having a distance is not finished,
     // however many legs were found. `legs >= 2` below counts legs; it does not
     // ask whether they read. Another frame is exactly what fixes it.
-    if (legsShortADistance(detail)) return false;
+    if (legsShortADistance(detail, parsed.miles)) return false;
     // ...and its mirror: a distance the card printed that no leg claimed. The
     // leg that lost its minutes was dropped whole, so the journey is short a
     // time AND short a distance, which flatters the rate twice.
@@ -1099,9 +1099,30 @@
     return false;
   }
 
-  function legsShortADistance(legs) {
+  /* `miles` is the distance the READING ended up with, from any source, and is
+     consulted only for the single-leg case. null or undefined means the reading
+     has no distance at all - which is also the default, so a caller that
+     forgets to say lands on doubt rather than on a number nobody checked. */
+  function legsShortADistance(legs, miles) {
     var list = [], i;
     for (i = 0; i < (legs || []).length; i++) if (legs[i]) list.push(legs[i]);
+    /* A single leg used to be left alone entirely, because it can be a total,
+       which states no distance and is a whole journey by itself. That exemption
+       was never about the COUNT - it was about not being able to tell a total
+       from a leg whose distance failed to read, and lostMiles is what tells
+       them apart: a total prints no bracket where a distance would go, and a
+       damaged leg still has one. Once the two-leg hole was closed this became
+       the bigger half - 335 of the 337 damaged readings still publishing an
+       optimistic rate had ONE leg.
+
+       The miles guard is the whole risk. "Add a delivery" cards have one leg
+       whose distance did not read AND a lone distance the branch in parse()
+       recovers a few lines later, so they end up with the RIGHT number.
+       Doubting those would throw away a good reading, which this project treats
+       as exactly as bad as publishing a wrong one. */
+    if (list.length === 1) {
+      return !!list[0].lostMiles && (miles === null || miles === undefined);
+    }
     // Two or more, and it does not ask whether any other leg kept its distance.
     // Both legs losing theirs is the worse case, not the exempt one: it leaves
     // miles null, which reads as "this card states no distance" rather than as
@@ -1180,8 +1201,7 @@
     // and into anything reading either. Rounded here rather than at each
     // display, so the stored number and the shown number are the same number.
     if (miles !== null) miles = Math.round(miles * 100) / 100;
-    var dist = { miles: miles, corrected: correctedLeg,
-                 uncertain: legsShortADistance(used) };
+    var dist = { miles: miles, corrected: correctedLeg, uncertain: false };
 
     var itemMatch = text.match(ITEMS);
     var items = itemMatch ? toNumber(itemMatch[1]) : null;
@@ -1262,6 +1282,13 @@
     miles = checked.miles;
     dist.corrected = dist.corrected || checked.corrected;
     dist.uncertain = dist.uncertain || checked.uncertain;
+    /* Asked HERE, below the lone-distance branch and below checkDistance, not
+       up beside the leg sum where it used to sit. The single-leg clause turns
+       on whether the reading ended up with a distance from anywhere, and up
+       there the answer is only "did the legs carry one" - which on an "Add a
+       delivery" card is No a few lines before the lone branch makes it Yes.
+       The multi-leg branch does not look at miles at all. */
+    dist.uncertain = dist.uncertain || legsShortADistance(used, miles);
 
     var places = findPlaces(text, legs);
     return {
@@ -1622,6 +1649,11 @@
            findAddress: findAddress,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole,
+           /* Exported so the default can be checked directly. Everything that
+              ships passes `miles`, so nothing reachable through parse() or
+              isWhole() exercises the omitted argument — and the argument is
+              the guard that decides whether a good reading is thrown away. */
+           legsShortADistance: legsShortADistance,
            SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH,
            SANE_RATE: SANE_RATE, SANE_RATE_OVER_MINUTES: SANE_RATE_OVER_MINUTES,
            MAX_MPH: MAX_MPH, UNREADABLE_MPH: UNREADABLE_MPH };

@@ -1265,6 +1265,61 @@
     "minutes": 9,
     "miles": 5.3
    }
+  },
+  {
+   "name": "a lone leg whose distance printed and did not read makes the distance uncertain",
+   "_why": "The single-leg half of legs_short_a_distance, which the old count exemption hid. The reading keeps the journey's whole time against no distance at all, which flatters the rate, so it is doubted rather than published: milesUncertain makes rate() charge no mileage and cap the verdict at CLOSE CALL. What tells this from a real total is the bracket — a total prints none where a distance would go.",
+   "text": "$16.05 25 min (11.q5 mi) total",
+   "expect": {
+    "pay": 16.05,
+    "minutes": 25,
+    "miles": null,
+    "legs": 1,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "...on a labelled lone leg too, since the label decides nothing",
+   "_why": "The clause asks lostMiles, not labelled. A card that labelled its only leg still says nothing about whether a distance was ever printed beside it — and a total is exactly that shape, labelled and distanceless.",
+   "text": "$16.05 25 min (11.q5 mi) trip",
+   "expect": {
+    "miles": null,
+    "legs": 1,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "...and the corpus card the single-leg clause was measured on",
+   "_why": "Verbatim damage out of the journal rather than an invention: the distance read as (g3 mi), so the leg kept its 26 minutes and lost its miles entirely. 335 of the 337 damaged readings that still published an optimistic rate after the two-leg hole was closed had this shape.",
+   "text": "$7.06 Guaranteed (incl. tip) 26 min (g3 mi) total Taco Mac",
+   "expect": {
+    "pay": 7.06,
+    "minutes": 26,
+    "miles": null,
+    "legs": 1,
+    "milesUncertain": true
+   }
+  },
+  {
+   "name": "...but a lone leg whose distance was recovered elsewhere is certain",
+   "_why": "The `miles is None` guard, and the reason the clause is not simply 'one leg with lostMiles'. The bracket here holds a plus, which defeats the leg's own distance group, and the lone-distance branch in parse() then recovers 7.2 correctly. This is why the question is asked BELOW that branch rather than beside the leg sum, where the answer would still have been no. Doubting this would throw away a good number, which this project treats as exactly as bad as publishing a wrong one.",
+   "text": "$5.85 Guaranteed (incl. tip) +18 min (+ 7.2 mi) total Taj Mahal",
+   "expect": {
+    "pay": 5.85,
+    "minutes": 18,
+    "miles": 7.2,
+    "legs": 1,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...and a lone leg that read cleanly is certain",
+   "text": "$16.05 25 min (4.2 mi) total",
+   "expect": {
+    "miles": 4.2,
+    "legs": 1,
+    "milesUncertain": false
+   }
   }
  ],
  "rate": [
@@ -2505,9 +2560,32 @@
    "expect": true
   },
   {
-   "name": "a single leg whose bracket did not read is left alone",
-   "_why": "The Add a delivery shape, where a plus inside the bracket defeats the leg's own distance group. One leg, so the rule exempts it - and it must, because the lone-distance branch a few lines later recovers the 7.2 miles and the reading is correct. Doubting it would throw away a good number, which is the same failure pointed the other way.",
+   "name": "a single leg whose bracket did not read, but whose distance was recovered, is whole",
+   "_why": "The Add a delivery shape, where a plus inside the bracket defeats the leg's own distance group. The single-leg clause asks lostMiles AND that the reading ended up with no distance; here the lone-distance branch a few lines later recovers the 7.2 miles, so the reading is correct and is left alone. Doubting it would throw away a good number, which is the same failure pointed the other way. This is the whole risk the clause carries.",
    "text": "$5.85 Guaranteed (incl. tip) +18 min (+ 7.2 mi) total Taj Mahal",
+   "expect": true
+  },
+  {
+   "name": "...but the same lone leg with nothing to recover is not whole",
+   "_why": "The half the count exemption used to hide. The exemption was never about the COUNT — it was about not being able to tell a total from a leg whose distance failed to read, and lostMiles is what tells them apart. Another frame is exactly what fixes this, which is what calling it unfinished asks for.",
+   "text": "$16.05 25 min (11.q5 mi) total",
+   "expect": false
+  },
+  {
+   "name": "...and the corpus card it was measured on",
+   "_why": "Verbatim damage out of the journal: the distance read as (g3 mi), so the leg kept its 26 minutes and lost its miles entirely.",
+   "text": "$7.06 Guaranteed (incl. tip) 26 min (g3 mi) total Taco Mac",
+   "expect": false
+  },
+  {
+   "name": "a lone total that never printed a distance is still whole",
+   "_why": "The non-regression. A card stating no distance at all is a shape, not damage — there is no bracket to find — and reading it as unfinished would refuse an ordinary card forever, since no further frame can make a distance appear.",
+   "text": "$7.09 34 min total",
+   "expect": true
+  },
+  {
+   "name": "...and a lone leg that read cleanly is whole",
+   "text": "$16.05 25 min (4.2 mi) total",
    "expect": true
   },
   {

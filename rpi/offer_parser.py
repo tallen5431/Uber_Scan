@@ -771,7 +771,8 @@ def is_whole(parsed):
     # voice spoke it, and the offers page counted it — on a journey credited
     # with 23 minutes and 1.1 of its 8.4 miles. Another frame is exactly what
     # fixes that: the accumulator merges legs across frames for this reason.
-    if legs_short_a_distance(parsed.get('legDetail') or []):
+    if legs_short_a_distance(parsed.get('legDetail') or [],
+                             parsed.get('miles')):
         return False
     # ...and its mirror: a distance the card printed that no leg claimed. The
     # leg that lost its minutes was dropped whole, so the journey is short a
@@ -854,8 +855,13 @@ def distance_without_a_time(text, legs):
     return False
 
 
-def legs_short_a_distance(legs):
-    """True when a multi-leg journey is missing a distance from any of its legs.
+def legs_short_a_distance(legs, miles=None):
+    """True when a journey is missing a distance one of its legs should carry.
+
+    `miles` is the distance the READING ended up with, from any source, and is
+    consulted only for the single-leg case below. None means the reading has no
+    distance at all - which is also the default, so a caller that forgets to say
+    lands on doubt rather than on a number nobody checked.
 
     The sum is then a whole journey's *time* against part of its distance, and
     nothing downstream can tell. Every existing guard looks for a distance that
@@ -886,10 +892,31 @@ def legs_short_a_distance(legs):
 
     A card printing an ordinary leg always prints its distance beside the time,
     so a leg without one is OCR damage rather than a card shape. A *single* leg
-    is left alone, because it can be a total — the corpus has `$7.09 34 min
-    total`, which states no distance and is a whole journey by itself — and one
-    plain leg is already not whole for having no second half.
+    used to be left alone entirely, because it can be a total — the corpus has
+    `$7.09 34 min total`, which states no distance and is a whole journey by
+    itself.
+
+    That exemption was never about the COUNT. It was about not being able to
+    tell a total from a leg whose distance failed to read, and `lostMiles` is
+    what tells them apart: a total prints no bracket where a distance would go,
+    and a damaged leg still has one.
+
+    It has to be asked, because once the two-leg hole was closed this became the
+    bigger half — 335 of the 337 damaged readings still publishing an optimistic
+    rate had ONE leg.
+
+    The `miles is None` guard is the whole risk and the reason this is not
+    simply "a single leg with lostMiles". The "Add a delivery" cards have one
+    leg whose distance did not read AND a lone distance that the branch in
+    parse() recovers a few lines later, so they end up with the RIGHT number.
+    Doubting those would throw away a good reading, which this project treats as
+    exactly as bad as publishing a wrong one.
     """
+    if len(legs) == 1:
+        # Not `labelled`: a card that labelled its only leg still says nothing
+        # about whether a distance was ever printed beside it, and a total is
+        # exactly that shape.
+        return bool(legs[0].get('lostMiles')) and miles is None
     if len(legs) < 2:
         return False
     # A leg is part of the journey if it states a distance, if the card labelled
@@ -1452,7 +1479,6 @@ def parse(raw_text):
                 had_decimal = True
             if leg.get('corrected'):
                 corrected_leg = True
-    short_a_leg = legs_short_a_distance(used)
 
     # A card gives distances to one decimal place, so a sum of them has one
     # decimal place. Binary floating point disagrees: 3.5 + 6.1 is
@@ -1462,7 +1488,7 @@ def parse(raw_text):
     if miles is not None:
         miles = round2(miles)
     corrected = corrected_leg
-    uncertain = short_a_leg
+    uncertain = False
 
     m = ITEMS.search(text)
     items = to_number(m.group(1)) if m else None
@@ -1555,6 +1581,17 @@ def parse(raw_text):
         minutes, miles, had_decimal)
     corrected = corrected or checked_corrected
     uncertain = uncertain or checked_uncertain
+
+    # Asked HERE, below the lone-distance branch and below check_distance, not
+    # up beside the leg sum where it used to sit. The single-leg clause turns on
+    # whether the reading ended up with a distance from anywhere, and up there
+    # the answer is only "did the legs carry one" — which on an "Add a delivery"
+    # card is No a few lines before the lone branch makes it Yes. Asked early,
+    # the rule would doubt every one of those cards for a distance it was about
+    # to recover correctly. The multi-leg branch does not look at `miles` at all,
+    # so nothing else moves.
+    short_a_leg = legs_short_a_distance(used, miles)
+    uncertain = uncertain or short_a_leg
 
     places = find_places(text, legs)
     return {
