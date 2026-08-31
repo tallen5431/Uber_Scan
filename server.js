@@ -122,7 +122,13 @@ var scanner = {
   // /api/status always said none.
   wedged: 0,
   wedgedAt: null,      // when the last one happened, for the same reason
-  error: null
+  error: null,
+  // Set up HERE and never again, which is the difference that matters: these
+  // two are facts about the DRIVER'S CAR, not about the scanner process, so
+  // startScanner() deliberately leaves them alone. See the note there.
+  offer: null,         // the last offer read, so it can still be marked taken
+  offerAt: null,
+  holding: null        // the order being carried, if any. See holding().
 };
 
 var listeners = [];    // open server-sent-event responses
@@ -189,10 +195,25 @@ function startScanner() {
   scanner.started = Date.now();
   scanner.error = null;
   scanner.heardAt = null;          // nothing from the scan loop yet
-  scanner.offer = null;            // ...and no offer on the record yet
-  scanner.offerAt = null;
-  // The order in the car, if there is one. See holding().
-  scanner.holding = null;
+  // What is NOT cleared here, and why.
+  //
+  // `started`, `error` and `heardAt` are facts about the PROCESS, and a new
+  // process makes them false. The order in the car is not one of those. It is
+  // a fact about the driver's car, established by their own press of "Took",
+  // and a camera that crashed says nothing about whether there is food on the
+  // back seat.
+  //
+  // Clearing it meant a wedge mid-delivery — the watchdog kills a scanner
+  // blocked in the camera driver roughly every minute it stays blocked — threw
+  // the order away: the stack line went silent for the rest of that delivery,
+  // and Drop and the destination scan vanished off the panel with a job still
+  // in the car. That is the one time the pairing advice is worth anything.
+  //
+  // Both of these already end on their own terms: holding() expires an order on
+  // the card's stated time, and the offer on record is served with an age the
+  // panel judges for itself. Neither needs a process restart to end it, and a
+  // restart is the wrong reason. They are set up once, where the object is
+  // built, and this function does not mention them.
   console.log('scanner: started ' + bin + ' ' + args.join(' '));
 
   // Without this, a missing python3 or a bad SCANNER_CMD emits an 'error' with
@@ -204,6 +225,35 @@ function startScanner() {
     console.error('scanner: ' + scanner.error);
   });
 
+  // 'close', not 'exit'. A process that starts and then dies emits both, but a
+  // process that never starts at all — python3 missing, SCANNER_CMD wrong or
+  // not executable, EMFILE — emits 'error' and then 'close' and *never* 'exit'.
+  // Hanging the retry off 'exit' meant that case scheduled nothing, ever:
+  // scanner.proc stayed set so /api/status kept answering running:true, the
+  // live page kept its green dot and WAITING FOR AN OFFER, and every offer of
+  // the shift was missed with nothing on screen admitting it. The comment above
+  // names this exact failure and only half of it was handled.
+  scanner.proc.on('close', function (code, signal) {
+    console.error('scanner: exited (' + (signal || code) + ')');
+    var ranFor = Date.now() - scanner.started;
+    scanner.proc = null;
+    if (shuttingDown) return;
+    // Back off so a camera that is missing or busy does not spin the CPU.
+    //
+    // The count is of *consecutive* failures, which is what a backoff is for,
+    // and it used to be a lifetime tally. A rig that had scanned all day and hit
+    // four unrelated hiccups was thereafter 48 seconds from restarting after any
+    // of them — 48 seconds of a shift with the camera off, because of things
+    // that had gone right hours earlier. A child that stayed up long enough to
+    // be doing its job did not fail to start, so the ladder resets.
+    if (ranFor > HEALTHY_RUN_MS) scanner.restarts = 0;
+    scanner.lifetimeRestarts = (scanner.lifetimeRestarts || 0) + 1;
+    var delay = Math.min(60000, 3000 * Math.pow(2, Math.min(scanner.restarts, 4)));
+    scanner.restarts++;
+    console.error('scanner: retrying in ' + Math.round(delay / 1000) + 's');
+    setTimeout(startScanner, delay);
+  });
+
   // ...and the pipes are not guaranteed to exist. When the process runs out of
   // file descriptors there are none left to build them from, so spawn returns a
   // child whose `stdout` and `stderr` are undefined, and reading `.on` off that
@@ -213,8 +263,15 @@ function startScanner() {
   // That is not a hypothetical pairing. Until the fix a few hundred lines below
   // this, every download a phone abandoned leaked a descriptor, so a rig that
   // had been up long enough arrived at exactly this state and then died on its
-  // next scanner restart. The 'close' handler underneath already knows what to
-  // do about EMFILE — it names it — and it only ever needed the chance to run.
+  // next scanner restart. The 'close' handler ABOVE already knows what to do
+  // about EMFILE — it names it — and it only ever needed the chance to run.
+  //
+  // Above, and that word is the whole point. It used to be below, and this
+  // early return came first — so the one path that says "retrying" attached no
+  // retry. `scanner.proc` stayed set, /api/status kept answering running:true,
+  // the panel kept its green dot, and the rig read nothing for the rest of the
+  // shift with the log line "Retrying." on screen and nothing retrying. This
+  // comment described a fix the code returned past.
   if (!scanner.proc.stdout || !scanner.proc.stderr) {
     scanner.error = 'could not attach to ' + bin + ': no pipes (out of file '
                   + 'descriptors?). Retrying.';
@@ -305,34 +362,6 @@ function startScanner() {
     scanner.error = text.split('\n').slice(-3).join(' ');
   });
 
-  // 'close', not 'exit'. A process that starts and then dies emits both, but a
-  // process that never starts at all — python3 missing, SCANNER_CMD wrong or
-  // not executable, EMFILE — emits 'error' and then 'close' and *never* 'exit'.
-  // Hanging the retry off 'exit' meant that case scheduled nothing, ever:
-  // scanner.proc stayed set so /api/status kept answering running:true, the
-  // live page kept its green dot and WAITING FOR AN OFFER, and every offer of
-  // the shift was missed with nothing on screen admitting it. The comment above
-  // names this exact failure and only half of it was handled.
-  scanner.proc.on('close', function (code, signal) {
-    console.error('scanner: exited (' + (signal || code) + ')');
-    var ranFor = Date.now() - scanner.started;
-    scanner.proc = null;
-    if (shuttingDown) return;
-    // Back off so a camera that is missing or busy does not spin the CPU.
-    //
-    // The count is of *consecutive* failures, which is what a backoff is for,
-    // and it used to be a lifetime tally. A rig that had scanned all day and hit
-    // four unrelated hiccups was thereafter 48 seconds from restarting after any
-    // of them — 48 seconds of a shift with the camera off, because of things
-    // that had gone right hours earlier. A child that stayed up long enough to
-    // be doing its job did not fail to start, so the ladder resets.
-    if (ranFor > HEALTHY_RUN_MS) scanner.restarts = 0;
-    scanner.lifetimeRestarts = (scanner.lifetimeRestarts || 0) + 1;
-    var delay = Math.min(60000, 3000 * Math.pow(2, Math.min(scanner.restarts, 4)));
-    scanner.restarts++;
-    console.error('scanner: retrying in ' + Math.round(delay / 1000) + 's');
-    setTimeout(startScanner, delay);
-  });
 }
 
 /* Kill a scanner that is running and has stopped saying anything.

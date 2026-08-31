@@ -3454,6 +3454,35 @@ the full address appears at accept or only after pickup — is unanswered. The Z
 anchor survives almost any layout; the street/city split is where a surprise
 would land.
 
+#### A read that outlived the window it went out in
+
+`digest()` judged the window by `time.time()` at the moment the reading LANDED.
+A read is over a second on a Pi, so a window closing while one was in flight
+threw the answer away: the read went out with the window open, found the
+address, and arrived a second past the deadline to be told it was too late.
+
+And it is the worst second to lose. The driver who took a moment to get the
+destination up is exactly the driver whose address is found by the last read of
+the window — the case the window exists for.
+
+The reader now carries the launch time back on the finished read, and the window
+is judged by when the picture was **taken**. That is the only clock the far end
+can honestly use.
+
+**The check for it was vacuous first, and that is worth writing down.** The
+harness replaces `time.sleep` with one that caps every wait at 10ms — which is
+how the loop gets driven quickly — so a stub calling `time.sleep(1.6)` to stage
+a slow read staged nothing at all. The test asserted a destination came out, one
+did, and it passed for reasons unrelated to the thing it was testing. The
+mutation survived all 245 checks.
+
+It now holds the genuine `time.sleep`, captured at import before anything
+patches it. Clean: 245 pass. Mutant: `a destination found by a read that
+outlived its window is still the answer: got 0 want 1`.
+
+This is the same defect class this file keeps recording, written while hunting
+it: **a check that cannot fail is worse than no check, because it is counted.**
+
 #### …and the button for it could not be reached on the path it was built for
 
 Worth stating plainly, because it is the third time in one sitting: the scanner
@@ -3999,6 +4028,54 @@ on file:
 `elsewhere` matters more than the total: 96 pairs that were being called far
 apart on nothing but a junk word now say nothing, and 382 that were saying
 nothing now have a town to compare.
+
+### Two ways the rig could go quiet and never come back
+
+Both in `startScanner()`, both found by an adversarial review of the lifecycle,
+and both cost a whole shift rather than one offer.
+
+**The retry that was never scheduled.** When a process runs out of file
+descriptors there are none left to build pipes from, so `spawn` returns a child
+whose `stdout` and `stderr` are undefined. The guard for that writes
+*"Retrying."* and returns — and it returned **before** the `'close'` handler
+that schedules the retry was attached. So nothing retried. `scanner.proc` stayed
+set, `/api/status` kept answering `running: true`, the panel kept its green dot,
+and the rig read nothing for the rest of the shift with "Retrying." in the log
+and nothing retrying.
+
+The comment sitting above it said the close handler *"only ever needed the
+chance to run"*. The code returned past it. A comment describing a fix the
+control flow skips is worse than no comment: it is why nobody looked again.
+
+Handlers now go on immediately after the spawn, before any guard can return.
+Checked structurally — the ordering, asserted on the source — and labelled as
+structural, because nothing a test can do to this server makes `spawn` hand back
+a child with no pipes. The choice was that check or none, and this failure is
+too expensive to leave unwatched.
+
+**The order in the car, thrown away by a restart.** `startScanner()` cleared
+`scanner.holding` and `scanner.offer` on every start. The watchdog kills a
+scanner blocked in the camera driver roughly every minute it stays blocked — so
+a wedge mid-delivery took the order with it: the stack line went silent for the
+rest of that delivery, and Drop and the destination scan vanished off the panel
+with a job still in the car. That is the one time the pairing advice is worth
+anything.
+
+The distinction the code was missing: `started`, `error` and `heardAt` are facts
+about the **process**, and a new process makes them false. The order in the car
+is a fact about the **driver's car**, established by their own press of "Took".
+A camera that crashed says nothing about whether there is food on the back seat.
+Both already end on their own terms — `holding()` expires an order on the card's
+stated time, and the offer is served with an age the panel judges for itself —
+so neither needs a restart to end it, and a restart is the wrong reason. They
+are set up once, where the object is built, and `startScanner()` does not mention
+them.
+
+Driven for real: the watchdog suite marks an offer taken, lets the scanner wedge,
+and checks the order is still there after the replacement starts. The fake
+scanner emits that offer on its FIRST start only, so "the order survived" cannot
+be confused with "the replacement said it again". Reverting the fix fails all
+three.
 
 ### The leg that lost its minutes, and took its distance with it
 
@@ -4886,7 +4963,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4452 checks
+npm test                # all 30 suites, 4461 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

@@ -30,6 +30,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# The genuine one, taken before anything in this file replaces it. run() swaps
+# time.sleep for a version that caps every wait at 10ms so the loop can be
+# driven quickly — which is right for the loop and wrong for a stub that is
+# meant to be SLOW. Anything staging a slow read has to hold this.
+_REAL_SLEEP = time.sleep
+
 
 # The two windows live.html keys staleness on, read out of the page rather than
 # copied into this file. A copy is a second place to remember, and the failure
@@ -1810,6 +1816,54 @@ run_nodrop = run(TC.uberx_screen(), seconds=10.0, extra_argv=['--no-parallel'],
 ok_('a run with no press still reads the screen', _nav_reads[0] > 2)
 eq('...and an address nobody asked for is not a destination',
    run_nodrop['destinations'], [])
+
+
+# --- a read that outlives the window it went out in ------------------------
+#
+# A read is over a second on a Pi. Judged by the clock at the moment the
+# reading LANDS, a window closing while one is in flight throws the answer
+# away: the read went out with the window open, found the address, and arrived
+# a second past the deadline to be told it was too late.
+#
+# And it is the worst second to lose. The driver who took a moment to get the
+# destination up is exactly the driver whose address is found by the last read
+# of the window — the case the window exists for.
+#
+# Staged deterministically rather than hoped for: the window is shortened to a
+# second and the reader made to take longer than that, so exactly one read is
+# launched, inside, and lands outside.
+def _slow_address(self, frames, now=None, geom=None):
+    text = 'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start'
+    parsed = OP2.parse(text)
+    # _REAL_SLEEP, not time.sleep. run() replaces time.sleep with one that caps
+    # every wait at 10ms — that is how the loop is driven quickly — and a stub
+    # calling the patched one is not a slow read at all. The first version of
+    # this check did exactly that: it staged nothing, and the mutation it was
+    # written to catch survived it. A test that cannot fail is worse than none,
+    # because it is counted.
+    _REAL_SLEEP(1.6)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+_was_window = SP2.DROPOFF_WINDOW
+SP2.DROPOFF_WINDOW = 1.0
+try:
+    run_slow = run(TC.uberx_screen(), seconds=12.0, appear_at=10_000.0,
+                   extra_argv=['--no-parallel'], look=_slow_address,
+                   press_dropoff=True)
+finally:
+    SP2.DROPOFF_WINDOW = _was_window
+
+eq('a destination found by a read that outlived its window is still the answer',
+   len(run_slow['destinations']), 1)
+if run_slow['destinations']:
+    eq('...and it is the address that was read',
+       run_slow['destinations'][0][0].get('line'),
+       '1234 Daffodil Ln, Powder Springs, GA 30127')
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)

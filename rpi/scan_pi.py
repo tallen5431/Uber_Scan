@@ -291,7 +291,13 @@ class Reader:
             self._thread.start()
 
     def submit(self, frames, now, geom):
-        """Hand over frames to read. Call only when not busy."""
+        """Hand over frames to read. Call only when not busy.
+
+        `now` comes back on the finished read as `at`, and it is the only clock
+        the far end can honestly use. A read is over a second on a Pi, so
+        anything decided by `time.time()` after it lands is asking about a
+        moment more than a second later than the picture it is judging.
+        """
         self.busy = True
         if not self.threaded:
             self._done.put(self._job(frames, now, geom))
@@ -319,7 +325,7 @@ class Reader:
     def _job(self, frames, now, geom):
         try:
             return {'outs': self.scanner.look_many(frames, now, geom=geom),
-                    'geom': geom, 'frames': frames, 'error': None}
+                    'geom': geom, 'frames': frames, 'at': now, 'error': None}
         except BaseException as e:                 # noqa: BLE001 — see take()
             # ...except the two that are not a failed read at all.
             #
@@ -340,7 +346,8 @@ class Reader:
             # `busy` stuck True and the rig alive but never reading again.
             if not self.threaded and not isinstance(e, Exception):
                 raise
-            return {'outs': None, 'geom': geom, 'frames': frames, 'error': e}
+            return {'outs': None, 'geom': geom, 'frames': frames, 'at': now,
+                    'error': e}
 
     def _serve(self):
         while not self._stop.is_set():
@@ -1572,7 +1579,7 @@ def main():
         log('journal: %s (%d offer%s so far)%s'
             % (args.journal, kept, '' if kept == 1 else 's',
                ', still on the last one' if resumed else ''))
-    def digest(out, frame):
+    def digest(out, frame, read_at=None):
         """Everything a read means, once the reading itself is done.
 
         On the loop's thread, always — the accumulator, the journal, the voice
@@ -1611,7 +1618,15 @@ def main():
         # screen with an address and no payout is `complete: False`, which is
         # the branch that decides the reading is not worth a verdict — correct
         # for an offer, and it would throw this away.
-        if time.time() < dropoff_until and dropoff_seen is None:
+        # Judged by when the picture was TAKEN, not by when the reading of
+        # it came back. A read is over a second on a Pi, so a window closing
+        # while one is in flight threw the answer away: the read went out with
+        # the window open, found the address, and landed a second past the
+        # deadline to be told it was too late. That is the worst second to lose
+        # it in - the driver who took a moment to get the destination up is
+        # exactly the driver whose address arrives at the end of the window.
+        started = read_at if read_at is not None else time.time()
+        if started < dropoff_until and dropoff_seen is None:
             found = (out['parsed'] or {}).get('address')
             if found:
                 dropoff_seen = found
@@ -1875,7 +1890,7 @@ def main():
         # in the other.
         for earlier in batch[:-1]:
             accumulator.add(earlier['parsed'])
-        return digest(batch[-1], done['frames'][0])
+        return digest(batch[-1], done['frames'][0], done.get('at'))
 
     try:
         while True:

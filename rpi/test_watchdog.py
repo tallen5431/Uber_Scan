@@ -74,6 +74,17 @@ signal.signal(signal.SIGINT, signal.SIG_IGN)
 with open(os.environ['STARTS'], 'a') as fh:
     fh.write('%d\n' % os.getpid())
 
+# An offer on the record, put there by the FIRST start only. Emitted again by
+# the replacement, "the order survived the restart" could not be told apart
+# from "the replacement said it again".
+with open(os.environ['STARTS']) as fh:
+    first_start = len([l for l in fh if l.strip()]) == 1
+if first_start:
+    sys.stdout.write(json.dumps({'offer': {
+        'id': 'wedge-1', 'pay': 14.0, 'minutes': 45.0, 'billedMinutes': 45.0,
+        'miles': 6.0, 'cost': 1.8, 'perHour': 18.7}}) + '\n')
+    sys.stdout.flush()
+
 until = time.time() + float(os.environ['BEATS'])
 while time.time() < until:
     sys.stdout.write(json.dumps({'alive': True}) + '\n')
@@ -143,6 +154,20 @@ try:
     eq('...it is still the same process', status()['scanner']['running'], True)
     eq('...and is not counted as wedged', status()['scanner']['wedged'], 0)
 
+    # --- an order in the car, taken before the wedge ----------------------
+    #
+    # The state that has to survive what follows. A wedge mid-delivery is not a
+    # rare shape: the watchdog kills a scanner blocked in the camera driver
+    # roughly every minute it stays blocked, and the driver is carrying food
+    # for twenty.
+    ok_('an offer reaches the record',
+        wait_for(lambda: (status().get('offer') or {}).get('id') == 'wedge-1'))
+    urllib.request.urlopen(urllib.request.Request(
+        base + '/api/offers/mark', method='POST',
+        data=json.dumps({'id': 'wedge-1', 'accepted': True}).encode('utf-8'),
+        headers={'Content-Type': 'application/json'}), timeout=3).read()
+    ok_('...and is marked as the order in the car', bool(status().get('holding')))
+
     # --- it goes quiet, and is killed and replaced ------------------------
     ok_('a silent scanner is restarted', wait_for(lambda: started_count() >= 2))
     ok_('...having actually been killed, not asked',
@@ -161,6 +186,20 @@ try:
     ok_('the wedge count is not zeroed by the restart', st['scanner']['wedged'] >= 1)
     ok_('...nor is the time it happened', st['scanner']['wedgedAt'])
 
+    # ...and neither is the order in the car, which is the one that costs money.
+    #
+    # A camera that crashed says nothing about whether there is food on the back
+    # seat. Cleared on restart, a wedge mid-delivery took the order with it: the
+    # stack line went silent for the rest of that delivery and Drop and the
+    # destination scan vanished off the panel with a job still in the car — the
+    # one time the pairing advice is worth anything. The replacement scanner
+    # never re-sends this offer (see the fake above), so this can only pass by
+    # surviving.
+    ok_('the order in the car survives the restart', bool(st.get('holding')))
+    eq('...with its payout intact', (st.get('holding') or {}).get('pay'), 14.0)
+    ok_('...and the offer is still there to un-mark',
+        (st.get('offer') or {}).get('id') == 'wedge-1')
+
     # --- and it keeps happening -------------------------------------------
     # A camera that is genuinely gone should produce a steady retry rather than
     # one attempt and a shrug — the replacement wedges too, and is caught too.
@@ -170,6 +209,30 @@ try:
     # --- the site is unharmed by all of it --------------------------------
     eq('the server survives its own watchdog',
        urllib.request.urlopen(base + '/live.html', timeout=3).status, 200)
+
+    # --- the restart that was never scheduled -----------------------------
+    #
+    # A structural check, and it says so. Everything above drives a real
+    # scanner; this one path cannot be driven, because it needs spawn to hand
+    # back a child with no pipes — the shape a process out of file descriptors
+    # gets — and nothing a test can do to this server produces that. The choice
+    # was a check that proves the ordering or no check at all, and this failure
+    # is too expensive to leave unwatched: the rig reads nothing for the rest of
+    # the shift while /api/status answers running:true and the panel keeps its
+    # green dot.
+    #
+    # The guard for it writes "Retrying." and returns. If it returns before the
+    # 'close' handler is attached, nothing retries — the message is a promise
+    # the function has already broken by the time it prints. The code carried a
+    # comment saying the handler "only ever needed the chance to run" while
+    # returning past it.
+    src = open(os.path.join(ROOT, 'server.js')).read()
+    at_close = src.index("scanner.proc.on('close'")
+    at_guard = src.index('!scanner.proc.stdout')
+    ok_('the restart handler is attached before the no-pipes guard returns',
+        at_close < at_guard)
+    ok_('...and that guard really does give up on the spawn',
+        'return;' in src[at_guard:at_guard + 400])
 finally:
     proc.terminate()
     try:
