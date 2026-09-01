@@ -189,6 +189,35 @@ try:
                                         for r in stored))
     ok_('...and so is the rule', any(r.get('kind') == 'rule' for r in stored))
 
+    # ...and the pairing, which is the same shape as a mark — an id and no seq
+    # — and is the row a shift driven to test the stacking advice exists to
+    # produce. Dropped here, the box at home would hold the offers and none of
+    # the advice, which is the whole of the evidence.
+    pair = {'v': 1, 'at': now + 3, 'kind': 'pair', 'id': 'off99',
+            'held': {'pay': 12.0, 'minutes': 30.0, 'dropoff': 'Oak Ln, Marietta',
+                     'scanned': True, 'heldMs': 60000},
+            'offer': {'pay': 9.0, 'minutes': 20.0,
+                      'dropoff': 'Chastain Rd NW, Kennesaw', 'pickup': None},
+            'stack': {'pay': 17.4, 'worst': 20.9, 'best': 34.8, 'minMinutes': 30,
+                      'maxMinutes': 50, 'state': 'warn', 'sure': True,
+                      'ends': 'elsewhere'}}
+    paired = SY.send(far.base, [pair])
+    eq('a pairing crosses over', paired['added'], 1)
+    eq('...with nothing refused', paired['malformed'], 0)
+    stored = lines(far.journal)
+    ok_('...and the advice it recorded is there',
+        any(r.get('kind') == 'pair'
+            and (r.get('stack') or {}).get('ends') == 'elsewhere'
+            for r in stored))
+    eq('...and sending it again adds nothing',
+       SY.send(far.base, [pair])['added'], 0)
+    # Two pairings for one offer are a real thing - the same card judged again
+    # against a different order - and they must not collapse onto each other.
+    pair2 = dict(pair, at=now + 4)
+    eq('a second pairing for the same offer is its own row',
+       SY.send(far.base, [pair2])['added'], 1)
+    stored = lines(far.journal)
+
     # Tags are re-sent on every tick alongside the offers, so a second run must
     # not double them — a card marked taken twice is a card counted twice.
     eq('sending the tags again adds nothing', SY.send(far.base, [mark, rule])['added'], 0)

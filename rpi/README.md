@@ -4029,6 +4029,51 @@ on file:
 apart on nothing but a junk word now say nothing, and 382 that were saying
 nothing now have a town to compare.
 
+### A shift driven to test the stacking advice was a test of nothing
+
+The offers reach the journal. The marks reach the journal. **The advice did
+not.** The stack line was computed in the web server's memory, painted once, and
+lost — so after a shift the file held what every card said and which ones the
+driver took, and nothing whatever about what the panel had told them.
+
+Which makes the only question worth asking unanswerable: *when it said take
+both, was it right?*
+
+That is not a gap in the analysis, it is a gap in the experiment. A shift driven
+to test this feature produced no evidence about it.
+
+So a pairing is now written down at the moment it is made — one row per offer,
+`kind: 'pair'`, alongside the marks and the rules:
+
+```
+held   pay, minutes, dropoff, SCANNED, heldMs
+offer  pay, minutes, dropoff, pickup
+stack  pay, worst, best, minMinutes, maxMinutes, state, sure, ends
+```
+
+Everything a person needs to grade one decision without having been there: both
+ends, both payouts, the range the panel drew, the colour it drew it in, and the
+geography verdict. `held.scanned` is the other half — whether that destination
+came off the card or off the **⌖ Dropoff** scan, which is the difference that
+button exists to make and the thing most worth measuring.
+
+**A null stack is recorded as null rather than skipped.** "How often can it say
+anything at all" is the question this feature lives or dies by, and a file that
+only contains the times it spoke would answer it wrong.
+
+Written **once per offer**, where an offer goes on the record — not in
+`withStack()`, which runs five times a second for as long as the card is on the
+phone. Best-effort: a journal that cannot be written must never stop the panel
+answering. The advice is the product; this is the notebook.
+
+**And the sync had to learn it, or the whole thing was pointless.** A pairing
+has an id and no `seq`, which is exactly the shape `syncKey` rejects — the same
+failure its own comment already records for marks, where "a shift's worth of
+tags went nowhere, silently, under a malformed count nobody looks at". Without a
+`pair` branch every one would have been dropped on the way to the box at home,
+which is the only machine where a shift gets analysed. Reverting that branch
+fails four checks; reverting the recorder fails the pairing outright.
+
 ### The stack line said two things and could show neither
 
 The line that answers "can I take both?" had **no browser check at all**, which
@@ -5009,7 +5054,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4483 checks
+npm test                # all 30 suites, 4505 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

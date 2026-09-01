@@ -565,6 +565,84 @@ try:
     os.remove(QUIET)
     time.sleep(0.5)
 
+    # --- the pairing, written down where a shift can be graded from it ------
+    #
+    # The stack line is the newest thing on this rig and until now it left no
+    # trace: a shift driven to test it came back with the offers and the marks
+    # and NOTHING about what the panel had advised. "When it said take both,
+    # was it right?" could not be asked of the file the shift produced, which
+    # makes the shift a test of nothing.
+    #
+    # One row per offer, written when the offer goes on the record and an order
+    # is already in the car.
+    ok_('an order to pair against reaches the record',
+        put_offer({'id': 'pairheld-7', 'pay': 12.0, 'minutes': 30.0,
+                   'billedMinutes': 30.0, 'miles': 8.0, 'cost': 2.4,
+                   'perHour': 19.2, 'dropoff': 'Oak Ln, Marietta'}))
+    post(base, '/api/offers/mark', {'id': 'pairheld-7', 'accepted': True})
+    ok_('...and is in the car', bool(get(base, '/api/status').get('holding')))
+    ok_('a second offer arrives while it is',
+        put_offer({'id': 'paired-8', 'pay': 9.0, 'minutes': 20.0,
+                   'billedMinutes': 20.0, 'miles': 4.0, 'cost': 1.2,
+                   'perHour': 23.4, 'target': 25.0, 'band': 15.0,
+                   'costPerMile': 0.3, 'dropoff': 'Chastain Rd NW, Kennesaw',
+                   'pickup': 'Wingstop (Acworth)'}))
+    time.sleep(0.8)
+
+    rows = []
+    for line in open(journal):
+        line = line.strip()
+        if line:
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                pass
+    # Selected by id, not "the only one in the file". Earlier in this run an
+    # offer arrived while a different order was in the car, and that pairing was
+    # written down too - correctly. Asserting on whichever came first read the
+    # wrong row and reported the wrong failure.
+    pairs = [r for r in rows if r.get('kind') == 'pair' and r.get('id') == 'paired-8']
+    eq('the pairing is written down, once for this offer', len(pairs), 1)
+    ok_('...and every pairing names the offer it judged',
+        all(isinstance(r.get('id'), str) and r['id']
+            for r in rows if r.get('kind') == 'pair'))
+    if pairs:
+        pr = pairs[0]
+        eq('...carrying what was already in the car',
+           (pr.get('held') or {}).get('pay'), 12.0)
+        eq('...and where that one ends',
+           (pr.get('held') or {}).get('dropoff'), 'Oak Ln, Marietta')
+        # The difference the destination button exists to make. A card-derived
+        # dropoff is a cross-street; a scanned one is a full address, and which
+        # it was decides how much the geography verdict is worth.
+        eq('...and whether that came off a card or off a scan',
+           (pr.get('held') or {}).get('scanned'), False)
+        eq('...the offer it was judged against',
+           (pr.get('offer') or {}).get('pay'), 9.0)
+        eq('...and where THAT one ends',
+           (pr.get('offer') or {}).get('dropoff'), 'Chastain Rd NW, Kennesaw')
+        st = pr.get('stack') or {}
+        ok_('...and what the panel actually advised', bool(st))
+        for field in ('worst', 'best', 'state'):
+            ok_('...including %s, which is what gets graded' % field,
+                field in st)
+        # Two towns that are genuinely different, so the geography really was
+        # asked and really did answer. A pairing that recorded `ends: null`
+        # every time would look like data and be none.
+        eq('...and the geography verdict it drew', st.get('ends'), 'elsewhere')
+
+    # It must not be mistaken for an offer by anything that walks this file.
+    eq('a pairing is not counted as an offer',
+       [r.get('id') for r in rows
+        if not r.get('kind') and r.get('id') == 'paired-8'], [])
+    # ...and it has to survive the trip to the box at home, which is the only
+    # machine where a shift gets analysed. A row with an id and no seq is
+    # exactly the shape the sync used to drop in silence.
+    server_src = open(os.path.join(ROOT, 'server.js')).read()
+    ok_('the sync knows how to identify a pairing',
+        "row.kind === 'pair'" in server_src)
+    post(base, '/api/delivered')
+
     # --- the export, which is how any of this reaches anyone -----------------
     #
     # Nothing checked this. It is the one path by which a shift's readings leave

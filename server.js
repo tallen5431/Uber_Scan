@@ -306,6 +306,26 @@ function startScanner() {
         if (read.offer && typeof read.offer.id === 'string') {
           scanner.offer = read.offer;
           scanner.offerAt = Date.now();
+          // ...and if there is an order in the car, WRITE THE PAIRING DOWN.
+          //
+          // Without this a shift produces no evidence about the one feature it
+          // was driven to test. The offer rows record what each card said and
+          // whether the driver marked it taken; the advice that was on the
+          // panel when they decided — the range, the state, whether the two
+          // jobs were called near or elsewhere — was computed in this process's
+          // memory, shown once, and lost. Afterwards there is no way to ask the
+          // only question that matters: when it said take both, was it right?
+          //
+          // Once per offer, here, because this is the moment an offer goes on
+          // the record and it happens exactly once. Doing it in withStack()
+          // would write five rows a second for as long as the card is on the
+          // phone.
+          //
+          // Its own row with a `kind`, like a mark or a rule, so every reader
+          // that walks this file already knows to skip it — including the
+          // scanner's own resume(), which must never mistake an annotation for
+          // the last offer.
+          recordPairing(scanner.offer, Date.now());
         }
         // The destination, read off the screen that comes AFTER the accept.
         //
@@ -579,6 +599,57 @@ function withStack(read, now) {
                                  costPerMile: read.costPerMile }, now)
     : null;
   return read;
+}
+
+/* The pairing, written down at the moment it is made.
+ *
+ * The stack line is the newest and least-proven thing on this rig, and until
+ * this it left no trace: a shift driven to test it came back with the offers
+ * and the marks, and nothing at all about what the panel had ADVISED. "When it
+ * said take both, was it right?" was unanswerable from the file the shift
+ * produced, which makes the shift a test of nothing.
+ *
+ * What is recorded is what a person would need to grade one decision without
+ * having been there: both ends, both payouts, the range the panel drew, the
+ * colour it drew it in, and the geography verdict — including the ones where
+ * the geography said nothing, because "how often can it say anything" is the
+ * question this feature lives or dies by.
+ *
+ * `held.dropoff` and `held.dropoffScanned` together are the other half of it:
+ * whether the destination came off the card or off a scan of the screen after
+ * the accept, which is the difference the ⌖ Dropoff button exists to make.
+ *
+ * Best-effort. A journal that cannot be written must never stop the panel from
+ * answering — the advice is the product, this is the notebook.
+ */
+function recordPairing(offer, now) {
+  var held = holding(now);
+  if (!held || !offer || typeof offer.id !== 'string') return;
+  var s = Advice.stack(held, offer, { target: offer.target, band: offer.band,
+                                      costPerMile: offer.costPerMile }, now);
+  var row = {
+    v: 1, kind: 'pair', at: now, id: offer.id,
+    // The order already in the car.
+    held: {
+      pay: numOrNull(held.pay), minutes: numOrNull(held.minutes),
+      dropoff: held.dropoff || null,
+      scanned: !!held.dropoffScanned,
+      heldMs: Math.max(0, now - held.acceptedAt)
+    },
+    // ...and the one being judged against it.
+    offer: {
+      pay: numOrNull(offer.pay), minutes: numOrNull(offer.minutes),
+      dropoff: offer.dropoff || null, pickup: offer.pickup || null
+    },
+    // What the panel actually said. Null when it said nothing, which is a
+    // measurement in its own right and must not be dropped as "no data".
+    stack: s ? { pay: s.pay, worst: s.worst, best: s.best,
+                 minMinutes: s.minMinutes, maxMinutes: s.maxMinutes,
+                 state: s.state, sure: !!s.sure, ends: s.ends || null } : null
+  };
+  appendLines(JSON.stringify(row) + '\n', function (err) {
+    if (err) console.error('journal: could not record a pairing: ' + err.message);
+  });
 }
 
 function broadcast(read) {
@@ -888,6 +959,19 @@ function syncKey(row) {
   if (row.kind === 'rule') {
     var m = row.match || {};
     return key(['r', row.at, m.pay, m.minutes, m.miles, row.accepted, row.hidden]);
+  }
+  // A pairing has an id and no seq, which is the shape the fallback below
+  // rejects — so without this branch every one of them would be dropped by the
+  // sync, quietly, under a `malformed` count nobody reads. That is the same
+  // failure this comment block already describes for marks, and it would land
+  // on exactly the rows a shift is driven to collect: the copy on the box at
+  // home would have the offers and none of the advice.
+  //
+  // Identified like a mark: which offer, and when it was written. Both are
+  // fixed the moment it lands on disk and neither is rewritten.
+  if (row.kind === 'pair') {
+    if (typeof row.id !== 'string' || !row.id) return null;
+    return key(['p', row.id, row.at]);
   }
   // Anything else needs the pair. A kind this build has never heard of is
   // carried across rather than dropped, as long as it can say which row it is:
