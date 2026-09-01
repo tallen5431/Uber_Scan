@@ -4029,6 +4029,93 @@ on file:
 apart on nothing but a junk word now say nothing, and 382 that were saying
 nothing now have a town to compare.
 
+### A fix that measured worse than the defect, and was not made
+
+A review found a real structural inconsistency in the merge: `merged['places']`
+is rebuilt from the union across frames, but `merged['dropoff']` and
+`merged['pickup']` are still whatever the LAST FRAME parsed. That is the defect
+shape this project names in its own principles — *a per-frame observation is not
+a fact about the card* — and it feeds the order in the car, so it feeds the
+stacking geography and the pairing rows.
+
+The obvious fix is one line: recompute `dropoff` from the merged places, the way
+`journal.py` already does. **Measured against 238 real multi-frame offers, it
+makes things worse.**
+
+| | |
+|---|---|
+| dropoff unchanged | 200 |
+| gained one it currently lacks | 15 — **11 of them merchant scrap** |
+| changed to a different one | 23 |
+
+The gains are the tell: `Little Caesars Ss Maret`, `Chili's Grill & Bar (6
+items) te ele eee)`, `cls) Ct)`, `Papa John's Store 414 AME ne`. The union of
+every frame's places is a bag containing every misreading any frame made, and
+`find_dropoff` picks from it by position, not by confidence — so it reaches for
+the restaurant when the customer's street was the thing that failed to read.
+
+And two of the 23 changes are outright destructive:
+
+    Cherry St NE, Marietta               ->  Vella Gir 000%, Renan
+    10th St NW & Williams St NW, Atlanta ->  Dabbs Xing & Shepard Ct, Acworth
+
+A different address, in a different town, presented as where the job ends.
+
+**Voting instead of unioning is worse still.** Take `find_dropoff` of each
+frame's own places and keep the majority: 215 unchanged, 4 gained (two of them
+scrap) and **14 real destinations lost**, because OCR of a street almost never
+agrees byte-for-byte across frames and a strict majority never forms.
+
+So the question became: *does any of this reach the driver?* The stacking advice
+reads exactly one thing off a dropoff — `area()`. Over the 124 offers where any
+frame named one:
+
+| | |
+|---|---|
+| every frame agrees on the town | **108** |
+| only one frame named a town | 1 |
+| no frame named a town | 9 |
+| frames **disagree** | **6** |
+
+And five of those six are the junk-word shape `couldBeOneTown` already treats as
+one town: `austell` / `austell res`, `atlanta` / `atlanta eater`, `mableton` /
+`mableton perot`, `marietta` / `marietta bore`, `lithia springs` / `lithia`.
+
+**One offer in 124 is a genuine disagreement.** Every fix measured costs an order
+of magnitude more than that. So the code is unchanged, and this is written down
+so the next person to notice the inconsistency does not spend the afternoon
+re-deriving it — the inconsistency is real, and correcting it is not free.
+
+#### Two more of the same shape, measured and left alone
+
+**`uncosted` never reaches the stack line.** `rate()` computes it — a rate with
+no mileage deducted, because the distance could not be trusted — and uses it to
+withhold green from the verdict panel. It is emitted nowhere, so `stack()` has
+never seen it and can paint a pair green off the same rate the panel above it
+deliberately would not. Real, and structurally the same mistake as the wire
+fields this file already records.
+
+Measured: **5 of 892 offers are uncosted, and 1 clears the target** — so one
+offer in 892 could show amber above and green below. Worth knowing; not worth a
+change that has to be got exactly right in the expensive direction.
+
+The reason it is now this rare is worth recording on its own. An earlier note in
+this file measured *52 of one shift's 121 offers* as `milesUncertain` and *108
+of 202* as uncosted. Over the 892 distinct card texts on file the same parse
+gives **3 doubted distances and 5 uncosted rates**. Not a like-for-like
+comparison — those were merged readings from single shifts and these are single
+frames — and single frames should look *worse*, not better. The leg recovery,
+the distance checks and the single-leg clause did that.
+
+**`stack()` divides by stated minutes, not billed minutes.** On a shop-and-
+deliver card `rate()` bills extra minutes for the shopping and can return PASS,
+while `stack()` divides by the smaller stated figure and can return green for
+the same card. The mechanism is real. It needs `secondsPerItem` set and an item
+count on the card to bite at all, which is why it has not been seen; it is
+recorded here rather than fixed blind, because changing which minutes the
+pairing divides by moves every stacked figure on the panel and that is not a
+change to make without a shift's data to check it against.
+
 ### The offer card still on the phone is not the destination
 
 The destination window opens the instant the button is pressed, and the driver
