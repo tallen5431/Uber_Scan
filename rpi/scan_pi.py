@@ -1627,7 +1627,33 @@ def main():
         # exactly the driver whose address arrives at the end of the window.
         started = read_at if read_at is not None else time.time()
         if started < dropoff_until and dropoff_seen is None:
-            found = (out['parsed'] or {}).get('address')
+            shot = out['parsed'] or {}
+            # A SCREEN WITH A PAYOUT ON IT IS AN OFFER, NOT A DESTINATION.
+            #
+            # The window opens the instant the button is pressed, and the driver
+            # then has to get the destination up — so the first reads of almost
+            # every window are of the offer card still sitting there. An offer
+            # card is supposed to yield no address, and the parser says so in a
+            # comment: "None on every one of the 604 offer cards on file". That
+            # is no longer true. Over the 900 card texts on file now, five DO
+            # yield one, because the merchant's branch address carries the same
+            # `, ST ZIP` anchor a real address does:
+            #
+            #     800 Forrest St NW, Atlanta, GA 30318   <- off a Delivery card
+            #     100 Rosemont Ct, Hiram, GA 30141
+            #     2603 E, GA 30106                       <- and two fragments
+            #
+            # Any one of them ends the window with the WRONG answer and stops it
+            # looking: the order in the car is then recorded as ending where it
+            # started, the stack line compares the next offer against a
+            # restaurant, and the pairing written to the journal says `scanned:
+            # true` — a full address, confidently wrong. That is the expensive
+            # direction.
+            #
+            # The payout is the grammar that separates them, and it costs
+            # nothing: a navigation screen has no payout to lose. All five of
+            # those cards carry one, so this closes the path completely.
+            found = shot.get('address') if shot.get('pay') is None else None
             if found:
                 dropoff_seen = found
                 # Closed the moment it is answered, and what that closes is the

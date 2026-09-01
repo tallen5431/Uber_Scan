@@ -1832,6 +1832,60 @@ eq('...and an address nobody asked for is not a destination',
 # Staged deterministically rather than hoped for: the window is shortened to a
 # second and the reader made to take longer than that, so exactly one read is
 # launched, inside, and lands outside.
+# --- the offer card still on the phone is not the destination --------------
+#
+# The window opens the instant the button is pressed and the driver THEN gets
+# the destination up, so the first reads of almost every window are of the offer
+# card still sitting there. An offer card is supposed to yield no address — the
+# parser said so in a comment, "None on every one of the 604 offer cards on
+# file" — and over the 900 texts on file now, FIVE do, because a merchant's
+# branch address carries the same ", ST ZIP" anchor a real address does.
+#
+# Taken as the answer it ends the window with the restaurant as the
+# destination and stops looking: the order in the car is then recorded as
+# ending where it started, the stack line compares the next offer against a
+# restaurant, and the pairing written to the journal calls it `scanned` — a
+# full address, confidently wrong.
+#
+# Verbatim off this driver's shift, and one of the five. Loaded rather than
+# retyped: a hand-copied card with the junk cleaned out of it would be a
+# different card, and the junk is why the reader sees what it sees.
+_CARD_WITH_ADDRESS = '; 0} Coy tree mL er\n3 ¥? Delivery § Exclusiv x :\n$8.40\n_ Guaranteed (incl. tip)\n© 21min (6.2 mi) total\nZaxbys (2603 E West Connector\nl Austell, GA 30106)\nPhillips Dr SW & Smith Ave SW,\n} Marietta\nmw Accept 4\n_—< ze'
+_shot = OP2.parse(_CARD_WITH_ADDRESS)
+ok_('the card really does yield an address, or this proves nothing',
+    bool(_shot.get('address')))
+ok_('...and really is an offer card', _shot.get('pay') is not None)
+
+_card_reads = [0]
+
+
+def _offer_card_then_address(self, frames, now=None, geom=None):
+    """The offer card twice, then the navigation screen."""
+    _card_reads[0] += 1
+    text = (_CARD_WITH_ADDRESS if _card_reads[0] <= 2 else
+            'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start')
+    parsed = OP2.parse(text)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+run_card = run(TC.uberx_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
+               appear_at=10_000.0, extra_argv=['--no-parallel'],
+               look=_offer_card_then_address, press_dropoff=True)
+
+eq('the destination is read, not the card that was still on the phone',
+   len(run_card['destinations']), 1)
+if run_card['destinations']:
+    eq('...and it is the address the driver brought up',
+       run_card['destinations'][0][0].get('line'),
+       '1234 Daffodil Ln, Powder Springs, GA 30127')
+ok_('...found past the card, so the card really was offered and refused',
+    _card_reads[0] >= 3)
+
+
 def _slow_address(self, frames, now=None, geom=None):
     text = 'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start'
     parsed = OP2.parse(text)

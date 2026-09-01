@@ -4029,6 +4029,45 @@ on file:
 apart on nothing but a junk word now say nothing, and 382 that were saying
 nothing now have a town to compare.
 
+### The offer card still on the phone is not the destination
+
+The destination window opens the instant the button is pressed, and the driver
+*then* has to get the address up — so the first reads of almost every window are
+of the offer card still sitting there. That was safe only because an offer card
+yields no address, which this file asserted in a comment:
+
+> None on every one of the 604 offer cards on file.
+
+**True of that corpus. Over the 900 texts on file now it is five.** A merchant's
+branch address carries the same `, ST ZIP` anchor a real address does:
+
+    800 Forrest St NW, Atlanta, GA 30318      <- off a Delivery card, twice
+    100 Rosemont Ct, Hiram, GA 30141
+    2603 E, GA 30106                          <- and two fragments
+    Austell, GA 30106
+
+Any one of them ends the window with the wrong answer *and stops it looking* —
+the first address found wins. The order in the car is then recorded as ending
+where it started, the stack line compares the next offer against a restaurant,
+and the pairing written to the journal calls it `scanned: true`: a full address,
+confidently wrong, which is the expensive direction.
+
+**A measured claim in a comment goes stale as the corpus grows, and this one was
+load-bearing.** The destination scan trusted it and had no guard of its own.
+
+The guard is the payout. *A screen with a payout on it is an offer, not a
+destination* — grammar, not a phrase list, and it costs nothing because a
+navigation screen has no payout to lose. All five of those cards carry one, so
+it closes the path completely. The comment in both ports now says what the data
+says.
+
+My own first attempt at this overstated it: synthetic cards like `Dollar General
+(925 Shiloh Rd Nw, Kennesaw, GA 30144)` made it look like *every* delivery card
+leaked its merchant address. Real ones print `Dollar General (925 Shiloh Rd Nw)`
+with no state and no ZIP, so the anchor never fires. Measuring turned "this
+happens constantly" into "this happens 5 times in 900" — still worth closing,
+but not the thing the synthetic test claimed.
+
 ### A shift driven to test the stacking advice was a test of nothing
 
 The offers reach the journal. The marks reach the journal. **The advice did
@@ -5054,7 +5093,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4505 checks
+npm test                # all 30 suites, 4510 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

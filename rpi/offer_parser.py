@@ -1611,10 +1611,19 @@ def parse(raw_text):
         # See find_dropoff, which is the half that decides.
         'pickup': find_pickup(places),
         'dropoff': find_dropoff(places, text),
-        # A full street address, which an offer card never shows — Uber does not
-        # say where a delivery ends until it has been accepted. This is here so
-        # the screen AFTER the accept can be read by the same pipeline, and it
-        # is None on every one of the 604 offer cards on file. See find_address.
+        # A full street address, which an offer card almost never shows — Uber
+        # does not say where a delivery ends until it has been accepted. This is
+        # here so the screen AFTER the accept can be read by the same pipeline.
+        #
+        # "None on every one of the 604 offer cards on file" is what this said,
+        # and it was true of that corpus. Over the 900 texts on file now it is
+        # FIVE, because a merchant's branch address carries the same `, ST ZIP`
+        # anchor a real one does — `800 Forrest St NW, Atlanta, GA 30318` off a
+        # Delivery card, and two fragments. A measured claim in a comment goes
+        # stale as the corpus grows, and this one was load-bearing: the
+        # destination scan trusted it and had no guard of its own. It has one
+        # now — see digest() in scan_pi.py, which refuses any frame carrying a
+        # payout. See find_address.
         'address': find_address(text),
         # The legs behind the sum, so a caller holding readings from several
         # frames can merge the ones a single frame missed.

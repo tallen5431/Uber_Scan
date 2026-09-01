@@ -1307,10 +1307,15 @@
       // in the car. See findDropoff, which is the half that decides.
       pickup: findPickup(places),
       dropoff: findDropoff(places, text),
-      // A full street address, which an offer card never shows - Uber does not
-      // say where a delivery ends until it has been accepted. Here so the
-      // screen AFTER the accept can go through the same pipeline; null on every
-      // one of the 604 offer cards on file bar three. See findAddress.
+      // A full street address, which an offer card almost never shows - Uber
+      // does not say where a delivery ends until it has been accepted. Here so
+      // the screen AFTER the accept can go through the same pipeline.
+      //
+      // "null on every one of the 604 offer cards on file bar three" is what
+      // this said. Over the 900 texts on file now it is five: a merchant's
+      // branch address carries the same `, ST ZIP` anchor a real one does. The
+      // destination scan used to trust that count and had no guard of its own;
+      // it refuses any frame carrying a payout now. See findAddress.
       address: findAddress(text),
       // The legs behind the sum, so a caller holding readings from several
       // frames can merge the ones a single frame missed.
