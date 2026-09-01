@@ -704,6 +704,24 @@ html, body {
    was added below it is worse than not having written it. */
 .bottombar button[hidden], .bottombar .linkbtn[hidden] { display: none; }
 
+/* A control that has been answered.
+ *
+ * The destination button used to become the address it had read. The bar is a
+ * grid of equal columns and there are six or seven of them, so that button is
+ * 122px wide on the rig's own panel and a 42-character address needs 238 — it
+ * arrived as "1234 Daffodil L…", which is neither a label nor a checkable
+ * address. There is no width to win here: the bar is full.
+ *
+ * So the answer is said in colour, which this panel already trusts a driver to
+ * read before they read words, and which costs no width at all. The same green
+ * the verdict uses for "yes", because that is what it means: the thing you
+ * asked for came back. The address itself is on the button's title and in the
+ * stack line's own geography, where there is room for it. */
+.bottombar button.done, .bottombar .linkbtn.done {
+  color: var(--go);
+  border-color: var(--go);
+}
+
 /* ---------- Said, not shown ---------- */
 /* Text for a screen reader and not for the eye. Used for the label on a search
    box that only has a placeholder — a placeholder is not a label, it vanishes

@@ -915,11 +915,32 @@
 
   function showDest() {
     el.dest.hidden = !holdingNow;
-    el.dest.textContent = destBusy ? '⌖ reading…' : (destSaid || '⌖ Dropoff');
+    // A LABEL, always, and the answer said in colour instead.
+    //
+    // This used to become the address itself once one had been read. The bar is
+    // a grid of equal columns and there are six or seven of them, so on the
+    // rig's own 800x480 panel this button is 122px wide: a 42-character address
+    // needs 238px and arrived as "1234 Daffodil L…". That is not a control any
+    // more - it neither says what pressing it does nor shows an address the
+    // driver can check - and at 480x320 the column is 69px, where even
+    // "⌖ Dropoff" is a squeeze at 74px.
+    //
+    // There is no width to win: the bar is full and every button shares it
+    // equally. So the confirmation is a colour, which this panel already trusts
+    // a driver to read before they read words, and it costs no width at all.
+    // The address itself goes where there is room for it - the title, and the
+    // stack line's own geography.
+    el.dest.textContent = destBusy ? '⌖ reading…' : '⌖ Dropoff';
+    el.dest.classList.toggle('done', !destBusy && !!destSaid);
     el.dest.title = destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
       : 'Read the destination off your phone, so the next offer can be judged '
         + 'on where it ends as well as what it pays. It does not touch your phone.';
+    // ...and said out loud, because the colour is the only thing on screen that
+    // changed and a screen reader cannot see it.
+    el.dest.setAttribute('aria-label', destSaid
+      ? 'Dropoff read as ' + destSaid + '. Press again to read it afresh.'
+      : 'Read the dropoff off your phone');
   }
 
   el.dest.addEventListener('click', function () {

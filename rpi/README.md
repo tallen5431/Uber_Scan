@@ -4029,6 +4029,35 @@ on file:
 apart on nothing but a junk word now say nothing, and 382 that were saying
 nothing now have a town to compare.
 
+### A control that stopped being a control
+
+Once a destination had been read, the **⌖ Dropoff** button's label became the
+address it read. The review called this "overflowing across its neighbours in
+the bottom bar". Measured, that is wrong — nothing overlaps, the bar does not
+scroll and the page still fits. What actually happens is worse in a quieter way.
+
+The bar is a grid of **equal columns** and there are six or seven of them, so on
+the rig's own 800x480 panel each button is **122px** wide. A 42-character
+address needs **238px**. The driver got `1234 Daffodil L…` — which is neither a
+label saying what pressing it does, nor an address they can check.
+
+I was wrong about the remedy first, too: I measured "408px of unused bar" and
+thought the button could simply grow. That summed three of the bar's *six*
+visible buttons. Six columns of 122px plus five 8px gaps is 772 of 774. **The
+bar is full.** There is no width to win.
+
+So the answer is said in **colour** — which this panel already trusts a driver
+to read before they read words, and which costs no width at all. The label stays
+`⌖ Dropoff`; a `done` class turns it the same green the verdict uses for yes.
+The address itself goes where there is room: the button's `title`, and the stack
+line's own geography. And it is put on `aria-label` as well, because a colour is
+the only thing that changed and a screen reader cannot see one.
+
+One thing this does **not** fix, and it is worth naming: at 480x320 the column
+is 69px and `⌖ Dropoff` alone needs 74, so that label is clipped on the small
+panel whether or not anything was scanned. That is the bar being over-subscribed
+at that size, not this feature, and it is a different piece of work.
+
 ### A fix that measured worse than the defect, and was not made
 
 A review found a real structural inconsistency in the merge: `merged['places']`
@@ -5180,7 +5209,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4510 checks
+npm test                # all 30 suites, 4517 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

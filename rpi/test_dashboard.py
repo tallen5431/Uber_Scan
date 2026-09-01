@@ -358,6 +358,33 @@ const LOOK = (sel) => {
     }, id);
     out.destAfterMark = await lookBar('dest');
     out.dropAfterMark = await lookBar('drop');
+
+    // ...and what the button becomes once a destination HAS been read.
+    //
+    // It used to become the address itself. The bar is a grid of equal columns
+    // and there are six or seven of them, so this button is 122px wide on the
+    // rig's own panel while a 42-character address needs 238 - it arrived as
+    // "1234 Daffodil L...", which is neither a label nor an address anyone can
+    // check. There is no width to win: the bar is full.
+    await page.evaluate(() => window.__es.push({ dropoff: {
+      line: '1234 Daffodil Ln, Powder Springs, GA 30127',
+      street: '1234 Daffodil Ln', city: 'Powder Springs',
+      state: 'GA', zip: '30127' } }));
+    await page.waitForTimeout(200);
+    out.destAfterScan = await page.evaluate(() => {
+      const el = document.getElementById('dest');
+      const r = el.getBoundingClientRect();
+      return { text: (el.textContent || '').trim(),
+               w: Math.round(r.width),
+               clipped: el.scrollWidth > el.clientWidth + 1,
+               done: el.classList.contains('done'),
+               // The answer has to reach a screen reader too, which cannot see
+               // a colour.
+               label: el.getAttribute('aria-label') || '',
+               title: el.getAttribute('title') || '',
+               fits: document.documentElement.scrollWidth
+                     <= document.documentElement.clientWidth + 1 };
+    });
     // Marking is the one thing on this screen that changes the count, so it is
     // the one time the figures are worth asking for off the timer. Left to the
     // three-minute poll, a driver would press "took it" and watch the number
@@ -857,6 +884,23 @@ try:
         ok_('...saying what it reads', 'Dropoff' in (dest_now.get('text') or ''))
         ok_('...and so does the one that puts the order down',
             drop_now.get('shown'))
+
+        # ...and once a destination is read, the control stays a control.
+        scanned = got.get('destAfterScan') or {}
+        ok_('the button still says what pressing it does after a scan',
+            'Dropoff' in (scanned.get('text') or ''))
+        ok_('...rather than becoming the address it read',
+            '1234' not in (scanned.get('text') or ''))
+        ok_('...unclipped on the panel the rig actually uses',
+            not scanned.get('clipped'))
+        # The answer is said in colour, because the bar has no width to give.
+        ok_('...marked as answered', scanned.get('done'))
+        # ...and out loud, because a colour is the only thing that changed.
+        ok_('...and said to a screen reader, which cannot see a colour',
+            '1234 Daffodil Ln' in (scanned.get('label') or ''))
+        ok_('...with the address still readable on the control',
+            '1234 Daffodil Ln' in (scanned.get('title') or ''))
+        ok_('...and the panel still fits', scanned.get('fits'))
 
         # A mark belongs to an offer, not to the button. This is asked while
         # the previous offer is still marked: a tick carried onto the next card
