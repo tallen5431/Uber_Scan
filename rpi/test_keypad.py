@@ -51,6 +51,10 @@ def eq(name, got, want):
         print('FAIL  %s: got %r want %r' % (name, got, want))
 
 
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 def ok_(name, cond):
     eq(name, bool(cond), True)
 
@@ -283,6 +287,42 @@ const [base] = process.argv.slice(2);
   out.capped = await page.evaluate(
     k => JSON.parse(localStorage.getItem(k)).length, HISTORY);
 
+  // --- a rate nothing came off is a ceiling, here as on the two other screens
+  //
+  // The camera screens cap the verdict at CLOSE CALL when a cost per mile is
+  // set and no distance could be charged: the figure is then an upper bound on
+  // the offer being compared against a net target. This page worked out `state`
+  // itself and had no such branch, so on 16 of the driver's own 1,672 recorded
+  // offers it showed a green ACCEPT and the ACCEPT buzz where the rig showed
+  // amber. Every one of the 16 was a card that printed no distance.
+  await open({ [SETTINGS]: JSON.stringify({ target: 25, band: 15, costPerMile: 0.3, pad: 0 }),
+               [DRAFT]: null, [HISTORY]: null });
+  await type(['1', '8', '.', '7', '7', 'next', '2', '5']);   // no distance typed
+  out.noDistance = await screen();
+  // ...and with a distance on it the cap has nothing to do: $0.30 of 6 miles
+  // is $1.80 off $18.77 over 25 minutes, which still clears $25/hr.
+  await type(['next', '6']);
+  out.withDistance = await screen();
+
+  // --- a refusal does not print the answer underneath itself ---------------
+  //
+  // The headline blanked to "--" and CHECK THE PAY while per-mile, per-min and
+  // net pay carried on quantifying the same impossible reading in smaller type.
+  await open({ [SETTINGS]: JSON.stringify({ target: 25, band: 15, costPerMile: 0.3, pad: 0 }),
+               [DRAFT]: null, [HISTORY]: null });
+  await type(['1', '0', '3', '0', 'next', '3', '1', 'next', '8']);
+  out.refused = await screen();
+  // ...and it cannot be logged as a rate either. `ready` stays true on a doubt,
+  // so this went straight into the list: twenty offers at $18/hr plus one $1030
+  // over 31 minutes read back as "avg $112 / best $1993 / 100%".
+  await type(['log']);
+  await page.waitForTimeout(120);
+  out.refusedLog = await page.evaluate(k => localStorage.getItem(k), HISTORY);
+  out.refusedToast = await page.evaluate(
+    () => (document.getElementById('toast') || {}).textContent || '');
+  // The entry is left alone to be corrected, not cleared out from under them.
+  out.refusedStill = (await screen()).pay;
+
   // --- storage that will not answer ----------------------------------------
   // Private mode, a full quota, a browser with site data blocked. The page has
   // to open and add up an offer either way; only remembering it is optional.
@@ -416,6 +456,44 @@ slipped = got.get('slipped') or {}
 ok_('$1184 for twenty minutes is not accepted',
     'go' not in (slipped.get('state') or ''))
 ok_('...it is refused as impossible', 'doubt' in (slipped.get('state') or ''))
+
+# --- the verdict is the rig's verdict, not a second opinion ----------------
+#
+# $18.77 over 25 minutes with no distance typed is $45.0/hr on its face, which
+# clears a $25 target twice over — and is a CEILING, because a cost per mile is
+# configured and nothing came off. This screen said ACCEPT and buzzed for it.
+gross = got.get('noDistance') or {}
+eq('an $18.77 offer with no distance still shows its rate',
+   gross.get('perHour'), '$45.0')
+ok_('...but is not a green ACCEPT, as it was (%r)' % (gross.get('label') or ''),
+    'go' not in (gross.get('state') or ''))
+eq('...it is the close call the two camera screens give it',
+   gross.get('label'), 'CLOSE CALL')
+# An amber with no reason on the screen is the state the driving screen was in
+# for as long as its own `uncosted` never reached it.
+ok_('...and says why the cap is there (%r)' % (gross.get('rawRate') or ''),
+    gross.get('rawShown') and 'ceiling' in (gross.get('rawRate') or ''))
+# The cap only exists because nothing was charged. Type a distance and it goes.
+costed = got.get('withDistance') or {}
+ok_('the same offer with a distance on it is accepted',
+    'go' in (costed.get('state') or ''))
+no_('...with nothing left saying it is a ceiling',
+    'ceiling' in (costed.get('rawRate') or ''))
+
+# --- a refusal does not print the answer underneath itself -----------------
+refused = got.get('refused') or {}
+eq('an impossible reading withholds the headline', refused.get('perHour'), '--')
+eq('...and the per-mile figure with it', refused.get('perMile'), '--')
+eq('...and the per-minute one', refused.get('perMin'), '--')
+eq('...and the net pay', refused.get('netPay'), '--')
+eq('...saying which figure to check instead', refused.get('label'), 'CHECK THE PAY')
+# `ready` is true on a doubt — every number is still there — so the log gate,
+# which tests only `ready`, let it through and poisoned the summary above the
+# list with a $1993/hr best.
+eq('...and it cannot be logged as a rate', got.get('refusedLog'), None)
+ok_('...with the reason said out loud (%r)' % (got.get('refusedToast') or ''),
+    'pay' in (got.get('refusedToast') or '').lower())
+eq('...and the entry left to be corrected', got.get('refusedStill'), '$1030')
 
 # --- what the digits do ----------------------------------------------------
 typing = got.get('typing') or {}

@@ -116,7 +116,31 @@
     for (var i = 0; i < 4; i++) {
       if (typeof b[i] !== 'number' || !isFinite(b[i])) return null;
     }
-    if (b[2] < MIN_BOX || b[3] < MIN_BOX) return null;
+    // A floor on a measured quantity, so it gets the same slack the ceiling
+    // below it already has.
+    //
+    // Without it, the drag handler's own clamp fails this test. Pull a box in
+    // until it stops shrinking and the clamp lands on exactly `x1 - MIN_BOX`;
+    // the width is then `x1 - (x1 - MIN_BOX)`, which in binary floating point
+    // is 0.07999999999999996 for every x1 the shipped reticle can start from —
+    // one ulp under the floor. Measured against the CSS default (left 7%, top
+    // 34%, width 86%, height 44%) at 800x480, 1024x600 and 390x844, all three
+    // identical: three of the four corners and two of the four edges came back
+    // null and the whole box was thrown away.
+    //
+    // And thrown away silently, on release. `applyBox()` runs on every move
+    // with the unvalidated value, so the box tracks the finger the whole way
+    // in and only snaps back to the default crop when the finger lifts — which
+    // reads as the page ignoring the driver rather than as a rule being
+    // enforced. Pulling a corner until it stops is the ordinary gesture, and
+    // the clamp is a floor, so this is not a knife-edge that needs a lucky
+    // pixel: any over-drag lands exactly on it.
+    //
+    // 1e-9 of a preview is a millionth of a pixel on the widest panel here.
+    // The ceiling has carried 0.001 of slack for the same reason since it was
+    // written; the floor was simply never given any.
+    var EPS = 1e-9;
+    if (b[2] < MIN_BOX - EPS || b[3] < MIN_BOX - EPS) return null;
     if (b[0] < 0 || b[1] < 0 || b[0] + b[2] > 1.001 || b[1] + b[3] > 1.001) return null;
     return [b[0], b[1], b[2], b[3]];
   }

@@ -125,50 +125,73 @@
     var typedMinutes = num(entry.minutes);
     var minutes = typedMinutes + settings.pad;
 
-    var cost = miles * settings.costPerMile;
-    var net = pay - cost;
-
     var ready = pay > 0 && typedMinutes > 0 && minutes > 0;
-    var perHour = ready ? net / (minutes / 60) : null;
+
+    // The verdict comes from the same function the two camera screens use, not
+    // from a second copy of the rule beside it.
+    //
+    // This screen worked out `state` itself, and the copy had gone out of step:
+    // rate() caps a verdict at CLOSE CALL when a cost per mile is configured
+    // and no distance could be charged, because the rate is then an upper bound
+    // being compared against a net target. This one had no such branch. Fed the
+    // driver's own 1,672 recorded offers at their own settings — target $25,
+    // band 15%, $0.30/mi — the two disagreed on 16, and every one of the 16 was
+    // this screen showing a green ACCEPT and the ACCEPT buzz where scan.html
+    // and live.html show amber. All 16 were cards printing no distance, of
+    // which the driver has 124. $18.77 over 25 minutes with the distance blank:
+    // ACCEPT $45.0/hr here, CLOSE CALL on the rig.
+    //
+    // The wrong-ACCEPT direction, on the one screen a driver reaches for
+    // precisely when the reader has failed and they cannot cross-check it.
+    //
+    // `milesChecked: true` because these figures were typed, not read: rate()
+    // recovers a lost decimal from a distance it believes came off a camera,
+    // and 85 miles typed by hand is 85 miles.
+    var judged = { ready: false, state: 'empty' };
+    if (ready && typeof OfferParser !== 'undefined' && OfferParser.rate) {
+      judged = OfferParser.rate(
+        { complete: true, pay: pay, minutes: typedMinutes,
+          miles: miles > 0 ? miles : null, milesChecked: true, items: 0 },
+        settings) || judged;
+    }
+
+    var cost = judged.ready ? judged.cost : miles * settings.costPerMile;
+    var net = judged.ready ? judged.net : pay - cost;
+    var perHour = judged.ready ? judged.perHour : null;
     // The same offer before the running cost, so this screen can say which of
     // the two numbers it is showing. Over the same denominator as `perHour`,
     // including the pad, because the point of it is to be the *same* sum with
     // one term removed — a raw rate over a different number of minutes is a
     // third figure, and three rates on one screen explain nothing.
-    var grossPerHour = ready ? pay / (minutes / 60) : null;
-    var perMin = ready ? net / minutes : null;
+    var grossPerHour = judged.ready ? judged.grossPerHour : null;
+    var perMin = judged.ready ? judged.perMin : null;
     // Net, like perHour, so the two agree about what a dollar means. This was
     // gross while the rate beside it was net, so the same offer read $1.97/mi
     // here and $1.67/mi on the Pi, and neither screen said why.
-    var perMile = (pay > 0 && miles > 0) ? net / miles : null;
-
-    // The same impossibility test the camera's readings get, on the figures as
-    // typed. A slipped decimal point is not only an OCR failure: $1184 is two
-    // keys away from $11.84 on this pad, and the app answered it with a green
-    // ACCEPT and a congratulatory buzz. The two screens now agree about what
-    // cannot be true, which matters most for a driver checking one against the
-    // other.
-    var why = (typeof OfferParser !== 'undefined' && OfferParser.doubt)
-      ? OfferParser.doubt(pay > 0 ? pay : null,
-                          typedMinutes > 0 ? typedMinutes : null,
-                          miles > 0 ? miles : null)
-      : null;
-
-    var state = 'empty';
-    if (perHour !== null) {
-      var floor = settings.target * (1 - settings.band / 100);
-      state = why ? 'doubt'
-        : perHour >= settings.target ? 'go' : (perHour >= floor ? 'warn' : 'no');
-    }
+    //
+    // Worked out here rather than taken from rate() for the one case rate()
+    // has no answer to: pay and a distance typed with the minutes still blank.
+    // rate() is not ready then and returns nothing, and a driver part way
+    // through an entry was already being shown a per-mile figure.
+    var perMile = judged.ready ? judged.perMile
+      : ((pay > 0 && miles > 0) ? (pay - miles * settings.costPerMile) / miles : null);
 
     return {
-      ready: ready, pay: pay, miles: miles, minutes: minutes,
+      ready: ready, pay: pay, miles: miles,
+      minutes: judged.ready ? judged.minutes : minutes,
       typedMinutes: typedMinutes,
       cost: cost, net: net,
       perHour: perHour, grossPerHour: grossPerHour,
       perMin: perMin, perMile: perMile,
-      doubt: why,
-      state: state
+      // The same impossibility test the camera's readings get, on the figures
+      // as typed. A slipped decimal point is not only an OCR failure: $1184 is
+      // two keys away from $11.84 on this pad, and the app answered it with a
+      // green ACCEPT and a congratulatory buzz.
+      doubt: judged.ready ? judged.doubt : null,
+      // Whether the rate above is the offer or only a ceiling on it — the field
+      // this screen had no idea existed.
+      uncosted: !!judged.uncosted,
+      state: ready ? judged.state : 'empty'
     };
   }
 
@@ -220,15 +243,42 @@
     // was comparing two numbers that are only sometimes the same thing. Shown
     // only where they differ: a figure repeated beside itself is noise next to
     // the one number that decides an offer.
-    var raw = (r.state !== 'doubt' && typeof r.grossPerHour === 'number'
-               && r.grossPerHour !== null
-               && Math.round(r.grossPerHour) !== Math.round(r.perHour))
+    //
+    // ...and the other thing this slot has to be able to say. With no distance
+    // typed and a cost per mile configured, nothing came off the pay: the
+    // figure beside it is a CEILING, and the verdict has just been capped at
+    // CLOSE CALL because of it. Without a word here that cap is an amber with
+    // no reason on the screen — which is what the driving screen looked like
+    // for as long as its own `uncosted` never reached it.
+    //
+    // The two cannot both apply: gross equals net exactly when nothing was
+    // charged, so "$X raw" is hidden in precisely the case this appears.
+    var raw = r.state === 'doubt' ? ''
+      : r.uncosted ? 'ceiling — no distance'
+      : (typeof r.grossPerHour === 'number' && r.grossPerHour !== null
+         && Math.round(r.grossPerHour) !== Math.round(r.perHour))
       ? rateText(r.grossPerHour) + ' raw' : '';
     el.rawRate.textContent = raw;
     el.rawRate.hidden = !raw;
-    el.perMile.textContent = r.perMile === null ? '--' : money(r.perMile, 2);
-    el.perMin.textContent = r.perMin === null ? '--' : money(r.perMin, 2);
-    el.netPay.textContent = r.pay > 0 ? money(r.net, 2) : '--';
+    // Withheld on the same terms as the headline above them.
+    //
+    // The headline blanked to "--" and CHECK THE PAY, and these three carried
+    // on printing the same impossible number in smaller type: $1030 over 31
+    // minutes gave "$33.23" per minute and "$1030.00" net pay under a refusal,
+    // and $1184 over 20 minutes gave "$59.20" and "$148.00" per mile. That is
+    // not a refusal, it is a refusal with the answer written underneath it.
+    //
+    // The driving screen already decided this, in the same words: "Hiding the
+    // headline rate and leaving '$303/mi' underneath it withholds nothing: it
+    // is the same impossible number, smaller." This screen is the one a driver
+    // opens to check the rig against, so it is the last place that should
+    // quantify what it just refused.
+    var refused = r.state === 'doubt';
+    el.perMile.textContent = (refused || r.perMile === null)
+      ? '--' : money(r.perMile, 2);
+    el.perMin.textContent = (refused || r.perMin === null)
+      ? '--' : money(r.perMin, 2);
+    el.netPay.textContent = (!refused && r.pay > 0) ? money(r.net, 2) : '--';
     el.netLabel.textContent = settings.costPerMile > 0 ? 'net pay' : 'trip pay';
     el.perMileLabel.textContent = settings.costPerMile > 0 ? 'net per mile' : 'per mile';
 
@@ -334,6 +384,25 @@
   function logEntry() {
     var r = calc();
     if (!r.ready) { toast('Enter pay and minutes first'); return; }
+    // A reading this screen has just refused to rate cannot be logged as a
+    // rate. `ready` stays true on a doubt — every number is still there,
+    // because on the camera side the row has to reach the journal — so this
+    // gate let one straight through: twenty offers at $18/hr plus one $1030
+    // over 31 minutes turned the summary above the list into "avg $112 / best
+    // $1993 / 100%". One mistyped payout, and the only record this screen keeps
+    // is worthless until the driver finds and deletes the row.
+    //
+    // Refused rather than logged-and-excluded, because unlike the journal this
+    // list is not evidence about the reader — it is a driver's own note of
+    // offers they saw, and the right answer to "$1184?" is to fix the entry.
+    if (r.state === 'doubt') {
+      toast({ pay: 'Check the pay before logging',
+              time: 'Check the time before logging',
+              speed: 'Check the distance before logging' }[r.doubt]
+            || 'Check that entry before logging');
+      buzz([55]);
+      return;
+    }
     history.unshift({
       t: Date.now(),
       pay: r.pay,

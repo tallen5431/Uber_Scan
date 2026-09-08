@@ -231,6 +231,92 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     }
     return { keys: keys, scope: reg.scope, held: held, controlled: controlled };
   });
+
+  /* --- the box a driver drags, pulled all the way in -----------------------
+   *
+   * The one control on this page that overrides the reader, and it discarded
+   * the drag on most of its handles. The resize clamp lands on exactly
+   * `x1 - MIN_BOX`, and `x1 - (x1 - MIN_BOX)` in binary floating point is
+   * 0.07999999999999996 against a floor of 0.08 — so validBox() returned null
+   * on release and the whole box reverted to the CSS default.
+   *
+   * Silently, and only on release: applyBox() runs on every move with the
+   * unvalidated value, so the box follows the finger the whole way in and then
+   * snaps back. That reads as the page ignoring the driver.
+   *
+   * Driven as a thumb drives it: press a handle, drag far past the minimum,
+   * lift. Every handle, at three sizes, because the numbers that produce the
+   * error come off the element's own rectangle and that changes with the
+   * panel.
+   */
+  {
+    const HANDLES = [
+      ['top-left', 0.02, 0.02, 1, 1], ['top-right', 0.98, 0.02, -1, 1],
+      ['bottom-left', 0.02, 0.98, 1, -1], ['bottom-right', 0.98, 0.98, -1, -1],
+      ['left edge', 0.02, 0.5, 1, 0], ['right edge', 0.98, 0.5, -1, 0],
+      ['top edge', 0.5, 0.02, 0, 1], ['bottom edge', 0.5, 0.98, 0, -1],
+    ];
+    out.drags = {};
+    for (const [w, h] of [[800, 480], [1024, 600], [390, 844]]) {
+      const ctx2 = await browser.newContext({ viewport: { width: w, height: h } });
+      const page2 = await ctx2.newPage();
+      for (const [name, fx, fy, ix, iy] of HANDLES) {
+        await page2.goto(base + '/scan.html', { waitUntil: 'domcontentloaded' });
+        await page2.evaluate(() => localStorage.removeItem('uberscan.settings.v1'));
+        await page2.reload({ waitUntil: 'domcontentloaded' });
+        await page2.waitForTimeout(400);
+        // The box is only draggable in adjust mode, and only when the whole
+        // frame is not being read.
+        await page2.click('#btnBox').catch(() => {});
+        await page2.waitForTimeout(120);
+        // Who answers a press at that handle, before pressing it.
+        //
+        // The drag below fails either way if something is in front of the box,
+        // and that failure looks identical to arithmetic getting it wrong. So
+        // ask separately: this is the question the fix is about, and the fix
+        // for one is not the fix for the other.
+        out.covering = out.covering || {};
+        out.covering[w + 'x' + h + ' ' + name] = await page2.evaluate(([fx, fy]) => {
+          const el = document.getElementById('reticle');
+          const b = el.getBoundingClientRect();
+          const t = document.elementFromPoint(b.x + b.width * fx, b.y + b.height * fy);
+          if (!t) return 'nothing';
+          // The box itself, or one of its own corner marks, is the right
+          // answer. Anything else is something drawn over the control.
+          return (t === el || el.contains(t)) ? 'the box'
+            : (t.id || t.className || t.tagName);
+        }, [fx, fy]);
+        const r = await page2.evaluate(() => {
+          const b = document.getElementById('reticle').getBoundingClientRect();
+          return { x: b.x, y: b.y, w: b.width, h: b.height };
+        });
+        const from = { x: r.x + r.w * fx, y: r.y + r.h * fy };
+        // Far past the floor in both axes, which is what pulling a corner
+        // until it stops moving does.
+        const to = { x: from.x + ix * r.w * 0.9, y: from.y + iy * r.h * 0.9 };
+        await page2.mouse.move(from.x, from.y);
+        await page2.mouse.down();
+        await page2.mouse.move(from.x + (to.x - from.x) / 2,
+                               from.y + (to.y - from.y) / 2, { steps: 4 });
+        await page2.mouse.move(to.x, to.y, { steps: 4 });
+        await page2.mouse.up();
+        await page2.waitForTimeout(150);
+        out.drags[w + 'x' + h + ' ' + name] = await page2.evaluate(() => {
+          let stored = null;
+          try { stored = (JSON.parse(localStorage.getItem('uberscan.settings.v1'))
+                          || {}).box; } catch (e) {}
+          const el = document.getElementById('reticle');
+          return { stored: stored,
+                   // What the element is actually showing. A discarded box
+                   // leaves the inline styles cleared and the CSS default back.
+                   inline: el.style.width || null };
+        });
+      }
+      await page2.close();
+      await ctx2.close();
+    }
+  }
+
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch(e => { console.log(JSON.stringify({ skip: 'browser: ' + e.message })); });
@@ -448,6 +534,52 @@ try:
            (js['w'], js['h']), (want.shape[1], want.shape[0]))
         ok_('...inside the pixel budget at %dx%d' % (w, h),
             js['w'] * js['h'] <= PL.MAX_OCR_PIXELS + 2000)
+
+    # --- the box survives being pulled all the way in -----------------------
+    #
+    # A box dragged to its minimum came back null from validBox, because the
+    # resize clamp produces exactly `x1 - MIN_BOX` and `x1 - (x1 - MIN_BOX)`
+    # is one ulp under the floor. Measured with the gestures below — each
+    # handle pulled inwards until it stops — that is the three top handles at
+    # all three sizes, 9 of the 24; the other clamp, `x0 + MIN_BOX`, lands one
+    # ulp above and survives, so which handles break depends on which way the
+    # finger goes. Together with the overlay above, 15 of the 24 did nothing.
+    #
+    # What a driver saw: the box tracking their finger all the way in, then
+    # snapping back to the default crop the moment they lifted it. No message,
+    # no rule stated — the control simply did not work.
+    # Nothing drawn over the box may take a press aimed at it. `#adjustNote` —
+    # the line reading "drag the box onto the offer card, or a corner to
+    # resize" — was sitting on top of three of the corners it names, on the
+    # 800x480 panel the rig is bolted to and on a phone. 1024x600 has the room
+    # and worked, which is why it looked fine wherever it was tried.
+    covering = got.get('covering') or {}
+    ok_('the handles were asked who answers for them', len(covering) >= 24)
+    blocked = sorted(k for k, v in covering.items() if v != 'the box')
+    eq('every handle of the reading box answers to a press', blocked, [])
+
+    drags = got.get('drags') or {}
+    ok_('the drags were measured', len(drags) >= 24)
+    kept = [k for k, v in sorted(drags.items()) if v.get('stored')]
+    lost = [k for k, v in sorted(drags.items()) if not v.get('stored')]
+    eq('every handle keeps the box it was dragged to (%d of %d)'
+       % (len(kept), len(drags)), lost, [])
+    # ...and the element shows it, rather than reverting to the stylesheet.
+    blank = [k for k, v in sorted(drags.items()) if not v.get('inline')]
+    eq('...and the picture shows the box that was kept', blank, [])
+    # The floor is still a floor. A box below it is refused, which is what the
+    # slack must not have undone.
+    for w, h in ((0.079, 0.5), (0.5, 0.079), (0.0, 0.5)):
+        ok_('a box %gx%g is still refused as too small' % (w, h),
+            'null' in subprocess.run(
+                ['node', '-e',
+                 'const s=require("fs").readFileSync(%r,"utf8");'
+                 'const m=s.match(/function validBox[\\s\\S]*?\\n  \\}/)[0];'
+                 'const MIN_BOX=0.08;'
+                 'const f=new Function("MIN_BOX", m + ";return validBox");'
+                 'console.log(String(f(MIN_BOX)([0.1,0.1,%g,%g])));'
+                 % (os.path.join(ROOT, 'scan.js'), w, h)],
+                capture_output=True, text=True).stdout)
 finally:
     if proc is not None:
         proc.terminate()

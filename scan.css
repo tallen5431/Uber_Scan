@@ -62,6 +62,23 @@ body.adjusting .corner::after {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 9px 10px;
+  /* A label, and labels do not take presses.
+   *
+   * This one says "drag the box onto the offer card, or a corner to resize"
+   * and it was sitting on top of three of the corners it names. Measured with
+   * elementFromPoint at the reticle's own bottom edge: at 800x480 and at
+   * 390x844 the bottom-left corner, the bottom-right corner and the bottom
+   * edge all returned `adjustNote`, so a press there never reached the box and
+   * the handle simply did not answer. 1024x600 has the room and worked, which
+   * is why it looked fine wherever it was tried.
+   *
+   * The same treatment the verdict panel gets three rules below, for the same
+   * reason and in the same words: while the box is being adjusted, everything
+   * drawn over it has to let the box be grabbed underneath. The verdict was
+   * given it and this was not. Nothing here is clickable, so it costs nothing
+   * — and it is left at full opacity because unlike the verdict this is the
+   * instruction being followed. */
+  pointer-events: none;
 }
 #adjustNote[hidden] { display: none; }
 
