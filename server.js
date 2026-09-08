@@ -645,6 +645,11 @@ function recordPairing(offer, now) {
     // measurement in its own right and must not be dropped as "no data".
     stack: s ? { pay: s.pay, worst: s.worst, best: s.best,
                  minMinutes: s.minMinutes, maxMinutes: s.maxMinutes,
+                 leftMinutes: s.leftMinutes,
+                 // Whether that money is the pair or a ceiling on it. Without
+                 // it a capped CLOSE CALL and a genuine one are the same row
+                 // in the record, and they are not the same call.
+                 uncosted: !!s.uncosted,
                  state: s.state, sure: !!s.sure, ends: s.ends || null } : null
   };
   appendLines(JSON.stringify(row) + '\n', function (err) {
@@ -1552,6 +1557,15 @@ function route(req, res) {
               // trap, and only the second is worth refusing over.
               dropoff: scanner.offer.dropoff || null,
               pickup: scanner.offer.pickup || null,
+              // Whether this reading was one the rig would state a verdict
+              // about. A doubted order in the car makes every pair judged
+              // against it nonsense, and an uncosted one makes the pair's
+              // money gross — and Advice.stack can only apply either rule to
+              // what it is handed. Carried rather than recomputed: rate()
+              // decided both, and a second derivation is a second thing to
+              // drift.
+              doubt: scanner.offer.doubt || null,
+              uncosted: !!scanner.offer.uncosted,
               acceptedAt: Date.now()
             };
           } else {

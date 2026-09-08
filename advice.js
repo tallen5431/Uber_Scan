@@ -430,6 +430,23 @@
     if (!active || !offer) return null;
     var target = (settings && typeof settings.target === 'number')
       ? settings.target : 0;
+    // A figure rate() refused to score cannot be re-scored here.
+    //
+    // rate() withholds the verdict on an impossible reading — `state: 'doubt'`
+    // — but keeps `ready: true` and every number, because the row still has to
+    // reach the journal. This function looked at neither, so it rebuilt a full
+    // money verdict out of the same figures doubt() had just declared could
+    // not all be true. Real pair off this driver's own record: held $11.84 /
+    // 20 min, next card's pay read as $1184, headline blanked to "--" with
+    // CHECK THE PAY above — and directly beneath it, in green, "+ the one you
+    // have: $1791–$3580/hr over 20–40 min · beats finishing alone". 6 of 337
+    // real pairs carry an offer today's doubt() refuses and 5 of those came
+    // out green.
+    //
+    // Both sides, because a doubted order in the car poisons `netA` exactly as
+    // a doubted offer poisons `netB`. Silence is already the right answer on
+    // about half of real pairs; this is one more place it is the right answer.
+    if (active.doubt || offer.doubt) return null;
     var totalA = num(active.minutes);
     var payA = num(active.pay);
     var minB = num(offer.minutes);
@@ -450,6 +467,27 @@
     var netA = (payA - costA) * (left / totalA);
     var netB = payB - costB;
     var money = netA + netB;
+    // ...and whether "net" is what those two words mean here.
+    //
+    // The same rule rate() applies to one offer, applied to a pair: when a cost
+    // per mile is configured and no cost could be taken off — the card printed
+    // no distance, or the distance was not trusted — the figure is GROSS, and
+    // `target` is a line the driver drew against net rates. Comparing the two
+    // is comparing different kinds of money.
+    //
+    // rate() has capped its own verdict at 'warn' for this since the uncosted
+    // cap was written; stack() went straight to `worst >= target ? 'go'` and
+    // called a gross number green. On this driver's own 3,065 recorded offers
+    // 788 — 26% — had no running cost taken off, and 188 of those clear the
+    // $25 target on the gross figure alone: exactly the pool where the cap is
+    // the difference between a green and an amber.
+    //
+    // Either side, because either one being gross makes `money` gross. Capped
+    // and not withheld, for rate()'s reason: CLOSE CALL is the honest answer to
+    // "this might clear your line and I cannot tell".
+    var costPerMile = (settings && typeof settings.costPerMile === 'number')
+      ? settings.costPerMile : 0;
+    var uncosted = costPerMile > 0 && (costA === 0 || costB === 0);
 
     var maxMinutes = left + minB;              // nothing shared
     var minMinutes = Math.max(left, minB);     // the new one rides along
@@ -486,7 +524,13 @@
       // half the driver said decides it. Null when either end was not named,
       // which is about half of real pairs. See mapRoute.
       route: mapRoute(active && active.dropoff, offer && offer.dropoff),
-      state: worst >= target ? 'go' : (best >= target ? 'warn' : 'no')
+      // Whether the money above is the pair or only a ceiling on it, so a
+      // display can say which it is showing — the same field, and the same
+      // word, rate() returns for one offer.
+      uncosted: uncosted,
+      state: (uncosted && worst >= target) ? 'warn'
+           : worst >= target ? 'go'
+           : (best >= target ? 'warn' : 'no')
     };
   }
 

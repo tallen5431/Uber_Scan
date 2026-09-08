@@ -636,6 +636,51 @@ function offer(atMinutes, pay, minutes, cost) {
   // number on the same screen is net.
   var free = A.stack(active({ cost: 0 }), newOffer({ cost: 0 }), SET, T0 + 10 * 60000);
   ok_('mileage is deducted from the pair', free.pay > s.pay);
+
+  // A figure rate() refused to score may not be re-scored here.
+  //
+  // rate() keeps `ready: true` and every number on an impossible reading so the
+  // row reaches the journal, and withholds only the verdict. This function
+  // looked at neither and rebuilt one. The real pair: held $11.84 / 20 min, the
+  // next card's pay read as $1184 — headline blanked to "--", CHECK THE PAY,
+  // and beneath it in green "$1791–$3580/hr · beats finishing alone".
+  eq('an offer the reading doubted gets no pair verdict',
+     A.stack(active(), newOffer({ pay: 1184, doubt: 'pay' }), SET, T0 + 10 * 60000),
+     null);
+  eq('...and neither does a doubted order in the car',
+     A.stack(active({ doubt: 'time' }), newOffer(), SET, T0 + 10 * 60000), null);
+  // The gate is the flag and not the size of the number: doubt() is where that
+  // judgement lives, and a second opinion here is a second thing to drift.
+  ok_('...while the same figures without the doubt are still judged',
+      !!A.stack(active(), newOffer({ pay: 1184 }), SET, T0 + 10 * 60000));
+
+  // An upper bound may not clear a net target — rate()'s rule, applied to a
+  // pair. `target` was drawn against rates with running costs already off; a
+  // card that printed no distance leaves nothing to take off, so the money is
+  // gross and the comparison is between two different kinds of dollar.
+  var noMiles = A.stack(active(), newOffer({ pay: 30, cost: 0 }), SET, T0 + 10 * 60000);
+  ok_('a pair with nothing charged for the miles says so', noMiles.uncosted);
+  eq('...and is capped at a close call however well it reads',
+     noMiles.state, 'warn');
+  ok_('...on a range that would otherwise have been green',
+      noMiles.worst >= SET.target);
+  // The held order counts too: either side being gross makes the pair gross,
+  // and this is the case nothing on the driving screen would otherwise explain
+  // — the note above the verdict only speaks about the offer.
+  eq('an order in the car with no distance caps the pair as well',
+     A.stack(active({ cost: 0 }), newOffer({ pay: 30 }), SET, T0 + 10 * 60000).state,
+     'warn');
+  // ...and the cap only exists because a cost per mile is configured. With
+  // none set, `target` is a gross line and nothing is missing.
+  eq('with no running cost configured there is nothing to cap',
+     A.stack(active({ cost: 0 }), newOffer({ pay: 30, cost: 0 }),
+             { target: 25, band: 15, costPerMile: 0 }, T0 + 10 * 60000).state,
+     'go');
+  // Capped, not demoted: below the floor it is still a PASS, exactly as
+  // rate() leaves it.
+  eq('...and a bad pair with no distance is still a pass',
+     A.stack(active(), newOffer({ pay: 1, cost: 0 }), SET, T0 + 10 * 60000).state,
+     'no');
 })();
 
 /* ---- where the two jobs end ---------------------------------------------

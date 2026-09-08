@@ -667,6 +667,35 @@
     return (typeof n === 'number' && isFinite(n)) ? n.toFixed(dp === undefined ? 1 : dp) : null;
   }
 
+  /* What a set of offers is worth, after running costs.
+   *
+   * Net, like every other figure on this page — the note at the bottom says so
+   * out loud ("Rates are after $0.35/mi of running costs"). `cost` is absent on
+   * rows whose distance was not trusted, and there the payout is the honest
+   * total anyway: no running cost was charged against that offer either.
+   *
+   * One function because there are three places that need it and two of them
+   * had already drifted. The headline said "You marked 6 as taken, worth $59.93
+   * after running costs, at a typical $28/hr" and, 145 lines further down, the
+   * day header for the same six offers said "took 6 for $73.70" — $13.77 apart,
+   * 23%, always on screen together, because any rendered "took N for $X"
+   * guarantees the headline is above it. The comment over the day line asserts
+   * the very rule it broke: "figures on one line that disagree about what they
+   * are counting are worse than one figure."
+   *
+   * `cost` back as well as `pay`, because the wording depends on it: with costs
+   * set to zero nothing was subtracted, and saying "after running costs" would
+   * describe a subtraction that never happened. */
+  function netTotal(rows) {
+    var cost = 0;
+    var pay = (rows || []).reduce(function (t, r) {
+      var c = (typeof r.cost === 'number' && isFinite(r.cost)) ? r.cost : 0;
+      cost += c;
+      return t + (r.pay || 0) - c;
+    }, 0);
+    return { pay: pay, cost: cost };
+  }
+
   // What "this card" means for a hide-every rule. Taken from the row's own data
   // attributes rather than parsed back out of the text, which would break the
   // moment the wording changed.
@@ -973,10 +1002,17 @@
     // one screen disagreeing about how many offers there are.
     var dropped = (typeof a.setAside === 'number' && a.setAside > 0)
       ? ' (' + a.setAside + ' more fell outside any run of scanning)' : '';
+    // "hours in total" appeared twice on this page over the same runs, for two
+    // different spans, and the section immediately below was the other one.
+    // This figure carries each run on to the end of the last trip taken in it —
+    // time spent on a job is time worked, and it is what the replay divides the
+    // money by — so it is always the larger of the two. Named, not changed:
+    // bending it to match the heading below would change the recommendation.
     var working =
       'From <b>' + a.offers + '</b> offers across <b>' + runs + '</b>'
       + dropped + ', <b>'
-      + a.hours.toFixed(1) + '</b> hours in total — not one continuous shift, and '
+      + a.hours.toFixed(1) + '</b> hours counting the trips taken to their end '
+      + '— not one continuous shift, and '
       + 'not all of it driving. Replaying those offers in the order they arrived '
       + 'and taking the first one at or above ' + money(a.suggested)
       + ' whenever free gives <b>' + a.trips + '</b> trips.';
@@ -1021,11 +1057,24 @@
       return;
     }
     el.runsHead.hidden = false;
+    // First card of a run to last card of it. Not the same span as the one the
+    // advice above quotes, and the difference is not a rounding: that one runs
+    // each group on to wherever the last trip TAKEN in it finishes, because it
+    // is dividing money by time and a trip you are on is time you are working.
+    // This one is describing the recording.
+    //
+    // They sat one element apart — "16 of them, 22.1 hours in total, not one
+    // shift" directly above "across 16 separate runs of scanning, 26.8 hours
+    // in total" — the same runs, the same offers, two totals 21% apart with
+    // nothing saying they were answering different questions. Measured across
+    // the four real exports that reach a recommendation: +12%, +15%, +21%,
+    // +22%, always in the same direction. So both are named now, and neither
+    // is bent to match the other: the arithmetic each one feeds is right.
     var hours = groups.reduce(function (t, g) {
       return t + (g[g.length - 1].at - g[0].at) / 3600000;
     }, 0);
     el.runsHead.innerHTML = 'Runs of scanning <em>· ' + groups.length + ' of them, '
-      + hours.toFixed(1) + ' hours in total, not one shift</em>';
+      + hours.toFixed(1) + ' hours of offers arriving, not one shift</em>';
 
     el.runs.innerHTML = groups.map(function (g) {
       var from = new Date(g[0].at);
@@ -1202,7 +1251,17 @@
       + row('Called it', saidWords(s))
       + row('Both together', s ? money(s.pay, 2) : null)
       + row('Over', mins ? mins + ' min' : null)
-      + row('Which is', s ? range + '/hr' : null)
+      + row('Which is', s
+            ? range + '/hr'
+              // A capped close call and a genuine one are not the same call,
+              // and without this they are the same row. One of the two cards
+              // printed no distance the rig could charge, so this figure is
+              // gross while the target it was held to is net — the panel says
+              // "close" because it cannot tell, not because the pair is
+              // borderline.
+              + (s.uncosted ? ' — a ceiling: one card printed no distance, '
+                              + 'so nothing was charged for the miles' : '')
+            : null)
       // The one claim in the whole answer that does not depend on geography,
       // and therefore the only one worth stating without a hedge.
       + row('Beats finishing what you have', s
@@ -1217,6 +1276,97 @@
       + row('Marked', outcome || 'never marked either way')
       + '</dl>'
       + '</details>';
+  }
+
+  /* The notes under the figures: what the rows are, what was left out, what
+   * the rig watched go past, and what came off for the car.
+   *
+   * A function because render() has two paths and only one of them ran this.
+   * The other — the early return for a window with nothing countable in it —
+   * blanked the list, and `data.unreadable` and `data.hidden` were only ever
+   * consulted afterwards, so neither could print in the one state each exists
+   * for. Reproduced by running this page's own script against the exact JSON
+   * the server sends: {unreadable:'EACCES', offers:[]} and a genuinely empty
+   * journal painted byte-identical pages, both of them saying
+   *
+   *     "No offers recorded yet ... If you have been driving and it is still
+   *      empty, the rig is reading nothing — the live view will say why."
+   *
+   * — a positive claim about the camera, made over a journal sitting on disk
+   * intact that the page had simply failed to open, and that the backup cannot
+   * merge into either. The driving screen has carried the matching branch all
+   * along ("Empty and unreadable look identical on a panel unless one of them
+   * says so"); this page had the rule and not the code.
+   *
+   * `newest` is null on the empty path — there is no row to read a cost per
+   * mile off — and the line about running costs is dropped rather than guessed
+   * at. */
+  function showCaveats(data, setAside, newest) {
+    var notes = ['These are offers the scanner read, not trips taken — it cannot '
+                 + 'see the Accept button and never touches it, so tick the ones '
+                 + 'you took and it will keep the tally.'];
+    if (setAside) {
+      notes.push(setAside + ' reading' + (setAside === 1 ? '' : 's')
+                 + ' left out of the figures above — they are still in the list '
+                 + 'below, greyed, with the reason on each.');
+    }
+    if (data.hidden) {
+      notes.push(data.hidden + ' offer' + (data.hidden === 1 ? ' is' : 's are')
+                 + ' hidden and left out of every figure here.');
+    }
+    // What went past unrecorded, from the scanner's own tally.
+    //
+    // The one thing a journal can never contain is what is not in it, so this
+    // is the nearest honest thing: a read that found a payout proves a card was
+    // in front of the camera, and an episode that ended with no row written is
+    // one the rig watched go past. It is a floor and is said to be one — an
+    // offer the reader never saw at all is invisible to this too.
+    // A journal that is there and cannot be read looks exactly like a quiet
+    // week, and only one of those is worth doing something about. The server
+    // used to answer both with an empty list — see readJournal — which on this
+    // page is a blank history and on the sync endpoints was sixty duplicate
+    // rows reported as a success.
+    if (data.unreadable) {
+      notes.push('<b>The journal could not be read (' + data.unreadable
+                 + ').</b> Everything above is empty because nothing could be '
+                 + 'loaded, not because nothing was recorded — the file is '
+                 + 'still there. Check its permissions before trusting a gap '
+                 + 'here, and know that the backup cannot merge into it either.');
+    }
+    var w = data.watched;
+    if (w && w.saw) {
+      // Counted in sightings, not in offers: one card watched, lost and picked
+      // up again is two sightings of one offer, and the wording must not invite
+      // anyone to compare this figure with the number of rows below it. What it
+      // is for is the ratio.
+      var lost = w.saw - w.kept;
+      notes.push(lost
+        ? '<b>' + lost + '</b> time' + (lost === 1 ? '' : 's')
+          + ' the scanner picked a payout off the screen and never managed to '
+          + 'record it — ' + Math.round(lost / w.saw * 100) + '% of the <b>'
+          + w.saw + '</b> it saw. Usually two reads that never agreed before the '
+          + 'card was gone. So at least that many offers are missing from '
+          + 'everything above, and probably more: one the camera never read at '
+          + 'all cannot be counted by anything.'
+        : 'Every one of the <b>' + w.saw + '</b> payout'
+          + (w.saw === 1 ? '' : 's') + ' the scanner picked off the screen was '
+          + 'recorded. An offer it never read at all cannot be counted, so that '
+          + 'is a floor rather than a guarantee.');
+    }
+    // Only when something was actually deducted. "Rates are after $0.00/mi of
+    // running costs" is a sentence about nothing, and it invites the reader to
+    // hunt for a subtraction that never happened.
+    if (newest) {
+      notes.push(newest.costPerMile > 0
+        ? 'Rates are after ' + money(newest.costPerMile, 2) + '/mi of running costs.'
+        : 'No running cost is set, so these are what the offers paid before the car.');
+    }
+    // A list, not a paragraph. These are four unrelated facts — what the rows
+    // are, what was set aside, what is hidden, what came off for the car — and
+    // run together in one grey block the eye skips all four.
+    el.caveats.innerHTML = notes.map(function (n) {
+      return '<li>' + n + '</li>';
+    }).join('');
   }
 
   function showPairs(pairs) {
@@ -1313,7 +1463,16 @@
     showPairs(data.pairs);
 
     if (!offers.length) {
-      el.headline.innerHTML = kept.length
+      // Nothing was recorded, or nothing could be READ. Those are different
+      // answers and the server already told this page which: `unreadable` is
+      // the code from a journal that exists and could not be opened. Saying
+      // "no offers recorded yet" over one of those is a claim about the
+      // camera made from a failure to open a file.
+      var blind = !!data.unreadable;
+      el.headline.innerHTML = blind
+        ? 'The journal could not be read, so there is nothing to show — '
+          + 'which is not the same as nothing being there.'
+        : kept.length
         ? 'Nothing usable in this stretch — <b>' + setAside + '</b> set aside as doubtful.'
         : 'No offers recorded yet. The scanner keeps one line per offer it is sure of.';
       el.blocks.innerHTML = el.kinds.innerHTML = '';
@@ -1323,10 +1482,25 @@
       el.blocksHead.hidden = el.kindsHead.hidden = true;
       el.more.textContent = '';
       el.nothing.hidden = false;
-      el.nothing.innerHTML = kept.length
+      el.nothing.innerHTML = blind
+        ? '<b>The journal could not be read.</b>The file is still there — this '
+          + 'page could not open it, which is not the same as a quiet week and '
+          + 'is not a fault in the camera. The note below says what the server '
+          + 'reported. The backup at home cannot merge into it either while '
+          + 'this lasts.'
+        : kept.length
         ? '<b>Nothing here can be counted.</b>Every offer in this stretch was '
           + 'set aside — a partial read, or a figure outside anything a real '
           + 'offer does. They are listed below with the reason on each.'
+        // Only reachable now with the journal readable and nothing hidden
+        // inside the window: a hidden-only stretch is a rule doing its job,
+        // not a rig that has stopped reading, and sending the driver to the
+        // live view for it is sending them to debug a camera that is fine.
+        : data.hidden
+        ? '<b>Everything in this stretch is hidden.</b>' + data.hidden + ' offer'
+          + (data.hidden === 1 ? ' is' : 's are') + ' held back by a hide rule '
+          + 'and left out of every figure here. Press <b>Show hidden</b> above '
+          + 'to see them.'
         : '<b>No offers recorded yet.</b>The scanner writes one line per offer '
           + 'it is sure of, so this fills up as you drive. If you have been '
           + 'driving and it is still empty, the rig is reading nothing — '
@@ -1335,7 +1509,13 @@
       el.p25.textContent = el.p50.textContent = el.p75.textContent = '--';
       // "--/hr" is not a rate, it is a dash wearing a unit.
       showUnits(false);
-      el.caveats.innerHTML = '';
+      // Not blanked. This is the one path where the two notes that matter most
+      // — the journal could not be read, and N offers are hidden — are the
+      // whole explanation for the emptiness above them, and it was the one
+      // path that threw them away. `null` for the newest row because there is
+      // none to read a cost per mile off, and a guess there is worse than
+      // silence.
+      showCaveats(data, setAside, null);
       el.advice.hidden = true;
       el.runs.innerHTML = '';
       el.runsHead.hidden = true;
@@ -1428,19 +1608,9 @@
     if (mine.length) {
       var mineRates = mine.map(function (r) { return r.perHour; })
                           .sort(function (a, b) { return a - b; });
-      // Net, like every other figure on this page — the note at the bottom
-      // says so out loud ("Rates are after $0.35/mi of running costs"), and
-      // this was the one number that ignored it. Worse, it sat in the same
-      // sentence as a net $/hr, so the two halves were measured differently
-      // and nothing said which was which. `cost` is absent on rows whose
-      // distance was not trusted, and there the payout is the honest total
-      // anyway: no running cost was charged against that offer either.
-      var mineCost = 0;
-      var minePay = mine.reduce(function (t, r) {
-        var c = (typeof r.cost === 'number' && isFinite(r.cost)) ? r.cost : 0;
-        mineCost += c;
-        return t + (r.pay || 0) - c;
-      }, 0);
+      var mineTotal = netTotal(mine);
+      var mineCost = mineTotal.cost;
+      var minePay = mineTotal.pay;
       lines.push('You marked <b>' + mine.length + '</b> as taken, worth <b>'
         + money(minePay, 2) + '</b>'
         // Only claimed when something was actually taken off. With costs set
@@ -1579,9 +1749,14 @@
         var day_counted = ofDay.filter(counted);
         var usable = day_counted.map(function (o) { return o.perHour; })
                                 .sort(function (a, b) { return a - b; });
-        var offered = day_counted.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
+        // Both of these net, and through the same function the headline uses.
+        // The median beside them already was; the money was not, so the one
+        // line carried a net rate and two gross totals — and the "took N for
+        // $X" at the end of it contradicted the headline above about the same
+        // offers by 23%.
+        var offered = netTotal(day_counted).pay;
         var tookToday = day_counted.filter(function (o) { return o.accepted; });
-        var tookPay = tookToday.reduce(function (t, o) { return t + (o.pay || 0); }, 0);
+        var tookPay = netTotal(tookToday).pay;
         var setAside = ofDay.length - day_counted.length;
         out.push('<div class="day"><b>' + dayOf(r.at).toLocaleDateString(undefined,
                    { weekday: 'short', month: 'short', day: 'numeric' }) + '</b>'
@@ -1612,69 +1787,7 @@
       el.findNote.hidden = true;
     }
 
-    var notes = ['These are offers the scanner read, not trips taken — it cannot '
-                 + 'see the Accept button and never touches it, so tick the ones '
-                 + 'you took and it will keep the tally.'];
-    if (setAside) {
-      notes.push(setAside + ' reading' + (setAside === 1 ? '' : 's')
-                 + ' left out of the figures above — they are still in the list '
-                 + 'below, greyed, with the reason on each.');
-    }
-    // Only when something was actually deducted. "Rates are after $0.00/mi of
-    // running costs" is a sentence about nothing, and it invites the reader to
-    // hunt for a subtraction that never happened.
-    if (data.hidden) {
-      notes.push(data.hidden + ' offer' + (data.hidden === 1 ? ' is' : 's are')
-                 + ' hidden and left out of every figure here.');
-    }
-    // What went past unrecorded, from the scanner's own tally.
-    //
-    // The one thing a journal can never contain is what is not in it, so this
-    // is the nearest honest thing: a read that found a payout proves a card was
-    // in front of the camera, and an episode that ended with no row written is
-    // one the rig watched go past. It is a floor and is said to be one — an
-    // offer the reader never saw at all is invisible to this too.
-    // A journal that is there and cannot be read looks exactly like a quiet
-    // week, and only one of those is worth doing something about. The server
-    // used to answer both with an empty list — see readJournal — which on this
-    // page is a blank history and on the sync endpoints was sixty duplicate
-    // rows reported as a success.
-    if (data.unreadable) {
-      notes.push('<b>The journal could not be read (' + data.unreadable
-                 + ').</b> Everything above is empty because nothing could be '
-                 + 'loaded, not because nothing was recorded — the file is '
-                 + 'still there. Check its permissions before trusting a gap '
-                 + 'here, and know that the backup cannot merge into it either.');
-    }
-    var w = data.watched;
-    if (w && w.saw) {
-      // Counted in sightings, not in offers: one card watched, lost and picked
-      // up again is two sightings of one offer, and the wording must not invite
-      // anyone to compare this figure with the number of rows below it. What it
-      // is for is the ratio.
-      var lost = w.saw - w.kept;
-      notes.push(lost
-        ? '<b>' + lost + '</b> time' + (lost === 1 ? '' : 's')
-          + ' the scanner picked a payout off the screen and never managed to '
-          + 'record it — ' + Math.round(lost / w.saw * 100) + '% of the <b>'
-          + w.saw + '</b> it saw. Usually two reads that never agreed before the '
-          + 'card was gone. So at least that many offers are missing from '
-          + 'everything above, and probably more: one the camera never read at '
-          + 'all cannot be counted by anything.'
-        : 'Every one of the <b>' + w.saw + '</b> payout'
-          + (w.saw === 1 ? '' : 's') + ' the scanner picked off the screen was '
-          + 'recorded. An offer it never read at all cannot be counted, so that '
-          + 'is a floor rather than a guarantee.');
-    }
-    notes.push(newest.costPerMile > 0
-      ? 'Rates are after ' + money(newest.costPerMile, 2) + '/mi of running costs.'
-      : 'No running cost is set, so these are what the offers paid before the car.');
-    // A list, not a paragraph. These are four unrelated facts — what the rows
-    // are, what was set aside, what is hidden, what came off for the car — and
-    // run together in one grey block the eye skips all four.
-    el.caveats.innerHTML = notes.map(function (n) {
-      return '<li>' + n + '</li>';
-    }).join('');
+    showCaveats(data, setAside, newest);
 
     // Said rather than only drawn. Everything above this point is a redraw
     // with no event a screen reader can notice.

@@ -1187,6 +1187,24 @@ def emit_offer(offer_id, parsed, rate):
                  if rate.get('ready') and rate.get('cost') is not None else None),
         'dropoff': parsed.get('dropoff'),
         'pickup': parsed.get('pickup'),
+        # The two fields that decide whether a verdict may be stated at all,
+        # and the reason they have to travel on THIS line and not only on the
+        # reading beside it.
+        #
+        # server.js writes the pairing row from this object and builds the
+        # order in the car out of it, and Advice.stack is then asked to judge
+        # both. Without these it judged them blind: a card whose pay read as
+        # $1184 got a green "+ the one you have: $1791-$3580/hr" beneath a
+        # headline already blanked to "--", and that verdict went into the
+        # journal as what the panel advised. An offer with no distance on it
+        # got a green pair verdict built from a gross figure against a net
+        # target.
+        #
+        # `doubt` is a string naming which figure is impossible, or None;
+        # `uncosted` says the money is a ceiling. Both are what rate() already
+        # decided - nothing here re-derives them.
+        'doubt': rate.get('doubt'),
+        'uncosted': bool(rate.get('uncosted')),
     }, 'at': int(time.time() * 1000)}), flush=True)
 
 
@@ -1202,6 +1220,22 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
         # is looking at the same card and is the one who can tell which of them
         # the camera got wrong.
         'doubt': rate.get('doubt'),
+        # Whether the rate below is the offer or only a ceiling on it.
+        #
+        # live.html has had `if (r.uncosted)` since the uncosted cap was
+        # written, printing "No distance on the card - rate is a ceiling." It
+        # has never once fired in the car: this key was not in the payload, so
+        # the branch tested a field that was never sent. The verdict itself was
+        # right - `state` comes from rate(), which caps it - so the panel showed
+        # an amber CLOSE CALL on an offer whose printed rate clears the target,
+        # with nothing on screen saying why.
+        #
+        # 788 of this driver's 3,065 recorded offers, 26%, were rated with no
+        # running cost taken off, and 188 of those clear the $25 target on the
+        # gross figure. Every one of the 188 was an unexplained amber.
+        #
+        # It is also what Advice.stack needs to apply the same cap to a pair.
+        'uncosted': bool(rate.get('uncosted')),
         'perHour': round(rate['perHour'], 2) if rate['ready'] else None,
         # Both rates, and the time they were both divided by. The card's own
         # minutes are below as `minutes`, for checking against the phone; these

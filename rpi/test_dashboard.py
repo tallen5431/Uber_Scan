@@ -112,6 +112,29 @@ IMPOSSIBLE = dict(UNCERTAIN, state='doubt', doubt='rate', pay=136.0,
 READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
             'impossible': IMPOSSIBLE}
 
+# ...and every field above has to be one the rig actually sends.
+#
+# These fixtures are hand-written, which is what lets them stage a card the
+# camera cannot be made to produce. It also lets them stage a MESSAGE the
+# scanner cannot produce, and then every check below is measured against a
+# shape that does not exist. `uncosted` was exactly that: the fixture set it,
+# live.html's `if (r.uncosted)` branch fired here and passed, and scan_pi.emit
+# had never put the key on the wire — so the "rate is a ceiling" line this file
+# claims to have verified had never once appeared in the car, on 26% of the
+# driver's offers.
+#
+# Read off emit()'s own source rather than by calling it, because calling it
+# needs a tracker, a scanner and a camera. A key here that emit does not write
+# is a fixture inventing a field; the reverse is fine, since a fixture need not
+# exercise everything.
+def _emitted_keys():
+    import re
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'scan_pi.py')).read()
+    start = src.index('def emit(rate, parsed, ms')
+    body = src[start:src.index('\ndef ', start + 10)]
+    return set(re.findall(r"^\s{8}'([a-zA-Z_]+)':", body, re.M))
+
 DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, readingsJson] = process.argv.slice(2);
@@ -732,6 +755,12 @@ if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
     skip('no playwright')
 
 work = tempfile.mkdtemp()
+_sent = _emitted_keys()
+ok_('the scanner\'s own payload could be read', len(_sent) > 20)
+for _name, _reading in sorted(READINGS.items()):
+    _invented = sorted(k for k in _reading if k not in _sent)
+    eq('the %s fixture stages only fields the rig sends' % _name, _invented, [])
+
 journal = os.path.join(work, 'journal.jsonl')
 open(journal, 'w').close()
 port = free_port()

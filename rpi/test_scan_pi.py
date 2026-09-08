@@ -1498,6 +1498,33 @@ ok_('...carrying no verdict', 'ready' not in told)
 ok_('...and no state to be mistaken for one',
     not [k for k in told if k in ('state', 'doubt', 'grossPerHour')])
 
+# ...but the two fields that say whether a verdict may be stated AT ALL do ride
+# along, inside the offer and not beside it.
+#
+# server.js builds the pairing row and the order in the car out of this object
+# and hands both to Advice.stack. Without these it judged them blind: a card
+# whose pay read as $1184 got a green "+ the one you have: $1791-$3580/hr"
+# under a headline already blanked to "--", and that went into the journal as
+# what the panel advised.
+doubted = said(lambda: SP.emit_offer('x', {'pay': 1184.0, 'minutes': 20.0},
+                                     {'ready': True, 'perHour': 3552.0,
+                                      'cardMinutes': 20.0, 'doubt': 'pay'}))
+eq('the offer says which figure the reading doubted',
+   doubted['offer']['doubt'], 'pay')
+eq('...and a sound one says none', told['offer']['doubt'], None)
+# `uncosted` was in no payload this file sends. live.html has had
+# `if (r.uncosted)` since the cap was written - "No distance on the card - rate
+# is a ceiling" - and it had never once fired in the car, because the key was
+# never on the wire. 788 of this driver's 3,065 recorded offers were rated with
+# no running cost taken off, and 188 of those clear the $25 target on the gross
+# figure: every one an amber with no reason on the screen.
+ceiling = said(lambda: SP.emit_offer('x', {'pay': 18.77, 'minutes': 25.0},
+                                     {'ready': True, 'perHour': 45.0,
+                                      'cardMinutes': 25.0, 'uncosted': True}))
+eq('the offer says when nothing could be charged for the miles',
+   ceiling['offer']['uncosted'], True)
+eq('...and says so plainly when something was', told['offer']['uncosted'], False)
+
 # The card's own minutes, not the billed ones. The button is named after what
 # the driver saw on the phone; a figure with their pickup pad added would not
 # match the card they are trying to remember.

@@ -748,6 +748,15 @@
       // because it is the only part of this a driver can act on without
       // checking the map.
       + (s.sure ? ' \u00b7 beats finishing alone' : '')
+      // ...and whether that range is the pair or only a ceiling on it. One of
+      // the two cards printed no distance the rig could charge, so the money
+      // above is gross and the target it is being held to is net \u2014 which is
+      // why this line can be amber on a range that appears to clear it.
+      //
+      // The note above the verdict says the same thing when the OFFER is the
+      // uncosted one. It says nothing when the order already in the car is,
+      // and then this line was an amber with no reason on the screen.
+      + (s.uncosted ? ' \u00b7 a ceiling, no distance to charge' : '')
       // Where the two jobs END, which is the half the arithmetic above cannot
       // reach: the range assumes either nothing is shared or the new job rides
       // along inside the old one, and geography decides which. Said in the

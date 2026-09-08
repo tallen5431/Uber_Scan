@@ -184,6 +184,33 @@ for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
     for suffix in ('.part', '.4321.7.part', '.tmp'):
         ok_('...and %s%s with it' % (base, suffix), is_ignored(base + suffix))
 
+# --- two figures may not wear the same words -------------------------------
+#
+# The offers page said "16 of them, 22.1 hours in total, not one shift" and,
+# one element below it, "across 16 separate runs of scanning, 26.8 hours in
+# total". The same runs and the same offers, 21% apart, because the second one
+# carries each run on to the end of the last trip taken in it and the first
+# stops at the last card seen. Both are right; neither said which question it
+# was answering, and they are never on screen apart.
+#
+# A static check because reproducing the clash needs a fixture large enough to
+# reach a recommendation, and the fault is not in the arithmetic — it is in two
+# strings. The rule is narrow and literal: a phrase this ambiguous may appear
+# once per page, or not at all. Measured across the four real exports that
+# reach a recommendation, the gap ran +12%, +15%, +21%, +22%, always the same
+# way round.
+AMBIGUOUS = ['hours in total']
+for page in ('journal.html', 'live.html', 'index.html', 'scan.html'):
+    text = open(os.path.join(ROOT, page)).read()
+    # Comments explain the trap and have to be allowed to quote it, or the
+    # check would forbid writing down why it exists.
+    code = re.sub(r'/\*.*?\*/', '', text, flags=re.S)
+    code = re.sub(r'(?m)^\s*//.*$', '', code)
+    for phrase in AMBIGUOUS:
+        seen = code.count(phrase)
+        ok_('%s says %r at most once, so two spans cannot share one wording '
+            '(%d)' % (page, phrase, seen), seen <= 1)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)
