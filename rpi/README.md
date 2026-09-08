@@ -1937,8 +1937,10 @@ Four keys in `config.json` are about where to look, and they mean different
 things.
 
 - **`quad`** is the calibration — the corners as found when you calibrated.
-  Only calibration writes it, and the corner tracker judges every candidate
-  against it.
+  Only calibration writes it. The corner tracker judges every candidate's SHAPE
+  against it always, and its SIZE against it until an automatic re-baseline
+  moves the size reference for the rest of that run. The file is untouched
+  either way, which is what ⟳ Re-find restores.
 - **`trackedQuad`** is where the tracking has got to. Written while scanning so
   the next run resumes without re-converging; ignored by `--no-track`.
 - **`cropBox`** pins the crop. Normally absent, and then the crop is placed per
@@ -2459,7 +2461,16 @@ what the timeout below and the **⟳ Re-find** button are for.
 
 **⟳ Re-find** in the live view puts the corners back where calibration left them
 and drops every piece of accumulated evidence, so the next screen argues for
-itself from nothing. It is a POST to `/api/recalibrate`, which touches
+itself from nothing — including undoing an automatic re-baseline, which is the
+case it exists for. "Corners on the screen at the wrong size" is equally "the
+phone was re-seated" and "the outline is on part of the screen", and that is
+exactly the call the watchdog has already made; the person watching the live
+view can see which it was, so they get to overrule it. For a while they could
+not: the re-baseline moved the same reference this button restores, so the press
+landed on the box the watchdog had just adopted and the green box did not move.
+If the phone really has been re-seated the rig will take the corners back about
+half a minute later, and the log says so rather than leaving a correct press
+looking like a failure. It is a POST to `/api/recalibrate`, which touches
 `rpi/.recalibrate`; the scanner notices within a check and deletes it. A file
 rather than a signal, for the same reason `.viewing` is one — the scanner is
 sometimes a child of the web server and sometimes a systemd unit that has never

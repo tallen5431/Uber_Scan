@@ -1001,8 +1001,13 @@ class Health:
             if self.relocks:
                 bits.append('re-locked %dx since start' % self.relocks)
             if self.rebaselines:
-                bits.append('un-stuck %dx — the stored calibration is out of date'
-                            % self.rebaselines)
+                # "the size it judges against", not "the calibration". The
+                # calibration itself is kept for the run — it is what re-find
+                # restores and what `wander` is measured against — and saying
+                # otherwise sent a driver to re-calibrate over something the
+                # rig had already worked around.
+                bits.append('un-stuck %dx — the size the tracker judges against '
+                            'is out of date' % self.rebaselines)
         log('health over %.0fs: %s' % (now - self.since, '; '.join(bits)))
         tally = {'over': int(now - self.since), 'saw': self.saw,
                  'kept': self.kept, 'reads': self.reads, 'failed': self.failed}
@@ -1615,6 +1620,9 @@ def main():
     # one. Remembered rather than dropped: the gate fires once, on the frame a
     # moving picture settles, so a trigger thrown away is a card never read.
     read_wanted = False
+    # When the driver last pressed ⟳ Re-find, so the stall watchdog can tell
+    # its own expected aftermath from a fault. See the stalled branch.
+    reset_at = None
     last_alive = 0.0
     # The card currently being watched, and what has become of it. See
     # Health.saw — an episode that ends having shown a payout but written
@@ -2087,13 +2095,39 @@ def main():
                                 'from it again, and tracking is %s'
                                 % ('off (--no-track)' if tracker is None else 'on'))
                     elif tracker is not None:
+                        was = TR.distance(tracker.quad, tracker.calibrated)
                         tracker.start_over()
                         scanner.quad = tracker.quad
                         cfg.pop('trackedQuad', None)
                         save_config(args.config, cfg)
-                        log('outline reset: back to the calibrated corners, and '
-                            'the next screen in the middle of the frame will be '
-                            'taken as the phone')
+                        # The same two lines the branch above sets, for the same
+                        # reason, and they were missing here because until the
+                        # tracker's two references were split this press could
+                        # not move anything: start_over restored the box an
+                        # automatic re-baseline had just adopted, so the corners
+                        # and the crop were already where they ended up. Now the
+                        # press moves them — measured at 241.9px on a 0.72x
+                        # re-seat — under a picture that has not changed, and
+                        # without this the rig waits for the phone to move
+                        # before reading through the corners the driver just
+                        # asked for.
+                        moved = do_read = True
+                        # When, so the stall watchdog below does not turn round
+                        # in six seconds and advise the driver to do the thing
+                        # they have just done. See there.
+                        reset_at = now
+                        log('outline reset: back to the calibrated corners, '
+                            '%.0fpx from where they were%s' %
+                            (was,
+                             # Said only when it is true. A re-baseline is the
+                             # thing this press exists to overrule, and saying
+                             # so is what stops a correct reset looking like a
+                             # failure when the watchdog takes the corners back
+                             # about thirty seconds later.
+                             ('; this undoes an automatic re-baseline, which '
+                              'will happen again in about half a minute if the '
+                              'phone really has been re-seated'
+                              if tracker.rebaselines or tracker.centred else '')))
                     else:
                         log('outline reset asked for, but tracking is off '
                             '(--no-track), so the corners are already fixed')
@@ -2178,10 +2212,11 @@ def main():
                         log('corners un-stuck: the screen in front of the camera '
                             'is not the size the stored calibration describes, and '
                             'has been steadily so for %ds, so the corners were '
-                            'moved onto it and the calibration taken as out of '
-                            'date. Reading carries on — but re-run calibration '
-                            'when you can, or the next start will be stuck again.'
-                            % TR.RECOVER_AFTER)
+                            'moved onto it and the SIZE the tracker judges against '
+                            'taken as out of date. The calibration itself is kept, '
+                            'so ⟳ Re-find undoes this. Reading carries on — but '
+                            're-run calibration when you can, or the next start '
+                            'will be stuck again.' % TR.RECOVER_AFTER)
                     elif tracker.jumps > jumps_before:
                         health.relocks += 1
                         log('corners re-locked: the phone is somewhere the stored '
@@ -2202,12 +2237,32 @@ def main():
                     # the box, only by the person who can see the screen.
                     stalled_now = tracker.status()['stalled']
                     if stalled_now != stalled_before:
-                        log('outline stuck: the corners have been off the screen '
-                            'the camera can see for %ds. If the box is drawn '
-                            'round part of the offer card rather than the whole '
-                            'phone, the screen is probably washed out — shade it '
-                            'or dim it. Otherwise press reset on the live page, '
-                            'or re-run calibration.' % TR.STALL_VISIBLE
+                        # Two different pieces of news, because after a reset
+                        # this is not a fault — it is the expected consequence
+                        # of the press.
+                        #
+                        # ⟳ Re-find puts the corners back on a screen the size
+                        # gate may well refuse: that is the whole point, since
+                        # the driver is overruling a re-baseline the rig made.
+                        # Measured on a 0.72x re-seat, the stall goes true about
+                        # six seconds after the press — so the rig was answering
+                        # the driver's override by telling them to press the
+                        # same button again, and then taking the corners back
+                        # about half a minute later anyway.
+                        just_reset = (reset_at is not None
+                                      and now - reset_at < TR.RECOVER_AFTER)
+                        log(('outline stuck: the corners have been off the screen '
+                             'the camera can see for %ds. If the box is drawn '
+                             'round part of the offer card rather than the whole '
+                             'phone, the screen is probably washed out — shade it '
+                             'or dim it. Otherwise press reset on the live page, '
+                             'or re-run calibration.' % TR.STALL_VISIBLE
+                             if not just_reset else
+                             'outline stuck, as expected after a reset: the '
+                             'corners are back at the calibration and the screen '
+                             'in view is not that size. If the phone really has '
+                             'been re-seated the rig will take them back in about '
+                             'half a minute; if it has not, re-run calibration.')
                             if stalled_now else 'outline unstuck: the corners are '
                             'back on the screen')
                     if tracker.needs_save(now):

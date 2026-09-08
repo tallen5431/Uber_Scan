@@ -28,9 +28,12 @@ other move. It still has to look like the screen — the right size and the righ
 shape — which is the check that stopped an Accept bar being adopted as a phone.
 That is the difference between drift and a knock, and both need handling.
 
-The size test is judged against the calibration and never against where the
+The size test is judged against a fixed reference and never against where the
 corners have got to, because a relative test has no floor and walks downhill.
-The price is that a screen the calibration does not recognise can never be
+That reference starts as the calibration and only ever moves when one of the
+recovery paths below deliberately adopts a new size — never by drift, which is
+the property that matters. The price is that a screen the reference does not
+recognise can never be
 adopted, however plainly it is there — re-seat the phone a little further back
 and the real screen is refused on every check, forever, while `misses` stays at
 zero so nothing reports it. So there is one bound on that: corners that sit off
@@ -457,17 +460,24 @@ class QuadTracker:
 
         Measured on a 0.72x re-seat, driving the real tracker: before this, the
         press landed 242px from the calibration and 0px from the box the
-        watchdog had just adopted — the green box did not move and the crop
-        stayed a fraction of the wrong rectangle. Resetting the corners but
-        leaving the size reference is not enough either: the ordinary drift
-        path eases them back onto the adopted box 6.0 seconds later, which is
-        not an escape hatch.
+        watchdog had just adopted — the green box did not move. Resetting the
+        corners but leaving the size reference is not enough either: the
+        ordinary drift path eases them back onto the adopted box within a few
+        seconds, which is not an escape hatch.
 
-        The cost, stated plainly: on a phone that really was re-seated smaller,
-        the corners now sit at the calibration — 1.389x too big for the screen
-        — until the watchdog takes them back 30.4s later. That window is the
-        price of the button working at all, and it only opens because the
-        driver asked for it.
+        The cost, stated as precisely as it can honestly be put: on a phone
+        that really was re-seated smaller, the corners now sit at the
+        calibration — 1.389x too big for the screen — until the watchdog takes
+        them back about thirty seconds later. One RECOVER_AFTER, quantised by
+        the check interval; measured at 30.4s on a 0.1s grid and 31.2s on a
+        0.4s one, so it is not a figure worth quoting to the tenth.
+
+        What that window costs a READING is not asserted here, because it has
+        not been measured. A concentric crop taken too wide takes in surround
+        the card does not have; whether the reader then produces a wrong number
+        or simply refuses is exactly the distinction rule 1 turns on, and
+        guessing at it in a comment would be the same fault this file exists to
+        avoid. The window is real; its price is unmeasured.
         """
         self.quad = self.calibrated.copy()
         self.adopted = self.calibrated.copy()
@@ -559,7 +569,7 @@ class QuadTracker:
 
         Two things, and both matter for a reason found the hard way.
 
-        **Against the calibration, not against the current corners.** A
+        **Against a fixed reference, not against the current corners.** A
         relative test has no floor. Every step is "the same size as the last
         one", every step looks reasonable, and the corners walk downhill: six
         candidates each 80% of the one before left a rig at 63% of its
@@ -570,6 +580,12 @@ class QuadTracker:
         exactly right and both gates refusing them. The phone does not change
         size and the mount is fixed, so there is an absolute answer available
         and no reason to use a relative one.
+
+        "Fixed" and not "the calibration", because the recovery paths below are
+        allowed to move the size reference and one of them sets it to the
+        current corners outright. What makes that safe is not that the value
+        never changes — it is that ordinary drift can never change it. Only a
+        deliberate adoption can, and each of those is counted and logged.
 
         **Shape, not just scale.** `span` is the mean of the diagonals, and a
         diagonal says nothing about proportions: a 1340x230 strip along the
@@ -594,6 +610,7 @@ class QuadTracker:
         calibration it stops after the first, at 1.888. A box that short feeds
         a crop that is a fraction of the card.
         """
+
         return (same_size(candidate, self.adopted)
                 and same_shape(candidate, self.calibrated))
     def needs_save(self, now=None):
