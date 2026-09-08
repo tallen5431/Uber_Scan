@@ -508,6 +508,73 @@ const LOOK = (sel) => {
               <= document.documentElement.clientHeight + 1,
       };
     });
+
+    // ...and the same row when the rig has NOTHING to say about where the two
+    // jobs end, which is about half of real pairs.
+    //
+    // The two silences drew the identical line: "I checked and found nothing to
+    // warn you about" and "I have no idea". The range is still coloured by the
+    // pay arithmetic, so an unchipped green row read at a glance as a pair that
+    // came back clean — the exact wrong "these end near each other" this rig
+    // prices at an hour of driving and a rating.
+    const whole = (el) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const chars = []; let n;
+      while ((n = walk.nextNode())) {
+        const rg = document.createRange();
+        for (let i = 0; i < n.length; i++) {
+          rg.setStart(n, i); rg.setEnd(n, i + 1);
+          const c = rg.getBoundingClientRect();
+          if (!c.width && !c.height) continue;
+          chars.push({ ch: n.data[i],
+                       ok: c.left >= r.left - 0.5 && c.right <= r.right + 0.5 });
+        }
+      }
+      return chars.filter((c) => c.ok).map((c) => c.ch).join('');
+    };
+    // No address on the order in the car, which is the half a driver can do
+    // something about: 106 of this driver's 604 cards print a merchant and no
+    // address, and the dropoff button in the bar is what rescues them.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, {
+        holding: { pay: 12, minutes: 30, dropoff: null },
+        stack: { pay: 16.8, minMinutes: 30, maxMinutes: 50, worst: 20.2,
+                 best: 33.6, state: 'warn', sure: true, ends: null,
+                 route: null } }));
+    await page.waitForTimeout(250);
+    out['unknown ' + panel[0]] = await page.evaluate((src) => {
+      const seen = new Function('return (' + src + ')')();
+      const chip = document.querySelector('#stack .ends');
+      const dest = document.getElementById('dest');
+      return {
+        chip: chip ? (chip.textContent || '').trim() : null,
+        chipWhole: seen(chip),
+        chipColour: chip ? getComputedStyle(chip).color : null,
+        // The range is what this row exists for and has to survive the chip.
+        sumSeen: seen(document.querySelector('#stack .sum')),
+        destClass: dest ? dest.className : null,
+        fits: document.documentElement.scrollWidth
+              <= document.documentElement.clientWidth + 1,
+      };
+    }, whole.toString());
+    // ...and the same silence when the HELD order does have an address, so the
+    // button is not asking to be pressed for something it cannot fix.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, {
+        holding: { pay: 12, minutes: 30, dropoff: 'Oak Ln, Marietta' },
+        stack: { pay: 16.8, minMinutes: 30, maxMinutes: 50, worst: 20.2,
+                 best: 33.6, state: 'warn', sure: true, ends: null,
+                 route: null } }));
+    await page.waitForTimeout(250);
+    out['known-end ' + panel[0]] = await page.evaluate(() => {
+      const dest = document.getElementById('dest');
+      const chip = document.querySelector('#stack .ends');
+      return { destClass: dest ? dest.className : null,
+               chip: chip ? (chip.textContent || '').trim() : null };
+    });
+
     await page.close();
     await ctx.close();
   }
@@ -993,6 +1060,39 @@ try:
             link.get('inside'))
         ok_('%s: ...and can actually be pressed' % panel, link.get('reachable'))
         ok_('%s: ...and the panel still fits' % panel, row.get('fits'))
+
+        # The other answer this line can give, which used to be no answer at
+        # all: about half of real pairs print too little for the geography to
+        # be decided, and the row said nothing and changed nothing.
+        blind = got.get('unknown ' + panel) or {}
+        eq('%s: a pair with nowhere named says so' % panel,
+           blind.get('chip'), 'ENDS ?')
+        eq('%s: ...whole, not truncated to a shape' % panel,
+           blind.get('chipWhole'), 'ENDS ?')
+        # Not one of the three verdict colours, for the reason .verdict.doubt is
+        # not: this is a refusal, not a worse "near" or a softer "elsewhere".
+        ok_('%s: ...in the colour that means the rig declined (%s)'
+            % (panel, blind.get('chipColour')),
+            blind.get('chipColour') == 'rgb(201, 182, 242)')
+        # ...and the number the row exists for survives the chip taking width.
+        ok_('%s: ...with the range still whole beside it (%r)'
+            % (panel, blind.get('sumSeen')),
+            '/hr' in (blind.get('sumSeen') or ''))
+        ok_('%s: ...and the panel still fitting' % panel, blind.get('fits'))
+        # The one actionable difference, on the control that acts on it. The
+        # order in the car has no address, so every pair judged against it will
+        # keep coming back ENDS ? until this button is pressed.
+        ok_('%s: the dropoff button asks to be pressed (%r)'
+            % (panel, blind.get('destClass')),
+            'wanted' in (blind.get('destClass') or ''))
+        # ...and not when pressing it would change nothing, which is what stops
+        # it being a light that is always on.
+        known = got.get('known-end ' + panel) or {}
+        eq('%s: ...and still says the geography is unknown' % panel,
+           known.get('chip'), 'ENDS ?')
+        ok_('%s: ...but stops asking once that end is on record (%r)'
+            % (panel, known.get('destClass')),
+            'wanted' not in (known.get('destClass') or ''))
 
         # ...and the address above it, which is the other item in that column
         # with no minimum size. It drew 9px tall for a 15px font on the rig's

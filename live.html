@@ -737,8 +737,17 @@
     while (el.stack.firstChild) el.stack.removeChild(el.stack.firstChild);
     var sum = document.createElement('span');
     sum.className = 'sum';
-    sum.textContent = '+ the one you have: $'
-      + (lo === hi ? lo : lo + '\u2013' + hi) + '/hr over '
+    // The number first, because the ellipsis eats from the other end.
+    //
+    // This read "+ the one you have: $26\u201335/hr over 23\u201335 min", putting twenty
+    // characters of framing in front of the one figure the row exists for \u2014 and
+    // this is the half of the line designed to give way. Measured on the 3.5"
+    // hat it showed "+ the one you have: $26": a truncated range that reads as
+    // a point estimate, which is a worse thing to show than no range. The words
+    // that were lost are the ones the row's own existence already says \u2014 this
+    // line only appears when there is an order in the car.
+    sum.textContent = '+ $'
+      + (lo === hi ? lo : lo + '\u2013' + hi) + '/hr with the one you have, over '
       + (s.minMinutes === s.maxMinutes
          ? Math.round(s.minMinutes)
          : Math.round(s.minMinutes) + '\u2013' + Math.round(s.maxMinutes))
@@ -747,6 +756,13 @@
       // finishing what you have, even sharing nothing. Worth saying out loud
       // because it is the only part of this a driver can act on without
       // checking the map.
+      //
+      // Kept INSIDE the ellipsised half, which is where it started. Pulling it
+      // out into a `flex: none` element of its own was tried and measured
+      // worse in the way that matters: the clause then always wins and the
+      // range gives way instead, so the 800x480 panel showed "+ the one you
+      // have: $26–35/h" and the 3.5" hat showed "+". The number is what this
+      // row exists for; a clause that survives by eating it is a bad trade.
       + (s.sure ? ' \u00b7 beats finishing alone' : '')
       // ...and whether that range is the pair or only a ceiling on it. One of
       // the two cards printed no distance the rig could charge, so the money
@@ -777,16 +793,39 @@
     // above can never reach it: these words are the only place this claim is
     // made, and losing them leaves the driver an amber line that also means
     // "the range straddles your target".
+    //
+    // ...including when it has nothing to say, which is the case that had no
+    // shape at all. `null` — about half of real pairs — appended no chip and
+    // changed nothing else on the row, so "I looked at where these two jobs
+    // end and found nothing to warn you about" and "I have no idea where they
+    // end" drew the identical line. The range beside it is still coloured
+    // green by the pay arithmetic, so an unchipped green row reads at a glance
+    // as a pair that was checked and came back clean — which is precisely the
+    // wrong "these end near each other" this rig prices at an hour of driving
+    // and a rating.
+    //
+    // Measured over the corpus's own address fixtures, sameArea refuses on 127
+    // of 300 pairs. 37 of those had BOTH ends parse and were still refused —
+    // those rows draw a route link and no chip today, which is a row that
+    // looks fully answered. The other 90 are the merchant-only cards ("Papa
+    // John's Store 3317") that 106 of 604 real cards print instead of an
+    // address.
+    //
+    // `?` because that is already this panel's glyph for the rig declining to
+    // answer, and in the doubt colour, which is deliberately none of the three
+    // verdict colours for the same reason .verdict.doubt is not: this is not a
+    // worse "near" or a softer "elsewhere", it is a refusal.
     var ends = s.ends === 'elsewhere' ? 'ENDS ELSEWHERE'
              : s.ends === 'same-zip' ? 'same ZIP'
              : s.ends === 'same-side' ? 'same side of town'
-             : s.ends === 'same-town' ? 'same town' : '';
-    if (ends) {
-      var chip = document.createElement('span');
-      chip.className = 'ends';
-      chip.textContent = ends;
-      el.stack.appendChild(chip);
-    }
+             : s.ends === 'same-town' ? 'same town' : 'ENDS ?';
+    var chip = document.createElement('span');
+    chip.className = 'ends' + (s.ends ? '' : ' unknown');
+    chip.textContent = ends;
+    chip.title = s.ends ? '' :
+      'Neither card printed enough for the rig to say whether these two jobs '
+      + 'end near each other. It is not saying they do.';
+    el.stack.appendChild(chip);
     if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
     // ...and the same question handed to a map, which answers it in driving
     // minutes with live traffic where the line above can only answer it in the
@@ -882,6 +921,10 @@
       if (body && typeof body.holding === 'boolean') {
         if (holdingNow && !body.holding) destSaid = '';
         holdingNow = body.holding;
+        // The mark reply says only whether an order is held, not where it
+        // ends. Cleared rather than kept: a stale end belonging to the last
+        // order would tint the button for a job that is finished.
+        heldEnds = undefined;
         showDrop();
         showDest();
       }
@@ -909,6 +952,18 @@
   // state you are not in is a control that teaches people to ignore the bar,
   // and this bar is the one a driver reaches for without looking.
   var holdingNow = false;
+  // ...and whether the rig knows where it ENDS, which is a different question
+  // and the one that decides whether the dropoff button is worth pressing.
+  //
+  // An offer card names where a delivery ends on only some cards — 106 of this
+  // driver's 604 print a merchant and no address — so the order in the car
+  // often has no end the geography check can use, and half of all pairs get no
+  // verdict on where they finish. The button that fixes that is in the bar
+  // already, and it looked identical whether pressing it would change the
+  // answer or not.
+  //
+  // `undefined` while nothing is held; a string or null once something is.
+  var heldEnds;
   var dropBusy = false;
 
   function showDrop() {
@@ -925,7 +980,10 @@
     fetch('/api/delivered', { method: 'POST' }).then(function (r) {
       // Believe the server, not the press. If the write failed the order is
       // still in the car and the next offer must still be measured against it.
-      if (r.ok) { holdingNow = false; destSaid = ''; showStack(null); showDest(); }
+      if (r.ok) {
+        holdingNow = false; destSaid = ''; heldEnds = undefined;
+        showStack(null); showDest();
+      }
     }).catch(function () {
       /* Left as it was: an order the server still holds is the truth. */
     }).then(function () {
@@ -969,14 +1027,36 @@
     // stack line's own geography.
     el.dest.textContent = destBusy ? '⌖ reading…' : '⌖ Dropoff';
     el.dest.classList.toggle('done', !destBusy && !!destSaid);
+    // ...and asked for, in the one state where pressing it changes an answer.
+    //
+    // The order in the car has no end the geography check can use — its card
+    // printed a merchant and no address, which 106 of this driver's 604 cards
+    // do — so every pair judged against it gets ENDS ? and will go on getting
+    // it until this button is pressed. The chip on the stack line says the
+    // question was not answered; this says which control answers it.
+    //
+    // The doubt colour, not the green one: green here means "already read",
+    // and this is the opposite state. And only when the missing half is the
+    // HELD order's — when it is the new card's own dropoff that is missing,
+    // nothing this button does can help, and a control that asks to be pressed
+    // for no gain is worse than one that says nothing.
+    var wants = !destBusy && !destSaid && holdingNow && heldEnds === null;
+    el.dest.classList.toggle('wanted', wants);
     el.dest.title = destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
+      : wants
+      ? 'The order you are carrying has no address on record, so the rig '
+        + 'cannot say whether a second job ends near it. Read it off your '
+        + 'phone. It does not touch your phone.'
       : 'Read the destination off your phone, so the next offer can be judged '
         + 'on where it ends as well as what it pays. It does not touch your phone.';
     // ...and said out loud, because the colour is the only thing on screen that
     // changed and a screen reader cannot see it.
     el.dest.setAttribute('aria-label', destSaid
       ? 'Dropoff read as ' + destSaid + '. Press again to read it afresh.'
+      : wants
+      ? 'Read the dropoff off your phone. The order you are carrying has no '
+        + 'address on record, so second jobs cannot be judged on where they end.'
       : 'Read the dropoff off your phone');
   }
 
@@ -1522,6 +1602,7 @@
         // so the driver has no reason to press it.
         if (holdingNow && !msg.holding) destSaid = '';
         holdingNow = !!msg.holding;
+        heldEnds = msg.holding ? (msg.holding.dropoff || null) : undefined;
         showDrop();
         showDest();
       }
@@ -1587,6 +1668,7 @@
     // is exactly when a second app's offer arrives — would otherwise show no
     // way to put it down, and no sign that anything was being carried.
     holdingNow = !!s.holding;
+    heldEnds = s.holding ? (s.holding.dropoff || null) : undefined;
     showDrop();
     // ...and what it was read as, so a panel opened or reloaded mid-delivery
     // shows the destination already scanned rather than offering to scan one

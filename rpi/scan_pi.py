@@ -1181,7 +1181,38 @@ def emit_offer(offer_id, parsed, rate):
         # about $1.80/hr on a five-mile job at 30c a mile, with nothing on the
         # screen saying so. `billedMinutes` is what the pair's time is measured
         # over, and `dropoff` is the end sameArea compares against.
-        'billedMinutes': rate.get('billedMinutes', parsed.get('minutes')),
+        # `minutes`, because that is the name rate() returns the billed time
+        # under. There is no `billedMinutes` key in what rate() gives back — in
+        # either port — so this line read a name nothing produces and took the
+        # fallback every single time, publishing the CARD's minutes as the
+        # billed ones. Twenty-eight lines below, emit() gets it right
+        # (`round(rate['minutes'], 1)`), and so does journal.py; only this path
+        # — the one that feeds the pair arithmetic — was reading the wrong key.
+        #
+        # server.js stores it as `holding.minutes`, which is `totalA` in
+        # Advice.stack: the number a held job's pay is prorated over. A Shop &
+        # Deliver card, $22.00 / 45 min / 6.0 mi / 30 items at a 5-minute pad
+        # and 90 seconds an item, bills at 95 minutes and $12.76/hr. Published
+        # as 45, and measured twenty minutes in against a $10 / 20 min offer:
+        #
+        #   published (45)   worst $27.50/hr  best $49.49  alone $26.93  GO
+        #   true billed (95) worst $16.01/hr  best $20.28  alone $12.76  PASS
+        #
+        # Green against a $25 target where the honest answer is decline. And
+        # past minute 45 `left` reaches zero, so the pair line disappears for
+        # the fifty minutes of shopping still to run, while holding() forgets
+        # the order at 77.5 minutes instead of 152.5.
+        #
+        # `alone` is the tell: it is meant to be the same standalone rate the
+        # panel already showed for that job, and with the true denominator it
+        # comes out at exactly rate['perHour']. With 45 it was $26.93 — a rate
+        # belonging to no job that exists.
+        #
+        # Dormant on this driver's record so far: `pad` and `secondsPerItem`
+        # are zero on all 3,065 rows, so billed and card minutes are equal
+        # throughout. 131 of those rows carry an item count, which is the shape
+        # it fires on the moment a shopping allowance is set.
+        'billedMinutes': rate.get('minutes', parsed.get('minutes')),
         'miles': rate.get('miles', parsed.get('miles')),
         'cost': (round(rate['cost'], 2)
                  if rate.get('ready') and rate.get('cost') is not None else None),
@@ -1194,7 +1225,7 @@ def emit_offer(offer_id, parsed, rate):
         # server.js writes the pairing row from this object and builds the
         # order in the car out of it, and Advice.stack is then asked to judge
         # both. Without these it judged them blind: a card whose pay read as
-        # $1184 got a green "+ the one you have: $1791-$3580/hr" beneath a
+        # $1184 got a green "+ $1791-$3580/hr with the one you have" beneath a
         # headline already blanked to "--", and that verdict went into the
         # journal as what the panel advised. An offer with no distance on it
         # got a green pair verdict built from a gross figure against a net
@@ -1876,7 +1907,28 @@ def main():
             # Nothing written because there was nothing new to say means an
             # earlier reading of this same card already landed, which is still
             # a card that reached the file.
-            if (landed or offer_log.id is not None) and not seen_kept:
+            #
+            # `landed_id`, not `id`. `id` is assigned the moment consider()
+            # decides a reading is a new card, before the append is even
+            # attempted, so it is a fact about this process's memory and not
+            # about the disk. With the journal on a path that cannot be written
+            # — an SD card remounted read-only mid-shift is the classic Pi
+            # failure, and `--journal` pointing at a directory nobody made is
+            # the classic setup one — every append raises, `Journal._complain`
+            # prints one line and then suppresses itself forever because the
+            # message never changes, and this counter said the cards were
+            # recorded. Reproduced: eight cards in, zero rows on disk, status
+            # line "8 cards seen, 8 recorded". The counter built to say how
+            # much the journal missed reported no misses at the moment it was
+            # missing all of it — and the `kind: 'seen'` row that carries the
+            # tally goes to the same dead file, so nothing downstream can tell
+            # either.
+            #
+            # The id is tested for existence as well, because two Nones are
+            # equal and "no card yet" must not count as "this card is on disk".
+            if (landed or (offer_log.id is not None
+                           and offer_log.landed_id == offer_log.id)) \
+                    and not seen_kept:
                 seen_kept = True
                 health.kept += 1
             # The picture the reader was given, against the offer it produced.
@@ -2320,9 +2372,29 @@ def main():
                 #
                 # A move above overrides this, because the whole point of
                 # waiting is to read the moment the corners arrive.
+                #
+                # Deferred, not dropped — the same rule the branch below states
+                # and for the same reason, which this one was breaking four
+                # lines above it. should_read() fires exactly once per card, on
+                # the frame the picture settles, and the tracker only updates on
+                # settled frames: so a new card's trigger and the dispute it
+                # causes are born on the SAME frame. The card changes the bright
+                # geometry, the detector's answer moves further than MAX_JUMP,
+                # and that frame's read is cancelled with nothing left to
+                # re-arm it.
+                #
+                # Driven with the real tracker against a detector alternating
+                # between two positions 30 lores pixels apart: disputing() stays
+                # true for the whole 2.0s of DISPUTE_PATIENCE with no jump and
+                # no move, so nothing sets `moved` and nothing revives the read.
+                # On an idle screen before the card, `card_on_screen` is false
+                # and `resample_until` is zero, so the offer simply sits unread
+                # until the picture moves again. With a previous card still up,
+                # the verify beat recovers it — after up to VERIFY_MAX seconds
+                # of showing the previous card's verdict.
                 if do_read and not moved and tracker is not None \
                         and tracker.disputing(now):
-                    do_read = False
+                    read_wanted, do_read = True, False
 
                 # One read at a time, and never a trigger thrown away.
                 #

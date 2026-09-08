@@ -10,6 +10,7 @@ cases that turn one offer into two in a year of data, or lose one entirely.
 
 import json
 import os
+import time
 import shutil
 import sys
 import tempfile
@@ -318,6 +319,62 @@ eq('an unwritable journal returns nothing',
 eq('...and says so once', broken.journal._error is not None, True)
 eq('...and reading it back is empty, not an explosion',
    broken.journal.rows(), [])
+# ...and it does not pretend the card is on disk.
+#
+# `id` is assigned the moment consider() decides a reading is a new card,
+# BEFORE the append is attempted, so it says only that this process has a name
+# for the card. scan_pi's health counter was reading it as "this card reached
+# the file": with the journal unwritable — an SD card remounted read-only
+# mid-shift is the classic Pi failure — eight cards produced eight ids, zero
+# rows, and the two-minute status line read "8 cards seen, 8 recorded". The one
+# counter built to say how much the journal is missing reported no misses at
+# the moment it was missing everything.
+ok_('a card the journal refused has an id all the same', broken.id is not None)
+eq('...and nothing recorded as having landed', broken.landed_id, None)
+ok_('...so the two do not agree, which is what the health line asks',
+    broken.landed_id != broken.id)
+# The same question of a journal that works has to answer the other way, or
+# the check above is satisfied by a counter that never counts anything.
+good = fresh()
+feed(good, [OFFER])
+ok_('a card that reached the file says so', good.landed_id is not None)
+eq('...naming the card that landed', good.landed_id, good.id)
+# One failure does not condemn the next success: a card lands after the disk
+# comes back, and the counter has to follow it.
+recovered = JR.OfferLog(JR.Journal(os.path.join(work, 'recovered.jsonl')))
+acc2 = OfferAccumulator()
+p2 = acc2.add(P.parse(OFFER), now=1.0)
+recovered.journal.path = os.path.join(work, 'no', 'such', 'dir.jsonl')
+recovered.consider(p2, P.rate(p2, MONEY), now=1.0)
+eq('a refused card leaves the landed marker alone', recovered.landed_id, None)
+recovered.journal.path = os.path.join(work, 'recovered.jsonl')
+acc3 = OfferAccumulator()
+p3 = acc3.add(P.parse(OTHER), now=200.0)
+recovered.consider(p3, P.rate(p3, MONEY), now=200.0)
+eq('...and the next card that lands sets it', recovered.landed_id, recovered.id)
+
+# --- a journal that stays broken keeps saying so ----------------------------
+#
+# "Say it once" became "say it once, ever". A path that fails identically on
+# every offer printed one line and then nothing for the rest of the shift,
+# because the message never changes — so the evidence that the irreplaceable
+# file is not being written scrolls off a headless box's log within minutes of
+# the failure starting.
+import io as _io                                               # noqa: E402
+import contextlib as _ctx                                      # noqa: E402
+quiet = JR.Journal(os.path.join(work, 'no', 'such', 'dir.jsonl'))
+buf = _io.StringIO()
+with _ctx.redirect_stdout(buf):
+    for _ in range(50):
+        quiet.append({'id': 'x'})
+eq('fifty failures in a row are one line, not fifty',
+   buf.getvalue().count('could not use the offer journal'), 1)
+buf = _io.StringIO()
+quiet._said_at = time.time() - JR.Journal.REPEAT_AFTER_S - 1
+with _ctx.redirect_stdout(buf):
+    quiet.append({'id': 'x'})
+eq('...and it is said again once the interval has passed',
+   buf.getvalue().count('could not use the offer journal'), 1)
 
 # --- annotations from the web side must not be mistaken for offers ----------
 # The file is written by two things now: the scanner adds offers, and the web

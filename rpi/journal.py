@@ -130,6 +130,7 @@ class Journal:
         self.cap = cap
         self.written = 0
         self._error = None
+        self._said_at = None
 
     def append(self, row):
         """Add one row. Returns True if it reached the disk.
@@ -291,14 +292,30 @@ class Journal:
                 and os.path.getsize(self.path) > self.cap:
             os.replace(self.path, self.path + '.1')
 
+    # How long the same complaint stays quiet before it is said again.
+    #
+    # Not forever, which is what "say it once" turned into. A path that fails
+    # identically on every offer — a read-only card, a directory nobody made —
+    # produces exactly one line and then nothing for the rest of the shift, so
+    # the evidence that the irreplaceable file is not being written scrolls off
+    # a headless box's log within minutes of the failure starting. A thousand
+    # repeats is a log nobody reads; one every five minutes is a log that still
+    # says what is wrong when somebody finally looks at it.
+    REPEAT_AFTER_S = 300.0
+
     def _complain(self, e):
-        """Say it once. A broken path breaks on every offer, and a log that
-        repeats itself a thousand times is a log nobody reads."""
+        """Say it once, then again every few minutes for as long as it lasts."""
         message = str(e)
-        if message != self._error:
+        now = time.time()
+        fresh = message != self._error
+        due = (self._said_at is None
+               or now - self._said_at >= self.REPEAT_AFTER_S)
+        if fresh or due:
             self._error = message
-            print('could not use the offer journal (further identical errors '
-                  'suppressed): %s' % message)
+            self._said_at = now
+            print('could not use the offer journal (repeated every %d minutes '
+                  'while it lasts): %s'
+                  % (int(self.REPEAT_AFTER_S / 60), message))
 
 
 class OfferLog:
@@ -342,6 +359,22 @@ class OfferLog:
         self.first_at = None
         self.last_at = None
         self.written = 0
+        # The id of the last offer a row of which actually reached the file.
+        #
+        # `self.id` is assigned the moment consider() decides a reading is a new
+        # card, BEFORE the append is attempted, so it says only that this
+        # process has a name for the card in memory. The health line was reading
+        # it as "this card is on disk": with the journal on a path that cannot
+        # be written — an SD card remounted read-only mid-shift is the classic
+        # Pi failure — eight cards produced eight ids, zero rows, and a status
+        # line reading "8 cards seen, 8 recorded". The one counter this project
+        # built to say how much the journal is missing reported zero misses at
+        # the moment it was missing everything.
+        #
+        # A separate field rather than checking `written`, because the question
+        # is about THIS card: a shift that recorded fifty offers and then lost
+        # the disk still has a non-zero `written`.
+        self.landed_id = None
 
     def resume(self, now=None):
         """Adopt the last row if it is recent enough to be the card on screen.
@@ -522,6 +555,7 @@ class OfferLog:
                                   places=list(self.places))
                 if self.journal.append(upgrade):
                     self.written += 1
+                    self.landed_id = self.id
                     return upgrade
             return None
 
@@ -534,6 +568,7 @@ class OfferLog:
                       keep_places=self.keep_places, places=list(self.places))
         if self.journal.append(row):
             self.written += 1
+            self.landed_id = self.id
             return row
         return None
 

@@ -258,6 +258,16 @@ html, body {
   font-size: 0.88em;
   white-space: nowrap;
 }
+/* The refusal, which is not a fifth answer on the same scale.
+ *
+ * Its own colour rather than the row's, and deliberately none of the three the
+ * verdict ladder uses — exactly as `.verdict.doubt` is off that ladder. The
+ * range beside it is still green or amber because the pay arithmetic is still
+ * true; what this says is that the half of the question the arithmetic cannot
+ * reach was not answered. Outlined like `same town`, never filled like ENDS
+ * ELSEWHERE: a filled chip on this line means "this overrides the number", and
+ * a refusal overrides nothing. */
+.stackline .ends.unknown { color: var(--doubt); }
 .stackline.go { color: var(--go); }
 .stackline.warn { color: var(--warn); }
 .stackline.no { color: var(--muted); }
@@ -720,6 +730,22 @@ html, body {
 .bottombar button.done, .bottombar .linkbtn.done {
   color: var(--go);
   border-color: var(--go);
+}
+
+/* ...and a control that is worth pressing right now.
+ *
+ * The other half of the same idea, in the colour that means "the rig is not
+ * answering": the order in the car has no address on record, so every pair
+ * judged against it comes back ENDS ? and will keep coming back that way until
+ * this button is pressed. Deliberately not the green — green here means the
+ * thing you asked for came back, and this is the state before that.
+ *
+ * Not a solid fill, and no animation. This is a hint on a bar read from the
+ * driving seat, not an alarm: the only thing on this page allowed to be
+ * unmissable is the verdict. */
+.bottombar button.wanted, .bottombar .linkbtn.wanted {
+  color: var(--doubt);
+  border-color: var(--doubt);
 }
 
 /* ---------- Said, not shown ---------- */

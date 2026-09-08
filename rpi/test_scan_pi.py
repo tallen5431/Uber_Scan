@@ -59,6 +59,7 @@ if not TC.available():
     sys.exit(0)
 
 import pipeline as PL                                         # noqa: E402
+import track as TR                                            # noqa: E402
 
 ok = bad = 0
 LORES = (640, 480)
@@ -151,7 +152,7 @@ class FakeCam(object):
 
 def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         until=None, look=None, spoil=None, config_extra=None,
-        press_dropoff=False):
+        press_dropoff=False, dispute=None):
     """Drive scan_pi.main() over a fake camera and collect what came out.
 
     `until(state)` ends the run as soon as the thing being tested has happened,
@@ -202,6 +203,24 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         return real_should(self, frame, scale)
 
     PL.Scanner.should_read = watched_should_read
+    # A detector arguing with itself, for a window of the run.
+    #
+    # `dispute=(from, to)` in seconds since the loop started. The real thing is
+    # produced by a detector whose answer jumps further than MAX_JUMP, which is
+    # what a new card on a phone does to the bright geometry — but staging that
+    # through a fake camera means rendering a screen whose corners move, which
+    # is a fixture about OpenCV rather than about the loop. What the loop has
+    # to get right is what it does with the answer, so the answer is what is
+    # replaced.
+    real_disputing = TR.QuadTracker.disputing
+    began = []
+    if dispute is not None:
+        def staged(self, now=None):
+            t = time.time() if now is None else now
+            if not began:
+                began.append(t)
+            return dispute[0] <= t - began[0] < dispute[1]
+        TR.QuadTracker.disputing = staged
     SP.start_camera = lambda *a, **k: (started.append(1), cam)[1]
     # A stand-in for the OCR, when the case under test is one no rendering of a
     # real card can produce — a payout whose journey never reads, for one.
@@ -282,6 +301,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         SP.emit_dropoff = real_dropoff
         PL.Scanner.look_many = real_look
         PL.Scanner.should_read = real_should
+        TR.QuadTracker.disputing = real_disputing
         if press_dropoff:
             HOF.clear(HOF.DROPOFF)
             if had_dir is None:
@@ -470,6 +490,39 @@ run_empty = run(TC.uberx_screen(), seconds=4.0, appear_at=1e9, vanish_at=1e9,
 eq('an empty mount records no offers', len(run_empty['rows']), 0)
 eq('...and leaks nothing', run_empty['cam'].outstanding, 0)
 ok_('...and keeps running', run_empty['cam'].taken > 10)
+
+# --- a card that arrives while the corners are being argued about -----------
+#
+# The read is cancelled while the detector disputes the outline, which is right:
+# the crop would be a fraction of a rectangle the detector can already see is
+# wrong. What was missing is the other half of the rule the branch four lines
+# below it states in full — "a trigger dropped because the reader was busy is a
+# card that is never read at all" — and it applies here for a stronger reason.
+#
+# should_read() fires exactly once per card, on the frame the picture settles,
+# and the tracker only updates on settled frames. So a new card's trigger and
+# the dispute it causes are born on the SAME frame: the card changes the bright
+# geometry, the detector's answer moves further than MAX_JUMP, and the trigger
+# is thrown away with nothing left to revive it. Nothing sets `moved` during a
+# dispute — driven with the real tracker against a detector alternating between
+# two positions 30 lores pixels apart, disputing() stayed true for the whole
+# 2.0s of patience with no jump and no move — so the offer sits unread until
+# the picture happens to move again.
+#
+# The dispute here is staged rather than provoked: what the loop has to get
+# right is what it does with the detector's answer, and rendering a screen
+# whose corners genuinely jump is a fixture about OpenCV. It covers the settle
+# and then clears, which is the shape a real one has.
+run_disputed = run(TC.uberx_screen(), seconds=40.0, appear_at=0.4,
+                   vanish_at=1e9, dispute=(0.0, 2.5),
+                   extra_argv=['--no-parallel'],
+                   until=lambda s: s['rows'] >= 1)
+ok_('a card read during a dispute is still read once it clears (%d reads)'
+    % len(run_disputed['ready']), len(run_disputed['ready']) >= 1)
+eq('...and reaches the journal', len(run_disputed['rows']), 1)
+# ...and the wait was real, or this passed by the dispute never applying.
+ok_('...having waited for the dispute rather than reading through it',
+    run_disputed['cam'].taken > 5)
 
 # --- one offer replaced by another, with no gap between them ----------------
 # The motion gate cannot see this. It compares whole frames as a mean absolute
@@ -1503,7 +1556,7 @@ ok_('...and no state to be mistaken for one',
 #
 # server.js builds the pairing row and the order in the car out of this object
 # and hands both to Advice.stack. Without these it judged them blind: a card
-# whose pay read as $1184 got a green "+ the one you have: $1791-$3580/hr"
+# whose pay read as $1184 got a green "+ $1791-$3580/hr with the one you have"
 # under a headline already blanked to "--", and that went into the journal as
 # what the panel advised.
 doubted = said(lambda: SP.emit_offer('x', {'pay': 1184.0, 'minutes': 20.0},
@@ -1533,6 +1586,27 @@ padded = said(lambda: SP.emit_offer('x', {'pay': 12.45, 'minutes': 28.0},
                                      'cardMinutes': 28.0, 'minutes': 38.0}))
 eq('the minutes are the card\'s, not the billed ones',
    padded['offer']['minutes'], 28.0)
+# ...and the billed ones are the billed ones.
+#
+# This case was already staged here — a rate with `minutes` 38 against a card's
+# 28 — and only the card's figure was ever asserted, so the field beside it was
+# free to be wrong and was. `rate.get('billedMinutes', ...)` read a key rate()
+# does not return, in either port, and took the fallback every time: the CARD's
+# minutes published as the billed ones.
+#
+# server.js stores this as `holding.minutes`, which is `totalA` in Advice.stack
+# — what a held job's pay is prorated over. On a Shop & Deliver card billing 95
+# minutes and published as 45, twenty minutes in against a $10/20min offer, the
+# pair came out $27.50/hr GO where the true denominator gives $16.01/hr PASS;
+# past minute 45 the pair line disappeared for the rest of the shop.
+eq('...and the billed minutes are the ones the rate was worked out over',
+   padded['offer']['billedMinutes'], 38.0)
+# A card with no duration at all — a delivery deadline — still has to publish
+# something, and the fallback is the card's own figure rather than a crash.
+bare = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0},
+                                  {'ready': False, 'state': 'empty'}))
+eq('an unrated card falls back to what it printed',
+   bare['offer']['billedMinutes'], 21.0)
 
 CAMERA_TICK = 1.0 / 30.0
 
