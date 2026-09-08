@@ -81,6 +81,17 @@ def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0):
 
 TOOK_SIX = [offer(i, accepted=(i < 6)) for i in range(12)]
 
+# ...and a ticked job with offers inside its stated minutes, one of which was
+# itself ticked. `offer(i)` is spaced ten minutes apart and counts BACKWARDS
+# from NOW, so a 30-minute job at index 5 covers indices 4, 3 and 2.
+BUSY_JOB = dict(offer(5, accepted=True), minutes=30.0, pay=16.05,
+                perHour=26.0, id='thejob')
+INSIDE = [dict(offer(4), id='in-a'),
+          dict(offer(3, accepted=True), id='in-b'),   # a stack: ticked as well
+          dict(offer(2), id='in-c')]
+OUTSIDE = [dict(offer(0), id='after'), dict(offer(11), id='before')]
+BUSY_ROWS = [BUSY_JOB] + INSIDE + OUTSIDE
+
 # One pairing, so the section that reads the stacking record is exercised by
 # something other than the layout file.
 PAIR = {
@@ -97,6 +108,9 @@ PAIR = {
 # The four answers /api/journal can give. Every field here is one the server
 # actually sends — see the send() call in the /api/journal branch.
 FEEDS = {
+    'busy': {'count': len(BUSY_ROWS), 'total': len(BUSY_ROWS), 'truncated': False,
+             'days': 7, 'hidden': 0, 'watched': {'saw': 6, 'kept': 6},
+             'unreadable': None, 'pairs': [], 'offers': BUSY_ROWS},
     'took six': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
                  'hidden': 0, 'watched': {'saw': 14, 'kept': 12},
                  'unreadable': None, 'pairs': [PAIR], 'offers': TOOK_SIX},
@@ -175,6 +189,18 @@ const TEXT = (sel) => {
           ? null : text('#pairsLead'),
         rows: document.querySelectorAll('#log details.offer').length,
         asked: window.__asked.length,
+        // What each row says about arriving during a ticked job, opened.
+        arrivals: [].slice.call(document.querySelectorAll('#log details.offer'))
+          .map(function (d) {
+            d.open = true;
+            var dt = [].slice.call(d.querySelectorAll('dt'))
+              .filter(function (e) { return e.textContent.trim() === 'Arrived'; })[0];
+            var tags = [].slice.call(d.querySelectorAll('summary .tag'))
+              .map(function (e) { return e.textContent.trim(); });
+            return { tags: tags,
+                     arrived: dt ? dt.nextElementSibling.textContent
+                                     .replace(/\s+/g, ' ').trim() : null };
+          }),
       };
     }, TEXT.toString());
     await page.close();
@@ -313,6 +339,46 @@ try:
     ok_('...and still sends the driver to the live view',
         'reading nothing' in (empty['nothing'] or ''))
     eq('...with no rows listed', empty['rows'], 0)
+
+    # --- offers that arrived while a ticked job was running ------------------
+    #
+    # Only the positive case is ever stated. This can see ticked jobs and
+    # nothing else, and 49 ticks across eight days of the driver's own record is
+    # plainly not every job worked — so an unmarked row means "no ticked job was
+    # running", never "you were free". Measured over the seven exports, the
+    # share that looks busy tracks how hard the driver was ticking rather than
+    # how busy they were: 3.5% of offers on the three days carrying one to three
+    # ticks, 27.7% on the four days carrying ten or eleven.
+    busy = got['busy']
+    arr = busy['arrivals']
+    eq('every seeded row is listed', len(arr), 6)
+    inside = [a for a in arr if a['arrived']]
+    eq('the three offers inside the ticked job are marked', len(inside), 3)
+    ok_('...saying how far into it they arrived (%r)'
+        % (inside[0]['arrived'] or '')[:60],
+        all('min into a job you ticked at' in (a['arrived'] or '') for a in inside))
+    # The strongest thing to get wrong: the driver demonstrably took this one.
+    stacks = [a for a in arr if 'stacked on' in a['tags']]
+    eq('the one inside the window that was itself ticked is a stack', len(stacks), 1)
+    ok_('...and says so rather than calling it unavailable',
+        'you ticked this one too' in (stacks[0]['arrived'] or ''))
+    during = [a for a in arr if 'during a job' in a['tags']]
+    eq('...and the other two are marked plainly', len(during), 2)
+    # No chip and no row is the whole of what is said about the rest. A page
+    # that wrote "you were free" here would be wrong on about 130 rows of the
+    # driver's own record, concentrated on the days somebody forgot to tick.
+    silent = [a for a in arr if not a['arrived']]
+    eq('the rest say nothing at all', len(silent), 3)
+    no_('...and never claim the driver was free',
+        any('free' in ' '.join(a['tags']).lower() for a in arr))
+    # ...and the note that stops the silence being read as its opposite.
+    ok_('the note says what the marking is worked out from',
+        any('no ticked job was running, not that you were free' in c
+            for c in busy['caveats']))
+    # With nothing ticked the feature has said nothing, and a note about it
+    # would be noise on every window that has no ticks in it.
+    no_('...and it stays away when nothing is ticked',
+        any('during a job' in c for c in got['unreadable']['caveats']))
 
     # --- the stacking record reaches the page --------------------------------
     ok_('the second-jobs section appears when there are pairings (%r)'

@@ -561,6 +561,9 @@
       // it is simulating a policy, and what actually happened is the thing it
       // is being compared against.
       out.push({ at: seenAt, net: net, mins: mins, perHour: net / (mins / 60),
+                 // Carried so a caller can join what busy() returns back onto
+                 // the row it is about. Nothing in the replay reads it.
+                 id: o.id,
                  took: o.accepted === true });
     }
     out.sort(function (a, b) { return a.at - b.at; });
@@ -590,14 +593,40 @@
      This only knows about trips the driver *told* it about. An untagged take
      still reads as a break — which is a reason to tag them, not a reason to
      guess. */
+  /* When the driver was free again after this offer.
+   *
+   * The moment it appeared, unless they ticked it — in which case the job it
+   * describes occupied them for the minutes it stated. This is the one piece
+   * of occupancy the record actually contains, as opposed to the replay's
+   * simulated version of it.
+   *
+   * One function because the same expression was written out twice, in runs()
+   * and in unexplained(), and the two are answering the same question about
+   * the same rows. Two copies of a rule drift.
+   *
+   * `mins` is billed minutes — what usable() carries — and on this driver's
+   * record that is identical to the card's own on all 1,672 rows, because the
+   * pad and the shopping allowance are both zero and no ticked row is a shop
+   * order. So the choice is unobservable here and has to be argued rather than
+   * measured: billed is what the driver is occupied for, which is the question.
+   *
+   * It is a FLOOR on occupancy and not a measurement of it. A job runs late,
+   * a pickup waits, and this rig's own server calls a job live for minutes ×
+   * 1.5 + 10 (see holding() in server.js) — which over this record would mark
+   * 830 of 1,672 offers busy against 333 for the stated minutes. Two
+   * definitions of one idea, and this is the conservative one on purpose:
+   * every use of it below is a disclosure, never a correction to a figure. */
+  function freeAgain(row) {
+    return row.took ? row.at + row.mins * 60000 : row.at;
+  }
+
   function runs(rows, breakMinutes) {
     if (!rows.length) return [];
     var gap = (breakMinutes || SHOWN_AT) * 60000;
     var out = [[rows[0]]];
     for (var i = 1; i < rows.length; i++) {
       var prev = rows[i - 1];
-      var freeAgain = prev.took ? prev.at + prev.mins * 60000 : prev.at;
-      if (rows[i].at - freeAgain > gap) out.push([rows[i]]);
+      if (rows[i].at - freeAgain(prev) > gap) out.push([rows[i]]);
       else out[out.length - 1].push(rows[i]);
     }
     return out.filter(function (r) { return r.length > 1 && r[r.length - 1].at > r[0].at; });
@@ -679,9 +708,7 @@
       // the case worth surfacing most, a five-minute job followed by an hour of
       // silence, and so asked for tags on everything except the stretch that
       // needed one.
-      var prev = rows[i - 1];
-      var freeAgain = prev.took ? prev.at + prev.mins * 60000 : prev.at;
-      if (rows[i].at - freeAgain > gap) silences++;
+      if (rows[i].at - freeAgain(rows[i - 1]) > gap) silences++;
     }
     return { tagged: tagged, silences: silences };
   }
@@ -873,7 +900,64 @@
     };
   }
 
+  /* Which offers arrived while a job the driver had ticked was still running.
+   *
+   * The one measured version of "you could not have taken this". Everything
+   * else in this file that reasons about occupancy is SIMULATED — replay()
+   * masks against its own hypothetical driver at a candidate target, which is
+   * a different mask for a different purpose: on this recording the simulation
+   * was free for 82 of the 301 counted busy rows at a $19 line and 102 at $25.
+   * Neither is a substitute for the other and neither may be fed the other.
+   *
+   * WHAT IT IS NOT FOR, which matters more than what it is for. It does not
+   * correct a statistic, and nothing that produces a default figure calls it.
+   * Measured over the seven exports: dropping all 301 counted rows that arrived
+   * inside a ticked window moves the median $13.95 -> $13.95, p25 $10.45 ->
+   * $10.46, p75 $17.87 -> $17.90, and "cleared $25" 6.3% -> 6.2%. The busy pile
+   * is not a biased sample — its own median is $13.85 against $13.95 for the
+   * rest — it is a random fifth of the log. The figures it was suspected of
+   * distorting, it does not distort.
+   *
+   * What it does distort is exactly one pile: of the 127 ACCEPT-rated offers
+   * the driver did not tick, 19 arrived while a ticked job was running. So
+   * "the pattern in what they passed" is 15% offers that were never passable,
+   * and that is the question this exists to let somebody ask properly.
+   *
+   * AND THE HEDGE IS THE WHOLE THING. This can only see jobs that were TICKED.
+   * 49 ticks across 8 days of scanning is plainly not every job worked, and the
+   * share of offers that look busy tracks how hard the driver was ticking
+   * rather than how busy they were: on the three days carrying one to three
+   * ticks, 3.5% of offers land inside a window; on the four days carrying ten
+   * or eleven, 27.7%. The market did not change eightfold between the 26th and
+   * the 28th of August. So a row this returns nothing for means "no ticked job
+   * was running" and never "you were free" — those words must not appear
+   * anywhere built on this.
+   *
+   * `stacked` because 12 of the 49 ticks are themselves inside another tick's
+   * window. Marking those "already out" would be the strongest possible thing
+   * to get wrong: the driver demonstrably took them. They are a stack, which
+   * this rig now records as a `pair` row of its own.
+   */
+  function busy(rows) {
+    var out = {};
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (row.id === undefined || row.id === null) continue;
+      var into = [];
+      for (var j = 0; j < rows.length; j++) {
+        var w = rows[j];
+        if (j === i || !w.took) continue;
+        if (w.at < row.at && row.at < freeAgain(w)) {
+          into.push({ at: w.at, net: w.net, mins: w.mins, id: w.id });
+        }
+      }
+      if (into.length) out[row.id] = { into: into, stacked: row.took === true };
+    }
+    return out;
+  }
+
   return { advise: advise, usable: usable, runs: runs, replay: replay,
+           busy: busy, freeAgain: freeAgain,
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
            unexplained: unexplained, stack: stack, sameArea: sameArea, area: area,
            mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,

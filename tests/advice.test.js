@@ -943,6 +943,70 @@ eq('...and says so when they end in the same place', near.ends, 'same-town');
 var blind = A.stack(heldFar, { pay: 10, minutes: 20, cost: 1 }, { target: 25 }, 0);
 eq('...and says nothing when the second card named nowhere', blind.ends, null);
 
+/* ---- which offers arrived while a ticked job was running -----------------
+ *
+ * The one measured piece of occupancy the record holds, as against replay()'s
+ * simulated one. What is checked here is mostly what it must REFUSE to say:
+ * it can only see jobs that were ticked, so "nothing returned" has to mean
+ * "no ticked job was running" and never "the driver was free". */
+(function () {
+  var MIN = 60000;
+  //  a: ticked, 20 min          b: 5 min in, not ticked     c: 8 min in, ticked
+  //  d: half an hour later, free                            e: never ticked
+  var rows = [
+    { at: 0,        net: 16, mins: 20, id: 'a', took: true },
+    { at: 5 * MIN,  net: 9,  mins: 15, id: 'b', took: false },
+    { at: 8 * MIN,  net: 12, mins: 10, id: 'c', took: true },
+    { at: 30 * MIN, net: 7,  mins: 12, id: 'd', took: false },
+  ];
+  var b = A.busy(rows);
+  eq('an offer inside a ticked job is marked', !!b.b, true);
+  eq('...naming the job it arrived into', b.b.into[0].id, 'a');
+  eq('...and it was not itself taken', b.b.stacked, false);
+  // The strongest thing to get wrong: the driver demonstrably took this one.
+  eq('an offer inside a window that was ITSELF ticked is marked as a stack',
+     b.c.stacked, true);
+  eq('an offer after the job ended is not marked', b.d, undefined);
+  // The job that defines a window is not inside its own window.
+  eq('a ticked job is not counted as busy against itself', b.a, undefined);
+
+  // The boundaries. An offer at the exact moment a job starts or ends is not
+  // inside it — measured on the real record, strict and inclusive bounds give
+  // the identical 333, so the rule is chosen for being defensible rather than
+  // for changing an answer.
+  var edge = A.busy([
+    { at: 0,       net: 16, mins: 20, id: 'a', took: true },
+    { at: 0,       net: 9,  mins: 5,  id: 'start', took: false },
+    { at: 20 * MIN, net: 9, mins: 5,  id: 'end', took: false },
+  ]);
+  eq('an offer at the very start of a job is not inside it', edge.start, undefined);
+  eq('...nor one at the very moment it ends', edge.end, undefined);
+
+  // Nothing ticked is not the same as nothing busy, and it must produce no
+  // claim at all rather than a claim that everything was free.
+  eq('with no ticks at all, nothing is marked',
+     Object.keys(A.busy([{ at: 0, net: 9, mins: 10, id: 'x', took: false },
+                          { at: MIN, net: 9, mins: 10, id: 'y', took: false }])).length,
+     0);
+  // A row with no id cannot be joined back to anything, so it is skipped
+  // rather than keyed on undefined.
+  eq('a row with no id is skipped',
+     Object.keys(A.busy([{ at: 0, net: 16, mins: 20, took: true },
+                          { at: MIN, net: 9, mins: 5, took: false }])).length, 0);
+
+  // freeAgain is the shared definition runs() and unexplained() both use, and
+  // busy() is the third caller. It is a floor on occupancy, not a measurement.
+  eq('an untaken offer frees the driver the moment it appears',
+     A.freeAgain({ at: 100, mins: 20, took: false }), 100);
+  eq('...and a taken one for the minutes it stated',
+     A.freeAgain({ at: 100, mins: 20, took: true }), 100 + 20 * MIN);
+
+  // usable() has to carry the id or none of this can be joined to a row.
+  var carried = A.usable([{ at: 1, id: 'keepme', pay: 10, minutes: 20,
+                            perHour: 30, whole: true }]);
+  eq('usable carries the id through', carried.length && carried[0].id, 'keepme');
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);

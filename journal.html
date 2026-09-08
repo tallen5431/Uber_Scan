@@ -272,9 +272,21 @@
   .facts div { display: flex; justify-content: space-between; gap: 12px;
                padding: 2px 0; }
   .facts dt { color: var(--muted); }
+  /* A cap, not a width — a figure still sits hard against the right edge of
+     the row, in the column the eye runs down. It is here so that a *value*
+     that turns out to be a sentence cannot silently run the width of a
+     dashboard panel: the first one written did, at 993px on a 1280 screen,
+     and rpi/test_layout.py caught it at the 900px readability line. */
   .facts dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums;
-              text-align: right; }
+              text-align: right; max-width: 38em; }
   .facts .quiet dd { font-weight: 500; color: var(--muted); }
+  /* A row whose value is a sentence. The rest of this list is money, and money
+     is set bold, tabular and right-aligned so a figure can be found by running
+     a finger down the column. A sentence set the same way is ragged down its
+     left edge — which is the edge the eye returns to at the end of every
+     line — and bold throughout, which is no emphasis at all. */
+  .facts .prose dd { font-weight: 500; text-align: left;
+                     font-variant-numeric: normal; }
 
   /* ---------- A screen bolted to a dashboard ---------- */
   /* The same breakpoint styles.css uses, and it has to be here rather than
@@ -651,9 +663,15 @@
          + ' rel="noopener noreferrer">' + label + '</a>';
   }
 
-  function row(label, value, quiet) {
+  /* `how` names the kind of value, not a decoration: 'quiet' for the reading's
+     own housekeeping, 'prose' for a row whose value is a sentence rather than
+     a figure. It was a boolean meaning "quiet", and there was no way to say
+     the other thing — so the first sentence written into this list came out
+     bold, tabular and right-aligned like the money above it, and 993px wide on
+     a 1280 panel. */
+  function row(label, value, how) {
     if (value === null || value === undefined || value === '') return '';
-    return '<div' + (quiet ? ' class="quiet"' : '') + '><dt>' + label
+    return '<div' + (how ? ' class="' + how + '"' : '') + '><dt>' + label
          + '</dt><dd>' + value + '</dd></div>';
   }
 
@@ -707,7 +725,11 @@
     return { pay: pay, minutes: minutes, miles: isFinite(miles) ? miles : null };
   }
 
-  function offerRow(r, when, target, band) {
+  /* `busy` is what Advice.busy returned for this row, or undefined, and `pair`
+     is the pairing the rig recorded at the time, or undefined. Both are passed
+     in rather than looked up here so the join happens once per render instead
+     of once per row, and so this function stays a pure formatter. */
+  function offerRow(r, when, target, band, busy, pair) {
     var aside = !counted(r);
     var mins = r.minutes === null ? '--' : Math.round(r.minutes);
     var gross = (typeof r.grossPerHour === 'number'
@@ -756,6 +778,14 @@
       + (r.hidden ? '<span class="tag">hidden</span>' : '')
       + (aside && !r.hidden
          ? '<span class="tag">' + (r.whole === false ? 'partial' : 'odd') + '</span>' : '')
+      // Only ever in the positive case. There is no chip for "you were free",
+      // because this cannot know that: it sees ticked jobs, and 49 ticks across
+      // eight days of scanning is plainly not every job worked. An absent chip
+      // means no ticked job was running, which is a different and much weaker
+      // statement — see the note under the figures.
+      + (pair ? '<span class="tag">stacked on</span>'
+         : busy ? '<span class="tag">' + (busy.stacked ? 'stacked on' : 'during a job')
+                  + '</span>' : '')
       + '<span class="when">' + when.toLocaleTimeString(undefined,
           { hour: 'numeric', minute: '2-digit' }) + '</span>'
       + '</summary>'
@@ -781,6 +811,42 @@
       + row('After running costs', typeof r.perHour === 'number'
             ? money(r.perHour, 2) + '/hr' : null)
       + row('Per mile', typeof r.perMile === 'number' ? money(r.perMile, 2) + '/mi' : null)
+      // When it arrived relative to a job that was already running. Stated as
+      // a fact about a tick, never as a fact about the driver: "no ticked job
+      // was running" is all an absent row means, and it is left absent rather
+      // than written out, because a row saying "you were free" would be wrong
+      // on about 130 of these — concentrated on exactly the days somebody
+      // forgot to tick.
+      + (pair
+         ? row('Arrived', 'with an order already in the car — the rig was '
+               + 'holding one when it read this, and recorded the pair. '
+               + 'See <b>Second jobs</b> above.', 'prose')
+         : busy
+         // The job named is the most recently STARTED one, which is the one the
+         // driver was in the middle of. `into` is built in arrival order, so
+         // that is the last of them, not the first.
+         //
+         // Identified by its clock time and not by its money. A payout would be
+         // the thing a driver recognises, but `usable` carries the NET figure
+         // and this page is net throughout — printing "$13.65" for a job whose
+         // card said $16.05 would be a gross/net mix on a page that has one
+         // already been fixed once. The time is unambiguous and needs no
+         // convention at all.
+         ? (function () {
+             var job = busy.into[busy.into.length - 1];
+             var more = busy.into.length - 1;
+             return row('Arrived',
+               Math.max(0, Math.round((r.at - job.at) / 60000))
+               + ' min into a job you ticked at '
+               + new Date(job.at).toLocaleTimeString(undefined,
+                   { hour: 'numeric', minute: '2-digit' })
+               + (more ? ' (and ' + more + ' other ticked job'
+                         + (more === 1 ? '' : 's') + ' still running)' : '')
+               + (busy.stacked
+                  ? ' — and you ticked this one too, so it is a stack' : ''),
+               'prose');
+           })()
+         : '')
       + '</dl><h3>The verdict, and what it was judged against</h3>'
       + '<dl class="facts">'
       // A row the scanner refused to judge says so, rather than showing a dash
@@ -811,14 +877,15 @@
       // the driver, who can. See Advice.mapSearch.
       + mapRow(r)
       + (r.fromDeadline
-         ? row('Time from', 'the delivery deadline, not a stated duration')
+         ? row('Time from', 'the delivery deadline, not a stated duration',
+               'prose')
          : '')
       + '</dl><h3>How it was read</h3>'
       + '<dl class="facts">'
-      + row('Seen as', read.join(', ') || null, true)
-      + row('Read at', when.toLocaleString(), true)
-      + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, true)
-      + (flags.length ? row('Worth knowing', flags.join('; '), true) : '')
+      + row('Seen as', read.join(', ') || null, 'quiet')
+      + row('Read at', when.toLocaleString(), 'quiet')
+      + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, 'quiet')
+      + (flags.length ? row('Worth knowing', flags.join('; '), 'quiet') : '')
       + '</dl>'
       + '<div class="acts">'
       + '<button type="button" data-act="took"' + (r.accepted ? ' class="on"' : '')
@@ -1301,7 +1368,7 @@
    * `newest` is null on the empty path — there is no row to read a cost per
    * mile off — and the line about running costs is dropped rather than guessed
    * at. */
-  function showCaveats(data, setAside, newest) {
+  function showCaveats(data, setAside, newest, ticks) {
     var notes = ['These are offers the scanner read, not trips taken — it cannot '
                  + 'see the Accept button and never touches it, so tick the ones '
                  + 'you took and it will keep the tally.'];
@@ -1352,6 +1419,25 @@
           + (w.saw === 1 ? '' : 's') + ' the scanner picked off the screen was '
           + 'recorded. An offer it never read at all cannot be counted, so that '
           + 'is a floor rather than a guarantee.');
+    }
+    // What "during a job" is worked out from, and therefore what it cannot say.
+    //
+    // The share of offers that look busy tracks how hard the driver was
+    // ticking, not how busy they were. Measured over the seven exports: on the
+    // three days carrying one to three ticks, 3.5% of offers land inside a
+    // ticked window; on the four days carrying ten or eleven, 27.7%. The market
+    // did not change eightfold between the 26th and the 28th of August.
+    //
+    // So this note exists to stop the absent chip being read as its opposite.
+    // Only shown when there is at least one tick in the window — with none, the
+    // feature has said nothing and a note about it would be noise.
+    if (ticks) {
+      notes.push('<b>' + ticks + '</b> offer' + (ticks === 1 ? ' is' : 's are')
+                 + ' ticked here, and that is the whole of what '
+                 + '<b>during a job</b> is worked out from — so a row without '
+                 + 'it means no ticked job was running, not that you were '
+                 + 'free. Ticking more of what you take is what makes it '
+                 + 'mean more.');
     }
     // Only when something was actually deducted. "Rates are after $0.00/mi of
     // running costs" is a sentence about nothing, and it invites the reader to
@@ -1455,6 +1541,30 @@
     var offers = kept.filter(counted);
     var setAside = kept.length - offers.length;
 
+    // Which of these arrived while a job the driver had ticked was still
+    // running. Worked out once per render rather than once per row.
+    //
+    // A DISCLOSURE, not a correction. Nothing below subtracts these from a
+    // figure, and the reason is measured: dropping all 301 counted rows that
+    // land inside a ticked window moves the median $13.95 → $13.95, p25 $10.45
+    // → $10.46, p75 $17.87 → $17.90. The busy pile's own median is $13.85
+    // against $13.95 for the rest — it is a random fifth of the log, not a
+    // biased sample, and the figures it was suspected of distorting it does
+    // not distort. See Advice.busy for the one pile it does distort.
+    var busyBy = {};
+    try {
+      busyBy = Advice.busy(Advice.usable(kept)) || {};
+    } catch (e) { busyBy = {}; }
+    // How many ticks the window holds, which is the denominator of everything
+    // the busy marking can honestly claim. See showCaveats.
+    var ticks = kept.filter(function (r) { return r.accepted === true; }).length;
+    // ...and which of them the rig itself was holding an order for when it
+    // read them, which is a different and much stronger claim: the driver did
+    // not have to remember to tick anything for this one, the rig recorded the
+    // pairing at the time. See the Second jobs section.
+    var pairedBy = {};
+    (data.pairs || []).forEach(function (p) { if (p && p.id) pairedBy[p.id] = p; });
+
     // Ahead of the early return below, because a pairing is not an offer and
     // does not stop existing because none of this window's offers were good
     // enough to move a median. A shift of doubtful readings can still have had
@@ -1515,7 +1625,7 @@
       // path that threw them away. `null` for the newest row because there is
       // none to read a cost per mile off, and a guess there is worse than
       // silence.
-      showCaveats(data, setAside, null);
+      showCaveats(data, setAside, null, ticks);
       el.advice.hidden = true;
       el.runs.innerHTML = '';
       el.runsHead.hidden = true;
@@ -1531,7 +1641,7 @@
       var t0 = lastKept && typeof lastKept.target === 'number' ? lastKept.target : 25;
       var b0 = lastKept && typeof lastKept.band === 'number' ? lastKept.band : 15;
       el.log.innerHTML = kept.slice(-LOG_MAX).reverse().map(function (r) {
-        return offerRow(r, new Date(r.at), t0, b0);
+        return offerRow(r, new Date(r.at), t0, b0, busyBy[r.id], pairedBy[r.id]);
       }).join('');
       return;
     }
@@ -1768,7 +1878,7 @@
                   + money(tookPay, 2) : '')
                + '</span></div>');
       }
-      out.push(offerRow(r, when, target, band));
+      out.push(offerRow(r, when, target, band, busyBy[r.id], pairedBy[r.id]));
     });
     el.log.innerHTML = out.join('');
 
@@ -1787,7 +1897,7 @@
       el.findNote.hidden = true;
     }
 
-    showCaveats(data, setAside, newest);
+    showCaveats(data, setAside, newest, ticks);
 
     // Said rather than only drawn. Everything above this point is a redraw
     // with no event a screen reader can notice.
