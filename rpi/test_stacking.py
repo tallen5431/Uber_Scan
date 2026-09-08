@@ -641,6 +641,44 @@ try:
     server_src = open(os.path.join(ROOT, 'server.js')).read()
     ok_('the sync knows how to identify a pairing',
         "row.kind === 'pair'" in server_src)
+
+    # --- and back out again, which is the half that was missing --------------
+    #
+    # These rows were written from the day the feature existed and read by
+    # nothing. A driver could work a shift, be advised a dozen times, and have
+    # no way afterwards to see a single one of the answers - so the record was
+    # being kept for a reader that did not exist. This is that reader.
+    feed = get(base, '/api/journal?days=30')
+    out = [p for p in (feed.get('pairs') or []) if p.get('id') == 'paired-8']
+    eq('the offers page is handed the pairing', len(out), 1)
+    if out:
+        p = out[0]
+        eq('...with the order that was in the car',
+           (p.get('held') or {}).get('pay'), 12.0)
+        eq('...the offer judged against it',
+           (p.get('offer') or {}).get('pay'), 9.0)
+        ok_('...and what the panel said about the two of them',
+            bool(p.get('stack')))
+    # Unmarked is a third answer and not a "no". A page that read `undefined`
+    # as "passed" would report a decision on every offer the driver was too
+    # busy driving to mark, and then count it against the advice.
+    eq('an unmarked pairing says nothing about what the driver did',
+       'accepted' in (out[0] if out else {}), False)
+    post(base, '/api/offers/mark', {'id': 'paired-8', 'accepted': True})
+    feed = get(base, '/api/journal?days=30')
+    out = [p for p in (feed.get('pairs') or []) if p.get('id') == 'paired-8']
+    eq('...and once marked, the pairing carries the outcome',
+       (out[0] if out else {}).get('accepted'), True)
+    # The join has to survive the window's own filters. `pairs` rides on the
+    # array `latestPerOffer` returns, and `filter` makes a new array - so a
+    # line written below the first filter would hand the page an empty list,
+    # which reads as a shift where the rig was never asked.
+    ok_('the pairing survives a window that hides offers',
+        any(p.get('id') == 'paired-8'
+            for p in (get(base, '/api/journal?days=30&hidden=1').get('pairs') or [])))
+    eq('...and is still not one of the offers',
+       [o.get('id') for o in (feed.get('offers') or [])
+        if o.get('id') == 'paired-8' and o.get('kind')], [])
     post(base, '/api/delivered')
 
     # --- the export, which is how any of this reaches anyone -----------------

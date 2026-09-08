@@ -1090,6 +1090,11 @@ function latestPerOffer(rows) {
   // about any one card, and the page needs both to say what fraction was
   // recorded.
   var seen = [];
+  // Every time the panel was asked whether to take a second job with one
+  // already in the car, and what it answered. Kept beside the offers for the
+  // same reason `seen` is: a pairing is not a card, it is a moment — two cards
+  // and a clock — and folding it into either card would lose the other.
+  var pairs = [];
   var readings = Object.create(null);
 
   rows.forEach(function (r) {
@@ -1100,6 +1105,7 @@ function latestPerOffer(rows) {
     }
     if (r.kind === 'rule') { rules.push(r); return; }
     if (r.kind === 'seen') { seen.push(r); return; }
+    if (r.kind === 'pair') { pairs.push(r); return; }
     if (r.kind) return;                       // something newer than this reader
     if (!r.id) { out.push(r); return; }
     if (!(r.id in byId)) { byId[r.id] = out.length; out.push(r); readings[r.id] = [r]; return; }
@@ -1127,6 +1133,17 @@ function latestPerOffer(rows) {
 
   out.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
   out.seen = seen;
+  // Whether the driver went on to take the offer they were being advised
+  // about. Joined here rather than on the page, because the mark can be on an
+  // offer the window's own filters have already dropped — hidden, or older
+  // than the range — and a pairing whose outcome silently became "no" would be
+  // worse than one that says nothing. `undefined` means unmarked, which is a
+  // third answer and not a "no".
+  pairs.forEach(function (p) {
+    var mark = p.id && marks[p.id];
+    if (mark && mark.accepted !== undefined) p.accepted = mark.accepted;
+  });
+  out.pairs = pairs;
   return out;
 }
 
@@ -2132,7 +2149,13 @@ function route(req, res) {
       var unreadable = rows ? null : (readErr && readErr.code || 'unknown');
       rows = rows || [];
       var offers = latestPerOffer(rows);
+      // Both taken off the array before anything filters it. `filter` returns a
+      // new array and these ride on the old one as properties, so a line moved
+      // below the first filter would quietly become an empty list — which reads
+      // on the page as a shift where the rig was never asked, rather than as a
+      // reader that dropped them.
       var seen = offers.seen || [];
+      var pairs = offers.pairs || [];
       // The window first, then the count of what is hidden inside it.
       //
       // Counting before the filter meant the page said "3 offers are hidden and
@@ -2173,6 +2196,17 @@ function route(req, res) {
         watched.saw += r.saw || 0;
         watched.kept += r.kept || 0;
       });
+      // Row by row, unlike `seen`, and not capped by `limit`.
+      //
+      // There is one of these per offer read with a job already in the car —
+      // a handful in a shift, not the thousands the offer log holds — and each
+      // one is a decision the driver may want to check against what happened.
+      // A total would answer none of the questions worth asking of them.
+      //
+      // Newest first, because a shift is read from its end: the pairing a
+      // driver wants is nearly always the one they just made.
+      var window = pairs.filter(function (r) { return !floor || (r.at || 0) >= floor; })
+                        .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
       send(res, 200, JSON.stringify({ count: offers.length, total: total,
                                       truncated: total > offers.length,
                                       days: days, hidden: hidden,
@@ -2182,6 +2216,7 @@ function route(req, res) {
                                       // emptiness below is not a record of a
                                       // quiet week.
                                       unreadable: unreadable,
+                                      pairs: window,
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });

@@ -205,6 +205,53 @@
   .offer .took { flex: none; font-size: 13px; color: var(--go); font-weight: 800; }
   .offer.mine > summary .big { color: var(--go); }
 
+  /* A pairing row carries more in its summary than an offer row does — a range,
+     two payouts, a span, a verdict chip and where both jobs end — so its places
+     get a line of their own rather than the sliver `.meta` has left after the
+     chips and the clock. Measured on the 3.5" hat before this: 98px, showing
+     "Powder Sprin". */
+  #pairs { container-type: inline-size; }
+  .offer.pair > summary { flex-wrap: wrap; align-content: center; row-gap: 2px; }
+  /* Shrinks instead of wrapping. Flexbox breaks lines on an item's *base* size
+     and only shrinks what is left on the line afterwards, so a `.meta` at its
+     natural width pushed itself, the tick and the clock onto a second and
+     third line at 390px — three ragged lines where two were meant. A base of
+     zero means it can never be the item that does not fit, and it ellipsises
+     the way it does on every other row of this page. */
+  .offer.pair .meta { flex: 1 1 0; }
+  /* ...except where zero leaves it nothing to ellipsise, and then a third line.
+   *
+   * 3.5" is a landscape panel, so this page gives it the dashboard's type —
+   * 26px figures, 17px detail — and after the range, the chip and the clock
+   * had taken their width the figures line had 100px: the row read "$10.04
+   * onto $", losing the payout of the job the offer was being weighed against.
+   * Asked of the list's own width rather than the window's, because that is
+   * the measurement that decides it.
+   *
+   * Below the `flex` shorthand above and not above it: the shorthand resets
+   * `flex-basis`, so written the other way round this rule parses, matches,
+   * and does nothing — which is how it was first written and why the row it
+   * was meant to fix measured the same afterwards. */
+  @container (max-width: 560px) {
+    .offer.pair .meta { flex-basis: 100%; }
+  }
+  .offer.pair .places {
+    /* Last, after the chevron. The chevron is `summary::after` and so it is a
+       flex item too, and a places line claiming the full width pushed it onto
+       a third line of its own — 25px of empty row with an arrow at the end of
+       it, on every pairing. Ordered after it instead, which puts it on the
+       second line and the arrow back beside the clock where it points. */
+    order: 1;
+    flex-basis: 100%; min-width: 0;
+    font-size: 11px; color: var(--muted); opacity: .8;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* The range is two figures and a dash where an offer row has one figure, so
+     it wants the room the log's rows do not. Still a floor and not a width:
+     "--" on a pairing the panel could not answer stays in the same column as
+     the rates above it. */
+  .offer.pair .big { min-width: 104px; }
+
   .acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px 20px; }
   /* These are the destructive ones — 'I took this', 'hide every offer like
      this' — so they are the last place a mis-tap should be easy. */
@@ -285,6 +332,11 @@
     .offer .big em { font-size: 15px; }
     .offer .meta { font-size: 17px; }
     .offer .meta em { font-size: 15px; }
+    /* The same 11px as `.meta em`, and it needs the same lift for the same
+       reason: it is the line that says which two towns, and this panel is at
+       arm's length. Missed on the first pass, and rpi/test_layout.py named it
+       — "nothing smaller than 15px (11px in places)". */
+    .offer.pair .places { font-size: 15px; }
     .offer .when { font-size: 16px; }
     .offer .tag { font-size: 15px; }
     .offer .why { font-size: 16px; }
@@ -357,6 +409,17 @@
   <h2 id="runsHead">Runs of scanning</h2>
   <div id="runs"></div>
 
+  <!-- The one thing this rig says that nothing else on this page records.
+       Every figure above is about one offer at a time; this is about the only
+       question with two: a card arrived while a job was already in the car,
+       and the panel answered it in the four seconds before the card went away.
+       The answer was written to the journal from the moment that feature
+       existed and read back by nothing, so a driver could work a shift, be
+       advised a dozen times, and have no way to see any of it afterwards. -->
+  <h2 id="pairsHead" hidden>Second jobs</h2>
+  <p class="hint" id="pairsLead" hidden></p>
+  <div id="pairs"></div>
+
   <h2 id="blocksHead">By time of day <em>· median $/hr</em></h2>
   <div id="blocks"></div>
   <div class="scale" id="blockScale"></div>
@@ -408,7 +471,8 @@
    'caveats', 'ranges', 'csv', 'recentNote', 'log', 'more',
    'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead',
    'blocksHead', 'kindsHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
-   'find', 'findNote', 'live', 'nothing', 'ladder'].forEach(function (id) {
+   'find', 'findNote', 'live', 'nothing', 'ladder',
+   'pairs', 'pairsHead', 'pairsLead'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -984,6 +1048,235 @@
     }).join('');
   }
 
+  /* Every time a card was read with a job already in the car.
+   *
+   * These are the only rows in the journal about two offers at once, and the
+   * only ones recording something the rig SAID rather than something it read.
+   * That makes them the one part of this record a driver can check the advice
+   * against — which is why they are listed rather than summed. There are a
+   * handful in a shift, not the thousands the offer log holds.
+   *
+   * Nothing here scores the advice. Whether a stack actually paid what the
+   * range said needs the finished job, which this rig never sees; all it can
+   * honestly show is what was asked, what was answered, and what the driver
+   * then marked. Putting those three side by side is the whole feature.
+   */
+
+  // The card's own words for where two jobs end. Deliberately the same five
+  // strings the driving screen uses — a driver comparing the panel they
+  // remember against this page must not have to translate.
+  function endsWords(ends) {
+    return ends === 'elsewhere' ? 'ends elsewhere'
+         : ends === 'same-zip' ? 'same ZIP'
+         : ends === 'same-side' ? 'same side of town'
+         : ends === 'same-town' ? 'same town' : null;
+  }
+
+  // An address short enough to read at a glance, for the line under the
+  // figures.
+  //
+  // The full lines are what the arithmetic uses and they do not fit here:
+  // "1234 Daffodil Ln, Powder Springs, GA 30127 → Chastain Rd NW, Kennesaw" is
+  // 69 characters, and measured on the 3.5" hat the row showed "1234 Daffo" —
+  // a house number, with the arrow and the whole destination cut off. The half
+  // that was lost is the half that matters: where the NEW job goes.
+  //
+  // The town, because that is what the geography verdict beside it is about,
+  // and it comes from Advice.area rather than a second guess at what a town
+  // looks like. `area` lowercases what it finds, so the original casing is cut
+  // back out of the line rather than title-cased into "Mcdonough".
+  function shortPlace(line) {
+    if (typeof line !== 'string' || !line) return null;
+    var a = null;
+    try { a = Advice.area(line); } catch (e) { a = null; }
+    if (a && a.town) {
+      var at = line.toLowerCase().indexOf(a.town);
+      if (at !== -1) return line.substr(at, a.town.length);
+    }
+    // No town printed — about half of these cards. The cross-street is what is
+    // left, and it is still something a driver recognises.
+    return line.split(',')[0].trim() || null;
+  }
+
+  // What the panel said, in the words it says it in. `null` is not a fourth
+  // verdict — it is the panel declining to answer, which happens when a figure
+  // was missing or the held job's own time had already run out, and it must
+  // not be shown as a PASS.
+  function saidWords(s) {
+    if (!s) return 'no answer';
+    return s.state === 'go' ? 'take it'
+         : s.state === 'warn' ? 'close call' : 'pass';
+  }
+
+  function pairRow(p) {
+    var s = p.stack || null;
+    var held = p.held || {};
+    var offer = p.offer || {};
+    var when = new Date(p.at || 0);
+    var lo = s ? Math.round(s.worst) : null;
+    var hi = s ? Math.round(s.best) : null;
+    var range = s
+      ? (lo === hi ? money(lo, 0) : money(lo, 0) + '–' + Math.round(hi))
+      : '--';
+    var mins = s
+      ? (Math.round(s.minMinutes) === Math.round(s.maxMinutes)
+         ? Math.round(s.minMinutes)
+         : Math.round(s.minMinutes) + '–' + Math.round(s.maxMinutes))
+      : null;
+    var ends = s ? endsWords(s.ends) : null;
+    // Three states, not two. `accepted` is undefined when the driver never
+    // pressed either way, and calling that "passed" would invent a decision
+    // out of a shift where they were simply busy driving.
+    var outcome = p.accepted === true ? 'took it'
+                : p.accepted === false ? 'passed' : null;
+    return '<details class="offer pair' + (s ? '' : ' aside')
+      + (p.accepted === true ? ' mine' : '') + '">'
+      + '<summary>'
+      + '<span class="dot ' + (s ? s.state : '') + '"></span>'
+      + '<span class="big">' + range + (s ? '<i class="unit">/hr</i>' : '') + '</span>'
+      // Terse, in the offer log's own idiom, and in priority order.
+      //
+      // "$8.04 offer onto $12.00 in the car · 23–35 min together" is 54
+      // characters and the phone gives this line 160px: measured, the driver
+      // saw "$8.04 offer onto $12.0" and nothing else. The words carrying no
+      // information here are the ones the heading over the section has already
+      // said — every row in it is an offer, and every one of them arrived with
+      // a job in the car. What is left is the two payouts and the span, which
+      // fits, and the geography last because it is the first thing that should
+      // give way.
+      + '<span class="meta">' + money(offer.pay, 2) + ' onto '
+      + money(held.pay, 2)
+      + (mins ? ' · ' + mins + ' min' : '')
+      // The good geography rides on this line and the bad one does not. It
+      // becomes a chip below instead, in the colour a warning is in — the same
+      // split the driving screen makes, and for the same reason: "ends
+      // elsewhere" is the one word here that changes what a driver should do.
+      + (ends && ends !== 'ends elsewhere' ? ' · ' + esc(ends) : '')
+      + '</span>'
+      + (p.accepted === true
+         ? '<span class="took" title="you took this">✓</span>' : '')
+      + (ends === 'ends elsewhere' ? '<span class="tag">elsewhere</span>' : '')
+      + (s ? '' : '<span class="tag">no answer</span>')
+      + '<span class="when">' + when.toLocaleTimeString(undefined,
+          { hour: 'numeric', minute: '2-digit' }) + '</span>'
+      // Where the two jobs go, on the row rather than only inside it — the
+      // same thing the offer log puts under its figures, and what turns this
+      // from rows of arithmetic into jobs a driver can recognise. Shortened;
+      // the lines they came off are inside, under "Ends at".
+      //
+      // A row of its own rather than tucked inside `.meta`, which is where it
+      // started. `.meta` is what gives way when the chips and the clock have
+      // taken their width, and on the 3.5" hat that left it 98px: the row said
+      // "Powder Sprin" and the destination — the half a driver is actually
+      // looking for — was gone. Wrapped onto its own line it has the width of
+      // the whole row at every size.
+      + ((held.dropoff || offer.dropoff)
+         ? '<span class="places">'
+           + esc(shortPlace(held.dropoff) || 'somewhere unnamed') + ' → '
+           + esc(shortPlace(offer.dropoff) || 'somewhere unnamed') + '</span>' : '')
+      + '</summary>'
+      + '<h3>The job already in the car</h3>'
+      + '<dl class="facts">'
+      + row('Payout', money(held.pay, 2))
+      + row('Time on the card', num(held.minutes, 0) === null
+            ? null : num(held.minutes, 0) + ' min')
+      + row('Already elapsed', typeof held.heldMs === 'number'
+            ? Math.round(held.heldMs / 60000) + ' min' : null)
+      + row('Time still left', s ? num(s.leftMinutes, 0) + ' min' : null)
+      // Where it ends, and whether that was read off the screen after the
+      // accept or is still whatever the offer card printed. The difference
+      // decides how much the geography below is worth: an offer card names a
+      // town, the screen after the accept names a street.
+      + row('Ends at', held.dropoff
+            ? esc(held.dropoff) + (held.scanned ? '' : ' — off the offer card')
+            : 'not named on the card')
+      + '</dl><h3>The offer being judged against it</h3>'
+      + '<dl class="facts">'
+      + row('Payout', money(offer.pay, 2))
+      + row('Time on the card', num(offer.minutes, 0) === null
+            ? null : num(offer.minutes, 0) + ' min')
+      + row('Picks up at', offer.pickup ? esc(offer.pickup) : null)
+      + row('Ends at', offer.dropoff ? esc(offer.dropoff) : 'not named on the card')
+      + '</dl><h3>What the panel said</h3>'
+      + '<dl class="facts">'
+      + row('Called it', saidWords(s))
+      + row('Both together', s ? money(s.pay, 2) : null)
+      + row('Over', mins ? mins + ' min' : null)
+      + row('Which is', s ? range + '/hr' : null)
+      // The one claim in the whole answer that does not depend on geography,
+      // and therefore the only one worth stating without a hedge.
+      + row('Beats finishing what you have', s
+            ? (s.sure ? 'yes, even sharing no road at all'
+                      : 'no — the worst end is below finishing alone') : null)
+      + row('Where they end', s
+            ? (ends || 'the cards did not print enough to say') : null)
+      + '</dl><h3>What you did</h3>'
+      + '<dl class="facts">'
+      // Silence is its own row rather than a missing one. An unmarked pairing
+      // looks identical to a page that failed to load the mark otherwise.
+      + row('Marked', outcome || 'never marked either way')
+      + '</dl>'
+      + '</details>';
+  }
+
+  function showPairs(pairs) {
+    pairs = pairs || [];
+    if (!pairs.length) {
+      el.pairs.innerHTML = '';
+      el.pairsHead.hidden = true;
+      el.pairsLead.hidden = true;
+      return;
+    }
+    el.pairsHead.hidden = false;
+    el.pairsLead.hidden = false;
+    var said = { go: 0, warn: 0, no: 0, none: 0 };
+    var took = { go: 0, warn: 0, no: 0, none: 0 };
+    var marked = 0;
+    pairs.forEach(function (p) {
+      var k = p.stack ? p.stack.state : 'none';
+      said[k]++;
+      if (p.accepted !== undefined) marked++;
+      if (p.accepted === true) took[k]++;
+    });
+    el.pairsHead.innerHTML = 'Second jobs <em>· ' + pairs.length
+      + (pairs.length === 1 ? ' time a card arrived' : ' times a card arrived')
+      + ' with a job already in the car</em>';
+    // A tally rather than a sentence. Four counts written out in prose came
+    // back as "The panel called 1 to take, 1 a close call, 1 to pass, 1 it
+    // could not answer", which is a list wearing a sentence's punctuation and
+    // is read as neither. These are the four words the driving screen uses, in
+    // the order of how good the answer was, with the count against each.
+    var parts = [];
+    if (said.go) parts.push('take it <b>' + said.go + '</b>');
+    if (said.warn) parts.push('close call <b>' + said.warn + '</b>');
+    if (said.no) parts.push('pass <b>' + said.no + '</b>');
+    if (said.none) parts.push('no answer <b>' + said.none + '</b>');
+    var lead = 'The panel said: ' + parts.join(' · ') + '. ';
+    // Counted against what was marked, not against every pairing. Dividing by
+    // the total would read as "you ignored the advice" on a shift where the
+    // driver simply never pressed the button — the same unmarked row, told as
+    // a decision they did not make.
+    //
+    // Cleared means `go` and nothing else. A close call is exactly the answer
+    // that has not cleared anything — the range straddles the target and which
+    // end it lands on is the geography — so counting it as cleared would turn
+    // the one honest hedge on the panel into a recommendation after the fact.
+    var tookAll = took.go + took.warn + took.no + took.none;
+    lead += marked
+      ? 'You marked <b>' + marked + '</b> of them'
+        + (marked === pairs.length ? '' : ' either way')
+        + ' and took <b>' + tookAll + '</b>'
+        + (tookAll
+           ? ' — ' + took.go + ' the panel had cleared, '
+             + (tookAll - took.go) + ' it had not.'
+           : '.')
+      : 'None of them are marked, so there is nothing yet to check the advice '
+        + 'against. The <b>Took</b> button on the driving screen is what fills '
+        + 'this in.';
+    el.pairsLead.innerHTML = lead;
+    el.pairs.innerHTML = pairs.slice(0, LOG_MAX).map(pairRow).join('');
+  }
+
   function A_MIN(a) {
     return Math.min.apply(null, a.checkedAt.map(function (c) { return c.minutes; }));
   }
@@ -1011,6 +1304,13 @@
     var kept = data.offers || [];
     var offers = kept.filter(counted);
     var setAside = kept.length - offers.length;
+
+    // Ahead of the early return below, because a pairing is not an offer and
+    // does not stop existing because none of this window's offers were good
+    // enough to move a median. A shift of doubtful readings can still have had
+    // the panel asked about a second job, and that is exactly the shift where
+    // a driver wants to see what it said.
+    showPairs(data.pairs);
 
     if (!offers.length) {
       el.headline.innerHTML = kept.length

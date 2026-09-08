@@ -318,10 +318,38 @@
   #drawTools #drawUse:not([disabled]) { background: #0d5c31; border-color: #17c964; color: #d7ffe6; }
   #drawTools button[disabled] { opacity: .45; }
   #drawHint { font-size: 12px; color: var(--muted); text-align: center; padding: 6px 0 0; }
-  /* Four buttons here, and the bar sizes itself to them. Tighter type because
-     four labels in a phone's width is the tightest this bar ever gets. */
+  /* A label that does not fit is allowed a second line.
+   *
+   * This said `white-space: nowrap`, written when this bar had four buttons and
+   * a phone's width to put them in. It now has six and sits beside the phone
+   * picture, so on the panel the rig is bolted to each button is 78px wide —
+   * and nowrap plus the default `overflow: visible` does not clip a long label,
+   * it *centres* it and paints the ends outside the button. Measured at 17px,
+   * which is what the landscape rule below actually renders:
+   *
+   *   800x480    "Took $12.45?" wants 91px in 78 → driver sees "ok $12.4"
+   *              "▣ Set box"    wants 79px in 78 → driver sees " Set bo"
+   *   1024x600   "Took $12.45?" wants 104 in 102 → driver sees "ook $12.45"
+   *   1024x768   the same
+   *
+   * A button whose first letters are missing is worse than a small one: "ok
+   * $12.4" is not a word, and the word is the half of this label that says the
+   * press records a decision already made rather than making one.
+   *
+   * Wrapping was the answer the shared stylesheet already gave — "clipping
+   * 'Camera' to 'Camer' is a worse answer than letting it wrap" — and this
+   * rule was quietly overriding it. Measured with the frame on the glass, in
+   * both bar populations, at all six panels: every label now renders whole on
+   * every landscape panel, the 3.5" hat goes from five clipped labels to three,
+   * and the bar grows 52px → 55px only on the panels where something wraps.
+   * The page still fits the glass on all of them, the rate figure is untouched
+   * at 124.8px, and the verdict gives up 3px to pay for it.
+   *
+   * `line-height: 1.1` rather than the default: two lines at 1.2 make the bar
+   * 59px and there is no reason to spend the extra four. Held by
+   * rpi/test_layout.py, which measures what a screenshot would show. */
   .bottombar button, .bottombar .linkbtn {
-    font-size: 13px; padding: 10px 4px; white-space: nowrap;
+    font-size: 13px; padding: 10px 4px; line-height: 1.1;
   }
   #setBox.on {
     background: #0d5c31; border-color: #17c964; color: #d7ffe6;

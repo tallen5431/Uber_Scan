@@ -535,6 +535,35 @@ const FRAMES = JSON.parse(framesJson);
           const drop = document.getElementById('drop');
           const bar = document.querySelector('.bottombar');
           const box = (el) => el.getBoundingClientRect();
+          const dest = document.getElementById('dest');
+          // What a driver can actually read off the button, glyph by glyph.
+          //
+          // `scrollWidth > clientWidth` was the whole test and it answers a
+          // narrower question than it looks. These buttons are `overflow:
+          // visible`, so a label too long for its button is not clipped by the
+          // button — it is centred and painted out past both edges — and a
+          // label allowed to wrap can spill downwards instead, which no width
+          // comparison sees at all. Asking where each character landed catches
+          // both, and is what a screenshot would show.
+          const outside = (el) => {
+            const r = box(el);
+            const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+            const out = [];
+            let node;
+            while ((node = walk.nextNode())) {
+              const range = document.createRange();
+              for (let i = 0; i < node.length; i++) {
+                range.setStart(node, i);
+                range.setEnd(node, i + 1);
+                const c = range.getBoundingClientRect();
+                if (c.width === 0 && c.height === 0) continue;
+                if (c.left < r.left - 0.5 || c.right > r.right + 0.5 ||
+                    c.top < r.top - 0.5 || c.bottom > r.bottom + 0.5)
+                  out.push(node.data[i]);
+              }
+            }
+            return out.join('');
+          };
           const measure = () => {
             const kids = [].slice.call(bar.children).filter((el) => {
               const r = box(el);
@@ -543,30 +572,43 @@ const FRAMES = JSON.parse(framesJson);
             return {
               count: kids.length,
               width: Math.round(box(bar).width),
+              height: Math.round(box(bar).height),
               shortest: kids.length ? Math.min(...kids.map((el) => box(el).height)) : 0,
               // A label wider than the button holding it. On a control pressed
               // without looking that is worse than a small one: the driver
               // cannot tell which button they are on.
               clipped: kids.filter((el) => el.scrollWidth > Math.ceil(box(el).width) + 1)
-                           .map((el) => (el.textContent || '').trim())
+                           .map((el) => (el.textContent || '').trim()),
+              // ...and the same question asked of the pixels.
+              spilling: kids.map((el) => [(el.textContent || '').trim(), outside(el)])
+                            .filter((pair) => pair[1] !== '')
             };
           };
-          // Three states, because the interesting comparison is not against an
+          // Four states, because the interesting comparison is not against an
           // empty bar. `plain` is the five fixed controls; `before` adds the
           // "Took ..." button, which is the bar as it stood before an order in
           // the car was a thing this panel knew about; `full` adds "Drop" on
           // top. What has to hold is that `full` clips nothing `before` did not
           // — anything else is this feature making the bar worse.
+          //
+          // `crowded` adds the destination button, and is the widest this bar
+          // ever gets: a card on screen, a job in the car, and an address read
+          // off it. It was missing here for as long as that button has
+          // existed, so the six-control bar — the only one the 7" panel gets
+          // wrong — was measured by nothing.
           took.hidden = true;
           drop.hidden = true;
+          dest.hidden = true;
           const plain = measure();
           took.hidden = false;
           took.textContent = 'Took $12.45?';
           const before = measure();
           drop.hidden = false;
           const full = measure();
+          dest.hidden = false;
+          const crowded = measure();
           const d = document.documentElement;
-          return { plain: plain, before: before, full: full,
+          return { plain: plain, before: before, full: full, crowded: crowded,
                    over: d.scrollWidth > d.clientWidth + 1 };
         });
         // Bounded, and the result kept rather than thrown.
@@ -591,6 +633,44 @@ const FRAMES = JSON.parse(framesJson);
         shown.sceneCut = Math.max(scene.cutTop, scene.cutBottom,
                                   scene.cutLeft, scene.cutRight);
         out[panel[0] + ' phoneview'] = shown;
+      }
+      // The one section on this page about two offers at once.
+      //
+      // Its rows carry more in a summary than an offer row does — a range, two
+      // payouts, a place and an outcome — so it is the row most likely to run
+      // out of width, and it is read parked on whichever screen is to hand.
+      if (name === 'journal.html') {
+        out[panel[0] + ' pairs'] = await page.evaluate(() => {
+          const head = document.getElementById('pairsHead');
+          const list = document.getElementById('pairs');
+          const rows = [].slice.call(list.querySelectorAll('details.pair'));
+          const d = document.documentElement;
+          const wide = (el) => {
+            const r = el.getBoundingClientRect();
+            return r.right > d.clientWidth + 1 || r.left < -1;
+          };
+          // Opened, because the arithmetic a driver checks the advice against
+          // is inside — and a `<dl>` that only fits while folded away fits
+          // nothing.
+          rows.forEach((r) => { r.open = true; });
+          const dds = [].slice.call(list.querySelectorAll('dd'));
+          return {
+            headShown: !head.hidden,
+            headText: (head.textContent || '').trim(),
+            lead: (document.getElementById('pairsLead').textContent || '').trim(),
+            count: rows.length,
+            // What each row says without being opened, which is what makes the
+            // list worth scrolling.
+            summaries: rows.map((r) => (r.querySelector('summary').textContent || '')
+                                       .replace(/\s+/g, ' ').trim()),
+            states: rows.map((r) => {
+              const dot = r.querySelector('.dot');
+              return dot ? dot.className.replace('dot', '').trim() : '';
+            }),
+            outside: rows.filter(wide).length + dds.filter(wide).length,
+            pageWide: d.scrollWidth > d.clientWidth + 1,
+          };
+        });
       }
       await page.close();
     }
@@ -621,6 +701,29 @@ for i in range(40):
         'target': 25, 'band': 15, 'legs': 2, 'whole': True,
         'accepted': i % 7 == 0, 'hidden': i % 11 == 0, 'suspect': i % 17 == 0,
     })
+# ...and the pairings, so the "Second jobs" section is measured with something
+# in it. One of each answer the panel can give, including the one where it
+# declines to answer, because that row is drawn differently and its own width
+# is the widest thing in the section.
+for i, (state, ends, took) in enumerate([
+        ('go', 'same-town', True), ('warn', None, False),
+        ('no', 'elsewhere', None), (None, None, True)]):
+    rows.append({
+        'v': 1, 'kind': 'pair', 'at': now - i * 1800000, 'id': 'r%d' % (i * 3),
+        'held': {'pay': 12.0 + i, 'minutes': 30, 'scanned': i % 2 == 0,
+                 'dropoff': '1234 Daffodil Ln, Powder Springs, GA 30127',
+                 'heldMs': 1080000},
+        'offer': {'pay': 8.04 + i, 'minutes': 23,
+                  'pickup': 'Chick-fil-A, 2500 Cobb Pkwy SE',
+                  'dropoff': 'Chastain Rd NW, Kennesaw'},
+        'stack': None if state is None else {
+            'pay': 17.2, 'worst': 19.4, 'best': 34.1, 'leftMinutes': 12,
+            'minMinutes': 23, 'maxMinutes': 35, 'state': state,
+            'sure': state != 'no', 'ends': ends},
+    })
+    if took is not None:
+        rows.append({'kind': 'mark', 'id': 'r%d' % (i * 3), 'accepted': took,
+                     'at': now - i * 1800000})
 with open(journal, 'w') as fh:
     for r in rows:
         fh.write(json.dumps(r) + '\n')
@@ -797,6 +900,31 @@ try:
                 if (plain.get('width') or 0) >= 400:
                     eq('...with the five fixed controls clipping nothing at %s'
                        % panel, plain.get('clipped'), [])
+                # The widest this bar ever gets, and an absolute claim rather
+                # than a comparative one.
+                #
+                # Every check above is "no worse than before", which is the
+                # right shape for a feature landing on a crowded bar and the
+                # wrong shape for the bar itself: it passed all of them while
+                # the 7" panel this rig is bolted to painted "ok $12.4" over
+                # the gap beside the button. Six controls, the longest label
+                # the Took button can hold, and nothing outside its own box —
+                # on every panel with the room for it.
+                #
+                # 470px is not a threshold with an opinion. Below it the bar is
+                # the 3.5" hat's or a phone's, where no type size fits six
+                # labels and the trade is a documented one; above it are the
+                # four landscape panels, whose bars measure 507, 567, 663 and
+                # 804px beside the picture.
+                crowded = bar.get('crowded') or {}
+                eq('the fullest bar carries six controls at %s (bar %spx)'
+                   % (panel, crowded.get('width')), crowded.get('count'), 6)
+                ok_('...each still 44px tall at %s (%.4gpx, bar %spx tall)'
+                    % (panel, crowded.get('shortest') or 0, crowded.get('height')),
+                    (crowded.get('shortest') or 0) >= 43.5)
+                if (crowded.get('width') or 0) >= 470:
+                    eq('...with every label inside its own button at %s'
+                       % panel, crowded.get('spilling'), [])
                 # ...which is a weaker claim than it looks, and was the one
                 # being made. #app clips, so a picture drawn taller than its
                 # row is trimmed rather than overflowed and every fits-check
@@ -858,6 +986,42 @@ try:
                 ok_('%s at %s keeps a line of text readable (%.0fpx in %s)'
                     % (name, panel, r['measure'], r['measureIn']),
                     r['measure'] <= 900)
+
+            # The section about two offers at once.
+            #
+            # It reads back rows that were written to the journal from the day
+            # the feature existed and shown to nobody, so the check that
+            # matters is the plain one: they are on the page, they say which
+            # way the panel went, and they fit the screen the driver has.
+            pairs = got.get('%s pairs' % panel)
+            if name == 'journal.html' and pairs:
+                ok_('the second-jobs section is on the page at %s (%r)'
+                    % (panel, pairs['headText'][:60]), pairs['headShown'])
+                eq('...with a row for every pairing in the window at %s' % panel,
+                   pairs['count'], 4)
+                # One of each answer, including the row where the panel
+                # declined to answer — which is not a fourth verdict and must
+                # not be drawn as one.
+                eq('...each carrying the verdict it was given at %s' % panel,
+                   sorted(pairs['states']), ['', 'go', 'no', 'warn'])
+                # The summary is the whole reason to scroll the list: the range,
+                # the two payouts and where the pair ends, without opening
+                # anything.
+                # `and pairs['summaries']` because `all([])` is True: with the
+                # section unrendered this passed while asserting on nothing,
+                # which is the shape of check this file exists to refuse.
+                ok_('...saying what was offered onto what at %s (%r)'
+                    % (panel, (pairs['summaries'] or [''])[0][:70]),
+                    pairs['summaries'] and all('onto' in s
+                                               for s in pairs['summaries']))
+                ok_('...and the lead says which way the panel went at %s (%r)'
+                    % (panel, pairs['lead'][:70]),
+                    'take it' in pairs['lead'] and 'no answer' in pairs['lead'])
+                # Opened, which is when a `<dl>` of arithmetic is widest.
+                eq('...with nothing pushed off the glass at %s' % panel,
+                   pairs['outside'], 0)
+                eq('...and the page still not scrolling sideways at %s' % panel,
+                   pairs['pageWide'], False)
 
             layers = r.get('layers') or []
             if len(layers) > 1:
