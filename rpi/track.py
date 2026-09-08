@@ -35,10 +35,15 @@ adopted, however plainly it is there — re-seat the phone a little further back
 and the real screen is refused on every check, forever, while `misses` stays at
 zero so nothing reports it. So there is one bound on that: corners that sit off
 a steady, phone-shaped screen for RECOVER_AFTER are taken as the stuck party,
-moved onto it, and the calibration written off as out of date. Only the size
-test is given up there; shape still decides, because size is what legitimately
-changes when a phone is re-seated and shape is what tells a screen from the
-Accept bar beneath it.
+moved onto it, and the size the gate judges against written off as out of date.
+Only the size test is given up there; shape still decides, because size is what
+legitimately changes when a phone is re-seated and shape is what tells a screen
+from the Accept bar beneath it.
+
+The calibration itself is kept for the whole run, apart from the size reference
+that recovery moves. It is what ⟳ Re-find restores and what `wander` reports
+against, and while one field was doing both jobs a re-baseline silently took
+the escape hatch and the health number with it.
 """
 
 import time
@@ -179,6 +184,35 @@ class QuadTracker:
         # position and only calibration writes it.
         self.calibrated = (self.quad.copy() if calibrated is None
                            else np.asarray(calibrated, dtype=np.float32).reshape(4, 2).copy())
+        # ...and the SIZE a candidate is judged against, which is a different
+        # question and the only one that is allowed to move.
+        #
+        # One field was answering both, and the two answers had gone to war.
+        # The recovery paths below overwrite the reference when they un-stick
+        # the corners, and they are right to: leaving it would un-stick them
+        # once and then refuse every correction afterwards, which is the same
+        # trap one step along. But `calibrated` is also what ⟳ Re-find restores
+        # and what `wander` is measured against, and both of those want the
+        # screen as the driver calibrated it — so a re-baseline was quietly
+        # taking the escape hatch and the health line with it.
+        #
+        # Measured by driving the real tracker with a phone re-seated to 0.72x,
+        # concentric and the same shape. The watchdog re-baselines at 30.8s,
+        # and then:
+        #
+        #   before   wander 0.0     re-find lands 242px from the calibration
+        #                           and 0px from the box just adopted
+        #   after    wander 241.9   re-find lands 0px from the calibration
+        #                           and 242px from the box just adopted
+        #
+        # Deliberately lopsided, because two fields holding a reference is two
+        # copies of a rule and copies drift. `adopted` has exactly ONE reader —
+        # same_size in looks_like_the_screen — and three writers: the two
+        # recovery paths and start_over. Anything else that reaches for a
+        # reference wants `calibrated`. A second reader here needs the question
+        # asked out loud in a comment: does this want the size that moved, or
+        # the screen that was calibrated?
+        self.adopted = self.calibrated.copy()
         # One number or an (x, y) pair; the streams are not always the same
         # aspect ratio to the last pixel, and a couple of pixels of skew across
         # a 1700px screen is not worth being sloppy about.
@@ -272,10 +306,17 @@ class QuadTracker:
         # wrong. See _stalled.
         if self._stalled(candidate, now):
             self.quad = np.asarray(candidate, dtype=np.float32)
-            # The reference moves too. Leaving it would mean unsticking the
-            # corners once and then refusing every correction to them
-            # afterwards, which is the same trap one step along.
-            self.calibrated = self.quad.copy()
+            # The SIZE reference moves too. Leaving it would mean unsticking
+            # the corners once and then refusing every correction to them
+            # afterwards, which is the same trap one step along — and that is
+            # not hypothetical: routing same_size back at the immutable field
+            # is the one change that fails the check at test_track.py's "with
+            # the size the gate judges against taken as out of date".
+            #
+            # The calibration itself does not move, which is the half this used
+            # to get wrong. It is what ⟳ Re-find restores and what `wander` is
+            # measured against, and a re-baseline was taking both with it.
+            self.adopted = self.quad.copy()
             self.agreeing = 0
             self._forget_stall()
             self.moves += 1
@@ -299,7 +340,11 @@ class QuadTracker:
         # the corners stuck with no way out.
         if self._holds_the_centre(candidate, frame) and self.agreeing >= self.centre_agree:
             self.quad = np.asarray(candidate, dtype=np.float32)
-            self.calibrated = self.quad.copy()
+            # The size reference, for the reason the stall path gives: this
+            # branch exists precisely to adopt a screen whose size the gate
+            # refuses, so leaving the size reference behind would have the very
+            # next check refuse the screen it just landed on.
+            self.adopted = self.quad.copy()
             self.agreeing = 0
             self._forget_stall()
             self.moves += 1
@@ -402,8 +447,30 @@ class QuadTracker:
         the corners back where calibration left them and drops every piece of
         accumulated evidence, so the next screen argues for itself from nothing
         rather than against a history that has gone wrong.
+
+        Which includes undoing an automatic re-baseline, and that is the whole
+        point of the button. A driver pressing it is saying the re-baseline was
+        wrong, and whether it was wrong is the one thing the automatic rules
+        cannot tell: "the phone was re-seated" and "the outline is on part of
+        the screen" look identical from here. So the size reference goes back
+        as well as the corners.
+
+        Measured on a 0.72x re-seat, driving the real tracker: before this, the
+        press landed 242px from the calibration and 0px from the box the
+        watchdog had just adopted — the green box did not move and the crop
+        stayed a fraction of the wrong rectangle. Resetting the corners but
+        leaving the size reference is not enough either: the ordinary drift
+        path eases them back onto the adopted box 6.0 seconds later, which is
+        not an escape hatch.
+
+        The cost, stated plainly: on a phone that really was re-seated smaller,
+        the corners now sit at the calibration — 1.389x too big for the screen
+        — until the watchdog takes them back 30.4s later. That window is the
+        price of the button working at all, and it only opens because the
+        driver asked for it.
         """
         self.quad = self.calibrated.copy()
+        self.adopted = self.calibrated.copy()
         self.agreeing = 0
         self._candidate = None
         self._disputed_since = None
@@ -510,8 +577,24 @@ class QuadTracker:
         0.82 against a 695x1512 phone and sails through a test called
         `same_size`. That is not a hypothetical; it is the outline a rig was
         photographed wearing while a readable offer sat above it.
+
+        **And the two are anchored to different things.** Size is judged
+        against whatever the recovery paths last adopted, because size is the
+        thing that legitimately changes: a phone re-seated, a mount knocked
+        closer. Shape is judged against the calibration and never moves,
+        because a phone re-seated is still the same rectangle — nothing about
+        a mount makes a 2.45 screen into a 1.45 one.
+
+        Both used to be anchored to the field the recovery paths move, and the
+        walk downhill this docstring is about was still open in the shape
+        dimension. Measured: two candidates, each 0.72x in size and 1.30x
+        squatter than the last, each held past `recover_after` — the outline
+        went 2.454 -> 1.888 -> 1.452, which is 0.59x the calibrated aspect and
+        outside ASPECT_BAND, in two re-baselines. With shape held to the
+        calibration it stops after the first, at 1.888. A box that short feeds
+        a crop that is a fraction of the card.
         """
-        return (same_size(candidate, self.calibrated)
+        return (same_size(candidate, self.adopted)
                 and same_shape(candidate, self.calibrated))
     def needs_save(self, now=None):
         """True when what is on disk is stale enough to be worth rewriting."""
@@ -540,6 +623,15 @@ class QuadTracker:
         calibration this run started from and is never re-baselined, so it is
         the number that can still see a problem after the file has caught up
         with it.
+
+        That last sentence was written before the code did it. The automatic
+        re-baseline used to overwrite the calibration, so `wander` went to 0.0
+        at the exact moment there was something to report — the one number
+        built to survive a save was blinded by the event it exists to survive.
+        Measured on a 0.72x re-seat, driving the real tracker: 0.0 before the
+        two references were split, 241.9 after. Rule 6, on a health line: a
+        number that resets itself when the news arrives is counted and cannot
+        fail.
         """
         return {'moves': self.moves, 'jumps': self.jumps, 'misses': self.misses,
                 'drift': round(self.drift, 1),

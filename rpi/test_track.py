@@ -375,8 +375,24 @@ eq('after RECOVER_AFTER the corners are un-stuck', tr.rebaselines, 1)
 ok_('...and land on the screen that is actually there',
     T.distance(tr.quad, quad_at(430, 200, size=SMALLER)) < 12.0)
 ok_('...and stop reporting stuck', not tr.status()['stalled'])
-ok_('...with the calibration taken as out of date, so corrections still work',
+# This is the check that says the second reference is needed at all: routing
+# `same_size` back at the immutable calibration is the one change that fails it,
+# and it is the whole of the trap the re-baseline's own comment defends —
+# "unsticking the corners once and then refusing every correction to them
+# afterwards". Measured on a patched copy: 121 passed, 1 FAILED, this one.
+ok_('...with the SIZE the gate judges against taken as out of date, '
+    'so corrections still work',
     tr.looks_like_the_screen(quad_at(432, 202, size=SMALLER)))
+# ...and the calibration itself is NOT out of date, which is the half that was
+# being thrown away with it. Three things want the screen as the driver
+# calibrated it: the re-find button, `wander`, and the shape test.
+ok_('...while the calibration itself is untouched',
+    T.distance(tr.calibrated, CAL) < 0.01)
+# The one number on the health line built to survive a save was being blinded
+# by the event it exists to survive: `wander` went to 0.0 the moment the
+# watchdog fired, on the reading that had something to report.
+ok_('...so wander still reports the distance from it (%.1f)'
+    % tr.status()['wander'], tr.status()['wander'] > 20.0)
 
 # It must not fire in place of the ordinary path, which is far quicker.
 tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
@@ -396,6 +412,35 @@ for i in range(20):
 eq('a downhill walk is never adopted', tr.rebaselines, 0)
 ok_('...and the corners are still the calibrated size',
     T.same_size(tr.quad, CAL))
+
+# ...and the same walk in the SHAPE dimension, which was still open.
+#
+# The size gate has to forgive a re-seated phone, so its reference moves. Shape
+# does not: a phone re-seated is the same rectangle, and nothing about a mount
+# turns a 2.07 screen into a 1.2 one. Both used to be anchored to the field the
+# recovery paths move, so a candidate that was squatter as well as smaller
+# dragged the outline's proportions with it, one patient step at a time — and a
+# box that short feeds a crop that is a fraction of the card.
+#
+# Two steps is enough to leave ASPECT_BAND. Each one is still, phone-shaped
+# enough to pass on its own, and held past RECOVER_AFTER so the watchdog adopts
+# it — which is exactly the patient decoy this file already knows about, in the
+# one dimension nothing was holding.
+# T.aspect, not a second copy of it: same_shape is what this is about and it is
+# the ratio same_shape computes that has to stay inside the band.
+tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+t = 0.0
+for step in (1, 2):
+    # 0.72x the size and 1.30x squatter each time.
+    size = (int(300 * 0.72 ** step * 1.30 ** step), int(620 * 0.72 ** step))
+    settle(tr, frame_with_phone(400, 140, size=size), 12,
+           t0=t, step=T.RECOVER_AFTER / 4.0)
+    t += 12 * (T.RECOVER_AFTER / 4.0) + 1.0
+eq('a walk that gets squatter as well as smaller is adopted once, not twice',
+   tr.rebaselines, 1)
+ok_('...so the outline keeps the calibrated proportions (%.2f of them)'
+    % (T.aspect(tr.quad) / T.aspect(CAL)),
+    T.aspect(tr.quad) / T.aspect(CAL) > T.ASPECT_BAND[0])
 
 # ...and neither is a strip. Only the size test is given up when un-sticking;
 # the shape test is what tells a screen from the Accept bar beneath it, and it
@@ -457,6 +502,36 @@ ok_('...and reports no stall', not tr.status()['stalled'])
 settle(tr, frame_with_phone(460, 180), 10, t0=100.0, step=0.5)
 ok_('and it tracks again afterwards',
     T.distance(tr.quad, quad_at(460, 180)) < 15.0)
+
+# ...and it undoes an automatic re-baseline, which is the case the button exists
+# for and the one it could not do.
+#
+# "Corners on the screen at the wrong size" is equally "the phone was re-seated"
+# and "the outline is on part of the screen" — that is this block's own opening
+# argument, and it is precisely the case the watchdog has already decided. So
+# the driver's override has to be able to overrule it. It could not: the
+# re-baseline moved the field start_over restores, so the press landed on the
+# box the watchdog had just adopted and the green box did not move.
+#
+# Measured on a 0.72x concentric re-seat, driving the real tracker: 242px from
+# the calibration and 0px from the adopted box before, the other way round now.
+tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+settle(tr, frame_with_phone(400, 140, size=SMALLER), 12,
+       t0=0.0, step=T.RECOVER_AFTER / 4.0)
+eq('the watchdog has re-baselined onto the re-seated phone', tr.rebaselines, 1)
+adopted = tr.quad.copy()
+ok_('...and the corners are on it, away from the calibration',
+    T.distance(adopted, CAL) > 20.0)
+tr.start_over()
+ok_('re-find undoes the re-baseline, not just the drift (%.0fpx from CAL)'
+    % T.distance(tr.quad, CAL), T.distance(tr.quad, CAL) < 1.0)
+ok_('...landing off the box the watchdog had adopted (%.0fpx)'
+    % T.distance(tr.quad, adopted), T.distance(tr.quad, adopted) > 20.0)
+# And the size reference goes back with it, or the ordinary drift path eases
+# the corners onto the adopted box again within seconds — measured at 6.0s,
+# which is not an escape hatch.
+ok_('...and the re-seated screen is refused again, as it was at calibration',
+    not tr.looks_like_the_screen(quad_at(400, 140, size=SMALLER)))
 
 # --- the outline must never freeze silently ---------------------------------
 # A detector does not give the same answer twice. In bright light the threshold
