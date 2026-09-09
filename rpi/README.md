@@ -614,10 +614,11 @@ not change was served the previous answer's `false` — the one state it exists 
 report, reported wrong. It is answered outside the cache now, like `clockSet`.
 
 **Known limit:** the machine at home runs the same `server.js` and will answer
-with its own journal, which the sync timer leaves up to eleven minutes behind,
-and marks made there never flow back. The line sits directly beside "no Pi
-scanner on this machine", which is the signal that it is a copy — but it is not
-suppressed there, and the figures are the copy's.
+with its own journal, which the sync timer leaves up to eleven minutes behind.
+The line sits directly beside "no Pi scanner on this machine", which is the
+signal that it is a copy — but it is not suppressed there, and the figures are
+the copy's. (Marks made there used to stay there; the timer's run now brings
+them back — see the sync section.)
 
 ### Nothing the rig writes may become a commit
 
@@ -5100,12 +5101,21 @@ sudo systemctl start uberscan-sync.service   # run it now
 journalctl -u uberscan-sync.service -n 20    # what it said
 ```
 
-**The rig pushes; nothing pulls.** A car is behind cellular NAT and cannot be
-reached from outside, so the direction is not a preference. It also means the
-sync works the same on the driveway and on the motorway rather than only when
-parked — *if* you give it an address that works from the road. A Tailscale or
-WireGuard name does; a `192.168.x.x` one only syncs when the car is at home,
-which is the one time the data was never really at risk.
+**The rig does the reaching, both ways.** A car is behind cellular NAT and
+cannot be reached from outside, so the direction is not a preference. It also
+means the sync works the same on the driveway and on the motorway rather than
+only when parked — *if* you give it an address that works from the road. A
+Tailscale or WireGuard name does; a `192.168.x.x` one only syncs when the car
+is at home, which is the one time the data was never really at risk.
+
+The same run also asks the copy for what *you* did there — a tick or a hide
+made on its offers page, an offer typed on its keypad — and hands those to the
+rig's own server, so both journals end up saying the same thing about the same
+offer whichever machine you said it on. That needs the rig's server address,
+which is `http://127.0.0.1:8080` unless you moved it: pass `--local` or set
+`SYNC_LOCAL` to match `PORT`. If the rig's server is not answering, the run
+says so on stderr and still exits 0 — the offers still went. `--no-pull` is the
+old, one-way behaviour.
 
 **It is idempotent, and that is the entire design.** Every row can say what makes
 it itself, and the far end appends only what it has never seen — so the same

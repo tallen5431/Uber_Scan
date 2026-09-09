@@ -140,6 +140,7 @@ it read `package.json`, and it will serve instead.
 | `index.html` | Layout |
 | `styles.css` | Styling |
 | `ui.js` | All of the app logic — browser only, never run under Node |
+| `journal-client.js` | Hands an offer typed here, or read by the phone's scanner, to the rig's journal when there is one to answer |
 | `server.js` | Zero-dependency static server; the Node entry point |
 | `journal.html` | Every offer the scanner kept, and what it adds up to |
 | `advice.js` | What target the offers themselves argue for — shared, and tested on its own |

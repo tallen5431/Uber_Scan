@@ -308,7 +308,13 @@ def main():
     if not args.no_pull:
         pulled, came, why = pull_notes(args.to, args.local, floor, token=args.token)
         if why:
-            say('%d tag(s) on the copy were not brought back: %s' % (pulled, why))
+            # stderr and not say(): this rig's own server not answering is a
+            # standing fault, not the routine chatter of a timer in a car —
+            # the copy had tags to give and they will never arrive until
+            # somebody hears about it, and --quiet is what the timer runs with.
+            print('%d tag(s) made on the copy were not brought back: %s. '
+                  'Is the server running here, and is --local (or SYNC_LOCAL) '
+                  'its address?' % (pulled, why), file=sys.stderr)
         elif came:
             say('%d tag(s) made on the copy came back, %d new here' % (pulled, came))
 

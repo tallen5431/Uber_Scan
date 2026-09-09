@@ -756,6 +756,17 @@ try:
        shown(rig.base).get('o1'), True)
     eq('...and what the copy shows, having received it', shown(home.base).get('o1'), True)
 
+    # An offer typed on the copy's keypad, or read by a phone's scanner pointed
+    # at the copy, is a row nothing but a browser wrote — and like a mark it
+    # existed only where that browser was pointed. It comes back the same way.
+    with open(home.journal, 'a') as fh:
+        fh.write(json.dumps({'v': 1, 'id': 'kabc123', 'seq': 1, 'at': T + 8000000,
+                             'firstAt': T + 8000000, 'pay': 9.0, 'minutes': 12.0,
+                             'perHour': 45.0, 'whole': True, 'typed': True}) + '\n')
+    run_main(home.base, rig.journal, ['--local', rig.base])
+    ok_('an offer typed on the copy comes back as an offer',
+        'kabc123' in shown(rig.base))
+
     # --no-pull is the old behaviour, for anyone who wants it.
     with open(home.journal, 'a') as fh:
         fh.write(json.dumps({'kind': 'mark', 'id': 'o1', 'at': T + 9000000,
@@ -765,6 +776,20 @@ try:
     eq('--no-pull brings nothing back', len(lines(rig.journal)), before)
     run_main(home.base, rig.journal, ['--local', rig.base])
     eq('...and the next ordinary run does', len(lines(rig.journal)), before + 1)
+
+    # This rig's own server not answering is a standing fault, not the chatter
+    # of a timer in a car: the copy has tags to give and they will never
+    # arrive until somebody hears. The timer runs --quiet, so it goes to
+    # stderr — and the run still exits 0, because the offers still went.
+    with open(home.journal, 'a') as fh:
+        fh.write(json.dumps({'kind': 'mark', 'id': 'o1', 'at': T + 10800000,
+                             'accepted': True}) + '\n')
+    before = len(lines(rig.journal))
+    code, said = run_main(home.base, rig.journal, ['--local', 'http://127.0.0.1:1'])
+    eq('a rig whose own server will not answer still exits 0', code, 0)
+    ok_('...but says so past --quiet (%r)' % said[:80], 'not brought back' in said)
+    ok_('...naming the setting to check', 'SYNC_LOCAL' in said)
+    eq('...and brought nothing back', len(lines(rig.journal)), before)
 finally:
     home.close()
     rig.close()

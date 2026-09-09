@@ -23,7 +23,7 @@
  * install would not have put it back: a phone with no signal would have lost
  * the scanner entirely, in the name of shipping a scanner fix.
  */
-var SHELL = 'uberscan-shell-v46';
+var SHELL = 'uberscan-shell-v47';
 
 /* Bumped only when the vendored engine itself changes, which is rare and
  * deliberate. Held apart from the shell so that shipping app code never costs
@@ -37,6 +37,7 @@ var ASSETS = [
   'styles.css',
   'ui.js',
   'offer-parser.js',
+  'journal-client.js',
   'scan.html',
   'scan.css',
   'scan.js',

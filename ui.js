@@ -1,7 +1,7 @@
 /* Uber Scan — offer rate calculator.
    Everything lives in localStorage and the page works with no rig anywhere
    near it; the one call it makes is to hand each logged offer to the rig's
-   journal when there is one to answer — see journalRow and flushUnsent. */
+   journal when there is one to answer — see flushUnsent and journal-client.js. */
 
 (function () {
   'use strict';
@@ -415,11 +415,16 @@
       miles: r.miles,
       perHour: r.perHour,
       state: r.state,
-      // The same offer as a journal row, built now while `r` is in hand, and
-      // whether it has reached the rig. See sendToJournal.
-      row: journalRow(r),
+      // The same offer as a journal row, kept by JournalClient until the rig
+      // has it, and whether it has arrived. See flushUnsent.
+      rowId: null,
       sent: false
     };
+    if (window.JournalClient) {
+      logged.rowId = JournalClient.keep(JournalClient.row(
+        { pay: r.pay, minutes: r.typedMinutes, miles: r.miles },
+        r, settings, { typed: true, prefix: 'k' })).id;
+    }
     history.unshift(logged);
     if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
     saveHistory();
@@ -433,7 +438,8 @@
     render();
   }
 
-  /* A typed offer as the journal would have written it.
+  /* Hand every typed offer that has not reached the rig to it, and mark the
+   * ones that arrive.
    *
    * This page kept its own list, in this browser, capped at a hundred, and
    * that was the whole of the record for anything typed here — no journal, no
@@ -442,63 +448,30 @@
    * offers most likely to be missing from the record were exactly the ones
    * entered by hand.
    *
-   * The row is shaped like a reading so the rest of the program needs no
-   * special case for it: an `id` and a `seq` so the sync can tell it from a
-   * copy of itself, `whole` and `settled` because a typed figure is complete
-   * and still, and NO `kind`, because the offers page drops kinds it has not
-   * heard of and a typed offer is an offer. `typed` says what it is. The
-   * figures are calc()'s, which are OfferParser.rate()'s — the same arithmetic
-   * the camera's rows carry, over the same padded minutes. */
-  function journalRow(r) {
-    var at = Date.now();
-    return {
-      v: 1, typed: true,
-      id: 'k' + at.toString(36) + Math.random().toString(36).slice(2, 8),
-      seq: 1, at: at, firstAt: at,
-      pay: r.pay, minutes: r.typedMinutes,
-      miles: r.miles > 0 ? r.miles : null,
-      perHour: r.perHour, grossPerHour: r.grossPerHour, perMile: r.perMile,
-      cost: r.cost, billedMinutes: r.minutes,
-      state: r.state, doubt: r.doubt || null,
-      target: settings.target, band: settings.band,
-      costPerMile: settings.costPerMile,
-      legs: 0, whole: true, settled: true, locked: true, suspect: false,
-      milesCorrected: false, milesUncertain: false, hasTotal: false
-    };
-  }
-
-  /* Send every entry that has not reached the rig, oldest first.
-   *
-   * Through /api/journal/ingest, which is the door the sync uses and which
-   * de-duplicates on the row's own id — so a row sent twice is stored once,
-   * and this can simply try again. Nothing here waits: an app on a phone
-   * with no rig anywhere near it is the normal case for this page, and it
-   * must go on working exactly as it did. An entry that never arrives is
-   * kept here and says so in the history; the next LOG, or the next open,
-   * tries it again. */
-  var flushing = false;
+   * The row itself, the queue and the sending live in journal-client.js,
+   * shared with the phone's scanner, which had the same hole. Nothing here
+   * waits: an app on a phone with no rig anywhere near it is the normal case
+   * for this page, and it goes on working exactly as it did. An entry that
+   * does not arrive says so in the history; the next LOG, or the next open,
+   * tries again. */
   function flushUnsent() {
-    if (flushing) return;
-    var unsent = history.filter(function (h) { return h.row && h.sent === false; });
-    if (!unsent.length) return;
-    flushing = true;
-    var body = unsent.slice().reverse().map(function (h) {
-      return JSON.stringify(h.row);
-    }).join('\n') + '\n';
-    fetch('/api/journal/ingest', { method: 'POST', body: body,
-                                   headers: { 'Content-Type': 'application/x-ndjson' } })
-      .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
-      .then(function (answer) {
-        if (!answer || answer.ok !== true) throw new Error('refused');
-        unsent.forEach(function (h) { h.sent = true; });
-        saveHistory();
-        renderHistory();
-      })
-      .catch(function () {
-        toast(unsent.length === 1 ? 'Kept on this phone — the rig did not answer'
-                                  : unsent.length + ' kept on this phone — the rig did not answer');
-      })
-      .then(function () { flushing = false; });
+    if (!window.JournalClient) return;
+    JournalClient.flush().then(function (result) {
+      var changed = false;
+      history.forEach(function (h) {
+        if (h.rowId && h.sent === false && result.sent.indexOf(h.rowId) !== -1) {
+          h.sent = true; changed = true;
+        }
+      });
+      if (changed) { saveHistory(); renderHistory(); }
+      if (!result.ok) {
+        var kept = history.filter(function (h) { return h.rowId && h.sent === false; }).length;
+        if (kept) {
+          toast(kept === 1 ? 'Kept on this phone — the rig did not answer'
+                           : kept + ' kept on this phone — the rig did not answer');
+        }
+      }
+    });
   }
 
   function renderHistory() {
@@ -529,7 +502,7 @@
           // Only the entries that have NOT reached the rig say anything: a
           // list of a hundred rows each saying "on the rig" is a list nobody
           // reads, and the one that is not is the one that matters.
-          (h.row && h.sent === false ? ' · <em>kept here only</em>' : '') +
+          (h.rowId && h.sent === false ? ' · <em>kept here only</em>' : '') +
         '</span>' +
         '<span class="when">' + ago(h.t) + '</span>' +
       '</li>';

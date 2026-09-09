@@ -1,6 +1,10 @@
 /* Camera scanner: point a second phone at the driving phone, read the offer
    card, show the rate. All processing is local — the OCR engine, its model and
-   every frame stay on the device. Nothing is uploaded, nothing is recorded. */
+   every frame stay on the device; no picture leaves it. What does leave it is
+   the offer a locked card became — pay, minutes, miles, the rate and the
+   verdict — handed to the rig's journal when there is a rig to answer, so a
+   card read here is in the record like a card read by the camera in the
+   car. See record() and journal-client.js. */
 
 (function () {
   'use strict';
@@ -345,7 +349,29 @@
     // and what earns the accept buzz.
     locked = agree >= AGREE_TO_LOCK && isWhole(parsed);
     lastResult = parsed;
-    if (locked && !wasLocked) buzz(judged(parsed).state === 'go' ? [18, 40, 18] : [45]);
+    if (locked && !wasLocked) {
+      var r = judged(parsed);
+      buzz(r.state === 'go' ? [18, 40, 18] : [45]);
+      record(parsed, r);
+    }
+  }
+
+  /* A card this page has locked on goes to the journal, once.
+   *
+   * It did not go anywhere. This page read a card, showed a verdict, and
+   * forgot it — the same hole the keypad had, on the other screen a driver
+   * reaches for when the rig cannot read. The lock is the one moment per
+   * card: the frames have agreed and the card is whole, which is what earns
+   * the buzz, and what earns a row. A reading the page refused to judge is
+   * not recorded as a rate, for the same reason the keypad refuses to log
+   * one. `browser: true` says what made it; the rig's own rows never carry
+   * it. The row, the queue and the sending are journal-client.js's, shared
+   * with the keypad, and a phone with no rig near it keeps the row for the
+   * next lock or the next open. */
+  function record(parsed, r) {
+    if (!window.JournalClient || !r || !r.ready || r.state === 'doubt') return;
+    JournalClient.keep(JournalClient.row(parsed, r, settings, { browser: true, prefix: 'p' }));
+    JournalClient.flush();
   }
 
   /* A failed read is a read that found nothing, not a read that did not happen.
@@ -735,6 +761,9 @@
     }
   })();
 
+  // Anything locked while the rig was out of reach goes now, if it is back.
+  if (window.JournalClient) JournalClient.flush();
+
   // Exposed so the test harness can drive the same pipeline headlessly.
   window.__scan = {
     readImage: async function (src) {
@@ -743,6 +772,9 @@
       var out = await readOnce(img, null);
       lastResult = out.parsed;
       locked = isWhole(out.parsed);
+      // A lock here records, as a lock in the loop does. The harness has no
+      // three agreeing frames to offer, so the whole card is the lock.
+      if (locked) record(out.parsed, judged(out.parsed));
       render(out.ms);
       return { parsed: out.parsed, ms: out.ms, rate: judged(out.parsed) };
     },

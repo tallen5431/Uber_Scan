@@ -1984,8 +1984,14 @@ function route(req, res) {
           error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')'
         }), { 'Content-Type': 'application/json; charset=utf-8' });
       }
+      // The driver's tags, and the offers the driver made — typed on the
+      // keypad or read by the phone's own scanner — which are rows nothing
+      // but a browser wrote and so exist only where that browser was pointed.
+      // Made on the copy at home, they would otherwise stay there like a mark
+      // did.
       var notes = rows.filter(function (r) {
-        return r && (r.kind === 'mark' || r.kind === 'rule')
+        return r && (r.kind === 'mark' || r.kind === 'rule'
+                     || r.typed === true || r.browser === true)
           && (r.at || 0) >= sinceNotes;
       });
       send(res, 200, JSON.stringify({ ok: true, notes: notes }),

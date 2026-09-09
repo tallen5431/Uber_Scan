@@ -124,8 +124,12 @@ User=$RUN_AS
 WorkingDirectory=$REPO
 Environment=SYNC_TO=$SYNC_TO
 ${SYNC_TOKEN:+Environment=SYNC_TOKEN=$SYNC_TOKEN}
-# Sends the offers and, alongside them, the 400-byte calibration.
-# Add --no-config if you would rather that stayed in the car.
+# Sends the offers and, alongside them, the 400-byte calibration, and brings
+# back what was done on the copy — ticks, hides, offers typed there — through
+# this rig's own server, which it expects at http://127.0.0.1:8080. If the
+# server here was moved off 8080, add: Environment=SYNC_LOCAL=http://127.0.0.1:PORT
+# Add --no-config if you would rather the calibration stayed in the car, and
+# --no-pull for the old one-way behaviour.
 ExecStart=$PYTHON $REPO/rpi/sync.py --quiet
 
 # It reads one file and writes nothing locally.

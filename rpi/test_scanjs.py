@@ -187,6 +187,44 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
              label: document.getElementById('verdictLabel').textContent.trim() };
   });
 
+  // A locked card reaches the journal, once; a fragment does not; and with the
+  // rig out of reach the row is kept and goes with the next lock.
+  const journal = () => page.evaluate(async () => {
+    const r = await fetch('/api/journal?days=1');
+    const d = await r.json();
+    return d.offers.map(o => ({ id: o.id, browser: o.browser, pay: o.pay,
+                                minutes: o.minutes, miles: o.miles,
+                                perHour: o.perHour, state: o.state, kind: o.kind }));
+  });
+  const whole = 'data:image/png;base64,'
+    + fs.readFileSync(path.join(dir, cards[0].file)).toString('base64');
+  // Every whole card read above recorded a row of its own; let those land
+  // before the snapshot everything below is a difference from.
+  await page.waitForTimeout(800);
+  out.recorded = { before: await journal() };
+  out.recorded.read = await page.evaluate(async s => {
+    const got = await window.__scan.readImage(s);
+    return { pay: got.parsed.pay, perHour: got.rate.perHour, state: got.rate.state };
+  }, whole);
+  await page.waitForTimeout(500);
+  out.recorded.afterWhole = await journal();
+  await page.evaluate(async s => { await window.__scan.readImage(s); }, frag);
+  await page.waitForTimeout(500);
+  out.recorded.afterFragment = await journal();
+  await page.route('**/api/journal/ingest',
+                   r => r.fulfill({ status: 503, contentType: 'text/plain', body: 'down' }));
+  await page.evaluate(async s => { await window.__scan.readImage(s); }, whole);
+  await page.waitForTimeout(500);
+  out.recorded.whileDown = await journal();
+  out.recorded.queued = await page.evaluate(
+    () => JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length);
+  await page.unroute('**/api/journal/ingest');
+  await page.evaluate(async s => { await window.__scan.readImage(s); }, whole);
+  await page.waitForTimeout(600);
+  out.recorded.afterBack = await journal();
+  out.recorded.queuedAfter = await page.evaluate(
+    () => JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length);
+
   // The offline cache: which caches exist, and does the app shell refresh.
   out.sw = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.register('/sw.js');
@@ -481,6 +519,34 @@ try:
     eq('a run of failed reads clears the rate', thrown['after'], '--')
     ok_('...and the verdict with it',
         thrown['label'] in ('POINT AT THE OFFER', 'READ AGAIN'))
+
+    # --- a locked card reaches the journal ----------------------------------
+    #
+    # This page read a card, showed a verdict, and forgot it — the same hole
+    # the keypad had, on the other screen a driver reaches for when the rig
+    # cannot read. Driven through the real server, and read back as the
+    # offers page will see it.
+    rec = got.get('recorded') or {}
+    before = len(rec.get('before') or [])
+    eq('a locked card writes one row to the journal',
+       len(rec.get('afterWhole') or []) - before, 1)
+    # The row this read wrote, by difference: the cards read earlier in this
+    # driver each recorded one too.
+    seen = set(o['id'] for o in (rec.get('before') or []))
+    new = [o for o in (rec.get('afterWhole') or []) if o['id'] not in seen]
+    ok_('...marked as the phone scanner\'s', len(new) == 1 and new[0].get('browser') is True)
+    ok_('...as an offer, not a kind the offers page would drop',
+        new and new[0].get('kind') is None)
+    eq('...with the figures the screen showed',
+       (new[0].get('pay'), new[0].get('state')) if new else None,
+       ((rec.get('read') or {}).get('pay'), (rec.get('read') or {}).get('state')))
+    ok_('...and the rate (%r)' % (new[0].get('perHour') if new else None),
+        new and abs((new[0].get('perHour') or 0) - ((rec.get('read') or {}).get('perHour') or -1)) < 0.06)
+    eq('a fragment writes nothing', len(rec.get('afterFragment') or []) - before, 1)
+    eq('with the rig out of reach nothing arrives', len(rec.get('whileDown') or []) - before, 1)
+    eq('...and the row is kept', rec.get('queued'), 1)
+    eq('...and goes with the next lock, both of them', len(rec.get('afterBack') or []) - before, 3)
+    eq('...leaving nothing kept', rec.get('queuedAfter'), 0)
 
     # --- the offline cache keeps the engine and refreshes the app ----------
     # The version constant used to be the whole mechanism: forget to bump it and
