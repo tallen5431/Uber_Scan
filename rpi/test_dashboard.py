@@ -644,6 +644,10 @@ const LOOK = (sel) => {
     ['early', { offers: 3, counted: 3, setAside: 0, took: 1, median: 18,
                 beforeClock: 4, unreadable: null, rolled: false,
                 clockSet: true }, 200],
+    // One job taken whose mileage cost more than it paid.
+    ['negative', { offers: 2, counted: 2, setAside: 0, took: 1, median: 9,
+                   earned: -1.25, earnedCost: 5.25, beforeClock: 0,
+                   unreadable: null, rolled: false, clockSet: true }, 200],
   ]) {
     const ctx = await browser.newContext({
       viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
@@ -1240,6 +1244,15 @@ try:
             % (early.get('text') or '')[-30:],
             'took 1' in (early.get('text') or '')
             and ' for $' not in (early.get('text') or ''))
+
+    # A net below zero, signed the way every other figure on these pages is.
+    # The first version printed "$-1".
+    neg = got.get('shift_negative') or {}
+    ok_('the negative-net state was measured', bool(neg))
+    if neg:
+        ok_('...and prints the sign before the dollar (%r)' % (neg.get('text') or '')[-24:],
+            'took 1 for -$1 net' in (neg.get('text') or ''))
+        ok_('...never as $-1', '$-' not in (neg.get('text') or ''))
 
 
     # --- a rig that stopped an hour ago does not look live --------------

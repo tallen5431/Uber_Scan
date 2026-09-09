@@ -1,5 +1,7 @@
 /* Uber Scan — offer rate calculator.
-   Everything lives in localStorage; no network calls after first load. */
+   Everything lives in localStorage and the page works with no rig anywhere
+   near it; the one call it makes is to hand each logged offer to the rig's
+   journal when there is one to answer — see journalRow and flushUnsent. */
 
 (function () {
   'use strict';
@@ -403,23 +405,100 @@
       buzz([55]);
       return;
     }
-    history.unshift({
+    // `logged`, not `entry`: `entry` is the draft this page is typing into,
+    // and a local by that name shadowed it — the clear at the end of this
+    // function then wrote to the local, and the fields stayed full.
+    var logged = {
       t: Date.now(),
       pay: r.pay,
       minutes: r.minutes,
       miles: r.miles,
       perHour: r.perHour,
-      state: r.state
-    });
+      state: r.state,
+      // The same offer as a journal row, built now while `r` is in hand, and
+      // whether it has reached the rig. See sendToJournal.
+      row: journalRow(r),
+      sent: false
+    };
+    history.unshift(logged);
     if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
     saveHistory();
     buzz([12, 30, 12]);
+    flushUnsent();
     toast('Logged ' + rateText(r.perHour) + '/hr');
     entry = { pay: '', minutes: '', miles: '' };
     active = 'pay';
     lastState = 'empty';
     saveDraft();
     render();
+  }
+
+  /* A typed offer as the journal would have written it.
+   *
+   * This page kept its own list, in this browser, capped at a hundred, and
+   * that was the whole of the record for anything typed here — no journal, no
+   * sync to the box at home, no offers page, no shift line, no advice. The
+   * night the camera cannot read is the night offers get typed, so the
+   * offers most likely to be missing from the record were exactly the ones
+   * entered by hand.
+   *
+   * The row is shaped like a reading so the rest of the program needs no
+   * special case for it: an `id` and a `seq` so the sync can tell it from a
+   * copy of itself, `whole` and `settled` because a typed figure is complete
+   * and still, and NO `kind`, because the offers page drops kinds it has not
+   * heard of and a typed offer is an offer. `typed` says what it is. The
+   * figures are calc()'s, which are OfferParser.rate()'s — the same arithmetic
+   * the camera's rows carry, over the same padded minutes. */
+  function journalRow(r) {
+    var at = Date.now();
+    return {
+      v: 1, typed: true,
+      id: 'k' + at.toString(36) + Math.random().toString(36).slice(2, 8),
+      seq: 1, at: at, firstAt: at,
+      pay: r.pay, minutes: r.typedMinutes,
+      miles: r.miles > 0 ? r.miles : null,
+      perHour: r.perHour, grossPerHour: r.grossPerHour, perMile: r.perMile,
+      cost: r.cost, billedMinutes: r.minutes,
+      state: r.state, doubt: r.doubt || null,
+      target: settings.target, band: settings.band,
+      costPerMile: settings.costPerMile,
+      legs: 0, whole: true, settled: true, locked: true, suspect: false,
+      milesCorrected: false, milesUncertain: false, hasTotal: false
+    };
+  }
+
+  /* Send every entry that has not reached the rig, oldest first.
+   *
+   * Through /api/journal/ingest, which is the door the sync uses and which
+   * de-duplicates on the row's own id — so a row sent twice is stored once,
+   * and this can simply try again. Nothing here waits: an app on a phone
+   * with no rig anywhere near it is the normal case for this page, and it
+   * must go on working exactly as it did. An entry that never arrives is
+   * kept here and says so in the history; the next LOG, or the next open,
+   * tries it again. */
+  var flushing = false;
+  function flushUnsent() {
+    if (flushing) return;
+    var unsent = history.filter(function (h) { return h.row && h.sent === false; });
+    if (!unsent.length) return;
+    flushing = true;
+    var body = unsent.slice().reverse().map(function (h) {
+      return JSON.stringify(h.row);
+    }).join('\n') + '\n';
+    fetch('/api/journal/ingest', { method: 'POST', body: body,
+                                   headers: { 'Content-Type': 'application/x-ndjson' } })
+      .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
+      .then(function (answer) {
+        if (!answer || answer.ok !== true) throw new Error('refused');
+        unsent.forEach(function (h) { h.sent = true; });
+        saveHistory();
+        renderHistory();
+      })
+      .catch(function () {
+        toast(unsent.length === 1 ? 'Kept on this phone — the rig did not answer'
+                                  : unsent.length + ' kept on this phone — the rig did not answer');
+      })
+      .then(function () { flushing = false; });
   }
 
   function renderHistory() {
@@ -446,7 +525,12 @@
         '<span class="dot ' + h.state + '"></span>' +
         '<span class="big">' + rateText(h.perHour) + '/hr</span>' +
         '<span class="meta">' + money(h.pay, 2) + ' · ' + round1(h.minutes) + ' min' +
-          (h.miles > 0 ? ' · ' + round1(h.miles) + ' mi' : '') + '</span>' +
+          (h.miles > 0 ? ' · ' + round1(h.miles) + ' mi' : '') +
+          // Only the entries that have NOT reached the rig say anything: a
+          // list of a hundred rows each saying "on the rig" is a list nobody
+          // reads, and the one that is not is the one that matters.
+          (h.row && h.sent === false ? ' · <em>kept here only</em>' : '') +
+        '</span>' +
         '<span class="when">' + ago(h.t) + '</span>' +
       '</li>';
     }
@@ -536,6 +620,8 @@
 
   restoreDraft();
   render();
+  // Anything logged while the rig was out of reach goes now, if it is back.
+  flushUnsent();
 
   // Show the way to the rig's own screen, but only on the rig. Asked once; a
   // failure to answer leaves the link hidden, which is right for the phone

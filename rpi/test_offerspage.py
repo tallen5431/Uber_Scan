@@ -112,6 +112,9 @@ VERDICTS = [
     offer(5, pay=10.0, state='go'),                     # cleared, never ticked
     offer(6, accepted=True, pay=10.0, state='go', hidden=True),
     offer(7, pay=10.0, state='no'),
+    # ...and one typed on the keypad. No verdict recorded, not ticked, so it
+    # lands under no chip but All — and its row has to say what it is.
+    dict(offer(8, pay=10.0), typed=True),
 ]
 
 # Five offers through Chattanooga, of which four can be counted and three were
@@ -340,8 +343,11 @@ const TEXT = (sel) => {
             // textContent so a '<' the OCR produced comes back as a '<' and
             // not as the start of an element.
             var pre = d.querySelector('.cardtext pre');
+            var worth = [].slice.call(d.querySelectorAll('dt'))
+              .filter(function (e) { return e.textContent.trim() === 'Worth knowing'; })[0];
             return { tags: tags,
                      id: d.getAttribute('data-id'),
+                     worth: worth ? worth.nextElementSibling.textContent.trim() : null,
                      // The element, not its text: an empty box and no box
                      // read identically through textContent, and the first
                      // version of the check below could not tell them apart.
@@ -747,7 +753,7 @@ try:
     eq('the Took chip lists the ticked rows and nothing else',
        sorted(p['took']['rows']), ['r0', 'r1', 'r2', 'r3', 'r4', 'r6'])
     ok_('...and the sentence says what was picked (%r)' % (p['took']['note'] or '')[:60],
-        '6 of 8 offers you marked as taken' in (p['took']['note'] or ''))
+        '6 of 9 offers you marked as taken' in (p['took']['note'] or ''))
     eq('PASS lists what the panel said PASS to', sorted(p['no']['rows']), ['r3', 'r7'])
     eq('CLOSE lists what it hedged', sorted(p['warn']['rows']), ['r1', 'r2'])
     eq('ACCEPT lists what it cleared, by the verdict on the row',
@@ -767,8 +773,14 @@ try:
     eq('During a job lists exactly the rows inside a ticked window',
        sorted(p['busy']['rows']), ['r0', 'r1', 'r2', 'r3'])
     ok_('...and the sentence says so (%r)' % (p['busy']['note'] or '')[:70],
-        '4 of 8 offers that arrived during a ticked job' in (p['busy']['note'] or ''))
-    eq('All puts every row back', len(p['all']['rows']), 8)
+        '4 of 9 offers that arrived during a ticked job' in (p['busy']['note'] or ''))
+    eq('All puts every row back', len(p['all']['rows']), 9)
+    # The typed one says so, and nothing else does.
+    typed = {a['id']: a['worth'] for a in v['arrivals']}
+    ok_('a row typed on the keypad says so (%r)' % (typed.get('r8') or '')[:50],
+        'typed on the keypad' in (typed.get('r8') or ''))
+    no_('...and a row the camera read does not',
+        any('typed' in (w or '') for i, w in typed.items() if i != 'r8'))
     eq('...and takes the sentence away', p['all']['note'], None)
     ok_('newest keeps the day headers', p['all']['days'] >= 1)
     eq('Best $/hr ranks the list', p['sort:perHour']['rows'][0], 'r4')

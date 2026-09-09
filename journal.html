@@ -819,6 +819,10 @@
     if (r.settled === false) flags.push('the reading was still changing when it was stored');
     if (r.whole === false) flags.push('only part of the card was in view');
     if (r.suspect) flags.push('outside the range a real offer falls in');
+    // Typed on the keypad rather than read off a card: the figures are the
+    // driver's own, there is no card text under this row, and "Seen as" has
+    // nothing to say about it.
+    if (r.typed) flags.push('typed on the keypad, not read by the camera');
 
     return '<details class="offer' + (aside ? ' aside' : '')
       + (r.hidden ? ' hiddenrow' : '')

@@ -323,6 +323,59 @@ const [base] = process.argv.slice(2);
   // The entry is left alone to be corrected, not cleared out from under them.
   out.refusedStill = (await screen()).pay;
 
+  // --- a typed offer reaches the journal -----------------------------------
+  // This page kept its own list, in this browser, capped at a hundred, and
+  // that was the whole record of anything typed here. The server is the real
+  // one and the journal it writes is read back through /api/journal, so what
+  // is checked is the row as the offers page will see it.
+  await open({ [SETTINGS]: SEEDED, [DRAFT]: null, [HISTORY]: null });
+  const journal = () => page.evaluate(async () => {
+    const r = await fetch('/api/journal?days=1');
+    const d = await r.json();
+    return d.offers.map(o => ({ id: o.id, typed: o.typed, pay: o.pay,
+                                minutes: o.minutes, miles: o.miles,
+                                perHour: o.perHour, state: o.state,
+                                target: o.target, kind: o.kind }));
+  });
+  // The tests above this one press LOG too, and those offers now reach the
+  // same journal — so everything below is a difference from here, and the
+  // row this block wrote is found by its payout rather than by its place.
+  out.journalBefore = await journal();
+  await type(['1', '6', '.', '0', '5', 'next', '2', '3', 'next', '8', '.', '4', 'log']);
+  await page.waitForTimeout(500);
+  out.loggedOnce = await journal();
+  out.historyOnce = await page.evaluate(
+    k => JSON.parse(localStorage.getItem(k) || '[]'), HISTORY);
+  // The rig out of reach — an app on a phone with no rig near it is the
+  // normal case for this page. The entry is kept here, says so, and goes
+  // with the next LOG once the rig answers again.
+  await page.route('**/api/journal/ingest',
+                   r => r.fulfill({ status: 503, contentType: 'text/plain', body: 'down' }));
+  await type(['clear', '9', 'next', '1', '2', 'log']);
+  await page.waitForTimeout(500);
+  out.keptToast = await page.evaluate(
+    () => (document.getElementById('toast') || {}).textContent || '');
+  await page.click('#openHistory');
+  await page.waitForTimeout(150);
+  const histText = () => page.evaluate(
+    () => document.getElementById('histList').textContent.replace(/\s+/g, ' ').trim());
+  out.keptList = await histText();
+  await page.click('[data-close="historySheet"]');
+  await page.unroute('**/api/journal/ingest');
+  out.journalWhileDown = await journal();
+  await type(['clear', '1', '1', 'next', '2', '0', 'log']);
+  await page.waitForTimeout(600);
+  out.loggedAfter = await journal();
+  await page.click('#openHistory');
+  await page.waitForTimeout(150);
+  out.listAfter = await histText();
+  await page.click('[data-close="historySheet"]');
+  // Opening the page again re-sends nothing that has already arrived: the
+  // rows carry their own ids and the ingest door stores each once.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(600);
+  out.loggedReload = await journal();
+
   // --- storage that will not answer ----------------------------------------
   // Private mode, a full quota, a browser with site data blocked. The page has
   // to open and add up an offer either way; only remembering it is optional.
@@ -544,6 +597,37 @@ eq('the log is capped rather than growing without end', got.get('capped'), 100)
 without = got.get('withoutStorage') or {}
 eq('the keypad still works with no storage at all', without.get('perHour'), '$30.0')
 eq('...and no page error was thrown', got.get('thrown'), [])
+
+# --- a typed offer reaches the journal --------------------------------------
+#
+# The night the camera cannot read is the night offers get typed, so the
+# offers most likely to be missing from the record were the ones entered by
+# hand. $16.05 over 23 minutes and 8.4 miles at $0.35/mi is $2.94 of cost and
+# $13.11 net: $34.2/hr.
+before = len(got.get('journalBefore') or [])
+once = got.get('loggedOnce') or []
+eq('LOG writes the offer to the journal', len(once) - before, 1)
+row = next((o for o in once if o.get('pay') == 16.05), {})
+ok_('...as an offer, not a kind the offers page would drop', row.get('kind') is None)
+ok_('...marked as typed', row.get('typed') is True)
+eq('...with the figures as typed',
+   (row.get('pay'), row.get('minutes'), row.get('miles')), (16.05, 23, 8.4))
+ok_('...and the net rate the screen showed (%r)' % row.get('perHour'),
+    abs((row.get('perHour') or 0) - 34.2) < 0.06)
+eq('...judged against the settings in force', row.get('target'), 25)
+hist = got.get('historyOnce') or []
+ok_('...and the local entry knows it arrived',
+    bool(hist) and hist[0].get('sent') is True)
+ok_('with the rig out of reach the entry says so (%r)' % (got.get('keptToast') or ''),
+    'did not answer' in (got.get('keptToast') or ''))
+ok_('...in the history as well', 'kept here only' in (got.get('keptList') or ''))
+eq('...and nothing reached the journal meanwhile',
+   len(got.get('journalWhileDown') or []) - before, 1)
+eq('the next LOG carries the kept one with it',
+   len(got.get('loggedAfter') or []) - before, 3)
+no_('...and the history stops saying kept', 'kept here only' in (got.get('listAfter') or ''))
+eq('opening the page again re-sends nothing that already arrived',
+   len(got.get('loggedReload') or []) - before, 3)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d keypad checks passed' % ok)

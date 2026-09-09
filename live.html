@@ -1146,7 +1146,11 @@
       // alone as it did.
       bits.push('took ' + s.took
                 + (s.took > 0 && typeof s.earned === 'number'
-                   ? ' for $' + Math.round(s.earned)
+                   // Signed the way every other figure on these pages is:
+                   // "-$1", not "$-1". A job whose mileage cost more than it
+                   // paid is rare and real.
+                   ? ' for ' + (s.earned < 0 ? '-$' : '$')
+                     + Math.abs(Math.round(s.earned))
                      + (s.earnedCost > 0 ? ' net' : '')
                    : ''));
       // Only when there is one. A median of nothing is not zero.
