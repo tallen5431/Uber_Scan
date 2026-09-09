@@ -482,7 +482,7 @@ const FRAMES = JSON.parse(framesJson);
         let shortest = null, shortestIn = null;
         for (const el of document.querySelectorAll(
                '.bottombar button, .bottombar a, .scanbar button, .scanbar label,'
-               + ' .scanbar a, .key, .rangebtns button')) {
+               + ' .scanbar a, .key, .rangebtns button, .chips button')) {
           const r = el.getBoundingClientRect();
           if (!r.width || !r.height) continue;
           if (shortest === null || r.height < shortest) {

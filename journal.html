@@ -111,6 +111,17 @@
                       background: var(--panel); border: 1px solid transparent;
                       border-radius: 8px; }
   .rangebtns button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+  /* The chips under the search box. Same look as the range buttons, but they
+     wrap and take their own width: seven at `flex: 1` on a 320px phone would
+     be seven slivers. The 52px floor is the same one every control on this
+     page meant for a finger keeps, and rpi/test_layout.py holds it. */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+  .chips button { min-height: 52px; padding: 8px 12px; font: inherit;
+                  font-size: 12px; font-weight: 700; color: var(--muted);
+                  background: var(--panel); border: 1px solid transparent;
+                  border-radius: 8px; cursor: pointer; }
+  .chips button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+  .chips.sorts { margin-bottom: 12px; }
   h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
        color: var(--muted); margin: 22px 0 8px; font-weight: 700; }
   /* Every figure on this page is a rate, and not one of them said so. "$21
@@ -368,7 +379,8 @@
     .facts h3 { font-size: 15px; }
     .cardtext, .cardtext pre { font-size: 15px; }
 
-    .rangebtns button, #showHidden, .acts button, #undo, #undoGo { font-size: 17px; }
+    .rangebtns button, #showHidden, .acts button, #undo, #undoGo,
+    .chips button { font-size: 17px; }
     #nothing { font-size: 17px; }
     #nothing b { font-size: 20px; }
     #nothing code { font-size: 16px; }
@@ -470,6 +482,30 @@
     <input type="search" id="find" inputmode="decimal" autocomplete="off"
            placeholder="find an offer — 12.50, 34 min, 8.4 mi, 25/hr">
   </label>
+  <!-- Which offers to list, and in what order. Both act on the LIST ONLY.
+       Every figure above stays the whole window's: an earlier plan fed a
+       selection into the advice block and found that two taps — PASS, then
+       Today — made it recommend halving the target, because it was being
+       asked about a pile chosen to be below the line. The sentence beside the
+       search box describes the selection instead; see foundNote. The three
+       verdict chips are the words the panel printed in the car, the same
+       three the "What you took" chart is drawn under, so a bar up there has
+       a chip down here. -->
+  <div class="chips" id="chips" role="group" aria-label="Which offers to list">
+    <button type="button" data-pick="all" aria-pressed="true">All</button>
+    <button type="button" data-pick="took" aria-pressed="false">Took</button>
+    <button type="button" data-pick="go" aria-pressed="false">ACCEPT</button>
+    <button type="button" data-pick="warn" aria-pressed="false">CLOSE</button>
+    <button type="button" data-pick="no" aria-pressed="false">PASS</button>
+    <button type="button" data-pick="aside" aria-pressed="false">Set aside</button>
+    <button type="button" data-pick="busy" aria-pressed="false">During a job</button>
+  </div>
+  <div class="chips sorts" id="sorts" role="group" aria-label="Order">
+    <button type="button" data-sort="newest" aria-pressed="true">Newest</button>
+    <button type="button" data-sort="perHour" aria-pressed="false">Best $/hr</button>
+    <button type="button" data-sort="pay" aria-pressed="false">Highest pay</button>
+    <button type="button" data-sort="minutes" aria-pressed="false">Longest</button>
+  </div>
   <p class="hint" id="findNote" hidden></p>
   <div id="log"></div>
   <p class="hint" id="more"></p>
@@ -504,7 +540,7 @@
    'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead',
    'blocksHead', 'kindsHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
    'find', 'findNote', 'live', 'nothing', 'ladder',
-   'took', 'tookHead',
+   'took', 'tookHead', 'chips', 'sorts',
    'pairs', 'pairsHead', 'pairsLead'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
@@ -942,13 +978,76 @@
   // is. Bare numbers match any field, because somebody typing 8.4 knows what
   // they mean and should not have to say which column it is in; a unit
   // narrows it when two fields could both match.
+  // Which pile of offers the list is showing, and in what order. Both are
+  // about the LIST ONLY — see the note on the chips in the markup — and both
+  // survive a re-render, which is how a mark made inside a filtered list
+  // keeps the list filtered.
+  var pick = 'all';
+  var sortBy = 'newest';
+  // What Advice.busy said about the current window, kept from the last render
+  // so the "during a job" chip can ask it. It is a join over the whole window
+  // and is worked out once per render, not once per row.
+  var lastBusy = {};
+
+  // Whether one row belongs to the pile a chip names.
+  //
+  // The three verdict chips read the verdict RECORDED on the row — what the
+  // panel said in the car against the target in force then — and not a rate
+  // re-judged against today's target. That is the same rule the "What you
+  // took" chart uses, so a bar up there and a chip down here count the same
+  // rows; the alternative, re-judging, would have the chip and the chart
+  // disagree about a row whenever the target had moved.
+  function picked(r) {
+    switch (pick) {
+      case 'took': return r.accepted === true;
+      case 'go': case 'warn': case 'no': return r.state === pick;
+      case 'aside': return !counted(r);
+      case 'busy': return !!(r.id && lastBusy[r.id]);
+      default: return true;
+    }
+  }
+
+  // The words for a pile, in the sentence that describes the selection: what
+  // follows "N of M offers". A separate whole sentence for the empty case,
+  // because the clause after a count does not survive being put after
+  // "Nothing" — the first version printed "Nothing in this stretch match".
+  var PICK_WORDS = {
+    took: 'you marked as taken', go: 'the panel said ACCEPT to',
+    warn: 'the panel called CLOSE', no: 'the panel said PASS to',
+    aside: 'set aside', busy: 'that arrived during a ticked job'
+  };
+  var PICK_NONE = {
+    took: 'You marked nothing in this stretch as taken',
+    go: 'The panel said ACCEPT to nothing in this stretch',
+    warn: 'The panel called nothing in this stretch CLOSE',
+    no: 'The panel said PASS to nothing in this stretch',
+    aside: 'Nothing in this stretch was set aside',
+    busy: 'Nothing in this stretch arrived during a ticked job'
+  };
+
   function matching(rows) {
+    if (pick !== 'all') rows = rows.filter(picked);
     var q = (el.find.value || '').trim().toLowerCase();
     if (!q) return rows;
     var terms = q.split(/\s*,\s*|\s+and\s+/).filter(Boolean);
     return rows.filter(function (r) {
       return terms.every(function (t) { return termMatches(r, t); });
     });
+  }
+
+  // The list, in the order asked for. Newest is the journal's own order and
+  // keeps the day headers; anything else is a ranking, and a ranking has no
+  // days, so the headers go and what is left is the top of the pile. Rows
+  // with no figure to rank on sink to the bottom rather than vanish — a row
+  // missing from a ranked list looks like a row that was never recorded.
+  function ordered(found) {
+    if (sortBy === 'newest') return found.slice(-LOG_MAX).reverse();
+    var key = sortBy;
+    return found.slice().sort(function (a, b) {
+      var x = typeof a[key] === 'number' ? a[key] : -Infinity;
+      var y = typeof b[key] === 'number' ? b[key] : -Infinity;
+      return y - x || (b.at || 0) - (a.at || 0);
+    }).slice(0, LOG_MAX);
   }
 
   function termMatches(r, term) {
@@ -1686,12 +1785,17 @@
    * is now going into innerHTML rather than textContent to carry the figures.
    */
   function foundNote(found, total, q, target) {
+    // How the selection was made, in words: a chip, a search, or both.
+    var how = (pick !== 'all' ? ' ' + PICK_WORDS[pick] : '')
+            + (q ? (pick !== 'all' ? ' and' : '') + ' match "' + esc(q) + '"' : '');
     if (!found.length) {
-      return 'Nothing in this stretch matches "' + esc(q)
-           + '". Try a wider range, or just the number.';
+      if (!q) return PICK_NONE[pick] + '. Try a wider range.';
+      return 'Nothing in this stretch'
+           + (pick !== 'all' ? ' ' + PICK_WORDS[pick] : '')
+           + ' matches "' + esc(q) + '". Try a wider range, or just the number.';
     }
     var head = '<b>' + found.length + '</b> of ' + total + ' offer'
-             + (total === 1 ? '' : 's') + ' match "' + esc(q) + '"';
+             + (total === 1 ? '' : 's') + how;
     var usable = found.filter(counted);
     if (!usable.length) {
       // A median of nothing is not "--", it is a question that cannot be
@@ -2028,8 +2132,10 @@
     // Once, not twice. The list below and the note above it are two views of
     // one answer, and running the filter again for the note is a second place
     // for them to disagree.
+    lastBusy = busyBy;
     var found = matching(kept);
-    var shown = found.slice(-LOG_MAX).reverse();
+    var shown = ordered(found);
+    var byTime = sortBy === 'newest';
     // Two truncations, and the driver has to be told about both. This page cuts
     // the *list* to LOG_MAX so a phone can render it, and the server cuts the
     // *window* to its own limit before the page ever sees it — and the second
@@ -2037,11 +2143,17 @@
     // survived, so a year's worth of offers was summarised over the last fifty
     // shifts with nothing saying so.
     var windowTotal = (data && data.total) || kept.length;
-    el.more.textContent = kept.length > shown.length || (data && data.truncated)
-      ? 'Showing the most recent ' + shown.length + ' of ' + kept.length
+    // Out of what was SELECTED, not out of the window: under a chip the list
+    // is cut from the pile the chip names, and "the most recent 300 of 2,000"
+    // over a pile of 40 is a sentence about a different list. And a ranked
+    // list is cut from the top, not from the recent end.
+    el.more.textContent = found.length > shown.length || (data && data.truncated)
+      ? 'Showing ' + (byTime ? 'the most recent ' : 'the top ') + shown.length
+        + ' of ' + found.length
+        + (found.length !== kept.length ? ' selected' : '')
         + (data && data.truncated
             ? ', and this window holds ' + windowTotal
-              + ' — the figures above cover the ' + kept.length + ' shown'
+              + ' — the figures above cover the ' + kept.length + ' loaded'
             : '')
         + '. Use the CSV for the rest.' : '';
 
@@ -2050,7 +2162,7 @@
     shown.forEach(function (r) {
       var when = new Date(r.at);
       var day = dayKey(r.at);
-      if (day !== currentDay) {
+      if (byTime && day !== currentDay) {
         currentDay = day;
         var ofDay = kept.filter(function (o) { return dayKey(o.at) === day; });
         // One set for the whole line. The median already excluded the rows set
@@ -2088,8 +2200,10 @@
     // Say what the filter did, because an empty list and a list with nothing
     // matching look identical, and one of them means "you have no offers".
     var q = (el.find.value || '').trim();
-    el.findNote.hidden = !q;
-    if (q) el.findNote.innerHTML = foundNote(found, kept.length, q, target);
+    el.findNote.hidden = !q && pick === 'all';
+    if (!el.findNote.hidden) {
+      el.findNote.innerHTML = foundNote(found, kept.length, q, target);
+    }
 
     showCaveats(data, setAside, newest, ticks);
 
@@ -2278,6 +2392,29 @@
       el.undoGo.disabled = false;
       el.undoGo.textContent = 'could not undo';
     });
+  });
+
+  // One handler for both chip rows. Neither asks the server for anything —
+  // the window is unchanged — so this is a redraw of what is already here,
+  // the same path a keystroke in the search box takes.
+  function pressOne(group, button) {
+    Array.prototype.forEach.call(group.querySelectorAll('button'), function (b) {
+      b.setAttribute('aria-pressed', b === button ? 'true' : 'false');
+    });
+  }
+  el.chips.addEventListener('click', function (e) {
+    var button = e.target.closest('button[data-pick]');
+    if (!button) return;
+    pick = button.getAttribute('data-pick');
+    pressOne(el.chips, button);
+    if (lastData) render(lastData);
+  });
+  el.sorts.addEventListener('click', function (e) {
+    var button = e.target.closest('button[data-sort]');
+    if (!button) return;
+    sortBy = button.getAttribute('data-sort');
+    pressOne(el.sorts, button);
+    if (lastData) render(lastData);
   });
 
   el.ranges.addEventListener('click', function (e) {

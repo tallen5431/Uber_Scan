@@ -303,6 +303,48 @@ const TEXT = (sel) => {
           }),
       };
     }, TEXT.toString());
+    // The chips and the order, on the feed with a verdict spread. Each press
+    // is read back as the rows it left, the sentence describing them, and
+    // whether the day headers survived — a ranking has no days.
+    if (name === 'verdicts') {
+      out[name].picks = {};
+      const peek = () => page.evaluate(() => {
+        const n = document.getElementById('findNote');
+        return { rows: [].slice.call(document.querySelectorAll('#log details.offer'))
+                          .map((d) => d.getAttribute('data-id')),
+                 note: n.hidden ? null : (n.textContent || '').replace(/\s+/g, ' ').trim(),
+                 days: document.querySelectorAll('#log .day').length,
+                 more: (document.getElementById('more').textContent || '').trim() };
+      });
+      for (const pick of ['took', 'go', 'warn', 'no', 'aside', 'busy', 'all']) {
+        await page.click('#chips button[data-pick="' + pick + '"]');
+        await page.waitForTimeout(250);
+        out[name].picks[pick] = await peek();
+      }
+      for (const sort of ['perHour', 'pay', 'minutes', 'newest']) {
+        await page.click('#sorts button[data-sort="' + sort + '"]');
+        await page.waitForTimeout(250);
+        out[name].picks['sort:' + sort] = await peek();
+      }
+      // A chip and a ranking together, then a mark made inside the selection:
+      // the list must stay selected and ranked through the redraw.
+      await page.click('#chips button[data-pick="took"]');
+      await page.click('#sorts button[data-sort="perHour"]');
+      await page.waitForTimeout(250);
+      out[name].picks['took+perHour'] = await peek();
+    }
+    // A chip that picks nothing, on the feed with no verdicts on its rows.
+    if (name === 'took six') {
+      await page.click('#chips button[data-pick="no"]');
+      await page.waitForTimeout(250);
+      out[name].emptyPick = await page.evaluate(() => {
+        const n = document.getElementById('findNote');
+        return { rows: document.querySelectorAll('#log details.offer').length,
+                 note: n.hidden ? null : (n.textContent || '').replace(/\s+/g, ' ').trim() };
+      });
+      await page.click('#chips button[data-pick="all"]');
+      await page.waitForTimeout(250);
+    }
     // ...and then the search box, on the one feed built to be searched. Typed
     // rather than assigned, because the note is redrawn by the box's own
     // `input` handler and setting `.value` fires nothing.
@@ -609,6 +651,58 @@ try:
         'Nothing in this stretch matches' in miss)
     eq('...and clearing the box takes the note away', s['']['note'], None)
     eq('...and puts every row back', s['']['rows'], len(SEARCHABLE))
+
+    # --- which offers to list, and in what order ---------------------------
+    #
+    # Both act on the list alone. The figures above are the whole window's and
+    # must stay so — a selection fed into the advice block recommends halving
+    # the target off two taps. VERDICTS is r0..r7: taken r0-r4 and r6 (r6
+    # hidden), ACCEPT r0 r4 r5 r6, CLOSE r1 r2, PASS r3 r7, and r6 is the one
+    # set-aside row. Ranked by $/hr the top is r4 at $36; by pay it is r4 at
+    # $14.00; by length every row is 20 minutes so the tie falls to newest.
+    p = v['picks']
+    eq('the Took chip lists the ticked rows and nothing else',
+       sorted(p['took']['rows']), ['r0', 'r1', 'r2', 'r3', 'r4', 'r6'])
+    ok_('...and the sentence says what was picked (%r)' % (p['took']['note'] or '')[:60],
+        '6 of 8 offers you marked as taken' in (p['took']['note'] or ''))
+    eq('PASS lists what the panel said PASS to', sorted(p['no']['rows']), ['r3', 'r7'])
+    eq('CLOSE lists what it hedged', sorted(p['warn']['rows']), ['r1', 'r2'])
+    eq('ACCEPT lists what it cleared, by the verdict on the row',
+       sorted(p['go']['rows']), ['r0', 'r4', 'r5', 'r6'])
+    # The chip and the chart above it must count the same rows: the chart's
+    # PASS bar says 1 taken, and the one taken row under this chip is r3.
+    eq('...so a bar up there has the same rows as its chip down here',
+       [r for r in p['no']['rows'] if r in ('r0', 'r1', 'r2', 'r3', 'r4', 'r6')], ['r3'])
+    eq('Set aside lists the row that could not be counted', p['aside']['rows'], ['r6'])
+    # offer(i) is ten minutes apart, counting backwards from NOW, and every row
+    # is twenty minutes long — so a ticked row's window holds exactly the one
+    # row after it in time. r4, r3, r2 and r1 are ticked and each covers the
+    # next: r3, r2, r1, r0. r6 is ticked too but hidden, and Advice.busy is
+    # built over usable() rows only, so its window does not exist and r5 is
+    # not inside it. The chip must agree with the "during a job" tag on the
+    # rows, which is the same join.
+    eq('During a job lists exactly the rows inside a ticked window',
+       sorted(p['busy']['rows']), ['r0', 'r1', 'r2', 'r3'])
+    ok_('...and the sentence says so (%r)' % (p['busy']['note'] or '')[:70],
+        '4 of 8 offers that arrived during a ticked job' in (p['busy']['note'] or ''))
+    eq('All puts every row back', len(p['all']['rows']), 8)
+    eq('...and takes the sentence away', p['all']['note'], None)
+    ok_('newest keeps the day headers', p['all']['days'] >= 1)
+    eq('Best $/hr ranks the list', p['sort:perHour']['rows'][0], 'r4')
+    eq('...and a ranking has no days', p['sort:perHour']['days'], 0)
+    eq('Highest pay ranks by the card', p['sort:pay']['rows'][0], 'r4')
+    ok_('Longest ranks by minutes, ties to newest (%s)' % p['sort:minutes']['rows'][:2],
+        p['sort:minutes']['rows'][0] == 'r0')
+    ok_('Newest restores the day headers', p['sort:newest']['days'] >= 1)
+    eq('a chip and a ranking compose', p['took+perHour']['rows'][0], 'r4')
+    eq('...over the picked rows only', len(p['took+perHour']['rows']), 6)
+    # A chip that picks nothing says so in a sentence of its own. The clause
+    # that follows a count does not survive "Nothing": the first version of
+    # this printed "Nothing in this stretch match".
+    empty = took.get('emptyPick') or {}
+    eq('a chip picking nothing lists nothing', empty.get('rows'), 0)
+    ok_('...and says so, grammatically (%r)' % (empty.get('note') or '')[:60],
+        'The panel said PASS to nothing in this stretch' in (empty.get('note') or ''))
 
     # --- what the reader actually read -----------------------------------
     #
