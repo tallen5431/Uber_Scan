@@ -238,7 +238,12 @@ else:
         else:
             raise RuntimeError('the server never came up')
 
-        T = 1_700_000_000_000
+        # After 1 Jan 2025, because /api/journal now drops anything stamped
+        # earlier as read-before-the-rig-had-a-clock, on EVERY window — All
+        # included. This was 1_700_000_000_000, November 2023, and it passed
+        # only because All used to mean "no floor at all", which is exactly
+        # how a phantom 1970 day got onto the offers page.
+        T = 1_750_000_000_000
 
         # The recording, in the order it happened. The majority answer is
         # 31 min / 15.1 mi, and the last row happens to agree — so this alone

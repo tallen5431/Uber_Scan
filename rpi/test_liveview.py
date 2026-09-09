@@ -460,8 +460,28 @@ try:
     # not in this number. Counting `accepted` over the raw window instead of
     # over the counted rows would say 2 here and the offers page would say 1.
     eq('taken is counted first and accepted second', day.get('took'), 1)
+    # ...and what it was worth, off the same row: o2 paid $8.00 and recorded
+    # no running cost. o3 was ticked too and is set aside, so its $12.00 must
+    # not be in here any more than it is in `took` — a driver reading "took 1
+    # for $20" would be reading two rows described as one.
+    eq('...and what the taken one was worth', day.get('earned'), 8.0)
+    eq('...with no cost claimed when none was recorded', day.get('earnedCost'), 0)
     eq('...and an offer stamped before the clock was set is said to be missing,'
        ' not quietly lost', day.get('beforeClock'), 1)
+
+    # The same 1970 row, through the offers page's own endpoint. It fell
+    # outside Today, 7 days and 30 days without a word, and on All — where the
+    # window floor is zero — it came back as a phantom day headed 1 Jan 1970.
+    # Out of every window now, and counted, whichever range is asked for.
+    def offers(qs):
+        return json.loads(urllib.request.urlopen(base + '/api/journal?' + qs,
+                                                 timeout=3).read().decode())
+    every = offers('days=0')
+    ok_('on "All" the clock-less row is not a phantom 1970 day',
+        all(o.get('at', 0) >= 1735689600000 for o in every.get('offers', [])))
+    eq('...and is counted rather than lost', every.get('beforeClock'), 1)
+    eq('...the same count on a 7-day window, because it has no date',
+       offers('days=7').get('beforeClock'), 1)
     ok_('...on a journal that could be read', day.get('unreadable') is None)
     ok_('...by a machine that knows what day it is', day.get('clockSet'))
 

@@ -1311,6 +1311,21 @@ function shiftSummary(rows, since) {
     // it off the raw window instead would put a bigger number on the driving
     // screen than the offers page shows for the same day.
     took: counted.filter(function (o) { return o.accepted; }).length,
+    // ...and what those were worth, net, off the SAME rows the count comes
+    // from. journal.html's netTotal, line for line: pay less the running cost
+    // the row itself recorded, and the cost carried separately so the panel
+    // can say "after costs" only when something was actually taken off. The
+    // driving screen said "took 3" all shift and never what the three were
+    // worth, which is the one number a driver wants at nine at night.
+    earned: counted.filter(function (o) { return o.accepted; })
+      .reduce(function (t, o) {
+        var c = (typeof o.cost === 'number' && isFinite(o.cost)) ? o.cost : 0;
+        return t + (o.pay || 0) - c;
+      }, 0),
+    earnedCost: counted.filter(function (o) { return o.accepted; })
+      .reduce(function (t, o) {
+        return t + ((typeof o.cost === 'number' && isFinite(o.cost)) ? o.cost : 0);
+      }, 0),
     median: percentileOf(rates, 0.5),
     beforeClock: early
   };
@@ -2178,9 +2193,22 @@ function route(req, res) {
       // A number that does not describe what is on screen is worse than no
       // number, because it is the one a driver checks their arithmetic against.
       var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
-      if (floor) {
-        offers = offers.filter(function (r) { return (r.at || 0) >= floor; });
-      }
+      // Rows stamped before the rig had a clock, taken out of EVERY window and
+      // counted, rather than out of three windows and left in the fourth.
+      //
+      // A Pi has no real-time clock. It boots in 1970 and jumps when NTP
+      // arrives, and anything it read before then is on disk with a date in
+      // 1970. Those rows fell outside Today, 7 days and 30 days without a word
+      // said — and on All, where `floor` is zero, they came BACK: a phantom
+      // day headed "Thu, Jan 1" at the far end of the list, its offers counted
+      // in every figure on the page under a date nobody drove. shiftSummary
+      // already counts these for the driving screen; this is the same rule for
+      // the same rows, and the page says how many there are.
+      var beforeClock = 0;
+      offers = offers.filter(function (r) {
+        if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) { beforeClock += 1; return false; }
+        return !floor || (r.at || 0) >= floor;
+      });
       var hidden = offers.filter(function (r) { return r.hidden; }).length;
       // Hidden rows are still on disk — nothing here deletes — but they are out
       // of every figure and every export unless asked for by name. The test card
@@ -2230,6 +2258,11 @@ function route(req, res) {
                                       // emptiness below is not a record of a
                                       // quiet week.
                                       unreadable: unreadable,
+                                      // Not a window figure: these rows have
+                                      // no date, so they are in no window,
+                                      // and the count is the same whichever
+                                      // range is asked for.
+                                      beforeClock: beforeClock,
                                       pairs: window,
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });

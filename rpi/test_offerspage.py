@@ -69,7 +69,7 @@ NOW = 1700000000000
 # $48.00 net against $60.00 gross — and across all twelve, $96.00 against
 # $120.00.
 def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
-          places=None, hidden=False, suspect=False):
+          places=None, hidden=False, suspect=False, text=None):
     row = {
         'id': 'r%d' % i, 'at': NOW - i * 600000, 'firstAt': NOW - i * 600000,
         'pay': pay, 'minutes': minutes, 'miles': 6.0,
@@ -90,6 +90,8 @@ def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
         row['hidden'] = True
     if suspect:
         row['suspect'] = True
+    if text is not None:
+        row['text'] = text
     return row
 
 
@@ -134,7 +136,11 @@ SEARCHABLE = [
     offer(5, pay=10.0, state='no', places=['Dalton GA'], suspect=True),
     offer(6, pay=10.0, state='no', places=['Dalton GA'], suspect=True),
     offer(7, pay=10.0, state='no'),
-    offer(8, accepted=True, pay=30.0, places=['Chattanooga TN'], suspect=True),
+    # ...and the misread one carries what the reader actually read, with a
+    # '<' in it, because OCR off a photograph of a phone can contain anything
+    # and this is the first card text to reach innerHTML on this page.
+    offer(8, accepted=True, pay=30.0, places=['Chattanooga TN'], suspect=True,
+          text='Deliver by 7:42 PM\n$30.00 <total>\n20 min\nChattanooga TN'),
 ]
 
 # Typed into the box on the page, in this order, against SEARCHABLE.
@@ -180,6 +186,9 @@ FEEDS = {
     'searchable': {'count': len(SEARCHABLE), 'total': len(SEARCHABLE),
                    'truncated': False, 'days': 7, 'hidden': 0,
                    'watched': {'saw': 8, 'kept': 8},
+                   # Two rows the rig read before its clock was set. They are
+                   # in no window and the page has to say so.
+                   'beforeClock': 2,
                    'unreadable': None, 'pairs': [], 'offers': SEARCHABLE},
     'unreadable': {'count': 0, 'total': 0, 'truncated': False, 'days': 7,
                    'hidden': 0, 'watched': {'saw': 0, 'kept': 0},
@@ -277,7 +286,18 @@ const TEXT = (sel) => {
               .filter(function (e) { return e.textContent.trim() === 'Arrived'; })[0];
             var tags = [].slice.call(d.querySelectorAll('summary .tag'))
               .map(function (e) { return e.textContent.trim(); });
+            // What the reader read, when the row carries it. Read back as
+            // textContent so a '<' the OCR produced comes back as a '<' and
+            // not as the start of an element.
+            var pre = d.querySelector('.cardtext pre');
             return { tags: tags,
+                     id: d.getAttribute('data-id'),
+                     // The element, not its text: an empty box and no box
+                     // read identically through textContent, and the first
+                     // version of the check below could not tell them apart.
+                     hasCardtext: !!d.querySelector('.cardtext'),
+                     cardtext: pre ? pre.textContent : null,
+                     cardtextTags: pre ? pre.querySelectorAll('*').length : 0,
                      arrived: dt ? dt.nextElementSibling.textContent
                                      .replace(/\s+/g, ' ').trim() : null };
           }),
@@ -589,6 +609,36 @@ try:
         'Nothing in this stretch matches' in miss)
     eq('...and clearing the box takes the note away', s['']['note'], None)
     eq('...and puts every row back', s['']['rows'], len(SEARCHABLE))
+
+    # --- what the reader actually read -----------------------------------
+    #
+    # On the wire for every row and thrown away by this page, so the one
+    # screen somebody opens to ask "why does this row say $30?" was the one
+    # that could not answer. Only the misread row carries text in the fixture,
+    # so a page printing it on every row would fail the second check.
+    by_id = {a['id']: a for a in got['searchable']['arrivals']}
+    read = by_id.get('r8', {})
+    ok_('a row carries what the reader read (%r)' % (read.get('cardtext') or '')[:40],
+        read.get('cardtext') and 'Deliver by 7:42 PM' in read['cardtext'])
+    # OCR output is text, never markup: the '<total>' the reader produced has
+    # to come back as five characters, not as an element.
+    ok_('...as text, with the angle bracket the reader produced still in it',
+        '<total>' in (read.get('cardtext') or ''))
+    eq('...and not as markup', read.get('cardtextTags'), 0)
+    eq('...and rows with no text carry no box at all, empty or otherwise',
+       [a['id'] for a in got['searchable']['arrivals'] if a['hasCardtext']], ['r8'])
+
+    # --- rows read before the rig had a clock ------------------------------
+    #
+    # In no window whichever range is pressed, and until now said nowhere on
+    # this page: dropped without a word on Today/7/30 and back as a phantom
+    # 1970 day on All. The server now counts them; the page has to say so.
+    ok_('offers read before the clock was set are named (%r)'
+        % ' | '.join(c[:60] for c in got['searchable']['caveats']),
+        any('2 offers were read before the rig’s clock had been set' in c
+            for c in got['searchable']['caveats']))
+    no_('...and not when there are none',
+        any('clock had been set' in c for c in got['took six']['caveats']))
 
 finally:
     proc.terminate()

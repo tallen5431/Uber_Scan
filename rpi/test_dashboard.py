@@ -287,6 +287,11 @@ const LOOK = (sel) => {
         status: 200, contentType: 'application/json',
         body: JSON.stringify({ offers: 9, counted: 8, setAside: 1,
                                took: n === 1 ? 2 : 3, median: 21,
+                               // Net, and with a cost recorded, so the panel
+                               // is entitled to say so. Moves with the mark
+                               // for the same reason the count does.
+                               earned: n === 1 ? 48.4 : 61.9,
+                               earnedCost: n === 1 ? 12.0 : 15.5,
                                beforeClock: 0, unreadable: null,
                                rolled: false, clockSet: true }),
       });
@@ -1157,13 +1162,19 @@ try:
             'set aside' in (first.get('text') or ''))
         ok_('...how many were taken', 'took 2' in (first.get('text') or ''))
         ok_('...and the median rate', '$21/hr' in (first.get('text') or ''))
-        # No dollar total. `pay` is what the card offered, not what was earned,
-        # and a gross sum beside a net median is the sentence the offers page
-        # was corrected for.
-        ok_('...and does not claim a total earned',
-            'offered' not in (first.get('text') or '')
-            and '$21/hr' in (first.get('text') or '')
-            and (first.get('text') or '').count('$') == 1)
+        # What the taken ones were worth. This check used to forbid any dollar
+        # total here, and its reason still stands: `pay` is what the card
+        # offered, and a GROSS sum beside a net median is the sentence the
+        # offers page was corrected for. What is printed now is net — pay less
+        # the running cost each row recorded, off the same rows the count comes
+        # from, the same rule as the offers page's "took 6 for $48.00" — and
+        # says so. "Offered" is still the word that must not appear.
+        ok_('...and what they were worth, net, in the day header\'s own words',
+            'took 2 for $48 net' in (first.get('text') or ''))
+        ok_('...never as what was offered',
+            'offered' not in (first.get('text') or ''))
+        ok_('...and still only one rate on the line',
+            (first.get('text') or '').count('/hr') == 1)
         # On the glass and on one line, on the panel this is bolted to.
         ok_('...on one line', first.get('oneLine'))
         eq('...and the connection message beside it still on one',
@@ -1182,6 +1193,8 @@ try:
            got.get('shiftAsked'), 2)
         ok_('...so the taken figure follows the button',
             'took 3' in (after.get('text') or ''))
+        ok_('...and the money with it',
+            'took 3 for $62 net' in (after.get('text') or ''))
 
     # A number that cannot be right is not printed. Each of these is a state
     # where the count would look perfectly plausible and be wrong.
@@ -1220,6 +1233,13 @@ try:
             'before the clock' not in (early.get('text') or ''))
         ok_('...while today\'s own figures still are',
             '3 offers' in (early.get('text') or ''))
+        # This stub carries no `earned` — it is the shape a server one release
+        # behind answers with — and the count has to stand alone as it always
+        # did, not print "for $undefined" or "for $NaN".
+        ok_('...and a server that sends no total leaves the count alone (%r)'
+            % (early.get('text') or '')[-30:],
+            'took 1' in (early.get('text') or '')
+            and ' for $' not in (early.get('text') or ''))
 
 
     # --- a rig that stopped an hour ago does not look live --------------

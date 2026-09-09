@@ -287,6 +287,17 @@
      line — and bold throughout, which is no emphasis at all. */
   .facts .prose dd { font-weight: 500; text-align: left;
                      font-variant-numeric: normal; }
+  /* What the reader actually read, under the facts made from it. The same
+     treatment live.html gives its own copy, indented to the facts' left edge
+     so it reads as part of "How it was read" rather than as a new section. */
+  .cardtext { margin: 0 0 10px 20px; font-size: 12px; color: var(--muted); }
+  .cardtext summary { cursor: pointer; padding: 4px 0; }
+  .cardtext pre {
+    margin: 4px 0 0; padding: 8px; white-space: pre-wrap; word-break: break-word;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    max-height: 28vh; overflow: auto; font-size: 12px; line-height: 1.45;
+    color: var(--text); max-width: 60ch;
+  }
 
   /* ---------- A screen bolted to a dashboard ---------- */
   /* The same breakpoint styles.css uses, and it has to be here rather than
@@ -355,6 +366,7 @@
     .offer .took { font-size: 18px; }
     .facts { font-size: 17px; }
     .facts h3 { font-size: 15px; }
+    .cardtext, .cardtext pre { font-size: 15px; }
 
     .rangebtns button, #showHidden, .acts button, #undo, #undoGo { font-size: 17px; }
     #nothing { font-size: 17px; }
@@ -896,6 +908,18 @@
       + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, 'quiet')
       + (flags.length ? row('Worth knowing', flags.join('; '), 'quiet') : '')
       + '</dl>'
+      // The text the reader actually read, folded away. It has been on the
+      // wire for every row since the journal started keeping it and this page
+      // threw it away, so the one screen somebody opens to ask "why does this
+      // row say $1,184?" was the one that could not answer, while the driving
+      // screen — glanced at in traffic — could. Only wanted after a wrong
+      // answer, and after a wrong answer it is the only thing that explains
+      // it. `esc` because this is OCR output off a photograph of a phone: it
+      // can contain anything.
+      + (r.text && String(r.text).trim()
+         ? '<details class="cardtext"><summary>what the reader read</summary>'
+           + '<pre>' + esc(String(r.text).trim()) + '</pre></details>'
+         : '')
       + '<div class="acts">'
       + '<button type="button" data-act="took"' + (r.accepted ? ' class="on"' : '')
         + '>' + (r.accepted ? '\u2713 you took this' : 'I took this') + '</button>'
@@ -1417,6 +1441,21 @@
     if (data.hidden) {
       notes.push(data.hidden + ' offer' + (data.hidden === 1 ? ' is' : 's are')
                  + ' hidden and left out of every figure here.');
+    }
+    // Rows the rig read before it knew what time it was. A Pi boots in 1970
+    // and jumps when the network arrives, and anything read in between is on
+    // disk with no usable date — so it is in no window, whichever range is
+    // pressed, and the count does not change with the buttons above. Said
+    // here because "the rig read it and the page will never show it" is
+    // precisely the kind of silence this list exists to break.
+    if (data.beforeClock) {
+      notes.push('<b>' + data.beforeClock + '</b> offer'
+                 + (data.beforeClock === 1 ? ' was' : 's were')
+                 + ' read before the rig’s clock had been set, so '
+                 + (data.beforeClock === 1 ? 'it has' : 'they have')
+                 + ' no date and appear under no range here, nor in the CSV. '
+                 + (data.beforeClock === 1 ? 'It is' : 'They are')
+                 + ' still in the journal file on disk.');
     }
     // What went past unrecorded, from the scanner's own tally.
     //

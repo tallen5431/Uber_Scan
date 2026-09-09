@@ -1136,7 +1136,19 @@
     } else {
       bits = [s.offers + (s.offers === 1 ? ' offer' : ' offers')];
       if (s.setAside) bits.push(s.setAside + ' set aside');
-      bits.push('took ' + s.took);
+      // "took 3 for $48" — the same words the offers page puts on a day
+      // header, so the two screens say the same thing about the same rows.
+      // Whole dollars, like the median beside it: this is read at arm's
+      // length. Net, and only claimed as net when a running cost was really
+      // taken off — with costs at zero the two are one number and "after
+      // costs" would describe a subtraction that never happened. `earned` is
+      // absent from a server one release behind, and then the count stands
+      // alone as it did.
+      bits.push('took ' + s.took
+                + (s.took > 0 && typeof s.earned === 'number'
+                   ? ' for $' + Math.round(s.earned)
+                     + (s.earnedCost > 0 ? ' net' : '')
+                   : ''));
       // Only when there is one. A median of nothing is not zero.
       if (typeof s.median === 'number') {
         bits.push('median $' + Math.round(s.median) + '/hr');
