@@ -1085,7 +1085,25 @@ function bestReading(rows) {
   return best;
 }
 
+// Folded once per change to the journal, not once per request.
+//
+// readJournal hands back the same array until the file changes and a new one
+// after, so the array's identity and length say whether this answer is still
+// the answer. Measured on a year's journal after the parse was made free:
+// this fold was what remained — ~100ms over 51,000 rows on a desktop, on
+// every offers-page load and every /api/today poll after a new offer.
+var latestCache = null;
+
 function latestPerOffer(rows) {
+  if (latestCache && latestCache.rows === rows && latestCache.n === rows.length) {
+    return latestCache.out;
+  }
+  var out = latestPerOfferUncached(rows);
+  latestCache = { rows: rows, n: rows.length, out: out };
+  return out;
+}
+
+function latestPerOfferUncached(rows) {
   var byId = Object.create(null);
   var out = [];
   var marks = Object.create(null);
@@ -1129,10 +1147,14 @@ function latestPerOffer(rows) {
     if (r.kind === 'seen') { seen.push(r); return; }
     if (r.kind === 'pair') { pairs.push(r); return; }
     if (r.kind) return;                       // something newer than this reader
-    if (!r.id) { out.push(r); return; }
-    if (!(r.id in byId)) { byId[r.id] = out.length; out.push(r); readings[r.id] = [r]; return; }
+    // Copies, because `hidden` and `accepted` are written onto these below
+    // and the rows readJournal hands over now live across requests.
+    if (!r.id) { out.push(Object.assign({}, r)); return; }
+    if (!(r.id in byId)) {
+      byId[r.id] = out.length; out.push(Object.assign({}, r)); readings[r.id] = [r]; return;
+    }
     readings[r.id].push(r);
-    out[byId[r.id]] = bestReading(readings[r.id]);
+    out[byId[r.id]] = Object.assign({}, bestReading(readings[r.id]));
   });
 
   out.forEach(function (o) {
@@ -1233,20 +1255,107 @@ function appendLines(text, done) {
  * being out of date. */
 var SYNC_CAN = ['ingest', 'config', 'mkdir', 'count'];
 
+function parseLines(text, rows) {
+  var n = 0;
+  text.split('\n').forEach(function (line) {
+    line = line.trim();
+    if (!line) return;
+    try {
+      var row = JSON.parse(line);
+      if (row && typeof row === 'object') { rows.push(row); n++; }
+    } catch (e) { /* a line torn by a power cut; skip it */ }
+  });
+  return n;
+}
+
+// The journal, parsed once, and after that only the part that grew.
+//
+// It was read and parsed whole on every call — a year of driving is about
+// 20MB and fifty thousand rows, measured at 150-265ms on a desktop and, per
+// the estimate this file has carried for a while, the best part of a second
+// on a Pi 4 — on the event loop that also relays the live picture to the
+// panel. Every offers-page load paid it. Worse, every offer the scanner
+// appends changes the file, so the driving screen's next /api/today poll
+// paid it again: a second of frozen picture, every few minutes, for the
+// whole shift.
+//
+// The file is append-only apart from the 64MB roll, so what was parsed last
+// time is still true and only the bytes past it are new. Kept: the inode,
+// the size, the mtime, where the last complete line ended, and the rows.
+// Same inode and size and mtime: the rows as they are. Same inode, larger:
+// read from the end of the last complete line, and parse what is whole. A
+// different inode — the roll, or a backup restored over the top — or a
+// smaller file: start again. The last line may be mid-write when this looks;
+// it is parsed if it parses, as before, but the offset stays at its start so
+// it is read again, once, when it is finished — and the row it made is taken
+// back first, so it is never counted twice.
+//
+// latestPerOffer copies every row it annotates, because these rows now
+// outlive one request.
+var journalCache = null;
+
 function readJournal(done) {
-  fs.readFile(JOURNAL_PATH, 'utf8', function (err, text) {
-    // Nothing recorded yet is not an error. Anything else is.
-    if (err) return done(err.code === 'ENOENT' ? [] : null, err);
-    var rows = [];
-    text.split('\n').forEach(function (line) {
-      line = line.trim();
-      if (!line) return;
-      try {
-        var row = JSON.parse(line);
-        if (row && typeof row === 'object') rows.push(row);
-      } catch (e) { /* a line torn by a power cut; skip it */ }
+  fs.stat(JOURNAL_PATH, function (statErr, st) {
+    if (statErr) {
+      journalCache = null;
+      // Nothing recorded yet is not an error. Anything else is.
+      return done(statErr.code === 'ENOENT' ? [] : null, statErr);
+    }
+    var c = journalCache;
+    if (c && c.ino === st.ino && c.size === st.size && c.mtime === st.mtimeMs) {
+      return done(c.rows);
+    }
+    var grew = c && c.ino === st.ino && st.size > c.size && st.mtimeMs >= c.mtime;
+    // Same inode and larger is not proof of an append. `cp backup journal`
+    // rewrites the file in place, keeps the inode, and can leave it larger —
+    // and a tail read from the old offset would then bolt the middle of one
+    // file onto the rows of another. So the last complete line that was
+    // parsed is kept, read again first, and if it is no longer there this is
+    // not the file that was parsed, and it is read from the start.
+    //
+    // The whole line, not its last few bytes. The first version kept sixty-
+    // four and a rewrite sailed through it: every row this program writes
+    // ENDS in the same fixed fields — `"whole": true, "settled": true, ...}`
+    // — and differs at its start, where the id and the timestamp are. A test
+    // fixture with the same shape produced three offers where there were two.
+    var mark = grew ? c.mark : Buffer.alloc(0);
+    var from = grew ? c.offset - mark.length : 0;
+    fs.open(JOURNAL_PATH, 'r', function (openErr, fd) {
+      if (openErr) {
+        journalCache = null;
+        return done(openErr.code === 'ENOENT' ? [] : null, openErr);
+      }
+      var want = Math.max(0, st.size - from);
+      var buf = Buffer.alloc(want);
+      fs.read(fd, buf, 0, want, from, function (readErr, n) {
+        fs.close(fd, function () {});
+        if (readErr) { journalCache = null; return done(null, readErr); }
+        buf = buf.slice(0, n);
+        if (grew) {
+          if (!buf.slice(0, mark.length).equals(mark)) {
+            journalCache = null;
+            return readJournal(done);
+          }
+          buf = buf.slice(mark.length);
+        }
+        var rows = grew ? c.rows : [];
+        if (grew && c.pending) rows.length -= c.pending;   // the line that was mid-write
+        var cut = buf.lastIndexOf(10);                      // the last newline
+        parseLines(buf.slice(0, cut + 1).toString('utf8'), rows);
+        var pending = parseLines(buf.slice(cut + 1).toString('utf8'), rows);
+        // The last complete line, newline included: everything after the
+        // newline before it. `mark` is at least the previous last line, so
+        // the new one is entirely in hand even when this read added no
+        // newline at all.
+        var whole = Buffer.concat([mark, buf.slice(0, cut + 1)]);
+        var prev = whole.length > 1 ? whole.lastIndexOf(10, whole.length - 2) : -1;
+        journalCache = { ino: st.ino, size: st.size, mtime: st.mtimeMs,
+                         offset: from + mark.length + cut + 1, pending: pending,
+                         mark: whole.slice(prev + 1),
+                         rows: rows };
+        done(rows);
+      });
     });
-    done(rows);
   });
 }
 
@@ -1360,9 +1469,10 @@ function shiftSummary(rows, since) {
 //
 // Keyed on SIZE as well as mtime because the file is append-only apart from the
 // 64MB roll, so size is monotonic where mtime granularity is not guaranteed.
-// The cached value is the finished summary — never the parsed rows, which
-// latestPerOffer writes `hidden` and `accepted` onto, safe today only because
-// every request re-parses them fresh.
+// The cached value is the finished summary. The parsed rows have a cache of
+// their own now, in readJournal, and latestPerOffer copies every row it
+// writes `hidden` or `accepted` onto — so this one stays a cache of the
+// answer, keyed the same way, and does not reach into the other.
 var shiftCache = null;
 
 function todaySummary(since, done) {

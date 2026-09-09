@@ -769,6 +769,75 @@ finally:
     home.close()
     rig.close()
 
+# --- the journal is parsed once, and then only the part that grew ----------
+#
+# readJournal keeps what it parsed and reads only the bytes past the last
+# complete line. The cases that can go wrong are the ones where the file did
+# not simply grow: a line still being written, a roll to a smaller file, and a
+# backup restored over the top — a different inode that happens to be larger.
+def have(base):
+    body = urllib.request.urlopen(base + '/api/journal/newest', timeout=5).read()
+    return json.loads(body.decode('utf-8')).get('have')
+
+def ids(base):
+    body = urllib.request.urlopen(base + '/api/journal?days=0', timeout=5).read()
+    return sorted(r['id'] for r in json.loads(body.decode('utf-8'))['offers'])
+
+def row(i):
+    return {'v': 1, 'id': 'g%d' % i, 'seq': 1, 'at': T + i * 60000, 'pay': 9.0,
+            'minutes': 20.0, 'perHour': 27.0, 'whole': True}
+
+grow = FarEnd()
+try:
+    write(grow.journal, [row(1), row(2), row(3)])
+    eq('three rows read', have(grow.base), 3)
+    with open(grow.journal, 'a') as fh:
+        fh.write(json.dumps(row(4)) + '\n')
+    eq('a fourth appended is seen without re-reading the first three',
+       have(grow.base), 4)
+    # A line the scanner is half way through writing. Parsed if it parses —
+    # it does not — and read again when it is finished, once.
+    half = json.dumps(row(5))
+    with open(grow.journal, 'a') as fh:
+        fh.write(half[:len(half) // 2])
+    eq('a line still being written is not a row yet', have(grow.base), 4)
+    with open(grow.journal, 'a') as fh:
+        fh.write(half[len(half) // 2:] + '\n')
+    eq('...and is one row when it is finished', have(grow.base), 5)
+    eq('...exactly once', ids(grow.base).count('g5'), 1)
+    # A complete last line with no newline after it is a row, as it always
+    # was — and still one row after something follows it.
+    with open(grow.journal, 'a') as fh:
+        fh.write(json.dumps(row(6)))
+    eq('a finished line with no newline yet is a row', have(grow.base), 6)
+    with open(grow.journal, 'a') as fh:
+        fh.write('\n' + json.dumps(row(7)) + '\n')
+    eq('...and is still one row once the file moves on', ids(grow.base).count('g6'), 1)
+    eq('...with the next one after it', have(grow.base), 7)
+    # The roll: journal.py replaces the file with a smaller one.
+    write(grow.journal, [row(8), row(9)])
+    eq('a smaller file is read from the start', have(grow.base), 2)
+    eq('...and holds only what it holds', ids(grow.base), ['g8', 'g9'])
+    # A backup restored over the top: a different inode, and larger, so a
+    # tail read would append the middle of some other file to the old rows.
+    fresh = grow.journal + '.restore'
+    write(fresh, [row(10), row(11), row(12), row(13)])
+    os.replace(fresh, grow.journal)
+    eq('a file replaced underneath is read from the start', ids(grow.base),
+       ['g10', 'g11', 'g12', 'g13'])
+    # ...and rewritten IN PLACE — `cp backup journal` — which keeps the inode
+    # and here leaves the file larger, exactly the shape of an append. The
+    # bytes before the old offset are not the bytes that were parsed, and
+    # that is how it is told apart. The first version of the reader took this
+    # for an append and served three offers where there were two.
+    write(grow.journal, [row(20), row(21), row(22), row(23), row(24), row(25)])
+    eq('a file rewritten in place, larger, is read from the start',
+       ids(grow.base), ['g20', 'g21', 'g22', 'g23', 'g24', 'g25'])
+    write(grow.journal, [row(30), row(31)])
+    eq('...and smaller', ids(grow.base), ['g30', 'g31'])
+finally:
+    grow.close()
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
 sys.exit(1 if bad else 0)
