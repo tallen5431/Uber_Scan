@@ -163,6 +163,41 @@ def send(base, rows, token=None, timeout=TIMEOUT):
     return total
 
 
+def pull_notes(far, local, floor_ms, token=None, timeout=TIMEOUT):
+    """Bring the driver's own tags back from the copy. Never fatal.
+
+    The sync ran one way. A tick made on the copy at home — the likelier place
+    to review a week, on a monitor rather than an 800x480 panel — stayed there,
+    and the rig's offers page showed that week untagged. This asks the copy for
+    its `mark` and `rule` rows since the same floor the offers went from, and
+    hands them to this rig's own server through the same ingest door the copy
+    uses, so the de-duplication is the one syncKey in server.js and not a
+    second copy of it here. Sent twice, a tag is stored once.
+
+    Returns (pulled, added, why): how many the copy offered, how many this
+    rig had not seen, and a sentence when nothing could be done. A copy on an
+    older build has no such door and answers 404, which is the same as having
+    nothing to say.
+    """
+    try:
+        with urllib.request.urlopen(
+                far.rstrip('/') + '/api/journal/notes?since=%d' % max(0, int(floor_ms)),
+                timeout=timeout) as fh:
+            body = json.loads(fh.read().decode('utf-8'))
+    except (urllib.error.URLError, ValueError, OSError):
+        return 0, 0, None
+    notes = body.get('notes') if isinstance(body, dict) else None
+    if not isinstance(notes, list) or not notes:
+        return 0, 0, None
+    if not local:
+        return len(notes), 0, 'no local server to hand them to'
+    try:
+        result = send(local, notes, token=token, timeout=timeout)
+    except (urllib.error.URLError, ValueError, OSError) as e:
+        return len(notes), 0, "this rig's own server did not answer (%s)" % e
+    return len(notes), result.get('added') or 0, None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--to', default=os.environ.get('SYNC_TO'),
@@ -179,6 +214,11 @@ def main():
                     help='calibration to keep a copy of alongside the offers')
     ap.add_argument('--no-config', action='store_true',
                     help='send only the offers')
+    ap.add_argument('--local', default=os.environ.get('SYNC_LOCAL', 'http://127.0.0.1:8080'),
+                    help="this rig's own server, which the driver's tags made "
+                         'on the copy are handed to (or set SYNC_LOCAL)')
+    ap.add_argument('--no-pull', action='store_true',
+                    help='send only; do not bring tags back from the copy')
     ap.add_argument('--quiet', action='store_true')
     args = ap.parse_args()
 
@@ -258,6 +298,19 @@ def main():
         elif not backup.get('ok'):
             say('could not copy the calibration (%s) — the offers still went'
                 % backup.get('error'))
+
+    # The other direction, and before the "nothing to send" exit below rather
+    # than after the send: a week of ticks made at home while the car sat
+    # idle is exactly the run that has nothing to push and everything to pull.
+    # From the same floor the offers go from, for the same reason — overlap
+    # is cheap and the door on this side stores a tag once however often it
+    # arrives.
+    if not args.no_pull:
+        pulled, came, why = pull_notes(args.to, args.local, floor, token=args.token)
+        if why:
+            say('%d tag(s) on the copy were not brought back: %s' % (pulled, why))
+        elif came:
+            say('%d tag(s) made on the copy came back, %d new here' % (pulled, came))
 
     rows = rows_since(args.journal, floor)
     if not rows:

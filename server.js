@@ -1105,7 +1105,24 @@ function latestPerOffer(rows) {
   rows.forEach(function (r) {
     if (!r || typeof r !== 'object') return;
     if (r.kind === 'mark') {
-      if (r.id) marks[r.id] = Object.assign(marks[r.id] || {}, r);
+      // Folded by WHEN each mark was made, not by where it sits in the file.
+      // There are two journals now that can each carry a mark about one
+      // offer — the rig's and the copy's, with the copy's coming back over
+      // the sync — and a row appended last is not the row made last: a tick
+      // in the car at 11:00 must beat an un-tick made at home at 10:00 even
+      // when the un-tick arrives afterwards. Per field, because a mark may
+      // carry only `accepted` or only `hidden`, and an older row about the
+      // other field is still the newest word on that one.
+      if (r.id) {
+        var m = marks[r.id] || (marks[r.id] = {});
+        var when = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
+        if (r.accepted !== undefined && when >= (m.acceptedAt || 0)) {
+          m.accepted = r.accepted; m.acceptedAt = when;
+        }
+        if (r.hidden !== undefined && when >= (m.hiddenAt || 0)) {
+          m.hidden = r.hidden; m.hiddenAt = when;
+        }
+      }
       return;
     }
     if (r.kind === 'rule') { rules.push(r); return; }
@@ -1836,6 +1853,36 @@ function route(req, res) {
 
   // What the far end already has, so a sender knows where to start. Cheap
   // enough to call every few minutes and the only thing the rig needs to ask.
+  // The driver's own tags, verbatim, for the rig to pull back from the copy.
+  //
+  // The sync ran one way. A tick made on the copy at home — the likelier
+  // place to review a week, on a monitor rather than an 800x480 panel — was
+  // written to the copy's journal and stayed there: the rig's offers page
+  // showed that week untagged and its advice ran without the ticks, and
+  // advise() says itself that tagging a handful of trips is worth more than
+  // another shift of scanning. This is the other direction. Raw rows, not
+  // the folded view /api/journal gives, because what is being copied is the
+  // record of what the driver did, and the rig folds it itself. Unauthenticated
+  // like /api/journal/newest: the same VPN, the same driver's own data.
+  if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/notes') {
+    var sinceNotes = clampNumber((url.parse(req.url, true).query || {}).since,
+                                 0, 4102444800000, 0);
+    return readJournal(function (rows, readErr) {
+      if (!rows) {
+        return send(res, 200, JSON.stringify({
+          ok: false, readable: false,
+          error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')'
+        }), { 'Content-Type': 'application/json; charset=utf-8' });
+      }
+      var notes = rows.filter(function (r) {
+        return r && (r.kind === 'mark' || r.kind === 'rule')
+          && (r.at || 0) >= sinceNotes;
+      });
+      send(res, 200, JSON.stringify({ ok: true, notes: notes }),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
+
   if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/newest') {
     return readJournal(function (rows, readErr) {
       // Answering 0 here is not a small error: the sender treats it as "the

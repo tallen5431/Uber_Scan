@@ -524,6 +524,14 @@ try:
        SY.far_end(old.base).get('can'), None)
     code, said = run_main(old.base, pi)
     eq('a refused upload is worth a non-zero exit', code, 1)
+    # An older build has no notes door to pull from, and that is the same as
+    # having nothing to say: the run must not append anything on this side
+    # or complain about it.
+    before_old = len(lines(pi))
+    code_pull, said_pull = run_main(old.base, pi, ['--local', 'http://127.0.0.1:1'])
+    eq('...and an old copy with no tags door changes nothing here',
+       len(lines(pi)), before_old)
+    ok_('...quietly', 'tag' not in said_pull)
     ok_('...and the refusal is quoted', 'could not append' in said)
     ok_('...and it says which machine is behind', 'older build' in said)
 finally:
@@ -700,6 +708,66 @@ else:
         except OSError:
             pass
         shutil.rmtree(work, ignore_errors=True)
+
+# --- the driver's tags come back from the copy ------------------------------
+#
+# The sync ran one way. A tick made on the copy at home stayed there, and the
+# rig's offers page showed that week untagged. Two real servers: `home` is the
+# copy, `rig` is this machine's own server, and the run is the timer's.
+T = 1_750_000_000_000
+OFFER = {'v': 1, 'id': 'o1', 'seq': 1, 'at': T, 'firstAt': T, 'pay': 16.05,
+         'minutes': 23.0, 'miles': 8.4, 'perHour': 34.2, 'whole': True,
+         'target': 25, 'band': 15, 'costPerMile': 0.35, 'cost': 2.94}
+home, rig = FarEnd(), FarEnd()
+try:
+    def shown(base):
+        body = urllib.request.urlopen(base + '/api/journal?days=0', timeout=5).read()
+        rows = json.loads(body.decode('utf-8'))['offers']
+        return {r['id']: r.get('accepted') for r in rows}
+
+    write(rig.journal, [OFFER])
+    write(home.journal, [OFFER,
+                         {'kind': 'mark', 'id': 'o1', 'at': T + 3600000, 'accepted': True}])
+    code, said = run_main(home.base, rig.journal, ['--local', rig.base])
+    eq('the run still exits 0', code, 0)
+    marks = [r for r in lines(rig.journal) if r.get('kind') == 'mark']
+    eq('a tick made on the copy comes back to the rig', len(marks), 1)
+    eq('...as written', (marks[0].get('id'), marks[0].get('accepted')), ('o1', True))
+    eq('...and the rig\'s offers page shows the offer taken', shown(rig.base).get('o1'), True)
+    before = len(lines(rig.journal))
+    run_main(home.base, rig.journal, ['--local', rig.base])
+    eq('a second run adds nothing', len(lines(rig.journal)), before)
+
+    # A tick in the car after an un-tick at home. The un-tick arrives on the
+    # rig later — appended last — and must not win by being last: marks fold
+    # by when they were made. And the tick goes the other way on the same
+    # run, so both copies agree.
+    with open(home.journal, 'a') as fh:
+        fh.write(json.dumps({'kind': 'mark', 'id': 'o1', 'at': T + 5400000,
+                             'accepted': False}) + '\n')
+    with open(rig.journal, 'a') as fh:
+        fh.write(json.dumps({'kind': 'mark', 'id': 'o1', 'at': T + 7200000,
+                             'accepted': True}) + '\n')
+    run_main(home.base, rig.journal, ['--local', rig.base])
+    on_rig = [r for r in lines(rig.journal) if r.get('kind') == 'mark']
+    eq('the older un-tick did come across', len(on_rig), 3)
+    eq('...and is the last row on the rig', on_rig[-1].get('accepted'), False)
+    eq('...but the newer tick made in the car is what the rig shows',
+       shown(rig.base).get('o1'), True)
+    eq('...and what the copy shows, having received it', shown(home.base).get('o1'), True)
+
+    # --no-pull is the old behaviour, for anyone who wants it.
+    with open(home.journal, 'a') as fh:
+        fh.write(json.dumps({'kind': 'mark', 'id': 'o1', 'at': T + 9000000,
+                             'hidden': True}) + '\n')
+    before = len(lines(rig.journal))
+    run_main(home.base, rig.journal, ['--local', rig.base, '--no-pull'])
+    eq('--no-pull brings nothing back', len(lines(rig.journal)), before)
+    run_main(home.base, rig.journal, ['--local', rig.base])
+    eq('...and the next ordinary run does', len(lines(rig.journal)), before + 1)
+finally:
+    home.close()
+    rig.close()
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
