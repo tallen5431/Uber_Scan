@@ -146,6 +146,45 @@ SEARCHABLE = [
 # Typed into the box on the page, in this order, against SEARCHABLE.
 QUERIES = ['chattanooga', 'soddy', 'dalton', 'nowhere at all']
 
+# Three weeks, one offer a day at noon UTC — noon so that neither the 4am
+# shift boundary nor a browser in another zone can move a row to the next
+# date — with the pay set by the weekday, so every bar of the day-of-week
+# chart has three identical rates under it and its median is exactly that
+# number: $18 + $6 per weekday, Sunday first, so Sunday $18, Monday $24 ... a
+# Saturday $54. Three rows per weekday because the check is on the median,
+# and a median of three equal numbers cannot be interpolated into a
+# coincidence.
+import datetime as _dt
+NOON = NOW - 10 * 3600000           # NOW is 22:13 UTC; this is 12:13 UTC
+def _js_weekday(at_ms):
+    """getDay(): Sunday is 0. Python's weekday() puts Monday at 0."""
+    return (_dt.datetime.utcfromtimestamp(at_ms / 1000).weekday() + 1) % 7
+WEEKS = [
+    offer(100 + d, pay=8.0 + 2 * _js_weekday(NOON - d * 86400000), state='go')
+    for d in range(21)
+]
+for _i, _r in enumerate(WEEKS):
+    _r['at'] = _r['firstAt'] = NOON - _i * 86400000
+# ...plus two rows that only the right grouping gets right.
+#
+# One at 1am on the first Sunday of the window. The calendar calls that
+# Sunday; the driver's day, bounded at 4am, calls it Saturday night, which is
+# what it was — so it belongs under Sat, at Saturday's pay, and Sat carries
+# four rows to Sunday's three. Grouped on the calendar it would land the other
+# way round.
+_first_sun = next(r for r in WEEKS if _js_weekday(r['at']) == 0)
+_late = offer(140, pay=8.0 + 2 * 6, state='go')
+_late['at'] = _late['firstAt'] = _first_sun['at'] - 11 * 3600000   # 01:13 UTC Sun
+WEEKS.append(_late)
+# Three set-aside Wednesdays at an impossible rate. The chart is drawn over
+# the COUNTED offers, like every other chart on the page; over the raw window
+# these would drag Wednesday from $36 to $168.
+for _k in range(3):
+    _bad = offer(150 + _k, pay=102.0, state='go', suspect=True)
+    _wed = next(r for r in WEEKS if _js_weekday(r['at']) == 3)
+    _bad['at'] = _bad['firstAt'] = _wed['at'] + (_k + 1) * 600000
+    WEEKS.append(_bad)
+
 # ...and a ticked job with offers inside its stated minutes, one of which was
 # itself ticked. `offer(i)` is spaced ten minutes apart and counts BACKWARDS
 # from NOW, so a 30-minute job at index 5 covers indices 4, 3 and 2.
@@ -183,6 +222,9 @@ FEEDS = {
                  'truncated': False, 'days': 7, 'hidden': 1,
                  'watched': {'saw': 8, 'kept': 8},
                  'unreadable': None, 'pairs': [], 'offers': VERDICTS},
+    'weeks': {'count': len(WEEKS), 'total': len(WEEKS), 'truncated': False,
+              'days': 30, 'hidden': 0, 'watched': {'saw': 21, 'kept': 21},
+              'unreadable': None, 'pairs': [], 'offers': WEEKS},
     'searchable': {'count': len(SEARCHABLE), 'total': len(SEARCHABLE),
                    'truncated': False, 'days': 7, 'hidden': 0,
                    'watched': {'saw': 8, 'kept': 8},
@@ -272,6 +314,14 @@ const TEXT = (sel) => {
         // What the panel had said about the jobs that were worked.
         tookHead: document.getElementById('tookHead').hidden
           ? null : text('#tookHead'),
+        weekHead: document.getElementById('weekHead').hidden
+          ? null : text('#weekHead'),
+        week: [].slice.call(document.querySelectorAll('#week .block'))
+          .map(function (b) {
+            return { label: b.querySelector('.label').textContent.trim(),
+                     amount: b.querySelector('.amount').textContent.trim(),
+                     n: b.querySelector('.n').textContent.trim() };
+          }),
         took: [].slice.call(document.querySelectorAll('#took .block'))
           .map(function (b) {
             return { label: b.querySelector('.label').textContent.trim(),
@@ -651,6 +701,39 @@ try:
         'Nothing in this stretch matches' in miss)
     eq('...and clearing the box takes the note away', s['']['note'], None)
     eq('...and puts every row back', s['']['rows'], len(SEARCHABLE))
+
+    # --- by day of the week ------------------------------------------------
+    #
+    # Shown once the window holds a fortnight, on the driver's 4am-bounded
+    # day, Monday first. Each fixture bar rests on three identical rates, so
+    # a median landing on the right number is a median over the right rows.
+    wk = got['weeks']
+    ok_('the day-of-week chart appears over three weeks (%r)'
+        % (wk['weekHead'] or '')[:60], wk['weekHead'] is not None)
+    ok_('...saying how many days are behind it',
+        'across 21 days' in (wk['weekHead'] or ''))
+    eq('...Monday first, Sunday last',
+       [b['label'] for b in wk['week']],
+       ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+    # Three under every bar but Saturday, which has the 1am row as well —
+    # grouped on the driver's day, not the calendar's. Grouped on the calendar
+    # it is Sunday that would read 4.
+    eq('...three offers under every bar, four under Saturday',
+       [b['n'] for b in wk['week']], ['3', '3', '3', '3', '3', '4', '3'])
+    wkbars = {b['label']: b['amount'] for b in wk['week']}
+    eq('...Sunday at its own median', wkbars.get('Sun'), '$18')
+    eq('...Monday at its', wkbars.get('Mon'), '$24')
+    eq('...and Saturday at its', wkbars.get('Sat'), '$54')
+    # The three set-aside Wednesdays at $300/hr are not in this. Over the raw
+    # window they would make it $168.
+    eq('...and Wednesday over the counted rows only', wkbars.get('Wed'), '$36')
+    # A week of offers is one day per bar, and one day's median is already on
+    # its day header — the chart would be the list again, drawn as a pattern.
+    for name in ('verdicts', 'took six', 'searchable'):
+        eq('...and it stays away over a single day: %s' % name,
+           got[name]['weekHead'], None)
+    eq('...with no bars drawn behind the hidden heading',
+       got['verdicts']['week'], [])
 
     # --- which offers to list, and in what order ---------------------------
     #

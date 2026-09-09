@@ -463,6 +463,13 @@
   <h2 id="kindsHead">Rides and shop orders <em>· median $/hr</em></h2>
   <div id="kinds"></div>
 
+  <!-- The sibling of "By time of day": which days of the week pay. Hidden
+       until the window holds a fortnight, because with a week of offers each
+       bar rests on one day and is the per-day median the day headers already
+       print — a chart that repeats the list under it, dressed as a pattern. -->
+  <h2 id="weekHead" hidden></h2>
+  <div id="week"></div>
+
   <!-- The comparison the rig is for, and the one the page never made: of the
        jobs actually worked, what had the panel said about them. Read only in
        that direction — see showTaken. Hidden until something is ticked,
@@ -540,7 +547,7 @@
    'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead',
    'blocksHead', 'kindsHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
    'find', 'findNote', 'live', 'nothing', 'ladder',
-   'took', 'tookHead', 'chips', 'sorts',
+   'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
    'pairs', 'pairsHead', 'pairsLead'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
@@ -1903,7 +1910,8 @@
       // ...and the headings over them. A blanked chart under "By time of day"
       // reads as a chart that failed to draw rather than as one there is
       // nothing to draw.
-      el.blocksHead.hidden = el.kindsHead.hidden = true;
+      el.blocksHead.hidden = el.kindsHead.hidden = el.weekHead.hidden = true;
+      el.week.innerHTML = '';
       // Nothing here has a rate, so nothing here can be in the taken chart —
       // including a doubtful row somebody ticked. An empty list is what
       // showTaken is given rather than a hidden flag, so there is one place
@@ -2117,6 +2125,32 @@
       return bar(k.name, k.rates, full, target, band);
     }).join('');
 
+    // --- by day of the week ---------------------------------------------------
+    //
+    // Grouped on the driver's day, not the calendar's: dayOf() moves the
+    // boundary to 4am, so an offer at 1am on what the phone calls Saturday is
+    // a Friday-night offer here, which is what it was. Monday first, because a
+    // week of driving is read from its start and Sunday is where it ends.
+    //
+    // Only once the window holds fourteen days. Below that each bar rests on
+    // one or two days, and one day's median is already printed on its day
+    // header below — the chart would be the list again, drawn as a pattern.
+    // The heading carries the day count for the same reason the time-of-day
+    // chart's does: "Fridays pay $24" rests on three Fridays or on twelve.
+    var WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var week = WEEKDAYS.map(function (name) { return { name: name, rates: [] }; });
+    offers.forEach(function (r) {
+      week[dayOf(r.at).getDay()].rates.push(r.perHour);
+    });
+    week.push(week.shift());                       // Monday first, Sunday last
+    var WEEK_NEEDS_DAYS = 14;
+    el.weekHead.hidden = dayCount < WEEK_NEEDS_DAYS;
+    el.weekHead.innerHTML = 'By day of week <em>· median $/hr, across '
+      + dayCount + ' day' + (dayCount === 1 ? '' : 's') + '</em>';
+    el.week.innerHTML = dayCount < WEEK_NEEDS_DAYS ? '' : week.map(function (w) {
+      return bar(w.name, w.rates, full, target, band);
+    }).join('');
+
     // --- what was taken, against what the panel said about it ---------------
     showTaken(mine, ticks, full, target, band);
 
@@ -2251,7 +2285,8 @@
         // numbers about a different question, and nothing marks them stale.
         el.headline.textContent = '';
         el.blocks.innerHTML = el.kinds.innerHTML = el.log.innerHTML = '';
-        el.blocksHead.hidden = el.kindsHead.hidden = true;
+        el.blocksHead.hidden = el.kindsHead.hidden = el.weekHead.hidden = true;
+        el.week.innerHTML = '';
         el.took.innerHTML = '';
         el.tookHead.hidden = true;
         el.runs.innerHTML = '';

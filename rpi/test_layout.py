@@ -466,7 +466,7 @@ const FRAMES = JSON.parse(framesJson);
         // above it. Nothing errors and nothing else moves, so the only sign is
         // a screenshot somebody has to notice.
         let rowSkew = null, rowSkewIn = '';
-        for (const chart of document.querySelectorAll('#blocks, #kinds, #took, #runs')) {
+        for (const chart of document.querySelectorAll('#blocks, #kinds, #took, #week, #runs')) {
           const heights = [].slice.call(chart.querySelectorAll('.block'))
             .map((b) => b.getBoundingClientRect().height)
             .filter((h) => h > 0);
@@ -515,6 +515,28 @@ const FRAMES = JSON.parse(framesJson);
           layers: layers,
         };
       });
+      // The day-of-week chart, on the range it exists for. The page lands on
+      // "7 days" and the chart hides itself under fourteen, so on the landing
+      // page it is never drawn and the row-height check above never sees it —
+      // the first version of this suite passed with "Wednesday afternoon" as
+      // a label because there was no chart to measure. Pressed to 30 days,
+      // the fixture's fifteen days are all on the page and it draws.
+      if (name === 'journal.html') {
+        await page.click('.rangebtns button[data-days="30"]').catch(() => {});
+        await page.waitForTimeout(1500);
+        out[panel[0] + ' ' + name + ' week'] = await page.evaluate(() => {
+          const head = document.getElementById('weekHead');
+          const heights = [].slice.call(document.querySelectorAll('#week .block'))
+            .map((b) => b.getBoundingClientRect().height).filter((h) => h > 0);
+          return {
+            shown: !!head && !head.hidden,
+            rows: heights.length,
+            skew: heights.length > 1
+              ? Math.max.apply(null, heights) - Math.min.apply(null, heights) : 0,
+            fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          };
+        });
+      }
       // The thing this panel is mostly used for: reading the phone through it
       // and working it with a bluetooth mouse. That view is only worth having
       // if the picture is bigger than the scene view it replaced, which is a
@@ -715,8 +737,13 @@ const FRAMES = JSON.parse(framesJson);
 work = tempfile.mkdtemp()
 journal = os.path.join(work, 'journal.jsonl')
 
-# A week of offers, so the log page is measured with a log in it. Rates
-# deliberately spread across the verdicts so every row style is drawn.
+# A fortnight of offers, so the log page is measured with a log in it and with
+# every chart drawn. Nine hours apart, so forty offers span fifteen days: the
+# landing page shows the week of them its default range holds, and the driver
+# presses "30 days" to put the fortnight on the page for the day-of-week
+# chart, which hides itself under fourteen days — and a chart that is not
+# drawn is not measured. Rates deliberately spread across the verdicts so every
+# row style is drawn.
 now = time.time() * 1000
 rows = []
 for i in range(40):
@@ -724,7 +751,7 @@ for i in range(40):
     mins = 8 + (i * 7) % 50
     miles = 1.5 + (i % 9) * 2.1
     rows.append({
-        'id': 'r%d' % i, 'at': now - i * 900000, 'firstAt': now - i * 900000,
+        'id': 'r%d' % i, 'at': now - i * 9 * 3600000, 'firstAt': now - i * 9 * 3600000,
         'pay': round(pay, 2), 'minutes': mins, 'miles': round(miles, 1),
         'perHour': round(pay / (mins / 60.0), 1),
         'grossPerHour': round(pay / (mins / 60.0), 1),
@@ -1027,6 +1054,20 @@ try:
                     '(%.1fpx apart in %s)'
                     % (name, panel, r['rowSkew'], r['rowSkewIn']),
                     r['rowSkew'] <= 0.5)
+
+            # The day-of-week chart, measured after the driver pressed "30
+            # days" — the range it exists for. See the driver for why the
+            # landing page cannot hold it.
+            wk = got.get('%s %s week' % (panel, name))
+            if name == 'journal.html':
+                ok_('%s at %s draws the day-of-week chart over a fortnight'
+                    % (name, panel), wk and wk.get('shown'))
+                if wk and wk.get('shown'):
+                    eq('...with a bar for every day of the week at %s' % panel,
+                       wk.get('rows'), 7)
+                    ok_('...all the same height (%.1fpx apart) at %s'
+                        % (wk.get('skew') or 0, panel), wk.get('skew', 99) <= 0.5)
+                    ok_('...without widening the page at %s' % panel, wk.get('fits'))
 
             # The section about two offers at once.
             #
