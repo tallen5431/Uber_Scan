@@ -68,8 +68,9 @@ NOW = 1700000000000
 # gap is unmissable: $2.00 of cost against $10.00 of pay, six times over, is
 # $48.00 net against $60.00 gross — and across all twelve, $96.00 against
 # $120.00.
-def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0):
-    return {
+def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
+          places=None, hidden=False, suspect=False):
+    row = {
         'id': 'r%d' % i, 'at': NOW - i * 600000, 'firstAt': NOW - i * 600000,
         'pay': pay, 'minutes': minutes, 'miles': 6.0,
         'perHour': round((pay - cost) / (minutes / 60.0), 2),
@@ -77,9 +78,67 @@ def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0):
         'cost': cost, 'costPerMile': 0.33, 'target': 25, 'band': 15,
         'legs': 2, 'whole': True, 'accepted': accepted,
     }
+    # What the panel printed in the car at the time, which is what "What you
+    # took" groups by. Left off entirely by default, because rows written
+    # before the field existed are exactly the case the fourth bar is for —
+    # and TOOK_SIX below is what proves those rows are not silently dropped.
+    if state is not None:
+        row['state'] = state
+    if places is not None:
+        row['places'] = places
+    if hidden:
+        row['hidden'] = True
+    if suspect:
+        row['suspect'] = True
+    return row
 
 
 TOOK_SIX = [offer(i, accepted=(i < 6)) for i in range(12)]
+
+# What the panel said about the jobs that were actually worked. Every group has
+# its own median so a bar built from the wrong pile cannot land on the right
+# number by accident: ACCEPT $30 and $36 -> $33, CLOSE $24 twice -> $24, PASS
+# one at $18. One ticked row is hidden, so six were ticked and five can be
+# counted, and the heading has to say so rather than print five under a
+# headline that says six.
+VERDICTS = [
+    offer(0, accepted=True, pay=12.0, state='go'),      # $30/hr
+    offer(1, accepted=True, pay=10.0, state='warn'),    # $24/hr
+    offer(2, accepted=True, pay=10.0, state='warn'),    # $24/hr
+    offer(3, accepted=True, pay=8.0, state='no'),       # $18/hr
+    offer(4, accepted=True, pay=14.0, state='go'),      # $36/hr
+    offer(5, pay=10.0, state='go'),                     # cleared, never ticked
+    offer(6, accepted=True, pay=10.0, state='go', hidden=True),
+    offer(7, pay=10.0, state='no'),
+]
+
+# Five offers through Chattanooga, of which four can be counted and three were
+# worked; one job on its own in Soddy Daisy; two in Dalton that were set aside
+# and so have no rate to give at all.
+#
+# The fifth Chattanooga row is the point of the set: it was ticked — the driver
+# took that job — and the scanner misread it, so it is set aside. Every figure
+# in the sentence has to be over the four that could be counted and not over
+# the five that matched, and it is only a mixed set that can tell the two
+# apart. Sorted, the four are [$24, $24, $30, $30] and interpolate to $27; put
+# the misread $84 back in and the median moves to $30, three clear $25 instead
+# of two, and the money taken goes from $18.00 to $46.00.
+SEARCHABLE = [
+    offer(0, accepted=True, pay=12.0, state='go',
+          places=['Chattanooga TN', 'Ringgold GA']),
+    offer(1, accepted=True, pay=10.0, state='warn',
+          places=['Chattanooga TN', 'Fort Oglethorpe GA']),
+    offer(2, pay=12.0, state='go', places=['Chattanooga TN', 'Hixson TN']),
+    offer(3, pay=10.0, state='warn', places=['East Ridge TN', 'Chattanooga TN']),
+    offer(4, pay=14.0, state='go', places=['Soddy Daisy TN']),
+    offer(5, pay=10.0, state='no', places=['Dalton GA'], suspect=True),
+    offer(6, pay=10.0, state='no', places=['Dalton GA'], suspect=True),
+    offer(7, pay=10.0, state='no'),
+    offer(8, accepted=True, pay=30.0, places=['Chattanooga TN'], suspect=True),
+]
+
+# Typed into the box on the page, in this order, against SEARCHABLE.
+QUERIES = ['chattanooga', 'soddy', 'dalton', 'nowhere at all']
 
 # ...and a ticked job with offers inside its stated minutes, one of which was
 # itself ticked. `offer(i)` is spaced ten minutes apart and counts BACKWARDS
@@ -114,6 +173,14 @@ FEEDS = {
     'took six': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
                  'hidden': 0, 'watched': {'saw': 14, 'kept': 12},
                  'unreadable': None, 'pairs': [PAIR], 'offers': TOOK_SIX},
+    'verdicts': {'count': len(VERDICTS), 'total': len(VERDICTS),
+                 'truncated': False, 'days': 7, 'hidden': 1,
+                 'watched': {'saw': 8, 'kept': 8},
+                 'unreadable': None, 'pairs': [], 'offers': VERDICTS},
+    'searchable': {'count': len(SEARCHABLE), 'total': len(SEARCHABLE),
+                   'truncated': False, 'days': 7, 'hidden': 0,
+                   'watched': {'saw': 8, 'kept': 8},
+                   'unreadable': None, 'pairs': [], 'offers': SEARCHABLE},
     'unreadable': {'count': 0, 'total': 0, 'truncated': False, 'days': 7,
                    'hidden': 0, 'watched': {'saw': 0, 'kept': 0},
                    'unreadable': 'EACCES', 'pairs': [], 'offers': []},
@@ -127,8 +194,12 @@ FEEDS = {
 
 DRIVER = r'''
 const { chromium } = require('playwright');
-const [base, feedsJson] = process.argv.slice(2);
+const [base, feedsJson, queriesJson] = process.argv.slice(2);
 const FEEDS = JSON.parse(feedsJson);
+// Typed into the page's own search box, one after another, against the feed
+// built for them. The box re-renders on a 120ms timer, so each one is given
+// time to land before the sentence beside it is read back.
+const QUERIES = JSON.parse(queriesJson);
 
 // The page's own fetch, replaced before its script runs. Everything above it —
 // render(), the wording, the arithmetic — is the real thing off disk.
@@ -189,6 +260,15 @@ const TEXT = (sel) => {
           ? null : text('#pairsLead'),
         rows: document.querySelectorAll('#log details.offer').length,
         asked: window.__asked.length,
+        // What the panel had said about the jobs that were worked.
+        tookHead: document.getElementById('tookHead').hidden
+          ? null : text('#tookHead'),
+        took: [].slice.call(document.querySelectorAll('#took .block'))
+          .map(function (b) {
+            return { label: b.querySelector('.label').textContent.trim(),
+                     amount: b.querySelector('.amount').textContent.trim(),
+                     n: b.querySelector('.n').textContent.trim() };
+          }),
         // What each row says about arriving during a ticked job, opened.
         arrivals: [].slice.call(document.querySelectorAll('#log details.offer'))
           .map(function (d) {
@@ -203,6 +283,31 @@ const TEXT = (sel) => {
           }),
       };
     }, TEXT.toString());
+    // ...and then the search box, on the one feed built to be searched. Typed
+    // rather than assigned, because the note is redrawn by the box's own
+    // `input` handler and setting `.value` fires nothing.
+    if (name === 'searchable') {
+      out[name].searches = {};
+      for (const q of QUERIES) {
+        await page.fill('#find', q);
+        await page.waitForTimeout(400);
+        out[name].searches[q] = await page.evaluate(() => {
+          const n = document.getElementById('findNote');
+          return { note: n.hidden ? null
+                     : (n.textContent || '').replace(/\s+/g, ' ').trim(),
+                   rows: document.querySelectorAll('#log details.offer').length };
+        });
+      }
+      // ...and cleared again, because an empty box must take the note away
+      // rather than leave the last answer standing over the whole list.
+      await page.fill('#find', '');
+      await page.waitForTimeout(400);
+      out[name].searches[''] = await page.evaluate(() => {
+        const n = document.getElementById('findNote');
+        return { note: n.hidden ? null : (n.textContent || '').trim(),
+                 rows: document.querySelectorAll('#log details.offer').length };
+      });
+    }
     await page.close();
     await ctx.close();
   }
@@ -253,7 +358,7 @@ try:
     driver = os.path.join(work, 'offerspage.js')
     open(driver, 'w').write(DRIVER)
     run = subprocess.run(
-        ['node', driver, base, json.dumps(FEEDS)],
+        ['node', driver, base, json.dumps(FEEDS), json.dumps(QUERIES)],
         env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
                  PW_EXES=json.dumps([
                      os.environ.get('CHROMIUM', ''),
@@ -389,6 +494,101 @@ try:
     for name in ('unreadable', 'all hidden', 'genuinely empty'):
         eq('...and staying away when there are none: %s' % name,
            got[name]['pairsHead'], None)
+
+    # --- what was taken, against what the panel had said about it ------------
+    #
+    # Read in one direction only. Every row behind these bars is ticked, so the
+    # denominator is a set of jobs somebody said they worked; the other
+    # direction — "of what it cleared, how much did you take" — would divide by
+    # a pile that is mostly rows nobody pressed a button on.
+    v = got['verdicts']
+    bars = {b['label']: b for b in v['took']}
+    ok_('the taken chart appears once something is ticked (%r)'
+        % (v['tookHead'] or '')[:70], v['tookHead'] is not None)
+    eq('...with one bar per verdict the panel can give', len(v['took']), 3)
+    eq('...ACCEPT is the two cleared jobs', bars.get('ACCEPT', {}).get('n'), '2')
+    # $30 and $36 interpolate to $33. A bar built from the wrong pile would not
+    # land here: CLOSE is $24 and PASS is $18.
+    eq('...at their own median, not the page\'s',
+       bars.get('ACCEPT', {}).get('amount'), '$33')
+    eq('...CLOSE is the two it hedged', bars.get('CLOSE', {}).get('n'), '2')
+    eq('...at $24', bars.get('CLOSE', {}).get('amount'), '$24')
+    # The one that matters most. Taking a job the panel said to pass is the
+    # decision the target exists to inform, and what it paid is the answer.
+    eq('...PASS is the one taken against the advice',
+       bars.get('PASS', {}).get('n'), '1')
+    eq('...and says what that one paid', bars.get('PASS', {}).get('amount'), '$18')
+    # Six ticked, five countable: a heading printing five under a page that
+    # counts six ticks is two numbers on one screen that do not add up.
+    ok_('...and the heading reconciles the ticks it could not count (%r)'
+        % (v['tookHead'] or '')[-60:],
+        '5 of 6 you ticked that could be counted (1 set aside)'
+        in (v['tookHead'] or ''))
+    # A verdict nobody recorded is not a fourth kind of advice, so the bar for
+    # it stays away unless something is actually in it.
+    no_('...with no empty fourth bar', 'no verdict' in ' '.join(
+        b['label'] for b in v['took']))
+    # ...and rows written before the verdict was recorded are not dropped: the
+    # older fixture carries no `state` at all and its six ticks must still be
+    # somewhere, or the chart and the headline disagree about the same offers.
+    tookbars = {b['label']: b for b in took['took']}
+    eq('rows with no recorded verdict get their own bar',
+       tookbars.get('no verdict', {}).get('n'), '6')
+    eq('...and the three real verdicts still show, empty',
+       [tookbars.get(k, {}).get('n') for k in ('ACCEPT', 'CLOSE', 'PASS')],
+       ['0', '0', '0'])
+    # Nothing ticked is not "you took nothing". It is a driver who has never
+    # pressed the button, and three empty bars would be a claim about their
+    # shift made out of the absence of one.
+    for name in ('unreadable', 'all hidden', 'genuinely empty'):
+        eq('...and the section stays away with nothing ticked: %s' % name,
+           got[name]['tookHead'], None)
+
+    # --- what the search found, and what it was worth ------------------------
+    #
+    # The figures at the top of the page are the whole window's and do not move
+    # when the box is typed into. "Do the Chattanooga runs pay?" is the question
+    # somebody types a place in to ask, and the answer used to be a filtered
+    # list and nothing else.
+    s = got['searchable']['searches']
+    chatt = s['chattanooga']['note'] or ''
+    eq('a search narrows the list', s['chattanooga']['rows'], 5)
+    ok_('...and says how many of how many (%r)' % chatt[:60],
+        '5 of 9 offers match "chattanooga"' in chatt)
+    # Over the four that could be counted, never the five that matched: with
+    # the misread $84 back in, [$24, $24, $30, $30, $84] has a median of $30.
+    ok_('...with the median of what it found, not the page\'s (%r)' % chatt[-90:],
+        'Typical $27/hr across the 4 that could be counted' in chatt)
+    # ...and the same set again. Counting the misread one would make it three.
+    ok_('...and how many of those cleared the line',
+        '2 of them clearing $25/hr' in chatt)
+    # Net, like every figure on this page: $12.00 and $10.00 of pay, $2.00 of
+    # running cost off each. The driver ticked a third — they took that job —
+    # but the scanner misread the card, so its $28.00 is not money this page
+    # will claim they earned.
+    ok_('...and what was worked out of them, net (%r)' % chatt[-60:],
+        'You marked 2 of them as taken, worth $18.00' in chatt)
+    # A median of one offer is that offer. Calling it typical invites it to be
+    # read as a pattern, which one job is not.
+    one = s['soddy']['note'] or ''
+    eq('a search matching one offer finds one', s['soddy']['rows'], 1)
+    ok_('...and names it as a single job rather than a typical one (%r)'
+        % one[-70:],
+        'The one of them that could be counted paid $36/hr' in one)
+    no_('...and does not call one offer typical', 'Typical' in one)
+    # Rows that were set aside are still listed — that is the whole reason the
+    # log keeps them — but there is no rate to give for them, and "median --"
+    # would be a figure where there is none.
+    none = s['dalton']['note'] or ''
+    eq('offers that were all set aside are still listed', s['dalton']['rows'], 2)
+    ok_('...and the note says there is no rate to give (%r)' % none[-70:],
+        'not one of them could be counted' in none)
+    no_('...rather than printing a dash as a rate', '--' in none)
+    miss = s['nowhere at all']['note'] or ''
+    ok_('a search matching nothing says so (%r)' % miss[:60],
+        'Nothing in this stretch matches' in miss)
+    eq('...and clearing the box takes the note away', s['']['note'], None)
+    eq('...and puts every row back', s['']['rows'], len(SEARCHABLE))
 
 finally:
     proc.terminate()

@@ -439,6 +439,14 @@
   <h2 id="kindsHead">Rides and shop orders <em>· median $/hr</em></h2>
   <div id="kinds"></div>
 
+  <!-- The comparison the rig is for, and the one the page never made: of the
+       jobs actually worked, what had the panel said about them. Read only in
+       that direction — see showTaken. Hidden until something is ticked,
+       because three empty bars over an untagged log is a claim about a shift
+       made out of nobody having pressed a button. -->
+  <h2 id="tookHead" hidden></h2>
+  <div id="took"></div>
+
   <h2>Every offer <em id="recentNote">· tap one to see everything that was read</em></h2>
   <!-- The reason to open this list is to find one particular offer and check it
        against what the shift actually paid. At three hundred rows that is
@@ -484,6 +492,7 @@
    'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead',
    'blocksHead', 'kindsHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
    'find', 'findNote', 'live', 'nothing', 'ladder',
+   'took', 'tookHead',
    'pairs', 'pairsHead', 'pairsLead'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
@@ -951,6 +960,34 @@
     if (rate === null) return '';
     var floor = target * (1 - band / 100);
     return rate >= target ? 'go' : (rate >= floor ? 'warn' : 'no');
+  }
+
+  /* One row of one of the charts on this page: a name, a bar, the median of
+     whatever went into it, and how many that was.
+   *
+   * The same markup and the same arithmetic were written out twice, once for
+   * the time-of-day chart and once for rides-against-shop, and the second was
+   * a copy of the first with the empty branch dropped. A third chart would
+   * have made three. `full` is the length of a full bar — twice the target on
+   * every chart here — so a bar means the same thing in all of them and the
+   * target sits at the halfway point of each.
+   *
+   * The count is printed even when it is zero. A blank there says nothing, and
+   * on the chart of what was taken zero is the interesting number: it is the
+   * difference between never taking a PASS and never being offered one. */
+  function bar(label, rates, full, target, band) {
+    if (!rates.length) {
+      return '<div class="block"><span class="label">' + label + '</span>'
+           + '<span class="bar" style="background-size:0 100%"></span>'
+           + '<span class="amount">--</span><span class="n">0</span></div>';
+    }
+    var mid = percentile(rates.slice().sort(function (x, y) { return x - y; }), 0.5);
+    var pct = Math.max(1, Math.min(100, mid / full * 100));
+    return '<div class="block"><span class="label">' + label + '</span>'
+         + '<span class="bar ' + verdictFor(mid, target, band)
+         + '" style="background-size:' + pct.toFixed(1) + '% 100%"></span>'
+         + '<span class="amount">' + money(mid, 0) + '</span>'
+         + '<span class="n">' + rates.length + '</span></div>';
   }
 
   // The only thing on this page that says what to do rather than what happened.
@@ -1513,6 +1550,140 @@
     el.pairs.innerHTML = pairs.slice(0, LOG_MAX).map(pairRow).join('');
   }
 
+  /* What the driver actually took, split by what the panel had said about it.
+   *
+   * The one comparison this whole rig exists to support, and until now the page
+   * made it nowhere: the headline says how many were marked and what they were
+   * worth, and the charts say what the market paid, but nothing said whether
+   * the advice was followed or what breaking it cost. On a real record that is
+   * the difference between a target that is working and one that is being
+   * quietly ignored — and the driver is the only person who can tell which.
+   *
+   * READ IN ONE DIRECTION ONLY, and the direction is the whole of the honesty
+   * here. This asks "of what you took, what had it said" — every row in it is
+   * ticked, so the denominator is solid. The other direction, "of what it
+   * cleared, how much did you take", is the question everybody wants and it
+   * cannot be answered: an unticked row means nobody pressed a button, and 49
+   * ticks across eight days of scanning is plainly not every job worked. That
+   * denominator would be mostly rows about which nothing is known, and the
+   * answer would read as a verdict on the driver rather than on the target.
+   *
+   * `state` and not a rate re-judged now. It is what the panel said in the car,
+   * against the target that was in force then, and that is what was followed or
+   * not. Every row carries its own — see the journal's rate block — so a row's
+   * verdict here and the "Called it" line inside it cannot disagree.
+   *
+   * `ticks` is every ticked row in the window and `mine` only the ones good
+   * enough to have a rate, so the two differ whenever somebody ticked a card
+   * the scanner had doubted. That gap is named rather than left as two counts
+   * on one screen that do not add up. */
+  // The three words the panel in the car actually printed — see LABELS in
+  // rpi/scan_pi.py — rather than the longer ones this page uses inside a row.
+  // These are what the driver was looking at when they decided, and they are
+  // short enough for the same 62/88px label column the other charts use, so
+  // all three charts on this page keep their bars in one line.
+  var TOOK_SAID = [
+    { state: 'go', name: 'ACCEPT' },
+    { state: 'warn', name: 'CLOSE' },
+    { state: 'no', name: 'PASS' },
+    // Not the rows the scanner refused to judge — every one of those is
+    // `suspect` too (see the journal's `suspect` field, which is false only
+    // when `doubt` is None) and so is never counted and never reaches here.
+    // This is for rows written before the verdict was recorded at all, and for
+    // anything else that arrives without one. They are ticked and they have a
+    // rate, so dropping them would make the counts here disagree with the
+    // headline above about the same offers.
+    { state: null, name: 'no verdict' }
+  ];
+
+  function showTaken(mine, ticks, full, target, band) {
+    // Nothing ticked is not "you took nothing" — it is a driver who has never
+    // pressed the button, and a chart of three empty bars would be a claim
+    // about their shift made out of an absence of one.
+    if (!mine.length) {
+      el.took.innerHTML = '';
+      el.tookHead.hidden = true;
+      return;
+    }
+    el.tookHead.hidden = false;
+    // Named on the heading rather than in a note at the foot of the page,
+    // because it is the denominator of every bar directly under it.
+    var aside = ticks - mine.length;
+    el.tookHead.innerHTML = 'What you took <em>· what the panel had said '
+      + 'about the ' + mine.length
+      + (aside ? ' of ' + ticks + ' you ticked that could be counted ('
+                 + aside + ' set aside)' : ' you ticked')
+      + ', median $/hr</em>';
+    el.took.innerHTML = TOOK_SAID.map(function (s) {
+      var rates = mine.filter(function (r) {
+        return s.state === null
+          ? (r.state !== 'go' && r.state !== 'warn' && r.state !== 'no')
+          : r.state === s.state;
+      }).map(function (r) { return r.perHour; });
+      // An empty "no verdict" row is the normal case and says nothing worth a
+      // line. The three real verdicts stay whether or not anything landed in
+      // them: "PASS 0" is the fact that the line is being kept.
+      return (s.state === null && !rates.length)
+        ? '' : bar(s.name, rates, full, target, band);
+    }).join('');
+  }
+
+  /* What the search found, and what it was worth.
+   *
+   * "Do the Chattanooga runs pay?" is the question somebody types a place into
+   * that box to ask, and until now the answer was a filtered list and nothing
+   * else — every figure on this page is the whole window's and none of them
+   * move when the filter does. So the driver was left to read twelve rows and
+   * do the arithmetic in their head, which is exactly the thing this page is
+   * for not making them do.
+   *
+   * Deliberately a sentence and deliberately not a second ladder. Three big
+   * numbers under the three big numbers at the top is how a filtered median
+   * gets read as the shift's, and the one at the top has to stay the one that
+   * is true of the shift. A sentence beside the box that made the selection
+   * cannot be mistaken for it.
+   *
+   * `esc` because this is the only text on the page the driver typed, and it
+   * is now going into innerHTML rather than textContent to carry the figures.
+   */
+  function foundNote(found, total, q, target) {
+    if (!found.length) {
+      return 'Nothing in this stretch matches "' + esc(q)
+           + '". Try a wider range, or just the number.';
+    }
+    var head = '<b>' + found.length + '</b> of ' + total + ' offer'
+             + (total === 1 ? '' : 's') + ' match "' + esc(q) + '"';
+    var usable = found.filter(counted);
+    if (!usable.length) {
+      // A median of nothing is not "--", it is a question that cannot be
+      // answered from these rows, and the rows themselves say why one at a
+      // time. Saying nothing at all would read as a page that failed.
+      return head + ' — and not one of them could be counted, so there is no '
+           + 'rate to give for them. The reason is on each row.';
+    }
+    var rates = usable.map(function (r) { return r.perHour; })
+                      .sort(function (a, b) { return a - b; });
+    var cleared = usable.filter(function (r) { return r.perHour >= target; }).length;
+    var took = usable.filter(function (r) { return r.accepted; });
+    // A median of one is that one offer, and calling it "typical" invites it
+    // to be read as a pattern. It is a single job and is named as one.
+    var s = head + '. ' + (usable.length === 1
+      ? 'The one of them that could be counted paid <b>'
+        + money(rates[0], 0) + '/hr</b>'
+      : 'Typical <b>' + money(percentile(rates, 0.5), 0) + '/hr</b> across the <b>'
+        + usable.length + '</b> that could be counted, <b>' + cleared
+        + '</b> of them clearing ' + money(target) + '/hr')
+      + '.';
+    // Only when something here was actually worked. Net, like every figure on
+    // this page, and through the same function the headline and the day line
+    // use — this is a third place that could have drifted from them.
+    if (took.length) {
+      s += ' You marked <b>' + took.length + '</b> of them as taken, worth <b>'
+         + money(netTotal(took).pay, 2) + '</b>.';
+    }
+    return s;
+  }
+
   function A_MIN(a) {
     return Math.min.apply(null, a.checkedAt.map(function (c) { return c.minutes; }));
   }
@@ -1590,6 +1761,11 @@
       // reads as a chart that failed to draw rather than as one there is
       // nothing to draw.
       el.blocksHead.hidden = el.kindsHead.hidden = true;
+      // Nothing here has a rate, so nothing here can be in the taken chart —
+      // including a doubtful row somebody ticked. An empty list is what
+      // showTaken is given rather than a hidden flag, so there is one place
+      // that decides whether that section appears.
+      showTaken([], 0, 0, 0, 0);
       el.more.textContent = '';
       el.nothing.hidden = false;
       el.nothing.innerHTML = blind
@@ -1762,19 +1938,7 @@
     // every row instead of moving with whatever the best block happened to be.
     var full = target * 2;
     el.blocks.innerHTML = blocks.map(function (b) {
-      if (!b.rates.length) {
-        return '<div class="block"><span class="label">' + b.name + '</span>'
-             + '<span class="bar" style="background-size:0 100%"></span>'
-             + '<span class="amount">--</span><span class="n"></span></div>';
-      }
-      var sorted = b.rates.slice().sort(function (x, y) { return x - y; });
-      var mid = percentile(sorted, 0.5);
-      var pct = Math.max(1, Math.min(100, mid / full * 100));
-      return '<div class="block"><span class="label">' + b.name + '</span>'
-           + '<span class="bar ' + verdictFor(mid, target, band) + '" style="background-size:'
-           + pct.toFixed(1) + '% 100%"></span>'
-           + '<span class="amount">' + money(mid, 0) + '</span>'
-           + '<span class="n">' + b.rates.length + '</span></div>';
+      return bar(b.name, b.rates, full, target, band);
     }).join('');
     el.blockScale.innerHTML =
       '<span style="left:50%">' + money(target) + ' target</span>'
@@ -1807,15 +1971,11 @@
        two kinds to hold against each other. */
     el.kindsHead.hidden = kinds.length < 2;
     el.kinds.innerHTML = kinds.map(function (k) {
-      if (!k.rates.length) return '';
-      var sorted = k.rates.slice().sort(function (x, y) { return x - y; });
-      var mid = percentile(sorted, 0.5);
-      return '<div class="block"><span class="label">' + k.name + '</span>'
-           + '<span class="bar ' + verdictFor(mid, target, band) + '" style="background-size:'
-           + Math.max(1, Math.min(100, mid / full * 100)).toFixed(1) + '% 100%"></span>'
-           + '<span class="amount">' + money(mid, 0) + '</span>'
-           + '<span class="n">' + k.rates.length + '</span></div>';
+      return bar(k.name, k.rates, full, target, band);
     }).join('');
+
+    // --- what was taken, against what the panel said about it ---------------
+    showTaken(mine, ticks, full, target, band);
 
     // --- the log ---
     // Everything in the window, not a sample of it, because the reason to look
@@ -1826,7 +1986,11 @@
     // offer missing from the record with nothing to say why is precisely what
     // makes a record impossible to reconcile — the driver would be left
     // wondering whether they mis-remembered the job or the scanner lost it.
-    var shown = matching(kept).slice(-LOG_MAX).reverse();
+    // Once, not twice. The list below and the note above it are two views of
+    // one answer, and running the filter again for the note is a second place
+    // for them to disagree.
+    var found = matching(kept);
+    var shown = found.slice(-LOG_MAX).reverse();
     // Two truncations, and the driver has to be told about both. This page cuts
     // the *list* to LOG_MAX so a phone can render it, and the server cuts the
     // *window* to its own limit before the page ever sees it — and the second
@@ -1885,17 +2049,8 @@
     // Say what the filter did, because an empty list and a list with nothing
     // matching look identical, and one of them means "you have no offers".
     var q = (el.find.value || '').trim();
-    if (q) {
-      var found = matching(kept).length;
-      el.findNote.hidden = false;
-      el.findNote.textContent = found
-        ? found + ' of ' + kept.length + ' offer'
-          + (kept.length === 1 ? '' : 's') + ' match "' + q + '"'
-        : 'Nothing in this stretch matches "' + q
-          + '". Try a wider range, or just the number.';
-    } else {
-      el.findNote.hidden = true;
-    }
+    el.findNote.hidden = !q;
+    if (q) el.findNote.innerHTML = foundNote(found, kept.length, q, target);
 
     showCaveats(data, setAside, newest, ticks);
 
@@ -1944,6 +2099,8 @@
         el.headline.textContent = '';
         el.blocks.innerHTML = el.kinds.innerHTML = el.log.innerHTML = '';
         el.blocksHead.hidden = el.kindsHead.hidden = true;
+        el.took.innerHTML = '';
+        el.tookHead.hidden = true;
         el.runs.innerHTML = '';
         el.runsHead.hidden = true;
         el.advice.hidden = true;

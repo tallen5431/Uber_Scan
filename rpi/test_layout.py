@@ -448,6 +448,36 @@ const FRAMES = JSON.parse(framesJson);
           }
         }
 
+        // Every row of a chart the same height as its neighbours.
+        //
+        // This is aimed at one thing: a label too long for the column it is
+        // given. `.block .label` is `flex: none` at 62px, 88px on a dashboard
+        // panel, and what happens then was worth measuring rather than
+        // reasoning about, because two guesses at it were both wrong. The text
+        // does not overhang the bar and it does not shorten the bar — the box
+        // and the bar keep their widths exactly. It WRAPS inside the column,
+        // and the row grows: measured on the chart of what was taken,
+        // "unrecorded-verdict-here" in place of "no verdict" took that row from
+        // 33px to 48px on a 1024x600 panel and from 30px to 52px on a phone,
+        // while the three rows above it stayed where they were.
+        //
+        // Which is a chart with one row emphasised for no reason, on a page
+        // whose whole idiom is that a row means the same thing as the row
+        // above it. Nothing errors and nothing else moves, so the only sign is
+        // a screenshot somebody has to notice.
+        let rowSkew = null, rowSkewIn = '';
+        for (const chart of document.querySelectorAll('#blocks, #kinds, #took, #runs')) {
+          const heights = [].slice.call(chart.querySelectorAll('.block'))
+            .map((b) => b.getBoundingClientRect().height)
+            .filter((h) => h > 0);
+          if (heights.length < 2) continue;
+          const skew = Math.max.apply(null, heights) - Math.min.apply(null, heights);
+          if (rowSkew === null || skew > rowSkew) {
+            rowSkew = skew;
+            rowSkewIn = chart.id + ' (' + heights.length + ' rows)';
+          }
+        }
+
         // Every control meant to be pressed one-handed, on glass, in a car.
         let shortest = null, shortestIn = null;
         for (const el of document.querySelectorAll(
@@ -481,6 +511,7 @@ const FRAMES = JSON.parse(framesJson);
           smallest: smallest, smallestIn: what,
           shortest: shortest, shortestIn: shortestIn,
           measure: measure, measureIn: measureIn,
+          rowSkew: rowSkew, rowSkewIn: rowSkewIn,
           layers: layers,
         };
       });
@@ -986,6 +1017,16 @@ try:
                 ok_('%s at %s keeps a line of text readable (%.0fpx in %s)'
                     % (name, panel, r['measure'], r['measureIn']),
                     r['measure'] <= 900)
+
+            # Measured at 0px of skew on every panel and in every chart
+            # today. The runs chart deliberately runs a second line under
+            # every one of its labels, which is why this is asked per chart
+            # rather than across the page.
+            if r.get('rowSkew') is not None:
+                ok_('%s at %s keeps a chart\'s rows the same height '
+                    '(%.1fpx apart in %s)'
+                    % (name, panel, r['rowSkew'], r['rowSkewIn']),
+                    r['rowSkew'] <= 0.5)
 
             # The section about two offers at once.
             #
