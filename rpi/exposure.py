@@ -198,66 +198,105 @@ def clipped_fraction(gray):
     return float(np.count_nonzero(a >= CLIPPED_AT)) / max(a.size, 1)
 
 
-def score(frames):
-    """Everything worth knowing about one exposure setting."""
+def score(frames, light=None):
+    """Everything worth knowing about one exposure setting.
+
+    Two pictures of the same moment, because the three numbers here are not
+    asking the same kind of question.
+
+    `frames` is what banding is measured from, and it stays whatever the caller
+    has been handing it — on the rig, the prepared card, which is what the
+    reader sees and the domain every threshold in this module was set in.
+
+    `light` is the picture BEFORE that preparation, and the two photometric
+    numbers come from it. They have to: `preprocess` runs CLAHE, which stretches
+    local contrast to fill the range, and on a dark-mode card it inverts as
+    well. Measured on test_exposure.py's simulated dark card at 1042us — a
+    picture whose white really sits at 12 — `clipped_fraction` reads 0.000 on
+    the raw frame and 0.514 on the prepared one, while at 33333us, where the
+    sensor really is blowing out 15% of the frame, it reads 0.150 raw and 0.000
+    prepared. The guard against blowing the card out was reading a number CLAHE
+    had manufactured, with the sign the wrong way round. `brightness` goes the
+    same way: 255 down to 222 as the exposure lengthens.
+
+    Defaults to `frames` so a caller that has only one picture — every existing
+    one but the rig — is unchanged.
+    """
+    light = light if light else frames
     return {'banding': banding_score(frames),
-            'bright': brightness(frames[0]) if frames else 0.0,
-            'clipped': clipped_fraction(frames[0]) if frames else 0.0}
+            'bright': brightness(light[0]) if light else 0.0,
+            'clipped': clipped_fraction(light[0]) if light else 0.0}
 
 
-def choose_exposure(grab, candidates=FLICKER_SAFE, target=TARGET_BRIGHT):
+def choose_exposure(grab, candidates=FLICKER_SAFE, target=TARGET_BRIGHT,
+                    prepare=None):
     """Pick the exposure that ripples least while still lighting the card.
 
     `grab(exposure_us)` must set the exposure and return a list of consecutive
-    greyscale frames of the screen. Kept as a callback so this is testable
-    without a camera, which is the only way it gets tested at all.
+    greyscale frames of the screen, AS THE SENSOR GAVE THEM. Kept as a callback
+    so this is testable without a camera, which is the only way it gets tested
+    at all.
+
+    `prepare(frame)` is whatever the reader does to a frame before reading it,
+    and banding is measured on its output while brightness and clipping are
+    measured on the frames as grabbed. Optional, and the two are the same
+    picture without it — see score() for why the rig needs them apart.
 
     Returns (exposure, report) where report lists what every candidate scored,
     because a number chosen silently is a number nobody can argue with later.
     """
     report = []
     for exposure in candidates:
-        frames = grab(exposure)
-        if not frames:
+        light = grab(exposure)
+        if not light:
             continue
-        row = dict(score(frames), exposure=exposure)
+        frames = [prepare(f) for f in light] if prepare else light
+        row = dict(score(frames, light), exposure=exposure)
         report.append(row)
 
-    usable = [r for r in report if r['clipped'] <= CLIPPED_FRACTION]
-    if not usable:
-        # Everything is blown out — at whatever gain the preview's auto-exposure
-        # happened to freeze while metering a mostly-dark car interior around a
-        # bright screen. That is a gain problem and it does not survive
-        # calibration: AutoGain re-sets gain to TARGET_BRIGHT the moment
-        # scanning starts. Letting it decide the exposure meant a condition
-        # that was about to go away vetoing one that is permanent, against the
-        # rule this whole module is built on — gain cannot reintroduce banding,
-        # and exposure can.
-        #
-        # Ranking by least-clipped was worse than merely irrelevant: it selects
-        # *for* banding. Once every candidate's white has crossed the clipping
-        # point, the one that ripples is the one with dark rows, and dark rows
-        # do not clip — so on a 60Hz panel the winner was 8333us, the single
-        # entry in FLICKER_SAFE that is half a 60Hz cycle rather than a whole
-        # one, and the only one that bands. It was then written to config.json
-        # and announced as "measured against this screen".
-        #
-        # So keep every candidate and let banding decide, which is what the
-        # rest of this function already does correctly.
-        usable = report
-    if not usable:
+    # Only ever elect a candidate long enough for a dark car. The daylight rungs
+    # are measured — that is the whole point of measuring them — but they are
+    # measured so the ladder has somewhere to fall to at run time, not so one of
+    # them can be written to config.json as the exposure a night shift starts
+    # on.
+    #
+    # FIRST, and this is the change. It used to be applied at the very end, to
+    # the tie set, and `or tied` let it be skipped whenever the earlier steps
+    # had already emptied the flicker-safe rungs out of that set. Measured over
+    # 32 simulated sweeps — two card polarities, four panel frequencies, four
+    # scene brightnesses — that fallback elected a daylight rung 5 times, and 3
+    # of those wrote an empty ladder as well, which scan_pi reads as "no ladder
+    # was measured" and answers with the unmeasured guess. Asked first, 0 of 32.
+    electable = [r for r in report if r['exposure'] in FLICKER_SAFE] or report
+    if not electable:
         return DEFAULT_EXPOSURE, report
 
     # Banding is the thing being solved, so it decides. Among settings that are
     # equally quiet, prefer the one closest to a well-lit card — quantised,
     # because a difference of a level or two in banding is not a difference.
-    quietest = min(r['banding'] for r in usable)
-    tied = [r for r in usable if r['banding'] <= quietest + 1.0]
-    # Only ever elect a candidate long enough for a dark car. The daylight
-    # rungs are measured — that is the whole point of measuring them — but a
-    # rig calibrated at noon must not start the night on a 2ms exposure.
-    settled = [r for r in tied if r['exposure'] in FLICKER_SAFE] or tied
-    best = min(settled, key=lambda r: abs(r['bright'] - target))
+    quietest = min(r['banding'] for r in electable)
+    tied = [r for r in electable if r['banding'] <= quietest + 1.0]
+    # ...and only then, among equally quiet candidates, refuse the ones that
+    # are blown out.
+    #
+    # AFTER banding and not before it, which is the second half of the same
+    # change. Filtering on clipping first selects *for* banding: once every
+    # candidate's white has crossed the clipping point, the one that ripples is
+    # the one with dark rows, and dark rows do not clip — so on a 60Hz panel
+    # the survivor was 8333us, the single entry in FLICKER_SAFE that is half a
+    # cycle rather than a whole one, and the only one that bands. It was
+    # written to config.json and announced as "measured against this screen".
+    # That failure is recorded twice more, at test_exposure.py's "ranking by
+    # least-clipped selects for banding". Inside the tie set it cannot happen:
+    # banding has already ruled, and everything left is equally quiet.
+    #
+    # `or tied` because everything being blown out is a gain problem and it
+    # does not survive calibration — AutoGain re-sets gain to TARGET_BRIGHT the
+    # moment scanning starts. A condition that is about to go away must not
+    # veto one that is permanent: gain cannot reintroduce banding, exposure
+    # can.
+    unblown = [r for r in tied if r['clipped'] <= CLIPPED_FRACTION] or tied
+    best = min(unblown, key=lambda r: abs(r['bright'] - target))
     return best['exposure'], report
 
 

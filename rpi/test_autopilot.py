@@ -247,6 +247,127 @@ ok_('the server documents the same vocabulary',
 shutil.rmtree(work, ignore_errors=True)
 
 
+# --- the exposure sweep, driven end to end ----------------------------------
+#
+# Nothing here touched `_measure_exposure` before, and one line inside it
+# decides which picture the whole measurement is taken off: `prepare=`, handed
+# to choose_exposure. Drop that one keyword and every check in this file and in
+# test_exposure.py still passes, while the rig goes back to measuring how bright
+# the card is on a picture CLAHE has already stretched to fill the range — and
+# on a dark-mode card, inverted first, so both numbers run backwards.
+#
+# So: a fake Source over a dark-mode card lit by a real amount of light, with a
+# quad that is the whole frame. No camera, no cv2 warp worth the name, and the
+# arrangement that used to elect a rung blowing out half the frame.
+try:
+    import numpy as np
+    import exposure as EX
+    import pipeline as PL
+except Exception as e:                                   # pragma: no cover
+    np = None
+    print('no imaging stack here (%s) — skipping the exposure sweep' % e)
+
+if np is not None:
+    ROWS, COLS, READOUT_US = 400, 300, 30000.0
+
+    def _dark_card():
+        img = np.full((ROWS, COLS), 120.0)
+        img[ROWS // 3:] = 235.0
+        for i in range(6):
+            img[ROWS // 3 + 20 + i * 30: ROWS // 3 + 30 + i * 30] = 60.0
+        return 255.0 - img
+
+    def _collected(us, hz, phase, duty=0.6):
+        period = 1e6 / hz
+        starts = phase + np.arange(ROWS) * (READOUT_US / ROWS)
+        duty_us = period * duty
+        whole = np.floor(us / period)
+        rem = us - whole * period
+        into = np.mod(starts, period)
+        part = np.clip(np.minimum(into + rem, duty_us) - np.minimum(into, duty_us), 0, None)
+        part += np.clip(np.minimum(rem - (period - into), duty_us), 0, None)
+        return whole * duty_us + part
+
+    CARD = _dark_card()
+    HZ = 120
+
+    class FakeCam(object):
+        def __init__(self):
+            self.us = EX.DEFAULT_EXPOSURE
+
+        def set_controls(self, controls):
+            self.us = int(controls.get('ExposureTime', self.us))
+
+    class FakeSource(object):
+        """Three frames per candidate, each catching the flicker differently."""
+
+        def __init__(self, anchor):
+            self.cam = FakeCam()
+            self.n = 0
+            # The scene brightness that puts the card's white at 205 at
+            # `anchor`, so a scene can be named by the exposure it suits.
+            self.per_us = 205.0 / _collected(anchor, HZ, 0.0).mean()
+
+        def frame(self):
+            rows = _collected(self.cam.us, HZ, phase=(self.n % 3) * 7777.0)
+            rng = np.random.RandomState(self.n % 3)
+            self.n += 1
+            f = CARD / 255.0 * rows[:, None] * self.per_us + rng.normal(0, 1.2, (ROWS, COLS))
+            return np.clip(f, 0, 255).astype(np.uint8)
+
+    # A quad is warped by PL.warp before anything else touches it, so the
+    # picture the sweep sees is a resampled version of the frame above rather
+    # than the frame itself. That is the real path and the point of driving it
+    # from here.
+    QUAD = np.array([[0, 0], [COLS - 1, 0], [COLS - 1, ROWS - 1], [0, ROWS - 1]],
+                    dtype=np.float32)
+
+    def sweep(anchor):
+        _real_sleep = AP.time.sleep
+        AP.time.sleep = lambda s: None                   # 8 rungs x 0.45s
+        try:
+            return AP._measure_exposure(FakeSource(anchor), QUAD, True)
+        finally:
+            AP.time.sleep = _real_sleep
+
+    def bands(us):
+        cycles = us / (1e6 / HZ)
+        return abs(cycles - round(cycles)) > 0.02
+
+    # The premise of the whole block: this card really is the dark-mode one,
+    # so `preprocess` really does invert it and the two photometric numbers
+    # really do run backwards when they are taken off its output. A light card
+    # here would make every check below pass for the wrong reason.
+    ok_('the fixture is a dark-mode card',
+        PL.is_dark_mode(FakeSource(8333).frame()))
+
+    chosen, detail, ladder = sweep(8333)
+    ok_('the sweep elects a rung long enough for a dark car (%dus)' % chosen,
+        chosen in EX.FLICKER_SAFE)
+    # What it must not do. Measured on this card: taking the two photometric
+    # numbers off the prepared frames elects 25000us, where the raw picture is
+    # 48% blown out; taking them off the light elects 8333us at 0.000.
+    eq('...and not the one that is blowing the card out', chosen, 8333)
+    ok_('...with a ladder to fall back down (%s)' % (ladder,),
+        ladder and chosen in ladder)
+    ok_('...and a line of working to argue with', 'banding' in (detail or ''))
+
+    # The other half of the wiring, and it needs its own scene because the
+    # election above survives losing it. Banding is measured on the PREPARED
+    # frames, and it has to be: it is an absolute level difference, so on a
+    # nearly-black picture a real ripple is a small number. Handed the raw
+    # frames, 1042us — an eighth of a 120Hz cycle, a certain bander — scores
+    # quiet enough to join the fallback ladder, and AutoGain walks that ladder
+    # freely at run time. Measured here: with the frames prepared the ladder is
+    # (8333, 16667, 25000); without, (1042, 8333, 16667, 25000).
+    chosen2, _detail2, ladder2 = sweep(16667)
+    ok_('the fallback ladder is measured on the picture the reader sees (%s)'
+        % (ladder2,), ladder2)
+    eq('...so no rung on it is a fraction of a flicker cycle',
+       [c for c in ladder2 if bands(c)], [])
+    ok_('...and the elected rung is on it (%dus)' % chosen2, chosen2 in ladder2)
+
+
 # --- and it still runs as a program ----------------------------------------
 # Everything above replaced four functions; this checks the file is a program
 # and not only a module, without a camera anywhere near it.

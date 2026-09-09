@@ -258,17 +258,50 @@ def _measure_exposure(source, quad, as_json):
         for _ in range(3):
             frame = source.frame()
             warped = PL.warp(frame, quad, 400)
-            # Every frame of every candidate turned the same way up. This
-            # function's whole output is a comparison between frames — banding
-            # is what changes from one to the next — and a card that decided it
-            # was dark on one frame and light on the next would score 200
-            # against a threshold of 4, condemning a perfectly good exposure.
-            # Settled on the first screen seen and held for the whole
-            # measurement, since `bright` is compared across candidates too.
+            grey = PL.to_grey(warped)
+            # Every frame of every candidate turned the same way up. The banding
+            # number is a comparison between frames — it is what changes from
+            # one to the next — and a card that decided it was dark on one frame
+            # and light on the next would score 200 against a threshold of 4,
+            # condemning a perfectly good exposure. Settled on the first screen
+            # seen and held for the whole measurement.
             if polarity['dark'] is None:
-                polarity['dark'] = PL.is_dark_mode(PL.to_grey(warped))
-            frames.append(PL.preprocess(warped, dark=polarity['dark']))
+                polarity['dark'] = PL.is_dark_mode(grey)
+            frames.append(grey)
         return frames
+
+    # ...and the reader's own version of the same frame, handed over separately.
+    #
+    # This used to be what grab() returned, and the two photometric numbers in
+    # exposure.score() were being taken off it. `preprocess` runs CLAHE, which
+    # stretches local contrast to fill the range, and on a dark-mode card it
+    # inverts first — so both numbers came back describing the picture CLAHE had
+    # made rather than the light the sensor collected, and on a dark card both
+    # ran backwards. Simulated in rpi/test_exposure.py's own harness — its card,
+    # its geometry, its noise — at 120Hz, with the scene set so the card's white
+    # sits at 205 at 16667us, and reproduced by the checks there:
+    #
+    #     us      bright raw / prepared     clipped raw / prepared
+    #     1042        12 / 255                 0.000 / 0.514
+    #     8333        77 / 244                 0.000 / 0.019
+    #     16667      156 / 238                 0.000 / 0.000
+    #     33333      255 / 222                 0.150 / 0.000
+    #
+    # Read down the prepared columns: the card gets DIMMER as the exposure
+    # lengthens, and the rung that is genuinely blowing out a fifth of the frame
+    # is the one the clipping guard passes while it rejects the black one.
+    #
+    # Banding stays on the prepared frames, which is where it has always been
+    # measured, where every threshold in exposure.py was set, and where the
+    # health line in scan_pi.py still measures it — so the two numbers a driver
+    # can see called "banding" remain the same measurement. Moving it too was
+    # tried and is worse in its own way. It is an absolute level difference, so
+    # on a nearly-black picture a real ripple is a small number: across 32
+    # sweeps of that harness, raw frames put a rung that bands onto the FALLBACK
+    # LADDER 4 times — 1042us, an eighth of a 120Hz cycle, which AutoGain then
+    # walks onto freely at run time — where preparing them first does so 0.
+    def prepare(grey):
+        return PL.preprocess(grey, dark=polarity['dark'])
 
     if source.cam is None:
         return EX.DEFAULT_EXPOSURE, 'no camera to measure with', ()
@@ -278,7 +311,7 @@ def _measure_exposure(source, quad, as_json):
     # the only exposures it ever used without anyone having measured them on
     # this screen. Two extra seconds of calibration buys the whole ladder.
     chosen, report = EX.choose_exposure(
-        grab, candidates=EX.DAYLIGHT_SAFE + EX.FLICKER_SAFE)
+        grab, candidates=EX.DAYLIGHT_SAFE + EX.FLICKER_SAFE, prepare=prepare)
     if not report:
         return EX.DEFAULT_EXPOSURE, 'exposure not settable on this camera', ()
 

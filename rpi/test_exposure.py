@@ -15,6 +15,11 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import exposure as EX
+# The rig hands choose_exposure two pictures of the same frame — as grabbed,
+# and as the reader will see it — and half of what is checked below is which
+# of them each number is taken off. That means the real preparation, not a
+# stand-in for it: CLAHE is where the distortion comes from.
+import pipeline as PL
 
 ok = bad = 0
 
@@ -163,6 +168,198 @@ ok_('a dim picture reads dim', EX.brightness(dim) < 60)
 ok_('a bright one reads bright', EX.brightness(bright) > 200)
 eq('nothing clipped', EX.clipped_fraction(bright), 0.0)
 eq('all clipped', EX.clipped_fraction(np.full((10, 10), 255, np.uint8)), 1.0)
+
+# --- a longer exposure collects more light ----------------------------------
+#
+# Everything above this point runs against `capture`, whose last step is
+# `level = collected / (exposure_us * duty)` — the light each row gathered,
+# divided by the exposure that gathered it. That is exactly right for the
+# question that harness was written for, because it isolates banding from
+# brightness. It also means that in every check above, a candidate's brightness
+# does not depend on its exposure at all and nothing ever clips.
+#
+# So the photometric half of choose_exposure had no test that could fail. The
+# clipping guard, the "closest to a well-lit card" tie-break and the ordering
+# between them were all being exercised against a `bright` column that is the
+# same number eight times over and a `clipped` column of zeros. Which is how
+# the rig came to be measuring both of them on the picture CLAHE had made
+# rather than on the light the sensor collected, with nothing to notice.
+#
+# This one does not normalise. Same rolling-shutter model, same card, same
+# noise; a longer exposure is simply brighter, and the sensor clips at 255.
+def collected(exposure_us, flicker_hz, phase, duty=0.6):
+    """Microseconds of panel-on light each row integrates."""
+    period = 1e6 / flicker_hz
+    starts = phase + np.arange(ROWS) * (READOUT_US / ROWS)
+    duty_us = period * duty
+    whole = np.floor(exposure_us / period)
+    rem = exposure_us - whole * period
+    into = np.mod(starts, period)
+    part = np.clip(np.minimum(into + rem, duty_us) - np.minimum(into, duty_us), 0, None)
+    part += np.clip(np.minimum(rem - (period - into), duty_us), 0, None)
+    return whole * duty_us + part
+
+
+DARK_CARD = 255.0 - CARD
+
+
+def per_us_for(anchor_us, flicker_hz, base, level=205.0):
+    """The scene brightness that puts this card's white at `level` at `anchor`."""
+    return level / max(collected(anchor_us, flicker_hz, 0.0).mean(), 1e-9)
+
+
+def lit(exposure_us, flicker_hz, per_us, base, n=3):
+    """Consecutive frames of a card lit by a real amount of light."""
+    out = []
+    for i in range(n):
+        rows = collected(exposure_us, flicker_hz, phase=i * 7777.0)
+        rng = np.random.RandomState(i)
+        f = base / 255.0 * rows[:, None] * per_us + rng.normal(0, 1.2, (ROWS, COLS))
+        out.append(np.clip(f, 0, 255).astype(np.uint8))
+    return out
+
+
+# The simulation has to actually get brighter, or nothing below means anything.
+_per = per_us_for(16667, 120, CARD)
+_levels = [EX.brightness(lit(us, 120, _per, CARD)[0]) for us in (1042, 8333, 16667)]
+ok_('a longer exposure is brighter (%s)' % _levels,
+    _levels[0] < _levels[1] < _levels[2])
+ok_('...and a long enough one clips',
+    EX.clipped_fraction(lit(33333, 120, _per, CARD)[0]) > 0.1)
+
+# --- the two photometric numbers, measured on the wrong picture -------------
+#
+# `preprocess` greys the card, turns a dark-mode one the right way up, and runs
+# CLAHE over it. CLAHE stretches local contrast to fill the range — that is what
+# it is for — so a number about how much light there was, taken afterwards, is a
+# number about CLAHE.
+#
+# On a dark-mode card both of the numbers run BACKWARDS. Measured here at 120Hz
+# with the scene set so the card's white sits at 205 at 16667us:
+#
+#     us       bright raw / prepared      clipped raw / prepared
+#     1042         12 / 255                  0.000 / 0.514
+#     8333         77 / 244                  0.000 / 0.019
+#     16667       156 / 238                  0.000 / 0.000
+#     33333       255 / 222                  0.150 / 0.000
+#
+# The card gets dimmer as the exposure lengthens, and the rung genuinely
+# blowing out a fifth of the frame is the one the clipping guard passes while
+# it rejects the black one.
+_dper = per_us_for(16667, 120, DARK_CARD)
+_raw = {us: lit(us, 120, _dper, DARK_CARD) for us in (1042, 8333, 16667, 33333)}
+_prep = {us: [PL.preprocess(f, dark=True) for f in fs] for us, fs in _raw.items()}
+_rawbright = [EX.brightness(_raw[us][0]) for us in (1042, 8333, 16667, 33333)]
+_prebright = [EX.brightness(_prep[us][0]) for us in (1042, 8333, 16667, 33333)]
+ok_('on a dark card the raw picture gets brighter with exposure (%s)' % _rawbright,
+    _rawbright == sorted(_rawbright) and _rawbright[0] < _rawbright[-1])
+ok_('...and the prepared one gets DIMMER (%s)' % _prebright,
+    _prebright[0] > _prebright[-1])
+ok_('the raw picture clips at the long end, not the short one',
+    EX.clipped_fraction(_raw[33333][0]) > EX.CLIPPED_FRACTION
+    and EX.clipped_fraction(_raw[1042][0]) < 0.001)
+ok_('...and the prepared one has it the wrong way round',
+    EX.clipped_fraction(_prep[1042][0]) > EX.CLIPPED_FRACTION
+    and EX.clipped_fraction(_prep[33333][0]) < 0.001)
+
+# So score() takes them off the frames as grabbed, and leaves banding where it
+# has always been measured. `light` defaults to `frames`, which is every caller
+# but the rig.
+_s = EX.score(_prep[33333], _raw[33333])
+eq('score reads brightness off the light, not the preparation',
+   _s['bright'], EX.brightness(_raw[33333][0]))
+eq('...and clipping too', _s['clipped'], EX.clipped_fraction(_raw[33333][0]))
+eq('...while banding stays on the prepared frames',
+   _s['banding'], EX.banding_score(_prep[33333]))
+eq('one picture is still allowed', EX.score(_prep[1042]),
+   EX.score(_prep[1042], _prep[1042]))
+
+
+# --- and the rig does not elect a rung it is blowing out ---------------------
+#
+# Measured over 32 sweeps of this simulation — light and dark card, 60/120/240/
+# 480Hz, four scene brightnesses — the shipped arrangement elected a rung with
+# more than CLIPPED_FRACTION of the frame genuinely blown out 17 times; with the
+# light measured on the light, 10, and every one of those 10 is the documented
+# "everything is blown, let banding decide" fallback. This is one of the 11
+# elections that change, and the whole difference is which picture was measured.
+def _both(hz, anchor, base, dark):
+    per = per_us_for(anchor, hz, base)
+    made = {}
+
+    def grab(us):
+        if us not in made:
+            made[us] = lit(us, hz, per, base)
+        return made[us]
+
+    rungs = EX.DAYLIGHT_SAFE + EX.FLICKER_SAFE
+    on_prepared = EX.choose_exposure(
+        lambda us: [PL.preprocess(f, dark=dark) for f in grab(us)], candidates=rungs)
+    on_light = EX.choose_exposure(
+        grab, candidates=rungs, prepare=lambda f: PL.preprocess(f, dark=dark))
+    return grab, on_prepared[0], on_light[0]
+
+
+_grab, _was, _now = _both(120, 8333, DARK_CARD, True)
+eq('measuring the preparation elects 25000us here', _was, 25000)
+ok_('...blowing out nearly half the frame (%.3f)'
+    % EX.clipped_fraction(_grab(_was)[0]),
+    EX.clipped_fraction(_grab(_was)[0]) > 0.4)
+eq('measuring the light elects 8333us instead', _now, 8333)
+eq('...with nothing clipped at all', EX.clipped_fraction(_grab(_now)[0]), 0.0)
+
+
+# --- a blown flicker-safe rung may not hand the election to a daylight one ---
+#
+# The daylight rungs are measured so the ladder has somewhere to fall to at run
+# time. They are not candidates for the number written to config.json, and the
+# function says so — but it used to say it last, to the tie set, with an `or`
+# after it, and clipping got to speak first. In a bright scene at the pinned
+# gain of 1.0 every flicker-safe rung clips, so the tie set was daylight rungs
+# only, the `or` fired, and 1042us went to config.json.
+#
+# 1042us against 16667us is sixteen times less light for the rest of the shift,
+# and `quiet_ladder(report, ceiling=1042)` is then empty — which scan_pi reads
+# as "no ladder was measured" and answers with the unmeasured guess. Measured on
+# this simulation, the old ordering does this in 10 of 32 sweeps and writes an
+# empty ladder in 6 of them.
+for _label, _base, _dark in (('light', CARD, False), ('dark', DARK_CARD, True)):
+    for _hz in (60, 240, 480):
+        _per = per_us_for(4167, _hz, _base)
+        _made = {}
+
+        def _bright_scene(us, p=_per, b=_base, m=_made, h=_hz):
+            if us not in m:
+                m[us] = lit(us, h, p, b)
+            return m[us]
+
+        _chosen, _report = EX.choose_exposure(
+            _bright_scene, candidates=EX.DAYLIGHT_SAFE + EX.FLICKER_SAFE,
+            prepare=lambda f, d=_dark: PL.preprocess(f, dark=d))
+        _where = '%s at %dHz' % (_label, _hz)
+        # Every flicker-safe rung really is blown here, which is the condition
+        # that used to hand the election away. If this stops being true the
+        # checks below are measuring nothing.
+        ok_('%s: a bright scene blows every flicker-safe rung' % _where,
+            all(r['clipped'] > EX.CLIPPED_FRACTION
+                for r in _report if r['exposure'] in EX.FLICKER_SAFE))
+        ok_('%s: ...and a rung long enough for a dark car is still elected (%dus)'
+            % (_where, _chosen), _chosen in EX.FLICKER_SAFE)
+        # The empty ladder is the other half of the damage and has to be
+        # asserted with the rung. scan_pi reads one as "no ladder was measured"
+        # and answers with the guess calibration exists to replace.
+        _ladder = EX.quiet_ladder(_report, ceiling=_chosen)
+        ok_('%s: ...and a ladder with the elected rung on it (%s)'
+            % (_where, _ladder), _ladder and _chosen in _ladder)
+        # At 60Hz there is genuinely nothing below to fall to — 8333us is half a
+        # cycle and every daylight rung is a smaller fraction of one — so the
+        # measured answer there is a ladder of one, and quiet_ladder's own
+        # caller prints "none: this screen bands at every shorter exposure".
+        # At 240 and 480 the shorter rungs divide the period and must survive.
+        if _hz > 60:
+            ok_('%s: ...with somewhere below it to fall (%s)' % (_where, _ladder),
+                len(_ladder) > 1)
+
 
 # --- gain tracks the phone dimming itself ----------------------------------
 g = EX.AutoGain(gain=1.5, every=6.0)
