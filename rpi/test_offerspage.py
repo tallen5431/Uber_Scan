@@ -225,6 +225,15 @@ FEEDS = {
                  'truncated': False, 'days': 7, 'hidden': 1,
                  'watched': {'saw': 8, 'kept': 8},
                  'unreadable': None, 'pairs': [], 'offers': VERDICTS},
+    # A window with rows and nothing countable in it: three misreads. The
+    # page takes its "nothing usable" path here, which used to build its own
+    # list and ignore the chips, the order and the search box.
+    'all aside': {'count': 3, 'total': 3, 'truncated': False, 'days': 7,
+                  'hidden': 0, 'watched': {'saw': 3, 'kept': 3},
+                  'unreadable': None, 'pairs': [],
+                  'offers': [offer(0, pay=1030.0, state='no', suspect=True),
+                             offer(1, accepted=True, pay=1184.0, suspect=True),
+                             offer(2, pay=1251.0, state='no', suspect=True)]},
     'weeks': {'count': len(WEEKS), 'total': len(WEEKS), 'truncated': False,
               'days': 30, 'hidden': 0, 'watched': {'saw': 21, 'kept': 21},
               'unreadable': None, 'pairs': [], 'offers': WEEKS},
@@ -263,6 +272,26 @@ const QUERIES = JSON.parse(queriesJson);
 // failure rather than as a page that silently rendered half.
 const STUB = (feed) => `
   window.__asked = [];
+  // How many times the expensive parts ran. advice.js assigns window.Advice
+  // once, after this script, so an accessor here sees it land and wraps the
+  // two entry points a keystroke must never reach: the replay behind the
+  // advice and the busy join over the whole window.
+  window.__calls = { advise: 0, busy: 0 };
+  (function () {
+    var held;
+    Object.defineProperty(window, 'Advice', {
+      configurable: true,
+      get: function () { return held; },
+      set: function (v) {
+        held = v;
+        if (v && typeof v.advise === 'function' && typeof v.busy === 'function') {
+          var a = v.advise, b = v.busy;
+          v.advise = function () { window.__calls.advise++; return a.apply(this, arguments); };
+          v.busy = function () { window.__calls.busy++; return b.apply(this, arguments); };
+        }
+      }
+    });
+  })();
   const REAL = window.fetch;
   window.fetch = function (url, opts) {
     window.__asked.push(String(url));
@@ -364,6 +393,7 @@ const TEXT = (sel) => {
     // whether the day headers survived — a ranking has no days.
     if (name === 'verdicts') {
       out[name].picks = {};
+      out[name].callsAtLoad = await page.evaluate(() => Object.assign({}, window.__calls));
       const peek = () => page.evaluate(() => {
         const n = document.getElementById('findNote');
         return { rows: [].slice.call(document.querySelectorAll('#log details.offer'))
@@ -388,6 +418,29 @@ const TEXT = (sel) => {
       await page.click('#sorts button[data-sort="perHour"]');
       await page.waitForTimeout(250);
       out[name].picks['took+perHour'] = await peek();
+      // ...and five keystrokes in the box, each past the 120ms debounce.
+      for (const ch of ['1', '0', '.', '0', '0']) {
+        await page.type('#find', ch);
+        await page.waitForTimeout(250);
+      }
+      out[name].callsAfterAll = await page.evaluate(() => Object.assign({}, window.__calls));
+    }
+    // The chips and the order on the nothing-usable path.
+    if (name === 'all aside') {
+      const rows = () => page.evaluate(() => ({
+        rows: [].slice.call(document.querySelectorAll('#log details.offer'))
+                 .map((d) => d.getAttribute('data-id')),
+        days: document.querySelectorAll('#log .day').length,
+        note: document.getElementById('findNote').hidden ? null
+          : (document.getElementById('findNote').textContent || '').replace(/\s+/g, ' ').trim() }));
+      out[name].asIs = await rows();
+      await page.click('#chips button[data-pick="took"]');
+      await page.waitForTimeout(250);
+      out[name].tookChip = await rows();
+      await page.click('#chips button[data-pick="all"]');
+      await page.click('#sorts button[data-sort="pay"]');
+      await page.waitForTimeout(250);
+      out[name].byPay = await rows();
     }
     // A chip that picks nothing, on the feed with no verdicts on its rows.
     if (name === 'took six') {
@@ -789,6 +842,17 @@ try:
     ok_('Longest ranks by minutes, ties to newest (%s)' % p['sort:minutes']['rows'][:2],
         p['sort:minutes']['rows'][0] == 'r0')
     ok_('Newest restores the day headers', p['sort:newest']['days'] >= 1)
+    # Twelve chip and sort presses and five keystrokes, and the expensive
+    # parts of the page ran for none of them. They used to run for every one:
+    # the whole render, measured at 150-224ms a keystroke over 3,000 offers on
+    # a desktop browser, and the Pi's own browser is several times slower.
+    at_load, after = v.get('callsAtLoad') or {}, v.get('callsAfterAll') or {}
+    ok_('the advice replay ran when the page loaded (%s)' % at_load.get('advise'),
+        (at_load.get('advise') or 0) >= 1)
+    ok_('...and the busy join too', (at_load.get('busy') or 0) >= 1)
+    eq('a chip, a sort or a keystroke re-runs neither',
+       (after.get('advise'), after.get('busy')),
+       (at_load.get('advise'), at_load.get('busy')))
     eq('a chip and a ranking compose', p['took+perHour']['rows'][0], 'r4')
     eq('...over the picked rows only', len(p['took+perHour']['rows']), 6)
     # A chip that picks nothing says so in a sentence of its own. The clause
@@ -798,6 +862,20 @@ try:
     eq('a chip picking nothing lists nothing', empty.get('rows'), 0)
     ok_('...and says so, grammatically (%r)' % (empty.get('note') or '')[:60],
         'The panel said PASS to nothing in this stretch' in (empty.get('note') or ''))
+
+    # --- the list on the nothing-usable path ------------------------------
+    #
+    # A window whose every row was set aside takes an early exit in render()
+    # that used to build its own list, so the chips, the order and the search
+    # box did nothing there. It goes through the same list code now.
+    aside_feed = got['all aside']
+    eq('every set-aside row is listed', len(aside_feed['asIs']['rows']), 3)
+    eq('the Took chip works on the nothing-usable path',
+       aside_feed['tookChip']['rows'], ['r1'])
+    ok_('...with the sentence (%r)' % (aside_feed['tookChip']['note'] or '')[:60],
+        '1 of 3 offers you marked as taken' in (aside_feed['tookChip']['note'] or ''))
+    eq('...and so does the order', aside_feed['byPay']['rows'], ['r2', 'r1', 'r0'])
+    eq('...without day headers', aside_feed['byPay']['days'], 0)
 
     # --- what the reader actually read -----------------------------------
     #

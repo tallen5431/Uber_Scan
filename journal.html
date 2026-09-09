@@ -578,6 +578,21 @@
 
   function dayKey(at) { return dayOf(at).toDateString(); }
 
+  // The window's rows by the driver's day, worked out once per load.
+  //
+  // Each day header used to filter the whole window for its own rows, so
+  // thirty headers over three thousand offers was ninety thousand dayKey()
+  // calls — a Date built and set twice for each — on every keystroke in the
+  // search box. Once here is three thousand.
+  function groupByDay(rows) {
+    var out = {};
+    rows.forEach(function (r) {
+      var day = dayKey(r.at);
+      (out[day] || (out[day] = [])).push(r);
+    });
+    return out;
+  }
+
   // Everything else this page prints is a number it worked out. A place is
   // text an OCR engine read off a photograph of a phone, which is the first
   // free-form string to reach innerHTML here — and a card that happens to
@@ -1846,6 +1861,9 @@
   }
 
   var lastData = null;
+  // What renderList draws from: the window as render() last saw it. Null
+  // until the first load has landed.
+  var view = null;
 
   function render(data) {
     lastData = data;
@@ -1971,9 +1989,13 @@
       var lastKept = kept.length ? kept[kept.length - 1] : null;
       var t0 = lastKept && typeof lastKept.target === 'number' ? lastKept.target : 25;
       var b0 = lastKept && typeof lastKept.band === 'number' ? lastKept.band : 15;
-      el.log.innerHTML = kept.slice(-LOG_MAX).reverse().map(function (r) {
-        return offerRow(r, new Date(r.at), t0, b0, busyBy[r.id], pairedBy[r.id]);
-      }).join('');
+      // Through the same list code as a full window, so the chips, the order
+      // and the search box work here too. They did not: this path built its
+      // own list and ignored all three.
+      lastBusy = busyBy;
+      view = { kept: kept, target: t0, band: b0, busyBy: busyBy,
+               pairedBy: pairedBy, data: data };
+      renderList();
       return;
     }
     showUnits(true);
@@ -2159,18 +2181,50 @@
     showTaken(mine, ticks, full, target, band);
 
     // --- the log ---
-    // Everything in the window, not a sample of it, because the reason to look
-    // at this list is to find one particular offer and check it against what
-    // the shift actually paid. A list that stops at twelve cannot do that.
-    //
-    // The ones set aside are here too, greyed and with the reason attached. An
-    // offer missing from the record with nothing to say why is precisely what
-    // makes a record impossible to reconcile — the driver would be left
-    // wondering whether they mis-remembered the job or the scanner lost it.
-    // Once, not twice. The list below and the note above it are two views of
-    // one answer, and running the filter again for the note is a second place
-    // for them to disagree.
+    // Drawn by renderList, from what this function hands it. The list is the
+    // one part of the page that the search box, the chips and the order
+    // change, and it used to be redrawn by running all of the above again —
+    // the busy join, the replay behind the advice, every chart — on every
+    // keystroke. Measured over 3,000 offers on a desktop browser: 150-224ms a
+    // keystroke, and the Pi's own browser is several times slower than that.
     lastBusy = busyBy;
+    view = { kept: kept, target: target, band: band, busyBy: busyBy,
+             pairedBy: pairedBy, data: data };
+    renderList();
+
+    showCaveats(data, setAside, newest, ticks);
+
+    // Said rather than only drawn. Everything above this point is a redraw
+    // with no event a screen reader can notice.
+    el.live.textContent = offers.length + ' offer'
+      + (offers.length === 1 ? '' : 's') + ' counted, typical '
+      + money(percentile(rates, 0.5), 0) + ' an hour.';
+  }
+
+  /* The list, and only the list.
+   *
+   * Everything in the window, not a sample of it, because the reason to look
+   * at this list is to find one particular offer and check it against what
+   * the shift actually paid. A list that stops at twelve cannot do that.
+   *
+   * The ones set aside are here too, greyed and with the reason attached. An
+   * offer missing from the record with nothing to say why is precisely what
+   * makes a record impossible to reconcile — the driver would be left
+   * wondering whether they mis-remembered the job or the scanner lost it.
+   *
+   * Reads `view`, which render() fills once per load, so a keystroke or a chip
+   * costs the filter, the sort and the rows, and nothing above them. Once, not
+   * twice: the list and the note above it are two views of one answer, and
+   * running the filter again for the note is a second place for them to
+   * disagree. */
+  function renderList() {
+    if (!view) return;
+    var kept = view.kept, target = view.target, band = view.band;
+    var busyBy = view.busyBy, pairedBy = view.pairedBy, data = view.data;
+    // Grouped the first time a list is drawn from this window and kept on it,
+    // so the grouping costs one pass per load rather than one per header per
+    // keystroke.
+    var byDay = view.byDay || (view.byDay = groupByDay(kept));
     var found = matching(kept);
     var shown = ordered(found);
     var byTime = sortBy === 'newest';
@@ -2202,7 +2256,7 @@
       var day = dayKey(r.at);
       if (byTime && day !== currentDay) {
         currentDay = day;
-        var ofDay = kept.filter(function (o) { return dayKey(o.at) === day; });
+        var ofDay = byDay[day] || [];
         // One set for the whole line. The median already excluded the rows set
         // aside; the money beside it did not, so a day carrying two misreads —
         // $1,184 and $1,251 are both real, from one recording — announced two
@@ -2242,14 +2296,6 @@
     if (!el.findNote.hidden) {
       el.findNote.innerHTML = foundNote(found, kept.length, q, target);
     }
-
-    showCaveats(data, setAside, newest, ticks);
-
-    // Said rather than only drawn. Everything above this point is a redraw
-    // with no event a screen reader can notice.
-    el.live.textContent = offers.length + ' offer'
-      + (offers.length === 1 ? '' : 's') + ' counted, typical '
-      + money(percentile(rates, 0.5), 0) + ' an hour.';
   }
 
   // "Today" has to mean today where the driver is. A trailing 24 hours folds
@@ -2408,7 +2454,7 @@
   var findTimer = null;
   el.find.addEventListener('input', function () {
     clearTimeout(findTimer);
-    findTimer = setTimeout(function () { if (lastData) render(lastData); }, 120);
+    findTimer = setTimeout(renderList, 120);
   });
 
   el.showHidden.addEventListener('click', function () {
@@ -2446,14 +2492,14 @@
     if (!button) return;
     pick = button.getAttribute('data-pick');
     pressOne(el.chips, button);
-    if (lastData) render(lastData);
+    renderList();
   });
   el.sorts.addEventListener('click', function (e) {
     var button = e.target.closest('button[data-sort]');
     if (!button) return;
     sortBy = button.getAttribute('data-sort');
     pressOne(el.sorts, button);
-    if (lastData) render(lastData);
+    renderList();
   });
 
   el.ranges.addEventListener('click', function (e) {
