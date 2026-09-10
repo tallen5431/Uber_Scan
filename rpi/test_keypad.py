@@ -168,6 +168,18 @@ const [base] = process.argv.slice(2);
   await page.waitForTimeout(150);
   out.afterToggling = await page.evaluate(
     k => JSON.parse(localStorage.getItem(k)), SETTINGS);
+  // A blank box is a box being retyped: the value already there stands. And
+  // a value outside the range is clamped, and the box then shows what was
+  // kept rather than what was typed.
+  await page.fill('#setTarget', '');
+  await page.waitForTimeout(120);
+  out.blankTarget = await page.evaluate(k => JSON.parse(localStorage.getItem(k)).target, SETTINGS);
+  await page.fill('#setBand', '60');
+  await page.dispatchEvent('#setBand', 'change');
+  await page.waitForTimeout(120);
+  out.clampedBand = { stored: await page.evaluate(k => JSON.parse(localStorage.getItem(k)).band, SETTINGS),
+                      shown: await page.inputValue('#setBand') };
+  await page.click('[data-close="settingsSheet"]');
 
   // --- a pickup pad is not an offer ----------------------------------------
   await open({ [SETTINGS]: JSON.stringify({ target: 25, band: 15, costPerMile: 0, pad: 10 }),
@@ -220,6 +232,12 @@ const [base] = process.argv.slice(2);
   out.backDeletes = await screen();
   await type(['next', 'next', 'next']);    // wraps
   out.wraps = (await screen()).active;
+  // ...but ⌫ from PAY stays on PAY. It used to wrap round to MILES, so one
+  // ⌫ too many while correcting the pay ate a digit of the distance.
+  await type(['clear', '1', '2', 'next', '2', '0', 'next', '5', '.', '5']);
+  await page.click('[data-field="pay"]');
+  await type(['back', 'back', 'back', 'back']);
+  out.backFromPay = await screen();
 
   // --- the physical keyboard, for a rig with one plugged in ----------------
   await open({ [DRAFT]: null });
@@ -235,6 +253,24 @@ const [base] = process.argv.slice(2);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(60);
   out.afterEscape = await screen();
+  // With a sheet open the keys are the sheet's: a digit does not type into
+  // the offer behind it and Escape closes the sheet rather than wiping the
+  // offer. And Tab moves focus, as it does on every other page.
+  await page.keyboard.type('15');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('20');
+  await page.click('#openSettings');
+  await page.keyboard.type('7');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(80);
+  out.escapeOnSheet = Object.assign(await screen(), {
+    sheetOpen: await page.evaluate(() => !document.getElementById('settingsSheet').hidden) });
+  const focused = () => page.evaluate(() => document.activeElement.tagName + ':'
+    + (document.activeElement.id || (document.activeElement.textContent || '').trim().slice(0, 12)));
+  const focusBefore = await focused();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  out.tabbed = { before: focusBefore, after: await focused() };
 
   // --- the draft, and how long it is worth keeping -------------------------
   // An offer is on the screen for seconds. One from an hour ago is a number
@@ -375,6 +411,34 @@ const [base] = process.argv.slice(2);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(600);
   out.loggedReload = await journal();
+
+  // --- the history says what was typed -------------------------------------
+  // With a pickup pad the rate includes it and the journal row carries the
+  // typed minutes; the history row said "33 min" for a card that said 23.
+  await open({ [SETTINGS]: JSON.stringify(Object.assign(JSON.parse(SEEDED), { pad: 10 })),
+               [DRAFT]: null, [HISTORY]: null });
+  await type(['1', '6', 'next', '2', '3', 'log']);
+  await page.waitForTimeout(400);
+  out.paddedHistory = await page.evaluate(k => JSON.parse(localStorage.getItem(k) || '[]')[0], HISTORY);
+  await page.click('#openHistory');
+  await page.waitForTimeout(150);
+  out.paddedList = await histText();
+  await page.click('[data-close="historySheet"]');
+
+  // --- a phone that has never had a rig --------------------------------------
+  // Served from a static host there is no rig, and every LOG used to end in
+  // "kept on this phone — the rig did not answer", about a machine that was
+  // never there. A rig that has answered once and does not now is still told.
+  await page.route('**/api/status', r => r.fulfill({ status: 404, contentType: 'text/plain', body: 'no' }));
+  await page.route('**/api/journal/ingest', r => r.fulfill({ status: 404, contentType: 'text/plain', body: 'no' }));
+  await open({ [SETTINGS]: SEEDED, [DRAFT]: null, [HISTORY]: null,
+               'uberscan.rig.seen': null, 'uberscan.unsent.v1': null });
+  await type(['3', '0', 'next', '6', '0', 'log']);
+  await page.waitForTimeout(500);
+  out.rigless = { toast: await page.evaluate(() => (document.getElementById('toast') || {}).textContent || ''),
+                  queued: await page.evaluate(() => JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length) };
+  await page.unroute('**/api/status');
+  await page.unroute('**/api/journal/ingest');
 
   // --- storage that will not answer ----------------------------------------
   // Private mode, a full quota, a browser with site data blocked. The page has
@@ -571,6 +635,19 @@ eq('digits typed on a keyboard land in the active field', typed.get('pay'), '$16
 eq('...and Enter moves on like NEXT', typed.get('minutes'), '23')
 eq('Backspace deletes', got.get('afterBackspace'), '2')
 eq('Escape clears the lot', (got.get('afterEscape') or {}).get('pay'), '$0')
+bp = got.get('backFromPay') or {}
+eq('backspacing past an empty PAY stays on PAY', bp.get('active'), 'pay')
+eq('...and leaves the distance typed alone', bp.get('miles'), '5.5')
+es = got.get('escapeOnSheet') or {}
+ok_('with a sheet open Escape closes it', es.get('sheetOpen') is False)
+eq('...and the offer behind it is untouched', (es.get('pay'), es.get('minutes')), ('$15', '20'))
+tb = got.get('tabbed') or {}
+ok_('Tab moves focus (%r -> %r)' % (tb.get('before'), tb.get('after')),
+    tb.get('after') and tb.get('after') != tb.get('before') and not tb['after'].startswith('BODY'))
+eq('a blanked Target keeps the value it had', got.get('blankTarget'), 30)
+cb = got.get('clampedBand') or {}
+eq('a band typed past its range is clamped', cb.get('stored'), 50)
+eq('...and the box shows what was kept', cb.get('shown'), '50')
 
 # --- the draft, and how long it is worth keeping ---------------------------
 draft = got.get('draftWritten') or {}
@@ -620,6 +697,13 @@ ok_('...and the local entry knows it arrived',
     bool(hist) and hist[0].get('sent') is True)
 ok_('with the rig out of reach the entry says so (%r)' % (got.get('keptToast') or ''),
     'did not answer' in (got.get('keptToast') or ''))
+ph = got.get('paddedHistory') or {}
+eq('the history row carries the minutes as typed, pad aside', ph.get('minutes'), 23)
+ok_('...and lists them (%r)' % (got.get('paddedList') or '')[:50], '23 min' in (got.get('paddedList') or ''))
+rl = got.get('rigless') or {}
+ok_('a phone that has never had a rig is not told the rig did not answer (%r)' % rl.get('toast'),
+    'did not answer' not in (rl.get('toast') or '') and 'Logged' in (rl.get('toast') or ''))
+eq('...though the row is kept for one', rl.get('queued'), 1)
 ok_('...in the history as well', 'kept here only' in (got.get('keptList') or ''))
 eq('...and nothing reached the journal meanwhile',
    len(got.get('journalWhileDown') or []) - before, 1)

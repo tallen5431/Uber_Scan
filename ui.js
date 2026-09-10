@@ -331,9 +331,13 @@
       lastState = 'empty';
     } else if (key === 'back') {
       if (entry[active] === '') {
-        // Backspace on an empty field steps back to the previous one.
+        // Backspace on an empty field steps back to the previous one — and
+        // stops at PAY. It used to wrap round to MILES, so one ⌫ too many
+        // while correcting the pay ate a digit of the distance already
+        // typed, and a stray ⌫ on an empty pad sent the next digits into
+        // the wrong field with the verdict stuck on ENTER OFFER.
         var i = FIELDS.indexOf(active);
-        active = FIELDS[(i + FIELDS.length - 1) % FIELDS.length];
+        if (i > 0) active = FIELDS[i - 1];
       } else {
         entry[active] = entry[active].slice(0, -1);
       }
@@ -372,10 +376,22 @@
 
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT') return;
+    // With a sheet open the keys belong to the sheet: Escape closes it, and
+    // nothing types into the offer behind it. Escape used to wipe the pay
+    // and minutes being typed and leave the sheet up; digits and ⌫ with
+    // focus on the Done button edited the hidden entry.
+    var sheet = document.querySelector('.sheet:not([hidden])');
+    if (sheet) {
+      if (e.key === 'Escape') { sheet.hidden = true; e.preventDefault(); }
+      return;
+    }
     if (e.key >= '0' && e.key <= '9') press(e.key);
     else if (e.key === '.') press('.');
     else if (e.key === 'Backspace') press('back');
-    else if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); press('next'); }
+    // Enter is NEXT. Tab is not: swallowed page-wide it meant a keyboard
+    // could never reach Targets, History, Offers or Camera, and the focus
+    // rings the stylesheet draws for exactly that were rings on nothing.
+    else if (e.key === 'Enter') press('next');
     else if (e.key === 'Escape') press('clear');
     else return;
     e.preventDefault();
@@ -411,7 +427,11 @@
     var logged = {
       t: Date.now(),
       pay: r.pay,
-      minutes: r.minutes,
+      // As typed, not with the pickup pad folded in: the journal row three
+      // lines down carries the typed minutes, and the offers page shows
+      // them, so the history listed "$16.00 · 33 min" for a card that said
+      // 23 and a driver looking for the 23-minute card did not find it.
+      minutes: r.typedMinutes,
       miles: r.miles,
       perHour: r.perHour,
       state: r.state,
@@ -454,6 +474,17 @@
    * for this page, and it goes on working exactly as it did. An entry that
    * does not arrive says so in the history; the next LOG, or the next open,
    * tries again. */
+  // Whether this phone has ever reached a rig. Set by an answer from one —
+  // its status at load, or a row it took — and never cleared: a rig that
+  // answered once and does not now is exactly the case worth a word.
+  var RIG_KEY = 'uberscan.rig.seen';
+  function rigSeen() {
+    try { return localStorage.getItem(RIG_KEY) === '1'; } catch (e) { return false; }
+  }
+  function rememberRig() {
+    try { localStorage.setItem(RIG_KEY, '1'); } catch (e) { /* private mode */ }
+  }
+
   function flushUnsent() {
     if (!window.JournalClient) return;
     JournalClient.flush().then(function (result) {
@@ -464,7 +495,14 @@
         }
       });
       if (changed) { saveHistory(); renderHistory(); }
-      if (!result.ok) {
+      // An answer, not the empty queue's own "nothing to send".
+      if (result.ok && result.sent.length) rememberRig();
+      // Only a phone that has ever had a rig to answer is told the rig did
+      // not. Served from GitHub Pages, as the README offers, there is no
+      // rig: every LOG ended in "N kept on this phone — the rig did not
+      // answer", over the top of "Logged $30/hr", for ever, about a machine
+      // that was never there.
+      if (!result.ok && rigSeen()) {
         var kept = history.filter(function (h) { return h.rowId && h.sent === false; }).length;
         if (kept) {
           toast(kept === 1 ? 'Kept on this phone — the rig did not answer'
@@ -555,12 +593,23 @@
   }
 
   function bindSetting(id, key, parse, min, max) {
-    document.getElementById(id).addEventListener('input', function (e) {
+    var field = document.getElementById(id);
+    field.addEventListener('input', function (e) {
       var v = parse(e.target.value);
-      if (!isFinite(v)) v = DEFAULTS[key];
+      // A blank box is a box being retyped, not a request for the default:
+      // backspacing 40 to nothing stored 25 at once, and a driver
+      // interrupted there had a target they never chose. The previous value
+      // stands until a number replaces it.
+      if (!isFinite(v)) return;
       settings[key] = Math.min(max, Math.max(min, v));
       saveSettings();
       render();
+    });
+    // ...and what was kept goes back into the box when the driver leaves
+    // it, so a value clamped to the range (60 in a band that stops at 50)
+    // and a blank both show the number that is actually in force.
+    field.addEventListener('change', function (e) {
+      e.target.value = settings[key];
     });
   }
 
@@ -602,6 +651,7 @@
   fetch('/api/status')
     .then(function (r) { return r.json(); })
     .then(function (s) {
+      if (s && s.ok !== false) rememberRig();
       var live = document.getElementById('toLive');
       if (live && s && s.scanner && s.scanner.enabled) live.hidden = false;
     })
