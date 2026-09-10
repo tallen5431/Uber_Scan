@@ -1043,7 +1043,7 @@ try:
                 ok_('...and offers the phone back at %s (%r)'
                     % (panel, phone['sceneLabel']),
                     'Phone' in phone['sceneLabel'])
-                if dashboard:
+                if dashboard and h >= 400:
                     # The whole point. A portrait phone in a landscape cell is
                     # bounded by height, so this only pays if it gets the
                     # height — and the picture it replaces was drawn at a third
@@ -1054,6 +1054,20 @@ try:
                     ok_('...taller than the row the scene view was boxed into '
                         'at %s (%.0fpx, was %.0f)' % (panel, phone['h'], phone['was']),
                         phone['h'] > phone['was'] + 40)
+                elif dashboard:
+                    # The 3.5" hat cannot afford that trade. Given every row,
+                    # the picture left the verdict a 279px column in which the
+                    # bar wrapped to 74px and a pair's stack line was painted
+                    # under the connection line. There the bar takes the width
+                    # back and the phone gets the verdict's row: 211px of 320,
+                    # which is still the whole phone and still not less than
+                    # the scene view's box.
+                    ok_('the phone takes the verdict\'s row at %s (%.0fpx of %.0f)'
+                        % (panel, phone['h'], phone['rowH']),
+                        phone['h'] > phone['rowH'] * 0.6)
+                    ok_('...and is no shorter than the scene view was boxed '
+                        'at %s (%.0fpx, was %.0f)' % (panel, phone['h'], phone['was']),
+                        phone['h'] >= phone['was'])
 
             # A line of prose has a width past which it stops being readable.
             # Widening the across-the-screen breakpoint to all of landscape put

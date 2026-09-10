@@ -137,7 +137,8 @@ def _emitted_keys():
 
 DRIVER = r'''
 const { chromium } = require('playwright');
-const [base, panelsJson, readingsJson] = process.argv.slice(2);
+const [base, panelsJson, readingsJson, framesJson] = process.argv.slice(2);
+const FRAMES = JSON.parse(framesJson || '{}');
 const PANELS = JSON.parse(panelsJson), READINGS = JSON.parse(readingsJson);
 
 // The page's own socket, replaced before its script runs. Everything above the
@@ -176,6 +177,19 @@ const LOOK = (sel) => {
     text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
   };
 };
+
+// The picture the rig sends once it has found the phone: portrait, and the
+// only shape the page lays out as a phone. Nothing on this test server writes
+// a frame, and without one the page is in the scene layout, which is not the
+// one a driver is looking at.
+const phoneFrame = async (page) => {
+  if (!FRAMES.portrait) return false;
+  await page.route('**/api/frame.*', (route) => route.fulfill({
+    status: 200, contentType: 'image/jpeg', body: Buffer.from(FRAMES.portrait, 'base64') }));
+  return true;
+};
+const framed = (page) => page.waitForFunction(
+  () => document.getElementById('view').naturalWidth > 0, null, { timeout: 10000 }).catch(() => {});
 
 (async () => {
   let browser;
@@ -469,10 +483,12 @@ const LOOK = (sel) => {
     });
     const page = await ctx.newPage();
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null,
                                { timeout: 10000 }).catch(() => {});
+    await framed(page);
     // The worst realistic shape: a range, the "beats finishing alone" clause,
     // a geography verdict, and a route link — everything competing for the row.
     await page.evaluate((r) => window.__es.push(r),
@@ -513,6 +529,16 @@ const LOOK = (sel) => {
                        line: Math.round(line),
                        shown: !pl.hidden } : null,
         rowClipped: row.scrollWidth > row.clientWidth + 1,
+        // ...and inside the verdict's own box, not painted over its bottom
+        // border and on into whatever is drawn below. On the 3.5" hat the
+        // phone layout left the verdict 192px for 225px of content, and this
+        // row — the one on the panel a driver presses — was under the
+        // connection line.
+        inVerdict: (() => {
+          const v = document.getElementById('verdict').getBoundingClientRect();
+          const r = row.getBoundingClientRect();
+          return r.bottom <= v.bottom - 1 && r.top >= v.top + 1;
+        })(),
         // The half that is MEANT to give way, and it has to actually be doing
         // so or the checks below prove nothing about priority.
         sumEllipsised: !!sum && sum.scrollWidth > sum.clientWidth + 1,
@@ -674,9 +700,11 @@ const LOOK = (sel) => {
       body: JSON.stringify({ ok: true, holding: false }) }));
     await page.route('**/api/delivered', (route) => route.fulfill({
       status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false }) }));
+    await phoneFrame(page);
     stage = 'snap: load';
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await framed(page);
     await page.waitForTimeout(600);
     // The stub's socket never opens on its own; the page treats a socket
     // that has not opened as "reconnecting", which is not what this is
@@ -759,6 +787,40 @@ const LOOK = (sel) => {
     out.replayAlone = await page.evaluate(() => ({
       conn: document.getElementById('conn').textContent.trim(),
       dot: document.getElementById('dot').classList.contains('on') }));
+    await page.close();
+  }
+
+  // --- the phone view is for a picture of a phone ---------------------------
+  //
+  // On its first boot the rig writes a landscape scene while it aims, and the
+  // page lands in the phone view. Laid out as a phone that picture squeezed
+  // the verdict to 153px and the bar's buttons to 24px at 800x480.
+  for (const shape of Object.keys(FRAMES)) {
+    stage = 'frame: ' + shape;
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } }).then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'aim',
+        scanner: { enabled: true, running: true, error: null },
+        last: null, lastAgeMs: null, heardAgeMs: 900, offer: null, holding: null }) }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 0, counted: 0, setAside: 0, took: 0,
+                             beforeClock: 0, unreadable: null, rolled: false, clockSet: true }) }));
+    await page.route('**/api/frame.*', (route) => route.fulfill({
+      status: 200, contentType: 'image/jpeg', body: Buffer.from(FRAMES[shape], 'base64') }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction(() => document.getElementById('view').naturalWidth > 0,
+                               null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    out['frame ' + shape] = await page.evaluate(() => ({
+      phoneMode: document.getElementById('viewMode').getAttribute('aria-pressed'),
+      phoneLayout: document.body.classList.contains('phoneview'),
+      verdictW: Math.round(document.getElementById('verdict').getBoundingClientRect().width),
+      imgW: document.getElementById('view').naturalWidth,
+      imgH: document.getElementById('view').naturalHeight,
+      note: document.getElementById('viewNote').textContent.trim() }));
     await page.close();
   }
 
@@ -997,11 +1059,29 @@ try:
     else:
         raise RuntimeError('the server never came up')
 
+    # Two pictures the rig can send: the landscape scene it writes while it
+    # is aiming, and the portrait phone it writes once it has found one.
+    FRAMES = {}
+    try:
+        import base64
+        import io
+        from PIL import Image
+        for name, size in (('landscape', (640, 480)), ('portrait', (573, 1000))):
+            buf = io.BytesIO()
+            Image.new('RGB', size, (44, 48, 56)).save(buf, format='JPEG', quality=70)
+            FRAMES[name] = base64.b64encode(buf.getvalue()).decode('ascii')
+    except ImportError:
+        # The stack row and the Set-box round trip are measured in the phone
+        # layout, which the page only takes for a portrait picture; with no
+        # picture to send they would be measured in the scene layout instead,
+        # which is not the one in the car.
+        skip('no PIL, so there is no frame to put the page in the phone layout')
     driver = os.path.join(work, 'dashboard.js')
     open(driver, 'w').write(DRIVER)
     readings = READINGS
     proc2 = subprocess.run(
-        ['node', driver, base, json.dumps(PANELS), json.dumps(READINGS)],
+        ['node', driver, base, json.dumps(PANELS), json.dumps(READINGS),
+         json.dumps(FRAMES)],
         env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
                  PW_EXES=json.dumps([
                      os.environ.get('CHROMIUM', ''),
@@ -1198,6 +1278,8 @@ try:
             continue
         ok_('%s: ...and the row itself is not clipped' % panel,
             not row.get('rowClipped'))
+        ok_('%s: ...and sits inside the verdict, not over its edge' % panel,
+            row.get('inVerdict'))
         # The priority has to be REAL, not just declared: the arithmetic is the
         # half that gives way, and if it is not actually being cut here then the
         # two checks below are passing on a row with room to spare and would say
@@ -1337,6 +1419,21 @@ try:
         ok_('Set box switches to the scene to draw on', not sn['viewDrawing'].get('phone'))
         eq('...without rewriting the remembered view', sn['viewDrawing'].get('stored'), None)
         ok_('...and Cancel brings the phone view back', sn['viewAfter'].get('phone'))
+
+    # --- the phone view is for a picture of a phone ------------------------
+    land = got.get('frame landscape') or {}
+    port = got.get('frame portrait') or {}
+    if land and port:
+        ok_('the page lands in the phone mode', land.get('phoneMode') == 'true')
+        ok_('...and a landscape scene arrived (%rx%r)' % (land.get('imgW'), land.get('imgH')),
+            (land.get('imgW') or 0) > (land.get('imgH') or 0))
+        ok_('...which is not laid out as a phone', not land.get('phoneLayout'))
+        ok_('...so the verdict keeps its width (%rpx)' % land.get('verdictW'),
+            (land.get('verdictW') or 0) >= 300)
+        ok_('...and the caption says the rig is still finding the phone (%r)' % land.get('note'),
+            'finds the phone' in (land.get('note') or ''))
+        ok_('a portrait phone is laid out as one', port.get('phoneLayout'))
+        ok_('...with the flattened-phone caption', 'flattened' in (port.get('note') or ''))
 
     # --- what the shift adds up to, on the row under the verdict ---------
     first = got.get('shiftFirst') or {}

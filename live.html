@@ -189,6 +189,14 @@
        The net line is the headline, in small type. Dropping that costs
        nothing a glance needs and buys the same line of height. */
     #verdict:has(#warn:not([hidden])) .working .net { display: none; }
+    /* The same line, for the same reason, when a pair is on screen. The stack
+       line is a row of its own under the address, and the card had no row to
+       give it: measured beside the phone on an 800x480 panel, the verdict's
+       contents ran 27px past its box, centred, so the word PASS started 4px
+       above the card's border and the stack line — the row a driver presses —
+       ended 2px below it. The net line is 32px there; without it the stack
+       line ends 11px inside the border. */
+    #verdict:has(#stack:not([hidden])) .working .net { display: none; }
     #raw, #viewNote { display: none; }
   }
 
@@ -218,6 +226,25 @@
        the three numbers underneath it are the ones not to trust. The headline
        and the reason for doubting it are the pair worth keeping. */
     #verdict:has(#warn:not([hidden])) .submetrics { display: none; }
+    /* The phone layout above gives the picture every row so that on an
+       800x480 panel the phone stands 468px tall. On the 3.5" hat that left the
+       verdict a 279px column, and measured with a phone on the glass: the
+       five-button bar wrapped to 74px, the verdict's row came out 192px for
+       205px of content before any pair was on screen, and with a pair the
+       stack line — the one row a driver presses — was painted under the
+       connection line, where nothing could reach it.
+
+       So here the bar and the connection line take the width back, which
+       puts the five buttons on one line, and the picture keeps the row that
+       is left: 122x211 rather than 177x314, on a screen where the verdict is
+       still the reason it is there. The headline gives up 19px of its 77 and
+       the working line its padding so the pair fits under them: 199px of
+       content inside the verdict's 207px, with the stack line in its own box
+       and every chip on it reachable. */
+    body.phoneview .connbar, body.phoneview .bottombar { grid-column: 1 / -1; }
+    body.phoneview #viewWrap { grid-row: 1; }
+    #perHour { font-size: min(12vw, calc((100cqw - 40px) / (var(--chars) * 0.62))); }
+    .working { padding: 0 0 2px; }
   }
 
   /* The number is sized to the panel and to how many characters it has to
@@ -1806,10 +1833,24 @@
   var framePending = false;
   var watchdog = null;
 
+  // The phone view's layout — the picture height-first beside a narrow
+  // verdict — is for a portrait picture of a phone. The rig writes a
+  // landscape scene while it is aiming, which is what a rig on its first boot
+  // does for as long as it takes, and laid out as a phone that picture
+  // squeezed the verdict to 153px and the bar's buttons to 24px at 800x480.
+  // The class follows the picture, not the button.
+  function layoutForFrame() {
+    var portrait = view.naturalHeight > view.naturalWidth;
+    document.body.classList.toggle('phoneview', phoneView && portrait);
+    return portrait;
+  }
+
   function sawAFrame() {
     viewWrap.classList.remove('gone');
+    var portrait = layoutForFrame();
     viewNote.textContent = phoneView
-      ? "the phone's screen, flattened"
+      ? (portrait ? "the phone's screen, flattened"
+                  : 'camera view while the rig finds the phone')
       : 'camera view · inset is what the reader sees';
     clearTimeout(watchdog);
     watchdog = null;
@@ -1916,7 +1957,7 @@
   var viewModeBtn = document.getElementById('viewMode');
 
   function applyViewMode() {
-    document.body.classList.toggle('phoneview', phoneView);
+    layoutForFrame();
     viewModeBtn.setAttribute('aria-pressed', phoneView ? 'true' : 'false');
     // The label says what pressing it gets you, not what you are looking at.
     viewModeBtn.textContent = phoneView ? '⛶ Scene' : '⛶ Phone';
