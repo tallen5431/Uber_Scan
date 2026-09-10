@@ -120,23 +120,27 @@ def section_of(key):
 start = re.search(r'^ExecStart=(.*)$', unit, re.M)
 ok_('the unit has an ExecStart', start is not None)
 command = start.group(1) if start else ''
-ok_('it starts the autopilot, which can calibrate an uncalibrated rig',
-    'autopilot.py' in command)
-ok_('...and not the scanner directly, which cannot',
-    'scan_pi.py' not in command)
-# A unit naming a file that is not there fails on a machine with no console.
-named = [word for word in command.split() if word.endswith('.py')]
+# The unit runs the web server, which spawns the autopilot. It used to run
+# the autopilot alone, and a rig booted that way had a driving screen that
+# could never show a verdict: readings reach the panel only through the
+# server that spawned the scanner.
+ok_('it starts the web server, which is where the panel gets its verdicts',
+    'server.js' in command)
+ok_('...and not the scanner directly', 'scan_pi.py' not in command
+    and 'autopilot.py' not in command)
+ok_('...with node found on this machine (%s)' % command.split()[0],
+    os.path.exists(command.split()[0]) if command else False)
+named = [word for word in command.split() if word.endswith('.js')]
 eq('...naming exactly one script', len(named), 1)
 ok_('...that exists in this checkout (%s)' % (os.path.basename(named[0]) if named else ''),
-    bool(named) and os.path.exists(
-        os.path.join(ROOT, 'rpi', os.path.basename(named[0]))))
-ok_('...passed the flag that makes it speak', '--speak' in command)
+    bool(named) and os.path.exists(os.path.join(ROOT, os.path.basename(named[0]))))
+ok_('...told to speak', re.search(r'^Environment=SCANNER_SPEAK=1$', unit, re.M) is not None)
 
-# The web server spawns the same entry point, so the two cannot drift into
-# starting different things and fighting over the camera in different ways.
+# The web server spawns the autopilot, which can calibrate an uncalibrated
+# rig, and reads SCANNER_SPEAK to decide whether it speaks.
 server = open(os.path.join(ROOT, 'server.js')).read()
-ok_('the web server spawns the same entry point',
-    "'autopilot.py'" in server and 'autopilot.py' in command)
+ok_('the web server spawns the autopilot',
+    "'autopilot.py'" in server and 'SCANNER_SPEAK' in server)
 
 # --- and how it survives a Pi that is not ready ---------------------------
 eq('the restart limit is in the section systemd reads it from',
@@ -155,7 +159,7 @@ ok_('it runs as the invoking user rather than root',
 ok_('...from wherever the script was run, not a path baked in at authoring time',
     re.search(r'^WorkingDirectory=' + re.escape(project) + '$', unit, re.M) is not None)
 ok_('...and starts the copy that lives there',
-    re.search(r'^ExecStart=\S+ ' + re.escape(project) + r'/rpi/\S+\.py', unit, re.M)
+    re.search(r'^ExecStart=\S+ ' + re.escape(project) + r'/server\.js$', unit, re.M)
     is not None)
 
 # --- SPEAK=0 is the other supported way to run it -------------------------
@@ -167,8 +171,22 @@ quiet = subprocess.run(
     capture_output=True, text=True, timeout=60)
 eq('SPEAK=0 installs too', quiet.returncode, 0)
 quiet_unit = open(unit_path).read() if os.path.exists(unit_path) else ''
-ok_('...and leaves the speech flag off', '--speak' not in quiet_unit)
-ok_('...while still starting the autopilot', 'autopilot.py' in quiet_unit)
+ok_('...and leaves the speech off', re.search(r'^Environment=SCANNER_SPEAK=0$', quiet_unit, re.M) is not None)
+ok_('...while still starting the server', 'server.js' in quiet_unit)
+
+# Flags for the scanner reach it through the server.
+os.remove(unit_path)
+flagged = subprocess.run(
+    ['bash', run_me],
+    env=dict(os.environ, PATH=stub + os.pathsep + os.environ.get('PATH', ''),
+             SUDO_USER='driver', SPEAK='1', ARGS='--keep-scans --no-track'),
+    capture_output=True, text=True, timeout=60)
+eq('ARGS installs too', flagged.returncode, 0)
+flagged_unit = open(unit_path).read() if os.path.exists(unit_path) else ''
+ok_('...and carries the flags to the scanner',
+    re.search(r'^Environment=SCANNER_ARGS=--keep-scans --no-track$', flagged_unit, re.M) is not None)
+ok_('...which the server hands to the autopilot',
+    'args.concat(extra)' in server)
 
 # --- and it actually asked systemd to do something ------------------------
 log = os.path.join(work, 'systemctl.log')

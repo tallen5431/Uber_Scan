@@ -188,7 +188,14 @@ function startScanner() {
   var cmd = process.env.SCANNER_CMD;
   var args = cmd ? [] : [path.join(ROOT, 'rpi', 'autopilot.py'), '--json'];
   var bin = cmd || 'python3';
-  if (cmd) args = process.env.SCANNER_ARGS ? process.env.SCANNER_ARGS.split(' ') : [];
+  // SCANNER_ARGS is the whole command line under SCANNER_CMD (the tests use
+  // it for a stand-in scanner) and extra flags for the autopilot otherwise —
+  // --keep-scans, --no-track, --screen-fps — which had no route at all under
+  // `npm start` or the service, though the README documents every one.
+  var extra = process.env.SCANNER_ARGS
+    ? process.env.SCANNER_ARGS.split(' ').filter(function (a) { return a; }) : [];
+  if (cmd) args = extra;
+  else args = args.concat(extra);
   if (process.env.SCANNER_SPEAK !== '0' && !cmd) args.push('--speak');
 
   scanner.proc = spawn(bin, args, { cwd: ROOT });
