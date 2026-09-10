@@ -304,8 +304,17 @@ function startScanner() {
         // mark. Cleared by nothing: the last offer stays markable until the
         // next one replaces it.
         if (read.offer && typeof read.offer.id === 'string') {
+          // The same card read again — a fuller reading of it, or the scanner
+          // resuming it after a restart — replaces what is on record and
+          // keeps the mark; a different card starts afresh, and is the one
+          // moment the pairing below is written. Before this every restart
+          // mid-card wrote a second pair row for the same id.
+          var sameCard = scanner.offer && scanner.offer.id === read.offer.id;
+          if (sameCard && scanner.offer.accepted !== undefined) {
+            read.offer.accepted = scanner.offer.accepted;
+          }
           scanner.offer = read.offer;
-          scanner.offerAt = Date.now();
+          if (!sameCard) scanner.offerAt = Date.now();
           // ...and if there is an order in the car, WRITE THE PAIRING DOWN.
           //
           // Without this a shift produces no evidence about the one feature it
@@ -325,7 +334,7 @@ function startScanner() {
           // that walks this file already knows to skip it — including the
           // scanner's own resume(), which must never mistake an annotation for
           // the last offer.
-          recordPairing(scanner.offer, Date.now());
+          if (!sameCard) recordPairing(scanner.offer, Date.now());
         }
         // The destination, read off the screen that comes AFTER the accept.
         //
@@ -881,9 +890,16 @@ var MAX_SYNC_BODY = 8 * 1024 * 1024;
 // starts requiring an X-Sync-Token header that matches.
 var SYNC_TOKEN = process.env.SYNC_TOKEN || '';
 
+// Decoded by Node's own StringDecoder rather than chunk by chunk. `text +=
+// chunk` on a Buffer stringifies each TCP segment on its own, so a two-byte
+// character split across two segments — an 'é' in a place name, sent over car
+// wifi in more than one packet — arrived as two replacement characters and
+// was stored that way for good, because the row's identity is its id and the
+// browser's next re-send of the correct bytes was refused as a duplicate.
 function readBody(req, cap, done) {
   var text = '';
   var over = false;
+  req.setEncoding('utf8');
   req.on('data', function (chunk) {
     if (over) return;
     text += chunk;
@@ -896,6 +912,7 @@ function readBody(req, cap, done) {
 function readJsonBody(req, done) {
   var text = '';
   var over = false;
+  req.setEncoding('utf8');
   req.on('data', function (chunk) {
     if (over) return;
     text += chunk;
@@ -1338,8 +1355,17 @@ function readJournal(done) {
           }
           buf = buf.slice(mark.length);
         }
-        var rows = grew ? c.rows : [];
-        if (grew && c.pending) rows.length -= c.pending;   // the line that was mid-write
+        // A COPY of the cached rows, never the cached array itself. Two
+        // reads in flight after one append both start from the same cache,
+        // and pushing onto its array from both left every new row in it
+        // twice for the rest of the process: the offers page's tally
+        // doubled, a pairing listed twice, /api/journal/newest reporting
+        // more rows than the file held — which is the number sync.py
+        // reconciles against. Measured: three concurrent reads after two
+        // appended rows left `have` at 9 for a file of 5 lines. Each reader
+        // builds its own array now and whichever finishes last stores a
+        // correct one. The mid-write line is taken back at the same time.
+        var rows = grew ? c.rows.slice(0, c.rows.length - (c.pending || 0)) : [];
         var cut = buf.lastIndexOf(10);                      // the last newline
         parseLines(buf.slice(0, cut + 1).toString('utf8'), rows);
         var pending = parseLines(buf.slice(cut + 1).toString('utf8'), rows);
@@ -1677,6 +1703,21 @@ function route(req, res) {
         //
         // Only when it names that offer. A mark for anything else is about a
         // row on the offers page and says nothing about what is on this screen.
+        //
+        // Or the offer the panel sends with the mark. After a server restart
+        // mid-shift the offer on record is gone — it is process memory — but
+        // the panel still shows "Took $10.00?" for it and the driver presses
+        // it. The mark was written and no order went in the car: Drop and
+        // Dropoff never appeared and the next card was judged alone, on the
+        // one path this feature exists for. The panel knows the offer it is
+        // marking, so it says, and that stands in when nothing is on record.
+        if (note.kind === 'mark' && note.accepted !== undefined
+            && !(scanner.offer && scanner.offer.id === note.id)
+            && body.offer && typeof body.offer === 'object'
+            && body.offer.id === note.id && typeof note.id === 'string') {
+          scanner.offer = Object.assign({}, body.offer);
+          scanner.offerAt = scanner.offerAt || Date.now();
+        }
         if (note.kind === 'mark' && scanner.offer && scanner.offer.id === note.id
             && note.accepted !== undefined) {
           scanner.offer.accepted = note.accepted;
@@ -1708,7 +1749,15 @@ function route(req, res) {
               // drift.
               doubt: scanner.offer.doubt || null,
               uncosted: !!scanner.offer.uncosted,
-              acceptedAt: Date.now()
+              // From when the card was on the screen, not from the press.
+              // The panel keeps "Took?" for the last offer however old it
+              // is, so a mark can be hours late — the driver ticking last
+              // night's job the next morning — and a hold dated from the
+              // press would then stack the morning's first offer onto a
+              // job finished at midnight. Dated from the card, holding()
+              // expires it on the card's own clock, which for a prompt
+              // press is the same moment.
+              acceptedAt: scanner.offerAt || Date.now()
             };
           } else {
             // Through holding() as well: taking the mark back off an order the
@@ -2146,7 +2195,13 @@ function route(req, res) {
         startedAt: scanner.started,
         error: scanner.error
       },
-      last: scanner.last,
+      // A copy re-stacked against the hold as it is NOW, exactly as the
+      // event stream's replay does. broadcast() stacks the stored reading
+      // itself, so served raw it carried the pair line computed at read
+      // time: press Drop and reload, and the panel showed "+ $25–50/hr with
+      // the one you have" under the verdict while the Drop button beside it
+      // was hidden because nothing was held.
+      last: scanner.last ? withStack(Object.assign({}, scanner.last), Date.now()) : null,
       // How old those two are, in milliseconds, measured entirely on this
       // machine's clock.
       //
@@ -2369,7 +2424,14 @@ function route(req, res) {
       // the same rows, and the page says how many there are.
       var beforeClock = 0;
       offers = offers.filter(function (r) {
-        if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) { beforeClock += 1; return false; }
+        // Hidden ones are not counted, because shiftSummary does not count
+        // them either, and the two pages printed different figures for the
+        // same file: 2 here, 1 on the driving screen, over one hidden test
+        // card read before NTP arrived.
+        if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) {
+          if (!r.hidden) beforeClock += 1;
+          return false;
+        }
         return !floor || (r.at || 0) >= floor;
       });
       var hidden = offers.filter(function (r) { return r.hidden; }).length;
@@ -2397,6 +2459,11 @@ function route(req, res) {
       // of scanning and the page wants the total, not the series.
       var watched = { saw: 0, kept: 0 };
       seen.forEach(function (r) {
+        // The same clock rule as the offers, or on All — where `floor` is
+        // zero — the cards tallied before NTP set the clock were counted as
+        // watched while every offer from that stretch was set aside, and the
+        // fraction recorded read lower than it was.
+        if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) return;
         if (floor && (r.at || 0) < floor) return;
         watched.saw += r.saw || 0;
         watched.kept += r.kept || 0;
