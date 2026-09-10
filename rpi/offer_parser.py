@@ -165,9 +165,12 @@ PAY_CHIP = re.compile(
 LEG = re.compile(
     r'(?:(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
     r'\s*[^\s\w()]{1,3}\s*)?'
-    r'(?:(\d{1,2})\s*h(?:r|rs|our|ours)?\s*)?'
+    r'(?:(' + DC + r'{1,2})\s*h(?:r|rs|our|ours)?\s*)?'
     r'(' + DC + r'{1,3})\s*m[il1|]n(?:s|ute|utes)?\b'
-    r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b\s*\)?)?',
+    # ...and the trailing distance is not a badge's: "20 min trip 4 mi from
+    # fast charger" with the trip's bracket lost. LONE_MILES has refused
+    # "from" since it was written; this window did not.
+    r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b(?!\s*from)\s*\)?)?',
     re.IGNORECASE | ASCII)
 
 # ...and the number in front of it has to contain a real digit. "SI min" is two
@@ -608,6 +611,11 @@ def find_legs(text):
         mins = to_number(m.group(3))
         if mins is None or not HAS_DIGIT.search(m.group(3)):
             continue
+        # An hour unit whose number has no real digit — "l hr" — is a leg
+        # that did not read, not a leg with no hours; matched, it dropped
+        # sixty minutes and called a ten-minute job whole.
+        if m.group(2) is not None and not HAS_DIGIT.search(m.group(2)):
+            continue
         minutes = (to_number(m.group(2)) or 0) * 60 + mins
         if minutes <= 0 or minutes > 600:
             continue
@@ -779,6 +787,11 @@ def is_whole(parsed):
     # time AND short a distance, which flatters the rate twice. Another frame is
     # the answer, exactly as above.
     if parsed.get('shortATime'):
+        return False
+    # A shop order whose item count did not read is not finished either: the
+    # count is what the shopping allowance is charged on, and another frame
+    # can still supply it.
+    if parsed.get('shop') is True and parsed.get('items') is None:
         return False
     if parsed.get('hasTotal') or any(
             leg.get('isTotal') for leg in (parsed.get('legDetail') or [])):
@@ -1846,7 +1859,11 @@ def rate(parsed, settings=None):
     if card_minutes is None or card_minutes <= 0:
         return {'ready': False, 'state': 'empty'}
 
-    shop_minutes = (parsed['items'] or 0) * seconds_per_item / 60.0
+    # Not on a deadline card: DoorDash prints "4 items" on a restaurant
+    # pickup whose time to the deadline already includes the counter wait.
+    # A shop order is charged whichever way it states its time.
+    shop_minutes = ((parsed['items'] or 0) * seconds_per_item / 60.0
+                    if (parsed.get('shop') is True or not from_deadline) else 0.0)
     minutes = card_minutes + pad + shop_minutes
     # A trip that takes no time pays infinitely well, which is the kind of
     # arithmetic that ends in an ACCEPT on nonsense. parse() will not produce a

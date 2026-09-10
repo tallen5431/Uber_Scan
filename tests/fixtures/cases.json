@@ -1320,6 +1320,36 @@
     "legs": 1,
     "milesUncertain": false
    }
+  },
+  {
+   "name": "an hour read as a lookalike is a leg that did not read",
+   "_why": "'l hr 10 min' matched nothing for the hour and went on to the minutes: a seventy-minute shop order read as a ten-minute job, whole, no doubt, $141/hr ACCEPT. The hour group takes lookalikes now and the leg is refused when it has no real digit, so the next frame supplies it.",
+   "text": "Shop & Deliver $25.00 30 items l hr 10 min (4.6 mi) total",
+   "expect": {
+    "pay": 25.0,
+    "items": 30,
+    "complete": false
+   }
+  },
+  {
+   "name": "...and the same card read properly is seventy minutes",
+   "text": "Shop & Deliver $25.00 30 items 1 hr 10 min (4.6 mi) total",
+   "expect": {
+    "pay": 25.0,
+    "minutes": 70,
+    "miles": 4.6,
+    "items": 30,
+    "complete": true
+   }
+  },
+  {
+   "name": "a charger badge is not the trip's distance",
+   "_why": "With the trip leg's bracket lost to glare, '20 min trip 4 mi from fast charger' put the badge's four miles on the trip. The away leg's distance is all the card still says.",
+   "text": "$16.05 5 min (1.2 mi) away 20 min trip 4 mi from fast charger",
+   "expect": {
+    "pay": 16.05,
+    "miles": 1.2
+   }
   }
  ],
  "rate": [
@@ -1644,6 +1674,33 @@
    "expect": {
     "state": "doubt",
     "doubt": "rate"
+   }
+  },
+  {
+   "name": "the shopping allowance is charged on a card that gives a duration",
+   "text": "$8.00 4 items 20 min (0.6 mi) total",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0,
+    "secondsPerItem": 90
+   },
+   "expect": {
+    "shopMinutes": 6
+   }
+  },
+  {
+   "name": "...and not on a delivery card whose deadline already includes the counter wait",
+   "_why": "DoorDash prints '4 items' on a restaurant order and states a deadline instead of a duration; the time to the deadline already includes the wait at the counter, and charging six minutes of shopping on top took a real $23.46/hr CLOSE CALL to $18.05/hr PASS.",
+   "text": "Deliver by 6:39 PM Cherry Cricket 4 items 0.6 mi $8.00",
+   "settings": {
+    "target": 25,
+    "costPerMile": 0,
+    "secondsPerItem": 90,
+    "nowMinutes": 979
+   },
+   "expect": {
+    "shopMinutes": 0,
+    "fromDeadline": true
    }
   }
  ],
@@ -2049,6 +2106,13 @@
     "minutes": 3.0,
     "miles": 1.0,
     "expect": null
+   },
+   {
+    "name": "an infinite distance",
+    "pay": 12,
+    "minutes": 20,
+    "miles": "@inf",
+    "expect": "speed"
    }
   ],
   "round2": [
@@ -2592,6 +2656,27 @@
    "name": "a labelled leg robbed of its distance is still not whole",
    "text": "$16.05 2.5 mi to the pickup zone 25 min away 17 min trip",
    "expect": false
+  },
+  {
+   "name": "a trip leg that lost its bracket does not borrow the charger badge's miles",
+   "text": "$16.05 5 min (1.2 mi) away 20 min trip 4 mi from fast charger",
+   "expect": false
+  },
+  {
+   "name": "...and with its own bracket it is whole, badge and all",
+   "text": "$16.05 5 min (1.2 mi) away 20 min (7.3 mi) trip 4 mi from fast charger",
+   "expect": true
+  },
+  {
+   "name": "a shop order whose item count did not read is not finished",
+   "_why": "The count is what the shopping allowance is charged on. Lost, the same card rated $24.74/hr over 38 minutes instead of $16.79/hr over 56, and a green ACCEPT for a job that shops for twelve things.",
+   "text": "Shop & Deliver $18.40 38 min (9.1 mi) total",
+   "expect": false
+  },
+  {
+   "name": "...and with its count it is",
+   "text": "Shop & Deliver $18.40 12 items (12 units) 38 min (9.1 mi) total",
+   "expect": true
   }
  ]
 }

@@ -320,9 +320,14 @@
   var LEG = new RegExp(
     '(?:(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b' +
     '\\s*[^\\s\\w()]{1,3}\\s*)?' +                 // distance, then the card's bullet
-    '(?:(\\d{1,2})\\s*h(?:r|rs|our|ours)?\\s*)?' +   // optional hours
+    '(?:(' + DC + '{1,2})\\s*h(?:r|rs|our|ours)?\\s*)?' +   // optional hours, lookalikes too
     '(' + DC + '{1,3})\\s*m[il1|]n(?:s|ute|utes)?\\b' +
-    '(?:[^(\\d]{0,6}\\(?\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b\\s*\\)?)?',
+    // ...and the trailing distance is not a badge's. "20 min trip 4 mi from
+    // fast charger": with the trip's own bracket lost to glare, the charger
+    // badge's 4 miles sat six characters past "min" and was charged as the
+    // trip. LONE_MILES has refused "from" since it was written; this
+    // window did not.
+    '(?:[^(\\d]{0,6}\\(?\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b(?!\\s*from)\\s*\\)?)?',
     'gi'
   );
 
@@ -844,6 +849,12 @@
     var legs = [], m;
     LEG.lastIndex = 0;
     while ((m = LEG.exec(text)) !== null) {
+      // An hour unit whose number has no real digit — "l hr", the lookalike
+      // this file calls the commonest there is — is a leg that did not read,
+      // not a leg with no hours. Matched, it silently dropped sixty minutes:
+      // "l hr 10 min (4.6 mi) total" read as a ten-minute job, whole, no
+      // doubt, $141/hr ACCEPT. Refused, the next frame supplies it.
+      if (m[2] !== undefined && m[2] !== null && !/\d/.test(String(m[2]))) continue;
       var hours = toNumber(m[2]) || 0;
       var mins = toNumber(m[3]);
       // The number has to contain a real digit. "SI min" is two guesses
@@ -1017,6 +1028,11 @@
     // leg that lost its minutes was dropped whole, so the journey is short a
     // time AND short a distance, which flatters the rate twice.
     if (parsed.shortATime) return false;
+    // A shop order whose item count did not read is not finished either.
+    // The count is what the shopping allowance is charged on, and with it
+    // lost the same card rated $24.74/hr CLOSE CALL over 38 minutes instead
+    // of $16.79/hr PASS over 56. Another frame can still supply the count.
+    if (parsed.shop === true && (parsed.items === null || parsed.items === undefined)) return false;
     if (parsed.hasTotal) return true;
     for (var i = 0; i < detail.length; i++) {
       if (detail[i] && detail[i].isTotal) return true;
@@ -1482,7 +1498,11 @@
     if (pay / (Math.max(minutes, SANE_RATE_OVER_MINUTES) / 60) > SANE_RATE) {
       return 'rate';
     }
-    if (typeof miles === 'number' && isFinite(miles) && miles >= 1.0
+    // No isFinite: an infinite distance is judged by the bound like any
+    // other, as the Python port judges it. NaN fails every comparison on
+    // its own. The two ports answered this differently and the corpus is
+    // what keeps them the same.
+    if (typeof miles === 'number' && miles >= 1.0
         && minutes > 0 && miles / (minutes / 60) > SANE_MPH) return 'speed';
     return null;
   }
@@ -1513,7 +1533,14 @@
       return { ready: false, state: 'empty' };
     }
 
-    var shopMinutes = (parsed.items || 0) * secondsPerItem / 60;
+    // Not on a deadline card. DoorDash prints "4 items" on a restaurant
+    // pickup and states a deadline instead of a duration; the time to the
+    // deadline already includes the wait at the counter, and charging the
+    // allowance on top took a real $23.46/hr CLOSE CALL to $18.05/hr PASS
+    // on a card nobody shops for. A shop order is charged whichever way it
+    // states its time.
+    var shopMinutes = (parsed.shop === true || !fromDeadline)
+      ? (parsed.items || 0) * secondsPerItem / 60 : 0;
     var minutes = cardMinutes + pad + shopMinutes;
     // A trip that takes no time pays infinitely well, which is the kind of
     // arithmetic that ends in an ACCEPT on nonsense. parse() will not produce
