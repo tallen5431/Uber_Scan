@@ -19,6 +19,12 @@
   // acting on a glitch. Cheap to require when a read takes ~200ms.
   var AGREE_TO_LOCK = 2;
   var MISSES_TO_RESET = 3;
+  // How long after the last sight of a card a lock on the same payout is
+  // still that card and not a new offer. The rig's journal uses the same
+  // ninety seconds for the same question (RESUME_WINDOW_MS in rpi/journal.py):
+  // a card sits on the screen far longer than the gap a glare frame or a hand
+  // makes in seeing it.
+  var RESUME_MS = 90 * 1000;
 
   // How big a picture the reader is handed, which is not a detail and is not
   // only about speed.
@@ -64,6 +70,10 @@
   var running = false, frozen = false, busy = false;
   var lastSig = null, agree = 0, misses = 0, locked = false;
   var lastResult = null;
+  // The last card that went to the journal — its payout, and when this page
+  // last saw it. Not cleared when the lock is: that is what separates the
+  // card from the lock. See record().
+  var recorded = null;
 
   var el = {};
   ['video', 'frame', 'reticle', 'verdict', 'verdictLabel', 'perHour', 'rawRate', 'vPay', 'vMin',
@@ -353,6 +363,8 @@
       var r = judged(parsed);
       buzz(r.state === 'go' ? [18, 40, 18] : [45]);
       record(parsed, r);
+    } else {
+      sighted(parsed);
     }
   }
 
@@ -367,11 +379,41 @@
    * one. `browser: true` says what made it; the rig's own rows never carry
    * it. The row, the queue and the sending are journal-client.js's, shared
    * with the keypad, and a phone with no rig near it keeps the row for the
-   * next lock or the next open. */
+   * next lock or the next open.
+   *
+   * Once per CARD, which is not once per lock. The lock is dropped after
+   * three frames that read nothing — a hand across the lens, a glare frame,
+   * the phone tilting — and the card is still there when the frames agree
+   * again, so the second lock on it was a second row: the same offer twice
+   * in the journal, and in every median the offers page works out. The rig's
+   * journal was built against exactly this ("one glare frame during the
+   * resample burst would re-arm the gate and record the same card twice"),
+   * and this is its rule: the payout identifies the offer, and the same
+   * payout seen again within ninety seconds of the last sight of it is the
+   * same card. What `recorded` remembers is the card, and a lost lock does
+   * not touch it. Two different offers paying the same to the cent inside
+   * ninety seconds is possible and rare; a duplicate for every glare frame
+   * was neither. */
   function record(parsed, r) {
     if (!window.JournalClient || !r || !r.ready || r.state === 'doubt') return;
+    var now = Date.now();
+    if (recorded && parsed.pay === recorded.pay && now - recorded.at <= RESUME_MS) {
+      recorded.at = now;
+      return;
+    }
+    recorded = { pay: parsed.pay, at: now };
     JournalClient.keep(JournalClient.row(parsed, r, settings, { browser: true, prefix: 'p' }));
     JournalClient.flush();
+  }
+
+  // The card that went to the journal is still in front of the camera. Any
+  // reading of its payout says so — a fragment too, since the rig counts a
+  // partial reading of the same card as the card — and the ninety seconds
+  // run from the last of them, not from the row.
+  function sighted(parsed) {
+    if (recorded && parsed && parsed.complete && parsed.pay === recorded.pay) {
+      recorded.at = Date.now();
+    }
   }
 
   /* A failed read is a read that found nothing, not a read that did not happen.
@@ -775,8 +817,21 @@
       // A lock here records, as a lock in the loop does. The harness has no
       // three agreeing frames to offer, so the whole card is the lock.
       if (locked) record(out.parsed, judged(out.parsed));
+      else sighted(out.parsed);
       render(out.ms);
       return { parsed: out.parsed, ms: out.ms, rate: judged(out.parsed) };
+    },
+    /* The loop's own path, frame by frame, with a reading already in hand:
+       this is where a lock is lost and found again on the same card, which a
+       single readImage() cannot do. */
+    consider: function (parsed) {
+      consider(parsed);
+      return { locked: locked, agree: agree };
+    },
+    /* Move the last recorded card's last sighting back in time, so a test
+       can reach the far side of the ninety seconds without waiting there. */
+    ageRecord: function (ms) {
+      if (recorded) recorded.at -= ms;
     },
     fitForOcr: fitForOcr,
     /* Drive the read-failed path without breaking the engine to do it: this is

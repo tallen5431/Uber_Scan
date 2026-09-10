@@ -187,8 +187,8 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
              label: document.getElementById('verdictLabel').textContent.trim() };
   });
 
-  // A locked card reaches the journal, once; a fragment does not; and with the
-  // rig out of reach the row is kept and goes with the next lock.
+  // A locked card reaches the journal, once per card; a fragment does not; and
+  // with the rig out of reach the row is kept and goes with the next lock.
   const journal = () => page.evaluate(async () => {
     const r = await fetch('/api/journal?days=1');
     const d = await r.json();
@@ -198,8 +198,14 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   });
   const whole = 'data:image/png;base64,'
     + fs.readFileSync(path.join(dir, cards[0].file)).toString('base64');
+  const shop = 'data:image/png;base64,'
+    + fs.readFileSync(path.join(dir, cards[1].file)).toString('base64');
   // Every whole card read above recorded a row of its own; let those land
-  // before the snapshot everything below is a difference from.
+  // before the snapshot everything below is a difference from. The delivery
+  // card is judged against the clock and is not whole to this harness, so
+  // the last card recorded above was the shop order and the ride card below
+  // is a new offer. Ride and shop alternate from here: a different payout is
+  // a different offer, whatever came before it.
   await page.waitForTimeout(800);
   out.recorded = { before: await journal() };
   out.recorded.read = await page.evaluate(async s => {
@@ -208,12 +214,20 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   }, whole);
   await page.waitForTimeout(500);
   out.recorded.afterWhole = await journal();
-  await page.evaluate(async s => { await window.__scan.readImage(s); }, frag);
+  // The same card, read again a moment later: one card, one row.
+  await page.evaluate(async s => { await window.__scan.readImage(s); }, whole);
+  await page.waitForTimeout(500);
+  out.recorded.afterAgain = await journal();
+  out.recorded.fragmentComplete = await page.evaluate(async s => {
+    return (await window.__scan.readImage(s)).parsed.complete;
+  }, frag);
   await page.waitForTimeout(500);
   out.recorded.afterFragment = await journal();
   await page.route('**/api/journal/ingest',
                    r => r.fulfill({ status: 503, contentType: 'text/plain', body: 'down' }));
-  await page.evaluate(async s => { await window.__scan.readImage(s); }, whole);
+  await page.evaluate(async s => {
+    window.__shop = (await window.__scan.readImage(s)).parsed;
+  }, shop);
   await page.waitForTimeout(500);
   out.recorded.whileDown = await journal();
   out.recorded.queued = await page.evaluate(
@@ -224,6 +238,68 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   out.recorded.afterBack = await journal();
   out.recorded.queuedAfter = await page.evaluate(
     () => JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length);
+  // The same payout after the window has passed is an offer of its own.
+  await page.evaluate(async s => {
+    window.__scan.ageRecord(91000);
+    await window.__scan.readImage(s);
+  }, whole);
+  await page.waitForTimeout(500);
+  out.recorded.afterAged = await journal();
+
+  // The loop's own path: the frames agree on the shop order and lock, three
+  // frames read nothing and the lock is dropped, the frames agree again. One
+  // card, one row — and the sighting in between is what keeps the ninety
+  // seconds running from the last sight of the card rather than from the row.
+  out.relock = await page.evaluate(() => {
+    const card = window.__shop;
+    const nothing = OfferParser.parse('');
+    const states = [];
+    states.push(window.__scan.consider(card).locked, window.__scan.consider(card).locked);
+    window.__scan.ageRecord(60000);
+    states.push(window.__scan.consider(card).locked);
+    window.__scan.ageRecord(60000);
+    for (let i = 0; i < 3; i++) states.push(window.__scan.consider(nothing).locked);
+    states.push(window.__scan.consider(card).locked, window.__scan.consider(card).locked);
+    return { complete: card.complete, nothingComplete: nothing.complete, states: states };
+  });
+  await page.waitForTimeout(600);
+  out.recorded.afterRelock = await journal();
+  // A fragment of the card is a sight of it too, when it reads as complete.
+  // The fragment is the ride card's, so the ride card first, as a new offer
+  // after the window; then sixty seconds, the fragment, sixty more, the card.
+  await page.evaluate(async s => {
+    window.__scan.ageRecord(91000);
+    await window.__scan.readImage(s);
+  }, whole);
+  await page.evaluate(async s => {
+    window.__scan.ageRecord(60000);
+    await window.__scan.readImage(s);
+  }, frag);
+  await page.evaluate(async s => {
+    window.__scan.ageRecord(60000);
+    await window.__scan.readImage(s);
+  }, whole);
+  await page.waitForTimeout(500);
+  out.recorded.afterFragmentSight = await journal();
+
+  // Two rows kept a moment apart, the second while the first is in flight:
+  // both go, and the one answer names both. Last, because these land in the
+  // journal every count above is a difference of.
+  out.midflight = await page.evaluate(async () => {
+    const parsed = { pay: 9.5, minutes: 20, miles: 5, legs: 2, complete: true };
+    const rate = { ready: true, state: 'no', perHour: 28.5, grossPerHour: 30,
+                   perMile: 1.9, cost: 1.75, minutes: 20 };
+    const settings = { target: 25, band: 15, costPerMile: 0.35 };
+    const mk = () => JournalClient.keep(
+      JournalClient.row(parsed, rate, settings, { browser: true, prefix: 't' }));
+    const a = mk();
+    const flight = JournalClient.flush();
+    const b = mk();
+    const answer = await flight;
+    return { ok: answer.ok, sentA: answer.sent.includes(a.id),
+             sentB: answer.sent.includes(b.id),
+             left: JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length };
+  });
 
   // The offline cache: which caches exist, and does the app shell refresh.
   out.sw = await page.evaluate(async () => {
@@ -542,11 +618,43 @@ try:
        ((rec.get('read') or {}).get('pay'), (rec.get('read') or {}).get('state')))
     ok_('...and the rate (%r)' % (new[0].get('perHour') if new else None),
         new and abs((new[0].get('perHour') or 0) - ((rec.get('read') or {}).get('perHour') or -1)) < 0.06)
+    # The lock is dropped after three frames that read nothing, and the card
+    # is still there when the frames agree again. That second lock was a
+    # second row — the same offer twice in the journal and in every median —
+    # for every glare frame and every hand across the lens. The rig's journal
+    # has always had the rule for this; the phone now has the same one.
+    eq('the same card locked again a moment later is not a second row',
+       len(rec.get('afterAgain') or []) - before, 1)
     eq('a fragment writes nothing', len(rec.get('afterFragment') or []) - before, 1)
     eq('with the rig out of reach nothing arrives', len(rec.get('whileDown') or []) - before, 1)
     eq('...and the row is kept', rec.get('queued'), 1)
     eq('...and goes with the next lock, both of them', len(rec.get('afterBack') or []) - before, 3)
     eq('...leaving nothing kept', rec.get('queuedAfter'), 0)
+    eq('the same payout ninety seconds after the last sight of it is a new offer',
+       len(rec.get('afterAged') or []) - before, 4)
+    relock = got.get('relock') or {}
+    states = relock.get('states') or []
+    ok_('the harness reading is whole and the blank one is not',
+        relock.get('complete') is True and relock.get('nothingComplete') is False)
+    ok_('the frames agreeing locks the loop', len(states) == 8 and states[1] is True)
+    ok_('...three frames reading nothing drop the lock', len(states) == 8 and states[5] is False)
+    ok_('...and the frames agreeing again find it', len(states) == 8 and states[7] is True)
+    eq('a lock lost and found on one card is one row, the window running from '
+       'the last sight of it', len(rec.get('afterRelock') or []) - before, 5)
+    fc = rec.get('fragmentComplete')
+    eq('a fragment that reads complete is a sight of the card too'
+       if fc else 'a fragment that reads incomplete is no sight of the card',
+       len(rec.get('afterFragmentSight') or []) - before, 6 if fc else 7)
+
+    # A row kept while a flush was in flight waited for the next flush — the
+    # next lock, or the next time the page opened — with the rig answering
+    # the whole time. It goes with a flight of its own now, and the one
+    # answer names it, so a page marking rows sent sees it go.
+    mid = got.get('midflight') or {}
+    ok_('two rows kept a moment apart both reach the rig', mid.get('ok'))
+    ok_('...the answer naming the first', mid.get('sentA'))
+    ok_('...and the one kept while the first was in flight', mid.get('sentB'))
+    eq('...leaving nothing kept', mid.get('left'), 0)
 
     # --- the offline cache keeps the engine and refreshes the app ----------
     # The version constant used to be the whole mechanism: forget to bump it and

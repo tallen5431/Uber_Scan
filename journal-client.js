@@ -104,12 +104,27 @@ var JournalClient = (function () {
         if (!answer || answer.ok !== true) throw new Error('refused');
         var ids = q.map(function (r) { return r.id; });
         // Only what was sent comes off the queue: a row kept while this was
-        // in flight stays for the next flush.
+        // in flight is still there for the flight below.
         save(load().filter(function (r) { return ids.indexOf(r.id) === -1; }));
         return { ok: true, sent: ids };
       })
       .catch(function () { return { ok: false, sent: [] }; })
-      .then(function (result) { flying = null; return result; });
+      .then(function (result) {
+        flying = null;
+        // A row kept while that was in flight used to wait for the next
+        // flush — which is the next lock, or the next time the page opens,
+        // and on a phone in the car that is the next card or tomorrow. The
+        // rig was answering the whole time. It goes now, and the one answer
+        // names it too, so a page marking rows sent sees it go. Only after a
+        // flight that landed: after one that did not, the rig is out of
+        // reach and the next lock is the right time to try again.
+        if (result.ok && load().length) {
+          return flush().then(function (more) {
+            return { ok: more.ok, sent: result.sent.concat(more.sent) };
+          });
+        }
+        return result;
+      });
     return flying;
   }
 
