@@ -209,7 +209,8 @@ def main():
     ap.add_argument('--days', type=int, default=FIRST_RUN_DAYS,
                     help='how far back to go when the far end has nothing')
     ap.add_argument('--all', action='store_true',
-                    help='send the whole journal; safe, just slower')
+                    help='send the whole journal, and ask the copy for every '
+                         'tag it has; safe, just slower')
     ap.add_argument('--config', default=DEFAULT_CONFIG,
                     help='calibration to keep a copy of alongside the offers')
     ap.add_argument('--no-config', action='store_true',
@@ -312,9 +313,15 @@ def main():
             # standing fault, not the routine chatter of a timer in a car —
             # the copy had tags to give and they will never arrive until
             # somebody hears about it, and --quiet is what the timer runs with.
+            # And how to get them once it is answering: the floor moves with
+            # the copy's newest offer, so a tag left behind for more than an
+            # hour of driving is below every later run's floor and only a
+            # run from zero — --all — reaches it again.
             print('%d tag(s) made on the copy were not brought back: %s. '
                   'Is the server running here, and is --local (or SYNC_LOCAL) '
-                  'its address?' % (pulled, why), file=sys.stderr)
+                  'its address? Once it answers, run this once with --all, '
+                  'which asks the copy for everything.'
+                  % (pulled, why), file=sys.stderr)
         elif came:
             say('%d tag(s) made on the copy came back, %d new here' % (pulled, came))
 

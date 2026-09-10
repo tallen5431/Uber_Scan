@@ -790,6 +790,27 @@ try:
     ok_('...but says so past --quiet (%r)' % said[:80], 'not brought back' in said)
     ok_('...naming the setting to check', 'SYNC_LOCAL' in said)
     eq('...and brought nothing back', len(lines(rig.journal)), before)
+    # ...and the way back once it does answer. The floor moves with the copy's
+    # newest offer, so a tag left behind for more than an hour of driving is
+    # below every later run's floor: an ordinary run never reaches it again,
+    # and the message has to say which run does.
+    ok_('...and names the run that reaches a tag the floor has passed',
+        '--all' in said)
+    # A day before the copy's newest offer: the floor is an hour before it.
+    OLD = T - 86400000
+    with open(home.journal, 'a') as fh:
+        fh.write(json.dumps({'kind': 'mark', 'id': 'o1', 'at': OLD,
+                             'hidden': True}) + '\n')
+
+    def old_tag_on_rig():
+        return any(r.get('kind') == 'mark' and r.get('at') == OLD
+                   for r in lines(rig.journal))
+
+    run_main(home.base, rig.journal, ['--local', rig.base])
+    ok_('a tag older than the floor is out of an ordinary run\'s reach',
+        not old_tag_on_rig())
+    run_main(home.base, rig.journal, ['--local', rig.base, '--all'])
+    ok_('...and --all brings it back', old_tag_on_rig())
 finally:
     home.close()
     rig.close()
