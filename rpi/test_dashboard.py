@@ -188,6 +188,15 @@ const LOOK = (sel) => {
   if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
 
   const out = {};
+  // Where the driver is, so a step that never settles — a click on a button
+  // that is not there waits thirty seconds; a page that never answers waits
+  // for ever — is reported as a skip naming the section, rather than as a
+  // suite that hung until the runner's own timeout killed it in silence.
+  let stage = 'start';
+  setTimeout(() => {
+    console.log(JSON.stringify({ skip: 'the driver hung in "' + stage + '"' }));
+    process.exit(2);
+  }, 300000).unref();
   for (const panel of PANELS) {
     const ctx = await browser.newContext({
       viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
@@ -249,6 +258,7 @@ const LOOK = (sel) => {
   }
 
   // --- marking an offer as taken, from the screen the driver is looking at -
+  stage = 'marking an offer as taken, from the screen the driver is looking at';
   //
   // The rig cannot see the Accept button and must never press it, so whether an
   // offer was taken is a fact only the driver has. The catch is the ordering:
@@ -443,6 +453,7 @@ const LOOK = (sel) => {
   }
 
   // --- both jobs at once, and the two things only that line can say --------
+  stage = 'both jobs at once, and the two things only that line can say';
   //
   // The stack line had no browser check at all, which is how it shipped as one
   // nowrap ellipsised string with the map link appended as a child. Everything
@@ -585,6 +596,7 @@ const LOOK = (sel) => {
   }
 
   // --- a rate the rig could not cost, and one that cannot be true ----------
+  stage = 'a rate the rig could not cost, and one that cannot be true';
   //
   // Two states a driver has to be able to tell apart at a glance from the
   // driving seat. The first is a real offer whose running cost could not be
@@ -624,7 +636,134 @@ const LOOK = (sel) => {
     await ctx.close();
   }
 
+  // --- the connection line and the bar, against the server's snapshot ------
+  stage = 'the connection line and the bar, against the server\'s snapshot';
+  //
+  // What /api/status says at load is a snapshot, and four things on this
+  // page believed it for the rest of the shift, or believed the stream over
+  // it in the one place they should not have.
+  {
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } }).then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    const reading = { ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
+                      pay: 10.0, minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15 };
+    // A snapshot taken while the scanner was being restarted: not running,
+    // last heard from a moment ago, last reading fifteen seconds old, an
+    // order in the car.
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'scanning',
+        scanner: { enabled: true, running: false, error: 'exited' },
+        last: reading, lastAgeMs: 15000, heardAgeMs: 900,
+        offer: { id: 'o-1', pay: 10.0, minutes: 20.0, billedMinutes: 20.0, miles: 4.0, cost: 1.4 },
+        offerAgeMs: 15000,
+        holding: { pay: 9.0, minutes: 20.0, dropoff: null, dropoffScanned: false } }),
+    }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 3, counted: 3, setAside: 0, took: 1, median: 20,
+                             beforeClock: 0, unreadable: null, rolled: false, clockSet: true }) }));
+    const marks = [];
+    await page.route('**/api/offers/mark', async (route) => {
+      marks.push(JSON.parse(route.request().postData() || '{}'));
+      await route.fulfill({ status: 500, contentType: 'application/json',
+                            body: JSON.stringify({ ok: false, error: 'disk full' }) });
+    });
+    await page.route('**/api/dropoff', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, holding: false }) }));
+    await page.route('**/api/delivered', (route) => route.fulfill({
+      status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false }) }));
+    stage = 'snap: load';
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    // The stub's socket never opens on its own; the page treats a socket
+    // that has not opened as "reconnecting", which is not what this is
+    // about.
+    await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+    await page.waitForTimeout(100);
+    stage = 'snap: seeded';
+    const conn = () => page.evaluate(() => ({
+      conn: document.getElementById('conn').textContent.trim(),
+      dot: document.getElementById('dot').classList.contains('on') }));
+    out.snap = { seeded: await conn() };
+    // The stream replays the reading, fifteen seconds old, as it does on
+    // every connect. That must not move the heartbeat clock.
+    await page.evaluate((r) => window.__es.push(Object.assign(
+      { replay: true, ageMs: 15000, holding: { pay: 9.0, minutes: 20.0, dropoff: null } }, r)), reading);
+    await page.waitForTimeout(150);
+    out.snap.afterReplay = await conn();
+    // ...and then the scanner itself speaks, which is the scanner running.
+    await page.evaluate(() => window.__es.push({ alive: true }));
+    await page.waitForTimeout(150);
+    out.snap.afterHeartbeat = await conn();
+    // Now the bar. The order is in the car per the snapshot; the reply to
+    // ⌖ Dropoff says it no longer is.
+    stage = 'snap: dest';
+    out.snap.dropBefore = await page.evaluate(() => document.getElementById('drop').hidden);
+    out.snap.destBefore = await page.evaluate(() => document.getElementById('dest').hidden);
+    await page.evaluate(() => document.getElementById('dest').click());
+    await page.waitForTimeout(400);
+    out.snap.dropAfterDest = await page.evaluate(() => document.getElementById('drop').hidden);
+    stage = 'snap: took';
+    await page.click('#took');
+    await page.waitForTimeout(500);
+    out.snap.tookAfterFail = await page.evaluate(() => ({
+      text: document.getElementById('took').textContent.trim(),
+      failed: document.getElementById('took').classList.contains('failed') }));
+    out.snap.markBody = marks[0] || null;
+    // Set box, then Cancel: the phone view comes back and the preference
+    // is not touched.
+    out.snap.viewBefore = await page.evaluate(() => ({
+      phone: document.body.classList.contains('phoneview'),
+      stored: localStorage.getItem('uberscan.liveView') }));
+    stage = 'snap: setBox';
+    await page.click('#setBox');
+    await page.waitForTimeout(200);
+    out.snap.viewDrawing = await page.evaluate(() => ({
+      phone: document.body.classList.contains('phoneview'),
+      stored: localStorage.getItem('uberscan.liveView') }));
+    stage = 'snap: cancel';
+    await page.click('#drawCancel');
+    await page.waitForTimeout(200);
+    out.snap.viewAfter = await page.evaluate(() => ({
+      phone: document.body.classList.contains('phoneview'),
+      stored: localStorage.getItem('uberscan.liveView') }));
+    await page.close();
+  }
+  // The replay on its own, against a snapshot that says the scanner IS
+  // running — the one above says it is not, and that line takes precedence
+  // over the staleness one, so it could not show this.
+  {
+    stage = 'snap: replay alone';
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } }).then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    const reading = { ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
+                      pay: 10.0, minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15 };
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'scanning',
+        scanner: { enabled: true, running: true, error: null },
+        last: reading, lastAgeMs: 15000, heardAgeMs: 900, offer: null, holding: null }) }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 0, counted: 0, setAside: 0, took: 0,
+                             beforeClock: 0, unreadable: null, rolled: false, clockSet: true }) }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+    await page.evaluate((r) => window.__es.push(Object.assign({ replay: true, ageMs: 15000 }, r)), reading);
+    await page.waitForTimeout(150);
+    out.replayAlone = await page.evaluate(() => ({
+      conn: document.getElementById('conn').textContent.trim(),
+      dot: document.getElementById('dot').classList.contains('on') }));
+    await page.close();
+  }
+
   // --- the shift line when the figures cannot be trusted -------------------
+  stage = 'the shift line when the figures cannot be trusted';
   //
   // Every one of these is a state where a plausible-looking count would be a
   // confidently wrong number, which is the thing this project refuses to print.
@@ -674,6 +813,7 @@ const LOOK = (sel) => {
   }
 
   // --- ...and when the endpoint stops answering -----------------------------
+  stage = '...and when the endpoint stops answering';
   //
   // Asserting the line is hidden on a page that never got an answer proves
   // nothing: it starts hidden in the markup. The property that matters is that
@@ -724,6 +864,7 @@ const LOOK = (sel) => {
   }
 
   // --- a page opened against a rig that stopped an hour ago ----------------
+  stage = 'a page opened against a rig that stopped an hour ago';
   //
   // The seed and the SSE replay both hand over the last reading. The page used
   // to start its own staleness clocks at zero for both, so a dead rig's ACCEPT
@@ -1023,9 +1164,14 @@ try:
         # when it was pressed. Marking by pay-and-minutes would be a rule
         # catching every offer paying that to the cent.
         eq('...and every note names one offer by id, in order',
-           posted, [{'id': 'o1', 'accepted': True},
-                    {'id': 'o2', 'accepted': True},
-                    {'id': 'o2', 'accepted': False}])
+           [{'id': n.get('id'), 'accepted': n.get('accepted')} for n in posted],
+           [{'id': 'o1', 'accepted': True},
+            {'id': 'o2', 'accepted': True},
+            {'id': 'o2', 'accepted': False}])
+        # ...and carries the offer it names, so a server that has restarted
+        # and forgotten the offer can still put the order in the car.
+        eq('...each carrying the offer it names',
+           [(n.get('offer') or {}).get('id') for n in posted], ['o1', 'o2', 'o2'])
 
         # It has to be usable in a moving car and must not break the panel.
         for name, slot in (('offered', offered), ('marked', marked)):
@@ -1153,6 +1299,44 @@ try:
            (impossible.get('rate') or {}).get('text'), '--')
         ok_('...while the figures it was working from stay on screen',
             '136' in ((impossible.get('pay') or {}).get('text') or ''))
+
+    # --- the snapshot at load is a snapshot ------------------------------
+    sn = got.get('snap') or {}
+    ok_('the snapshot was measured', bool(sn))
+    if sn:
+        # /api/status said the scanner was not running at the moment the page
+        # loaded — the seconds of a restart. The stream is the scanner
+        # talking, and that wins from then on.
+        ok_('a page loaded during a restart says so at first (%r)' % sn['seeded'].get('conn'),
+            'not running' in (sn['seeded'].get('conn') or ''))
+        # The replay carries the reading's age, not the heartbeat's; the
+        # heartbeat was 900ms ago per the snapshot, so nothing is stale.
+        ok_('...a replayed reading does not put the scanner fifteen seconds in the past (%r)'
+            % sn['afterReplay'].get('conn'),
+            'nothing from the scanner' not in (sn['afterReplay'].get('conn') or ''))
+        ok_('...and a replay alone is not the scanner running',
+            'not running' in (sn['afterReplay'].get('conn') or ''))
+        ra = got.get('replayAlone') or {}
+        ok_('with the scanner running, a replayed reading leaves the heartbeat clock alone (%r)'
+            % ra.get('conn'), ra and 'nothing from the scanner' not in (ra.get('conn') or ''))
+        ok_('...and the dot lit', ra.get('dot'))
+        ok_('...but a heartbeat is (%r)' % sn['afterHeartbeat'].get('conn'),
+            'not running' not in (sn['afterHeartbeat'].get('conn') or ''))
+        ok_('...and lights the dot', sn['afterHeartbeat'].get('dot'))
+        # The reply to Dropoff says the order is gone; the bar follows it.
+        eq('with an order in the car the Drop button is on the bar', sn.get('dropBefore'), False)
+        eq('...and goes when the dropoff reply says the order is no longer held',
+           sn.get('dropAfterDest'), True)
+        # A mark the journal could not take does not look like one nobody made.
+        ok_('a mark the journal refused says so on the button (%r)' % sn['tookAfterFail'].get('text'),
+            'not saved' in (sn['tookAfterFail'].get('text') or '') and sn['tookAfterFail'].get('failed'))
+        eq('...and the mark carried the offer it names, for a server that has forgotten it',
+           ((sn.get('markBody') or {}).get('offer') or {}).get('id'), 'o-1')
+        # Set box borrows the scene and gives the phone view back.
+        ok_('the page lands in the phone view', sn['viewBefore'].get('phone'))
+        ok_('Set box switches to the scene to draw on', not sn['viewDrawing'].get('phone'))
+        eq('...without rewriting the remembered view', sn['viewDrawing'].get('stored'), None)
+        ok_('...and Cancel brings the phone view back', sn['viewAfter'].get('phone'))
 
     # --- what the shift adds up to, on the row under the verdict ---------
     first = got.get('shiftFirst') or {}

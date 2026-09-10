@@ -747,6 +747,12 @@ html, body {
   color: var(--doubt);
   border-color: var(--doubt);
 }
+/* A press that did not reach the journal. It used to look exactly like a
+   button nobody had pressed. */
+.bottombar button.failed, .bottombar .linkbtn.failed {
+  color: var(--no);
+  border-color: var(--no);
+}
 
 /* ---------- Said, not shown ---------- */
 /* Text for a screen reader and not for the eye. Used for the label on a search

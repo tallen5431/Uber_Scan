@@ -859,6 +859,12 @@
   var onRecord = null;
   var tookState = false;
   var tookBusy = false;
+  // Whether the last press failed to reach the journal. It used to show
+  // nothing: the label flickered to "…" and came straight back to "Took
+  // $10.00?", and the driver either assumed it registered or pressed again.
+  // The Re-find button on the same bar already says "⟳ failed"; this says
+  // "not saved", and says it until the next press.
+  var tookFailed = false;
 
   function showTook() {
     if (!onRecord || !onRecord.id) {
@@ -877,10 +883,14 @@
     // affordance nobody can see is not an affordance. It is a toggle, styled
     // when set, exactly as the same control on the offers page behaves.
     el.took.textContent = tookBusy ? '…'
+      : tookFailed ? 'Took ' + what + ' · not saved'
       : (tookState ? '\u2713 Took ' + what : 'Took ' + what + '?');
-    el.took.title = tookState
+    el.took.title = tookFailed
+      ? 'The journal could not be written. Press again to retry.'
+      : tookState
       ? 'Recorded as taken. Press again if that was wrong.'
       : 'Record that you accepted this offer. It does not touch your phone.';
+    el.took.classList.toggle('failed', tookFailed);
     el.took.classList.toggle('on', tookState);
     el.took.setAttribute('aria-pressed', tookState ? 'true' : 'false');
   }
@@ -897,9 +907,15 @@
       // that catches every offer paying that to the cent, and two genuinely
       // different cards doing exactly that inside one window is a case this
       // project has already met — see rpi/test_repeats.py.
-      body: JSON.stringify({ id: onRecord.id, accepted: want })
+      //
+      // And the offer itself. The server keeps the offer on record in
+      // memory, so after a restart mid-shift it has none — while this page
+      // still shows "Took $10.00?" for it. Sent along, the server can put
+      // the order in the car from what this page knows.
+      body: JSON.stringify({ id: onRecord.id, accepted: want, offer: onRecord })
     }).then(function (r) {
-      if (!r.ok) return null;
+      if (!r.ok) { tookFailed = true; return null; }
+      tookFailed = false;
       tookState = want;
       return r.json().catch(function () { return null; });
     }).then(function (body) {
@@ -930,6 +946,7 @@
       }
     }).catch(function () {
       /* The record is the point; a failed write must not look like a success. */
+      tookFailed = true;
     }).then(function () {
       tookBusy = false;
       showTook();
@@ -965,10 +982,12 @@
   // `undefined` while nothing is held; a string or null once something is.
   var heldEnds;
   var dropBusy = false;
+  var dropFailed = false;
 
   function showDrop() {
     el.drop.hidden = !holdingNow;
-    el.drop.textContent = dropBusy ? '…' : 'Drop';
+    el.drop.textContent = dropBusy ? '…' : dropFailed ? 'Drop · failed' : 'Drop';
+    el.drop.classList.toggle('failed', dropFailed);
     el.drop.title = 'Put the order down, so the next offer is judged on its own '
                   + 'again. It does not touch your phone.';
   }
@@ -980,12 +999,14 @@
     fetch('/api/delivered', { method: 'POST' }).then(function (r) {
       // Believe the server, not the press. If the write failed the order is
       // still in the car and the next offer must still be measured against it.
+      dropFailed = !r.ok;
       if (r.ok) {
         holdingNow = false; destSaid = ''; heldEnds = undefined;
         showStack(null); showDest();
       }
     }).catch(function () {
       /* Left as it was: an order the server still holds is the truth. */
+      dropFailed = true;
     }).then(function () {
       dropBusy = false;
       showDrop();
@@ -1065,7 +1086,19 @@
     destBusy = true;
     destSaid = '';
     showDest();
-    fetch('/api/dropoff', { method: 'POST' }).catch(function () {
+    fetch('/api/dropoff', { method: 'POST' }).then(function (r) {
+      return r.json().catch(function () { return null; });
+    }).then(function (b) {
+      // The one thing the reply does say: whether there is still an order to
+      // read a destination for. The server's clock ends a hold with nothing
+      // pressed here, and between offers no reading arrives to say so — so
+      // Drop and ⌖ Dropoff stayed lit for an order that no longer existed,
+      // and pressing this photographed the phone for nothing.
+      if (b && b.holding === false && holdingNow) {
+        holdingNow = false; destSaid = ''; heldEnds = undefined;
+        showDrop(); showStack(null);
+      }
+    }).catch(function () {
       /* The scanner answers on its own stream; a failed ask just reads as one
          that found nothing, which is the same thing from here. */
     }).then(function () {
@@ -1580,8 +1613,23 @@
       // clock from another's is how "12 seconds old" became "fifty-six years
       // old" — or, worse, a negative age that never trips the stale test at
       // all, leaving a frozen verdict on screen looking live.
-      seenAt = msg.replay ? Math.min(seenAt, Date.now() - age(msg.ageMs))
-                          : Date.now();
+      //
+      // A replay does not move this clock at all. It carries the last
+      // READING's age, not the last heartbeat's, and taking the older of the
+      // two put a page opened between offers — minutes since a read, a
+      // heartbeat four seconds ago — on "nothing from the scanner for 300s"
+      // with the dot off and the picture dimmed, until the next heartbeat.
+      // The seed from /api/status already knows when the scanner last spoke.
+      if (!msg.replay) seenAt = Date.now();
+      // ...and a live message from the scanner is the scanner running,
+      // whatever the snapshot said. `scannerState` was taken once, from
+      // /api/status at load, and a page opened in the seconds the server
+      // was restarting the scanner read "scanner not running" for the rest
+      // of the shift, verdicts flowing beside it.
+      if (!msg.replay && scannerState && scannerState.enabled && !scannerState.running) {
+        scannerState.running = true;
+        scannerState.error = null;
+      }
       // The camera saying it has run out of room. It rides the heartbeat rather
       // than a reading precisely because the state it describes is the one
       // where there may be no reading — the phone is brighter than the camera
@@ -1911,7 +1959,17 @@
   var box = null;             // {x, y, w, h} as fractions, or null
   var dragFrom = null;
 
+  // Whether the scene is on loan from the phone view for a drawing.
+  var lentScene = false;
+
   function drawingMode(on) {
+    if (!on && lentScene) {
+      lentScene = false;
+      phoneView = true;
+      applyViewMode();
+      if (streaming) startStream();
+      else refreshView();
+    }
     viewWrap.classList.toggle('drawing', on);
     drawHint.hidden = !on;
     // The label stays put and the button lights up instead: "▣ Drawing" wraps
@@ -2011,9 +2069,15 @@
     // Switched rather than refused. The scene is the picture this button needs
     // and there is nothing to lose by going there — you cannot draw the
     // phone's outline on a picture that has been cropped to it already.
+    //
+    // Borrowed, not switched: the remembered view is not touched, and the
+    // phone view comes back when the drawing ends — cancelled or used.
+    // Before this one press of Set box wrote 'scene' into the preference,
+    // and neither Cancel nor a box read put the phone back: the phone was a
+    // third of a cabin thumbnail until the driver found ⛶ Phone again.
     if (on && phoneView) {
+      lentScene = true;
       phoneView = false;
-      try { localStorage.setItem(VIEW_KEY, 'scene'); } catch (e) { /* private mode */ }
       applyViewMode();
       if (streaming) startStream();
       else refreshView();
