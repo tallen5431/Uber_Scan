@@ -482,7 +482,7 @@ const FRAMES = JSON.parse(framesJson);
         let shortest = null, shortestIn = null;
         for (const el of document.querySelectorAll(
                '.bottombar button, .bottombar a, .scanbar button, .scanbar label,'
-               + ' .scanbar a, .key, .rangebtns button, .chips button')) {
+               + ' .scanbar a, .key, .rangebtns button, .chips button, #runsAll')) {
           const r = el.getBoundingClientRect();
           if (!r.width || !r.height) continue;
           if (shortest === null || r.height < shortest) {
@@ -528,12 +528,22 @@ const FRAMES = JSON.parse(framesJson);
           const head = document.getElementById('weekHead');
           const heights = [].slice.call(document.querySelectorAll('#week .block'))
             .map((b) => b.getBoundingClientRect().height).filter((h) => h > 0);
+          // Where the run-by-run chart sits against the chart of hours, on
+          // the range where it is longest. Distances, not DOM order: a
+          // heading hidden by a stylesheet keeps its place in the DOM.
+          const top = (id) => {
+            const e = document.getElementById(id);
+            return e && !e.hidden ? e.getBoundingClientRect().top + window.scrollY : null;
+          };
           return {
             shown: !!head && !head.hidden,
             rows: heights.length,
             skew: heights.length > 1
               ? Math.max.apply(null, heights) - Math.min.apply(null, heights) : 0,
             fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+            hoursAt: top('blocksHead'),
+            runsAt: top('runsHead'),
+            runRows: document.querySelectorAll('#runs .block').length,
           };
         });
       }
@@ -759,6 +769,18 @@ for i in range(40):
         'target': 25, 'band': 15, 'legs': 2, 'whole': True,
         'accepted': i % 7 == 0, 'hidden': i % 11 == 0, 'suspect': i % 17 == 0,
     })
+# ...and a second card five minutes after each of the first twenty, so that
+# there are runs of scanning to draw. Nine hours apart, every offer above is a
+# stretch of one card, and a stretch of one card is not a run: the chart of
+# runs was never drawn in this suite, and every check on it measured nothing.
+for i in range(20):
+    first = rows[i]
+    second = dict(first, id='r%db' % i, at=first['at'] + 300000,
+                  firstAt=first['at'] + 300000, pay=round(first['pay'] + 1.5, 2),
+                  accepted=False, hidden=False, suspect=False)
+    second['perHour'] = round(second['pay'] / (second['minutes'] / 60.0), 1)
+    second['grossPerHour'] = second['perHour']
+    rows.append(second)
 # ...and the pairings, so the "Second jobs" section is measured with something
 # in it. One of each answer the panel can give, including the one where it
 # declines to answer, because that row is drawn differently and its own width
@@ -1068,6 +1090,15 @@ try:
                     ok_('...all the same height (%.1fpx apart) at %s'
                         % (wk.get('skew') or 0, panel), wk.get('skew', 99) <= 0.5)
                     ok_('...without widening the page at %s' % panel, wk.get('fits'))
+                # The run-by-run chart is a log, one row per stretch of
+                # scanning, and on a month it is the longest thing above the
+                # offers. It goes after the chart of hours, and shows eight.
+                if wk and wk.get('runsAt') is not None:
+                    ok_('the chart of hours comes before the run-by-run log at %s '
+                        '(%dpx before)' % (panel, (wk['runsAt'] or 0) - (wk['hoursAt'] or 0)),
+                        wk.get('hoursAt') is not None and wk['hoursAt'] < wk['runsAt'])
+                    ok_('...which shows at most eight runs at %s (%d)' % (panel, wk['runRows']),
+                        wk['runRows'] <= 8)
 
             # The section about two offers at once.
             #

@@ -75,11 +75,14 @@
                 border: 1px solid var(--line); border-radius: 10px;
                 -webkit-appearance: none; appearance: none; }
   .find input::placeholder { color: var(--muted); }
-  #showHidden { font: inherit; font-size: 12px; font-weight: 700;
+  #showHidden, #runsAll { font: inherit; font-size: 12px; font-weight: 700;
                 min-height: 52px; padding: 6px 12px; color: var(--muted);
                 background: transparent; border: 1px solid var(--line);
                 border-radius: 8px; cursor: pointer; }
-  #showHidden[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+  #showHidden[aria-pressed="true"], #runsAll[aria-pressed="true"] {
+    color: var(--text); border-color: var(--muted); }
+  #runsAll { display: block; margin: 4px auto 0; }
+  #runsAll[hidden] { display: none; }
   .offer.hiddenrow > summary { opacity: .5; }
   /* The way back, always in reach.
      This page is one continuous list — a week of offers is fourteen thousand
@@ -379,7 +382,7 @@
     .facts h3 { font-size: 15px; }
     .cardtext, .cardtext pre { font-size: 15px; }
 
-    .rangebtns button, #showHidden, .acts button, #undo, #undoGo,
+    .rangebtns button, #showHidden, #runsAll, .acts button, #undo, #undoGo,
     .chips button { font-size: 17px; }
     #nothing { font-size: 17px; }
     #nothing b { font-size: 20px; }
@@ -442,20 +445,6 @@
        gaps, and a gap can be a break, a trip, or the rig left switched on in a
        driveway. Every figure above pools them, which is right for a median and
        wrong to imply. So they are named. -->
-  <h2 id="runsHead">Runs of scanning</h2>
-  <div id="runs"></div>
-
-  <!-- The one thing this rig says that nothing else on this page records.
-       Every figure above is about one offer at a time; this is about the only
-       question with two: a card arrived while a job was already in the car,
-       and the panel answered it in the four seconds before the card went away.
-       The answer was written to the journal from the moment that feature
-       existed and read back by nothing, so a driver could work a shift, be
-       advised a dozen times, and have no way to see any of it afterwards. -->
-  <h2 id="pairsHead" hidden>Second jobs</h2>
-  <p class="hint" id="pairsLead" hidden></p>
-  <div id="pairs"></div>
-
   <h2 id="blocksHead">By time of day <em>· median $/hr</em></h2>
   <div id="blocks"></div>
   <div class="scale" id="blockScale"></div>
@@ -477,6 +466,28 @@
        made out of nobody having pressed a button. -->
   <h2 id="tookHead" hidden></h2>
   <div id="took"></div>
+
+  <!-- After the charts that answer "when", not before them. This one is a
+       run-by-run log — one row per stretch of scanning — and a month of it
+       is thirty-odd rows: measured on a fortnight of offers at 800x480, it
+       put "By time of day" 1,911px down the page on a week and 2,675 on a
+       month, three to five screens of bars between the headline and the
+       chart that says which hours pay. It shows the latest few and offers
+       the rest, so a run that stands out is still findable. -->
+  <h2 id="runsHead">Runs of scanning</h2>
+  <div id="runs"></div>
+  <button type="button" id="runsAll" hidden aria-pressed="false"></button>
+
+  <!-- The one thing this rig says that nothing else on this page records.
+       Every figure above is about one offer at a time; this is about the only
+       question with two: a card arrived while a job was already in the car,
+       and the panel answered it in the four seconds before the card went away.
+       The answer was written to the journal from the moment that feature
+       existed and read back by nothing, so a driver could work a shift, be
+       advised a dozen times, and have no way to see any of it afterwards. -->
+  <h2 id="pairsHead" hidden>Second jobs</h2>
+  <p class="hint" id="pairsLead" hidden></p>
+  <div id="pairs"></div>
 
   <h2>Every offer <em id="recentNote">· tap one to see everything that was read</em></h2>
   <!-- The reason to open this list is to find one particular offer and check it
@@ -548,7 +559,7 @@
    'blocksHead', 'kindsHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
    'find', 'findNote', 'live', 'nothing', 'ladder',
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
-   'pairs', 'pairsHead', 'pairsLead'].forEach(function (id) {
+   'pairs', 'pairsHead', 'pairsLead', 'runsAll'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -1298,8 +1309,17 @@
   // misleading to leave unsaid. Naming them also makes an odd one findable: a
   // run of nine offers in eight minutes is a rig pointed at a screenshot, and
   // it is dragging the medians without anything else on this page showing it.
+  // How many runs the chart shows before it asks. A shift is one to three
+  // runs, so this is the last few days; the heading says how many there are
+  // in all and the button under the chart brings the rest. What the chart was
+  // last drawn from is kept so that button can redraw it without a fetch.
+  var RUNS_SHOWN = 8;
+  var runsOpen = false;
+  var runsDrawnFrom = null;
+
   function showRuns(kept, target, band, full) {
     var rows;
+    runsDrawnFrom = { kept: kept, target: target, band: band, full: full };
     try { rows = Advice.usable(kept); } catch (e) { rows = []; }
     var groups = rows.length ? Advice.runs(rows, Advice.SHOWN_AT) : [];
     if (groups.length < 2) {
@@ -1307,9 +1327,16 @@
       // announcing it would be noise on every short window.
       el.runs.innerHTML = '';
       el.runsHead.hidden = true;
+      el.runsAll.hidden = true;
       return;
     }
     el.runsHead.hidden = false;
+    var folded = !runsOpen && groups.length > RUNS_SHOWN;
+    el.runsAll.hidden = groups.length <= RUNS_SHOWN;
+    el.runsAll.setAttribute('aria-pressed', runsOpen ? 'true' : 'false');
+    el.runsAll.textContent = folded
+      ? 'all ' + groups.length + ' runs'
+      : 'latest ' + RUNS_SHOWN + ' only';
     // First card of a run to last card of it. Not the same span as the one the
     // advice above quotes, and the difference is not a rounding: that one runs
     // each group on to wherever the last trip TAKEN in it finishes, because it
@@ -1329,7 +1356,9 @@
     el.runsHead.innerHTML = 'Runs of scanning <em>· ' + groups.length + ' of them, '
       + hours.toFixed(1) + ' hours of offers arriving, not one shift</em>';
 
-    el.runs.innerHTML = groups.map(function (g) {
+    // The latest, not the first: the chart reads oldest to newest like the
+    // day headers below it, and the runs a driver remembers are this week's.
+    el.runs.innerHTML = (folded ? groups.slice(-RUNS_SHOWN) : groups).map(function (g) {
       var from = new Date(g[0].at);
       var mins = (g[g.length - 1].at - g[0].at) / 60000;
       var mid = percentile(g.map(function (r) { return r.perHour; })
@@ -1339,10 +1368,16 @@
         : Math.round(mins) + 'm';
       // Date, time and length in the one label column, so these bars are the
       // same width as every other bar on the page and can be read against them.
+      //
+      // Three lines each, always. Time and length used to share a line, and
+      // "10:12 PM · 2.4h" wraps in a 62px column where "3:37 PM · 16m" does
+      // not — measured at 390px, rows 12.5px apart in one chart, the one
+      // chart on the page whose rows were not the same height. On a panel
+      // every one of them wrapped anyway.
       return '<div class="block"><span class="label runlabel">'
            + from.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
            + '<em>' + from.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-           + ' · ' + length + '</em></span>'
+           + '</em><em>' + length + '</em></span>'
            + '<span class="bar ' + verdictFor(mid, target, band) + '" style="background-size:'
            + Math.max(1, Math.min(100, mid / full * 100)).toFixed(1) + '% 100%"></span>'
            + '<span class="amount">' + money(mid, 0) + '</span>'
@@ -1978,6 +2013,7 @@
       el.advice.hidden = true;
       el.runs.innerHTML = '';
       el.runsHead.hidden = true;
+      el.runsAll.hidden = true;
       // The set-aside rows stay listed. The page has just said "3 set aside as
       // doubtful", and the next thing it did was delete them — so the one
       // screen that could show a driver *which* three, and why, showed nothing
@@ -2341,6 +2377,7 @@
         el.tookHead.hidden = true;
         el.runs.innerHTML = '';
         el.runsHead.hidden = true;
+        el.runsAll.hidden = true;
         el.advice.hidden = true;
         el.ladder.hidden = true;
         el.caveats.innerHTML = '';
@@ -2455,6 +2492,12 @@
   el.find.addEventListener('input', function () {
     clearTimeout(findTimer);
     findTimer = setTimeout(renderList, 120);
+  });
+
+  el.runsAll.addEventListener('click', function () {
+    runsOpen = !runsOpen;
+    var d = runsDrawnFrom;
+    if (d) showRuns(d.kept, d.target, d.band, d.full);
   });
 
   el.showHidden.addEventListener('click', function () {

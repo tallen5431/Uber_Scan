@@ -212,6 +212,23 @@ PAIR = {
               'ends': 'elsewhere', 'uncosted': False},
 }
 
+# Runs of scanning: twelve stretches three hours apart, three cards five
+# minutes apart in each, and three such stretches for the small case. The
+# chart shows the latest eight and offers the rest, and the way it says so
+# has to be read back rather than assumed.
+def _runs(count):
+    rows = []
+    for k in range(count):
+        for j in range(3):
+            r = offer(200 + k * 3 + j, pay=9.0 + k, state='go')
+            r['at'] = r['firstAt'] = NOW - (k * 3 * 3600000 + (2 - j) * 300000)
+            rows.append(r)
+    return rows
+
+
+RUNS = _runs(12)
+FEW_RUNS = _runs(3)
+
 # The four answers /api/journal can give. Every field here is one the server
 # actually sends — see the send() call in the /api/journal branch.
 FEEDS = {
@@ -234,6 +251,12 @@ FEEDS = {
                   'offers': [offer(0, pay=1030.0, state='no', suspect=True),
                              offer(1, accepted=True, pay=1184.0, suspect=True),
                              offer(2, pay=1251.0, state='no', suspect=True)]},
+    'runs': {'count': len(RUNS), 'total': len(RUNS), 'truncated': False,
+             'days': 7, 'hidden': 0, 'watched': {'saw': 36, 'kept': 36},
+             'unreadable': None, 'pairs': [], 'offers': RUNS},
+    'few runs': {'count': len(FEW_RUNS), 'total': len(FEW_RUNS), 'truncated': False,
+                 'days': 7, 'hidden': 0, 'watched': {'saw': 9, 'kept': 9},
+                 'unreadable': None, 'pairs': [], 'offers': FEW_RUNS},
     'weeks': {'count': len(WEEKS), 'total': len(WEEKS), 'truncated': False,
               'days': 30, 'hidden': 0, 'watched': {'saw': 21, 'kept': 21},
               'unreadable': None, 'pairs': [], 'offers': WEEKS},
@@ -442,6 +465,31 @@ const TEXT = (sel) => {
       await page.waitForTimeout(250);
       out[name].byPay = await rows();
     }
+    // The runs chart: what it shows, what its button says, and what a press
+    // does. Every row is read back as its label and amount so the folded
+    // eight can be held against the tail of the twelve.
+    if (name === 'runs' || name === 'few runs') {
+      const runsNow = () => page.evaluate(() => {
+        const b = document.getElementById('runsAll');
+        return { head: document.getElementById('runsHead').hidden
+                   ? null : (document.getElementById('runsHead').textContent || '').replace(/\s+/g, ' ').trim(),
+                 rows: [].slice.call(document.querySelectorAll('#runs .block')).map((e) =>
+                   (e.querySelector('.label').textContent + ' ' + e.querySelector('.amount').textContent)
+                     .replace(/\s+/g, ' ').trim()),
+                 button: b.hidden ? null : (b.textContent || '').trim(),
+                 pressed: b.getAttribute('aria-pressed'),
+                 height: b.hidden ? 0 : b.getBoundingClientRect().height };
+      });
+      out[name].runs = { folded: await runsNow() };
+      if (out[name].runs.folded.button) {
+        await page.click('#runsAll');
+        await page.waitForTimeout(250);
+        out[name].runs.opened = await runsNow();
+        await page.click('#runsAll');
+        await page.waitForTimeout(250);
+        out[name].runs.refolded = await runsNow();
+      }
+    }
     // A chip that picks nothing, on the feed with no verdicts on its rows.
     if (name === 'took six') {
       await page.click('#chips button[data-pick="no"]');
@@ -553,6 +601,29 @@ try:
 
     # --- net and gross may not disagree about the same offers ----------------
     #
+    # --- the runs chart shows the latest few and offers the rest ------------
+    # Measured on a fortnight of offers at 800x480 before this: seventeen runs
+    # on a week put "By time of day" 1,911px down the page, three panel
+    # screens of bars between the headline and the chart that says which hours
+    # pay. It sits after those charts now, and shows eight.
+    rn = got['runs']['runs']
+    fold = rn['folded']
+    ok_('twelve runs are counted in the heading (%r)' % (fold['head'] or '')[:40],
+        fold['head'] is not None and '12 of them' in fold['head'])
+    eq('...and eight are drawn', len(fold['rows']), 8)
+    ok_('...with a button naming the rest (%r)' % fold['button'],
+        fold['button'] is not None and '12' in fold['button'])
+    ok_('...tall enough to press in a car (%.0fpx)' % fold['height'], fold['height'] >= 44)
+    opened = rn.get('opened') or {}
+    eq('pressing it draws all twelve', len(opened.get('rows') or []), 12)
+    eq('...the eight it showed being the latest eight',
+       fold['rows'], (opened.get('rows') or [])[-8:])
+    eq('...and the button says so', opened.get('pressed'), 'true')
+    eq('pressing it again folds them back', len((rn.get('refolded') or {}).get('rows') or []), 8)
+    few = got['few runs']['runs']['folded']
+    eq('three runs are all drawn', len(few['rows']), 3)
+    ok_('...with nothing to press', few['button'] is None)
+
     # Six taken offers, $10.00 each with $2.00 of running cost: $48.00 net,
     # $60.00 gross. The headline was already net; the day header was not, and
     # any rendered "took N for $X" guarantees the headline is above it, so the
