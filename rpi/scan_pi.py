@@ -231,6 +231,13 @@ VERIFY_BACKOFF = 1.6
 # development machine: 1517 / 2.12 is about 715ms. Rounded up, because being
 # wrong in this direction only costs a slightly lazier beat.
 READ_SECONDS = 0.75
+# How long one read may be in flight before the rig treats itself as stuck.
+# A read that never returns left the loop alive, beating, silent and never
+# reading again: every card's trigger was deferred to `read_wanted` and never
+# taken, no health line was printed, and server.js kept hearing `alive` so
+# it never restarted anything. Past this the heartbeat stops, which is what
+# the thirty-second silence watchdog on the other side is for.
+READ_STUCK_S = 60.0
 
 # ...and the ceiling, which is that cost divided by the duty cycle this is
 # willing to spend on looking at a card that has not changed.
@@ -285,6 +292,8 @@ class Reader:
         self._done = queue.Queue()
         self._stop = threading.Event()
         self._thread = None
+        # When the read in flight was submitted; None when none is.
+        self.since = None
         if threaded:
             self._thread = threading.Thread(target=self._serve, name='reader',
                                             daemon=True)
@@ -299,6 +308,7 @@ class Reader:
         moment more than a second later than the picture it is judging.
         """
         self.busy = True
+        self.since = time.time()
         if not self.threaded:
             self._done.put(self._job(frames, now, geom))
             return
@@ -317,6 +327,7 @@ class Reader:
         except queue.Empty:
             return None
         self.busy = False
+        self.since = None
         if done['error'] is None:
             # On the loop's thread, deliberately. See Scanner.settle.
             done['outs'] = self.scanner.settle(done['outs'], done['geom'])
@@ -1591,6 +1602,12 @@ def main():
     # not once per read: a card sits on screen for tens of seconds and is
     # re-read throughout, and the page needs the id rather than a heartbeat.
     told_offer = None
+    # ...and what that card read as when it was told. A later, fuller reading
+    # of the same card — the second leg, the address a single frame lost —
+    # is told again, because the first was what the panel, the order in the
+    # car and the pair row were built from. See below.
+    told_as = None
+    stuck_said = False
     frames = 0
     last_snapshot = 0.0
     # How long the camera actually leaves between frames, smoothed. Measured
@@ -1649,7 +1666,7 @@ def main():
         # resume() that was doing the same thing again.
         kept = offer_log.journal.count()
         resumed = offer_log.resume()
-        log('journal: %s (%d offer%s so far)%s'
+        log('journal: %s (%d journal row%s so far)%s'
             % (args.journal, kept, '' if kept == 1 else 's',
                ', still on the last one' if resumed else ''))
     def digest(out, frame, read_at=None):
@@ -1668,7 +1685,7 @@ def main():
         nonlocal dropoff_until, dropoff_seen
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
-        nonlocal last_sample, spoke_for, told_offer
+        nonlocal last_sample, spoke_for, told_offer, told_as
         parsed = accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
         # a duration. Passed in rather than read inside the parser, which
@@ -1906,7 +1923,24 @@ def main():
             seen_kept = False
         if parsed.get('pay') is not None and not seen_pay:
             seen_pay = True
-            health.saw += 1
+            # Not when it is the card already on disk. The accumulator opens
+            # a new episode whenever the payout it reads changes, and one
+            # frame reading $16.06 or $1605 for a $16.05 card is a new
+            # episode that never locks — so the health line said "3 cards
+            # seen, 2 recorded" and the offers page called it a card the
+            # scanner failed to record, for one card under one id. The
+            # journal's identity, not the accumulator's: the same payout as
+            # the card that landed, or a payout that cannot be true, is that
+            # card again.
+            impossible = OP.doubt(parsed.get('pay'), parsed.get('minutes'),
+                                  parsed.get('miles')) is not None
+            same_card = (offer_log is not None and offer_log.id is not None
+                         and offer_log.landed_id == offer_log.id
+                         and (impossible or parsed.get('pay') == offer_log.pay))
+            if same_card:
+                seen_kept = True
+            else:
+                health.saw += 1
 
         if offer_log is not None and rate['ready'] and out['locked']:
             landed = offer_log.consider(parsed, rate, ms=out['ms']['total'],
@@ -1952,9 +1986,22 @@ def main():
             # ...and say which offer that is, once per card rather than once
             # per read. The driving screen holds it so the driver can mark it
             # as taken without going and finding the row afterwards.
-            if args.json and offer_log.id is not None and offer_log.id != told_offer:
-                told_offer = offer_log.id
-                emit_offer(offer_log.id, parsed, rate)
+            #
+            # And again when a LATER reading of the same card lands with more
+            # on it. The first locked reading can be a fragment — one leg, 20
+            # min / 7.3 mi, no address — and it was frozen as the offer: the
+            # panel's stack line, the Drop timer and the pair row were built
+            # from it while the offers page showed the corrected 23 min /
+            # 8.4 mi with the address. A reading that lands a row and reads
+            # differently is told; server.js replaces the offer on record
+            # and keeps its mark.
+            if args.json and offer_log.id is not None:
+                reading = (offer_log.id, parsed.get('minutes'), parsed.get('miles'),
+                           parsed.get('dropoff'))
+                if offer_log.id != told_offer or (landed and reading != told_as):
+                    told_offer = offer_log.id
+                    told_as = reading
+                    emit_offer(offer_log.id, parsed, rate)
 
         if args.display:
             cv2.imshow('uber-scan', render_panel(rate, parsed, whole=whole))
@@ -2028,7 +2075,18 @@ def main():
             # fault worth showing.
             if args.json:
                 now_alive = time.time()
-                if now_alive - last_alive > ALIVE_EVERY:
+                if reader.busy and reader.since is not None \
+                        and now_alive - reader.since > READ_STUCK_S:
+                    # No heartbeat for a rig whose reader has gone: the
+                    # silence is the message, and the supervisor restarts
+                    # on it. Said once, in the log nobody reads, for the
+                    # day somebody does.
+                    if not stuck_said:
+                        stuck_said = True
+                        log('a read has been in flight for %ds — the reader is '
+                            'stuck; going quiet so the supervisor restarts this'
+                            % int(now_alive - reader.since))
+                elif now_alive - last_alive > ALIVE_EVERY:
                     last_alive = now_alive
                     emit_alive(too_bright=health.too_bright,
                                too_dim=health.too_dim)
