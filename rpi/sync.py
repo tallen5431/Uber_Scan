@@ -51,6 +51,37 @@ OVERLAP_MS = 60 * 60 * 1000
 # What to send when the far end has nothing, or cannot say what it has.
 FIRST_RUN_DAYS = 30
 
+# Where a successful run leaves its mark: beside the journal, as
+# `<journal>.synced`, holding when the copy was last reached and what it held.
+# The sync keeps no state of its own on purpose — but "when did the copy last
+# answer" is not sync state, it is the one fact about the backup that the
+# owner cannot otherwise get. A copy machine that rebooted, or dropped off
+# the VPN, looked exactly like a car out of range: every tick said "did not
+# answer" under --quiet, exited 0, and the timer looked healthy for ever.
+# doctor.py reads this and says how old the backup is.
+def stamp_path(journal):
+    return journal + '.synced'
+
+
+def stamp(journal, to, have):
+    try:
+        tmp = stamp_path(journal) + '.part'
+        with open(tmp, 'w') as fh:
+            json.dump({'at': JR.now_ms(), 'to': to, 'have': have}, fh)
+        os.replace(tmp, stamp_path(journal))
+    except OSError:
+        pass                    # the journal's directory may be read-only here
+
+
+def last_synced(journal):
+    """The stamp as a dict, or None if the copy has never been reached."""
+    try:
+        with open(stamp_path(journal)) as fh:
+            row = json.load(fh)
+        return row if isinstance(row, dict) and isinstance(row.get('at'), int) else None
+    except (OSError, ValueError):
+        return None
+
 TIMEOUT = 20.0
 
 
@@ -278,7 +309,18 @@ def main():
     # silently, which is the worst way for the only backup to fail.
     mine = [r for r in JR.Journal(args.journal).rows()
             if isinstance(r, dict) and not r.get('kind')]
-    settled = sum(1 for r in mine if (r.get('at') or 0) <= newest)
+    # ...inside the window --days asked for. The first tick sent thirty days
+    # as promised and the second saw the rig holding more offers than the
+    # copy "up to that point" — the older ones, deliberately not sent — and
+    # sent everything from the start of the file. Offers older than the
+    # window are not a gap.
+    #
+    # An hour inside the window rather than on its edge: the first tick's
+    # floor was taken from this rig's clock at the moment it ran, and
+    # `newest` is the copy's newest row, so the two edges are never the same
+    # instant and a row sitting between them would read as a gap for ever.
+    since = newest - args.days * 86400000 + OVERLAP_MS if args.days else 0
+    settled = sum(1 for r in mine if since <= (r.get('at') or 0) <= newest)
     theirs = far.get('offers')
     short = (isinstance(theirs, int) and settled > theirs)
 
@@ -329,6 +371,7 @@ def main():
     if not rows:
         say('nothing new since %s' % time.strftime('%Y-%m-%d %H:%M',
                                                    time.localtime(floor / 1000.0)))
+        stamp(args.journal, args.to, far.get('have'))
         return 0
 
     try:
@@ -357,6 +400,7 @@ def main():
 
     say('sent %d row(s), %d were new, %s now holds %s'
         % (len(rows), result.get('added', 0), args.to, result.get('have', '?')))
+    stamp(args.journal, args.to, result.get('have'))
     if result.get('malformed'):
         print('%d row(s) were refused as malformed' % result['malformed'],
               file=sys.stderr)

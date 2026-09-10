@@ -104,6 +104,74 @@ eq('the engine it reports is the engine that would be used',
 eq('the scratch space it reports is where files would go',
    seen.get('scratch space'), HO._dir() != HO.HERE)
 
+# --- the camera's modes are the camera's, and the backup's age is real -------
+#
+# The modes line printed the IMX519's two sizes over a literal True whatever
+# the camera was. A fake picamera2 on the path answers with whatever modes the
+# check wants, and the doctor has to print those.
+import json                                                   # noqa: E402
+import tempfile                                               # noqa: E402
+import time                                                   # noqa: E402
+
+fakes = tempfile.mkdtemp()
+
+
+def fake_camera(sizes):
+    with open(os.path.join(fakes, 'picamera2.py'), 'w') as fh:
+        fh.write('class Picamera2(object):\n'
+                 '    @staticmethod\n'
+                 '    def global_camera_info():\n'
+                 '        return [{"Model": "fakecam"}]\n'
+                 '    sensor_modes = %r\n'
+                 '    def close(self):\n'
+                 '        pass\n' % [{'size': tuple(sz)} for sz in sizes])
+    return dict(PYTHONPATH=fakes + os.pathsep + os.environ.get('PYTHONPATH', ''))
+
+
+small = run(**fake_camera([(1920, 1080)]))
+eq('a sensor with only a small mode fails the modes check',
+   findings(small.stdout).get('full-frame modes available'), False)
+ok_('...printing the size the sensor reported', '1920x1080' in small.stdout)
+ok_('...and not the size the doctor used to assume', '2328x1748' not in
+    [l for l in small.stdout.splitlines() if 'full-frame' in l][0])
+big = run(**fake_camera([(2328, 1748), (4656, 3496)]))
+eq('a sensor with the full frame passes it',
+   findings(big.stdout).get('full-frame modes available'), True)
+ok_('...printing both modes', '4656x3496' in big.stdout)
+
+# The backup. A stamp sync.py wrote a day and a half ago is a copy machine
+# that has not answered for a day and a half, and the report says so.
+journal_dir = tempfile.mkdtemp()
+journal = os.path.join(journal_dir, 'journal.jsonl')
+open(journal, 'w').close()
+with open(journal + '.synced', 'w') as fh:
+    json.dump({'at': int(time.time() * 1000) - 36 * 3600000, 'to': 'http://nuc:8080',
+               'have': 12}, fh)
+stale = run(JOURNAL=journal)
+eq('a backup a day and a half old fails the backup check',
+   findings(stale.stdout).get('offers backed up off the car'), False)
+ok_('...saying how old it is (%r)' % [l for l in stale.stdout.splitlines() if 'backed up' in l][:1],
+    any('36.0 hours' in l for l in stale.stdout.splitlines() if 'backed up' in l))
+ok_('...and where it went', 'nuc:8080' in stale.stdout)
+ok_('...without blocking the rig', 'backed up' not in ' '.join(
+    l for l in stale.stdout.splitlines() if l.startswith('FAIL') and 'blocking' in l))
+with open(journal + '.synced', 'w') as fh:
+    json.dump({'at': int(time.time() * 1000) - 20 * 60000, 'to': 'http://nuc:8080',
+               'have': 12}, fh)
+fresh = run(JOURNAL=journal)
+eq('a backup twenty minutes old passes it',
+   findings(fresh.stdout).get('offers backed up off the car'), True)
+ok_('...saying so in minutes', any('20 min ago' in l for l in fresh.stdout.splitlines()))
+
+# The next step named is the autopilot, which aims, calibrates and scans on
+# its own — not the three scripts it replaced.
+ok_('the next step is the autopilot', 'autopilot.py' in big.stdout)
+ok_('...and not the bare scan loop',
+    not any('scan_pi.py' in l for l in big.stdout.splitlines()
+            if l.strip().startswith('python3')))
+ok_('...nor the three scripts it replaced',
+    not any('calibrate.py' in l or 'preview.py' in l for l in big.stdout.splitlines()))
+
 # --- slower is not broken --------------------------------------------------
 #
 # The distinction the whole report rests on. Forcing the slow path must change

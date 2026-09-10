@@ -10,7 +10,7 @@
     "test": "bash tools/test.sh",
     "cert": "bash tools/make-cert.sh",
     "test:quick": "bash tools/test.sh --quick",
-    "test:js": "node tests/corpus.test.js && node tests/parser.test.js && node tests/crop.test.js"
+    "test:js": "for f in tests/*.test.js; do node \"$f\" || exit 1; done"
   },
   "engines": {
     "node": ">=14"

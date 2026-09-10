@@ -219,6 +219,19 @@ else:
     ok_('no tracked file outside vendor/ is over %dkB%s' % (
         BIG // 1000, ' (' + ', '.join(big) + ')' if big else ''), not big)
 
+# --- the quick JavaScript pass runs every JavaScript suite -------------------
+#
+# `npm run test:js` named three of the four suites, so the stacking advice
+# was tested only by the ten-minute `npm test`. Either every tests/*.test.js
+# is named, or the script globs them.
+import json                                                   # noqa: E402
+scripts = json.load(open(os.path.join(ROOT, 'package.json'))).get('scripts', {})
+quick = scripts.get('test:js', '')
+suites = sorted(os.path.basename(p) for p in glob.glob(os.path.join(ROOT, 'tests', '*.test.js')))
+ok_('there are JavaScript suites to run', len(suites) >= 3)
+ok_('npm run test:js runs every one of them (%r)' % quick[:60],
+    'tests/*.test.js' in quick or all(name in quick for name in suites))
+
 # --- two figures may not wear the same words -------------------------------
 #
 # The offers page said "16 of them, 22.1 hours in total, not one shift" and,

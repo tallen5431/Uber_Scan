@@ -884,6 +884,52 @@ try:
 finally:
     grow.close()
 
+# --- the stamp: when the copy was last reached -------------------------------
+#
+# A copy machine that rebooted looked exactly like a car out of range, and
+# nothing on the rig ever said how old the last backup was. A run that reaches
+# the copy stamps `<journal>.synced`; one that does not leaves it alone.
+stamp_far = FarEnd()
+try:
+    work3 = tempfile.mkdtemp()
+    j3 = os.path.join(work3, 'journal.jsonl')
+    write(j3, [offer(1, now - 60000)])
+    eq('no stamp before the first run', SY.last_synced(j3), None)
+    run_main(stamp_far.base, j3)
+    first = SY.last_synced(j3)
+    ok_('a run that reaches the copy stamps the journal', first is not None)
+    eq('...naming where it went', (first or {}).get('to'), stamp_far.base)
+    eq('...and what the copy holds', (first or {}).get('have'), 1)
+    time.sleep(0.01)
+    run_main(stamp_far.base, j3)
+    second = SY.last_synced(j3)
+    ok_('...and a run with nothing new stamps it again',
+        second is not None and second['at'] >= first['at'])
+    run_main('http://127.0.0.1:1', j3)
+    eq('a run that cannot reach the copy leaves the stamp alone',
+       SY.last_synced(j3), second)
+finally:
+    stamp_far.close()
+
+# --- --days bounds the second tick as well as the first ------------------------
+#
+# The first tick sent thirty days as promised; the second saw the rig holding
+# more offers than the copy "up to that point" — the older ones, deliberately
+# not sent — and sent everything from the start of the file.
+days_far = FarEnd()
+try:
+    work4 = tempfile.mkdtemp()
+    j4 = os.path.join(work4, 'journal.jsonl')
+    write(j4, [offer(i, now - i * 86400000) for i in range(60)])
+    run_main(days_far.base, j4, ['--days', '30'])
+    first_tick = len(lines(days_far.journal))
+    ok_('the first tick sends the window (%d rows)' % first_tick, 29 <= first_tick <= 31)
+    run_main(days_far.base, j4, ['--days', '30'])
+    eq('...and the second sends nothing more, rather than everything',
+       len(lines(days_far.journal)), first_tick)
+finally:
+    days_far.close()
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
 sys.exit(1 if bad else 0)

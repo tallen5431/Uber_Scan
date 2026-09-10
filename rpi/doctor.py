@@ -95,6 +95,34 @@ def main():
     check('espeak-ng (only for --speak)', bool(espeak), espeak or 'not installed',
           'sudo apt install -y espeak-ng')
 
+    # The backup: when the copy machine last answered. Without this a copy
+    # that rebooted, or dropped off the VPN, looked exactly like a car out of
+    # range — every tick "did not answer" under --quiet, exit 0, a healthy
+    # looking timer — and nothing anywhere said how old the last backup was.
+    # sync.py stamps `<journal>.synced` on every run that reaches the copy.
+    try:
+        import journal as JR
+        import sync as SY
+        journal_path = os.environ.get('JOURNAL') or JR.DEFAULT_PATH
+        last = SY.last_synced(journal_path)
+        timer = os.path.exists('/etc/systemd/system/uberscan-sync.timer')
+        if last is None:
+            check('offers backed up off the car', not timer,
+                  'no sync set up — see tools/install-sync.sh' if not timer
+                  else 'the timer is installed but the copy has never been reached',
+                  '' if not timer else
+                  'run: python3 rpi/sync.py --to <the copy machine> and read what it says')
+        else:
+            hours = max(0.0, (JR.now_ms() - last['at']) / 3600000.0)
+            check('offers backed up off the car', hours < 24,
+                  '%s ago, to %s' % (
+                      ('%d min' % round(hours * 60)) if hours < 1 else '%.1f hours' % hours,
+                      last.get('to') or '?'),
+                  'the copy machine has not been reached for %.0f hours — is its '
+                  'server running, and is it on the VPN?' % hours)
+    except Exception as e:                                    # noqa: BLE001
+        check('offers backed up off the car', False, str(e))
+
     # The camera is the one thing that cannot be worked around.
     try:
         from picamera2 import Picamera2
@@ -102,9 +130,29 @@ def main():
         if cameras:
             names = ', '.join(c.get('Model', '?') for c in cameras)
             check('camera detected', True, names)
-            full_fov = [m for m in ('2328x1748', '4656x3496')]
-            check('full-frame modes available', True, ' / '.join(full_fov) +
-                  '  (run scan_pi.py --list-modes to confirm)')
+            # The sensor's own modes, asked of the sensor. This line used to
+            # print the IMX519's two sizes over a literal True whatever the
+            # camera was, so on a Camera Module 3 the one line the doctor
+            # printed about modes was the one line that could not be trusted.
+            # The camera has to be opened to ask, and the service may be
+            # holding it: then it is not checked, and says so.
+            try:
+                cam = Picamera2()
+                try:
+                    sizes = ['%dx%d' % tuple(m['size']) for m in cam.sensor_modes
+                             if m.get('size')]
+                finally:
+                    cam.close()
+                biggest = max((m[0] * m[1] for m in
+                               (tuple(int(x) for x in sz.split('x')) for sz in sizes)),
+                              default=0)
+                check('full-frame modes available', biggest >= 2328 * 1748,
+                      ' / '.join(sizes) or 'none reported',
+                      'this sensor is smaller than the scanner is tuned for')
+            except Exception as e:                            # noqa: BLE001
+                check('full-frame modes available', True,
+                      'not checked — the camera is in use (%s); stop the service '
+                      'and run this again to see them' % str(e)[:60])
         else:
             check('camera detected', False, 'libcamera reports no cameras',
                   'check the ribbon cable, then add dtoverlay=imx519 to '
@@ -141,7 +189,7 @@ def main():
     config = os.path.join(HERE, 'config.json')
     check('calibration', os.path.exists(config),
           config if os.path.exists(config) else 'not calibrated yet',
-          'python3 rpi/preview.py   # aim first, then: python3 rpi/calibrate.py')
+          'python3 rpi/autopilot.py   # aims and calibrates on its own')
 
     # The parser is pure python and must pass regardless of any hardware.
     if has_cv2 and has_pytesseract:
@@ -166,16 +214,22 @@ def main():
     blocking = [r for r in failed
                 if 'espeak' not in r[0] and 'calibration' not in r[0] and 'focus' not in r[0]
                 and 'autofocus' not in r[0] and 'reading engine' not in r[0]
-                and 'scratch space' not in r[0]]
+                and 'scratch space' not in r[0] and 'backed up' not in r[0]]
 
     print()
+    # The next step is the autopilot, which aims, calibrates and scans on its
+    # own — not the three scripts it replaced. And if the service is
+    # installed it holds the camera, so it is stopped first.
+    step = []
+    if os.path.exists('/etc/systemd/system/uberscan.service'):
+        step.append('  sudo systemctl stop uberscan   # it holds the camera while it runs')
+    step.append('  python3 rpi/autopilot.py --speak   # aims, calibrates, then scans')
     if not failed:
-        print('All good. Next: python3 rpi/scan_pi.py --speak')
+        print('All good. Next:')
+        print('\n'.join(step))
     elif not blocking:
         print('Nothing blocking. Finish setup with the fixes above, then:')
-        print('  python3 rpi/preview.py     # aim the camera')
-        print('  python3 rpi/calibrate.py   # lock in the corners')
-        print('  python3 rpi/scan_pi.py --speak')
+        print('\n'.join(step))
     else:
         print('%d blocking problem(s) — fix those first.' % len(blocking))
     return 1 if blocking else 0

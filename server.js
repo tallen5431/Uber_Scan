@@ -1213,8 +1213,21 @@ function latestPerOfferUncached(rows) {
 // Cheap enough to do on every write: mkdir with recursive succeeds silently
 // when the directory is already there, which it is after the first one.
 function withDirectory(file, done) {
-  fs.mkdir(path.dirname(file), { recursive: true }, function (err) {
-    done(err && err.code !== 'EEXIST' ? err : null);
+  var dir = path.dirname(file);
+  fs.mkdir(dir, { recursive: true }, function (err) {
+    if (err && err.code !== 'EEXIST') return done(err);
+    // EEXIST is fine when what exists is a directory. A file standing where
+    // the directory should be also answers EEXIST, and was taken as fine
+    // here while every append then failed with ENOTDIR.
+    fs.stat(dir, function (statErr, st) {
+      if (statErr) return done(statErr);
+      if (!st.isDirectory()) {
+        var e = new Error(dir + ' is not a directory');
+        e.code = 'ENOTDIR';
+        return done(e);
+      }
+      done(null);
+    });
   });
 }
 
@@ -2658,6 +2671,21 @@ if (tls) {
   console.log('home-screen install need a secure context: they work on localhost,');
   console.log('but not over a LAN address. Run `npm run cert` and restart to fix.');
   console.log('(The Pi scanner below does not care — it never touches a browser.)');
+}
+
+// Say now if the journal cannot be written where JOURNAL points, rather than
+// on the first upload. On a fresh copy machine, `JOURNAL=/var/lib/uberscan/…`
+// as a normal user started cleanly, answered /api/journal/newest with nothing,
+// passed the rig's install gate, and only the first ingest failed with EACCES.
+// The directory is made here if it can be, and the fix is printed if not.
+if (process.env.JOURNAL) {
+  withDirectory(JOURNAL_PATH, function (err) {
+    if (!err) return;
+    var dir = path.dirname(JOURNAL_PATH);
+    console.error('\nJOURNAL points at ' + dir + ', which this user cannot create (' + err.code + ').');
+    console.error('  sudo mkdir -p ' + dir + ' && sudo chown $USER ' + dir);
+    console.error('  or point JOURNAL somewhere under your home directory.');
+  });
 }
 
 if (scannerEnabled()) {

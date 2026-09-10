@@ -296,6 +296,38 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- a journal that cannot be written is said at startup ----------------------
+# On a fresh copy machine, JOURNAL under /var/lib as a normal user started
+# cleanly and answered the rig's install gate; only the first upload failed.
+work = tempfile.mkdtemp()
+errlog = open(os.path.join(work, 'err.txt'), 'w')
+# A directory that cannot be made: a file stands where it would go.
+open(os.path.join(work, 'blocker'), 'w').close()
+nowhere = os.path.join(work, 'blocker', 'journal.jsonl')
+port = free_port()
+proc = subprocess.Popen(
+    ['node', os.path.join(ROOT, 'server.js')],
+    env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', SCANNER='0', JOURNAL=nowhere),
+    stdout=subprocess.DEVNULL, stderr=errlog)
+try:
+    base = 'http://127.0.0.1:%d' % port
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(base + '/api/status', timeout=1).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+    time.sleep(0.3)
+    errlog.flush()
+    said = open(os.path.join(work, 'err.txt')).read()
+    ok_('a JOURNAL its user cannot create is said at startup (%r)' % said[:60],
+        'cannot create' in said and os.path.dirname(nowhere) in said)
+    ok_('...with the command that fixes it', 'mkdir -p' in said and 'chown' in said)
+finally:
+    stop(proc)
+    errlog.close()
+    shutil.rmtree(work, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)
