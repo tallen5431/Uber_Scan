@@ -1134,8 +1134,14 @@
     } else if (s.rolled) {
       bits = ['today: the journal just rolled over'];
     } else {
-      bits = [s.offers + (s.offers === 1 ? ' offer' : ' offers')];
-      if (s.setAside) bits.push(s.setAside + ' set aside');
+      // Money first. This is one line, cut with an ellipsis where it does
+      // not fit, and on the 480px hat and a phone it does not: measured
+      // against a fortnight of offers, 392px of text in 223px on the hat and
+      // 314px in 172px on the phone. What the ellipsis took was the tail, and
+      // the tail was "took 2 for $27 net · median $20/hr" — the two figures
+      // a driver glances down for. They lead now; the count of offers and
+      // the set-aside figure are what a small screen loses.
+      bits = [];
       // "took 3 for $48" — the same words the offers page puts on a day
       // header, so the two screens say the same thing about the same rows.
       // Whole dollars, like the median beside it: this is read at arm's
@@ -1157,6 +1163,8 @@
       if (typeof s.median === 'number') {
         bits.push('median $' + Math.round(s.median) + '/hr');
       }
+      bits.push(s.offers + (s.offers === 1 ? ' offer' : ' offers'));
+      if (s.setAside) bits.push(s.setAside + ' set aside');
       // `beforeClock` is deliberately NOT printed here. Offers the rig recorded
       // before its clock was right are stamped 1970 on disk and cannot fall
       // inside any day window — but that is true of every day, forever, so on a

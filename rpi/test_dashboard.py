@@ -1179,6 +1179,18 @@ try:
             'offered' not in (first.get('text') or ''))
         ok_('...and still only one rate on the line',
             (first.get('text') or '').count('/hr') == 1)
+        # The money before the count. The line is one line, cut with an
+        # ellipsis where it does not fit, and it does not fit on the 480px
+        # hat or a phone: measured against a fortnight of offers, 392px of
+        # text in 223px on the hat and 314px in 172px on the phone, and what
+        # was cut was the tail — "took 2 for $27 net · median $20/hr", the two
+        # figures a driver glances down for. They lead now, so what the
+        # ellipsis takes is the count of offers and the set-aside figure.
+        text = first.get('text') or ''
+        ok_('...with what was taken before how many offers there were',
+            'took' in text and 'offers' in text and text.index('took') < text.index('offers'))
+        ok_('...and the median before them too',
+            '/hr' in text and text.index('/hr') < text.index('offers'))
         # On the glass and on one line, on the panel this is bolted to.
         ok_('...on one line', first.get('oneLine'))
         eq('...and the connection message beside it still on one',
