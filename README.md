@@ -218,14 +218,22 @@ hide for a minute, for the mis-tap.
 Two things it is careful about:
 
 * **it is a record of offers, not of trips.** The scanner cannot see the Accept
-  button and never touches it, so nothing here knows which offers you took.
-* **it stores numbers, not addresses.** The pickup and dropoff text the reader
-  saw is not written to the file. It is your earnings history and, by the hour,
-  your whereabouts — so `rpi/journal.jsonl` is gitignored and, like everything
-  under `rpi/`, the server refuses to serve the file itself. The page gets its
-  data through `/api/journal`.
+  button and never touches it, so nothing it writes knows which offers you took.
+  What you ticked yourself is kept separately, as its own line naming the offer,
+  and is the only thing here that claims to know.
+* **it stores where an offer went, and you can turn that off.** The merchant
+  behind a "Pickup" label and the address printed after a leg are kept, because
+  an offer read months ago is otherwise a row of figures that cannot be matched
+  to any job you remember — and checking the record is the point of having one.
+  Only what the card itself printed, never free text off the map behind it. They
+  are in `/api/journal` and in the CSV.
 
-Run the scanner with `--no-journal` to keep no record at all.
+  It is a real trade: this is a record of where you were and when, it lives on a
+  card in a vehicle, and it is copied to the machine at home. `"keepPlaces":
+  false` alongside the other settings in `rpi/config.json` turns it off and
+  changes nothing else; `--no-journal` keeps no record at all. Either way
+  `rpi/journal.jsonl` is gitignored and, like everything under `rpi/`, the
+  server refuses to serve the file itself.
 
 ## What the server will not serve
 
