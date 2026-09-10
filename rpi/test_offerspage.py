@@ -212,6 +212,21 @@ PAIR = {
               'ends': 'elsewhere', 'uncosted': False},
 }
 
+# Dots and rankings. The newest row was judged at a lower target than the
+# rest, so re-judging a row against "today's" target would colour it
+# differently from the verdict it records; and the misread every real journal
+# carries — $1,184 for twenty minutes — led every ranking until rankings
+# learned to leave set-aside rows at the bottom.
+DOTS = [offer(101, pay=12.0, state='go'),              # $30/hr at 25
+        offer(102, pay=8.0, state='no'),               # $18/hr: PASS at 25, ACCEPT at 18
+        offer(103, pay=9.0, state='warn'),             # $21/hr
+        offer(104, pay=1184.0, state='go', suspect=True),
+        offer(100, pay=12.0, state='go')]              # newest, target 18
+# Last in the feed and a minute old: the page takes its target from the
+# most recent row that is not in the future, in feed order.
+DOTS[-1]['at'] = DOTS[-1]['firstAt'] = NOW - 60000
+DOTS[-1]['target'] = 18
+
 # Runs of scanning: twelve stretches three hours apart, three cards five
 # minutes apart in each, and three such stretches for the small case. The
 # chart shows the latest eight and offers the rest, and the way it says so
@@ -251,6 +266,9 @@ FEEDS = {
                   'offers': [offer(0, pay=1030.0, state='no', suspect=True),
                              offer(1, accepted=True, pay=1184.0, suspect=True),
                              offer(2, pay=1251.0, state='no', suspect=True)]},
+    'dots': {'count': len(DOTS), 'total': len(DOTS), 'truncated': False,
+             'days': 7, 'hidden': 0, 'watched': {'saw': 5, 'kept': 5},
+             'unreadable': None, 'pairs': [], 'offers': DOTS},
     'runs': {'count': len(RUNS), 'total': len(RUNS), 'truncated': False,
              'days': 7, 'hidden': 0, 'watched': {'saw': 36, 'kept': 36},
              'unreadable': None, 'pairs': [], 'offers': RUNS},
@@ -343,7 +361,16 @@ const TEXT = (sel) => {
   }
   if (!browser) throw new Error('no chromium');
   const out = {};
+  // A step that never settles is reported as a skip naming the feed it hung
+  // on, rather than as a suite that sat until the runner's timeout killed
+  // it in silence.
+  let stage = 'start';
+  setTimeout(() => {
+    console.log(JSON.stringify({ skip: 'the driver hung on "' + stage + '"' }));
+    process.exit(2);
+  }, 400000).unref();
   for (const [name, feed] of Object.entries(FEEDS)) {
+    stage = name;
     const ctx = await browser.newContext({ viewport: { width: 900, height: 900 } });
     const page = await ctx.newPage();
     await page.addInitScript(STUB(feed));
@@ -448,6 +475,29 @@ const TEXT = (sel) => {
       }
       out[name].callsAfterAll = await page.evaluate(() => Object.assign({}, window.__calls));
     }
+    // The colour of each row's dot against the verdict it records, and where
+    // the set-aside row lands in a ranking.
+    if (name === 'dots') {
+      const dots = () => page.evaluate(() =>
+        [].slice.call(document.querySelectorAll('#log details.offer')).map((d) => ({
+          id: d.getAttribute('data-id'),
+          aside: d.classList.contains('aside'),
+          dot: (d.querySelector('.dot') || { className: '' }).className.replace('dot', '').trim() })));
+      out[name].dots = {};
+      for (const pick of ['no', 'go', 'all']) {
+        await page.click('#chips button[data-pick="' + pick + '"]');
+        await page.waitForTimeout(250);
+        out[name].dots[pick] = await dots();
+      }
+      out[name].ranked = {};
+      for (const sort of ['perHour', 'pay']) {
+        await page.click('#sorts button[data-sort="' + sort + '"]');
+        await page.waitForTimeout(250);
+        out[name].ranked[sort] = (await dots()).map((d) => d.id);
+      }
+      out[name].findKeyboard = await page.evaluate(() =>
+        document.getElementById('find').getAttribute('inputmode'));
+    }
     // The chips and the order on the nothing-usable path.
     if (name === 'all aside') {
       const rows = () => page.evaluate(() => ({
@@ -489,6 +539,94 @@ const TEXT = (sel) => {
         await page.waitForTimeout(250);
         out[name].runs.refolded = await runsNow();
       }
+    }
+    if (name === 'took six') {
+      // A mark, made on an opened row a long way down the list: the row
+      // must still be open and on screen afterwards. The mark goes to the
+      // real server (only /api/journal is stubbed), which answers, and the
+      // list is redrawn from the same feed.
+      out[name].mark = await page.evaluate(async () => {
+        const rows = document.querySelectorAll('#log details.offer');
+        const d = rows[rows.length - 1];
+        d.open = true;
+        d.scrollIntoView({ block: 'center' });
+        const before = { y: window.scrollY, top: d.getBoundingClientRect().top };
+        d.querySelector('button[data-act="took"]').click();
+        await new Promise((r) => setTimeout(r, 900));
+        const again = document.querySelector('#log details.offer[data-id="' + d.getAttribute('data-id') + '"]');
+        return { id: d.getAttribute('data-id'), before: before,
+                 open: !!(again && again.open),
+                 top: again ? again.getBoundingClientRect().top : null,
+                 y: window.scrollY, inner: window.innerHeight,
+                 undo: (document.getElementById('undoWhat').textContent || '').trim() };
+      });
+      // Two loads in flight: the slower earlier one must not paint over the
+      // window pressed later. 7 days is answered after 1.5s with the feed;
+      // Today is answered at once with nothing.
+      out[name].race = await page.evaluate(async (empty) => {
+        const feedFetch = window.fetch;
+        window.fetch = function (url, opts) {
+          const u = String(url);
+          if (u.indexOf('/api/journal?') === 0 && u.indexOf('days=7') !== -1) {
+            return new Promise((r) => setTimeout(() => r(feedFetch(url, opts)), 1500));
+          }
+          if (u.indexOf('/api/journal?') === 0) {
+            return Promise.resolve({ ok: true, status: 200,
+              json: () => Promise.resolve(empty), text: () => Promise.resolve(JSON.stringify(empty)) });
+          }
+          return feedFetch(url, opts);
+        };
+        document.querySelector('#ranges button[data-days="7"]').click();
+        await new Promise((r) => setTimeout(r, 50));
+        document.querySelector('#ranges button[data-days="1"]').click();
+        await new Promise((r) => setTimeout(r, 2200));
+        const pressed = [].slice.call(document.querySelectorAll('#ranges button'))
+          .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-days'));
+        window.fetch = feedFetch;
+        return { pressed: pressed,
+                 rows: document.querySelectorAll('#log details.offer').length,
+                 days: document.querySelectorAll('#log .day').length,
+                 nothing: document.getElementById('nothing').hidden ? null
+                   : (document.getElementById('nothing').textContent || '').slice(0, 40),
+                 headline: (document.getElementById('headline').textContent || '').trim(),
+                 scale: (document.getElementById('blockScale').textContent || '').trim() };
+      }, FEEDS['genuinely empty']);
+      // The feed again, then a search and a window that fails: nothing of
+      // the previous window may stand under the apology, and a chip must
+      // not bring it back.
+      out[name].failed = await page.evaluate(async () => {
+        const feedFetch = window.fetch;
+        document.querySelector('#ranges button[data-days="7"]').click();
+        await new Promise((r) => setTimeout(r, 400));
+        const box = document.getElementById('find');
+        box.value = 'marietta';
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 400));
+        const withRows = { pairs: !document.getElementById('pairsHead').hidden,
+                           note: !document.getElementById('findNote').hidden,
+                           scale: (document.getElementById('blockScale').textContent || '').trim() };
+        window.fetch = function (url, opts) {
+          if (String(url).indexOf('/api/journal?') === 0) return Promise.reject(new Error('down'));
+          return feedFetch(url, opts);
+        };
+        document.querySelector('#ranges button[data-days="30"]').click();
+        await new Promise((r) => setTimeout(r, 400));
+        const down = { pairs: !document.getElementById('pairsHead').hidden,
+                       note: !document.getElementById('findNote').hidden,
+                       scale: (document.getElementById('blockScale').textContent || '').trim(),
+                       nothing: (document.getElementById('nothing').textContent || '').slice(0, 25) };
+        document.querySelector('#chips button[data-pick="go"]').click();
+        await new Promise((r) => setTimeout(r, 300));
+        const chipped = document.querySelectorAll('#log details.offer').length;
+        window.fetch = feedFetch;
+        box.value = '';
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        document.querySelector('#chips button[data-pick="all"]').click();
+        await new Promise((r) => setTimeout(r, 300));
+        return { withRows: withRows, down: down, chipped: chipped };
+      });
+      await page.click('#ranges button[data-days="7"]').catch(() => {});
+      await page.waitForTimeout(400);
     }
     // A chip that picks nothing, on the feed with no verdicts on its rows.
     if (name === 'took six') {
@@ -623,6 +761,52 @@ try:
     few = got['few runs']['runs']['folded']
     eq('three runs are all drawn', len(few['rows']), 3)
     ok_('...with nothing to press', few['button'] is None)
+
+    # --- a mark leaves the row where it was -------------------------------
+    mk = got['took six'].get('mark') or {}
+    ok_('the row acted on was opened and scrolled to before the mark',
+        mk.get('before') and mk['before'].get('y', 0) > 0)
+    ok_('the mark was made (%r)' % mk.get('undo'), 'taken' in (mk.get('undo') or ''))
+    ok_('...and the row is still open afterwards', mk.get('open'))
+    ok_('...and still on screen (top %r of %r)' % (mk.get('top'), mk.get('inner')),
+        mk.get('top') is not None and 0 <= mk['top'] < (mk.get('inner') or 0))
+
+    # --- the later window wins ------------------------------------------
+    rc = got['took six'].get('race') or {}
+    eq('after 7 days then Today, Today is the window pressed', rc.get('pressed'), ['1'])
+    eq('...and the rows on the page are today\'s (none)', rc.get('rows'), 0)
+    eq('...with no day headers from the week', rc.get('days'), 0)
+    ok_('...and the empty state, not the week\'s headline (%r)' % (rc.get('headline') or '')[:40],
+        rc.get('nothing') is not None and 'cleared the line' not in (rc.get('headline') or ''))
+    eq('...and no chart scale left over', rc.get('scale'), '')
+
+    # --- a window that cannot be fetched leaves nothing of the last one -----
+    fl = got['took six'].get('failed') or {}
+    wr = fl.get('withRows') or {}
+    ok_('with rows on the page there is a pairing, a search sentence and a scale',
+        wr.get('pairs') and wr.get('note') and wr.get('scale'))
+    dn = fl.get('down') or {}
+    ok_('the apology is up (%r)' % dn.get('nothing'), 'Cannot reach' in (dn.get('nothing') or ''))
+    ok_('...with no pairing under it', not dn.get('pairs'))
+    ok_('...no search sentence', not dn.get('note'))
+    eq('...no chart scale', dn.get('scale'), '')
+    eq('...and a chip brings nothing back', fl.get('chipped'), 0)
+
+    # --- the dot is the verdict the row records ---------------------------
+    dz = got['dots']
+    passing = [d for d in (dz['dots'].get('no') or []) if not d['aside']]
+    ok_('the PASS chip lists rows', bool(passing))
+    eq('...and every one of them wears a PASS dot', sorted(set(d['dot'] for d in passing)), ['no'])
+    accepting = [d for d in (dz['dots'].get('go') or []) if not d['aside']]
+    eq('...as every row under ACCEPT wears an ACCEPT dot',
+       sorted(set(d['dot'] for d in accepting)), ['go'])
+    ranked = dz['ranked'].get('perHour') or []
+    ok_('Best $/hr does not lead with the set-aside misread (%r)' % ranked[:2],
+        ranked and ranked[0] != 'r104')
+    eq('...which is last', ranked[-1] if ranked else None, 'r104')
+    eq('...and last under Highest pay too', (dz['ranked'].get('pay') or [None])[-1], 'r104')
+    ok_('the find box does not ask the phone for a keypad with no letters (%r)'
+        % dz.get('findKeyboard'), dz.get('findKeyboard') not in ('decimal', 'numeric'))
 
     # Six taken offers, $10.00 each with $2.00 of running cost: $48.00 net,
     # $60.00 gross. The headline was already net; the day header was not, and
