@@ -62,8 +62,12 @@ may cost you more than it gains. Try split screen first.
 | Pickup padding | Minutes added to every offer, since the quoted time usually ignores the drive to the rider. |
 | Haptics | Buzz on each key. |
 
-Settings and history are stored on the phone only. The app makes no network
-requests after it loads — there is no account, no server, no tracking.
+Settings and history are stored on the phone only — there is no account and no
+tracking. The one thing it talks to is the rig: served by the rig's own server,
+**LOG** also hands the offer to the rig's journal so the offers page can count
+it, and says so in the history when that did not get through. Served from
+anywhere else (GitHub Pages, a file), it asks once whether a rig is there,
+hears nothing, and keeps every offer on the phone.
 
 ## The math
 
@@ -123,9 +127,11 @@ Accepting the browser's warning is enough for the camera but **not** for the
 offline install; for that, install `ssl/ca.pem` on the phone.
 [SCANNING.md](SCANNING.md) has the details and the per-platform steps.
 
-On a Raspberry Pi with a camera, `npm start` also runs the offer scanner once
-`rpi/config.json` exists, serving the live verdict at `/live.html` and its state
-at `/api/status`. See [rpi/README.md](rpi/README.md); `SCANNER=0` turns it off.
+On a Raspberry Pi with a camera, `npm start` also runs the rig's autopilot —
+which aims, calibrates and then reads offers — wherever `rpi/autopilot.py`
+exists, serving the live verdict at `/live.html` and its state at
+`/api/status`. See [rpi/README.md](rpi/README.md). On any other machine, the
+copy at home included, set `SCANNER=0` so it does not try.
 
 **If your host tried to run `ui.js` (or the old `app.js`) with Node and died on
 `ReferenceError: document is not defined`**, that is the symptom of this project
@@ -143,11 +149,16 @@ it read `package.json`, and it will serve instead.
 | `journal-client.js` | Hands an offer typed here, or read by the phone's scanner, to the rig's journal when there is one to answer |
 | `server.js` | Zero-dependency static server; the Node entry point |
 | `journal.html` | Every offer the scanner kept, and what it adds up to |
+| `live.html` | The driving screen: the rig's verdict, the phone as the camera sees it, and the controls used while moving |
+| `scan.html`, `scan.js`, `scan.css` | The phone's own scanner — a photo of the offer card, read on the phone; see [SCANNING.md](SCANNING.md) |
+| `offer-parser.js` | Turns the text off a card into pay, minutes and miles — one corpus, shared with the Pi's port |
+| `vendor/` | The OCR engine the phone's scanner runs, kept here so the page works with no signal |
 | `advice.js` | What target the offers themselves argue for — shared, and tested on its own |
-| `sw.js` | Offline cache — bump `CACHE` when you change files |
+| `sw.js` | Offline cache — stale-while-revalidate, so a changed file is picked up on the next open. `SHELL` is a convenience to bump when a page changes; `BLOB` is the OCR engine, bumped only when that changes |
 | `manifest.webmanifest` | Home-screen install metadata |
 | `tools/make_icons.py` | Regenerates the icons in `icons/` |
 | `tools/make-cert.sh` | `npm run cert` — local certificate authority for https |
+| `tools/install-sync.sh` | Puts the rig's journal on a timer to the machine at home; see the rig's README |
 
 ## Looking at a shift afterwards
 
@@ -199,7 +210,9 @@ So the Pi scanner keeps one line per offer it was confident about, in
 Nothing is ever deleted. Ticking and hiding are appended as their own lines, the
 same way the offers are, so a mis-tap on a phone in a moving car costs an entry
 in a list rather than a row of data that took a shift to collect. Hidden offers
-are out of every figure and every export, and `?hidden=1` brings them back.
+are out of every figure and every export; **show hidden offers** at the foot of
+the list brings them back, and an **Undo** bar follows every tick and every
+hide for a minute, for the mis-tap.
 * a **CSV** of everything, for a spreadsheet.
 
 Two things it is careful about:

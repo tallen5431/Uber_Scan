@@ -195,10 +195,10 @@ real offers before mounting anything.
 ## Running the tests
 
 ```sh
-node tests/parser.test.js     #  83 checks, no browser needed
-node tests/corpus.test.js     # 350 checks shared with the Pi parser
+node tests/parser.test.js     #  95 checks, no browser needed
+node tests/corpus.test.js     # 673 checks shared with the Pi parser
 node tests/crop.test.js       #  16 on the Pi's hand-drawn box, server to scanner
-python3 rpi/test_scanjs.py    #  39 through a real browser, end to end
+python3 rpi/test_scanjs.py    #  94 through a real browser, end to end
 ```
 
 The last one drives this page the way a phone does — it renders each card shape,

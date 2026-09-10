@@ -113,14 +113,22 @@ left to tell you whether tonight was the first time or the fourth.
 ### Or as its own service
 
 ```sh
-sudo bash rpi/install-service.sh
-journalctl -u uberscan -f       # watch it work
+sudo bash rpi/install-service.sh                        # verdicts spoken aloud
+sudo SPEAK=0 bash rpi/install-service.sh                # printed to the journal only
+sudo ARGS="--keep-scans" bash rpi/install-service.sh    # flags for the scanner
+journalctl -u uberscan -f                               # watch it work
 ```
 
-Use one or the other, not both — two processes cannot share the camera.
+The service **is** the web server: it runs `server.js`, which spawns the
+autopilot exactly as `npm start` does, so a rig booted this way has the
+driving screen, the offers page and the scanner from one unit. It used to run
+the scanner alone, and a rig booted that way had a driving screen that could
+never show a verdict — readings reach the panel only through the server that
+spawned the scanner.
 
-Stop the service before recalibrating, so the camera is free:
-`sudo systemctl stop uberscan`.
+Use one or the other, not both — two processes cannot share the camera, and
+two servers cannot share the port. Stop the service before `npm start` or any
+of the `rpi/` scripts by hand: `sudo systemctl stop uberscan`.
 
 ## Why the fixed mount changes everything
 
@@ -2639,6 +2647,12 @@ python3 rpi/scan_pi.py --journal /some/other/path.jsonl
 JOURNAL=/some/other/path.jsonl npm start   # ...and tell the web side where it went
 ```
 
+Flags for the scanner reach it through the server that spawns it:
+`SCANNER_ARGS="--keep-scans --screen-fps 6" npm start`, or
+`sudo ARGS="--keep-scans" bash rpi/install-service.sh` for the service. That
+route did not exist for a long time — every flag below was documented and none
+of them could be given to the rig as it actually runs.
+
 The scanner and the web server have to name the same file. Nothing detects a
 mismatch: the page simply reports no offers while the scanner writes happily to
 somewhere else.
@@ -2796,9 +2810,10 @@ happened to come out on top. Distinct readings are kept, deduplicated (a card
 sitting still says the same thing repeatedly) and capped at eight, and they go
 into the CSV as a `scans` column joined with pipes.
 
-**The picture itself** — `--keep-scans`. This is the one that changes what can be
-asked. Whether a crop was too tight, whether a threshold ate a decimal point,
-whether a different psm would have found the missing leg: all of it is
+**The picture itself** — `--keep-scans` (`SCANNER_ARGS="--keep-scans" npm start`
+on the rig as it runs). This is the one that changes what can be asked. Whether
+a crop was too tight, whether a threshold ate a decimal point, whether a
+different psm would have found the missing leg: all of it is
 answerable offline from the card image and *none* of it is answerable from the
 text, because the text is what the damage left behind. What is written is the
 greyscale card as it came off the warp, **before** `preprocess()` — a picture of
@@ -5066,8 +5081,16 @@ SCANNER=0 JOURNAL=/var/lib/uberscan/journal.jsonl npm start
 
 `JOURNAL` wants to point *outside* the checkout — left at the default the copy
 lands in `rpi/journal.jsonl` inside the clone, which works but stands your only
-backup next to a `git clean`. The directory is created if it is not there, and
-`config-backup.json` lands beside it.
+backup next to a `git clean`. The directory has to exist and be writable by
+whoever runs the server; a path like the one above needs making first:
+
+```sh
+sudo mkdir -p /var/lib/uberscan && sudo chown $USER /var/lib/uberscan
+```
+
+The server checks that at startup and prints exactly that line if it cannot
+write there, rather than starting, taking the rig's rows and dropping them.
+`config-backup.json` lands beside the journal.
 
 `SCANNER=0` is not optional on that machine. Without it the server tries to
 start the camera scanner, fails on the missing picamera2, and restart-loops
@@ -5230,7 +5253,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 30 suites, 4517 checks
+npm test                # all 33 suites, 5165 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5244,20 +5267,20 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 608 checks, the shared corpus
-node tests/parser.test.js       #  83 on the browser side alone
-node tests/advice.test.js       # 144 on what line to tell a driver to draw
+node tests/corpus.test.js       # 673 checks, the shared corpus
+node tests/parser.test.js       #  95 on the browser side alone
+node tests/advice.test.js       # 200 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-python3 rpi/test_parser.py      # 641 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 132 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 710 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 234 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
-python3 rpi/test_exposure.py    # 133 on flicker, brightness, gain and
+python3 rpi/test_exposure.py    # 169 on flicker, brightness, gain and
                                 #     exposure, and on both ends of running out
-python3 rpi/test_track.py       # 122 on following the phone as it drifts
-python3 rpi/test_journal.py     # 176 on keeping one row per offer, and on a
+python3 rpi/test_track.py       # 131 on following the phone as it drifts
+python3 rpi/test_journal.py     # 185 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
@@ -5266,51 +5289,64 @@ python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 210 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 259 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
-python3 rpi/test_sync.py        #  84 on getting the offers off the car, and
+python3 rpi/test_sync.py        # 131 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
-python3 rpi/test_scanjs.py      #  53 on the phone's own scanner, through a
+python3 rpi/test_scanjs.py      #  94 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
-python3 rpi/test_liveview.py    #  84 on the picture the driver watches, on
+python3 rpi/test_liveview.py    # 109 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
                                 #     dashboard layout being wired up, on which
                                 #     of the two views was asked for, on the
                                 #     offer a reopened tab can still mark, and
                                 #     on one shift's figures being counted the
                                 #     way the offers page counts them
-python3 rpi/test_watchdog.py    #  15 on a scanner that runs without working
-python3 rpi/test_autopilot.py   #  37 on the one command that takes the rig
+python3 rpi/test_watchdog.py    #  22 on a scanner that runs without working
+python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     from nothing to scanning, and on the
                                 #     branch that used to brick it
-python3 rpi/test_keypad.py      #  48 on the fallback input path, driven
+python3 rpi/test_keypad.py      #  87 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        #  50 on the faults that only surface when a
+python3 rpi/test_lint.py        #  59 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
-python3 rpi/test_handoff.py     #  37 on the three files the browser and the
+python3 rpi/test_handoff.py     #  50 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
-python3 rpi/test_service.py     #  27 on the systemd unit the installer writes
+python3 rpi/test_service.py     #  31 on the systemd unit the installer writes
 python3 rpi/test_camera.py      #  34 on which tuning file opens the camera, and
                                 #     on who is already holding it
-python3 rpi/test_doctor.py      #  30 on the preflight running to the end, and
+python3 rpi/test_doctor.py      #  45 on the preflight running to the end, and
                                 #     on slower not being reported as broken
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 218 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 312 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 258 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 429 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
+python3 rpi/test_offerspage.py  # 157 on the offers page as a driver reads it:
+                                #     the search, the undo, the runs and the
+                                #     empty states (skipped without Playwright)
+python3 rpi/test_stacking.py    # 108 on judging a second job against the one
+                                #     already in the car
+python3 rpi/test_server.py      #  29 on the server's own edges: two readers of
+                                #     the journal at once, a mark for an offer
+                                #     it has forgotten, a scanner re-reading
+                                #     the same card, a journal directory that
+                                #     is not one
+python3 rpi/test_loop.py        #  13 on the scan loop re-telling a card once
+                                #     the rest of it arrives, and going quiet
+                                #     when a read never returns
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
@@ -5374,12 +5410,10 @@ setup: exposure 16667us (a whole number of 60/120/240Hz cycles, so the screen sh
 setup: corners [[951, 300], [1456, 301], [1455, 1399], [950, 1398]]
 read 1 found nothing usable (no payout in the crop, 1 in a row).
        Reader saw: '34 min (3.6 mi) total\nDollar General (925 Shiloh Rd Nw)\n...'
-crop moved: [0.00 0.66 1.00 0.34] -> [0.00 0.47 1.00 0.33] (reads were failing; the card
-       was found there by two whole-screen searches that agreed)
 screen not visible — is the phone lit and in frame?
-health over 120s: 7 reads, 5 complete; median 259ms; 2 found no payout; card
-       brightness 190/205; banding 0.4; gain 2.10; crop [0.00 0.47 1.00 0.33]; crop
-       moved 1x since start; corners held, drift 7px from saved
+health over 120s: 7 reads, 5 complete; median 259ms; 2 found no payout; screen
+       brightness 190/205; banding 0.4; gain 2.10; crop [0.00 0.40 1.00 0.60];
+       corners held, 7px from calibration (3px since last save)
 ```
 
 The `Reader saw:` line is the one that settles arguments. In the example above
@@ -5392,10 +5426,13 @@ address became a $45 offer, and `ZIM` out of map texture became a 21-minute leg.
 happened, so a quiet scanner stays quiet. The same detail is on `live.html`
 under **what the reader read**, which is quicker if you are standing at the car.
 
-`crop moved` says which of the two moves it was, because they mean opposite
-things about how the scanner is doing — `reads were failing` is a repair,
-`reads were working` is a working crop being trimmed. A log that called both a
-failure made a healthy scanner look broken.
+`corners` says three things, not two: `held` is the tracker following the
+phone, `stuck` is a candidate found on every check that is not the phone, and
+`lost` is no candidate at all. Both distances are given because they answer
+different questions — how far the phone has wandered from where it was
+calibrated, and how far since the corners were last saved, which moves.
+There is no `crop moved` line any more: the mechanism that walked the crop
+about looking for the card is gone, and the crop is what calibration set.
 
 **libcamera is told to be quiet.** Opening the camera used to narrate itself at
 INFO on stderr — which media node it bound, which yaml it read, the sensor
