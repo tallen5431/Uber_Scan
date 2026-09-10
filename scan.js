@@ -174,18 +174,74 @@
 
   /* ---------- engine ---------- */
 
-  function status(msg) { el.statusline.textContent = msg; }
+  // One-shot messages — "box back to its default", "could not open that
+  // picture" — were overwritten by the next frame's render inside a tenth
+  // of a second, so a press looked like nothing happened. A message given a
+  // hold stands for that long; the routine per-read line waits its turn.
+  var holdUntil = 0;
+  function status(msg, holdMs) {
+    if (!holdMs && holdUntil > Date.now()) return;
+    el.statusline.textContent = msg;
+    holdUntil = holdMs ? Date.now() + holdMs : 0;
+  }
+
+  // How long the reader may take to load, and a read to answer. Neither
+  // was bounded: a language file that never arrived left the page at
+  // "loading reader…" for good, with the camera never started and Photo
+  // saying "try again in a moment" for ever; and a worker the phone's OS
+  // had killed left the loop waiting on one read with the last ACCEPT and
+  // $/hr standing on screen, the preview still moving, indefinitely. Both
+  // needed a reload the driver had no reason to try.
+  //
+  // The engine deadline can be shortened from the address bar
+  // (?engineDeadline=ms) so the harness can reach the failure without
+  // waiting a minute; nothing else reads it.
+  var ENGINE_LOAD_MS = (function () {
+    var q = parseInt(new URLSearchParams(location.search).get('engineDeadline'), 10);
+    return isFinite(q) && q > 0 ? q : 60000;
+  })();
+  var READ_MS = 10000;
+  var engineFailed = false;
+  var engineRestarts = 0;
+
+  function withDeadline(promise, ms, what) {
+    return Promise.race([promise, new Promise(function (_, reject) {
+      setTimeout(function () {
+        var e = new Error(what + ' took longer than ' + Math.round(ms / 1000) + 's');
+        e.stuck = true;
+        reject(e);
+      }, ms);
+    })]);
+  }
 
   async function startEngine() {
     status('loading reader…');
-    worker = await Tesseract.createWorker('eng', 1, {
+    worker = await withDeadline(Tesseract.createWorker('eng', 1, {
       workerPath: 'vendor/worker.min.js',
       corePath: 'vendor/core',
       langPath: 'vendor/lang',
       gzip: true
-    });
+    }), ENGINE_LOAD_MS, 'loading the reader');
     await applyPsm();
     return worker;
+  }
+
+  /* A reader that stopped answering is thrown away and loaded again. The
+     read that hung has already been reported as a failed read, which clears
+     the verdict; this is what makes the next frame readable. */
+  async function restartEngine() {
+    var old = worker;
+    worker = null;
+    try { if (old) old.terminate(); } catch (e) { /* it was not answering */ }
+    try {
+      await startEngine();
+      engineRestarts++;
+      status('reader restarted');       // waits its turn behind 'read failed'
+    } catch (e) {
+      engineFailed = true;
+      running = false;
+      status('reader failed to load (' + e.message + ') — reload the page', 600000);
+    }
   }
 
   function applyPsm() {
@@ -328,13 +384,34 @@
 
   /* ---------- scanning ---------- */
 
+  var stallNext = 0;                 // harness: the next read hangs, with this deadline
+
   async function readOnce(source, rect) {
     var canvas = grab(source, rect);
     var t = performance.now();
-    var res = await worker.recognize(canvas);
+    var deadline = READ_MS;
+    var pending = worker.recognize(canvas);
+    if (stallNext) {
+      deadline = stallNext;
+      stallNext = 0;
+      pending = new Promise(function () { /* never */ });
+    }
+    var res = await withDeadline(pending, deadline, 'a read');
     var ms = Math.round(performance.now() - t);
     var parsed = OfferParser.parse(res.data.text);
     return { parsed: parsed, ms: ms };
+  }
+
+  /* One read, with the failure handled the same way whoever asked for it:
+     the loop, or a photo, or the harness. Returns null when it failed. */
+  async function readGuarded(source, rect) {
+    try {
+      return await readOnce(source, rect);
+    } catch (e) {
+      readFailed(e);
+      if (e && e.stuck) await restartEngine();
+      return null;
+    }
   }
 
   function consider(parsed) {
@@ -432,19 +509,17 @@
   function readFailed(e) {
     consider({ complete: false });
     render(0);
-    status('read failed: ' + (e && e.message ? e.message : e));
+    status('read failed: ' + (e && e.message ? e.message : e), 2500);
   }
 
   async function loop() {
     while (running) {
       if (frozen || busy || el.video.readyState < 2) { await sleep(80); continue; }
       busy = true;
-      try {
-        var out = await readOnce(el.video, settings.fullFrame ? null : sourceRect());
+      var out = await readGuarded(el.video, settings.fullFrame ? null : sourceRect());
+      if (out) {
         consider(out.parsed);
         render(out.ms);
-      } catch (e) {
-        readFailed(e);
       }
       busy = false;
       await sleep(30);
@@ -566,7 +641,8 @@
     // was picked, the file dialog closed, and the page went on saying
     // "loading reader…" as though the press had never happened.
     if (!worker) {
-      status('still loading the reader — try that photo again in a moment');
+      status(engineFailed ? 'the reader failed to load — reload the page'
+                          : 'still loading the reader — try that photo again in a moment', 4000);
       e.target.value = '';
       return;
     }
@@ -580,10 +656,18 @@
         // A still has no successive frames to agree with, so one good read is
         // all the agreement there can be — but it still has to be a *whole*
         // card, for the same reason a live one does.
-        var out = await readOnce(img, null);
-        lastResult = out.parsed;
-        locked = isWhole(out.parsed);
-        render(out.ms);
+        var out = await readGuarded(img, null);
+        if (out) {
+          lastResult = out.parsed;
+          locked = isWhole(out.parsed);
+          // A whole card off a photo is a lock, and goes to the journal as
+          // one. It showed ACCEPT, "confirmed" and the green corners, and
+          // reached nothing — on the night the rig cannot read, which is
+          // when Photo gets used.
+          if (locked) record(out.parsed, judged(out.parsed));
+          else sighted(out.parsed);
+          render(out.ms);
+        }
       } catch (err) {
         // Same rule as the live loop: a read that failed must not leave the
         // last card's numbers standing as though they were this photo's.
@@ -594,7 +678,7 @@
       e.target.value = '';
     };
     img.onerror = function () {
-      status('could not open that picture');
+      status('could not open that picture', 2500);
       URL.revokeObjectURL(img.src);
       e.target.value = '';
     };
@@ -641,7 +725,7 @@
     settings.box = null;
     applyBox();
     save();
-    status('box back to its default');
+    status('box back to its default', 2500);
   });
 
   /* ---------- the box ----------
@@ -776,7 +860,9 @@
     try {
       await startEngine();
     } catch (e) {
-      status('reader failed to load: ' + e.message);
+      engineFailed = true;
+      worker = null;
+      status('reader failed to load (' + e.message + ') — reload the page', 600000);
       return;
     }
     var blocked = cameraBlockedReason();
@@ -806,12 +892,23 @@
   // Anything locked while the rig was out of reach goes now, if it is back.
   if (window.JournalClient) JournalClient.flush();
 
+  // The offline shell, registered from here as well as from the keypad and
+  // the offers page. A phone that only ever opened /scan.html — which is
+  // what SCANNING.md says to do — had nothing cached, the 15MB reader
+  // included, and got a browser error page in a garage with no bars.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+
   // Exposed so the test harness can drive the same pipeline headlessly.
   window.__scan = {
     readImage: async function (src) {
       var img = new Image();
       await new Promise(function (r, j) { img.onload = r; img.onerror = j; img.src = src; });
-      var out = await readOnce(img, null);
+      var out = await readGuarded(img, null);
+      if (!out) return { parsed: null, failed: true, ms: 0, rate: { ready: false } };
       lastResult = out.parsed;
       locked = isWhole(out.parsed);
       // A lock here records, as a lock in the loop does. The harness has no
@@ -833,6 +930,11 @@
     ageRecord: function (ms) {
       if (recorded) recorded.at -= ms;
     },
+    /* The next read never answers, and is given this long before it is
+       called stuck — the worker the phone's OS killed, without the wait. */
+    stall: function (ms) { stallNext = ms || 500; },
+    restarts: function () { return engineRestarts; },
+    engineFailed: function () { return engineFailed; },
     fitForOcr: fitForOcr,
     /* Drive the read-failed path without breaking the engine to do it: this is
        the branch where a screen full of last offer's numbers can survive an

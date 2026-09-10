@@ -282,6 +282,41 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   await page.waitForTimeout(500);
   out.recorded.afterFragmentSight = await journal();
 
+  // A whole card off a photo is a lock and goes to the journal. The last
+  // card recorded above is the ride card, so the shop order is a new one.
+  await page.setInputFiles('#photo', path.join(dir, cards[1].file));
+  await page.waitForFunction(() => !/reading photo/.test(document.getElementById('statusline').textContent),
+                             null, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(600);
+  out.recorded.afterPhoto = await journal();
+  out.photoStatus = await page.evaluate(() => document.getElementById('statusline').textContent);
+
+  // A one-shot message stands long enough to be read: Reset in the sheet,
+  // then a read, and the message is still there.
+  await page.click('#btnSettings');
+  await page.click('#setResetBox');
+  out.holdAt0 = await page.evaluate(() => document.getElementById('statusline').textContent);
+  await page.evaluate(async s => { await window.__scan.readImage(s); }, whole);
+  out.holdAfterRead = await page.evaluate(() => document.getElementById('statusline').textContent);
+  await page.evaluate(() => { document.getElementById('settingsSheet').hidden = true; });
+
+  // A read that never answers: reported as a failed read, the reader thrown
+  // away and loaded again, and the next read works.
+  out.stall = await page.evaluate(async s => {
+    window.__scan.stall(400);
+    // Bounded here too: a scanner with no deadline on a read would leave
+    // this waiting for ever, which is a hung suite rather than a failed check.
+    const got = await Promise.race([window.__scan.readImage(s),
+      new Promise(r => setTimeout(() => r({ failed: false, hung: true }), 20000))]);
+    const status = document.getElementById('statusline').textContent;
+    const t0 = Date.now();
+    while (!window.__scan.ready() && Date.now() - t0 < 60000) await new Promise(r => setTimeout(r, 200));
+    const again = await window.__scan.readImage(s);
+    return { failed: !!got.failed, status: status, restarts: window.__scan.restarts(),
+             ready: window.__scan.ready(), pay: again.parsed && again.parsed.pay,
+             label: document.getElementById('verdictLabel').textContent.trim() };
+  }, whole);
+
   // Two rows kept a moment apart, the second while the first is in flight:
   // both go, and the one answer names both. Last, because these land in the
   // journal every count above is a difference of.
@@ -300,6 +335,30 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
              sentB: answer.sent.includes(b.id),
              left: JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length };
   });
+
+  // Registered by this page on its own: a phone that only ever opened
+  // /scan.html had nothing cached and got a browser error in a garage.
+  out.swAuto = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
+
+  // The reader failing to load, as a language file that never arrives would
+  // have it: the deadline passes with no reader.
+  out.engineDown = await (async () => {
+    const ctx2 = await browser.newContext({ viewport: { width: 420, height: 900 } });
+    const p2 = await ctx2.newPage();
+    // A deadline the load cannot meet stands in for the language file that
+    // never arrives: the reader's own fetches happen inside its worker,
+    // where a route on the page or the context does not reach them.
+    await p2.goto(base + '/scan.html?engineDeadline=1', { waitUntil: 'domcontentloaded' });
+    await p2.waitForFunction(() => /failed to load/.test(document.getElementById('statusline').textContent),
+                             null, { timeout: 20000 }).catch(() => {});
+    const status = await p2.evaluate(() => document.getElementById('statusline').textContent);
+    const failed = await p2.evaluate(() => window.__scan && window.__scan.engineFailed());
+    await p2.setInputFiles('#photo', path.join(dir, cards[0].file));
+    await p2.waitForTimeout(300);
+    const photo = await p2.evaluate(() => document.getElementById('statusline').textContent);
+    await ctx2.close();
+    return { status: status, failed: failed, photo: photo };
+  })();
 
   // The offline cache: which caches exist, and does the app shell refresh.
   out.sw = await page.evaluate(async () => {
@@ -645,6 +704,31 @@ try:
     eq('a fragment that reads complete is a sight of the card too'
        if fc else 'a fragment that reads incomplete is no sight of the card',
        len(rec.get('afterFragmentSight') or []) - before, 6 if fc else 7)
+
+    # A whole card off a photo is a lock. It showed ACCEPT, "confirmed" and
+    # the green corners and reached nothing, on the night Photo gets used.
+    eq('a whole card read from a photo is one row in the journal',
+       len(rec.get('afterPhoto') or []) - before, (6 if fc else 7) + 1)
+    ok_('...and the screen said so (%r)' % (got.get('photoStatus') or '')[:40],
+        'confirmed' in (got.get('photoStatus') or ''))
+    # A one-shot message holds through the next read.
+    ok_('Reset says so (%r)' % (got.get('holdAt0') or ''), 'back to its default' in (got.get('holdAt0') or ''))
+    ok_('...and still says so after the next read (%r)' % (got.get('holdAfterRead') or '')[:40],
+        'back to its default' in (got.get('holdAfterRead') or ''))
+    # A read that never answers.
+    st = got.get('stall') or {}
+    ok_('a read that never answers is a failed read (%r)' % (st.get('status') or '')[:50],
+        st.get('failed') and 'read failed' in (st.get('status') or ''))
+    eq('...the reader is loaded again', st.get('restarts'), 1)
+    ok_('...and answers', st.get('ready'))
+    eq('...reading the next card (%r)' % st.get('pay'), st.get('pay'), 16.05)
+    # The shell, registered from this page.
+    eq('scan.html registers the offline shell on its own', got.get('swAuto'), 1)
+    ed = got.get('engineDown') or {}
+    ok_('a reader that never loads is called failed (%r)' % (ed.get('status') or '')[:50],
+        'failed to load' in (ed.get('status') or '') and ed.get('failed') is True)
+    ok_('...and Photo says so rather than "try again in a moment" (%r)' % (ed.get('photo') or '')[:50],
+        'reload' in (ed.get('photo') or '') and 'moment' not in (ed.get('photo') or ''))
 
     # A row kept while a flush was in flight waited for the next flush — the
     # next lock, or the next time the page opened — with the rig answering
