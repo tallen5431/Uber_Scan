@@ -30,6 +30,13 @@ rpi/config-preview.png
 rpi/config.json
 ssl/
 
+# Python wheels downloaded to set up a test harness. Four of them — 48MB, built
+# for x86_64 — were committed at the root by a `git add -A` and rode along in
+# every clone for nothing: the Pi is not x86_64 and cannot install them, and
+# nothing here refers to them. test_lint.py holds the line at a size, since
+# the next accident will have a different extension.
+*.whl
+
 # A shift's worth of offers: what was paid, how far, and when. That is the
 # driver's own earnings history and, by the hour, where they were. It stays on
 # the Pi, like the calibration and the live frame.

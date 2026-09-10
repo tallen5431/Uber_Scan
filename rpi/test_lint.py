@@ -184,6 +184,41 @@ for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
     for suffix in ('.part', '.4321.7.part', '.tmp'):
         ok_('...and %s%s with it' % (base, suffix), is_ignored(base + suffix))
 
+# --- nothing big rides along that the rig cannot use ------------------------
+#
+# Four Python wheels sat at the root of this repository for a while: 48MB,
+# built for x86_64, downloaded to stand up a test harness on some other
+# machine and swept into a commit by `git add -A`. The Pi fetched them on every
+# pull and could not have installed one. Nothing referred to them, so nothing
+# noticed. The pattern is ignored now, and this holds the size, because the
+# next accident will have a different extension.
+#
+# The cap is measured, not chosen: the largest thing the repo legitimately
+# carries outside vendor/ is rpi/README.md at 310kB; the smallest wheel that
+# was not pure metadata was 625kB. One megabyte sits between them. vendor/ is
+# the OCR engine, four files of 3-4MB each, and is exempt by name rather than
+# by a cap high enough to let a wheel back in.
+ok_('*.whl is ignored, so a harness download cannot be committed',
+    is_ignored('anything-1.0-py3-none-any.whl'))
+BIG = 1000000
+git = shutil.which('git')
+tracked = None
+if git:
+    listing = subprocess.run([git, '-C', ROOT, 'ls-files', '-z'],
+                             capture_output=True)
+    if listing.returncode == 0:
+        tracked = [p for p in listing.stdout.decode('utf-8').split('\0') if p]
+if tracked is None:
+    print('  (no git here, so what is tracked cannot be sized — skipping)')
+else:
+    ok_('git listed the files the repo carries', len(tracked) > 20)
+    big = [p for p in tracked
+           if not p.startswith('vendor/')
+           and os.path.exists(os.path.join(ROOT, p))
+           and os.path.getsize(os.path.join(ROOT, p)) > BIG]
+    ok_('no tracked file outside vendor/ is over %dkB%s' % (
+        BIG // 1000, ' (' + ', '.join(big) + ')' if big else ''), not big)
+
 # --- two figures may not wear the same words -------------------------------
 #
 # The offers page said "16 of them, 22.1 hours in total, not one shift" and,
