@@ -164,33 +164,55 @@ def grab_from_camera(size, lens=None):
     The scanner pins focus rather than tracking it, so the focus has to be
     decided once — here — and recorded. Otherwise every run starts at whatever
     the lens happens to be resting at, which is the blurry default.
+
+    Opened through camera.open_camera(), like the preview and the scanner, and
+    not with a bare Picamera2(). This was the one camera path in the project
+    that went its own way, and it is the worst one to have done it in, because
+    a calibration is permanent: every later read is warped through the corners
+    decided here.
+
+    Three things the bare constructor skipped.
+
+    The lock. Calibrating while the service holds the camera produced
+    libcamera's "Failed to acquire camera: Device or resource busy" instead of
+    this project's own refusal naming the pid and telling you to stop the
+    scanner — the exact confusion acquire_lock() exists to end, on the script
+    most likely to be run by hand while the rig is up.
+
+    The tuning file. The stock imx519 tuning carries no autofocus algorithm, so
+    the lens cannot be driven at all; open_camera() finds an autofocus-capable
+    one and points libcamera at it. Without that, `AfMode` is still in
+    camera_controls — a fixed-focus module and a broken tuning both advertise
+    it — so the old code set AfMode, ran a cycle that moved nothing, read back
+    whatever the lens was resting at, and wrote that number into the config as
+    the focus to pin. A calibration that pins the blurry default is worse than
+    one that admits it cannot focus.
+
+    And the empty-camera-list case, which open_camera() turns into a sentence
+    naming the tuning file rather than an IndexError out of picamera2.
     """
     import time
-    from picamera2 import Picamera2
+    import camera as CAM
 
-    cam = Picamera2()
+    cam, focus = CAM.open_camera()
     cam.configure(cam.create_still_configuration(main={'size': size, 'format': 'RGB888'}))
     cam.start()
     try:
         time.sleep(2)          # let auto-exposure settle before the one frame we keep
-        lens_position = None
 
-        if 'AfMode' in cam.camera_controls:
-            from libcamera import controls
-            if lens is not None:
-                cam.set_controls({'AfMode': controls.AfModeEnum.Manual, 'LensPosition': lens})
-                time.sleep(1.5)
-                lens_position = lens
-            else:
-                print('running autofocus...')
-                cam.set_controls({'AfMode': controls.AfModeEnum.Auto})
-                try:
-                    cam.autofocus_cycle()
-                except Exception as e:
-                    print('  autofocus cycle failed (%s); using whatever it settled on' % e)
-                time.sleep(0.5)
-        else:
+        if not focus.get('supported'):
             print('no autofocus on this module; focus is set by the mount distance')
+            if focus.get('reason'):
+                print('  %s' % focus['reason'])
+        elif lens is None:
+            print('running autofocus...')
+
+        # One definition of "pin or autofocus", shared with the preview and the
+        # scanner. Restated here it drifted: this copy asked only whether the
+        # control existed, which is the question that lets a dead lens through.
+        lens_position = CAM.apply_focus(cam, focus, lens)
+        if lens is not None and lens_position is not None:
+            time.sleep(1.5)    # the lens has to actually get there first
 
         request = cam.capture_request()
         try:

@@ -5300,7 +5300,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 34 suites, 5286 checks
+npm test                # all 34 suites, 5298 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5334,7 +5334,7 @@ python3 rpi/test_track.py       # 131 on following the phone as it drifts
 python3 rpi/test_journal.py     # 192 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  54 on one card read many times
-python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and
+python3 rpi/test_calibrate.py   #  66 on what calibration may overwrite, and
                                 #     which frame it is allowed to write from
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,

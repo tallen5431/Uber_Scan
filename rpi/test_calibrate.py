@@ -298,6 +298,151 @@ ok_('a lowered floor is honoured while calibrating too', frame is FAR)
 frame, quad, sharp, said = keep([GOOD] * AP.CALIBRATE_TRIES, floor=600)
 ok_('...and a raised one is as well', frame is None)
 
+# --- the one frame calibration keeps comes through the shared opener --------
+#
+# This function had no test because the only way in was a camera, which is the
+# reason given at the top of this file for the last thing that regressed here.
+# It is also the worst place in the project to go its own way: a calibration is
+# permanent, and every later read is warped through the corners decided from
+# this one frame.
+#
+# A fake `camera` module in sys.modules is enough, because the function asks
+# for it by name at call time. picamera2 is stubbed to EXPLODE if anything
+# constructs it directly, which is exactly what this function used to do.
+class _Boom(object):
+    def __init__(self, *a, **k):
+        raise AssertionError('calibration opened the camera itself, '
+                             'bypassing camera.open_camera()')
+
+
+class _FakeRequest(object):
+    def __init__(self, meta):
+        self.meta = meta
+        self.released = False
+
+    def make_array(self, _name):
+        return 'THE-FRAME'
+
+    def get_metadata(self):
+        return self.meta
+
+    def release(self):
+        self.released = True
+
+
+class _FakeCam(object):
+    def __init__(self, meta=None):
+        self.started = self.stopped = self.closed = False
+        self.configured = None
+        self.request = _FakeRequest(meta or {})
+
+    def create_still_configuration(self, **kw):
+        return kw
+
+    def configure(self, cfg):
+        self.configured = cfg
+
+    def start(self):
+        self.started = True
+
+    def capture_request(self):
+        return self.request
+
+    def stop(self):
+        self.stopped = True
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeCameraModule(object):
+    """Stands in for rpi/camera.py, recording what calibration asked of it."""
+
+    CameraBusy = type('CameraBusy', (RuntimeError,), {})
+
+    def __init__(self, focus, cam=None, busy=False):
+        self.focus, self.cam, self.busy = focus, cam or _FakeCam(), busy
+        self.opened = False
+        self.focus_calls = []
+
+    def open_camera(self, prefer_autofocus=True):
+        if self.busy:
+            raise self.CameraBusy('the camera is already in use by this project (pid 42)')
+        self.opened = True
+        return self.cam, self.focus
+
+    def apply_focus(self, cam, focus, lens=None):
+        self.focus_calls.append((focus, lens))
+        if not focus.get('supported'):
+            return None
+        return lens if lens is not None else 3.5
+
+
+def _with_camera(module, fn):
+    saved_cam = sys.modules.get('camera')
+    saved_pi = sys.modules.get('picamera2')
+    sys.modules['camera'] = module
+    sys.modules['picamera2'] = type('m', (), {'Picamera2': _Boom})
+    try:
+        return fn()
+    finally:
+        for name, was in (('camera', saved_cam), ('picamera2', saved_pi)):
+            if was is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = was
+
+
+AF = {'supported': True, 'tuning': '/x/imx519_af.json', 'reason': None}
+NO_AF = {'supported': False, 'tuning': '/x/imx519.json',
+         'reason': 'the tuning file for imx519 has no autofocus algorithm'}
+
+fake = _FakeCameraModule(AF)
+# Caught rather than left to propagate: a suite that dies on its own stub
+# reports a stack trace where it should report a failing check, and the next
+# person reads that as the test being broken rather than the code.
+try:
+    frame, lens_at = _with_camera(fake, lambda: CB.grab_from_camera((2328, 1748)))
+    went_around = None
+except AssertionError as e:                                   # noqa: BLE001
+    frame, lens_at, went_around = None, None, str(e)
+ok_('calibration does not open the camera itself (%s)' % (went_around or 'it did not'),
+    went_around is None)
+ok_('calibration opens the camera through the shared opener', fake.opened)
+eq('...and keeps the frame it was given', frame, 'THE-FRAME')
+# The lock, the tuning file and the empty-camera-list message all live in
+# open_camera. Going around it skipped every one of them.
+ok_('...releasing the request whatever happens', fake.cam.request.released)
+ok_('...and shutting the camera down after', fake.cam.stopped and fake.cam.closed)
+# Focus is decided by the shared rule, not by a second copy of it here. The
+# copy that lived here asked only whether the AfMode control existed, which a
+# fixed-focus module and a broken tuning both answer yes to.
+eq('...asking the shared rule to pin or autofocus', len(fake.focus_calls), 1)
+eq('...and recording what it actually settled on', lens_at, 3.5)
+
+pinned = _FakeCameraModule(AF)
+_frame, lens_at = _with_camera(pinned, lambda: CB.grab_from_camera((2328, 1748), lens=4.0))
+eq('a pinned lens is passed through to the shared rule', pinned.focus_calls[0][1], 4.0)
+eq('...and is what gets recorded', lens_at, 4.0)
+
+# A module whose lens cannot be driven must not have a focus invented for it.
+# The old code read LensPosition back off the metadata regardless, so a dead
+# lens resting at its blurry default was written into the config as the focus
+# to pin for every read from then on.
+blind = _FakeCameraModule(NO_AF, cam=_FakeCam(meta={}))
+_frame, lens_at = _with_camera(blind, lambda: CB.grab_from_camera((2328, 1748)))
+eq('a module that cannot focus records no lens position', lens_at, None)
+
+# ...and the camera being busy reaches the driver as this project's own
+# sentence naming the pid, not as libcamera's "Device or resource busy".
+busy = _FakeCameraModule(AF, busy=True)
+try:
+    _with_camera(busy, lambda: CB.grab_from_camera((2328, 1748)))
+    ok_('a camera already in use stops calibration', False)
+except Exception as e:                                        # noqa: BLE001
+    ok_('a camera already in use stops calibration', True)
+    ok_('...saying who has it (%r)' % str(e)[:48], 'already in use' in str(e))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d calibration checks passed' % ok)
 sys.exit(1 if bad else 0)
