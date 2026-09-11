@@ -347,6 +347,20 @@ PLACE_ENDS_AT_TOWN = re.compile(
     r"^(.*?,\s*[A-Z][A-Za-z]+(?:'s)?(?:\s+[A-Z][A-Za-z]+(?:'s)?)?)\b", ASCII)
 TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 
+# The leg that is the drive to the pickup, which an Uber card labels "away".
+#
+# It is inside the total the rate is computed over and it should be: the driver
+# spends those minutes and those miles whether or not the job is worth taking.
+# It is kept apart because it is the only part of the journey that is not the
+# JOB — the gap between where the car happens to be and where the work starts —
+# and nothing downstream can separate it again once the legs have been summed.
+#
+# Deliberately exact, with none of the damage tolerance LEG_TAIL carries for
+# "trip". A missed label here records no split at all, which is a silence; a
+# loose one would label the wrong leg and hand out a confident wrong distance
+# between two jobs. See to_pickup(), which is the rule this feeds.
+APPROACH_TAIL = re.compile(r'\baway\b', ASCII)
+
 # What a card calls a leg of the journey. Uber labels every one — "away",
 # "trip", "total" — and prints its distance beside its time.
 #
@@ -666,6 +680,9 @@ def find_legs(text):
         legs.append({
             'minutes': minutes, 'miles': miles, 'hadDecimal': had_decimal or leg_corrected,
             'isTotal': bool(TOTAL_TAIL.search(tail)), 'corrected': leg_corrected,
+            # Whether the card called this leg the drive to the pickup. See
+            # APPROACH_TAIL and to_pickup().
+            'isApproach': bool(APPROACH_TAIL.search(tail)),
             # Whether the card labelled this as part of the journey. Only
             # consulted for a leg with no distance, where it is the difference
             # between a leg that lost its miles and a line that never had any.
@@ -719,6 +736,40 @@ def recover_decimal(minutes, miles, had_decimal):
     if 0.5 <= recovered / (minutes / 60.0) <= MAX_MPH:
         return recovered, True
     return miles, False
+
+
+def to_pickup(legs):
+    """The leg that is the drive to the pickup, when the card split it out.
+
+    The journal has always stored a card's TOTAL distance and time, which
+    includes getting to the pickup. That is the right figure to judge an offer
+    on — the driver spends it either way — and it is the wrong figure for every
+    question about where the WORK is, because it moves with wherever the car
+    happened to be when the card arrived.
+
+    Two jobs at once is the question that needs the difference. How far the
+    second pickup sits from the first dropoff cannot be recovered from a total
+    that has an unknown approach folded into it, and the card states the split
+    perfectly plainly. It was being read and thrown away.
+
+    Refuses in three cases rather than guessing, because every one of them
+    would produce a wrong distance rather than no distance:
+
+      - fewer than two legs. A lone "away" leg is a card that has not finished
+        arriving; reporting it would let a caller work out a trip of zero.
+      - no leg labelled away, which is most delivery cards: they state one
+        "total" and never say how much of it is the drive to the restaurant.
+      - more than one leg claiming to be the approach, which is damage.
+
+    Returns the leg, or None. The caller subtracts.
+    """
+    if not legs or len(legs) < 2:
+        return None
+    approach = [leg for leg in legs
+                if leg.get('isApproach') and not leg.get('isTotal')]
+    if len(approach) != 1:
+        return None
+    return approach[0]
 
 
 def is_complete(pay, minutes, deliver_by=None):
@@ -1607,6 +1658,7 @@ def parse(raw_text):
     uncertain = uncertain or short_a_leg
 
     places = find_places(text, legs)
+    approach = to_pickup(used)
     return {
         'pay': pay,
         'minutes': minutes,
@@ -1647,8 +1699,14 @@ def parse(raw_text):
         # second distance came back as "7.3 m1" called itself whole again.
         'legDetail': [{'minutes': l['minutes'], 'miles': l['miles'],
                        'isTotal': l['isTotal'], 'labelled': l['labelled'],
+                       'isApproach': l['isApproach'],
                        'lostMiles': l['lostMiles']}
                       for l in used],
+        # How much of the sum above is the drive to the pickup rather than the
+        # job. Null whenever the card did not split it, which is most delivery
+        # cards. See to_pickup() for why it refuses rather than estimating.
+        'toPickupMinutes': approach['minutes'] if approach else None,
+        'toPickupMiles': approach['miles'] if approach else None,
         'items': items,
         'legs': len(used),
         'milesCorrected': corrected,

@@ -757,6 +757,45 @@ _trimmed = JR.row_for(
 eq('...and a row whose places were trimmed away records neither',
    (_trimmed['pickup'], _trimmed['dropoff']), (None, None))
 
+# --- how much of the journey was getting to the work ------------------------
+#
+# The row has always held the card's TOTAL time and distance, which is the right
+# figure to judge an offer on: the driver spends the approach either way. It is
+# the wrong figure for any question about where the WORK is, because it moves
+# with wherever the car happened to be when the card arrived — the same two
+# places produce a different total every time.
+#
+# Nothing can put this back for a row already written, which is why it is
+# checked at the row rather than only at the parser: the parser reading it and
+# the journal dropping it is exactly the state this was in.
+_split = a_row('UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw '
+               '23 min (8.4 mi) trip Celebration Blvd, Acworth')
+eq('the row keeps the whole journey the card stated',
+   (_split['minutes'], _split['miles']), (28.0, 9.6))
+eq('...and how much of it was the drive to the pickup',
+   (_split['toPickupMinutes'], _split['toPickupMiles']), (5.0, 1.2))
+# The subtraction the whole field exists to make possible.
+eq('...so what is left is the job itself',
+   (round(_split['minutes'] - _split['toPickupMinutes'], 1),
+    round(_split['miles'] - _split['toPickupMiles'], 1)), (23.0, 8.4))
+
+# A delivery card states one total and never says how much of it is the drive
+# to the restaurant. Null, not zero: a zero would be subtracted and would make
+# the approach vanish into the job, which is a confident wrong distance between
+# two places rather than an absent one.
+_whole_total = a_row('Shop & Deliver $7.09 6 items 34 min (3.6 mi) total '
+                     'Five Guys (3450 Cobb Pkwy. NW)')
+eq('a card that never split its journey records no split',
+   (_whole_total['toPickupMinutes'], _whole_total['toPickupMiles']), (None, None))
+ok_('...while still recording the journey itself',
+    _whole_total['minutes'] == 34.0 and _whole_total['miles'] == 3.6)
+
+# The field has to be on every row, present or absent, or a reader cannot tell
+# "this card did not say" from "this rig was too old to record it".
+for _name, _row in (('a split card', _split), ('an unsplit one', _whole_total)):
+    ok_('%s carries both halves of the field' % _name,
+        'toPickupMinutes' in _row and 'toPickupMiles' in _row)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)

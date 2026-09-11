@@ -80,7 +80,8 @@ class OfferAccumulator:
         self.started = 0.0
         self.last_add = 0.0
         self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool,
-                                #   'labelled': bool, 'lostSeen': n, 'seen': n}]
+                                #   'labelled': bool, 'isApproach': bool,
+                                #   'lostSeen': n, 'seen': n}]
         self.items = []
         # Deadlines seen this window. A delivery card gives one instead of a
         # duration, so it is the denominator of the whole verdict — and it was
@@ -176,7 +177,8 @@ class OfferAccumulator:
         if found is not None:
             return found
         self.legs.append({'minutes': [], 'miles': [], 'isTotal': False,
-                          'labelled': False, 'lostSeen': 0, 'seen': 0})
+                          'labelled': False, 'isApproach': False,
+                          'lostSeen': 0, 'seen': 0})
         return len(self.legs) - 1
 
     def _is_a_different_card(self, parsed, detail, now):
@@ -381,6 +383,12 @@ class OfferAccumulator:
             # label that does not survive the merge is a rule that stops
             # working on exactly the readings the merge exists for.
             slot['labelled'] = slot['labelled'] or bool(leg.get('labelled'))
+            # ...and which leg is the drive to the pickup, ORed for the same
+            # reason. A frame that loses the word "away" to glare must not turn
+            # a card whose split was already read back into one that never
+            # stated it — the journal would then record the approach as
+            # unknown on a card that said it plainly.
+            slot['isApproach'] = slot['isApproach'] or bool(leg.get('isApproach'))
             # ...and the other way a leg says it travels: a bracket printed
             # where its distance should be. COUNTED, not ORed, and the
             # difference is a card this rig really reads.
@@ -451,6 +459,7 @@ class OfferAccumulator:
                         'miles': _consensus(slot['miles']) if slot['miles'] else None,
                         'isTotal': slot['isTotal'],
                         'labelled': slot['labelled'],
+                        'isApproach': slot['isApproach'],
                         # A strict majority of the frames that saw this slot.
                         # See where lostSeen is counted.
                         'lostMiles': slot['lostSeen'] * 2 > slot['seen']}
@@ -603,6 +612,15 @@ class OfferAccumulator:
                                else parsed.get('deliverBy'))
         merged['legs'] = len(used)
         merged['legDetail'] = merged_legs
+        # Re-derived from the merged legs rather than inherited from whichever
+        # frame happened to be last, for the same reason legDetail itself is:
+        # the window is what knows the whole card. The parser's own rule is
+        # called rather than restated — a second copy of a refusal is a second
+        # thing to get wrong, and this one decides whether a distance between
+        # two jobs exists at all.
+        approach = OP.to_pickup(merged_legs)
+        merged['toPickupMinutes'] = approach['minutes'] if approach else None
+        merged['toPickupMiles'] = approach['miles'] if approach else None
         # A total is the whole journey in one line, so one of them is a complete
         # picture where one ordinary leg is only ever half of one.
         merged['hasTotal'] = bool(totals)

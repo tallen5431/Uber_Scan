@@ -352,6 +352,21 @@
      low rather than absent, the less optimistic of the two errors. */
   var LEG_TAIL = /\b(?:away|tr[il1|]p|tota?l|dropoff|drop\s*off)\b/i;
 
+  /* The leg that is the drive to the pickup, which an Uber card labels "away".
+
+     It is inside the total the rate is computed over and it should be: the
+     driver spends those minutes and those miles whether or not the job is
+     worth taking. It is kept apart because it is the only part of the journey
+     that is not the JOB - the gap between where the car happens to be and
+     where the work starts - and nothing downstream can separate it again once
+     the legs have been summed.
+
+     Deliberately exact, with none of the damage tolerance LEG_TAIL carries for
+     "trip". A missed label records no split at all, which is a silence; a
+     loose one would label the wrong leg and hand out a confident wrong
+     distance between two jobs. See toPickup(), which is the rule this feeds. */
+  var APPROACH_TAIL = /\baway\b/;
+
   /* The other way a leg says it is part of the journey: it printed a distance
      and the reader did not get it. Matched against the same tail LEG_TAIL sees,
      on a leg that came out with no distance.
@@ -905,6 +920,9 @@
       legs.push({
         minutes: minutes, miles: miles, hadDecimal: hadDecimal || fixed.corrected,
         isTotal: /\btota?l\b/.test(tail), corrected: fixed.corrected,
+        // Whether the card called this leg the drive to the pickup. See
+        // APPROACH_TAIL and toPickup().
+        isApproach: APPROACH_TAIL.test(tail),
         // Whether the card labelled this as part of the journey. Only
         // consulted for a leg with no distance, where it is the difference
         // between a leg that lost its miles and a line that never had any.
@@ -1013,6 +1031,34 @@
    * free: rate() charges no mileage for a distance it does not have, so without
    * it such a card shows gross wearing net's clothes. There is no second leg to
    * wait for, so the distance is the one thing another frame can still add. */
+  /* The leg that is the drive to the pickup, when the card split it out.
+
+     The journal has always stored a card's TOTAL distance and time, which
+     includes getting to the pickup. That is the right figure to judge an offer
+     on - the driver spends it either way - and it is the wrong figure for
+     every question about where the WORK is, because it moves with wherever the
+     car happened to be when the card arrived.
+
+     Two jobs at once is the question that needs the difference. How far the
+     second pickup sits from the first dropoff cannot be recovered from a total
+     with an unknown approach folded into it, and the card states the split
+     perfectly plainly. It was being read and thrown away.
+
+     Refuses in three cases rather than guessing, because every one of them
+     would produce a wrong distance rather than no distance: fewer than two
+     legs, where a lone "away" would let a caller work out a trip of zero; no
+     leg labelled away, which is most delivery cards; and more than one leg
+     claiming to be the approach, which is damage.
+
+     Returns the leg, or null. The caller subtracts. */
+  function toPickup(legs) {
+    if (!legs || legs.length < 2) return null;
+    var approach = legs.filter(function (leg) {
+      return leg && leg.isApproach && !leg.isTotal;
+    });
+    return approach.length === 1 ? approach[0] : null;
+  }
+
   function isWhole(parsed) {
     if (!parsed || !parsed.complete) return false;
     // Two shapes reach this. A raw parse() carries the legs themselves and no
@@ -1307,6 +1353,7 @@
     dist.uncertain = dist.uncertain || legsShortADistance(used, miles);
 
     var places = findPlaces(text, legs);
+    var approach = toPickup(used);
     return {
       pay: pay,
       minutes: minutes,
@@ -1340,8 +1387,14 @@
         // over this projection, and a field the rule needs that does not
         // survive the trip is a rule that quietly stops working.
         return { minutes: l.minutes, miles: l.miles, isTotal: l.isTotal,
-                 labelled: l.labelled, lostMiles: l.lostMiles };
+                 labelled: l.labelled, isApproach: l.isApproach,
+                 lostMiles: l.lostMiles };
       }),
+      // How much of the sum above is the drive to the pickup rather than the
+      // job. Null whenever the card did not split it, which is most delivery
+      // cards. See toPickup() for why it refuses rather than estimating.
+      toPickupMinutes: approach ? approach.minutes : null,
+      toPickupMiles: approach ? approach.miles : null,
       items: items,
       legs: used.length,
       milesCorrected: dist.corrected,
@@ -1680,7 +1733,7 @@
            findPlaces: findPlaces, trimPlace: trimPlace,
            findAddress: findAddress,
            looksLikeAPlace: looksLikeAPlace,
-           isComplete: isComplete, isWhole: isWhole,
+           isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,
            /* Exported so the default can be checked directly. Everything that
               ships passes `miles`, so nothing reachable through parse() or
               isWhole() exercises the omitted argument — and the argument is

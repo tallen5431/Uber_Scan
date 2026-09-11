@@ -2679,4 +2679,48 @@
    "expect": true
   }
  ]
+,
+ "_toPickup_comment": "How much of a card's stated journey is the drive to the pickup rather than the job. `expect` is [minutes, miles], or null where the card did not split it. The journal has always kept the TOTAL, which is the right figure to judge an offer on and the wrong one to measure geography with: it moves with wherever the car happened to be. Refusing is the common answer and the important one - a delivery card states one total, and a zero here would become a confident wrong distance between two jobs.",
+ "toPickup": [
+  {
+   "name": "a ride card splits the drive to the rider from the trip",
+   "text": "UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw 23 min (8.4 mi) trip Celebration Blvd, Acworth Accept",
+   "expect": [5, 1.2]
+  },
+  {
+   "name": "a delivery card states one total and never splits it",
+   "text": "Shop & Deliver $7.09 6 items 34 min (3.6 mi) total Five Guys (3450 Cobb Pkwy. NW) Accept",
+   "expect": null
+  },
+  {
+   "name": "an away leg on its own is a card still arriving, not a trip of nothing",
+   "text": "$12.45 5 min (1.2 mi) away",
+   "expect": null
+  },
+  {
+   "name": "an away leg whose distance did not read still says how long it takes",
+   "text": "UberX $12.45 5 min away Old 41 Hwy NW, Kennesaw 23 min (8.4 mi) trip Celebration Blvd, Acworth",
+   "expect": [5, null]
+  },
+  {
+   "name": "two legs and neither labelled away is a journey with no stated approach",
+   "text": "$12.45 5 min (1.2 mi) 23 min (8.4 mi) trip",
+   "expect": null
+  },
+  {
+   "name": "a leg that is a total cannot also be the approach to it",
+   "text": "$12.45 5 min (1.2 mi) away total 23 min (8.4 mi) total",
+   "expect": null
+  },
+  {
+   "name": "two legs both claiming to be the approach is damage, not a choice",
+   "text": "UberX $12.45 5 min (1.2 mi) away 7 min (2.0 mi) away 23 min (8.4 mi) trip",
+   "expect": null
+  },
+  {
+   "name": "a total beside an away leg is the total, and a total is not split",
+   "text": "UberX $12.45 5 min (1.2 mi) away 28 min (9.6 mi) total",
+   "expect": null
+  }
+ ]
 }

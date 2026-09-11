@@ -135,8 +135,23 @@ function legs(offers, grain) {
     var from = keyOf(o.pickup, grain), to = keyOf(o.dropoff, grain);
     if (!from || !to || from === to) continue;
     if (typeof o.miles !== 'number' || !(o.miles > 0)) continue;
-    out.push({ at: o.at, pair: from + ' → ' + to, miles: o.miles,
-               minutes: typeof o.minutes === 'number' ? o.minutes : null });
+    // The card's total covers driving to the pickup as well as the job, and
+    // that first part moves with wherever the car happened to be — so the same
+    // two places give a different total every time it comes up. Where the row
+    // records the split, it comes off and what is left is the road between the
+    // two places. Where it does not, the sample is kept and marked: a row
+    // written before the rig started recording the split cannot be repaired,
+    // and dropping those would throw away the entire history.
+    var offMiles = typeof o.toPickupMiles === 'number' ? o.toPickupMiles : null;
+    var offMins = typeof o.toPickupMinutes === 'number' ? o.toPickupMinutes : null;
+    var miles = offMiles === null ? o.miles : o.miles - offMiles;
+    var minutes = typeof o.minutes === 'number'
+      ? (offMins === null ? o.minutes : o.minutes - offMins) : null;
+    // A subtraction that leaves nothing is damage, not a very short job.
+    if (!(miles > 0)) continue;
+    out.push({ at: o.at, pair: from + ' → ' + to, miles: miles,
+               minutes: minutes !== null && minutes > 0 ? minutes : null,
+               exact: offMiles !== null });
   }
   out.sort(function (a, b) { return a.at - b.at; });
   return out;
@@ -245,10 +260,16 @@ function analyse(offers) {
 
   ['town', 'town+quadrant'].forEach(function (grain) {
     var sampleList = legs(offers, grain);
+    var exact = sampleList.filter(function (s) { return s.exact; });
     report.grains[grain] = {
       samples: sampleList.length,
+      exact: exact.length,
       reach: reachOf(sampleList),
       spread: spreadOf(sampleList, 3),
+      // The same question asked only of the rows that know how much of their
+      // journey was the approach. It is the honest version of the number and
+      // it starts at zero on any journal written before the rig kept that.
+      exactSpread: spreadOf(exact, 3),
       stacks: stackMoments(offers, grain, sampleList),
     };
   });
@@ -317,6 +338,8 @@ function render(r) {
     line();
     line('=== a table of your own driven legs, keyed by ' + grain + ' ===');
     line('  usable legs on file    ' + g.samples);
+    line('  ...with the approach known and taken off  ' + g.exact
+         + '  (' + pct(g.exact, g.samples) + ')');
     line('  distinct pairs         ' + g.reach.distinct);
     line('  pair already driven    ' + g.reach.hit + ' of ' + g.reach.asked
          + '  (' + pct(g.reach.hit, g.reach.asked) + ')');
@@ -326,6 +349,16 @@ function render(r) {
            : Math.round(g.spread.spread * 100) + '% of the median'));
       line('       (low is good: it is how much the same pair varies run to run,');
       line('        and it is the ceiling on how precise such a table could be)');
+      if (g.exactSpread.pairs) {
+        line('  ...on the rows that know their approach: '
+             + Math.round(g.exactSpread.spread * 100) + '% over '
+             + g.exactSpread.pairs + ' pairs');
+        line('       (this is the real number. The one above is inflated by');
+        line('        approaches that could not be taken off.)');
+      } else {
+        line('  ...on the rows that know their approach: none yet, so the');
+        line('       figure above is the inflated one. It improves by itself.');
+      }
     } else {
       line('  pairs driven 3+ times  none — no pair repeats often enough to check');
     }
@@ -360,11 +393,13 @@ function render(r) {
   }
 
   line();
-  line('One caveat this cannot measure away: the journal stores each card\'s');
-  line('TOTAL distance, which includes driving to the pickup. Every leg above');
-  line('therefore OVERSTATES the pickup-to-dropoff distance by however far the');
-  line('car happened to be. The card states the split and the rig does not keep');
-  line('it. Nothing can recover it for the rows already written.');
+  line('On the approach, which is the caveat on all of the above: a card states');
+  line('its TOTAL time and distance, and part of that is driving to the pickup');
+  line('rather than doing the job. The rig records the split from the day it');
+  line('learned to, and subtracts it here. A row written before that cannot be');
+  line('repaired, so it is kept and counted apart rather than thrown away. The');
+  line('"approach known" line above is what share of the history is clean, and');
+  line('it rises on its own with every shift.');
   return out.join('\n');
 }
 

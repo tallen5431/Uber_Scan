@@ -2925,6 +2925,29 @@ while driving, and the driver does the geography the rig cannot see. Naming a
 single number would be claiming that geography, which is the one thing it must
 not do.
 
+**What the rows now keep so that this can be reopened.** Every card states its
+journey as a total, and part of that total is driving to the pickup rather than
+doing the job. The parser has always read the split — Uber labels the leg
+`away` — and the journal threw it away, keeping only the sum.
+
+That sum is the right figure to judge an offer on, because the driver spends the
+approach either way. It is the wrong figure for any question about *where* the
+work is, because the approach moves with wherever the car happened to be when
+the card arrived: the same two places produce a different total every time. So
+no row could ever say how far apart two places are.
+
+`toPickupMinutes` and `toPickupMiles` are on every row written from now on, and
+null wherever the card did not split it, which is most delivery cards. Null and
+not zero: a zero would be subtracted, the approach would vanish into the job,
+and the result would be a confident wrong distance rather than an absent one.
+See `to_pickup()`, which refuses three separate ways.
+
+It is recorded ahead of anything being built on it because the journal is
+append-only. A row already on disk cannot be repaired, so every shift that went
+by without this is a shift nothing can go back for.
+`tools/measure_places.js` reports what share of the history is clean, and that
+share rises on its own.
+
 **ACCEPT only when the whole range clears the line**, for the same reason a rate
 with no running cost taken off it cannot earn one: a range that straddles the
 target is a maybe, and a maybe drawn in green is a wrong answer.
@@ -5253,7 +5276,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 34 suites, 5222 checks
+npm test                # all 34 suites, 5256 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5267,16 +5290,16 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 673 checks, the shared corpus
+node tests/corpus.test.js       # 681 checks, the shared corpus
 node tests/parser.test.js       #  95 on the browser side alone
 node tests/advice.test.js       # 200 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
-node tests/measure.test.js      #  57 on the measurement that decides how this
+node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 710 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 234 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 718 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 238 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
@@ -5284,7 +5307,7 @@ python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
 python3 rpi/test_exposure.py    # 169 on flicker, brightness, gain and
                                 #     exposure, and on both ends of running out
 python3 rpi/test_track.py       # 131 on following the phone as it drifts
-python3 rpi/test_journal.py     # 185 on keeping one row per offer, and on a
+python3 rpi/test_journal.py     # 192 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  54 on what calibration may overwrite, and

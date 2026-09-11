@@ -986,6 +986,39 @@ for _i, _t in enumerate([_REAL, _REAL, _SLIP]):
 eq('a real long trip is not folded away by one slipped point',
    _m['miles'], 24.0)
 
+# --- the drive to the pickup survives the frame that loses the word ---------
+#
+# The journal is written from the MERGED reading, so a split the window has
+# already seen has to outlive a later frame that reads the same card through
+# glare and misses the label. This is the same rule `labelled` and `isTotal`
+# keep, and it is on the one field nothing can reconstruct afterwards: a card
+# recorded with no split is indistinguishable from a card that never stated
+# one.
+_RIDE = ('UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw '
+         '23 min (8.4 mi) trip Celebration Blvd, Acworth')
+_LOST = ('UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
+         '23 min (8.4 mi) trip Celebration Blvd, Acworth')
+
+acc = OfferAccumulator()
+_first = acc.add(P.parse(_RIDE))
+eq('a merged reading carries the split the card stated',
+   (_first['toPickupMinutes'], _first['toPickupMiles']), (5.0, 1.2))
+_after = acc.add(P.parse(_LOST))
+eq('...and keeps it when a later frame loses the word',
+   (_after['toPickupMinutes'], _after['toPickupMiles']), (5.0, 1.2))
+
+# ...and the other direction, which is what stops the rule inventing one: a
+# window that has never seen the word reports no split at all rather than
+# guessing which of its legs is the approach.
+acc = OfferAccumulator()
+_never = acc.add(P.parse(_LOST))
+eq('a window that never saw the word records no split',
+   (_never['toPickupMinutes'], _never['toPickupMiles']), (None, None))
+# The frame arriving later must not create one either.
+_still = acc.add(P.parse(_LOST))
+eq('...and a second frame without it does not manufacture one',
+   (_still['toPickupMinutes'], _still['toPickupMiles']), (None, None))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

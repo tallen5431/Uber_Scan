@@ -777,7 +777,14 @@ function framePath() {
 // Not every field in the row: `content` is an internal fingerprint and `v`,
 // `seq` and `id` only matter to whatever is collapsing the rows, which has
 // already happened by the time anything gets here.
-var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles', 'items',
+var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles',
+                   // How much of `minutes` and `miles` was the drive to the
+                   // pickup rather than the job. Empty on a card that stated
+                   // one total and never split it, which is most deliveries.
+                   // Subtract them and what is left is the job itself, which is
+                   // the only form of these figures that says anything about
+                   // the distance between two places.
+                   'toPickupMinutes', 'toPickupMiles', 'items',
                    'perHour', 'grossPerHour', 'perMile', 'cost', 'state',
                    'target', 'band', 'costPerMile', 'legs', 'mergedFrom', 'hasTotal', 'shop',
                    'milesCorrected', 'milesUncertain', 'whole', 'settled',

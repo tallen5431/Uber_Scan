@@ -661,6 +661,26 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         'pay': pay,
         'minutes': minutes,
         'miles': miles,
+        # How much of those two is the drive to the pickup rather than the job.
+        #
+        # `minutes` and `miles` above are the whole journey the card stated,
+        # which is the right thing to judge an offer on and the wrong thing to
+        # measure geography with: the approach moves with wherever the car
+        # happened to be when the card arrived, so the same two places produce a
+        # different total every time. Subtracting it is the only way a row says
+        # anything about the distance between two JOBS — which is the question
+        # a second order raises and the one the rig refuses to guess at.
+        #
+        # Null on most delivery cards, which state one "total" and never split
+        # it. Null is the honest answer and not a zero: see OP.to_pickup, which
+        # refuses three separate ways rather than estimating.
+        #
+        # Written from today forward and unrecoverable for the rows already on
+        # disk. That is the whole reason it is here before anything is built on
+        # it: the journal is append-only, and a shift that went by without this
+        # is a shift nothing can go back for.
+        'toPickupMinutes': _round(parsed.get('toPickupMinutes'), 1),
+        'toPickupMiles': _round(parsed.get('toPickupMiles'), 1),
         'items': parsed.get('items'),
         # What the card called itself. None when it never said, which is not
         # the same as "a ride" and must not be folded into one — see the kinds

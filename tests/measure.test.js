@@ -122,6 +122,31 @@ eq('a card that starts and ends in one town is not a leg',
 eq('a merchant pickup cannot be placed, so it is not a leg',
    M.legs([offer({ pickup: 'Buffalo Wild Wings' })], 'town').length, 0);
 
+/* --- the approach, taken off where the card said what it was ------------- */
+
+// A card's total covers driving to the pickup as well as doing the job, and
+// the approach moves with wherever the car was. Left in, the same two towns
+// measure differently every time and no table of them can ever be tight.
+var split = M.legs([offer({ miles: 9.6, minutes: 28,
+                            toPickupMiles: 1.2, toPickupMinutes: 5 })], 'town');
+eq('the drive to the pickup comes off the distance', split[0].miles, 8.4);
+eq('...and off the time', split[0].minutes, 23);
+eq('...and the sample says it is a clean one', split[0].exact, true);
+
+var unsplit = M.legs([offer({ miles: 9.6, minutes: 28 })], 'town');
+eq('a row that never knew its approach keeps the whole total',
+   unsplit[0].miles, 9.6);
+// Kept rather than dropped: a journal written before the rig recorded the
+// split is most of the history, and throwing it away would leave nothing to
+// measure at all.
+eq('...and is kept, marked as the inexact sample it is', unsplit[0].exact, false);
+
+// A subtraction that leaves nothing is damage, not a very short job.
+eq('an approach as long as the whole card is not a leg of zero',
+   M.legs([offer({ miles: 4, toPickupMiles: 4 })], 'town').length, 0);
+eq('...nor is one longer than the card',
+   M.legs([offer({ miles: 4, toPickupMiles: 6 })], 'town').length, 0);
+
 /* --- reach, and the lookahead that would fake it ------------------------- */
 
 var reach = M.reachOf([

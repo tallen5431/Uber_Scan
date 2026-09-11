@@ -95,6 +95,16 @@ for c in cases.get('address', []):
 for c in cases.get('whole', []):
     eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])
 
+# How much of the journey is the drive to the pickup. A pair rather than two
+# sections, because the two halves are one claim: minutes without miles is a
+# split that cannot be subtracted from a distance, and reporting them
+# separately would let one port pass on half of it.
+for c in cases.get('toPickup', []):
+    p = P.parse(c['text'])
+    got = (None if p['toPickupMinutes'] is None
+           else [p['toPickupMinutes'], p['toPickupMiles']])
+    eq('to pickup / ' + c['name'], got, c['expect'])
+
 for c in cases.get('deadline', []):
     eq('deadline / ' + c['name'], P.parse(c['text'])['deliverBy'], c['expect'])
 

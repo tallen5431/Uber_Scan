@@ -87,6 +87,19 @@ function sameList(a, b) {
                             + ' want ' + c.expect); }
 });
 
+/* How much of the journey is the drive to the pickup. A pair rather than two
+   sections, because the two halves are one claim: minutes without miles is a
+   split that cannot be subtracted from a distance, and reporting them
+   separately would let one port pass on half of it. */
+(cases.toPickup || []).forEach(function (c) {
+  var p = P.parse(c.text);
+  var got = (p.toPickupMinutes === null || p.toPickupMinutes === undefined)
+    ? null : [p.toPickupMinutes, p.toPickupMiles === undefined ? null : p.toPickupMiles];
+  if (JSON.stringify(got) === JSON.stringify(c.expect)) ok++;
+  else { bad++; console.log('FAIL  to pickup / ' + c.name + ': got '
+                            + JSON.stringify(got) + ' want ' + JSON.stringify(c.expect)); }
+});
+
 (cases.deadline || []).forEach(function (c) {
   eq('deadline / ' + c.name, P.parse(c.text).deliverBy, c.expect);
 });
