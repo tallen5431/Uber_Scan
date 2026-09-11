@@ -163,6 +163,36 @@ eq('a backup twenty minutes old passes it',
    findings(fresh.stdout).get('offers backed up off the car'), True)
 ok_('...saying so in minutes', any('20 min ago' in l for l in fresh.stdout.splitlines()))
 
+# ...and a rig with the timer installed but no stamp yet, which is every rig
+# for the first ten minutes after the update that introduced the stamp.
+#
+# The stamp is a NEWER record than the sync it describes, so its absence says
+# nothing about whether the copy has ever been reached. Announcing that it had
+# never been reached was a confident claim about the one thing on this rig that
+# cannot be regenerated, made to a driver who had been backing up for months.
+nostamp_dir = tempfile.mkdtemp()
+nostamp = os.path.join(nostamp_dir, 'journal.jsonl')
+open(nostamp, 'w').close()
+timer_file = os.path.join(nostamp_dir, 'uberscan-sync.timer')
+open(timer_file, 'w').close()
+virgin = run(JOURNAL=nostamp, UBERSCAN_SYNC_TIMER=timer_file)
+backup_line = [l for l in virgin.stdout.splitlines() if 'backed up' in l]
+ok_('a timer with no stamp yet does not claim the copy has never been reached (%r)'
+    % backup_line[:1],
+    not any('never been reached' in l for l in backup_line))
+ok_('...it says only that nothing has been recorded yet',
+    any('no sync has been recorded yet' in l for l in backup_line))
+ok_('...and says that is normal just after an update',
+    'newer record than the sync itself' in virgin.stdout)
+ok_('...naming the one command that settles it',
+    'systemctl start uberscan-sync.service' in virgin.stdout)
+ok_('...without blocking the rig', 'backed up' not in ' '.join(
+    l for l in virgin.stdout.splitlines() if l.startswith('FAIL') and 'blocking' in l))
+# ...while a rig with no sync set up at all still gets the other sentence.
+unset = run(JOURNAL=nostamp)
+ok_('a rig with no sync set up is still told how to set one up',
+    any('install-sync.sh' in l for l in unset.stdout.splitlines() if 'backed up' in l))
+
 # The next step named is the autopilot, which aims, calibrates and scans on
 # its own — not the three scripts it replaced.
 ok_('the next step is the autopilot', 'autopilot.py' in big.stdout)

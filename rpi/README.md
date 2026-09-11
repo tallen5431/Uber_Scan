@@ -5124,15 +5124,19 @@ SCANNER=0 JOURNAL=/var/lib/uberscan/journal.jsonl npm start
 
 `JOURNAL` wants to point *outside* the checkout — left at the default the copy
 lands in `rpi/journal.jsonl` inside the clone, which works but stands your only
-backup next to a `git clean`. The directory has to exist and be writable by
-whoever runs the server; a path like the one above needs making first:
+backup next to a `git clean`. The server creates the directory itself when it
+is allowed to, so a path under your home directory needs nothing done to it.
+Somewhere like `/var/lib` it is not allowed to, and then it prints this and
+tells you to run it:
 
 ```sh
 sudo mkdir -p /var/lib/uberscan && sudo chown $USER /var/lib/uberscan
 ```
 
-The server checks that at startup and prints exactly that line if it cannot
-write there, rather than starting, taking the rig's rows and dropping them.
+**It keeps serving either way**, so a running server is not by itself evidence
+that the journal has anywhere to go. That is deliberate — the pages and the
+verdict are worth more than the write — but it means the line is worth reading
+for. It is the last thing printed at startup, after the addresses.
 `config-backup.json` lands beside the journal.
 
 `SCANNER=0` is not optional on that machine. Without it the server tries to
@@ -5296,7 +5300,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 34 suites, 5280 checks
+npm test                # all 34 suites, 5286 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5366,7 +5370,7 @@ python3 rpi/test_handoff.py     #  50 on the three files the browser and the
 python3 rpi/test_service.py     #  38 on the systemd unit the installer writes
 python3 rpi/test_camera.py      #  34 on which tuning file opens the camera, and
                                 #     on who is already holding it
-python3 rpi/test_doctor.py      #  45 on the preflight running to the end, and
+python3 rpi/test_doctor.py      #  51 on the preflight running to the end, and
                                 #     on slower not being reported as broken
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way

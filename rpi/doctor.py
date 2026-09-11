@@ -105,13 +105,31 @@ def main():
         import sync as SY
         journal_path = os.environ.get('JOURNAL') or JR.DEFAULT_PATH
         last = SY.last_synced(journal_path)
-        timer = os.path.exists('/etc/systemd/system/uberscan-sync.timer')
+        # Overridable for the same reason UBERSCAN_HANDOFF_DIR is: this branch
+        # is the one that misreported a working backup, and a check that can
+        # only be exercised on a machine with the timer actually installed is a
+        # check nothing runs until it is wrong again.
+        timer = os.path.exists(os.environ.get('UBERSCAN_SYNC_TIMER')
+                               or '/etc/systemd/system/uberscan-sync.timer')
         if last is None:
+            # "No stamp" is not "never reached", and saying so cost a rig an
+            # afternoon: the stamp file is newer than the sync itself, so on a
+            # rig that had been backing up happily for months the first doctor
+            # run after an update announced that the copy had never been
+            # reached. It had. Nothing had written the stamp yet.
+            #
+            # The rig cannot tell the two apart from here — there is no record
+            # older than the record itself — so it says what it actually knows
+            # and what makes it true, rather than picking the alarming reading.
             check('offers backed up off the car', not timer,
                   'no sync set up — see tools/install-sync.sh' if not timer
-                  else 'the timer is installed but the copy has never been reached',
+                  else 'the timer is installed, but no sync has been recorded yet',
                   '' if not timer else
-                  'run: python3 rpi/sync.py --to <the copy machine> and read what it says')
+                  'normal for the first ten minutes after an update — this is a '
+                  'newer record than the sync itself. To fill it in now: '
+                  'sudo systemctl start uberscan-sync.service, then run this '
+                  'again. If it still says this, run python3 rpi/sync.py --to '
+                  '<the copy machine> and read what it says.')
         else:
             hours = max(0.0, (JR.now_ms() - last['at']) / 3600000.0)
             check('offers backed up off the car', hours < 24,
