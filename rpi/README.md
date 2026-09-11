@@ -5253,7 +5253,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 33 suites, 5165 checks
+npm test                # all 34 suites, 5222 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5271,6 +5271,10 @@ node tests/corpus.test.js       # 673 checks, the shared corpus
 node tests/parser.test.js       #  95 on the browser side alone
 node tests/advice.test.js       # 200 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
+node tests/measure.test.js      #  57 on the measurement that decides how this
+                                #     rig should learn geography — held hardest
+                                #     to the rule that a table may not be
+                                #     scored on rows it was built from
 python3 rpi/test_parser.py      # 710 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 234 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
