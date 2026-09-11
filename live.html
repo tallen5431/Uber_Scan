@@ -1010,6 +1010,19 @@
   var heldEnds;
   var dropBusy = false;
   var dropFailed = false;
+  // What the failed press was about, so the failure can be forgotten when the
+  // car is carrying something else. A refused Drop leaves the order where it
+  // was, so "the hold went away" is not the signal — the order that failed to
+  // go down is still there, and the next thing to happen is a DIFFERENT order
+  // being picked up. The card has no id for a hold, so the figures it does
+  // print stand in for one.
+  var dropFailedFor = null;
+  // The order in the car as last described, so a failure can be tied to it.
+  var heldSig = null;
+
+  function holdSignature(holding) {
+    return holding ? String(holding.pay) + '/' + String(holding.minutes) : null;
+  }
 
   function showDrop() {
     el.drop.hidden = !holdingNow;
@@ -1027,13 +1040,15 @@
       // Believe the server, not the press. If the write failed the order is
       // still in the car and the next offer must still be measured against it.
       dropFailed = !r.ok;
+      dropFailedFor = r.ok ? null : heldSig;
       if (r.ok) {
-        holdingNow = false; destSaid = ''; heldEnds = undefined;
+        holdingNow = false; destSaid = ''; heldEnds = undefined; heldSig = null;
         showStack(null); showDest();
       }
     }).catch(function () {
       /* Left as it was: an order the server still holds is the truth. */
       dropFailed = true;
+      dropFailedFor = heldSig;
     }).then(function () {
       dropBusy = false;
       showDrop();
@@ -1667,8 +1682,21 @@
       if (msg.tooDim !== undefined) tooDim = !!msg.tooDim;
       // A new offer on the record. `tookState` resets with it — the mark
       // belongs to the offer, not to the button.
+      //
+      // ...and so does `tookFailed`, for the same reason and a worse one. It
+      // says a write FAILED, which is a statement about one press on one card.
+      // Left standing it was re-rendered against every later card: one dropped
+      // POST — the link to the copy at home, the server restarting mid-shift —
+      // and the button read "Took $8.20 · not saved" for the rest of the
+      // shift, on cards the driver had never touched. Worse than a stale
+      // label, because the title invites a retry, and pressing it on the wrong
+      // card writes a real mark and a real pairing row into a journal whose
+      // history cannot be regenerated.
       if (msg.offer && msg.offer.id) {
-        if (!onRecord || onRecord.id !== msg.offer.id) tookState = false;
+        if (!onRecord || onRecord.id !== msg.offer.id) {
+          tookState = false;
+          tookFailed = false;
+        }
         onRecord = msg.offer;
         showTook();
       }
@@ -1700,7 +1728,17 @@
         // it afresh" — for an order whose destination has never been scanned,
         // so the driver has no reason to press it.
         if (holdingNow && !msg.holding) destSaid = '';
+        // A different order in the car is a different write. `dropFailed` is
+        // about the press that failed, not about this job, and left standing
+        // it painted the NEXT order's button "Drop · failed" the moment that
+        // order appeared — a failure reported for something nobody had tried
+        // yet. See tookFailed above, which was the same fault on the same bar.
+        if (dropFailed && holdSignature(msg.holding) !== dropFailedFor) {
+          dropFailed = false;
+          dropFailedFor = null;
+        }
         holdingNow = !!msg.holding;
+        heldSig = holdSignature(msg.holding);
         heldEnds = msg.holding ? (msg.holding.dropoff || null) : undefined;
         showDrop();
         showDest();
@@ -1767,6 +1805,7 @@
     // is exactly when a second app's offer arrives — would otherwise show no
     // way to put it down, and no sign that anything was being carried.
     holdingNow = !!s.holding;
+    heldSig = holdSignature(s.holding);
     heldEnds = s.holding ? (s.holding.dropoff || null) : undefined;
     showDrop();
     // ...and what it was read as, so a panel opened or reloaded mid-delivery

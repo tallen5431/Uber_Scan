@@ -2102,10 +2102,22 @@ function route(req, res) {
       // an hour before *that*, and every offer older than an hour that had not
       // yet been sent was skipped — permanently, because nothing ever looks
       // further back. Tagging one offer here could quietly cost a day of them.
-      var newest = 0, offers = 0;
+      // ...and the same count over a window the sender names, which is what
+      // makes the reconciliation below an apples-to-apples one.
+      //
+      // The sender only ever ships the last `--days`, so the offers it holds
+      // from before that window are not a gap and must not be counted as one.
+      // It windows its own side; if this side answers with an all-time total,
+      // the comparison is a windowed count against an unwindowed one and the
+      // shortfall can never be seen. `since` is the sender's window, anchored
+      // to this copy's own newest row so both edges are the same instant.
+      var since = Number((url.parse(req.url, true).query || {}).since);
+      var wantWindow = isFinite(since) && since > 0;
+      var newest = 0, offers = 0, offersSince = 0;
       rows.forEach(function (r) {
         if (r.kind) return;                       // a tag, not an offer
         offers++;
+        if (wantWindow && (r.at || 0) >= since) offersSince++;
         if ((r.at || 0) > newest) newest = r.at;
       });
       // What this build can do, so the sender can tell "I am misconfigured"
@@ -2119,6 +2131,14 @@ function route(req, res) {
                                       // itself, rather than needing somebody to
                                       // think of running --all.
                                       offers: offers,
+                                      // ...counted over the window the sender
+                                      // asked about, when it asked. Absent
+                                      // when it did not, and absent from older
+                                      // builds, which is how the sender knows
+                                      // to fall back to the whole-file
+                                      // comparison rather than reading a
+                                      // missing key as a copy holding nothing.
+                                      offersSince: wantWindow ? offersSince : undefined,
                                       can: SYNC_CAN }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });

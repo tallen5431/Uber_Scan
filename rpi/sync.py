@@ -85,11 +85,19 @@ def last_synced(journal):
 TIMEOUT = 20.0
 
 
-def far_end(base, timeout=TIMEOUT):
-    """What the far end holds and what it can do. None when it will not say."""
+def far_end(base, timeout=TIMEOUT, since=None):
+    """What the far end holds and what it can do. None when it will not say.
+
+    `since` asks it to also count the offers it holds at or after that instant,
+    which it returns as `offersSince`. That is what makes the shortfall check a
+    like-for-like one — see the reconciliation in main(). An older build ignores
+    the parameter and simply does not return the key.
+    """
+    url = base.rstrip('/') + '/api/journal/newest'
+    if since:
+        url += '?since=%d' % int(since)
     try:
-        with urllib.request.urlopen(base.rstrip('/') + '/api/journal/newest',
-                                    timeout=timeout) as fh:
+        with urllib.request.urlopen(url, timeout=timeout) as fh:
             body = json.loads(fh.read().decode('utf-8'))
     except (urllib.error.URLError, ValueError, OSError):
         return None
@@ -321,14 +329,42 @@ def main():
     # instant and a row sitting between them would read as a gap for ever.
     since = newest - args.days * 86400000 + OVERLAP_MS if args.days else 0
     settled = sum(1 for r in mine if since <= (r.get('at') or 0) <= newest)
+
+    # ...and the copy's count over the SAME window, which is the half that was
+    # missing and the reason this stopped working at all.
+    #
+    # Windowing only this side compares a thirty-day count against the copy's
+    # all-time one. The copy at home keeps everything, so its number is always
+    # the larger and the shortfall can never be seen: a gap of any size, from
+    # any cause, stays open for ever while both ends report success. The
+    # ordinary floor is an hour before the copy's newest row, so nothing older
+    # than that is ever revisited, and the journal cannot be regenerated.
+    #
+    # Fetched in a second call because the window is anchored to the copy's
+    # newest row, which the first call is what tells us. A ten-minute timer can
+    # afford one more request; getting this wrong costs the backup.
     theirs = far.get('offers')
-    short = (isinstance(theirs, int) and settled > theirs)
+    windowed = far_end(args.to, since=since) if since else None
+    theirs_window = windowed.get('offersSince') if isinstance(windowed, dict) else None
+
+    if isinstance(theirs_window, int):
+        short = settled > theirs_window
+        behind, held = theirs_window, settled
+    else:
+        # An older copy that does not understand the window, or no window at
+        # all because --days was 0. Fall back to comparing whole files, which
+        # is what this did before the window existed: it can re-send a history
+        # the copy was never offered, but it never misses a real gap. Being
+        # noisy is recoverable; being blind is not.
+        settled_all = sum(1 for r in mine if (r.get('at') or 0) <= newest)
+        short = (isinstance(theirs, int) and settled_all > theirs)
+        behind, held = theirs, settled_all
 
     if args.all or short:
         floor = 0
         if short and not args.all:
             say('%s holds %d offers and this rig holds %d up to that point — '
-                'sending everything to close the gap' % (args.to, theirs, settled))
+                'sending everything to close the gap' % (args.to, behind, held))
     elif newest:
         floor = newest - OVERLAP_MS
     else:

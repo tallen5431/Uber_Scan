@@ -5,10 +5,16 @@ the rate. This is an experimental branch; the typed calculator on
 `index.html` is the version to rely on.
 
 Open it with the **📷 Camera** button in the main app's bottom bar, or go
-straight to `/scan.html`. It works offline —
-the OCR engine and its language model are vendored in `vendor/`, so nothing is
-uploaded and nothing needs a signal. Camera frames are read and discarded; no
-image is stored or transmitted.
+straight to `/scan.html`. It works offline — the OCR engine and its language
+model are vendored in `vendor/`, so the reading itself needs no signal and goes
+nowhere. Camera frames are read and discarded; no image is stored or
+transmitted, and no picture of a card ever leaves the phone.
+
+The **reading** does, when the rig is the one serving this page. A card the
+scanner locks on is handed to the rig's journal the same way a typed offer is,
+so the offers page can count it — the figures, the places the card named, and
+the text the reader saw. See `journal-client.js`. Served from anywhere else it
+has no rig to hand anything to and keeps everything on the phone.
 
 ## It needs HTTPS
 
@@ -196,7 +202,7 @@ real offers before mounting anything.
 
 ```sh
 node tests/parser.test.js     #  95 checks, no browser needed
-node tests/corpus.test.js     # 673 checks shared with the Pi parser
+node tests/corpus.test.js     # 681 checks shared with the Pi parser
 node tests/crop.test.js       #  16 on the Pi's hand-drawn box, server to scanner
 python3 rpi/test_scanjs.py    #  94 through a real browser, end to end
 ```

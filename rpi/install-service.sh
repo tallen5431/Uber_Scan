@@ -84,7 +84,13 @@ WorkingDirectory=$PROJECT
 # Whether the verdicts are spoken, and any flags for the scanner, reach the
 # autopilot through the server that spawns it.
 Environment=SCANNER_SPEAK=$SPEAK
-Environment=SCANNER_ARGS=$ARGS
+# Quoted, because systemd reads Environment= as a space-separated list of
+# assignments. Unquoted, ARGS="--keep-scans --screen-fps 6" installs
+# SCANNER_ARGS=--keep-scans and silently discards the rest, into a log nobody
+# reads — and a flag that takes a value loses its value, which is how
+# "--screen-fps 6" becomes a scanner that exits on a missing argument and a
+# unit that restarts for ever. The whole assignment goes inside one pair.
+Environment="SCANNER_ARGS=$ARGS"
 ExecStart=$NODE $PROJECT/server.js
 # The camera and calibration are not always ready the instant the Pi is, so let
 # it retry rather than giving up after the default burst of fast restarts.

@@ -183,10 +183,47 @@ flagged = subprocess.run(
     capture_output=True, text=True, timeout=60)
 eq('ARGS installs too', flagged.returncode, 0)
 flagged_unit = open(unit_path).read() if os.path.exists(unit_path) else ''
-ok_('...and carries the flags to the scanner',
-    re.search(r'^Environment=SCANNER_ARGS=--keep-scans --no-track$', flagged_unit, re.M) is not None)
+# Quoted, and this is the whole of it. systemd reads Environment= as a
+# space-separated list of assignments, so an unquoted value is cut at its first
+# space: `ARGS="--keep-scans --screen-fps 6"` installed SCANNER_ARGS=--keep-scans
+# and dropped the rest with a warning in a log nobody reads. A flag that takes a
+# value then reaches the scanner without it, the scanner exits, and the unit
+# restarts for ever — from a line that looked like it had worked.
+ok_('...and carries the flags to the scanner, whole',
+    re.search(r'^Environment="SCANNER_ARGS=--keep-scans --no-track"$',
+              flagged_unit, re.M) is not None)
 ok_('...which the server hands to the autopilot',
     'args.concat(extra)' in server)
+
+# ...including one that takes a value, which is the shape that bricks a rig.
+os.remove(unit_path)
+valued = subprocess.run(
+    ['bash', run_me],
+    env=dict(os.environ, PATH=stub + os.pathsep + os.environ.get('PATH', ''),
+             SUDO_USER='driver', SPEAK='0', ARGS='--screen-fps 6'),
+    capture_output=True, text=True, timeout=60)
+eq('a flag with a value installs', valued.returncode, 0)
+valued_unit = open(unit_path).read() if os.path.exists(unit_path) else ''
+ok_('...with its value still attached to it',
+    re.search(r'^Environment="SCANNER_ARGS=--screen-fps 6"$', valued_unit, re.M)
+    is not None)
+# The value must not be sitting on a line of its own, which is what an
+# unquoted assignment leaves behind and what systemd would read as a second
+# variable name.
+ok_('...and not left stranded as an assignment of its own',
+    '\nEnvironment=SCANNER_ARGS=--screen-fps 6\n' not in valued_unit)
+
+# Every flag the README tells the driver to put here has to be one the scanner
+# will actually accept. An unknown flag is not a warning: argparse exits, and
+# the unit restarts on failure, so a documented flag that the scanner has never
+# heard of installs a rig that loops for ever instead of reading offers.
+scanner_src = open(os.path.join(ROOT, 'rpi', 'scan_pi.py')).read()
+autopilot_src = open(os.path.join(ROOT, 'rpi', 'autopilot.py')).read()
+ok_('the autopilot passes flags it does not know on to the scanner',
+    'parse_known_args' in autopilot_src and 'extra' in autopilot_src)
+for flag in ('--keep-scans', '--no-track', '--screen-fps'):
+    ok_('...and the scanner accepts %s, which the README offers' % flag,
+        "'%s'" % flag in scanner_src)
 
 # --- and it actually asked systemd to do something ------------------------
 log = os.path.join(work, 'systemctl.log')

@@ -741,6 +741,77 @@ const framed = (page) => page.waitForFunction(
       text: document.getElementById('took').textContent.trim(),
       failed: document.getElementById('took').classList.contains('failed') }));
     out.snap.markBody = marks[0] || null;
+    // ...and then the NEXT card arrives, which nobody has pressed anything
+    // for. A failure belongs to the press that failed; carried onto a later
+    // card it asserts a write went wrong on an offer the driver never touched,
+    // and the label invites them to retry it — which would write a real mark
+    // and a real pairing row for the wrong job.
+    stage = 'snap: next card after a failed mark';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      offer: { id: 'o-2', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4 } }));
+    await page.waitForTimeout(200);
+    out.snap.tookNextCard = await page.evaluate(() => ({
+      text: document.getElementById('took').textContent.trim(),
+      failed: document.getElementById('took').classList.contains('failed'),
+      title: document.getElementById('took').title || '' }));
+    // The same question for the order in the car. A failed Drop must not
+    // paint the next order's button as having failed before it is pressed.
+    //
+    // The order has to be back in the car first: the Dropoff press above
+    // already put it down, and a Drop pressed with nothing held is a failure
+    // about no order at all, which is a different case from this one.
+    stage = 'snap: next hold after a failed drop';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 20.0, dropoff: null } }));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.getElementById('drop').click());
+    await page.waitForTimeout(300);
+    out.snap.dropAfterFail = await page.evaluate(() => ({
+      text: document.getElementById('drop').textContent.trim(),
+      failed: document.getElementById('drop').classList.contains('failed') }));
+    // The order that failed to go down is still in the car, and the rig keeps
+    // saying so on every reading. That is not a new order, and forgetting the
+    // failure there would take the retry away from the one press that needs
+    // it — so the label has to survive its own order being re-reported.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 20.0, dropoff: null } }));
+    await page.waitForTimeout(200);
+    out.snap.dropSameHold = await page.evaluate(() => ({
+      text: document.getElementById('drop').textContent.trim(),
+      failed: document.getElementById('drop').classList.contains('failed') }));
+    // Carried on a reading, which is the only way a hold ever reaches this
+    // page — see the `msg.ready` guard the holding branch sits behind.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 11.0, minutes: 25.0, dropoff: null } }));
+    await page.waitForTimeout(200);
+    out.snap.dropNextHold = await page.evaluate(() => ({
+      text: document.getElementById('drop').textContent.trim(),
+      failed: document.getElementById('drop').classList.contains('failed'),
+      hidden: document.getElementById('drop').hidden }));
+    // ...and a failure on THIS order sticks to this one. Without the held
+    // order being tracked as it changes, a second failure would still be
+    // filed against the first order, and the job actually in the car would
+    // clear it the moment the rig mentioned it again.
+    stage = 'snap: a second failure belongs to the second order';
+    await page.evaluate(() => document.getElementById('drop').click());
+    await page.waitForTimeout(300);
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 11.0, minutes: 25.0, dropoff: null } }));
+    await page.waitForTimeout(200);
+    out.snap.dropSecondFail = await page.evaluate(() => ({
+      text: document.getElementById('drop').textContent.trim(),
+      failed: document.getElementById('drop').classList.contains('failed') }));
     // Set box, then Cancel: the phone view comes back and the preference
     // is not touched.
     out.snap.viewBefore = await page.evaluate(() => ({
@@ -1414,6 +1485,39 @@ try:
             'not saved' in (sn['tookAfterFail'].get('text') or '') and sn['tookAfterFail'].get('failed'))
         eq('...and the mark carried the offer it names, for a server that has forgotten it',
            ((sn.get('markBody') or {}).get('offer') or {}).get('id'), 'o-1')
+        # ...but it belongs to that press and that card, and to nothing after.
+        # One dropped POST used to make the panel report a failed write on
+        # every card for the rest of the shift, on offers nobody had touched,
+        # with a title inviting a retry that would have written a real mark
+        # against the wrong job.
+        nxt = sn.get('tookNextCard') or {}
+        ok_('the next card is not reported as a write that failed (%r)' % nxt.get('text'),
+            'not saved' not in (nxt.get('text') or ''))
+        ok_('...and is not painted as failed', not nxt.get('failed'))
+        ok_('...and is offered on its own terms (%r)' % nxt.get('text'),
+            '14.25' in (nxt.get('text') or ''))
+        ok_('...without inviting a retry of somebody else\'s failure (%r)' % nxt.get('title'),
+            'retry' not in (nxt.get('title') or '').lower())
+        # The same on the other button: a refused Drop says so...
+        fail_drop = sn.get('dropAfterFail') or {}
+        ok_('a refused drop says so on its button (%r)' % fail_drop.get('text'),
+            'failed' in (fail_drop.get('text') or '').lower() or fail_drop.get('failed'))
+        # ...keeps saying it while that same order is still being carried, or
+        # the retry the driver needs disappears off the one press that failed.
+        same_hold = sn.get('dropSameHold') or {}
+        ok_('...and goes on saying it while that order is still in the car (%r)'
+            % same_hold.get('text'),
+            'failed' in (same_hold.get('text') or '').lower() or same_hold.get('failed'))
+        # ...and stops saying it once a different order is in the car.
+        nxt_hold = sn.get('dropNextHold') or {}
+        ok_('the next order in the car is not reported as a failed drop (%r)'
+            % nxt_hold.get('text'), 'failed' not in (nxt_hold.get('text') or '').lower())
+        ok_('...nor painted as one', not nxt_hold.get('failed'))
+        # ...and a refusal on the order now being carried stays with THAT one.
+        second = sn.get('dropSecondFail') or {}
+        ok_('a second refusal is filed against the order it happened on (%r)'
+            % second.get('text'),
+            'failed' in (second.get('text') or '').lower() or second.get('failed'))
         # Set box borrows the scene and gives the phone view back.
         ok_('the page lands in the phone view', sn['viewBefore'].get('phone'))
         ok_('Set box switches to the scene to draw on', not sn['viewDrawing'].get('phone'))

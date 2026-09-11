@@ -1,8 +1,16 @@
 # Raspberry Pi scanner (IMX519)
 
 The Pi does everything: its own camera watches the phone screen, and the Pi
-reads the offer and tells you the rate. Nothing is sent anywhere, no second
-device is involved, and it needs no network once it is set up.
+reads the offer and tells you the rate. No second device is involved in the
+reading, no picture of a card leaves the car, and it needs no network to
+scan — a rig with no signal all shift reads offers and shows verdicts exactly
+as it does with one.
+
+One thing does leave, once you set it up: `rpi/sync.py` copies the journal to a
+machine at home on a timer, because a year of what the work paid living on one
+SD card in a vehicle is the least durable arrangement in the system. That is
+opt-in, it is the offers and the calibration and nothing else, and it goes to a
+machine you own. See **Getting the offers off the car**.
 
 This is the version worth building. A fixed mount is what makes the reading
 reliable, and it removes the alignment problem that makes a hand-held camera
@@ -510,8 +518,14 @@ Marking was write-only. A driver could put a fact into the record from the
 driving screen and never see it come back: the figures that fact feeds live on
 the offers page, which is the wrong screen to be on while driving.
 
-One line on the status row now: **`· 9 offers · 1 set aside · took 3 · median
-$26/hr`**. Three things decided it.
+One line on the status row now: **`· took 3 for $61 net · median $26/hr · 9
+offers · 1 set aside`**. Three things decided it.
+
+The money leads. It used to read "9 offers · 1 set aside · took 3 · median
+$26/hr", counts first, and the line is ellipsised from the right on a narrow
+panel — so the two figures a driver is actually working towards were the two
+most likely to be cut. What the taken jobs paid is net, and says `net` only
+when a running cost was really taken off.
 
 **Where.** Not inside the verdict card. That card has 20–50px of slack at
 800×480, and the rules that fire when a notice shows already spend a line's
@@ -2936,11 +2950,17 @@ work is, because the approach moves with wherever the car happened to be when
 the card arrived: the same two places produce a different total every time. So
 no row could ever say how far apart two places are.
 
-`toPickupMinutes` and `toPickupMiles` are on every row written from now on, and
-null wherever the card did not split it, which is most delivery cards. Null and
-not zero: a zero would be subtracted, the approach would vanish into the job,
-and the result would be a confident wrong distance rather than an absent one.
-See `to_pickup()`, which refuses three separate ways.
+`toPickupMinutes` and `toPickupMiles` are on every row the RIG writes from now
+on, and null wherever the card did not split it, which is most delivery cards.
+Null and not zero: a zero would be subtracted, the approach would vanish into
+the job, and the result would be a confident wrong distance rather than an
+absent one. See `to_pickup()`, which refuses three separate ways.
+
+Rows the browser writes — a typed offer, or a card the phone's own scanner read
+— do not carry the pair at all: `journal-client.js` builds its own row and has
+never had these fields. They are a minority of the journal and they are not
+wrong, merely silent, which reads the same way as a card that stated no split.
+The measurement counts a row without them as one whose approach is unknown.
 
 It is recorded ahead of anything being built on it because the journal is
 append-only. A row already on disk cannot be repaired, so every shift that went
@@ -5276,7 +5296,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 34 suites, 5256 checks
+npm test                # all 34 suites, 5280 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5320,7 +5340,7 @@ python3 rpi/test_scan_pi.py     # 259 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
-python3 rpi/test_sync.py        # 131 on getting the offers off the car, and
+python3 rpi/test_sync.py        # 139 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  94 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
@@ -5343,7 +5363,7 @@ python3 rpi/test_lint.py        #  59 on the faults that only surface when a
 python3 rpi/test_handoff.py     #  50 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
-python3 rpi/test_service.py     #  31 on the systemd unit the installer writes
+python3 rpi/test_service.py     #  38 on the systemd unit the installer writes
 python3 rpi/test_camera.py      #  34 on which tuning file opens the camera, and
                                 #     on who is already holding it
 python3 rpi/test_doctor.py      #  45 on the preflight running to the end, and
@@ -5351,7 +5371,7 @@ python3 rpi/test_doctor.py      #  45 on the preflight running to the end, and
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 312 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 321 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying

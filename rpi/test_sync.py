@@ -930,6 +930,100 @@ try:
 finally:
     days_far.close()
 
+# --- a copy that is genuinely missing rows repairs itself -------------------
+#
+# The only backup of a file that cannot be regenerated, so the reconciliation
+# matters more than anything else here. It had no test at all, and it was
+# broken: windowing this rig's count to `--days` while still comparing it
+# against the copy's ALL-TIME count meant the copy's number was always the
+# larger one, so no shortfall could ever be seen. A gap of any size, from any
+# cause, stayed open for ever while both ends reported success.
+#
+# Three shapes, because the fix has to do all three and the middle one is what
+# the window was added for in the first place.
+gap_far = FarEnd()
+try:
+    work5 = tempfile.mkdtemp()
+    j5 = os.path.join(work5, 'journal.jsonl')
+    # 120 offers, twelve hours apart: sixty days, so most of the file is
+    # outside a thirty-day window.
+    rig_rows = [offer(i, now - (120 - i) * 12 * 3600000) for i in range(120)]
+    write(j5, rig_rows)
+    # The copy holds all of it but five rows from inside the window.
+    write(gap_far.journal, [r for i, r in enumerate(rig_rows)
+                            if not (100 <= i < 105)])
+    eq('the copy starts five rows short', len(lines(gap_far.journal)), 115)
+    run_main(gap_far.base, j5, ['--days', '30'])
+    eq('a real gap inside the window is closed on the next tick',
+       len(lines(gap_far.journal)), 120)
+
+    # ...and having closed it, the next tick is quiet. A repair that re-fires
+    # every ten minutes for ever is the failure this replaced.
+    before = len(lines(gap_far.journal))
+    run_main(gap_far.base, j5, ['--days', '30'])
+    eq('...and does not fire again once there is nothing to close',
+       len(lines(gap_far.journal)), before)
+finally:
+    gap_far.close()
+
+# The case the window exists for: the copy is complete INSIDE the window and
+# has no older history, because the window is all it was ever offered. That is
+# not a gap, and reading it as one re-sent the whole file every tick.
+win_far = FarEnd()
+try:
+    work6 = tempfile.mkdtemp()
+    j6 = os.path.join(work6, 'journal.jsonl')
+    rig_rows = [offer(i, now - (120 - i) * 12 * 3600000) for i in range(120)]
+    write(j6, rig_rows)
+    cutoff = now - 30 * 86400000
+    write(win_far.journal, [r for r in rig_rows if r['at'] >= cutoff])
+    held = len(lines(win_far.journal))
+    ok_('the copy holds only the window (%d rows)' % held, 55 <= held <= 65)
+    run_main(win_far.base, j6, ['--days', '30'])
+    eq('history older than the window is not a gap', len(lines(win_far.journal)), held)
+    run_main(win_far.base, j6, ['--days', '30'])
+    eq('...on the second tick either', len(lines(win_far.journal)), held)
+finally:
+    win_far.close()
+
+# ...and against a copy that has not been updated yet, which cannot count a
+# window and simply does not answer with one. Falling back to comparing whole
+# files can re-send history the copy was never offered; it never misses a real
+# gap. Noisy is recoverable, blind is not.
+#
+# The real far end throughout — its de-duplication is the half that decides
+# whether a re-send costs anything — with only the one key the old build does
+# not send stripped from the reply. Simulating the whole far end here would be
+# testing a stub's arithmetic instead of the server's.
+old_far = FarEnd()
+try:
+    work7 = tempfile.mkdtemp()
+    j7 = os.path.join(work7, 'journal.jsonl')
+    rig_rows = [offer(i, now - (120 - i) * 12 * 3600000) for i in range(120)]
+    write(j7, rig_rows)
+    write(old_far.journal, [r for i, r in enumerate(rig_rows)
+                            if not (100 <= i < 105)])
+    eq('the un-updated copy starts five rows short',
+       len(lines(old_far.journal)), 115)
+    real_far_end = SY.far_end
+
+    def without_window(base, timeout=SY.TIMEOUT, since=None):
+        body = real_far_end(base, timeout, since)
+        if isinstance(body, dict):
+            body = dict(body)
+            body.pop('offersSince', None)
+        return body
+
+    SY.far_end = without_window
+    try:
+        run_main(old_far.base, j7, ['--days', '30'])
+    finally:
+        SY.far_end = real_far_end
+    eq('a copy too old to count a window still has its gap closed',
+       len(lines(old_far.journal)), 120)
+finally:
+    old_far.close()
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
 sys.exit(1 if bad else 0)
