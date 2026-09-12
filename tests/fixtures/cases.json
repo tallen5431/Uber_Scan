@@ -2723,4 +2723,104 @@
    "expect": null
   }
  ]
+,
+ "_ends_comment": "Which end is which, on cards this rig really read. `expect` is [pickup, dropoff]; a null dropoff is the card declining to say where the job ends, which is most delivery offers. Recording the restaurant as the destination was the commonest wrong answer the parser gave \u2014 35 of 57 on one 103-offer export \u2014 and it is the reason those rows could not be drawn on a map. A case may give `places` instead of `text` to reach the list as the Pi merges it across frames, which no single frame's text contains.",
+ "ends": [
+  {
+   "name": "a delivery card that will not say where it ends",
+   "text": "*.\nP\nas\n$14.05 Guaranteed (incl. tips) ny\n7.0 mi + 41min cd\nToh\n@ Pickup\nChuy's haa\nf\u00a5 Customer dropoff he\na\nAccept 40 4 ry,\nsl fi",
+   "expect": [
+    "Chuy's haa",
+    null
+   ]
+  },
+  {
+   "name": "...even when the label is swallowed into the place",
+   "text": "s G-\" at\na oe\nbb Px, & P\no)anspines G) .\nA\n$5.84 Guaranteed (incl. tips) *\n2.9 mi + 21min hone\na a\nLif\nrd\n@ Pickup a:\nCAVA DRIVE \u201chare\neae\nff Customer dropoff Za et\nx= i\u201d \" ;\ny 57\na j",
+   "expect": [
+    "CAVA DRIVE 'hare eae",
+    null
+   ]
+  },
+  {
+   "name": "...and when it says so twice for a stacked pair",
+   "text": "4 = = oo\nae.\nse\nNan\na\nLd s\nSe\n\u2014 ja\nian vg\nse)\n$8.70 Guaranteed (incl. tips) of\ni\nee 5.8 mi + 32 min m,\nx i\nS i\nx nant @ Pickup re\not Zaxbys (2 orders) Ty 4\n.s ra\ni TX Customer dropoff ia\nSs 2\nss f% Customer dropoff a\nay Dy,\ncs ee\na All orders are picked up at the same facility Le\n< he\nxe ve\nOe Accept 31 :",
+   "expect": [
+    "Zaxbys",
+    null
+   ]
+  },
+  {
+   "name": "a shop card that does name the street it goes to",
+   "text": "| eit at\na Ree\n* Shop & Deliver Exclusive x Wines\nwe 8 xy % -\not\n$9.03 \u2018 a\n= Guaranteed (incl. tip) i CS;\n; f \" ~ +\n\u2019 iF pha gs\n: \u00a9 2Zitems (2 units) GAys\"\nos De\n~ i\nao \u00a9 43 min (8.9 mi) total ye Ay\n| Kroger (Chastain) $e a\n~ ee\n- Busbee Dr NW, Kennesaw wit.\nae mei.\n~~ z f . wt \u201cer\nE | wo Accept a) ahi?\niy",
+   "expect": [
+    "Kroger (Chastain)",
+    "$e a ~ ee - Busbee Dr NW, Kennesaw"
+   ]
+  },
+  {
+   "name": "a ride card names both ends and means both",
+   "text": "-**\nme an\nes \\\n_ > 3\n= s\nTe ~\n=| | 2 >\nMe ce es\na >| * we\n+* Vad\nPs he\n%. Ory:\ne De\nv2 tery\n+, $ Me\nsf $15.02 eee\na % 487 & Rarelycancels soe)\n~ A ch\new be\n<= . 18 min (6.7 mi) Ve i 3\nae Lake Holcomb Ln & Wingard Dr, GAS\n> Marietta ei} 6\nvy be Li\neS \u00a5 39 mins (13.5 mi) i Me\nwS Payne Rd & Stately Dr, Woodstock q\nme Pe -\nges 4, 4mifrom fast we\nt= < My charger f ee\ns A\nSe Pehs '\n3s mw IVEY) i\n= 2 f\n\u00a9",
+   "expect": [
+    "Lake Holcomb Ln & Wingard Dr, GAS",
+    "Payne Rd & Stately Dr, Woodstock"
+   ]
+  },
+  {
+   "name": "the card's own words beat a place read off the map behind it",
+   "places": [
+    "Chuy's nae",
+    "Lake Dr SE, Marietta"
+   ],
+   "text": "*.\nP\nas\n$14.05 Guaranteed (incl. tips) ny\n7.0 mi + 41min cd\nToh\n@ Pickup\nChuy's haa\nf\u00a5 Customer dropoff he\na\nAccept 40 4 ry,\nsl fi",
+   "expect": [
+    "Chuy's nae",
+    null
+   ]
+  },
+  {
+   "name": "...and without that sentence the same list does name an end",
+   "places": [
+    "Chuy's nae",
+    "Lake Dr SE, Marietta"
+   ],
+   "expect": [
+    "Chuy's nae",
+    "Lake Dr SE, Marietta"
+   ]
+  },
+  {
+   "name": "one reading of the merchant swallowing another is still the merchant",
+   "places": [
+    "CAVA DRIVE 'hare eae",
+    "hone a a Lif rd @ Pickup a: CAVA DRIVE 'hare eae"
+   ],
+   "expect": [
+    "CAVA DRIVE 'hare eae",
+    null
+   ]
+  },
+  {
+   "name": "the merchant read twice is not a journey",
+   "places": [
+    "Dairy Queen bie",
+    "Dairy Queen bie"
+   ],
+   "expect": [
+    "Dairy Queen bie",
+    null
+   ]
+  },
+  {
+   "name": "a bracketed shop and a real street are two ends",
+   "places": [
+    "Kroger (Chastain)",
+    "Busbee Dr NW, Kennesaw"
+   ],
+   "expect": [
+    "Kroger (Chastain)",
+    "Busbee Dr NW, Kennesaw"
+   ]
+  }
+ ]
 }

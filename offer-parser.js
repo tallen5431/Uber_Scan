@@ -773,7 +773,44 @@
     return PICKUP_LABEL.test(text.slice(0, at));
   }
 
+  /* The card saying, in its own words, that it will not tell you where the job
+     ends. Uber prints this instead of an address on a delivery offer: furniture,
+     in a fixed place, meaning exactly one thing.
+
+     Measured on 103 offers off this driver's own rig: 48 print it, and on every
+     one the card names the merchant and nothing else. Not one of the 103 prints
+     this sentence AND a second real place.
+
+     On that export it refuses nothing the rule below would not also have
+     refused. It is kept because it is the card stating the fact directly, where
+     the other rule depends on the invention happening to contain the merchant's
+     name — an accident of how this reader fails rather than something to lean
+     on. */
+  var DROPOFF_NOT_STATED = /custom[ea]r\s*drop\s*-?\s*off/i;
+
+  function placeKey(value) {
+    return (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  /* One end of the job wearing two readings of the same words. Containment
+     rather than equality, because the ends come from different frames as often
+     as not and one carries a tail of map furniture the other does not —
+     "Chuy's nae" beside "Chuy''s heey". A real dropoff does not contain the
+     whole merchant name, so this does not join two different places.
+
+     The Pi has a fuzzier rule for merging readings across frames. This one runs
+     in both ports and the shared corpus holds them to the same answers, so it
+     has to be something the JavaScript can do identically. */
+  function samePlace(a, b) {
+    var x = placeKey(a), y = placeKey(b);
+    if (!x || !y) return false;
+    return x.indexOf(y) !== -1 || y.indexOf(x) !== -1;
+  }
+
   function findDropoff(places, text) {
+    // The card said so itself. Nothing below can improve on that.
+    if (text && DROPOFF_NOT_STATED.test(text)) return null;
+    var startedAt = findPickup(places);
     for (var i = (places || []).length - 1; i >= 0; i--) {
       if (PLACE_IS_A_SHOP.test(places[i])) continue;
       // ...and a place the card LABELLED as the pickup is a pickup, bracket or
@@ -781,6 +818,13 @@
       // were exactly this: an unbracketed shop name standing in for somebody's
       // front door. The word has to end right where the place begins.
       if (text && labelledPickup(text, places[i])) continue;
+      // ...and where a job starts is not where it ends, whatever else is true.
+      // The rule above can only refuse a place it can find in this frame's
+      // text, and `places` is a union across frames while `text` is one frame.
+      // On 103 real offers the old code recorded 57 dropoffs and 35 were this:
+      // the restaurant being collected from, recorded as where the customer
+      // lives. It is why a map of those rows could not be drawn.
+      if (startedAt && samePlace(startedAt, places[i])) continue;
       return places[i];
     }
     return null;
@@ -1731,6 +1775,7 @@
            setting: setting, doubt: doubt, DEFAULT_SETTINGS: DEFAULT_SETTINGS,
            findDeadline: findDeadline, minutesUntil: minutesUntil,
            findPlaces: findPlaces, trimPlace: trimPlace,
+           findPickup: findPickup, findDropoff: findDropoff,
            findAddress: findAddress,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,

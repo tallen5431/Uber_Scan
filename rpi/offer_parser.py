@@ -1369,6 +1369,22 @@ def find_address(text):
     return best
 
 
+# The card saying, in its own words, that it is not going to tell you where the
+# job ends. Uber prints this instead of an address on a delivery offer, and it
+# is furniture, in a fixed place, meaning exactly one thing.
+#
+# Measured on 103 offers off this driver's own rig: 48 print it, and on every
+# one of those the card names the merchant and nothing else. Not one of the 103
+# prints this sentence AND a second real place, so believing it costs nothing.
+#
+# On that export it refuses nothing the rule below would not also have refused —
+# the invented destination was the merchant's own name every time. It is kept
+# because it is the card stating the fact directly, where the other rule depends
+# on the invention happening to contain the merchant's name, which is an
+# accident of how this reader fails rather than something to rely on.
+DROPOFF_NOT_STATED = re.compile(r'custom[ea]r\s*drop\s*-?\s*off', re.IGNORECASE | ASCII)
+
+
 def find_dropoff(places, text=None):
     """Where the job ENDS, or None when the card did not say.
 
@@ -1387,6 +1403,10 @@ def find_dropoff(places, text=None):
     an address split across two entries — "Northeast Expy NE & Westcheste" then
     "Ln NE, Atlanta" — leaves the tail last, which is the half carrying the town.
     """
+    # The card said so itself. Nothing below can improve on that.
+    if text and DROPOFF_NOT_STATED.search(text):
+        return None
+    started_at = find_pickup(places)
     for place in reversed(places or []):
         if PLACE_IS_A_SHOP.search(place):
             continue
@@ -1399,8 +1419,46 @@ def find_dropoff(places, text=None):
         # 1 min 10 mins (4.6 mi) N Cobb Pkwy NW" would disown a real address.
         if text and _labelled_pickup(text, place):
             continue
+        # ...and where a job starts is not where it ends, whatever else is true.
+        #
+        # The rule above can only refuse a place it can find in this frame's
+        # text, and `places` is a union across every frame while `text` is one
+        # frame — so the merged string is often not in this text at all, the
+        # search returns -1, and the merchant is offered as a destination.
+        #
+        # Measured on 103 offers off this driver's rig: the old code recorded 57
+        # dropoffs and 35 of them were this, the restaurant the driver was
+        # collecting from, recorded as where the customer lives. It is the
+        # commonest wrong answer the parser gave, and the reason a map of these
+        # rows could not be drawn.
+        if started_at and _same_place(started_at, place):
+            continue
         return place
     return None
+
+
+def _place_key(value):
+    return re.sub(r'[^a-z0-9]', '', (value or '').lower())
+
+
+def _same_place(a, b):
+    """One end of the job wearing two readings of the same words.
+
+    Containment rather than equality, because the two ends come from different
+    frames as often as not and one carries a tail of map furniture the other
+    does not — "Chuy's nae" beside "Chuy''s heey". A real dropoff does not
+    contain the whole merchant name, so this does not join two genuinely
+    different places.
+
+    Deliberately not `same_place()`, which is fuzzier and better. That one is
+    the Pi's alone, for merging across frames; this rule runs in both ports and
+    the shared corpus holds them to the same answers, so it has to be something
+    the JavaScript can do identically.
+    """
+    x, y = _place_key(a), _place_key(b)
+    if not x or not y:
+        return False
+    return x in y or y in x
 
 
 def _labelled_pickup(text, place):

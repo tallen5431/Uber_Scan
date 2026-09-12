@@ -191,11 +191,17 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
 
 
 FRAG = '$16.05 20 min (7.3 mi) trip'
-WHOLE = '$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip 123 Main St, Acworth, GA 30101'
+# Both ends named, which is what a ride card really prints. It used to name
+# only the destination, and the parser then reported that one address as
+# BOTH ends of the journey — the fault find_dropoff was corrected for. A
+# fixture that depends on a bug keeps the bug alive.
+WHOLE = ('$16.05 3 min (1.1 mi) away Cobb Pkwy NW, Kennesaw '
+         '20 min (7.3 mi) trip 123 Main St, Acworth, GA 30101')
 # The decimal point lost: a payout that cannot be true, on a card that is
 # already on disk. (A plausible near miss — $16.06 for $16.05 — is a card
 # the journal itself would file as a different offer, and is still counted.)
-LOST_DECIMAL = '$1605 3 min (1.1 mi) away 20 min (7.3 mi) trip 123 Main St, Acworth, GA 30101'
+LOST_DECIMAL = ('$1605 3 min (1.1 mi) away Cobb Pkwy NW, Kennesaw '
+                '20 min (7.3 mi) trip 123 Main St, Acworth, GA 30101')
 
 # --- a fuller reading of the same card is told again ------------------------
 # The first read returns a fragment on both frames of the pair, so it locks;

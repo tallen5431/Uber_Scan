@@ -149,6 +149,7 @@ it read `package.json`, and it will serve instead.
 | `journal-client.js` | Hands an offer typed here, or read by the phone's scanner, to the rig's journal when there is one to answer |
 | `server.js` | Zero-dependency static server; the Node entry point |
 | `journal.html` | Every offer the scanner kept, and what it adds up to |
+| `map.html` | Puts the places the rig read on a map, to check whether they are right. Needs a network; asks nothing until you press the button |
 | `live.html` | The driving screen: the rig's verdict, the phone as the camera sees it, and the controls used while moving |
 | `scan.html`, `scan.js`, `scan.css` | The phone's own scanner — a photo of the offer card, read on the phone; see [SCANNING.md](SCANNING.md) |
 | `offer-parser.js` | Turns the text off a card into pay, minutes and miles — one corpus, shared with the Pi's port |

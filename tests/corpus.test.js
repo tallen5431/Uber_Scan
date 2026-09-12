@@ -100,6 +100,25 @@ function sameList(a, b) {
                             + JSON.stringify(got) + ' want ' + JSON.stringify(c.expect)); }
 });
 
+/* Which end is which. A pair, because the two answers are one claim: a dropoff
+   is only right relative to the pickup it is not. */
+(cases.ends || []).forEach(function (c) {
+  var pickup, dropoff;
+  if (c.places) {
+    pickup = P.findPickup(c.places);
+    dropoff = P.findDropoff(c.places, c.text || null);
+  } else {
+    var p = P.parse(c.text);
+    pickup = p.pickup;
+    dropoff = p.dropoff;
+  }
+  var got = [pickup === undefined ? null : pickup,
+             dropoff === undefined ? null : dropoff];
+  if (JSON.stringify(got) === JSON.stringify(c.expect)) ok++;
+  else { bad++; console.log('FAIL  ends / ' + c.name + ': got '
+                            + JSON.stringify(got) + ' want ' + JSON.stringify(c.expect)); }
+});
+
 (cases.deadline || []).forEach(function (c) {
   eq('deadline / ' + c.name, P.parse(c.text).deliverBy, c.expect);
 });

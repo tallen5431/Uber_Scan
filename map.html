@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Uber Scan — map check</title>
+<link rel="stylesheet" href="styles.css">
+<!-- Leaflet, for the map itself. Loaded from a CDN rather than vendored
+     because this page is the one thing here that cannot work offline anyway:
+     it needs a geocoder and it needs tiles. If the rig has no signal the page
+     says so rather than showing an empty grey square. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  body { padding: 0; }
+  #app { display: grid; grid-template-rows: auto auto 1fr; height: 100dvh;
+         max-width: none; padding: 0; gap: 0; }
+  header { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { font-size: 12px; color: var(--muted); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+         padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  .bar label { font-size: 12px; color: var(--muted); display: flex;
+               align-items: center; gap: 5px; }
+  .bar input, .bar select {
+    font: inherit; font-size: 13px; padding: 5px 7px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+  }
+  .bar input[type="text"] { width: 150px; }
+  .bar input[type="number"] { width: 66px; }
+  button {
+    font: inherit; font-size: 13px; font-weight: 700; padding: 7px 12px;
+    border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--text); cursor: pointer;
+  }
+  button.go { background: #0d5c31; border-color: #17c964; color: #d7ffe6; }
+  button[disabled] { opacity: .5; cursor: default; }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) 340px;
+           min-height: 0; }
+  @media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); }
+                              #side { max-height: 40dvh; } }
+  #map { min-height: 0; background: var(--panel-2); }
+  #side { border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px;
+          font-size: 13px; }
+  #side h2 { font-size: 13px; margin: 14px 0 6px; letter-spacing: .04em;
+             text-transform: uppercase; color: var(--muted); }
+  #side h2:first-child { margin-top: 0; }
+  .row { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .row b { font-weight: 700; }
+  .row .why { color: var(--muted); font-size: 12px; }
+  .tag { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+         border: 1px solid var(--line); margin-left: 4px; }
+  .tag.bad { color: var(--no); border-color: var(--no); }
+  .tag.iffy { color: var(--warn); border-color: var(--warn); }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .warnbox { border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px;
+             margin: 8px 14px; font-size: 12px; line-height: 1.5; }
+  .leaflet-container { background: var(--panel-2); }
+  .pin-label { font: 700 11px system-ui, sans-serif; }
+</style>
+</head>
+<body data-page="map">
+
+<div id="app">
+  <header>
+    <h1>Map check</h1>
+    <div class="sub">Where the rig thinks your jobs went, put on a map so you can
+      see whether it is right. Nothing here changes the journal.</div>
+  </header>
+
+  <!-- Nothing is searched until this is pressed. The rig never sends a place
+       anywhere by itself; this page does it from YOUR browser, to a public
+       geocoder, and only when you ask. That is the same arrangement as the
+       route links on the other pages, and it is the whole reason the rig does
+       not do this for you. -->
+  <div class="bar">
+    <label>days <input type="number" id="days" value="7" min="1" max="365"></label>
+    <label>near <input type="text" id="hint" placeholder="Georgia, USA"></label>
+    <button id="load">Load offers</button>
+    <button id="place" class="go" disabled>Place them on a map</button>
+    <button id="forget" title="Throw away the remembered lookups on this device">Forget lookups</button>
+    <span class="note" id="status">no offers loaded yet</span>
+  </div>
+
+  <div class="warnbox" id="privacy">
+    <b>Pressing “Place them on a map” sends these place names to OpenStreetMap’s
+    public geocoder</b>, from this browser. Some of them are where customers
+    live. Answers are remembered on this device so a second run asks nothing.
+    The rig itself never sends them anywhere.
+  </div>
+
+  <div class="split">
+    <div id="map"></div>
+    <div id="side">
+      <div class="note" id="sideEmpty">Load a few days, then place them.</div>
+      <div id="sideBody" hidden></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var el = {};
+  ['days', 'hint', 'load', 'place', 'forget', 'status', 'map', 'side',
+   'sideEmpty', 'sideBody'].forEach(function (id) { el[id] = document.getElementById(id); });
+
+  var offers = [];
+  var map = null, layer = null;
+
+  function say(text) { el.status.textContent = text; }
+
+  /* --- what the rig knows --------------------------------------------------
+   *
+   * Straight off /api/journal, which is the same list the offers page reads,
+   * so anything wrong here is wrong there too rather than being an artefact of
+   * this page. */
+  function load() {
+    var days = Math.max(1, Math.min(365, Number(el.days.value) || 7));
+    say('loading…');
+    el.place.disabled = true;
+    fetch('/api/journal?days=' + days + '&limit=5000')
+      .then(function (r) { return r.json(); })
+      .then(function (body) {
+        if (body && body.unreadable) throw new Error('the journal could not be read (' + body.unreadable + ')');
+        offers = (body && body.offers) || [];
+        var withEnds = offers.filter(function (o) { return o.pickup || o.dropoff; });
+        var mappable = offers.filter(function (o) { return o.pickup && o.dropoff; });
+        say(offers.length + ' offers · ' + withEnds.length + ' name somewhere · '
+            + mappable.length + ' name both ends');
+        el.place.disabled = withEnds.length === 0;
+        render([]);
+      })
+      .catch(function (e) { say('could not load: ' + (e && e.message || e)); });
+  }
+
+  /* --- the geocoder --------------------------------------------------------
+   *
+   * Nominatim, which is free, keyless and asks for at most one request a
+   * second. That rate is kept deliberately rather than hopefully: a page that
+   * hammers it gets the whole project blocked, and there is no hurry here.
+   *
+   * Answers are cached in localStorage under the exact string searched, so the
+   * second run of a week costs nothing and the driver can re-check a map
+   * without asking anybody anything. */
+  var CACHE_KEY = 'uberscan.geocode.v1';
+  var cache = {};
+  try { cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') || {}; } catch (e) { cache = {}; }
+
+  function remember(key, value) {
+    cache[key] = value;
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); } catch (e) { /* full or private */ }
+  }
+
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function lookup(place) {
+    var hint = el.hint.value.trim();
+    var query = hint ? place + ', ' + hint : place;
+    if (Object.prototype.hasOwnProperty.call(cache, query)) {
+      return Promise.resolve(cache[query]);
+    }
+    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q='
+            + encodeURIComponent(query);
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (hits) {
+        var hit = hits && hits[0];
+        var found = hit ? { lat: Number(hit.lat), lon: Number(hit.lon),
+                            name: hit.display_name, kind: hit.type || '' } : null;
+        remember(query, found);
+        return found;
+      })
+      .catch(function () { return null; });      // offline, blocked, rate-limited
+  }
+
+  /* Straight-line miles, which is the only distance this page can compute. It
+     is never the driving distance, and that asymmetry is exactly what makes it
+     useful as a check: a straight line between two points CANNOT be longer
+     than the road between them. Where it is, one of the two pins is wrong. */
+  function crowMiles(a, b) {
+    var R = 3958.8, toRad = Math.PI / 180;
+    var dLat = (b.lat - a.lat) * toRad, dLon = (b.lon - a.lon) * toRad;
+    var la = a.lat * toRad, lb = b.lat * toRad;
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+          + Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(la) * Math.cos(lb);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  async function placeAll() {
+    el.place.disabled = true;
+    el.load.disabled = true;
+    var jobs = offers.filter(function (o) { return o.pickup || o.dropoff; });
+    var wanted = [];
+    jobs.forEach(function (o) {
+      if (o.pickup) wanted.push(o.pickup);
+      if (o.dropoff) wanted.push(o.dropoff);
+    });
+    var distinct = wanted.filter(function (v, i, all) { return all.indexOf(v) === i; });
+    var fresh = distinct.filter(function (q) {
+      var hint = el.hint.value.trim();
+      return !Object.prototype.hasOwnProperty.call(cache, hint ? q + ', ' + hint : q);
+    });
+    say(distinct.length + ' distinct places, ' + fresh.length + ' to look up'
+        + (fresh.length ? ' (about ' + fresh.length + 's)' : ' — all remembered'));
+
+    var done = 0;
+    var found = {};
+    for (var i = 0; i < distinct.length; i++) {
+      var q = distinct[i];
+      var hit = await lookup(q);                                    // eslint-disable-line no-await-in-loop
+      found[q] = hit;
+      done++;
+      if (done % 3 === 0 || done === distinct.length) {
+        say('looked up ' + done + ' of ' + distinct.length);
+      }
+      // Only sleep when the network was actually used.
+      var hint = el.hint.value.trim();
+      if (!Object.prototype.hasOwnProperty.call(cache, hint ? q + ', ' + hint : q)) {
+        await sleep(1100);                                          // eslint-disable-line no-await-in-loop
+      }
+    }
+
+    var placed = jobs.map(function (o) {
+      var a = o.pickup ? found[o.pickup] : null;
+      var b = o.dropoff ? found[o.dropoff] : null;
+      var crow = (a && b) ? crowMiles(a, b) : null;
+      var stated = typeof o.miles === 'number' ? o.miles : null;
+      // The card's distance covers getting to the pickup as well as the job,
+      // so the straight line between the two ends should be comfortably under
+      // it. Over it means a pin is in the wrong place.
+      var impossible = (crow !== null && stated !== null && crow > stated + 0.5);
+      return { offer: o, from: a, to: b, crow: crow, stated: stated,
+               impossible: impossible };
+    });
+    render(placed);
+    el.place.disabled = false;
+    el.load.disabled = false;
+    // Out of the offers that named BOTH ends, which are the only ones that
+    // could ever be drawn end to end. Counting against everything that named
+    // anywhere would fold "the card never said where this went" into the same
+    // figure as "the geocoder got it wrong", and those are different problems
+    // with different answers. The first is counted on its own below.
+    var couldDraw = jobs.filter(function (o) { return o.pickup && o.dropoff; }).length;
+    var ok = placed.filter(function (p) { return p.from && p.to && !p.impossible; }).length;
+    say(ok + ' of ' + couldDraw + ' drawn end to end');
+  }
+
+  /* --- drawing ------------------------------------------------------------- */
+
+  function ensureMap() {
+    if (map) return true;
+    if (typeof L === 'undefined') {
+      el.map.innerHTML = '<div class="note" style="padding:16px">The map library '
+        + 'did not load. This page needs a network: it uses OpenStreetMap for '
+        + 'both the tiles and the lookups.</div>';
+      return false;
+    }
+    map = L.map(el.map, { zoomControl: true }).setView([33.94, -84.58], 10);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '© OpenStreetMap'
+    }).addTo(map);
+    return true;
+  }
+
+  function dot(colour) {
+    return L.divIcon({ className: '', iconSize: [12, 12],
+      html: '<div style="width:12px;height:12px;border-radius:50%;background:'
+          + colour + ';border:2px solid #0b0d10"></div>' });
+  }
+
+  function when(at) {
+    try { return new Date(at).toLocaleString(); } catch (e) { return String(at); }
+  }
+
+  function render(placed) {
+    if (!ensureMap()) return;
+    if (layer) { map.removeLayer(layer); }
+    layer = L.layerGroup().addTo(map);
+    var bounds = [];
+
+    placed.forEach(function (p) {
+      var money = '$' + (p.offer.pay != null ? p.offer.pay : '?')
+                + ' · ' + (p.offer.minutes != null ? p.offer.minutes : '?') + ' min';
+      if (p.from) {
+        L.marker([p.from.lat, p.from.lon], { icon: dot('#17c964') })
+          .bindPopup('<b>Pickup</b><br>' + esc(p.offer.pickup)
+                     + '<br><span class="note">' + esc(p.from.name) + '</span>'
+                     + '<br>' + esc(money) + '<br>' + esc(when(p.offer.at)))
+          .addTo(layer);
+        bounds.push([p.from.lat, p.from.lon]);
+      }
+      if (p.to) {
+        L.marker([p.to.lat, p.to.lon], { icon: dot('#f5a524') })
+          .bindPopup('<b>Dropoff</b><br>' + esc(p.offer.dropoff)
+                     + '<br><span class="note">' + esc(p.to.name) + '</span>'
+                     + '<br>' + esc(money))
+          .addTo(layer);
+        bounds.push([p.to.lat, p.to.lon]);
+      }
+      if (p.from && p.to) {
+        L.polyline([[p.from.lat, p.from.lon], [p.to.lat, p.to.lon]], {
+          color: p.impossible ? '#f31260' : '#7aa2f7',
+          weight: p.impossible ? 3 : 2,
+          dashArray: p.impossible ? '6 4' : null, opacity: .85
+        }).bindPopup((p.impossible ? '<b>This cannot be right</b><br>' : '')
+            + 'straight line ' + p.crow.toFixed(1) + ' mi'
+            + (p.stated !== null ? ', card said ' + p.stated + ' mi total' : ''))
+          .addTo(layer);
+      }
+    });
+
+    if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
+    sidebar(placed);
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  /* The half that matters for checking: what could NOT be drawn, and why.
+     A map that quietly shows the third of the offers it managed is a map that
+     says the rig is doing better than it is. */
+  function sidebar(placed) {
+    if (!placed.length) { el.sideEmpty.hidden = false; el.sideBody.hidden = true; return; }
+    el.sideEmpty.hidden = true;
+    el.sideBody.hidden = false;
+
+    var noEnd = offers.filter(function (o) { return !o.dropoff; });
+    var lost = placed.filter(function (p) { return (p.offer.pickup && !p.from) || (p.offer.dropoff && !p.to); });
+    var wrong = placed.filter(function (p) { return p.impossible; });
+    var drawn = placed.filter(function (p) { return p.from && p.to && !p.impossible; });
+
+    var html = '';
+    html += '<h2>' + drawn.length + ' drawn end to end</h2>';
+    html += '<div class="note">Green is the pickup, amber the dropoff, and the '
+          + 'line between them is a straight line, not a route.</div>';
+
+    html += '<h2>' + wrong.length + ' that cannot be right</h2>';
+    html += '<div class="note">The straight line came out longer than the whole '
+          + 'distance the card stated. A straight line cannot beat the road, so '
+          + 'one of the two pins is in the wrong place.</div>';
+    wrong.slice(0, 25).forEach(function (p) {
+      html += '<div class="row"><b>' + esc(p.offer.pickup || '?') + '</b> → '
+           + esc(p.offer.dropoff || '?') + '<span class="tag bad">'
+           + p.crow.toFixed(1) + ' vs ' + p.stated + ' mi</span>'
+           + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
+    });
+
+    html += '<h2>' + lost.length + ' the geocoder could not find</h2>';
+    lost.slice(0, 25).forEach(function (p) {
+      var which = !p.from ? p.offer.pickup : p.offer.dropoff;
+      html += '<div class="row"><b>' + esc(which) + '</b>'
+           + '<span class="tag iffy">no match</span>'
+           + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
+    });
+
+    html += '<h2>' + noEnd.length + ' with no dropoff at all</h2>';
+    html += '<div class="note">The card never said where the job ends — Uber '
+          + 'prints “Customer dropoff” and no address until you accept. The '
+          + '⌖ Dropoff button on the driving screen is what fills these in.</div>';
+
+    el.sideBody.innerHTML = html;
+  }
+
+  el.load.addEventListener('click', load);
+  el.place.addEventListener('click', function () { placeAll(); });
+  el.forget.addEventListener('click', function () {
+    cache = {};
+    try { localStorage.removeItem(CACHE_KEY); } catch (e) { /* private mode */ }
+    say('remembered lookups thrown away');
+  });
+
+  ensureMap();
+  load();
+})();
+</script>
+</body>
+</html>

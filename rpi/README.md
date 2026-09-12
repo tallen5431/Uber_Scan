@@ -2968,6 +2968,48 @@ by without this is a shift nothing can go back for.
 `tools/measure_places.js` reports what share of the history is clean, and that
 share rises on its own.
 
+### What 103 real offers said about mapping any of this
+
+The driver exported a shift and asked whether there was enough location in it to
+draw a map. Measured on that file rather than argued about:
+
+| | |
+|---|---|
+| offers | 103 |
+| cards printing `Customer dropoff` and no address | 48 |
+| legs on the card | one on 91 of them |
+| `toPickupMinutes` / `toPickupMiles` filled in | **0** |
+| dropoffs the parser recorded | 57 |
+| ...that were the pickup again | **35** |
+
+Three things follow, and the first two are corrections rather than opinions.
+
+**The approach split does not exist on these cards.** 91 of the 103 state one
+leg — `2.9 mi • 21min`, or `43 min (8.9 mi) total` — and never separate the
+drive to the restaurant from the drive to the customer. The field added for it
+is correctly null on every row here. It fills in on ride cards, which this
+driver is now being shown far fewer of, so anything built on subtracting the
+approach would be building on almost no data.
+
+**The parser was inventing destinations.** Of 57 dropoffs recorded, 35 were the
+restaurant the driver was collecting from, recorded as where the customer lives
+— the commonest wrong answer the parser gave, and on its own enough to make a
+map of these rows meaningless. `find_dropoff` refuses two ways now: when the
+card says `Customer dropoff` in its own words, and when the answer would be the
+place the job starts from. That took the 57 down to 22, and cost exactly one
+genuine pair.
+
+**What is left is real but thin.** 22 of 103 offers name two distinct ends, and
+they are proper street addresses — `Payne Rd & Stately Dr, Woodstock`,
+`Villa Rica Hwy, Dallas`, `Greenside Dr, Austell`. That is the honest ceiling
+for mapping the offers themselves: about one in five. The other route to a
+destination is the ⌖ Dropoff scan, which reads the navigation screen *after* the
+accept and is the only place a customer's full address ever appears.
+
+`map.html` is where to look at all of this: it pins what it can, joins the two
+ends of each job, and — the half that matters for checking — lists what it could
+not place and why.
+
 **ACCEPT only when the whole range clears the line**, for the same reason a rate
 with no running cost taken off it cannot earn one: a range that straddles the
 target is a maybe, and a maybe drawn in green is a wrong answer.
@@ -5300,7 +5342,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 34 suites, 5298 checks
+npm test                # all 35 suites, 5341 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5314,7 +5356,7 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 681 checks, the shared corpus
+node tests/corpus.test.js       # 691 checks, the shared corpus
 node tests/parser.test.js       #  95 on the browser side alone
 node tests/advice.test.js       # 200 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
@@ -5322,7 +5364,7 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 718 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 728 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 238 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -5395,6 +5437,9 @@ python3 rpi/test_server.py      #  29 on the server's own edges: two readers of
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
                                 #     is not one
+python3 rpi/test_map.py         #  23 on the map check page: that it asks
+                                #     nobody anything until told to, and that
+                                #     it shows what it could not place
 python3 rpi/test_loop.py        #  13 on the scan loop re-telling a card once
                                 #     the rest of it arrives, and going quiet
                                 #     when a read never returns

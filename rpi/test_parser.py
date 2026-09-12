@@ -105,6 +105,16 @@ for c in cases.get('toPickup', []):
            else [p['toPickupMinutes'], p['toPickupMiles']])
     eq('to pickup / ' + c['name'], got, c['expect'])
 
+# Which end is which. A pair, because the two answers are one claim: a dropoff
+# is only right relative to the pickup it is not.
+for c in cases.get('ends', []):
+    if c.get('places'):
+        got = [P.find_pickup(c['places']), P.find_dropoff(c['places'], c.get('text'))]
+    else:
+        p = P.parse(c['text'])
+        got = [p['pickup'], p['dropoff']]
+    eq('ends / ' + c['name'], got, c['expect'])
+
 for c in cases.get('deadline', []):
     eq('deadline / ' + c['name'], P.parse(c['text'])['deliverBy'], c['expect'])
 
