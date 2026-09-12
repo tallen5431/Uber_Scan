@@ -302,7 +302,22 @@ def main():
 
     pin = CX.PIN_WHOLE if drawn else (WHOLE_VIEW if args.full_screen else DEFAULT_ROI)
     share = 1.0 if drawn else None
-    config = calibrated_config(load_existing(args.config), quad, pin,
+    was = load_existing(args.config)
+    # A --from-image run has no camera to find focus with, so it has no focus to
+    # write — and writing None over a measured one is worse than writing
+    # nothing at all. scan_pi reads `cfg.get('lensPosition') or 4.0`, so a null
+    # here is not "autofocus", it is a hardcoded 4.0 dioptres pinned for the
+    # whole shift: a number nothing measured, on a mount whose real focus was
+    # on disk a moment earlier. Measured on a config holding 4.62 — one
+    # --from-image run and the scanner pins 4.0.
+    #
+    # Kept for the same reason calibrated_config keeps the driver's money:
+    # re-deciding where the phone is has no business discarding what was
+    # measured about the lens, and the mount has not moved. --lens still wins,
+    # and a camera calibration still measures its own.
+    if lens_position is None:
+        lens_position = was.get('lensPosition')
+    config = calibrated_config(was, quad, pin,
                                args.card_height, (width, height), lens_position)
     if drawn:
         CX.apply_to_config(config, drawn, (width, height))

@@ -43,6 +43,11 @@ QUAD = [[100, 20], [900, 22], [905, 1600], [98, 1598]]
 LIVED_IN = {
     'settings': {'target': 32, 'band': 10, 'costPerMile': 0.62,
                  'pad': 3, 'secondsPerItem': 45},
+    # A focus the camera measured on this mount. --from-image has no camera to
+    # find one with, and was writing null over it — which scan_pi reads as
+    # `cfg.get('lensPosition') or 4.0`, so a null is not "autofocus", it is a
+    # hardcoded 4.0 dioptres pinned for the whole shift.
+    'lensPosition': 4.62,
     'exposureTime': 33333,
     'exposureWhy': 'measured against this screen',
     'analogueGain': 4.1,
@@ -157,6 +162,38 @@ try:
     written = json.load(open(cfg_path))
     eq('the recorded size is the still, not the --mode default',
        written['capture'], {'width': STILL_W, 'height': STILL_H})
+    # The focus survives, for the same reason the driver's money does: a
+    # --from-image run re-decides where the phone is and has nothing to say
+    # about the lens, so it may not overwrite what was measured about it.
+    eq('...and the measured focus survives a run that could not measure one',
+       written['lensPosition'], 4.62)
+
+    # ...while --lens still overrules it, which is the only reason that flag
+    # exists. Without this check, "always take what was on disk" would look
+    # like a working fix.
+    argv, out = sys.argv, sys.stdout
+    sys.argv = ['calibrate', '--from-image', still, '--config', cfg_path,
+                '--lens', '3.1']
+    try:
+        sys.stdout = open(os.devnull, 'w')
+        CB.main()
+    finally:
+        sys.stdout.close()
+        sys.stdout, sys.argv = out, argv
+    eq('a focus given on the command line still wins',
+       json.load(open(cfg_path))['lensPosition'], 3.1)
+    # Put it back, so the checks below read the file the block above wrote.
+    with open(cfg_path, 'w') as fh:
+        json.dump(LIVED_IN, fh)
+    argv, out = sys.argv, sys.stdout
+    sys.argv = ['calibrate', '--from-image', still, '--config', cfg_path]
+    try:
+        sys.stdout = open(os.devnull, 'w')
+        CB.main()
+    finally:
+        sys.stdout.close()
+        sys.stdout, sys.argv = out, argv
+    written = json.load(open(cfg_path))
     corners = np.array(written['quad'], dtype=np.float32)
     ok_('...so every corner falls inside the frame it was measured on',
         corners[:, 0].max() <= STILL_W and corners[:, 1].max() <= STILL_H)

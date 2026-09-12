@@ -264,6 +264,7 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   });
   await page.waitForTimeout(600);
   out.recorded.afterRelock = await journal();
+
   // A fragment of the card is a sight of it too, when it reads as complete.
   // The fragment is the ride card's, so the ride card first, as a new offer
   // after the window; then sixty seconds, the fragment, sixty more, the card.
@@ -289,6 +290,56 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
                              null, { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(600);
   out.recorded.afterPhoto = await journal();
+
+  // Two readings of ONE delivery card that disagree about the deadline and the
+  // item count. The lock signature was pay|minutes|miles, and on a delivery
+  // card `minutes` is null — the duration comes from the deadline and the
+  // shopping allowance from the item count — so these two agreed perfectly and
+  // locked, which is acting on a glitch with the ceremony of acting on a
+  // number.
+  out.disagree = await page.evaluate(() => {
+    var CARD = 'Uber Eats $18.77 6 items Deliver by 7:15 PM 3.6 mi Pickup '
+             + "McDonald's";
+    // Differs on the DEADLINE ONLY — same pay, same items, same distance — so
+    // a signature that added the item count and stopped there would still let
+    // this pair lock. The deadline is the denominator on these cards.
+    var LATER = 'Uber Eats $18.77 6 items Deliver by 9:15 PM 3.6 mi Pickup '
+              + "McDonald's";
+    // ...and this one on the ITEM COUNT only, which is the shopping allowance.
+    var MORE = 'Uber Eats $18.77 8 items Deliver by 7:15 PM 3.6 mi Pickup '
+             + "McDonald's";
+    var a = OfferParser.parse(CARD), b = OfferParser.parse(LATER);
+    // Cleared the way the page itself clears: three reads that see nothing
+    // drop the lock and the running agreement. There is no back door for it,
+    // which is the right shape — a test reaching past the loop would not be
+    // testing the loop.
+    var blank = OfferParser.parse('');
+    var clear = function () {
+      for (var i = 0; i < 4; i++) window.__scan.consider(blank);
+    };
+    clear();
+    var lockedOnDisagreement = window.__scan.consider(a).locked
+                            || window.__scan.consider(OfferParser.parse(LATER)).locked;
+    clear();
+    var lockedOnItems = window.__scan.consider(OfferParser.parse(CARD)).locked
+                     || window.__scan.consider(OfferParser.parse(MORE)).locked;
+    // ...and the same card twice must still lock, or this would be a rule
+    // that simply refuses everything.
+    clear();
+    window.__scan.consider(OfferParser.parse(CARD));
+    var lockedOnAgreement = window.__scan.consider(OfferParser.parse(CARD)).locked;
+    var s = { target: 25, band: 15, costPerMile: 0.30, nowMinutes: 18 * 60 + 57 };
+    return {
+      lockedOnDisagreement: lockedOnDisagreement,
+      lockedOnItems: lockedOnItems,
+      lockedOnAgreement: lockedOnAgreement,
+      // How far apart the two verdicts are, so the check can say what was at
+      // stake rather than only that something differed.
+      rateA: OfferParser.rate(a, s).perHour,
+      rateB: OfferParser.rate(b, s).perHour,
+      minutesA: a.minutes, deadlineA: a.deliverBy, deadlineB: b.deliverBy
+    };
+  });
   out.photoStatus = await page.evaluate(() => document.getElementById('statusline').textContent);
 
   // A one-shot message stands long enough to be read: Reset in the sheet,
@@ -334,6 +385,69 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     return { ok: answer.ok, sentA: answer.sent.includes(a.id),
              sentB: answer.sent.includes(b.id),
              left: JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length };
+  });
+
+  // A rate that is only a ceiling, on the screen that had nothing to say
+  // about it. rate() caps the verdict at CLOSE CALL when a cost per mile is
+  // set and the card states no chargeable distance — and live.html and the
+  // offers page both name it in words. This one showed "/hr" like any other
+  // number, so the only clue was an amber verdict on a card whose printed rate
+  // clears the target, which reads as the rig being cautious rather than as
+  // the figure being an upper bound.
+  out.ceiling = await page.evaluate(() => {
+    var card = "Uber Eats $18.77 Includes expected tip 25 min total Pickup "
+             + "McDonald's Deliver to Customer";
+    var settings = { target: 25, band: 15, costPerMile: 0.35 };
+    var parsed = OfferParser.parse(card);
+    var rate = OfferParser.rate(parsed, settings);
+    // Driven through the page's own path rather than a back door: two frames
+    // agree so the card locks and becomes `lastResult`, then setting the cost
+    // per mile re-renders from it. A hook that painted the screen directly
+    // would be testing the hook.
+    var blank = OfferParser.parse('');
+    for (var i = 0; i < 4; i++) window.__scan.consider(blank);
+    window.__scan.consider(parsed);
+    window.__scan.consider(parsed);
+    var cost = document.getElementById('setCost');
+    cost.value = '0.35';
+    cost.dispatchEvent(new Event('input', { bubbles: true }));
+    var warn = document.getElementById('warn');
+    return { uncosted: !!rate.uncosted, state: rate.state,
+             perHour: rate.perHour,
+             warn: (warn.textContent || '').replace(/\s+/g, ' ').trim(),
+             warnShown: !warn.hidden,
+             headline: (document.getElementById('perHour') || {}).textContent || '' };
+  });
+
+  // The row the phone writes, built from the REAL parser and the REAL verdict
+  // rather than from a literal beside it.
+  //
+  // That distinction is the check. The fixture above hands row() a hand-written
+  // `rate`, and a hand-written rate cannot notice that row() was reading the
+  // wrong object: it took minutes and miles off the PARSE, where
+  // rpi/journal.py takes both off the verdict and says why. On this card —
+  // $41.11, "98 mi", "Deliver by 7:15 PM", read at 18:57 — the two disagree
+  // completely, because the duration comes from the deadline and the distance
+  // has had a lost decimal put back.
+  out.rowAgrees = await page.evaluate(() => {
+    var card = 'Decline High paying offer! $41.11 Guaranteed (incl. tips) '
+             + '98 mi Deliver by 7:15 PM Pickup Papa Johns';
+    var settings = { target: 25, band: 15, costPerMile: 0.30,
+                     nowMinutes: 18 * 60 + 57 };
+    var parsed = OfferParser.parse(card);
+    var rate = OfferParser.rate(parsed, settings);
+    var row = JournalClient.row(parsed, rate, settings,
+                                { browser: true, prefix: 'q' });
+    return {
+      shownRate: rate.perHour, shownMinutes: rate.cardMinutes,
+      shownMiles: rate.miles, shownCorrected: !!rate.milesCorrected,
+      rowMinutes: row.minutes, rowMiles: row.miles,
+      rowCorrected: row.milesCorrected, rowFromDeadline: row.fromDeadline,
+      rowPay: row.pay, rowGross: row.grossPerHour,
+      // What the parse alone would have given, so the check can say the two
+      // really are different and is not passing by coincidence.
+      parsedMinutes: parsed.minutes, parsedMiles: parsed.miles
+    };
   });
 
   // Registered by this page on its own: a phone that only ever opened
@@ -739,6 +853,98 @@ try:
     ok_('...the answer naming the first', mid.get('sentA'))
     ok_('...and the one kept while the first was in flight', mid.get('sentB'))
     eq('...leaving nothing kept', mid.get('left'), 0)
+
+    # --- a rate that is only a ceiling, said in words ---------------------
+    #
+    # rate() caps the verdict at CLOSE CALL when a cost per mile is set and the
+    # card states no chargeable distance, because the headline is then gross —
+    # an upper bound, not the offer. live.html and the offers page both name
+    # it. This screen — the one a driver uses when the rig is not there — put
+    # "/hr" on it like any other number, so the only clue was an amber verdict
+    # on a card whose printed rate clears the target, which reads as caution
+    # rather than as a bound.
+    ceil = got.get('ceiling') or {}
+    ok_('the uncosted card was measured', bool(ceil))
+    if ceil:
+        ok_('the card really is uncosted, or nothing below means anything',
+            ceil.get('uncosted') is True)
+        eq('...and the verdict is capped, as it always was', ceil.get('state'), 'warn')
+        ok_('...and now the screen says the rate is a ceiling (%r)'
+            % (ceil.get('warn') or '')[:60],
+            'ceiling' in (ceil.get('warn') or ''))
+        ok_('...on the glass, not hidden', ceil.get('warnShown'))
+        # The same sentence live.html uses, which is the point: a driver
+        # checking one screen against the other has to find them agreeing.
+        ok_('...in the same words as the driving screen',
+            'No distance on the card' in (ceil.get('warn') or ''))
+
+    # --- two readings that disagree must not lock -------------------------
+    #
+    # AGREE_TO_LOCK exists because "two readings that agree is the difference
+    # between acting on a number and acting on a glitch". The signature was
+    # pay|minutes|miles — and on a delivery card `minutes` is null, the
+    # duration comes from the deadline and the shopping allowance from the item
+    # count. So two readings two hours apart on the deadline agreed perfectly
+    # and locked.
+    dis = got.get('disagree') or {}
+    ok_('the disagreement case was measured', bool(dis))
+    if dis:
+        # The stake, said in the check rather than assumed: these are the same
+        # card read twice, and the verdicts are eight times apart.
+        ok_('the two readings really do give different verdicts ($%s vs $%s)'
+            % (round(dis.get('rateA') or 0, 2), round(dis.get('rateB') or 0, 2)),
+            abs((dis.get('rateA') or 0) - (dis.get('rateB') or 0)) > 20)
+        ok_('...and the card states no duration of its own, which is the point',
+            dis.get('minutesA') is None)
+        ok_('...with the deadlines genuinely apart',
+            dis.get('deadlineA') != dis.get('deadlineB'))
+        eq('two readings that disagree about the deadline alone do not lock',
+           dis.get('lockedOnDisagreement'), False)
+        # Separately, because a signature that added the item count and
+        # stopped there would pass the check above and still be wrong.
+        eq('...nor two that disagree about the item count alone',
+           dis.get('lockedOnItems'), False)
+        # ...and the rule still lets a real agreement through.
+        eq('...while the same card read twice still does',
+           dis.get('lockedOnAgreement'), True)
+
+    # --- and the row says what the phone showed ---------------------------
+    #
+    # row() took `minutes` and `miles` off the PARSE. rpi/journal.py takes both
+    # off the verdict, and carries a comment saying why: on a delivery card the
+    # duration comes from the deadline, and the distance may have had a lost
+    # decimal put back. Neither of those is in the parse.
+    #
+    # So every offer typed on the keypad or read by the phone's scanner went
+    # into the journal with figures that do not produce its own rate. The
+    # suite could not see it because the fixture beside it hands row() a
+    # hand-written `rate`, which is the drift this project keeps finding.
+    ra = got.get('rowAgrees') or {}
+    ok_('the row was built from the real parser', bool(ra))
+    if ra:
+        # First: the two really do disagree, or nothing below means anything.
+        ok_('the parse and the verdict disagree on this card (%r vs %r min, '
+            '%r vs %r mi)' % (ra.get('parsedMinutes'), ra.get('shownMinutes'),
+                              ra.get('parsedMiles'), ra.get('shownMiles')),
+            ra.get('parsedMinutes') != ra.get('shownMinutes')
+            and ra.get('parsedMiles') != ra.get('shownMiles'))
+        eq('the row keeps the minutes the verdict was made over',
+           ra.get('rowMinutes'), ra.get('shownMinutes'))
+        eq('...and the distance it was made over', ra.get('rowMiles'),
+           ra.get('shownMiles'))
+        eq('...saying the decimal was put back, because it was',
+           ra.get('rowCorrected'), True)
+        eq('...and that the minutes are a deadline, not a stated duration',
+           ra.get('rowFromDeadline'), True)
+        # The property all of that is for: the row's own figures produce the
+        # row's own rate. A reader months later can check it against nothing
+        # but itself.
+        gross = ra.get('rowGross')
+        pay, mins = ra.get('rowPay'), ra.get('rowMinutes')
+        worked = (pay / (mins / 60.0)) if (pay and mins) else None
+        ok_('the row can be reconciled with itself (%s/hr from $%s over %s min)'
+            % (round(worked, 2) if worked else None, pay, mins),
+            worked is not None and abs(worked - gross) < 0.05)
 
     # --- the offline cache keeps the engine and refreshes the app ----------
     # The version constant used to be the whole mechanism: forget to bump it and

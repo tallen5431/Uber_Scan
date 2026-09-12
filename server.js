@@ -1228,13 +1228,33 @@ function latestPerOfferUncached(rows) {
     // A rule hides every reading of one card. The test offer a driver keeps
     // presenting to check the rig still works would otherwise need hiding again
     // after every check.
+    //
+    // The NEWEST matching rule wins, by `at` — not the last one in the file.
+    // That is the same correction the mark fold above carries a paragraph
+    // about, and rules travel over the same two-way sync: sync.py pulls both
+    // kinds from /api/journal/notes and ingest appends them at the end of the
+    // receiving file. So on whichever machine did not make the newer rule, the
+    // older one lands last and won.
+    //
+    // Measured through the real ingest door: a copy holding the driver's 11:00
+    // "put this back", sent the rig's 10:00 "hide every card like this", went
+    // from 2 offers visible to 0 — and the driving screen's shift line simply
+    // read short, because /api/today carries no hidden count at all.
+    //
+    // The match itself is unchanged, three `===` on the same three fields: a
+    // key built by joining them would quietly make null and undefined the same
+    // thing, and those are different answers about whether a card had a
+    // distance.
+    var winner = null;
     rules.forEach(function (rule) {
       var m = rule.match || {};
       if (m.pay === o.pay && m.minutes === o.minutes && m.miles === o.miles
           && rule.hidden !== undefined) {
-        o.hidden = rule.hidden;
+        var when = (typeof rule.at === 'number' && isFinite(rule.at)) ? rule.at : 0;
+        if (!winner || when >= winner.at) winner = { hidden: rule.hidden, at: when };
       }
     });
+    if (winner) o.hidden = winner.hidden;
     var mark = o.id && marks[o.id];
     if (mark) {
       if (mark.accepted !== undefined) o.accepted = mark.accepted;

@@ -421,7 +421,23 @@
       return;
     }
     misses = 0;
-    var sig = parsed.pay + '|' + parsed.minutes + '|' + parsed.miles;
+    // Everything the verdict is worked out from, not just the three figures a
+    // ride card happens to print.
+    //
+    // It was pay|minutes|miles. On a delivery card `minutes` is null and the
+    // duration comes from the DEADLINE, and the shopping allowance comes from
+    // the ITEM COUNT — so two readings that disagreed about both agreed
+    // perfectly here and locked. Measured on one card read twice, 7:15 PM / 6
+    // items against 9:15 PM / 8 items: identical signatures, and verdicts of
+    // $58.97/hr and $7.69/hr.
+    //
+    // AGREE_TO_LOCK exists because two readings that agree is the difference
+    // between acting on a number and acting on a glitch. A signature that
+    // leaves out the denominator is not that difference. The rig's own
+    // fingerprint — content_of in rpi/journal.py — has carried deliverBy and
+    // items all along.
+    var sig = [parsed.pay, parsed.minutes, parsed.miles,
+               parsed.deliverBy, parsed.items].join('|');
     agree = (sig === lastSig) ? agree + 1 : 1;
     lastSig = sig;
 
@@ -612,8 +628,29 @@
       notes.push('Still reading this card — the journey may not be all there '
                  + 'yet, which makes it look better than it is.');
     }
-    if (r.milesUncertain) notes.push('Distance unreadable — showing pay before mileage cost.');
-    else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
+    // A rate with no running cost taken off it is a CEILING, not the offer —
+    // the number may be anywhere below itself. rate() caps the verdict at
+    // CLOSE CALL for it, and live.html and the offers page both say so in
+    // words. This screen, which is the one a driver uses when the rig is not
+    // there, said nothing at all: the headline read "/hr" like any other and
+    // the only clue was an amber verdict on a card whose printed rate clears
+    // the target.
+    //
+    // The same sentence as live.html, deliberately, for the reason given
+    // above: the two screens are the same decision made in two places and a
+    // driver checking one against the other has to find them saying the same
+    // thing. `uncosted` rather than milesUncertain because a card that states
+    // no distance at all lands in the same place, and because with no cost per
+    // mile configured there is nothing missing.
+    if (r.uncosted) {
+      notes.push(r.milesUncertain
+        ? 'Distance unreadable — rate is a ceiling.'
+        : 'No distance on the card — rate is a ceiling.');
+    } else if (r.milesUncertain) {
+      notes.push('Distance unreadable — showing pay before mileage cost.');
+    } else if (r.milesCorrected) {
+      notes.push('Recovered a decimal in the distance — check the miles.');
+    }
     if (r.ready && r.shopMinutes) notes.push('Includes ' + Math.round(r.shopMinutes) + ' min of shopping time.');
     el.warn.textContent = notes.join(' ');
     el.warn.hidden = !notes.length;

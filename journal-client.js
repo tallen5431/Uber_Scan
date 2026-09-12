@@ -50,8 +50,28 @@ var JournalClient = (function () {
       id: (extra.prefix || 'b') + at.toString(36) + Math.random().toString(36).slice(2, 8),
       seq: 1, at: at, firstAt: at,
       pay: parsed.pay,
-      minutes: parsed.minutes,
-      miles: parsed.miles > 0 ? parsed.miles : null,
+      // The minutes and the miles the VERDICT was reached with, not the ones
+      // the parse came out with. rpi/journal.py:735-743 takes both from rate()
+      // and says why; this was the second copy of that rule and it had drifted
+      // on exactly those fields.
+      //
+      // They are not the same numbers. On a real DoorDash card — $41.11,
+      // "98 mi", "Deliver by 7:15 PM", read at 18:57 — the phone showed
+      // $127.23/hr over 18 minutes and 9.8 miles, having recovered the lost
+      // decimal and worked the duration out from the deadline. The row stored
+      // minutes null and miles 98: a 98-mile job with no duration, at a rate
+      // neither figure produces. A row that cannot be reconciled with itself is
+      // the one thing the journal exists to avoid.
+      minutes: (typeof rate.cardMinutes === 'number') ? rate.cardMinutes
+                                                      : parsed.minutes,
+      miles: (typeof rate.miles === 'number' && rate.miles > 0) ? rate.miles
+             : (parsed.miles > 0 ? parsed.miles : null),
+      // Which of the two the minutes above are, so a reader months later can
+      // tell a stated duration from the time left on a deadline. journal.html
+      // prints one or the other off this.
+      cardMinutes: (typeof rate.cardMinutes === 'number') ? rate.cardMinutes
+                                                          : parsed.minutes,
+      fromDeadline: !!rate.fromDeadline,
       items: parsed.items || null,
       shop: parsed.shop ? true : null,
       legs: parsed.legs || 0,
@@ -63,7 +83,11 @@ var JournalClient = (function () {
       state: rate.state, doubt: rate.doubt || null,
       target: settings.target, band: settings.band, costPerMile: settings.costPerMile,
       whole: true, settled: true, locked: true, suspect: false,
-      milesCorrected: false, milesUncertain: false
+      // Reported, not asserted. These were hardcoded false, which is a claim
+      // about the reading made without looking at it: the card above really
+      // did have its decimal recovered, and the row said it had not.
+      milesCorrected: !!rate.milesCorrected,
+      milesUncertain: !!rate.milesUncertain
     };
     for (var k in extra) {
       if (k !== 'prefix' && Object.prototype.hasOwnProperty.call(extra, k)) out[k] = extra[k];

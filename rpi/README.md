@@ -3054,6 +3054,64 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### Six places the record disagreed with the screen
+
+Every one of these is the same shape: a number the driver saw, written down or
+locked in or carried forward as a *different* number. None of them threw.
+
+**The log row was re-deriving what the panel had already decided.**
+`journal-client.js` built its row out of `parsed`, not out of the verdict. On a
+delivery card that is two different offers. The card states "24 mi" with no time
+beside it, `rate()` recovers the lost decimal to 2.4 and works the hour out over
+that, and the row went to disk saying 24 — beside a `$/hr` computed over 2.4.
+A row that cannot be reconciled with itself is worse than a missing row, because
+it argues. Minutes had the same split: a delivery card's minutes are the time
+left until the deadline, which `parse()` cannot know and `rate()` does. The row
+now takes `cardMinutes`, `miles`, `fromDeadline`, `milesCorrected` and
+`milesUncertain` off the verdict, and only falls back to the card's own figures
+for a reading that predates them. Four mutants, four caught.
+
+**The lock could not see two-thirds of the card.** `scan.js` decided a reading
+had settled by comparing `pay|minutes|miles` against the last one. A DoorDash
+card carries a deadline and an item count and — the case that made this real —
+*the same three numbers two hours apart*, one worth `$58.97/hr` and one worth
+`$7.69/hr`, because the hours left until the deadline had run down. The
+signature saw no change and locked the stale verdict. It is now
+`pay|minutes|miles|deliverBy|items`. Holding this took splitting the fixture so
+that the deadline and the item count each differ alone; with both moving at
+once, either half of the fix looked sufficient. Four mutants, four caught.
+
+**"No distance on the card" was printed as a rate, not as a ceiling.** When
+`uncosted` was set, the note explained the *distance*, and the big number above
+it stood unqualified. The hour worked out without a distance is an upper bound —
+every mile that is really there only makes it worse — so the note now says so in
+the sentence that is actually about the number: *"No distance on the card — rate
+is a ceiling"*, and *"Distance unreadable — rate is a ceiling"* when a distance
+was there and could not be read. Two mutants, two caught.
+
+**Hiding a card and un-hiding it left the outcome to file order.** A `rule` row
+says *hide every card matching these three numbers*; un-hiding writes another
+with `hidden: false`. The fold took whichever it met last in the file, which is
+insertion order and not time order — and rows arrive out of order routinely,
+because the sync appends a chunk from the rig into a copy that has been written
+to at home. The fold is now by `rule.at`, newest wins, with `>=` so that two
+rules sharing a millisecond still resolve to the later one in the file. Two
+mutants, two caught.
+
+**A recalibration from a saved image threw the focus away.** `calibrate.py
+--from-image` has no camera, so it has no lens position to measure, and it wrote
+`null` — over a `lensPosition: 4.62` that a real run had measured against the
+real mount. The scanner then fell back to a hardcoded `4.0` and every card after
+that was read slightly soft. It now keeps what was on disk when it cannot
+measure, and still takes an explicit `--lens`. Proving that needed a check that
+`--lens 3.1` *wins*, or "always keep the old one" passes too. Two mutants, two
+caught.
+
+**The Set box button stayed live while the box was being drawn.** Switching the
+view out from under an in-progress drag left the drawing bound to a frame that
+was no longer on screen. The button is now disabled for the duration, with a
+title saying why.
+
 ### Four checks that could not fail, one of them written that morning
 
 The audit's twelfth agent was pointed at the suites rather than the code, on
@@ -5942,7 +6000,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5597 checks
+npm test                # all 35 suites, 5629 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

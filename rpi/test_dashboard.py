@@ -958,12 +958,34 @@ const framed = (page) => page.waitForFunction(
     out.snap.viewDrawing = await page.evaluate(() => ({
       phone: document.body.classList.contains('phoneview'),
       stored: localStorage.getItem('uberscan.liveView') }));
+    // The view is borrowed for the length of the drawing and may not be given
+    // back mid-drag. The guard on Set box checks the view at the moment it is
+    // PRESSED and never again, and the toggle used to stay live throughout —
+    // so a driver could switch to the phone view with a box half-drawn, and
+    // "Read this box" re-checked only that the box was big enough before
+    // POSTing it as CAMERA FRAME fractions and answering "box sent" in green.
+    // The phone view is one rectangle out of the camera frame, flattened and
+    // blown up, so the same drag lands somewhere else entirely.
+    stage = 'snap: the view is locked while drawing';
+    out.snap.lockedWhileDrawing = await page.evaluate(() => {
+      var b = document.getElementById('viewMode');
+      var was = document.body.classList.contains('phoneview');
+      b.click();                                   // the driver tries anyway
+      return { disabled: b.disabled, title: b.title || '',
+               phoneBefore: was,
+               phoneAfter: document.body.classList.contains('phoneview') };
+    });
+    await page.waitForTimeout(150);
+
     stage = 'snap: cancel';
     await page.click('#drawCancel');
     await page.waitForTimeout(200);
     out.snap.viewAfter = await page.evaluate(() => ({
       phone: document.body.classList.contains('phoneview'),
-      stored: localStorage.getItem('uberscan.liveView') }));
+      stored: localStorage.getItem('uberscan.liveView'),
+      // ...and given back once the drawing ends, or the button is simply
+      // broken from then on.
+      viewEnabled: !document.getElementById('viewMode').disabled }));
     await page.close();
   }
   // The replay on its own, against a snapshot that says the scanner IS
@@ -1758,6 +1780,24 @@ try:
         ok_('Set box switches to the scene to draw on', not sn['viewDrawing'].get('phone'))
         eq('...without rewriting the remembered view', sn['viewDrawing'].get('stored'), None)
         ok_('...and Cancel brings the phone view back', sn['viewAfter'].get('phone'))
+
+        # The box is drawn on the SCENE and sent as fractions of the camera
+        # frame. The phone view is one rectangle out of that frame, flattened
+        # and blown up, so the same drag lands somewhere else entirely — and
+        # "Read this box" re-checked only that the box was big enough. A box
+        # accepted, a quad moved, the scanner reading a patch of car door, and
+        # a green "box sent" on the glass.
+        lw = sn.get('lockedWhileDrawing') or {}
+        ok_('the drawing starts on the scene', lw.get('phoneBefore') is False)
+        eq('...and the view cannot be switched back while a box is being drawn',
+           lw.get('disabled'), True)
+        eq('...so pressing it anyway changes nothing',
+           lw.get('phoneAfter'), lw.get('phoneBefore'))
+        ok_('...with the button saying why (%r)' % (lw.get('title') or ''),
+            'cancel first' in (lw.get('title') or ''))
+        # ...and given back afterwards, or the button is broken from then on.
+        eq('the view can be switched again once the drawing ends',
+           sn['viewAfter'].get('viewEnabled'), True)
 
     # --- the phone view is for a picture of a phone ------------------------
     land = got.get('frame landscape') or {}

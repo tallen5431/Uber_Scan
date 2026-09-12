@@ -2116,6 +2116,25 @@
       else refreshView();
     }
     viewWrap.classList.toggle('drawing', on);
+    // The view is borrowed for the length of the drawing, so it may not be
+    // given back mid-drag.
+    //
+    // The guard on Set box above checks the view at the moment it is PRESSED
+    // and never again. The toggle stayed live throughout, so the driver could
+    // switch to the phone view with a box half-drawn, and "Read this box"
+    // re-checked only that the box was big enough — then POSTed it as camera
+    // frame fractions and answered "box sent" in green. That is the exact
+    // silent failure the guard was written to prevent, reached by pressing a
+    // button beside it: a box accepted, a quad moved, and the scanner reading
+    // a patch of car door.
+    //
+    // Disabled rather than checked again at send time: there is nothing to
+    // decide here. You cannot draw the phone's outline on a picture that has
+    // already been cropped to it, so switching away is not a thing to refuse
+    // politely, it is a thing that cannot be meant.
+    viewModeBtn.disabled = on;
+    viewModeBtn.title = on ? 'the box is drawn on the scene — cancel first'
+                           : '';
     drawHint.hidden = !on;
     // The label stays put and the button lights up instead: "▣ Drawing" wraps
     // onto two lines in a four-slot bar on a phone, and a bar that changes

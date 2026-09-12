@@ -756,6 +756,54 @@ try:
        shown(rig.base).get('o1'), True)
     eq('...and what the copy shows, having received it', shown(home.base).get('o1'), True)
 
+    # ...and the same for a RULE, which hides every card like this one. Marks
+    # fold by when they were made; rules were replayed in file order, last in
+    # the file winning, with `at` never looked at — and rules travel over this
+    # same two-way sync, so on whichever machine did not make the newer one the
+    # older one lands last.
+    #
+    # The driver's "put this back" made at 11:00 was therefore reverted by
+    # their own "hide every card like this" from 10:00, as soon as the sync
+    # carried it across. Those offers then drop out of the median, the count
+    # and the CSV, and /api/today carries no hidden count at all — so the
+    # driving screen just reads short.
+    def hidden_of(base, offer_id):
+        body = urllib.request.urlopen(base + '/api/journal?days=0&hidden=1',
+                                      timeout=5).read()
+        rows = json.loads(body.decode('utf-8'))['offers']
+        for r in rows:
+            if r.get('id') == offer_id:
+                return bool(r.get('hidden'))
+        return None
+
+    MATCH = {'pay': OFFER['pay'], 'minutes': OFFER['minutes'],
+             'miles': OFFER['miles']}
+    # Newer, on the copy: put it back.
+    with open(home.journal, 'a') as fh:
+        fh.write(json.dumps({'kind': 'rule', 'at': T + 11000000,
+                             'match': MATCH, 'hidden': False}) + '\n')
+    # Older, in the car: hide every card like this.
+    with open(rig.journal, 'a') as fh:
+        fh.write(json.dumps({'kind': 'rule', 'at': T + 10000000,
+                             'match': MATCH, 'hidden': True}) + '\n')
+    run_main(home.base, rig.journal, ['--local', rig.base])
+    _rules_on_rig = [r for r in lines(rig.journal) if r.get('kind') == 'rule']
+    eq('the older hide-rule did come across', len(_rules_on_rig), 2)
+    eq('...and is not the last row, the newer one having arrived',
+       _rules_on_rig[-1].get('hidden'), False)
+    eq('the newer put-this-back is what the rig shows',
+       hidden_of(rig.base, OFFER['id']), False)
+    eq('...and what the copy shows', hidden_of(home.base, OFFER['id']), False)
+
+    # The other direction, so this is a rule about time and not about False
+    # winning: an older un-hide must not beat a newer hide either.
+    with open(rig.journal, 'a') as fh:
+        fh.write(json.dumps({'kind': 'rule', 'at': T + 12000000,
+                             'match': MATCH, 'hidden': True}) + '\n')
+    run_main(home.base, rig.journal, ['--local', rig.base])
+    eq('a newer hide beats the older put-this-back',
+       hidden_of(rig.base, OFFER['id']), True)
+
     # An offer typed on the copy's keypad, or read by a phone's scanner pointed
     # at the copy, is a row nothing but a browser wrote — and like a mark it
     # existed only where that browser was pointed. It comes back the same way.
