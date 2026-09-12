@@ -850,6 +850,69 @@ ok_('...and the row is written rather than refused', _typed['pay'] == 1030.0)
 ok_('...and marked not to be trusted, as it would have been either way',
     _typed['suspect'] is True)
 
+# --- a line that will not read is an offer that is gone ----------------------
+#
+# Skipping it is right: the file is append-only, it cannot be repaired, and one
+# bad line must not cost the other fifty thousand. Saying nothing about it was
+# not. This is the one artefact the rig produces that cannot be regenerated,
+# and a row disappearing out of every figure with nothing anywhere saying so is
+# the failure this project keeps writing sections about.
+import tempfile as _tf
+
+_torn_dir = _tf.mkdtemp()
+_torn_path = os.path.join(_torn_dir, 'offers.jsonl')
+_GOOD = {'v': 3, 'id': 'g1', 'seq': 1, 'at': 1_789_000_000_000, 'pay': 10.0}
+_NEXT = {'v': 3, 'id': 'g2', 'seq': 1, 'at': 1_789_000_060_000, 'pay': 11.0}
+with open(_torn_path, 'w') as _fh:
+    _fh.write(json.dumps(_GOOD) + '\n')
+    # A row the engine interrupted, and then terminated by the next append.
+    _fh.write(json.dumps(_NEXT)[:30] + '\n')
+    # ...and the row being written right now, which is not a casualty.
+    _fh.write(json.dumps(_NEXT)[:30])
+
+_torn_log = JR.Journal(_torn_path)
+_kept = _torn_log.rows()
+eq('a torn line costs its own row and no other', len(_kept), 1)
+eq('...and is counted rather than passed over in silence', _torn_log.torn, 1)
+# The distinction that stops this reporting a fault on every busy shift: the
+# scanner appends while everything else reads, so the last line of a live
+# journal routinely has no newline on it yet. It is not torn, it is not
+# finished — and append() terminates it before writing the next row, so a real
+# casualty is counted the moment the car comes back.
+ok_('...counting the row being written now as neither read nor lost',
+    _torn_log.torn == 1 and len(_kept) == 1)
+
+# A whole file reports none, or the count above means nothing.
+_whole_path = os.path.join(_torn_dir, 'whole.jsonl')
+with open(_whole_path, 'w') as _fh:
+    _fh.write(json.dumps(_GOOD) + '\n')
+    _fh.write(json.dumps(_NEXT) + '\n')
+_whole_log = JR.Journal(_whole_path)
+eq('an intact journal reads every row', len(_whole_log.rows()), 2)
+eq('...and reports nothing torn', _whole_log.torn, 0)
+
+# The count belongs to the last read, not to the life of the object: a journal
+# re-read after the card was replaced must not still be reporting the old hole.
+_torn_log.rows()
+eq('a second read does not add the same casualty twice', _torn_log.torn, 1)
+
+# ...and the write side's own guarantee, which is what keeps ONE torn line from
+# becoming two: a stub is terminated before the next row goes on, so the offer
+# written after the car came back is not fused to the one that was lost.
+_after = JR.Journal(_torn_path)
+ok_('an append after a torn line lands on its own line',
+    _after.append({'v': 3, 'id': 'g3', 'seq': 1, 'at': 1_789_000_120_000,
+                   'pay': 12.0}))
+_after_rows = _after.rows()
+eq('...so the offer after the power cut survives', len(_after_rows), 2)
+# Two now, and that is the rule working rather than failing. The stub this
+# fixture left open was a casualty all along — it was simply not finished, so
+# nothing could say yet — and terminating it is what turns "cannot tell" into
+# a count. The offer written after it is whole, which is the property that
+# matters: one power cut costs one row, not two.
+eq('...and the stub it was fused against is now counted too', _after.torn, 2)
+shutil.rmtree(_torn_dir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)

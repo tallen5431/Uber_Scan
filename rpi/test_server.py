@@ -420,6 +420,72 @@ finally:
     stop(_proc)
     shutil.rmtree(_work, ignore_errors=True)
 
+# --- a hole in the one file that cannot be regenerated -----------------------
+#
+# The server skipped unparseable lines with a comment saying why and no count.
+# Right to skip — the file is append-only and one bad line must not cost the
+# other fifty thousand — and wrong to say nothing, because the offers are gone
+# and no backup gets them back: the copy machine faithfully receives the hole.
+#
+# Checked through the incremental reader as well as the first read, because
+# that is where a count is easiest to lose: the journal is parsed once and
+# after that only the part that grew.
+_hole_dir = tempfile.mkdtemp()
+_hole = os.path.join(_hole_dir, 'offers.jsonl')
+_NOW2 = int(time.time() * 1000)
+
+
+def _row(i):
+    return {'v': 3, 'id': 'h%d' % i, 'seq': 1, 'at': _NOW2 - i * 60_000,
+            'pay': 10.0, 'minutes': 20.0, 'miles': 4.0, 'perHour': 25.0,
+            'state': 'go', 'whole': True}
+
+
+with open(_hole, 'w') as _fh:
+    _fh.write(json.dumps(_row(0)) + '\n')
+    _fh.write(json.dumps(_row(1))[:30] + '\n')     # the engine stopped here
+    _fh.write(json.dumps(_row(2)) + '\n')
+
+_hproc, _hbase = start({'SCANNER': '0'}, _hole)
+try:
+    _first = get(_hbase, '/api/journal?days=30')
+    eq('the readable rows are still served', _first['count'], 2)
+    eq('...and the line that was lost is counted', _first['torn'], 1)
+    # Different question from `unreadable`, which is the whole file being
+    # unavailable — a transient. These rows are gone for good.
+    eq('...without claiming the journal itself could not be read',
+       _first['unreadable'], None)
+
+    # Now the incremental path: the file grows, and only the new bytes are
+    # parsed. A count kept per-read rather than accumulated would reset here
+    # and report a whole journal on the very next page load.
+    with open(_hole, 'a') as _fh:
+        _fh.write(json.dumps(_row(3)) + '\n')
+    time.sleep(0.05)
+    _second = get(_hbase, '/api/journal?days=30')
+    eq('an appended row is picked up', _second['count'], 3)
+    ok_('...and the earlier casualty is not forgotten (%r)' % _second['torn'],
+        _second['torn'] == 1)
+
+    # ...and a second torn line adds to it rather than replacing it.
+    with open(_hole, 'a') as _fh:
+        _fh.write(json.dumps(_row(4))[:25] + '\n')
+    time.sleep(0.05)
+    _third = get(_hbase, '/api/journal?days=30')
+    eq('a second casualty is added to the first', _third['torn'], 2)
+
+    # The row being written RIGHT NOW is not a casualty. The scanner appends
+    # while this reads, so the last line of a live journal routinely has no
+    # newline on it yet — counting it would report a fault on every shift.
+    with open(_hole, 'a') as _fh:
+        _fh.write(json.dumps(_row(5))[:25])
+    time.sleep(0.05)
+    _live = get(_hbase, '/api/journal?days=30')
+    eq('a row still being written is not counted as lost', _live['torn'], 2)
+finally:
+    stop(_hproc)
+    shutil.rmtree(_hole_dir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

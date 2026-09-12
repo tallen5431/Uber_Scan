@@ -1670,6 +1670,32 @@
                  + (data.beforeClock === 1 ? 'It is' : 'They are')
                  + ' still in the journal file on disk.');
     }
+    // Lines that were written and are now unreadable.
+    //
+    // Not the same as `unreadable` below, which is the whole file being
+    // unavailable — a transient, and recoverable. These are rows this rig
+    // produced, that are on the card, and that nothing can get back: the
+    // journal is append-only and there is no second copy of a line.
+    //
+    // One is the accepted cost of a power cut. The scanner is in a car and the
+    // card loses power when the engine does, and journal.py says as much where
+    // it starts a fresh line after a stub. More than one, or a number that
+    // grows, is a card beginning to fail — and that is worth knowing while a
+    // backup can still save what is left rather than copy the hole.
+    if (data.torn) {
+      notes.push('<b>' + data.torn + '</b> line'
+                 + (data.torn === 1 ? '' : 's')
+                 + ' in the journal file could not be read at all, so '
+                 + (data.torn === 1 ? 'that offer is' : 'those offers are')
+                 + ' gone from every figure here and cannot be recovered — the '
+                 + 'file is append-only and nothing keeps a second copy of a '
+                 + 'line. One is what a power cut costs. '
+                 + (data.torn === 1
+                    ? 'More than that, or a number that grows, is a card '
+                      + 'starting to fail: copy the journal off it now.'
+                    : 'This many, or a number that grows, is a card starting '
+                      + 'to fail: copy the journal off it now.'));
+    }
     // What went past unrecorded, from the scanner's own tally.
     //
     // The one thing a journal can never contain is what is not in it, so this

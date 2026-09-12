@@ -213,6 +213,12 @@ So the Pi scanner keeps one line per offer it was confident about, in
   toward whatever that card says. Hide one, or hide *every* reading of that card
   — now and in future — so checking the rig costs nothing.
 
+If a line in that file is ever unreadable — a power cut mid-write, or a card
+going bad — the offers page says so and says plainly that those offers cannot be
+got back, and `rpi/doctor.py` fails on more than one with the instruction to
+copy the journal off the card now. One is what a power cut costs; a number that
+grows is the card.
+
 Nothing is ever deleted. Ticking and hiding are appended as their own lines, the
 same way the offers are, so a mis-tap on a phone in a moving car costs an entry
 in a list rather than a row of data that took a shift to collect. Hidden offers

@@ -298,6 +298,11 @@ FEEDS = {
                    # Two rows the rig read before its clock was set. They are
                    # in no window and the page has to say so.
                    'beforeClock': 2,
+                   # ...and three lines that will not parse at all, which is a
+                   # different and worse thing: those offers are not somewhere
+                   # else in the file, they are gone, and no backup gets them
+                   # back. The page has to tell the two apart.
+                   'torn': 3,
                    'unreadable': None, 'pairs': [], 'offers': SEARCHABLE},
     'unreadable': {'count': 0, 'total': 0, 'truncated': False, 'days': 7,
                    'hidden': 0, 'watched': {'saw': 0, 'kept': 0},
@@ -1217,6 +1222,26 @@ try:
             for c in got['searchable']['caveats']))
     no_('...and not when there are none',
         any('clock had been set' in c for c in got['took six']['caveats']))
+
+    # A different and worse thing, and it may not be folded into the sentence
+    # above. A row with no usable date is still in the file and can be read; a
+    # torn line is an offer that is gone, cannot be recovered, and is copied to
+    # the machine at home as a hole. Both were silent; only one of them is
+    # about a clock.
+    _cav = got['searchable']['caveats']
+    ok_('lines that could not be read at all are named (%r)'
+        % ' | '.join(c[:70] for c in _cav if 'could not be read' in c)[:120],
+        any('3 lines in the journal file could not be read' in c for c in _cav))
+    ok_('...saying those offers cannot be got back',
+        any('cannot be recovered' in c for c in _cav))
+    ok_('...and what a growing number of them means',
+        any('card starting to fail' in c for c in _cav))
+    # Told apart from the clock note, which sits beside it in the same list.
+    ok_('...without being confused with a row that merely has no date',
+        not any('could not be read' in c and 'clock had been set' in c
+                for c in _cav))
+    no_('...and nothing is said when the file is whole',
+        any('could not be read at all' in c for c in got['took six']['caveats']))
 
 finally:
     proc.terminate()

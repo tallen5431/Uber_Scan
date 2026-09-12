@@ -3054,6 +3054,52 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### A hole in the one file that cannot be rebuilt
+
+Three readers of `journal.jsonl` had the same line in them:
+
+```js
+} catch (e) { /* a line torn by a power cut; skip it */ }
+```
+
+```python
+except ValueError:
+    continue        # a torn line; skip it and carry on
+```
+
+Skipping is right. The file is append-only, it cannot be repaired, and one bad
+line must not cost the other fifty thousand. Saying **nothing** was not.
+
+This is the one artefact the rig produces that cannot be regenerated. A row that
+will not parse is an offer that is gone — nothing keeps a second copy of a line,
+and the machine at home faithfully receives the hole. It vanished out of every
+figure on every page with nothing anywhere saying so, which is the failure this
+file keeps writing sections about, on the file that can least afford it.
+
+The write side had already thought about this. `append` starts a fresh line when
+the last one never finished, so a stub left by a power cut costs one row and
+does not fuse to the next — its comment says *one torn row is the cost of a power
+cut; two is a missing byte*. The read side was the half that never reported the
+one.
+
+**One is not the case worth alarming about.** The card loses power when the
+engine does. The case worth alarming about is a number that grows, because that
+is an SD card beginning to go, and the entire value of noticing is noticing while
+there is still something to copy off it. So: `/api/journal` counts them beside
+`beforeClock`, the offers page names them in the same list and says plainly that
+those offers cannot be recovered, and the preflight passes at one and fails at
+more — *copy the journal off it now, then check the card*.
+
+**The line being written right now is not a casualty.** The scanner appends
+while everything else reads, so the last line of a live journal routinely has no
+newline on it yet. Counting it would report a fault on every busy shift. Only
+lines that are terminated and still will not parse are counted — and a real
+stub becomes terminated on the next append, so nothing is missed by waiting.
+
+Ten mutations, ten caught, including the two that matter most for a count kept
+across an incremental read: one that reset it on every parse of the part that
+grew, and one that counted the row in flight.
+
 ### The row that said it was refused and would not say why
 
 `journal.py` was working the verdict out a second time:
@@ -5645,7 +5691,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5488 checks
+npm test                # all 35 suites, 5518 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5678,7 +5724,7 @@ python3 rpi/test_exposure.py    # 175 on flicker, brightness, gain and
                                 #     and on an empty mount in the sun never
                                 #     being reported as a phone
 python3 rpi/test_track.py       # 131 on following the phone as it drifts
-python3 rpi/test_journal.py     # 203 on keeping one row per offer, on a
+python3 rpi/test_journal.py     # 212 on keeping one row per offer, on a
                                 #     distrusted distance always saying so twice,
                                 #     and on the row agreeing with the screen
                                 #     about why a verdict was withheld
@@ -5720,8 +5766,10 @@ python3 rpi/test_handoff.py     #  50 on the three files the browser and the
 python3 rpi/test_service.py     #  38 on the systemd unit the installer writes
 python3 rpi/test_camera.py      #  34 on which tuning file opens the camera, and
                                 #     on who is already holding it
-python3 rpi/test_doctor.py      #  51 on the preflight running to the end, and
-                                #     on slower not being reported as broken
+python3 rpi/test_doctor.py      #  60 on the preflight running to the end, on
+                                #     slower not being reported as broken, and
+                                #     on a journal with a hole in it being
+                                #     reported at one line and failed at more
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
@@ -5735,12 +5783,12 @@ python3 rpi/test_dashboard.py   # 340 on what the driving screen shows while a
 python3 rpi/test_layout.py      # 429 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
-python3 rpi/test_offerspage.py  # 166 on the offers page as a driver reads it:
+python3 rpi/test_offerspage.py  # 171 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 108 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      #  41 on the server's own edges: two readers of
+python3 rpi/test_server.py      #  48 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that

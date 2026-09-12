@@ -1304,15 +1304,33 @@ function appendLines(text, done) {
  * being out of date. */
 var SYNC_CAN = ['ingest', 'config', 'mkdir', 'count'];
 
-function parseLines(text, rows) {
+// Returns how many rows were taken, and counts what could not be.
+//
+// Skipping a line that will not parse is right — the file is append-only, it
+// cannot be repaired, and one bad line must not cost the other fifty thousand.
+// Saying nothing about it was not. This is the one artefact of this project
+// that cannot be regenerated, and a row disappearing out of every figure with
+// nothing anywhere saying so is the failure this file keeps writing comments
+// about.
+//
+// One torn row is the accepted cost of a power cut, and journal.py's append
+// says so in as many words. A card beginning to fail is not one row, and it is
+// the case where knowing early is the difference between a backup that saves
+// the shift and one that copies the hole.
+//
+// `torn` is an OUT parameter rather than a second return, because the caller
+// needs both numbers and the count has to accumulate across the incremental
+// reads below.
+function parseLines(text, rows, torn) {
   var n = 0;
   text.split('\n').forEach(function (line) {
     line = line.trim();
     if (!line) return;
     try {
       var row = JSON.parse(line);
-      if (row && typeof row === 'object') { rows.push(row); n++; }
-    } catch (e) { /* a line torn by a power cut; skip it */ }
+      if (row && typeof row === 'object') { rows.push(row); n++; return; }
+    } catch (e) { /* falls through */ }
+    if (torn) torn.n++;
   });
   return n;
 }
@@ -1352,7 +1370,7 @@ function readJournal(done) {
     }
     var c = journalCache;
     if (c && c.ino === st.ino && c.size === st.size && c.mtime === st.mtimeMs) {
-      return done(c.rows);
+      return done(c.rows, null, c.torn || 0);
     }
     var grew = c && c.ino === st.ino && st.size > c.size && st.mtimeMs >= c.mtime;
     // Same inode and larger is not proof of an append. `cp backup journal`
@@ -1399,8 +1417,17 @@ function readJournal(done) {
         // correct one. The mid-write line is taken back at the same time.
         var rows = grew ? c.rows.slice(0, c.rows.length - (c.pending || 0)) : [];
         var cut = buf.lastIndexOf(10);                      // the last newline
-        parseLines(buf.slice(0, cut + 1).toString('utf8'), rows);
-        var pending = parseLines(buf.slice(cut + 1).toString('utf8'), rows);
+        // Counted on the COMPLETE lines only, and that distinction is the whole
+        // of the rule. A line with no newline after it is not torn, it is the
+        // row being written right now — the scanner appends while this reads —
+        // and counting it would report a fault on every busy shift. It becomes
+        // a complete line on the next append either way: journal.py starts a
+        // fresh line when the last one never finished, so a stub left by a
+        // power cut is terminated before the next row goes on, and it is
+        // counted here the moment it is.
+        var torn = { n: grew ? (c.torn || 0) : 0 };
+        parseLines(buf.slice(0, cut + 1).toString('utf8'), rows, torn);
+        var pending = parseLines(buf.slice(cut + 1).toString('utf8'), rows, null);
         // The last complete line, newline included: everything after the
         // newline before it. `mark` is at least the previous last line, so
         // the new one is entirely in hand even when this read added no
@@ -1410,8 +1437,9 @@ function readJournal(done) {
         journalCache = { ino: st.ino, size: st.size, mtime: st.mtimeMs,
                          offset: from + mark.length + cut + 1, pending: pending,
                          mark: whole.slice(prev + 1),
+                         torn: torn.n,
                          rows: rows };
-        done(rows);
+        done(rows, null, torn.n);
       });
     });
   });
@@ -2457,7 +2485,7 @@ function route(req, res) {
     // when their day began.
     var since = clampNumber(q.since, 0, 4102444800000, 0);
     var withHidden = q.hidden === '1';
-    return readJournal(function (rows, readErr) {
+    return readJournal(function (rows, readErr, torn) {
       // This one may degrade — a driver looking at the offers page is better
       // served by the page than by a 500 — but not silently. An empty history
       // and an unreadable one look identical otherwise, and the second is the
@@ -2562,6 +2590,17 @@ function route(req, res) {
                                       // and the count is the same whichever
                                       // range is asked for.
                                       beforeClock: beforeClock,
+                                      // Lines in the file that would not parse
+                                      // at all. Different from `unreadable`,
+                                      // which is the whole file being
+                                      // unavailable: these are rows that were
+                                      // written and are now gone, and they
+                                      // cannot be got back. Reported for the
+                                      // same reason `beforeClock` is — a row
+                                      // missing from every figure with nothing
+                                      // saying so is the one failure this
+                                      // project keeps writing sections about.
+                                      torn: torn || 0,
                                       pairs: window,
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });

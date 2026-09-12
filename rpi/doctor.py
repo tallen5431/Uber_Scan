@@ -141,6 +141,34 @@ def main():
     except Exception as e:                                    # noqa: BLE001
         check('offers backed up off the car', False, str(e))
 
+    # ...and whether the file the backup is copying is still whole.
+    #
+    # A line that will not parse is an offer that is gone. The journal is
+    # append-only, nothing keeps a second copy of a line, and no amount of
+    # syncing gets it back — the copy machine faithfully receives the hole.
+    #
+    # One is what a power cut costs, and the card loses power when the engine
+    # does, so this does not fail for one. It fails for more, because a number
+    # that is climbing is a card beginning to go, and the whole value of
+    # noticing is noticing while there is still something to copy off it.
+    try:
+        import journal as JR
+        journal_path = os.environ.get('JOURNAL') or JR.DEFAULT_PATH
+        log = JR.Journal(journal_path)
+        kept = len(log.rows())
+        check('the journal file is whole', log.torn <= 1,
+              ('%d row%s readable, none torn' % (kept, '' if kept == 1 else 's'))
+              if not log.torn else
+              '%d row%s readable, %d line%s unreadable'
+              % (kept, '' if kept == 1 else 's',
+                 log.torn, '' if log.torn == 1 else 's'),
+              'those offers are gone and cannot be recovered — the file is '
+              'append-only and nothing keeps a second copy of a line. One is '
+              'what a power cut costs; this many is a card starting to fail. '
+              'Copy %s somewhere else now, then check the card.' % journal_path)
+    except Exception as e:                                    # noqa: BLE001
+        check('the journal file is whole', False, str(e))
+
     # The camera is the one thing that cannot be worked around.
     try:
         from picamera2 import Picamera2

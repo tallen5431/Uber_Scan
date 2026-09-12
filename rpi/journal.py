@@ -131,6 +131,10 @@ class Journal:
         self.written = 0
         self._error = None
         self._said_at = None
+        # Lines the last rows() read could not parse. Set by rows(); zero
+        # before anything has been read, which is different from "none found"
+        # only in that nobody has looked yet.
+        self.torn = 0
 
     def append(self, row):
         """Add one row. Returns True if it reached the disk.
@@ -175,22 +179,42 @@ class Journal:
         is the only version of this that stays correct when a line is not the
         length it was assumed to be — a power cut mid-append leaves exactly
         that.
+
+        How many were skipped is left in `self.torn`, because skipping them is
+        right and saying nothing about them was not. This file cannot be
+        regenerated and there is no second copy of a line: a row that will not
+        parse is an offer that is simply gone. One is what a power cut costs and
+        `append` above says so. A number that grows is a card beginning to fail,
+        which is worth knowing while a backup can still save what is left.
         """
+        self.torn = 0
         try:
             if not os.path.exists(self.path):
                 return []
             out = []
             with open(self.path) as fh:
                 for line in fh:
-                    line = line.strip()
-                    if not line:
+                    stripped = line.strip()
+                    if not stripped:
                         continue
                     try:
-                        row = json.loads(line)
+                        row = json.loads(stripped)
                     except ValueError:
-                        continue        # a torn line; skip it and carry on
+                        # The row being written RIGHT NOW is not a torn row. It
+                        # has no newline on it yet because the scanner is still
+                        # appending, and counting it would report a fault on
+                        # every busy shift. It becomes a complete line either
+                        # way: append() terminates a stub before writing the
+                        # next row, so a real casualty is counted the moment the
+                        # car comes back.
+                        if line.endswith('\n'):
+                            self.torn += 1
+                        continue
                     if isinstance(row, dict):
                         out.append(row)
+                    elif line.endswith('\n'):
+                        # Parsed, and not a row. Same silence, same cost.
+                        self.torn += 1
             return out[-limit:] if limit else out
         except Exception as e:
             self._complain(e)

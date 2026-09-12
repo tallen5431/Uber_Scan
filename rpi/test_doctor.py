@@ -226,6 +226,70 @@ eq('nothing else changed with it',
    {k: v for k, v in slow_seen.items() if k != 'reading engine'},
    {k: v for k, v in seen.items() if k != 'reading engine'})
 
+# --- the file the backup is copying, and whether it is still whole ----------
+#
+# The backup check above answers "did the copy machine hear from us". It cannot
+# answer "is there anything left to copy": a line that will not parse is an
+# offer that is gone, the file is append-only, nothing keeps a second copy of a
+# line, and the copy machine faithfully receives the hole. One is what a power
+# cut costs — the card loses power when the engine does — so this does not fail
+# for one. It fails for more, because a number that is climbing is a card
+# beginning to go, and the whole value of noticing is noticing while there is
+# still something to copy off it.
+import json as _json
+import tempfile as _tempfile
+import time as _time
+
+_work = _tempfile.mkdtemp()
+_NOW = int(_time.time() * 1000)
+
+
+def _line(i, cut=None):
+    row = _json.dumps({'v': 3, 'id': 'd%d' % i, 'seq': 1, 'at': _NOW - i * 1000,
+                       'pay': 10.0, 'minutes': 20.0})
+    return (row[:cut] if cut else row) + '\n'
+
+
+def _journal(name, text):
+    path = os.path.join(_work, name)
+    open(path, 'w').write(text)
+    return path
+
+
+_whole = _journal('whole.jsonl', _line(0) + _line(1))
+_one = _journal('one.jsonl', _line(0) + _line(1, cut=25) + _line(2))
+_many = _journal('many.jsonl',
+                 _line(0) + _line(1, cut=25) + _line(2, cut=25) + _line(3))
+
+_CHECK = 'the journal file is whole'
+_whole_seen = findings(run(JOURNAL=_whole).stdout)
+ok_('the report says whether the journal itself is intact', _CHECK in _whole_seen)
+eq('...and an intact one passes', _whole_seen.get(_CHECK), True)
+
+_one_out = run(JOURNAL=_one)
+_one_seen = findings(_one_out.stdout)
+eq('one torn line does not fail the rig — that is what a power cut costs',
+   _one_seen.get(_CHECK), True)
+ok_('...but it is still reported rather than passed over (%r)'
+    % [l for l in _one_out.stdout.splitlines() if _CHECK in l][:1],
+    any(_CHECK in l and 'unreadable' in l for l in _one_out.stdout.splitlines()))
+
+_many_out = run(JOURNAL=_many)
+_many_seen = findings(_many_out.stdout)
+eq('more than one is a card starting to fail, and fails the check',
+   _many_seen.get(_CHECK), False)
+ok_('...saying the offers cannot be got back',
+    'cannot be recovered' in _many_out.stdout)
+ok_('...and what to do about it while there is still time',
+    'Copy' in _many_out.stdout and _many in _many_out.stdout)
+# The rows that survived are still counted, so the driver can see what is left
+# rather than only what is lost.
+ok_('...alongside how much of the journal is still readable',
+    any(_CHECK in l and 'readable' in l for l in _many_out.stdout.splitlines()))
+
+import shutil as _shutil
+_shutil.rmtree(_work, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d preflight checks passed' % ok)
 sys.exit(1 if bad else 0)
