@@ -20,6 +20,30 @@ var JournalClient = (function () {
 
   var KEY = 'uberscan.unsent.v1';
 
+  /* The Pi's `_round`, in the language the phone is written in.
+   *
+   * Kept to the same two places for money and one for minutes as
+   * rpi/journal.py, so that a row written on the phone and a row written on the
+   * rig are the same shape in the same file. Null, undefined and the non-finite
+   * come back untouched: rounding a missing figure is arithmetic on nothing,
+   * and arithmetic on nothing is NaN — which JSON turns into `null` on the way
+   * to disk, so a row carrying it reads afterwards as a row that simply had no
+   * distance. A guard here is the only place that can tell those apart.
+   *
+   * Math.round is not Python's round() — Python rounds a half to even, so
+   * round(0.125, 2) is 0.12 — but rpi/offer_parser.py's round2 does not use it
+   * either: it uses floor(v * 100 + 0.5) / 100, which is what Math.round does
+   * to a positive number. On a negative half they still part company, and a
+   * half-cent on a rate nobody reads past two places is not worth a second
+   * implementation of rounding to keep in step. */
+  function places(v, by) {
+    if (typeof v !== 'number' || !isFinite(v)) return v;
+    return Math.round(v * by) / by;
+  }
+
+  function money(v) { return places(v, 100); }
+  function tenths(v) { return places(v, 10); }
+
   function load() {
     try {
       var q = JSON.parse(localStorage.getItem(KEY));
@@ -78,8 +102,21 @@ var JournalClient = (function () {
       hasTotal: !!parsed.hasTotal,
       places: parsed.places && parsed.places.length ? parsed.places : undefined,
       text: parsed.text || undefined,
-      perHour: rate.perHour, grossPerHour: rate.grossPerHour, perMile: rate.perMile,
-      cost: rate.cost, billedMinutes: rate.minutes,
+      // Rounded, because rpi/journal.py rounds. The same field, written by the
+      // same project, into the same file, under two rules — and the second rule
+      // was simply absent rather than different, which is the shape that drifts
+      // without anybody noticing. Measured on one card ($8.83, 23 min, 4.6 mi):
+      // the Pi wrote 19.43 and the phone wrote 19.434782608695652 into the
+      // column beside it. The pages hide it, because they round for display, so
+      // the only place a person meets the stored figure is the CSV the README
+      // calls "a CSV of everything" — and anything that later groups or diffs
+      // on those values gets two populations that never compare equal.
+      //
+      // Two decimals for money and one for minutes, matching _round()'s callers
+      // on the Python side field for field.
+      perHour: money(rate.perHour), grossPerHour: money(rate.grossPerHour),
+      perMile: money(rate.perMile), cost: money(rate.cost),
+      billedMinutes: tenths(rate.minutes),
       state: rate.state, doubt: rate.doubt || null,
       target: settings.target, band: settings.band, costPerMile: settings.costPerMile,
       whole: true, settled: true, locked: true, suspect: false,

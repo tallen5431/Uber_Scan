@@ -29,6 +29,7 @@ socket is fake. The server is the real server.js.
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -697,6 +698,32 @@ const framed = (page) => page.waitForFunction(
       const chip = document.querySelector('#stack .ends');
       return { destClass: dest ? dest.className : null,
                chip: chip ? (chip.textContent || '').trim() : null };
+    });
+
+    // A pair that LOSES money, which this row could not write down.
+    //
+    // Every other money figure on this page goes through rateText(), which puts
+    // the minus in front of the dollar because "$-16" is a dash at a glance
+    // from the driving seat. This row was the one that did not, and the range
+    // made it worse: `'$' + lo + en-dash + hi` on two negatives is "$-16--31",
+    // an en dash wedged between two minus signs. And the range came out
+    // backwards, because `worst` divides the pair's money by the LONGER time -
+    // which is the smaller number above zero and the larger below it.
+    //
+    // A real shape: two long cheap jobs with a running cost that eats them.
+    await page.evaluate((r) => window.__es.push(
+      Object.assign({}, r, {
+        cost: 17.0, perHour: -14,
+        holding: { pay: 4.0, minutes: 55.0, cost: 18.0,
+                   dropoff: 'Oak Ln, Marietta' },
+        stack: { pay: 7.0, minMinutes: 55, maxMinutes: 105,
+                 worst: -16.0, best: -30.55, alone: -15.3, sure: false,
+                 state: 'no', ends: 'elsewhere', route: null } })),
+      READINGS.deducted);
+    await page.waitForTimeout(250);
+    out['losing ' + panel[0]] = await page.evaluate(() => {
+      const sum = document.querySelector('#stack .sum');
+      return { text: sum ? (sum.textContent || '').trim() : null };
     });
 
     // A notice longer than any card produces today, on the smallest panel.
@@ -1881,6 +1908,28 @@ try:
             ok_('%s: ...with the part that did not fit scrollable, not '
                 'deleted (%spx of it)' % (panel, long_.get('cut')),
                 long_.get('scrolls'))
+
+        # A pair that loses money. Every other money figure on this page puts
+        # the minus in front of the dollar, because "$-16" is a dash at a
+        # glance; this row did not, and its range separator was an en dash,
+        # which between two negatives is not a range but a smear.
+        losing = (got.get('losing ' + panel) or {}).get('text') or ''
+        ok_('%s: a losing pair is written down at all (%r)' % (panel, losing[:48]),
+            '/hr' in losing)
+        ok_('%s: ...with the minus in front of the dollar, not inside it'
+            % panel, '$-' not in losing)
+        ok_('%s: ...and it does say the pair loses money' % panel,
+            '-$' in losing)
+        ends_seen = [float(m.replace('$', ''))
+                     for m in re.findall(r'-?\$\d+', losing)]
+        ok_('%s: ...as a range of two ends (%r)' % (panel, ends_seen),
+            len(ends_seen) == 2)
+        if len(ends_seen) == 2:
+            ok_('%s: ...the lower one first (%s then %s)'
+                % (panel, ends_seen[0], ends_seen[1]),
+                ends_seen[0] <= ends_seen[1])
+        ok_('%s: ...with a separator that cannot be read as a sign' % panel,
+            '\u2013-' not in losing)
 
         # The other answer this line can give, which used to be no answer at
         # all: about half of real pairs print too little for the geography to

@@ -3054,6 +3054,54 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### Two figures the phone wrote differently from the rig
+
+Both found by an audit fleet pointed at the seams between the two ports, and
+both verified by running the real code before anything was changed.
+
+**A pair that loses money could not be written down.** Every money figure on the
+driving screen goes through `rateText()`, which puts the minus in FRONT of the
+dollar — "$-16" is a dash at a glance from the driving seat. The stack line was
+the one formatter that did not, and being a range made it worse: `'$' + lo +
+'–' + hi` on two negatives is `$-16–-31`, an en dash wedged between two minus
+signs. Measured on a real shape (two long cheap jobs, 62c/mile eating them):
+
+    + $-16–-31/hr with the one you have, over 55–105 min
+
+And the range is backwards. `worst` divides the pair's money by the LONGER time
+and `best` by the shorter — above zero that makes `worst` the smaller number,
+below zero it reverses, because dividing a negative by a smaller number makes it
+more negative. So the low end printed first was the larger of the two. Both ends
+now go through a signed formatter, ordered by value, separated by the word "to"
+rather than a dash that cannot survive a minus beside it.
+
+**The phone wrote its money unrounded.** `rpi/journal.py` puts `perHour`,
+`grossPerHour`, `perMile` and `cost` through `_round` at two places and
+`billedMinutes` at one. `journal-client.js` put them through nothing. The same
+field, written by the same project, into the same file, under two rules — and
+the second rule was *absent* rather than different, which is the shape that
+drifts without anybody noticing. On one card ($8.83, 23 min, 4.6 mi) the Pi
+wrote `19.43` and the phone wrote `19.434782608695652` into the column beside
+it. Both pages round for display, so the only place a person meets it is the CSV
+the README calls "a CSV of everything", and anything that later groups or diffs
+on those values gets two populations that never compare equal.
+
+**The interesting part is the guard, which took three tries to make testable.**
+Rounding has to leave a missing figure alone, and on a card with no distance the
+verdict's `perMile` is `undefined` — so arithmetic on it gives NaN, and *NaN
+serializes to `null`*. A row carrying NaN therefore reads on disk exactly like a
+row that honestly had no distance. The first check compared the serialized value
+to `None` and passed over both, which made the guard look like dead weight; the
+mutation run is what said so. The check now reports the TYPE across the browser
+boundary, which is the only thing that can tell them apart. Eight mutants, eight
+caught.
+
+Two fixtures had to be built rather than reused, for the same reason as ever: a
+card with whole minutes cannot tell a rounded one-decimal field from an
+unrounded one, so the billed-minutes check needs a shopping allowance (7 items
+at 25 seconds bills 25.9166… minutes), and the missing-figure check needs a card
+that names no distance at all.
+
 ### Asking the phone where it is
 
 The Pi has no GPS and no clock. The phone in the mount has both, and a GPS
@@ -6224,7 +6272,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 36 suites, 5832 checks
+npm test                # all 36 suites, 5857 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

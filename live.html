@@ -911,9 +911,31 @@
   // from the driving seat, and `go` is only ever set when the WHOLE range
   // clears the target: a range straddling the line is a maybe, and a maybe
   // drawn in green is a wrong answer. See stack() in advice.js.
+  // Whole dollars with the sign in front of the dollar, not inside it.
+  //
+  // The same rule rateText() applies a hundred lines up, and the reason is the
+  // same: "$-16" reads as a dash at a glance from the driving seat. This row
+  // was the one money formatter on the page that did not follow it, and the
+  // range made it worse — "+ $-16\u2013-31/hr" puts an en dash between two minus
+  // signs, which is not a range, it is a smear.
+  //
+  // Whole dollars rather than rateText()'s one decimal because this row is the
+  // half of the line that gives way when the panel runs out of width, and it is
+  // a RANGE: the spread between the two ends is the information, and a tenth of
+  // a dollar inside a fifteen-dollar spread is noise bought at the price of the
+  // clause after it.
+  function dollars(n) {
+    return (n < 0 ? '-$' : '$') + Math.abs(Math.round(n));
+  }
+
   function showStack(s) {
     if (!s) { el.stack.hidden = true; el.stack.className = 'stackline'; return; }
-    var lo = Math.round(s.worst), hi = Math.round(s.best);
+    // Ordered by value, not by which field they came from. `worst` divides the
+    // pair's money by the LONGER time and `best` by the shorter, so on money
+    // above zero worst is the smaller — and below zero that reverses, because
+    // dividing a negative by a smaller number makes it more negative. A losing
+    // pair therefore printed its range backwards, low end first and larger.
+    var lo = Math.min(s.worst, s.best), hi = Math.max(s.worst, s.best);
     el.stack.className = 'stackline ' + s.state;
     // Built from parts rather than one string, because the parts have different
     // priorities when the row runs out of room. See .stackline in styles.css:
@@ -931,8 +953,13 @@
     // a point estimate, which is a worse thing to show than no range. The words
     // that were lost are the ones the row's own existence already says \u2014 this
     // line only appears when there is an order in the car.
-    sum.textContent = '+ $'
-      + (lo === hi ? lo : lo + '\u2013' + hi) + '/hr with the one you have, over '
+    // "to" rather than an en dash, because the dash cannot survive a minus
+    // sign beside it and this is exactly the row where that happens: a pair
+    // that loses money is the one a driver most needs to read correctly.
+    sum.textContent = '+ '
+      + (Math.round(lo) === Math.round(hi)
+         ? dollars(lo) : dollars(lo) + ' to ' + dollars(hi))
+      + '/hr with the one you have, over '
       + (s.minMinutes === s.maxMinutes
          ? Math.round(s.minMinutes)
          : Math.round(s.minMinutes) + '\u2013' + Math.round(s.maxMinutes))

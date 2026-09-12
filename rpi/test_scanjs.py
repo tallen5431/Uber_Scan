@@ -450,6 +450,48 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     };
   });
 
+  // The same figures, to the same number of places the Pi writes them to.
+  out.rowRounds = await page.evaluate(() => {
+    var build = function (settings, card) {
+      var parsed = OfferParser.parse(card);
+      var rate = OfferParser.rate(parsed, settings);
+      return { row: JournalClient.row(parsed, rate, settings,
+                                      { browser: true, prefix: 'r' }),
+               rate: rate };
+    };
+    var plain = build({ target: 25, band: 15, costPerMile: 0.30 },
+      'Delivery\n$8.83\n23 min (4.6 mi) total\nPickup\nMcDonalds\nCustomer dropoff');
+    // A shopping allowance makes the billed minutes fractional - 7 items at 25
+    // seconds is 25.9166... - which is the only way the one-decimal field can
+    // tell a rounded figure from an unrounded one. With a whole 23 in it, every
+    // version of this passes.
+    var padded = build({ target: 25, band: 15, costPerMile: 0.30,
+                         secondsPerItem: 25, pad: 0 },
+      'Delivery\n$8.83\n23 min (4.6 mi) total\nDeliver by 7:15 PM\n'
+      + 'Cherry Cricket\n7 items 4.6 mi\nPickup\nMcDonalds');
+    // ...and a card with no distance, where the verdict has no per-mile at all.
+    var nodist = build({ target: 25, band: 15, costPerMile: 0.30 },
+      'Delivery\n$9.17\nDeliver by 7:15 PM\nPickup\nWendys\nCustomer dropoff');
+    return { perHour: plain.row.perHour, grossPerHour: plain.row.grossPerHour,
+             perMile: plain.row.perMile, cost: plain.row.cost,
+             billedMinutes: plain.row.billedMinutes,
+             // The verdict's own figures, unrounded, so the checks can prove
+             // the row is not copying something that was already short.
+             rawPerHour: plain.rate.perHour,
+             padMinutes: padded.row.billedMinutes,
+             rawPadMinutes: padded.rate.minutes,
+             // Reported as a WORD, not as the value. A missing figure comes
+             // back from the verdict as `undefined`, and rounding it
+             // arithmetically gives NaN - which JSON turns into `null` on the
+             // way out of the browser. So a check comparing the serialized
+             // value to None passed over a row carrying NaN, and the guard that
+             // prevents it looked like dead weight. The type is the only way to
+             // tell the two apart from here.
+             nullPerMile: String(nodist.row.perMile),
+             nullPerMileIsNumber: typeof nodist.row.perMile === 'number',
+             rawNullPerMile: String(nodist.rate.perMile) };
+  });
+
   // Registered by this page on its own: a phone that only ever opened
   // /scan.html had nothing cached and got a browser error in a garage.
   out.swAuto = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
@@ -945,6 +987,53 @@ try:
         ok_('the row can be reconciled with itself (%s/hr from $%s over %s min)'
             % (round(worked, 2) if worked else None, pay, mins),
             worked is not None and abs(worked - gross) < 0.05)
+
+    # --- and to the same number of places the Pi writes them to ------------
+    #
+    # rpi/journal.py puts every one of these through _round; journal-client.js
+    # did not put them through anything. Same field, same project, same file on
+    # disk, and the second rule was absent rather than different - which is the
+    # shape that drifts without anybody noticing, because both pages round for
+    # display and the only place a person meets the stored figure is the CSV.
+    # Measured on this card: the Pi wrote 19.43 and the phone wrote
+    # 19.434782608695652 into the column beside it.
+    rr = got.get('rowRounds') or {}
+    ok_('the rounding fixture produced a row', bool(rr))
+    if rr:
+        # First, that there was anything to round. A card whose rate came out
+        # exactly two places long would pass every check below without the
+        # rounding existing at all.
+        raw = rr.get('rawPerHour')
+        ok_('the verdict\'s own rate has more places than a row keeps (%r)' % raw,
+            isinstance(raw, float) and round(raw, 2) != raw)
+        for field, dp in (('perHour', 2), ('grossPerHour', 2), ('perMile', 2),
+                          ('cost', 2), ('billedMinutes', 1)):
+            v = rr.get(field)
+            ok_('the row stores %s to %d place%s (%r)'
+                % (field, dp, '' if dp == 1 else 's', v),
+                v is None or (isinstance(v, (int, float))
+                              and round(float(v), dp) == float(v)))
+        # ...and it is the same number, not merely a short one.
+        eq('...and it is the figure the Pi would have written for this card',
+           rr.get('perHour'), 19.43)
+
+        # The one-decimal field, on a card where it is not already whole. A
+        # shopping allowance of 25 seconds over 7 items bills 25.9166... minutes.
+        raw_pad = rr.get('rawPadMinutes')
+        ok_('a shopping allowance bills a fraction of a minute (%r)' % raw_pad,
+            isinstance(raw_pad, float) and round(raw_pad, 1) != raw_pad)
+        eq('...and the row keeps one decimal of it', rr.get('padMinutes'), 25.9)
+
+        # ...and a figure the card never supported stays missing rather than
+        # becoming arithmetic. Not zero, and - the part that took finding - not
+        # NaN either: NaN serializes to `null`, so a row carrying it reads
+        # afterwards exactly like a row that honestly had no distance.
+        eq('the verdict has no per-mile on a card with no distance',
+           rr.get('rawNullPerMile'), 'undefined')
+        eq('...and the row does not turn that into arithmetic',
+           rr.get('nullPerMile'), 'undefined')
+        eq('...so nothing numeric is stored for it at all',
+           rr.get('nullPerMileIsNumber'), False)
 
     # --- the offline cache keeps the engine and refreshes the app ----------
     # The version constant used to be the whole mechanism: forget to bump it and
