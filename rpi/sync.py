@@ -174,29 +174,64 @@ def send_config(base, path, token=None, timeout=TIMEOUT):
         return {'ok': False, 'error': str(e)}
 
 
-# How many rows to put in one POST.
+# How big a POST may get.
 #
-# The far end refuses a body over 8MB, and a row is a few hundred bytes, so a
-# journal of about twenty thousand rows is the point at which a whole-journal
-# send stops fitting — a year and a bit of driving. What made that worth
-# bounding rather than documenting is how it failed: the far end resets the
+# The far end refuses a body over 8MB. What made that worth bounding on this
+# side rather than documenting is how it failed: the far end reset the
 # connection, a reset is indistinguishable here from being out of range, and
 # being out of range is normal in a car and exits 0. So the only backup of the
 # only irreplaceable thing on the rig would stop working, permanently, and say
-# it had worked.
+# it had worked. (The reset is fixed too — see readBody in server.js — but a
+# copy at home is not necessarily running today's build, and the sender is the
+# end that can be sure.)
 #
-# Two thousand rows is comfortably inside the cap with a large margin for rows
-# that carry addresses, and each POST is still idempotent on its own — the far
-# end appends only (id, seq) pairs it has never seen — so an interrupted run
-# leaves the copy consistent and the next tick picks up from there.
-CHUNK_ROWS = 2000
+# This used to be a count of rows: 2000, chosen against "a row is a few hundred
+# bytes". That is one limit written in two units, with nothing holding the two
+# together. A measured row carrying two addresses and its OCR text is 1062
+# bytes, so 2000 of them is 2MB and the margin was real — but it was a margin
+# nobody could see from either constant, and a row is not a fixed size. It grows
+# every time a field is added to what is worth keeping: `places`, `text`,
+# `untimedMiles` and `mergedFrom` all arrived after that 2000 was chosen. The
+# chunk is now measured in the same unit as the cap it has to fit inside, so the
+# question is answered by arithmetic instead of by an estimate that ages.
+#
+# Half the far end's cap, because the far end compares CHARACTERS (`text.length`
+# on a utf-8-decoded body) and this counts BYTES. Bytes are never fewer, so
+# counting here is already the safe side; the other half is room for the far end
+# to be an older or a differently configured build.
+#
+# Each POST stays idempotent on its own — the far end appends only (id, seq)
+# pairs it has never seen — so an interrupted run leaves the copy consistent and
+# the next tick picks up from there.
+MAX_CHUNK_BYTES = 4 * 1024 * 1024
+
+
+def chunks(rows, cap=None):
+    """Split rows into POST bodies, each at most `cap` bytes.
+
+    Always yields at least one row per body, even one whose own line is over the
+    cap: dropping it would lose a row silently, and sending it gets a readable
+    refusal out of the far end that exits non-zero and names the problem. A
+    chunker that skipped it instead would be the same silent-success failure this
+    whole limit exists to prevent, just one row further along.
+    """
+    cap = MAX_CHUNK_BYTES if cap is None else cap
+    part, size = [], 0
+    for row in rows:
+        line = (json.dumps(row, sort_keys=True) + '\n').encode('utf-8')
+        if part and size + len(line) > cap:
+            yield part
+            part, size = [], 0
+        part.append(row)
+        size += len(line)
+    if part:
+        yield part
 
 
 def send(base, rows, token=None, timeout=TIMEOUT):
     """POST rows as newline-delimited JSON, in chunks. Returns the summary."""
     total = {'added': 0, 'malformed': 0, 'have': None}
-    for start in range(0, len(rows), CHUNK_ROWS):
-        part = rows[start:start + CHUNK_ROWS]
+    for part in chunks(rows):
         body = ('\n'.join(json.dumps(r, sort_keys=True) for r in part)
                 + '\n').encode('utf-8')
         request = urllib.request.Request(

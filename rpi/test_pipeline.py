@@ -973,11 +973,17 @@ ok_('with no quad known the gate still measures something',
 eq('...and it is the whole-frame statistic, unchanged',
    round(no_quad.last_diff, 6), round(fires(dark_before, dark_after, dark_quad, None), 6))
 
-# A quad is known and the caller named no scale. This is not hypothetical:
-# Scanner.feed() calls should_read(frame) with one argument, and the quad is in
-# SENSOR coordinates — so a crop that treated a missing scale as 1:1 would index
-# a 2328-wide box into a 640-wide frame and measure a slice down one edge rather
-# than the whole picture. The statistic here has to be the wide one.
+# A quad is known and the caller named no scale. The quad is in SENSOR
+# coordinates, so a crop that treated a missing scale as 1:1 would index a
+# 2328-wide box into a 640-wide frame and measure a slice down one edge rather
+# than the whole picture. The statistic here has to be the wide one — a caller
+# that cannot say where its frame sits gets a gate that is merely blunt, not one
+# watching the wrong 3% of the picture.
+#
+# This used to be justified by Scanner.feed(), which called should_read(frame)
+# with one argument. feed() is gone — it was a second, scale-less way in that
+# nothing in the loop used — but the fallback it exposed stays covered, because
+# the one-argument call is still the signature and still reachable.
 #
 # The quad here is the rig's own calibrated one, not the synthetic one above:
 # a synthetic quad centred in the frame clamps to an empty box at 1:1 and
@@ -996,11 +1002,11 @@ without_quad.should_read(dark_after)
 eq('a caller that names no scale gets the whole frame, quad or no quad',
    round(with_quad.last_diff, 6), round(without_quad.last_diff, 6))
 
-# ...and the gated read path is one of those callers, so it must still work.
-fed = PL.Scanner(quad=REAL_QUAD)
-fed.feed(dark_before)
-ok_('the gated read path still runs with a quad set',
-    isinstance(fed.last_diff, float))
+# ...and it must not come back at all. A gate-then-read wrapper on the Scanner
+# is a trap: the only correct one has to be handed the scale, and the loop that
+# has the scale also has three other things to do between the gate and the read.
+ok_('there is no scale-less gate-and-read wrapper to reach for',
+    not hasattr(PL.Scanner, 'feed'))
 
 # A still picture is still still, whichever window it is measured over — the
 # crop must not manufacture a change out of a frame that did not move.

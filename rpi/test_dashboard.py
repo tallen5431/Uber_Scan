@@ -273,6 +273,54 @@ const framed = (page) => page.waitForFunction(
       slot.net = await page.evaluate(LOOK, '.working .net');
       slot.warn = await page.evaluate(LOOK, '#warn');
       slot.places = await page.evaluate(LOOK, '#places');
+      // How old the reading is, and the diagnostics beside it. These are two
+      // different questions sharing one line, and the 3.5" hat wants only one
+      // of them — so they are measured separately on every panel.
+      slot.age = await page.evaluate(LOOK, '#detail .age');
+      slot.diag = await page.evaluate(LOOK, '#detail .diag');
+      // Inside the CARD, not merely inside the screen. LOOK answers against the
+      // viewport, and the verdict is a centred flex column inside a box the
+      // grid has already sized — so content that does not fit spills out of
+      // both ends of the card while still landing on the glass. Asked against
+      // the window alone, a verdict label painted across the top border of its
+      // own panel passes; asked against the box, it does not. This is the same
+      // question `inVerdict` asks of the stack line, which is the only part of
+      // this card that was ever asked it.
+      // Whether the reason for the doubt can be read without scrolling for it.
+      //
+      // The line above this one is what stops a long notice taking the verdict
+      // with it, and it does that by letting the notice scroll — which is the
+      // right trade and a poor thing to rely on from the driving seat. What the
+      // 3.5" hat's smaller notice type is FOR is not having to: the three notes
+      // an uncertain reading writes are the worst a real card produces, and on
+      // every panel they have to fit whole.
+      slot.wholeNote = await page.evaluate(() => {
+        const w = document.getElementById('warn');
+        if (w.hidden) return null;
+        if (w.scrollHeight <= w.getBoundingClientRect().height + 1) return true;
+        // Not whole — so the rest of it has to be somewhere a driver can get
+        // to. Scrolled for real rather than inferred: an overflow:visible box
+        // reports a scrollHeight past its own height too, and simply paints
+        // the words outside where #app clips them away.
+        w.scrollTop = 0;
+        w.scrollTop = 9999;
+        const moved = w.scrollTop > 0;
+        w.scrollTop = 0;
+        return moved ? 'scrolls' : false;
+      });
+      slot.inCard = await page.evaluate(() => {
+        const v = document.getElementById('verdict').getBoundingClientRect();
+        const over = [];
+        ['#verdictLabel', '.rate.big', '#working', '.submetrics', '#places',
+         '#stack', '#warn'].forEach((sel) => {
+          const e = document.querySelector(sel);
+          if (!e) return;
+          const r = e.getBoundingClientRect();
+          if (r.height === 0) return;
+          if (r.top < v.top - 0.5 || r.bottom > v.bottom + 0.5) over.push(sel);
+        });
+        return over;
+      });
       // The card goes away. An address left on screen would read as belonging
       // to whatever arrives next.
       await page.evaluate(() => window.__es.push(
@@ -563,6 +611,19 @@ const framed = (page) => page.waitForFunction(
         // The half that is MEANT to give way, and it has to actually be doing
         // so or the checks below prove nothing about priority.
         sumEllipsised: !!sum && sum.scrollWidth > sum.clientWidth + 1,
+        // The other end of the same box. A pair is the tallest this card ever
+        // gets, and the verdict centres what will not fit — so the row below
+        // going over the bottom border and the headline going off the TOP are
+        // one fault measured twice, and only the first half was ever asked.
+        onGlass: (() => {
+          const seen = (sel) => {
+            const e = document.querySelector(sel);
+            if (!e) return false;
+            const r = e.getBoundingClientRect();
+            return r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight + 1;
+          };
+          return seen('#verdictLabel') && seen('#perHour');
+        })(),
         ends: inside(document.querySelector('#stack .ends')),
         link: inside(document.querySelector('#stack .maplink')),
         fits: document.documentElement.scrollWidth
@@ -636,6 +697,62 @@ const framed = (page) => page.waitForFunction(
       const chip = document.querySelector('#stack .ends');
       return { destClass: dest ? dest.className : null,
                chip: chip ? (chip.textContent || '').trim() : null };
+    });
+
+    // A notice longer than any card produces today, on the smallest panel.
+    //
+    // The three the `uncertain` fixture stacks are 139px of prose in a 191px
+    // verdict, and smaller type alone is enough for those — which would leave
+    // the rule that lets the notice SHRINK doing nothing any input could show.
+    // The rule is not there for today's three. It is there because notices are
+    // sentences and the set of them grows: this page has added four since it
+    // was written, and the verdict is a centred column, so the first one that
+    // does not fit does not push the prose out of the bottom of the card, it
+    // slides the headline and the verdict out of the top. That failure is
+    // silent and it is on the screen with the least room to spare.
+    //
+    // Written straight into the element because what is being measured is the
+    // stylesheet, not the sentence: any notice this long has the same shape.
+    await page.evaluate(() => {
+      const w = document.getElementById('warn');
+      w.hidden = false;
+      w.textContent = ('Distance unreadable — rate is a ceiling. ').repeat(12);
+    });
+    await page.waitForTimeout(200);
+    out['longnote ' + panel[0]] = await page.evaluate(() => {
+      const v = document.getElementById('verdict').getBoundingClientRect();
+      const w = document.getElementById('warn');
+      const r = w.getBoundingClientRect();
+      const out = [];
+      ['#verdictLabel', '.rate.big', '#warn'].forEach((sel) => {
+        const e = document.querySelector(sel);
+        if (!e) return;
+        const b = e.getBoundingClientRect();
+        if (b.height === 0) return;
+        if (b.top < v.top - 0.5 || b.bottom > v.bottom + 0.5) out.push(sel);
+      });
+      return {
+        over: out,
+        // ...and the prose is reachable rather than deleted: what will not fit
+        // scrolls. A notice cut with no way to see the rest would be this
+        // page's own second-worst fault instead of its worst.
+        //
+        // Scrolled for real, not inferred from scrollHeight. A box with
+        // `overflow: visible` reports a scrollHeight past its own height too —
+        // it simply paints outside instead — so the arithmetic answers yes for
+        // both the version that works and the version that loses the words.
+        // Asking the box to move and looking at where it went cannot.
+        scrolls: (() => {
+          w.scrollTop = 0;
+          w.scrollTop = 9999;
+          const moved = w.scrollTop > 0;
+          w.scrollTop = 0;
+          return moved;
+        })(),
+        cut: Math.round(w.scrollHeight - r.height),
+        fits: document.documentElement.scrollHeight
+              <= document.documentElement.clientHeight + 1,
+      };
     });
 
     await page.close();
@@ -1341,7 +1458,7 @@ try:
             # it, so the run passed by not looking.
             missing = [k for k in ('idle', 'reading', 'readingRate', 'verdict',
                                    'rate', 'raw', 'net', 'warn', 'places',
-                                   'placesAfter')
+                                   'placesAfter', 'age', 'diag')
                        if not isinstance((r or {}).get(k), dict)]
             eq('%s: every element was measured' % where, missing, [])
             if not r or missing:
@@ -1390,6 +1507,71 @@ try:
                 not r['placesAfter']['shown'])
             ok_('%s: the headline rate is on the glass' % where,
                 r['rate']['shown'])
+            # ...and so is the word above it. The verdict is a centred flex
+            # column, so a block of prose too tall for it overflows at BOTH
+            # ends: the `uncertain` fixture carries three notices at once, and
+            # on the 3.5" hat that put the headline 2px above the glass and the
+            # word PASS 25px above it, with #app's `overflow: hidden` cutting
+            # them off. Every check here passed — the text was in the DOM, and
+            # nothing had asked where it landed.
+            ok_('%s: ...and the word above it, which is the verdict' % where,
+                r['verdict']['shown'])
+            eq('%s: ...and nothing in the card hangs outside it' % where,
+               r.get('inCard'), [])
+            # The `uncertain` fixture is the only one of the three that writes a
+            # notice, and it writes all three at once — the worst a real card
+            # produces. On a panel with room it reads whole.
+            #
+            # On the 3.5" hat it does not, and that is measured rather than
+            # hoped: with the figures already hidden the card has 83px left and
+            # the three notes are 127 of them at the hat's smaller 11px type,
+            # four lines over. Nothing available closes a gap that size — the
+            # headline giving up as much again as it gives a pair is worth 18 —
+            # so on this one panel the reason for the doubt is a line and a bit
+            # plus a scroll. The check says which panel does which, so that the
+            # day one of them changes, it is a failure and not a discovery.
+            if r.get('wholeNote') is not None:
+                # Whole, or scrollable. Never cut.
+                ok_('%s: ...and the reason for the doubt is all reachable'
+                    % where, r['wholeNote'] in (True, 'scrolls'))
+                if key == 'uncertain':
+                    eq('%s: ...reading whole on a panel with the room for it, '
+                       'and by scrolling on the one without' % where,
+                       r['wholeNote'], 'scrolls' if panel == '480x320' else True)
+
+            # --- how old the reading is, on every panel --------------------
+            #
+            # A driver watching a phone through this page is asking one question
+            # continuously: do these numbers belong to the card in front of me,
+            # or to the one before it? The age is the whole answer, and it is
+            # not derivable from anything else on the screen.
+            #
+            # The 3.5" hat had it hidden. `#detail` carries the age AND the
+            # diagnostics — the read time, the leg count, the tracker's drift —
+            # and the hat's stylesheet reclaimed the line by hiding the block,
+            # which is a fair trade for the diagnostics and a bad one for the
+            # age. The same rule also took the two sentences the no-card branch
+            # writes into that block: "nothing from the scanner for 40s — it may
+            # have stopped", and the instruction for aiming the mount. So the
+            # smallest screen, the one a driver can work out the least from, was
+            # the only one that could not tell a stopped scanner from a quiet
+            # one. They are separate elements now and this asks for them
+            # separately.
+            ok_('%s: how old the reading is, is on the glass' % where,
+                r['age']['shown'])
+            ok_('%s: ...as a time and not a blank' % where,
+                'ago' in r['age']['text'] or 'just now' in r['age']['text'])
+            # ...and the half that genuinely has no room on the hat does give
+            # way there, or this is just the old block back under a new name.
+            if panel == '480x320':
+                ok_('%s: ...while the diagnostics beside it stand down' % where,
+                    not r['diag']['shown'])
+            else:
+                ok_('%s: ...with the diagnostics beside it' % where,
+                    r['diag']['shown'])
+                ok_('%s: ...which say how long the read took' % where,
+                    'ms' in r['diag']['text'])
+
             ok_('%s: the panel still fits' % where, r['fits'])
 
     # --- marking an offer as taken, from the driving screen --------------
@@ -1514,6 +1696,13 @@ try:
             not row.get('rowClipped'))
         ok_('%s: ...and sits inside the verdict, not over its edge' % panel,
             row.get('inVerdict'))
+        # ...without the verdict paying for it out of the other end. A pair is
+        # the tallest this card gets, and what does not fit is centred, so
+        # anything that buys room for the stack line by leaving the column
+        # taller than its box pushes the headline and the word above it off the
+        # top of the glass instead. Both halves, or neither is a check.
+        ok_('%s: ...with the headline and the word above it still on the glass'
+            % panel, row.get('onGlass'))
         # The priority has to be REAL, not just declared: the arithmetic is the
         # half that gives way, and if it is not actually being cut here then the
         # two checks below are passing on a row with room to spare and would say
@@ -1531,6 +1720,20 @@ try:
             link.get('inside'))
         ok_('%s: ...and can actually be pressed' % panel, link.get('reachable'))
         ok_('%s: ...and the panel still fits' % panel, row.get('fits'))
+
+        # A notice longer than any card writes today. The verdict is a centred
+        # column, so prose it cannot hold does not overflow downwards where it
+        # would be noticed — it slides the headline and the word above it off
+        # the top of the card. The notice is the item that has to give, and on
+        # the 3.5" hat what it gives has to still be reachable.
+        long_ = got.get('longnote ' + panel) or {}
+        eq('%s: a notice too long for the card does not push the verdict out '
+           'of it' % panel, long_.get('over'), [])
+        ok_('%s: ...and the panel still fits' % panel, long_.get('fits'))
+        if panel == '480x320':
+            ok_('%s: ...with the part that did not fit scrollable, not '
+                'deleted (%spx of it)' % (panel, long_.get('cut')),
+                long_.get('scrolls'))
 
         # The other answer this line can give, which used to be no answer at
         # all: about half of real pairs print too little for the geography to

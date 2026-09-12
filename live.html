@@ -46,6 +46,32 @@
        rather than a label floating in the dark. */
     .live #verdict { flex: 1 1 auto; display: flex; flex-direction: column;
                      justify-content: center; min-height: 0; }
+    /* The notice is the item that gives way, on every panel.
+
+       `#verdict` is a centred column, so prose taller than the card spills
+       equally out of BOTH ends of it — and the top of the card is where the
+       word ACCEPT and the rate live. Measured: a long enough notice put both
+       outside the card on the 800x480 panel the rig is bolted to, and on the
+       3.5" hat the three notices a single uncertain reading already writes did
+       it. Neither says anything; #app clips at `overflow: hidden` and the
+       verdict is simply not there.
+
+       One declaration does all of it, and not the obvious one. A flex item's
+       automatic minimum size is its own content, so a block of prose refuses to
+       give even when it is the only item with anything to give — and the rule
+       that removes that floor is `overflow` being anything but `visible`. So
+       `overflow-y: auto` both makes the notice shrinkable and makes what does
+       not fit reachable, in the same word. (A `min-height: 0` alongside it is
+       the declaration everyone reaches for and it changes nothing here; see the
+       same note on `.places` and `.stackline` above, which take the other half
+       of this rule — `overflow: hidden` — and needed `flex: none` to get their
+       floor BACK.)
+
+       Not `safe center` — which is what the same fault one box out called for.
+       Here it would move the whole overflow to the bottom edge, and the cards
+       on the 800x480 panel run a few pixels into their own padding, which is
+       invisible and harmless until it is all pushed to one side. */
+    .live #verdict > #warn { overflow-y: auto; }
     /* ...and inside that column, the one-line facts do not shrink.
 
        A flex item's automatic minimum size is its content — except when it has
@@ -220,12 +246,82 @@
     /* `=` opens a sum whose left-hand side is no longer on screen. */
     .working .raw i:first-of-type { display: none; }
     .working { font-size: 11px; margin-top: 2px; }
-    #detail { display: none; }
+    /* This was `#detail { display: none; }`, and #detail is not only the
+       diagnostics. It is also how old the reading is — the one figure on this
+       page a driver acts on continuously, since it is what says whether the
+       numbers belong to the card in front of them or the one before it — and,
+       when there is no card, the whole of what the page has to say: "nothing
+       from the scanner for 40s — it may have stopped", and the aiming
+       instruction "move the mount until this says good". So the 3.5" hat was
+       the one screen with no way to tell a stopped scanner from a quiet one and
+       no instructions for pointing the camera, which is exactly backwards: it
+       is the screen with the least room to work anything out.
+
+       The diagnostics — the read time, the leg count, the tracker's drift —
+       genuinely have no room here, and they are all questions for a parked
+       driver on a bigger screen. They go; the line stays. */
+    #detail .diag { display: none; }
+    /* And it costs what it costs, so it costs as little as possible: the
+       verdict is the row's other occupant and every pixel this line takes comes
+       out of it. At the shared 12.5px/1.5 that was 16px, enough on its own to
+       push the headline off the glass. Ten. The three rules below are where it
+       is paid for. */
+    #detail { font-size: 10px; line-height: 1; margin: 0; }
     /* On a panel this small a notice and the figures cannot both fit, and the
        notice wins: it is there because something is wrong with the reading, so
        the three numbers underneath it are the ones not to trust. The headline
        and the reason for doubting it are the pair worth keeping. */
     #verdict:has(#warn:not([hidden])) .submetrics { display: none; }
+    /* ...and hiding the figures is not enough on its own, which took measuring
+       to see. A card can carry three notices at once — a distance that could not
+       be read, an hour worked out without one, and a journey still arriving —
+       and on this panel that is a 139px block of prose inside a 191px verdict.
+       The verdict is a centred flex column, so the overflow went out BOTH ends:
+       the headline sat 2px above the glass and the word PASS 25px above it,
+       clipped away by #app. The one screen where a driver has the least room to
+       work anything out was the one that answered a three-note card by hiding
+       its own verdict, and nothing said so.
+
+       There is no rule here for it, which is the point of saying so here: it is
+       settled for every panel by `.live #verdict > #warn` above, and this panel
+       is where that rule earns its keep. With the figures hidden the card has
+       83px left and the three notes want 127, so on the 3.5" hat — and only
+       there — the reason for the doubt is a line and a bit plus a scroll.
+       Smaller type was tried and is not in this file: at 11px the same notice
+       still scrolls, so it bought a fraction of a line and a claim nothing
+       could check. Nothing on this panel closes a gap of four lines. The
+       alternative was the verdict itself leaving the screen. */
+    /* The other half of the same measurement, on a card with no notice at all.
+       The verdict's column on this panel is 191px and the four card figures
+       took 78 of it: the block is `minmax(74px, 1fr)` columns, the verdict here
+       is narrow because the phone picture has the width, so only two columns
+       fit and the four figures wrapped to two rows of a value stacked over its
+       label. 184px of content in 173px of room, centred — so the verdict label
+       was painted over the top border of its own card and the address over the
+       bottom one, and with a pair on screen the stack line was outside the box
+       entirely.
+
+       Value beside label rather than above it. Two rows of one line instead of
+       two rows of two: 41px rather than 78, which is 37 handed back to a column
+       that was 11 short. Nothing is dropped and nothing is smaller — "8.00 PAY"
+       reads as readily across a car as "8.00" over "PAY". */
+    #verdict .sub { flex-direction: row; align-items: baseline;
+                    justify-content: center; gap: 5px; }
+    /* And the last of it off the headline, only when there is a pair. A second
+       job in the car puts the stack line under everything else, and that is the
+       one row on this page a driver presses; this panel already asks the
+       headline to give up 19px of its 77 so it fits, and with the age back on
+       the glass it gives up the same again. 38px is still four times the size
+       of anything else in the card, and the alternative was that row hanging
+       outside the box it belongs to, which is where this started.
+
+       Only when there is a pair, because a pair is the only card where it is
+       true: nothing else on this panel needs it, and a headline permanently
+       smaller to pay for a line that is usually not there would be the same
+       mistake in the other direction. */
+    #verdict:has(#stack:not([hidden])) #perHour {
+      font-size: min(8vw, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
     /* The phone layout above gives the picture every row so that on an
        800x480 panel the phone stands 468px tall. On the 3.5" hat that left the
        verdict a 279px column, and measured with a phone on the glass: the
@@ -1631,13 +1727,22 @@
     // tracker reported.
     el.detail.textContent = '';
     el.detail.appendChild(when);
-    el.detail.appendChild(document.createTextNode(
+    // The diagnostics get an element of their own so the 3.5" hat can drop them
+    // and keep the age. They used to be bare text nodes, which CSS cannot
+    // address, so the hat's only way to reclaim the line was to hide all of
+    // #detail — and that took the age with it, on the one screen where the
+    // driver is furthest from being able to work it out for themselves. See the
+    // `max-height: 380px` block.
+    var diag = document.createElement('span');
+    diag.className = 'diag';
+    diag.appendChild(document.createTextNode(
       (deducted ? ' · after $' + Number(r.costPerMile).toFixed(2) + '/mi costs' : '')
       + ' · ' + r.ms + 'ms'
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
       + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')
       + (r.items ? ' · ' + r.items + ' items' : '')
       + trackNote(r)));
+    el.detail.appendChild(diag);
     showRaw(r.text);
   }
 

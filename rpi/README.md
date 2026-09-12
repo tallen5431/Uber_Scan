@@ -3054,6 +3054,96 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### One limit written in two units, and the screen that hid the clock
+
+**The backup had a size it could not check.** `sync.py` chunked its uploads at
+2000 **rows**; `server.js` refuses a body over 8MB of **bytes**. Nothing held the
+two together — the tie was a sentence, "a row is a few hundred bytes", and a row
+is not a fixed size. It grows every time a field is added to what is worth
+keeping, and `places`, `text`, `untimedMiles` and `mergedFrom` all arrived after
+that 2000 was chosen. (Measured today: a row carrying two addresses and its OCR
+text is 1062 bytes, so 2000 of them is 2MB. The margin was real. It was also
+invisible from either constant.)
+
+What made that worth fixing rather than documenting is how it fails. Measured: a
+9MB upload came back to the sender as `ConnectionResetError`, because the far end
+called `req.destroy()` before writing its 400 and Node resets a connection whose
+response ends with the request still arriving. `sync.py` cannot tell a reset from
+being out of range — and being out of range is *normal in a car*, so it says
+"will try again next time" and exits 0. The only backup of the only irreplaceable
+thing on the rig would have stopped working, permanently, while every tick
+reported success. Its own comment claimed a body over the cap arrives as an
+`HTTPError` worth a non-zero exit; that branch was unreachable.
+
+Both ends. `readBody` now drops the buffer and drains the rest instead of
+destroying the socket, so the refusal is readable — and that is a near-miss cure,
+not a guarantee, which the comment there now says: past roughly twice the cap
+Node stops feeding the request and the sender's remaining write still breaks
+(measured: 9MB readable, 16MB a broken pipe). No server can make a client read an
+answer it is not looking at yet. So the guarantee lives on the sender, which now
+measures chunks in the same unit as the cap they have to fit inside, at half of
+it — the far end counts characters and this counts bytes, and bytes are never
+fewer. A row too big for a chunk of its own is still sent rather than skipped:
+dropping it would lose a row in silence, which is the failure the whole limit
+exists to prevent, one row further along. Six mutants, six caught.
+
+**`Scanner.feed()` was a second way in, and the wrong one.** Gate the frame, then
+read it — and nothing called it. The loop in `scan_pi.py` does those two steps
+itself because between them it re-finds the phone's corners, converts them to
+sensor coordinates and decides whether this is the card it was already watching.
+Worse than redundant: `feed` called `should_read(frame)` with no scale, and the
+scale is what confines the motion gate to the phone. Without it the gate measures
+the whole picture and fires on a hand moving past the windscreen. Anyone who
+found it and used it would have got a scanner that read on the wrong frames, from
+a method whose name says it is the normal way in. Deleted, with a check that it
+stays deleted.
+
+**The 3.5" hat had the clock hidden.** `#detail` is not only diagnostics. It is
+how old the reading is — the one figure on the driving screen that is acted on
+continuously, because it is what says whether the numbers belong to the card in
+front of you or the one before it — and, when there is no card, the whole of what
+the page has to say: *"nothing from the scanner for 40s — it may have stopped"*,
+and the instruction for aiming the mount. The hat's stylesheet reclaimed the line
+with `#detail { display: none; }`. So the smallest screen, the one with the least
+room to work anything out, was the only one that could not tell a stopped scanner
+from a quiet one and had no instructions for pointing the camera. The diagnostics
+now have an element of their own — they were bare text nodes, which CSS cannot
+address, and that is *why* the whole block had to go — and the line stays.
+
+Putting it back needed 10px the panel did not have, and looking for them found
+something worse. **The verdict was already sliding off its own card.** `#verdict`
+is a centred flex column, so content taller than it spills equally out of *both*
+ends, and the top of the card is where the word ACCEPT and the rate live. On a
+card carrying three notices at once — a distance that could not be read, an hour
+worked out without one, a journey still arriving — the hat put the headline 2px
+above the glass and the word PASS 25px above it, clipped away by `#app`. On the
+800x480 panel the rig is actually bolted to, a long enough notice did the same.
+Every existing check passed: the text was in the DOM, and nothing had asked where
+it landed.
+
+One declaration fixes it, and not the obvious one. A flex item's automatic
+minimum size is its own content, so the block of prose refused to give even
+though it was the only item with anything to give — and the rule that removes
+that floor is `overflow` being anything but `visible`. `overflow-y: auto` makes
+the notice shrinkable and what does not fit reachable, in the same word. A
+`min-height: 0` beside it is what everyone reaches for and changes nothing; the
+mutation run is what said so.
+
+Two more on the hat: the four card figures went from a value stacked over its
+label to a value beside it — 41px rather than 78, nothing dropped and nothing
+smaller — and the headline gives up as much again as it already gives a pair,
+only when there is a pair, so the stack line stops hanging outside the card it
+belongs to. Eight mutants, eight caught, after three survivors sent three of
+these back: `min-height: 0` did nothing, a `scrollHeight` comparison answered yes
+for the version that scrolls *and* the version that paints the words off the
+screen, and smaller notice type on the hat bought a fraction of a line and a
+claim nothing could check. That one is not in the file. **What the checks say
+now** is that a notice is whole or scrollable but never cut, that the three-note
+card reads whole on a panel with the room and by scrolling on the one without,
+and that nothing in the card hangs outside it — asked against the card's box and
+not the window, because overflow eats the padding first and a verdict label
+painted across its own border passes every question about the glass.
+
 ### Six places the record disagreed with the screen
 
 Every one of these is the same shape: a number the driver saw, written down or
@@ -6000,7 +6090,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5629 checks
+npm test                # all 35 suites, 5712 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

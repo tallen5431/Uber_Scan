@@ -1773,8 +1773,16 @@ class Scanner:
         self.locked = self._agree >= self.agree_to_lock
         self.last = parsed
 
-    def feed(self, frame):
-        """Motion-gated read. Returns None when the frame was skipped."""
-        if not self.should_read(frame):
-            return None
-        return self.read(frame)
+    # There was a `feed(frame)` here — gate, then read — and nothing called it.
+    # The loop in scan_pi.py does the two steps itself, because between them it
+    # has work to do that a convenience wrapper cannot hold: it re-finds the
+    # phone's corners, converts them to sensor coordinates, and decides whether
+    # the card is the same one it was already watching. So `feed` was a second
+    # answer to a question already answered, kept alive by one test.
+    #
+    # A wrong second answer, at that. It called `should_read(frame)` with no
+    # scale, and the scale is what confines the motion gate to the phone; without
+    # it the gate measures the whole picture and fires on a hand moving past the
+    # windscreen. Anyone who found it and used it would have got a scanner that
+    # read on the wrong frames, in a method whose name says it is the normal way
+    # in. Deleted rather than fixed: the loop is the way in.

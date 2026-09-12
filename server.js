@@ -946,6 +946,27 @@ var SYNC_TOKEN = process.env.SYNC_TOKEN || '';
 // wifi in more than one packet — arrived as two replacement characters and
 // was stored that way for good, because the row's identity is its id and the
 // browser's next re-send of the correct bytes was refused as a duplicate.
+//
+// Over the cap, the buffer is dropped and the rest of the body is read and
+// thrown away rather than the socket being destroyed. Destroying it is what this
+// did, and it meant the refusal could not be read: Node resets the connection
+// when a response ends with the request still arriving, so the 400 explaining
+// what was wrong never reached the sender. sync.py cannot tell a reset from
+// being out of range — a car is offline most of the time, so out of range exits
+// 0 and says "will try again next time" — and a rig whose uploads had grown too
+// big would have reported success and backed up nothing, permanently. Measured:
+// a 9MB upload came back as `ConnectionResetError`, and now comes back as a
+// readable 400 that sync.py exits non-zero on.
+//
+// This is a near-miss cure and not a guarantee, which is worth being exact
+// about. Node stops feeding the request once the response is finished, so past
+// roughly twice the cap the sender's remaining write still fails — measured:
+// 9MB readable, 16MB a broken pipe. There is no way to fix that from here; a
+// server cannot make a client read an answer it is not looking at yet, short of
+// `Expect: 100-continue`, which urllib does not send. What it does cover is the
+// case that actually happens: a body a little over the limit, from a sender
+// whose idea of the limit has drifted. The guarantee lives at the other end,
+// where sync.py now measures its chunks in the same unit as this cap.
 function readBody(req, cap, done) {
   var text = '';
   var over = false;
@@ -953,7 +974,7 @@ function readBody(req, cap, done) {
   req.on('data', function (chunk) {
     if (over) return;
     text += chunk;
-    if (text.length > cap) { over = true; req.destroy(); done(new Error('too big')); }
+    if (text.length > cap) { over = true; text = ''; done(new Error('too big')); }
   });
   req.on('error', function () { if (!over) { over = true; done(new Error('aborted')); } });
   req.on('end', function () { if (!over) { over = true; done(null, text); } });
@@ -966,7 +987,8 @@ function readJsonBody(req, done) {
   req.on('data', function (chunk) {
     if (over) return;
     text += chunk;
-    if (text.length > MAX_BODY) { over = true; req.destroy(); done(new Error('too big')); }
+    // Drained rather than destroyed, for the reason in readBody above.
+    if (text.length > MAX_BODY) { over = true; text = ''; done(new Error('too big')); }
   });
   req.on('error', function () { if (!over) { over = true; done(new Error('aborted')); } });
   req.on('end', function () {

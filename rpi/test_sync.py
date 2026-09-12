@@ -1114,6 +1114,146 @@ finally:
     _ur_far.close()
     shutil.rmtree(_ur_dir, ignore_errors=True)
 
+# --- a body too big for the far end -----------------------------------------
+#
+# The cap this side chunks against and the cap the far end refuses at have to be
+# the same limit in the same unit, or nothing holds them together. They were
+# not: 2000 ROWS here against 8MB of BYTES there, tied by an estimate of how
+# large a row is — an estimate that ages every time a field is added to what is
+# worth keeping. And the way it failed is the worst one available: the far end
+# reset the connection, a reset here is indistinguishable from being out of
+# range, out of range is normal in a car and exits 0, so the only backup of the
+# only irreplaceable thing on the rig would have stopped working permanently
+# while every tick reported success.
+
+# The chunker, first, on its own terms: it must fit the cap, keep every row, and
+# keep them in order.
+_rows = [offer(i, now - i * 1000) for i in range(200)]
+_one = len((json.dumps(_rows[0], sort_keys=True) + '\n').encode('utf-8'))
+_cap = _one * 7 + 3          # room for seven rows, not eight
+_parts = list(SY.chunks(_rows, _cap))
+eq('nothing is lost in the split', sum(len(p) for p in _parts), len(_rows))
+eq('...and the order is the file order',
+   [r['id'] for p in _parts for r in p], [r['id'] for r in _rows])
+ok_('...and every body fits the cap',
+    all(len(('\n'.join(json.dumps(r, sort_keys=True) for r in p) + '\n')
+            .encode('utf-8')) <= _cap for p in _parts))
+eq('...with the cap actually filled, not one row per body',
+   max(len(p) for p in _parts), 7)
+
+# A single row larger than the whole cap cannot be made to fit, and the only two
+# things to do with it are drop it or send it. Dropping it loses a row in
+# silence, which is the failure this limit exists to prevent. Sending it gets a
+# refusal that says so.
+_fat = dict(_rows[0], text='x' * (_cap * 2))
+_fat_parts = list(SY.chunks([_rows[0], _fat, _rows[1]], _cap))
+eq('a row too big for the cap is still sent, on its own',
+   [len(p) for p in _fat_parts], [1, 1, 1])
+eq('...and it is the row itself, not a stand-in',
+   _fat_parts[1][0]['id'], _fat['id'])
+
+# An empty list is not one empty POST.
+eq('nothing to send is no bodies at all', list(SY.chunks([], _cap)), [])
+
+# The cap is in the same unit as the far end's, and under it.
+ok_('the chunk cap is bytes, and inside the 8MB the far end refuses at',
+    0 < SY.MAX_CHUNK_BYTES <= 8 * 1024 * 1024)
+
+_big_far = FarEnd()
+_big_dir = tempfile.mkdtemp()
+try:
+    # The end-to-end half: a journal that does not fit in one POST still arrives
+    # whole. The real far end, the real chunker, a cap small enough to force
+    # several round trips.
+    _big = os.path.join(_big_dir, 'journal.jsonl')
+    _many = [offer(i, now - i * 1000) for i in range(300)]
+    write(_big, _many)
+    _sent, _ = SY.rows_since(_big, 0)
+    _was, SY.MAX_CHUNK_BYTES = SY.MAX_CHUNK_BYTES, _one * 7 + 3
+    try:
+        _res = SY.send(_big_far.base, _sent)
+    finally:
+        SY.MAX_CHUNK_BYTES = _was
+    eq('a journal too big for one POST still arrives whole', _res['added'], 300)
+    eq('...and is stored once each', len(lines(_big_far.journal)), 300)
+    eq('...and the count reported is the last chunk\'s, which is the true one',
+       _res['have'], 300)
+
+    # And the refusal itself, which is what made the row-count cap dangerous
+    # rather than merely imprecise. A body over the far end's own limit has to
+    # come back as something readable — an HTTP answer — and not as a reset that
+    # this side would file under "out of range" and exit 0 on.
+    _huge = (json.dumps(_many[0], sort_keys=True) + '\n').encode('utf-8')
+    _huge = _huge * (9 * 1024 * 1024 // len(_huge) + 1)
+    _req = urllib.request.Request(
+        _big_far.base + '/api/journal/ingest', data=_huge, method='POST',
+        headers={'Content-Type': 'application/x-ndjson'})
+    try:
+        urllib.request.urlopen(_req, timeout=30).read()
+        _refusal = 'accepted'
+    except urllib.error.HTTPError as e:
+        _refusal = 'http %d' % e.code
+    except (urllib.error.URLError, OSError) as e:
+        # This is the old behaviour, and the point: sync.main() treats OSError
+        # as "lost the connection — will try again next time" and exits 0.
+        _refusal = 'reset (%s)' % type(e).__name__
+    eq('a body over the far end\'s cap is refused in words, not by a reset',
+       _refusal, 'http 400')
+
+    # ...and that refusal reaches send() as the error main() exits non-zero on,
+    # rather than as the OSError it files under "out of range" and exits 0 on.
+    # Driven through send() with this side's cap lifted above the far end's,
+    # which is the shape a mismatched pair of limits has.
+    _over = os.path.join(_big_dir, 'over.jsonl')
+    write(_over, _many)
+    _was2, SY.MAX_CHUNK_BYTES = SY.MAX_CHUNK_BYTES, 64 * 1024 * 1024
+    try:
+        _sent2, _ = SY.rows_since(_over, 0)
+        _sent2 = [dict(r, text='y' * 30000) for r in _sent2]
+        try:
+            SY.send(_big_far.base, _sent2)
+            _too = 'accepted'
+        except urllib.error.HTTPError as e:
+            _too = 'http %d' % e.code
+        except (urllib.error.URLError, OSError) as e:
+            _too = 'reset (%s)' % type(e).__name__
+    finally:
+        SY.MAX_CHUNK_BYTES = _was2
+    eq('...so an oversized chunk raises the error send() cannot mistake for '
+       'being out of range', _too, 'http 400')
+
+    # The honest boundary of that, so nobody reads the two checks above as a
+    # promise the far end cannot keep. Node stops feeding the request once the
+    # response is finished, so a body far past the cap still breaks the pipe on
+    # the way out and lands back in the "out of range" arm. It is unfixable from
+    # the far end and it is why the cap on THIS side has to be real: a sender
+    # that chunks by bytes never gets here in the first place.
+    _wild = (json.dumps(_many[0], sort_keys=True) + '\n').encode('utf-8')
+    _wild = _wild * (32 * 1024 * 1024 // len(_wild) + 1)
+    _req2 = urllib.request.Request(
+        _big_far.base + '/api/journal/ingest', data=_wild, method='POST',
+        headers={'Content-Type': 'application/x-ndjson'})
+    try:
+        urllib.request.urlopen(_req2, timeout=30).read()
+        _far_past = 'accepted'
+    except urllib.error.HTTPError as e:
+        _far_past = 'http %d' % e.code
+    except (urllib.error.URLError, OSError):
+        _far_past = 'broken'
+    ok_('a body far past the cap still breaks the pipe, which is why the '
+        'sender chunks', _far_past in ('broken', 'http 400'))
+
+    # And the reason none of that is reachable in normal service: the rows a
+    # real journal holds, chunked by the real cap, make bodies the far end takes.
+    _real = list(SY.chunks(_many))
+    eq('a whole ordinary journal is one body', len(_real), 1)
+    ok_('...and it is nowhere near the far end\'s limit',
+        len(('\n'.join(json.dumps(r, sort_keys=True) for r in _real[0]) + '\n')
+            .encode('utf-8')) < SY.MAX_CHUNK_BYTES)
+finally:
+    _big_far.close()
+    shutil.rmtree(_big_dir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
 sys.exit(1 if bad else 0)
