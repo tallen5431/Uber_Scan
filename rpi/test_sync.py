@@ -1114,6 +1114,60 @@ finally:
     _ur_far.close()
     shutil.rmtree(_ur_dir, ignore_errors=True)
 
+# --- the offers read before the rig knew what time it was -------------------
+#
+# The Pi has no clock of its own: it boots in 1970 and jumps when the network
+# arrives, and a card read in between is on disk stamped with a moment that
+# never happened. Those rows were never backed up. Every ordinary tick sends
+# from an hour before the copy's newest row — a number in the trillions — and a
+# 1970 stamp is below it, so only a hand-run `--all` ever carried one.
+#
+# Nor could the shortfall check notice: both ends count inside the same window
+# and a row with no date is in no window on either side, so the two counts
+# agreed and nothing looked missing. Meanwhile the offers page tells the driver
+# those rows are "still in the journal file on disk" — true, and on exactly one
+# disk, the SD card in the car, which is the thing the backup is for.
+_clock_far = FarEnd()
+_clock_dir = tempfile.mkdtemp()
+try:
+    _cp = os.path.join(_clock_dir, 'journal.jsonl')
+    _early = [dict(offer(90 + i, at), id='boot%d' % i)
+              for i, at in enumerate((42000, 0, 1100))]
+    _recent = [offer(i, now - i * 60000) for i in range(4)]
+    write(_cp, _early + _recent)
+
+    # The ordinary tick: a floor an hour before the copy's newest row.
+    _floor = now - 3600000
+    _sent, _ = SY.rows_since(_cp, _floor)
+    _ids = [r['id'] for r in _sent]
+    for _r in _early:
+        ok_('a row read before the clock was set is sent on an ordinary tick '
+            '(%s)' % _r['id'], _r['id'] in _ids)
+    ok_('...and so are the ones the floor was for',
+        all(r['id'] in _ids for r in _recent))
+    # ...and nothing else has been let through with them. A floor that stopped
+    # working would pass this file too.
+    _old = os.path.join(_clock_dir, 'old.jsonl')
+    write(_old, [offer(500, now - 86400000 * 30)] + _recent)
+    _sent_old, _ = SY.rows_since(_old, _floor)
+    eq('a dated row below the floor is still left alone',
+       [r['id'] for r in _sent_old], [r['id'] for r in _recent])
+
+    # End to end, against the real far end: they arrive, and they arrive once.
+    _res = SY.send(_clock_far.base, _sent)
+    eq('they reach the copy', _res['added'], len(_early) + len(_recent))
+    _res2 = SY.send(_clock_far.base, _sent)
+    eq('...and the next tick, which offers them again, adds nothing',
+       _res2['added'], 0)
+    eq('...leaving one of each on the copy',
+       len(lines(_clock_far.journal)), len(_early) + len(_recent))
+    _there = set(r['id'] for r in lines(_clock_far.journal))
+    ok_('...including every one of the undated ones',
+        all(r['id'] in _there for r in _early))
+finally:
+    _clock_far.close()
+    shutil.rmtree(_clock_dir, ignore_errors=True)
+
 # --- a body too big for the far end -----------------------------------------
 #
 # The cap this side chunks against and the cap the far end refuses at have to be

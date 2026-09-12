@@ -852,6 +852,29 @@
     // entirely on how much of the recorded time was really driving — the one
     // thing this cannot know. The ratio is the stable part where the level is
     // not.
+    // What the recommended line actually does, worked out once.
+    //
+    // Everything reported below about "taking the first offer at or above
+    // `suggested`" has to come from here, and three figures did not: `trips`,
+    // `takes` and `hours` were read off `shown.best`, which is the ARGMAX — a
+    // different line. The page names `suggested` in the same sentence: "taking
+    // the first one at or above $13 whenever free gives 108 trips." Measured on
+    // a curve with a broad plateau, $13 gives 314 trips and 68.5 hours against
+    // the 108 and 70.7 that were printed — a third of the truth, in the
+    // direction that makes the recommendation look worse than it is.
+    //
+    // This file had already caught the same mistake twice, in the two places
+    // below and above: the stability check and the gain. Each was fixed on its
+    // own and the reasoning was written out both times. It was never applied to
+    // the counts, which is the argument for computing the replay once, up here,
+    // rather than reaching for `shown.best` again.
+    var atSuggested = replay(runs(rows, o.breakMinutes || SHOWN_AT), suggested);
+
+    // The improvement over the driver's current line, as a share rather than a
+    // rate. A rate here would be a dollar figure per hour, and that depends
+    // entirely on how much of the recorded time was really driving — the one
+    // thing this cannot know. The ratio is the stable part where the level is
+    // not.
     var gain = null, current = null, currentTakesNothing = false;
     if (typeof o.target === 'number' && isFinite(o.target)) {
       current = replay(runs(rows, o.breakMinutes || SHOWN_AT), o.target);
@@ -860,7 +883,6 @@
         // argmax. Those are different lines — the recommendation is the bottom
         // of the plateau — so quoting the argmax's improvement beside the
         // recommended figure credits it with a gain it does not produce.
-        var atSuggested = replay(runs(rows, o.breakMinutes || SHOWN_AT), suggested);
         gain = (atSuggested.perHour - current.perHour) / current.perHour;
       } else if (current.trips === 0) {
         // Not a missing comparison — the strongest finding this can make. A
@@ -881,14 +903,18 @@
       // 234 is the kind of gap that makes a reader distrust the rest.
       setAside: rows.length - shown.offers,
       runs: shown.runs,
-      hours: shown.hours,
+      // At the recommended line, not the argmax — see `atSuggested` above. The
+      // page prints this in the same sentence that names `suggested`, and it is
+      // the span the money is divided by, so it is a fact about that line and
+      // not about the recording.
+      hours: atSuggested.hours,
       from: rows[0].at,
       to: rows[rows.length - 1].at,
       suggested: suggested,
       low: shown.low,
       high: shown.high,
-      trips: shown.best.trips,
-      takes: shown.best.takes,
+      trips: atSuggested.trips,
+      takes: atSuggested.takes,
       stable: stable,
       spread: spread,
       checkedAt: elsewhere,

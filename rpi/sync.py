@@ -113,6 +113,14 @@ def newest_at(base, timeout=TIMEOUT):
     return None if body is None else int(body.get('newest') or 0)
 
 
+# Before this, a timestamp is not a timestamp. The Pi has no clock of its own:
+# it boots in 1970 and jumps forward when the network arrives, and anything read
+# in between is on disk stamped with a moment that never happened. The same
+# floor server.js and the pages apply, so that "has no date" means one thing
+# everywhere.
+CLOCK_BELIEVABLE_AFTER = 1735689600000       # 2025-01-01
+
+
 def rows_since(path, floor_ms):
     """Rows at or after `floor_ms`, oldest first, and why if there are none.
 
@@ -125,10 +133,28 @@ def rows_since(path, floor_ms):
     empty one, exit 0, "nothing new", and a fresh stamp on the way out — which
     doctor.py then read as a healthy backup made minutes ago. The rig would
     have reported everything fine while nothing was being copied off it.
+
+    Rows from before the clock was set come too, whatever the floor. Their `at`
+    is a 1970 moment, so every ordinary tick — whose floor is an hour before the
+    copy's newest row, a number in the trillions — stepped straight over them,
+    and only a hand-run `--all` ever sent one. The shortfall check could not
+    catch it either: both ends count within the same window, and a row with no
+    date is in no window on either side, so the counts agreed and nothing was
+    missing as far as anything could tell.
+
+    That is the one shape this whole tool exists to prevent. The rig read those
+    offers, they are in the file, the offers page tells the driver they are
+    "still in the journal file on disk" — and they were on exactly one disk, the
+    SD card in the car, which is the thing the backup is for. There are never
+    many (one boot's worth, before NTP answers) and the far end stores an
+    (id, seq) pair once however often it arrives, so re-offering them on every
+    tick costs a few hundred bytes and closes the hole permanently.
     """
     log = JR.Journal(path)
     rows = [r for r in log.rows()
-            if isinstance(r, dict) and (r.get('at') or 0) >= floor_ms]
+            if isinstance(r, dict)
+            and ((r.get('at') or 0) >= floor_ms
+                 or (r.get('at') or 0) < CLOCK_BELIEVABLE_AFTER)]
     return rows, log.unreadable
 
 

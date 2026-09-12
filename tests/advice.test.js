@@ -1012,6 +1012,63 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   eq('usable carries the id through', carried.length && carried[0].id, 'keepme');
 })();
 
+/* ---- the figures beside the recommendation belong to the recommendation ---- */
+/* `suggested` is the BOTTOM of the plateau and `shown.best` is the argmax.
+   Usually those are the same number — the replay curve climbs to its peak and
+   the 95% band spreads upward from there — which is why this went unnoticed and
+   why the shape below had to be hunted for. The page prints them in one
+   sentence: "taking the first one at or above $12 whenever free gives 173
+   trips." At $12 it gives 187.
+
+   The existing check asked only `a.trips > 0`, which both lines satisfy: it
+   named the right property and could not tell them apart.
+
+   The shape is a two-population market — a bulk of cheap offers around $10/hr
+   and a dense cluster between $38 and $52 — which is what puts a shallow
+   shoulder under the argmax and pulls the plateau's bottom a long way below it.
+   It is contrived, and it has to be: a check built on a recording where the two
+   lines coincide cannot fail whatever the code does. The guard below says so
+   out loud rather than letting that happen quietly. */
+(function () {
+  // Built from a rate rather than a payout, because the ladder this walks is
+  // in dollars per hour — a fact worth stating here, since every other fixture
+  // in this file names a payout and a duration and leaves it implied.
+  function rate(min, r, dur) {
+    var row = offer(min, r * dur / 60, dur);
+    row.perHour = r;
+    return row;
+  }
+  var rows = [];
+  for (var m = 0, i = 0; m < 60 * 160; m += 6, i++) {
+    if (m % 180 > 150) continue;
+    rows.push(rate(m, (i % 4 === 0) ? 38 + ((i * 7) % 56) / 4
+                                    : 9 + ((i * 5) % 12) / 4, 30));
+  }
+  var a = A.advise(rows, { target: 10 });
+  ok_('the two-line shape produces an answer at all', a.ready);
+  if (a.ready) {
+    var steps = A.runs(A.usable(rows), 30);
+    var at = A.replay(steps, a.suggested);
+    // The recommendation is well below the best-scoring line here, which is
+    // the only condition under which the three checks after it mean anything.
+    ok_('...whose recommendation ($' + a.suggested + ') is below the '
+        + 'best-scoring line ($' + a.high + '), or nothing below could fail',
+        a.suggested < a.high);
+    // And it is the bottom of the plateau that is recommended, not the peak.
+    // Deliberately: a lower line takes more work for the same money and leaves
+    // less riding on the recording being representative, and being too picky is
+    // the failure that hides itself. Pinned here because this is the one
+    // fixture where the two are far enough apart to tell.
+    eq('...and it is the bottom of the plateau that is recommended',
+       a.suggested, a.low);
+    eq('the trips quoted are the ones the suggested line takes',
+       a.trips, at.trips);
+    eq('...and the takes', a.takes, at.takes);
+    eq('...and the hours the money is divided by',
+       Math.round(a.hours * 100), Math.round(at.hours * 100));
+  }
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);

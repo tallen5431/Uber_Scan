@@ -682,6 +682,52 @@
   // this is comparing against and is the thing actually worth knowing.
   var STALE_MS = 12000;
 
+  // Every POST this page makes, with a deadline on it.
+  //
+  // A `fetch` has no timeout of its own: a connection that opens and never
+  // closes leaves the promise pending for ever, and nothing after it runs. Car
+  // wifi produces exactly that — a hotspot the Pi is associated with and cannot
+  // reach through. `loadShift` below knew this and guarded itself; the five
+  // controls on the bar did not, and every one of them cleared its busy flag
+  // only in the `.then()` after the fetch. So Took, Drop, ⌖ Dropoff, ⟳ Re-find
+  // and "✓ Read this box" each sat at "…", disabled, for the rest of the shift
+  // — after ONE press on a bad connection, with nothing saying why and no way
+  // back but reloading the page. The controls a driver uses at a red light are
+  // the last place to leave that.
+  //
+  // A deadline makes the promise settle: `AbortError` lands in the same
+  // `.catch` the other failures already use, and each control's existing
+  // "failed" state is what appears. That is the honest answer anyway — nothing
+  // was written, and the button says so.
+  //
+  // Twenty seconds, the same figure `loadShift` uses and for the same reason:
+  // long enough that a busy rig is not cut off mid-answer, short enough that a
+  // driver is not left looking at a dead button.
+  var POST_TIMEOUT_MS = 20000;
+
+  function ask(url, opts) {
+    opts = opts || {};
+    // Feature-detected rather than assumed: this page is opened from phones and
+    // laptops as well as the panel, and a browser without AbortController gets
+    // the behaviour it had before, which is the old behaviour and not a crash.
+    if (typeof AbortController !== 'function') return fetch(url, opts);
+    var stop = new AbortController();
+    var timer = setTimeout(function () { stop.abort(); }, POST_TIMEOUT_MS);
+    var out = {};
+    Object.keys(opts).forEach(function (k) { out[k] = opts[k]; });
+    out.signal = stop.signal;
+    // Cleared on both paths. A timer left running would fire into an aborted
+    // controller — harmless — but it also keeps this page's one-second tick
+    // company for twenty seconds after every press, for nothing.
+    return fetch(url, out).then(function (r) {
+      clearTimeout(timer);
+      return r;
+    }, function (e) {
+      clearTimeout(timer);
+      throw e;
+    });
+  }
+
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
@@ -1039,7 +1085,7 @@
     var want = !tookState;
     tookBusy = true;
     showTook();
-    fetch('/api/offers/mark', {
+    ask('/api/offers/mark', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // By id, never by pay-and-minutes. Marking by the figures is a *rule*
@@ -1148,7 +1194,7 @@
     if (dropBusy) return;
     dropBusy = true;
     showDrop();
-    fetch('/api/delivered', { method: 'POST' }).then(function (r) {
+    ask('/api/delivered', { method: 'POST' }).then(function (r) {
       // Believe the server, not the press. If the write failed the order is
       // still in the car and the next offer must still be measured against it.
       dropFailed = !r.ok;
@@ -1240,7 +1286,7 @@
     destBusy = true;
     destSaid = '';
     showDest();
-    fetch('/api/dropoff', { method: 'POST' }).then(function (r) {
+    ask('/api/dropoff', { method: 'POST' }).then(function (r) {
       return r.json().catch(function () { return null; });
     }).then(function (b) {
       // The one thing the reply does say: whether there is still an order to
@@ -1375,9 +1421,6 @@
   // 1 Jan 2025, the same floor server.js applies. Below this a clock is not a
   // clock: the Pi has no RTC, boots in 1970 and jumps when NTP arrives.
   var CLOCK_BELIEVABLE_AFTER = 1735689600000;
-  // Long enough that a slow rig is not cut off mid-answer, short enough that a
-  // connection which never closes does not freeze the figures for the shift.
-  var SHIFT_TIMEOUT_MS = 20000;
 
   function loadShift() {
     // The page's OWN clock first. On the panel bolted to the dashboard this
@@ -1402,15 +1445,11 @@
     shiftBusy = true;
     shiftAt = Date.now();
     // A fetch that never settles would leave shiftBusy set for the rest of the
-    // shift, and the figures on the panel would stop moving with nothing
-    // saying they had.
-    var stop = null;
-    if (typeof AbortController === 'function') {
-      stop = new AbortController();
-      setTimeout(function () { stop.abort(); }, SHIFT_TIMEOUT_MS);
-    }
-    fetch('/api/today?since=' + since,
-          stop ? { signal: stop.signal } : undefined).then(function (r) {
+    // shift, and the figures on the panel would stop moving with nothing saying
+    // they had. This used to build its own AbortController here, which is where
+    // `ask` came from: the same guard was needed by five controls that did not
+    // have it, and one deadline written twice is one that drifts.
+    ask('/api/today?since=' + since).then(function (r) {
       // An older build has no such route, and an unknown /api path on this
       // server falls past every handler to a text/plain 404 — so `.json()`
       // rejects with a SyntaxError rather than returning a status to branch on.
@@ -2137,7 +2176,7 @@
   resetBtn.addEventListener('click', function () {
     resetBtn.disabled = true;
     resetBtn.textContent = '⟳ …';
-    fetch('/api/recalibrate', { method: 'POST' })
+    ask('/api/recalibrate', { method: 'POST' })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
       // "asked", not "re-finding". Everything this promise knows is that a web
       // handler touched a file; it has not spoken to the scanner and cannot
@@ -2365,7 +2404,7 @@
     var sent = box;
     drawUse.disabled = true;
     drawUse.textContent = '✓ sending…';
-    fetch('/api/crop', {
+    ask('/api/crop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ box: [sent.x, sent.y, sent.w, sent.h] })

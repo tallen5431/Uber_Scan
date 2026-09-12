@@ -1105,6 +1105,103 @@ const framed = (page) => page.waitForFunction(
       viewEnabled: !document.getElementById('viewMode').disabled }));
     await page.close();
   }
+  // --- a connection that opens and never closes ---------------------------
+  stage = 'a connection that opens and never closes';
+  //
+  // Not a refusal and not an outage: a socket the rig accepts and never
+  // answers on, which is what a car hotspot the Pi is associated with but
+  // cannot reach through actually produces. `fetch` has no timeout of its own,
+  // so the promise stays pending and nothing after it runs — and every control
+  // on the bar cleared its busy flag in the `.then()` after the fetch. One
+  // press and the button sat at "…", disabled, for the rest of the shift, with
+  // nothing saying why and no way back but reloading the page.
+  //
+  // All five at once and one wait, because the wait is the real twenty seconds
+  // this page uses and there is no reason to spend it five times. ⌖ Dropoff
+  // needs the longest: its own thirteen-second window starts only once the
+  // fetch settles, which under this fault it never did.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    // The deadline is twenty seconds and ⌖ Dropoff's own window is thirteen
+    // more, and waiting those out for real would put this driver past the
+    // watchdog that keeps a hung section from eating the whole run. The page's
+    // clock is moved instead: the timers are the real ones, at their real
+    // settings, and only the waiting is skipped.
+    await page.clock.install();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
+    // Every door this page pushes at, held open and never answered. `/api/today`
+    // and `/api/status` are deliberately NOT among them: the figures freezing
+    // is a different fault with its own checks, and leaving them working keeps
+    // this about the bar.
+    for (const path of ['**/api/offers/mark', '**/api/delivered',
+                        '**/api/dropoff', '**/api/recalibrate', '**/api/crop']) {
+      await page.route(path, () => { /* never fulfilled, never aborted */ });
+    }
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await framed(page);
+    // An offer on record and an order in the car, so Took, Drop and ⌖ Dropoff
+    // are all on the bar to be pressed.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 10.0,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 20.0, dropoff: null },
+      // `offer`, not an `id` on the reading: "Took $10.00?" names the offer on
+      // RECORD, which is a different thing from the card on screen and arrives
+      // in its own field. Without it the button is hidden and the press below
+      // waits for a control that is never going to appear.
+      offer: { id: 'o-hang', pay: 10.0, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4 } }));
+    await page.waitForTimeout(300);
+    const barState = () => page.evaluate(() => {
+      const one = (id) => {
+        const e = document.getElementById(id);
+        return { text: (e.textContent || '').trim(), off: !!e.disabled,
+                 hidden: !!e.hidden };
+      };
+      return { took: one('took'), drop: one('drop'), dest: one('dest'),
+               reset: one('reset'), crop: one('drawUse') };
+    });
+    // Bounded, and the failure kept rather than thrown: a control that is not
+    // there is a result, and an unbounded click on one spends the whole
+    // driver's budget waiting for it. The same note as on the view toggle.
+    const press = (id) => page.click(id, { timeout: 4000 })
+      .then(() => true, () => false);
+    out.hung = { pressedOk: {} };
+    for (const id of ['#took', '#drop', '#dest', '#reset']) {
+      out.hung.pressedOk[id] = await press(id);
+    }
+    // The crop control needs a box drawn before it will send anything, which
+    // is a drag on the picture — done through the page's own pointer events so
+    // the box is the one a driver would have made.
+    await press('#setBox');
+    await page.waitForTimeout(200);
+    const wrap = await page.locator('#viewWrap').boundingBox();
+    if (wrap) {
+      await page.mouse.move(wrap.x + wrap.width * 0.3, wrap.y + wrap.height * 0.3);
+      await page.mouse.down();
+      await page.mouse.move(wrap.x + wrap.width * 0.7, wrap.y + wrap.height * 0.7,
+                            { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      out.hung.pressedOk['#drawUse'] = await press('#drawUse');
+    }
+    await page.waitForTimeout(400);
+    out.hung.pressed = await barState();
+    out.hung.drew = !!wrap;
+    // Twenty seconds for the deadline, thirteen more for ⌖ Dropoff's own
+    // window, and a second of slack.
+    await page.clock.runFor(34500);
+    await page.waitForTimeout(400);
+    out.hung.after = await barState();
+    await page.close();
+    await ctx.close();
+  }
+
   // The replay on its own, against a snapshot that says the scanner IS
   // running — the one above says it is not, and that line takes precedence
   // over the staleness one, so it could not show this.
@@ -1582,6 +1679,56 @@ try:
     undone = got.get('tookUndone') or {}
     nxt = got.get('tookNext') or {}
     posted = got.get('tookPosted') or []
+
+    # --- a connection that opens and never closes ------------------------
+    #
+    # The failure this page is bolted into a car for. `fetch` has no timeout of
+    # its own, so a socket that is accepted and never answered on leaves the
+    # promise pending for ever — and every control on the bar cleared its busy
+    # flag in the `.then()` after the fetch. One press on a bad connection and
+    # the button sat at "…", disabled, for the rest of the shift.
+    hung = got.get('hung') or {}
+    ok_('the bar was pressed against a connection that never answers',
+        bool(hung.get('pressed')))
+    if hung.get('pressed'):
+        pressed, after = hung['pressed'], hung.get('after') or {}
+        # Each control in turn, because they have five different busy states
+        # and four different ways of showing one.
+        ok_('pressing Took while nothing answers puts it to work',
+            pressed['took']['text'] == '…' or pressed['took']['off'])
+        ok_('...and it comes back rather than sitting there for the shift',
+            after.get('took', {}).get('text') != '…')
+        ok_('...saying the record was not made (%r)'
+            % (after.get('took', {}).get('text'),),
+            'not saved' in (after.get('took', {}).get('text') or '').lower())
+
+        eq('pressing Drop while nothing answers puts it to work',
+           pressed['drop']['text'], '…')
+        ok_('...and it comes back', after.get('drop', {}).get('text') != '…')
+        ok_('...saying the order is still in the car',
+            'failed' in (after.get('drop', {}).get('text') or '').lower())
+
+        # ⌖ Dropoff is the slowest: its own thirteen-second window starts only
+        # once the fetch settles, and under this fault it never did.
+        # ⌖ Dropoff says its busy state in the label rather than by disabling —
+        # the bar is a grid of equal columns and there is no width for a second
+        # word, so "reading…" IS the disabled state. Asked about `disabled`
+        # instead, this check passed over a button stuck at "⌖ reading…" for
+        # the rest of the shift.
+        eq('pressing Dropoff while nothing answers puts it to work',
+           pressed['dest']['text'], '⌖ reading…')
+        eq('...and it offers itself again afterwards',
+           after.get('dest', {}).get('text'), '⌖ Dropoff')
+
+        eq('pressing Re-find while nothing answers puts it to work',
+           pressed['reset']['off'], True)
+        ok_('...and it comes back', not after.get('reset', {}).get('off'))
+
+        if hung.get('drew'):
+            eq('sending a crop box while nothing answers puts it to work',
+               pressed['crop']['off'], True)
+            ok_('...and the button is offered again, so the box can be re-sent',
+                not after.get('crop', {}).get('off'))
 
     ok_('the mark control was measured', bool(offered))
     if offered:

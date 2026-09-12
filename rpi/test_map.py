@@ -293,6 +293,19 @@ try:
     code = urllib.request.urlopen(base + '/map.html', timeout=5).getcode()
     eq('the server serves the map page', code, 200)
 
+    # ...and somebody can get to it. Every check in this file was passing while
+    # the page was unreachable by anything but typing its address: no page
+    # linked to it and it linked nowhere back, so it was a working feature that
+    # did not exist. The offer log is the right door — this is a parked page,
+    # it asks a public geocoder about the places on the cards, and that is not
+    # a thing to start at a red light.
+    log_page = urllib.request.urlopen(base + '/journal.html', timeout=5) \
+                             .read().decode('utf-8', 'replace')
+    ok_('the offer log offers a way to the map', 'href="map.html"' in log_page)
+    map_page = urllib.request.urlopen(base + '/map.html', timeout=5) \
+                             .read().decode('utf-8', 'replace')
+    ok_('...and the map offers a way back', 'href="journal.html"' in map_page)
+
     driver = os.path.join(work, 'mapdrive.js')
     open(driver, 'w').write(DRIVER)
     proc = subprocess.run(

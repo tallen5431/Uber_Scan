@@ -710,7 +710,14 @@ ok_('the driving screen has a dropoff button', 'id="dest"' in _page)
 ok_('...and it is hidden until there is an order to attach one to',
     re.search(r'el\.dest\.hidden\s*=\s*!holdingNow', _page) is not None)
 ok_('...and asks the server for a read',
-    "fetch('/api/dropoff'" in _page)
+    "ask('/api/dropoff'" in _page)
+# `ask`, not `fetch`, and that is the property rather than the spelling. A bare
+# fetch has no deadline: a socket the far end accepts and never answers on — car
+# wifi, routinely — leaves the promise pending, so this button's "⌖ reading…"
+# state never ends and it is dead until the page is reloaded. Every control on
+# that bar goes through the one helper that puts a deadline on it.
+ok_('...through the call that has a deadline on it, not a bare fetch',
+    "fetch('/api/dropoff'" not in _page)
 ok_('...and is registered like every other control',
     re.search(r"'drop',\s*'dest'\]", _page) is not None)
 

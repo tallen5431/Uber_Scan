@@ -3054,6 +3054,80 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### A page nothing linked to, five buttons one press from dead, and a backup with a hole in it
+
+**The map page did not exist.** Not in the sense of being unwritten — it works,
+it has its own suite, and every check in that suite was passing. Nothing linked
+to it. No page pointed at `map.html` and `map.html` pointed nowhere back, so the
+only way in was to type the address and the only way out was the back button. A
+working feature nobody can reach is not a feature, and a suite that proves it
+works without asking whether anyone can get to it is the shape this project
+keeps finding. The offer log now carries `⌖ Map` and the map carries a way back,
+and the map suite asks for both — it was the file already holding "the server
+serves the map page", one question short of the useful one.
+
+The offer log is the right door rather than the driving screen: the map sends
+place names to a public geocoder at one request a second, which is a thing to do
+parked on a monitor, not at a red light.
+
+**Five controls, one press from dead for the rest of the shift.** `fetch` has no
+timeout of its own. A socket the far end accepts and never answers on — which is
+exactly what a car hotspot the Pi is associated with but cannot reach through
+produces — leaves the promise pending for ever, and nothing after it runs. Every
+control on the driving screen's bar cleared its busy flag in the `.then()` after
+the fetch. So Took, Drop, ⌖ Dropoff, ⟳ Re-find and "✓ Read this box" each sat at
+"…", disabled, from one press until the page was reloaded, with nothing saying
+why.
+
+`loadShift` already knew this and guarded itself, in a comment explaining the
+exact failure. That guard is now `ask()` and all six go through it: a deadline
+makes the promise settle, `AbortError` lands in the `.catch` each control already
+has, and the "not saved" state a driver can act on is what appears. Seven
+mutants, seven caught — the last after the check for ⌖ Dropoff was rewritten,
+because it asked about `disabled` and that button says its busy state in its
+label, so it passed over a control stuck at "⌖ reading…" for the shift.
+
+Driving it needed Playwright's fake clock. Twenty seconds of real waiting, plus
+the thirteen ⌖ Dropoff takes on top, put the browser driver past the watchdog
+that stops a hung section eating the whole run — the timers are the real ones at
+their real settings, and only the waiting is skipped.
+
+**The offers read before the rig knew what time it was were never backed up.**
+The Pi has no clock: it boots in 1970 and jumps when the network arrives, and a
+card read in between is on disk stamped with a moment that never happened. Every
+ordinary sync sends from an hour before the copy's newest row — a number in the
+trillions — so a 1970 stamp is below the floor and was stepped over. Only a
+hand-run `--all` ever carried one.
+
+The reconciliation could not catch it either: both ends count inside the same
+window, a row with no date is in no window on either side, so the counts agreed
+and nothing looked missing. Meanwhile the offers page tells the driver those rows
+are "still in the journal file on disk" — true, and on exactly one disk, the SD
+card in the car, which is the thing the backup exists for. They go on every tick
+now; there are never many, and the far end stores an (id, seq) pair once however
+often it arrives.
+
+**The target advice quoted a different line from the one it recommended.** The
+page prints one sentence: *"taking the first one at or above $12 whenever free
+gives 173 trips."* At $12 it gives 187. `suggested` is the bottom of the plateau
+and `trips`, `takes` and `hours` were read off the argmax, which is a different
+line — this file had already caught the same mistake twice, for the stability
+check and for the gain, written the reasoning out both times, and not applied it
+to the counts.
+
+The interesting part is why it survived. Usually those two lines are the same
+number: the replay curve climbs to its peak and the 95% band spreads upward from
+there, so the bottom of the plateau IS the argmax. A sweep of 3,897 shapes that
+produced an answer separated them in none. The check needed a two-population
+market — a bulk of cheap offers around $10/hr against a dense cluster from $38 to
+$52 — to put a shallow shoulder under the peak and pull the plateau's bottom down
+to $12. The check says out loud that the two lines are far enough apart on that
+fixture to tell, because on any other recording it could not fail.
+
+That hunt also corrected a measurement of my own. A first attempt reported the
+page saying 108 trips where the line gives 314, which was not a fault at all —
+the comparison had been made against a different row set, not a different line.
+
 ### One limit written in two units, and the screen that hid the clock
 
 **The backup had a size it could not check.** `sync.py` chunked its uploads at
@@ -6090,7 +6164,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5712 checks
+npm test                # all 35 suites, 5743 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
