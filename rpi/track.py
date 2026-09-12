@@ -240,6 +240,19 @@ class QuadTracker:
         self.resets = 0         # times the driver asked for a fresh start
         self.agreeing = 0
         self._candidate = None
+        # The centre rule's own agreement, kept apart from `agreeing` above.
+        #
+        # It has to be its own, and that is the whole repair. `agreeing` is
+        # wiped to zero by the size gate every time it refuses a candidate —
+        # deliberately, so a run of steadily-shrinking detections cannot walk
+        # the counter up and then move the corners on the first one that
+        # squeaks through. But the centre rule exists precisely FOR candidates
+        # the size gate refuses, so it was reading a counter that the refusal
+        # it depends on had just cleared. It could never reach two, and the
+        # recovery never fired once: measured over 40 checks of a phone
+        # re-seated to 0.72x sitting on the frame centre, `centred` stayed 0.
+        self._centre_agreeing = 0
+        self._centre_candidate = None
         self._disputed_since = None  # when the corners were last visibly wrong
         self._off_since = None       # ...and how long they have been off the screen
         self._last_check = None     # None, not 0, so the first check is always due
@@ -262,6 +275,8 @@ class QuadTracker:
             self.misses += 1
             self.agreeing = 0
             self._candidate = None
+            self._centre_agreeing = 0
+            self._centre_candidate = None
             self._disputed_since = None
             self._forget_stall()
             # One check finding nothing is not evidence that the corners are
@@ -341,7 +356,21 @@ class QuadTracker:
         # screen from the Accept bar under it — but size deliberately does not,
         # since a size the calibration refuses is exactly the state that leaves
         # the corners stuck with no way out.
-        if self._holds_the_centre(candidate, frame) and self.agreeing >= self.centre_agree:
+        #
+        # Counted on its own evidence: the same screen, holding the centre, on
+        # two checks running. `same_shape` against the calibration is inside
+        # _holds_the_centre, so a bright thing crossing the frame is refused on
+        # shape before it is ever counted.
+        if self._holds_the_centre(candidate, frame):
+            steady = (self._centre_candidate is not None
+                      and near(candidate, self._centre_candidate, SETTLE))
+            self._centre_agreeing = self._centre_agreeing + 1 if steady else 1
+            self._centre_candidate = candidate
+        else:
+            self._centre_agreeing = 0
+            self._centre_candidate = None
+
+        if self._centre_agreeing >= self.centre_agree:
             self.quad = np.asarray(candidate, dtype=np.float32)
             # The size reference, for the reason the stall path gives: this
             # branch exists precisely to adopt a screen whose size the gate
@@ -349,6 +378,8 @@ class QuadTracker:
             # next check refuse the screen it just landed on.
             self.adopted = self.quad.copy()
             self.agreeing = 0
+            self._centre_agreeing = 0
+            self._centre_candidate = None
             self._forget_stall()
             self.moves += 1
             self.jumps += 1
@@ -483,6 +514,8 @@ class QuadTracker:
         self.adopted = self.calibrated.copy()
         self.agreeing = 0
         self._candidate = None
+        self._centre_agreeing = 0
+        self._centre_candidate = None
         self._disputed_since = None
         self._off_since = None
         self.misses = 0

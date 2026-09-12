@@ -675,6 +675,82 @@ ok_('...and rejects a real jump', not T.near(quad_at(400, 400), start, 0.10))
 half = T.ease_toward(start, quad_at(500, 140), 0.5)
 eq('easing halfway lands halfway', round(T.distance(half, quad_at(450, 140))), 0.0)
 
+# --- the centre recovery, which had never once fired -------------------------
+#
+# "A screen that holds the centre, while the corners do not, is not a candidate
+# to be weighed against a stored size — it is the phone." The branch that says
+# so was reading `agreeing`, and the size gate twelve lines below it sets
+# `agreeing = 0` on every refusal. The centre rule exists FOR candidates the
+# size gate refuses, so it was gated on a counter that its own precondition had
+# just cleared: it could never reach two.
+#
+# Measured before the fix, over 40 checks of a phone re-seated to 0.72x sitting
+# on the frame centre with the corners parked aside: `centred` stayed 0. The rig
+# did get out of that state, but by the 30-second re-baseline — half a minute of
+# reading through corners that are on the wrong thing, which is most of an
+# offer's life.
+_CW, _CH = 1200, 900
+_MID = (_CW // 2, _CH // 2)
+_CAL = np.array([[100, 100], [500, 100], [500, 700], [100, 700]],
+                dtype=np.float32)                      # 400x600, a 2:3 screen
+
+
+def _lit(w, h, cx=None, cy=None):
+    """A dark cabin with one lit, text-bearing rectangle in it."""
+    cx = _MID[0] if cx is None else cx
+    cy = _MID[1] if cy is None else cy
+    f = np.full((_CH, _CW), 18, np.uint8)
+    x0, y0 = cx - w // 2, cy - h // 2
+    cv2.rectangle(f, (x0, y0), (x0 + w, y0 + h), 235, -1)
+    for yy in range(y0 + 12, y0 + h - 12, 26):
+        cv2.rectangle(f, (x0 + 14, yy), (x0 + w - 14, yy + 9), 24, -1)
+    return f
+
+
+def _watch(frame, checks=20):
+    """Show the tracker one scene for a while; return it."""
+    tr = T.QuadTracker(_CAL, scale=(1, 1), calibrated=_CAL)
+    at = 1000.0
+    for _ in range(checks):
+        at += 0.4
+        tr.update(frame, now=at)
+    return tr
+
+
+_reseated = _lit(int(400 * 0.72), int(600 * 0.72))
+_got = _watch(_reseated)
+ok_('a phone re-seated smaller, on the centre, is adopted at all (%d)'
+    % _got.centred, _got.centred >= 1)
+# Quickly, which is the whole value of it: the re-baseline already got there
+# eventually, so a recovery that took as long would be worth nothing.
+_quick = T.QuadTracker(_CAL, scale=(1, 1), calibrated=_CAL)
+_at, _fired = 1000.0, None
+for _i in range(1, 21):
+    _at += 0.4
+    _quick.update(_reseated, now=_at)
+    if _quick.centred and _fired is None:
+        _fired = _i
+ok_('...within a few checks rather than the 30-second re-baseline (check %s)'
+    % _fired, _fired is not None and _fired <= 5)
+ok_('...and the size reference moves with it, or the next check refuses it again',
+    np.allclose(_got.adopted, _got.quad))
+
+# The guards that keep it from being a way for the corners to wander. Both are
+# demonstrated rather than asserted from the comment, because this branch spent
+# its whole life unreachable and nothing had ever exercised what it refuses.
+#
+# Shape first: same_shape against the CALIBRATION is inside _holds_the_centre,
+# so a bright thing of the wrong shape is refused before it is ever counted.
+eq('a wide bright thing on the centre is not the phone',
+   _watch(_lit(520, 240)).centred, 0)
+eq('...nor a tall narrow one', _watch(_lit(150, 560)).centred, 0)
+# ...and the corners already being on the phone is not something to correct.
+eq('a phone the corners are already on is left alone',
+   _watch(_lit(400, 600, cx=300, cy=400)).centred, 0)
+# A frame with no screen in it must not count toward the rule either.
+eq('an empty mount adopts nothing',
+   _watch(np.full((_CH, _CW), 18, np.uint8)).centred, 0)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d tracker checks passed' % ok)
 sys.exit(1 if bad else 0)

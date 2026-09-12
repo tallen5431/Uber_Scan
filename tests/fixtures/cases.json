@@ -1394,6 +1394,20 @@
    "expect": { "state": "doubt", "doubt": "leg", "untimedMiles": 14.0 }
   },
   {
+   "name": "an untimed leg whose distance will not read either",
+   "_why": "LEG_ORPHAN is compiled case-insensitively, so DC matches L and q as well as the characters it lists, and to_number has no entry for either: (3.q mi) is a bracket this pattern really produces. With a second orphan already holding a number the Python port compared None against 9.0 and raised TypeError out of parse() - a read that raises is a card the rig does not read - while the browser port returned 9. The orphan that will not coerce is skipped now, in both.",
+   "text": "$12.00 4 min (1.0 mi) away ll min (9.0 mi) trip ll min (3.q mi) total",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "doubt", "doubt": "leg", "untimedMiles": 9.0 }
+  },
+  {
+   "name": "...and when NO orphan on the card will read as a number",
+   "_why": "Then a leg is known to be untimed and its size is unknown, which is not the same as nothing being missing. Unknown is not small - it is the same case as a reading with no distance at all - so the verdict is still withheld. Returning None here and letting the rule read it as 'nothing missing' is what silently dropped the refusal.",
+   "text": "$12.00 4 min (1.0 mi) away ll min (3.q mi) trip",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "doubt", "doubt": "leg", "untimedMiles": null }
+  },
+  {
    "name": "a leg it could not time, on a card whose total it could",
    "_why": "The trip leg lost its minutes, but the card also printed a total and THAT read - so the journey in hand is the whole journey and nothing is missing from the rate. A rule keyed on shortATime would refuse this card; one that weighs the orphan against what the reading holds does not.",
    "text": "$20.00 5 min (2.0 mi) away ll min (9.0 mi) trip 30 min (11.0 mi) total",

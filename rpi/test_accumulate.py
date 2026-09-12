@@ -1019,6 +1019,54 @@ _still = acc.add(P.parse(_LOST))
 eq('...and a second frame without it does not manufacture one',
    (_still['toPickupMinutes'], _still['toPickupMiles']), (None, None))
 
+# --- the two ends, re-derived from the window like everything else ----------
+#
+# `places` is rebuilt from the whole window because "an address is exactly the
+# field a single frame loses" — and then `pickup` and `dropoff` were still
+# whatever dict(parsed) copied off the frame that lost it. So a card whose map
+# was read three times and lost on the fourth merged with BOTH addresses in
+# `places` and None in both ends.
+#
+# Those two fields are what the journal row stores, what map.html pins, and
+# what the stacking advice asks sameArea() about. The window's whole reason for
+# keeping the addresses stopped at the field that everything downstream uses.
+_MAPPED = ('$16.05 5 min (1.1 mi) away Celebration Blvd, Acworth '
+           '18 min (7.3 mi) trip N Cobb Pkwy NW, Acworth')
+_NO_MAP = '$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip'
+
+acc = OfferAccumulator()
+for _ in range(3):
+    _seen = acc.add(P.parse(_MAPPED))
+eq('both ends are read while the map is legible',
+   (_seen['pickup'], _seen['dropoff']),
+   ('Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth'))
+_lost = acc.add(P.parse(_NO_MAP))
+eq('...and the window keeps the addresses when a frame loses them',
+   _lost['places'], ['Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth'])
+eq('...including the two ends, which are what everything downstream reads',
+   (_lost['pickup'], _lost['dropoff']),
+   ('Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth'))
+
+# The other direction, and the one that matters more: a card that names only
+# the shop must not acquire a destination from the merge. 48 of one shift's 103
+# cards print "Customer dropoff" and no address, and recording the restaurant
+# as where the customer lives was the commonest wrong answer this parser gave.
+#
+# The fixture deliberately HAS a place in it, so a merge that simply took the
+# last thing in the list would be caught: a rule that returns None because the
+# list is empty proves nothing about a rule.
+_SHOP_ONLY = 'Deliver now $9.00 Pickup Kroger (Chastain) 22 min (4.6 mi) total'
+acc = OfferAccumulator()
+for _ in range(2):
+    _cust = acc.add(P.parse(_SHOP_ONLY))
+ok_shop = bool(_cust['places'])
+eq('the fixture really does name somewhere, or the next check is empty',
+   ok_shop, True)
+eq('a card that names only the shop still has no dropoff',
+   _cust['dropoff'], None)
+eq('...and the shop is where it starts, which is all the card said',
+   _cust['pickup'], _cust['places'][0] if _cust['places'] else None)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

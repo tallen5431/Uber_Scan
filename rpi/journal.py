@@ -61,7 +61,9 @@ import offer_parser as OP                                     # noqa: E402
 # hundred offers, so a year of driving is a few megabytes and there is nothing
 # to be gained by throwing any of it away. This exists so that a bug writing on
 # every frame instead of every offer cannot quietly fill the card: past the cap
-# the file is rolled once and a fresh one started.
+# the live file is moved aside and a fresh one started. Every roll is kept —
+# `.1` is the newest, `.2` the one before it — because the alternative, which
+# this did for a while, is that the second roll silently deletes the first.
 MAX_BYTES = 64 * 1024 * 1024
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -346,9 +348,50 @@ class Journal:
             return 0
 
     def _roll_if_huge(self):
-        if self.cap and os.path.exists(self.path) \
-                and os.path.getsize(self.path) > self.cap:
-            os.replace(self.path, self.path + '.1')
+        """Start a fresh file past the cap, keeping every one that came before.
+
+        `os.replace` overwrites, and this used to move the live file straight
+        onto `<journal>.1` every time the cap was passed — so the SECOND roll
+        deleted the first archive, with no exception, no complaint, and nothing
+        left on disk to say it had happened. Measured on the same mechanism at a
+        300-byte cap: 39 rows written, 9 still findable anywhere afterwards.
+
+        That is the file this module's own docstring calls append-only and
+        irreplaceable, and it is the failure mode of the very thing the cap
+        exists for. The comment on MAX_BYTES says the cap is there so a bug
+        writing on every frame instead of every offer cannot quietly fill the
+        card; in exactly that case this rolled again and again and shredded
+        everything behind it.
+
+        The chain is shifted instead: `.1` becomes `.2`, `.2` becomes `.3`, and
+        the live file becomes `.1`. Nothing is destroyed, `.1` stays the newest
+        archive — which is what server.js stats to notice a roll — and a card
+        that really is filling says so by filling, which is recoverable, rather
+        than by quietly deleting a year of driving, which is not.
+        """
+        if not (self.cap and os.path.exists(self.path)
+                and os.path.getsize(self.path) > self.cap):
+            return
+        # From the top down, so nothing is overwritten on the way.
+        highest = 0
+        while os.path.exists('%s.%d' % (self.path, highest + 1)):
+            highest += 1
+        for n in range(highest, 0, -1):
+            os.replace('%s.%d' % (self.path, n), '%s.%d' % (self.path, n + 1))
+        os.replace(self.path, self.path + '.1')
+        if highest:
+            # Worth saying out loud, and not through _complain: that one says
+            # "could not use the offer journal", which is the opposite of what
+            # happened here. The journal was used, kept, and moved aside.
+            #
+            # One roll is the backstop doing its job. A second means a hundred
+            # and twenty-eight megabytes of journal, which on a rig that
+            # produces a few megabytes a year is a bug writing on every frame
+            # rather than a season of driving.
+            print('the offer journal has rolled %d times and every roll has '
+                  'been kept (%s.1 through .%d). A few megabytes a year is '
+                  'normal, so this many is worth looking at.'
+                  % (highest + 1, self.path, highest + 1))
 
     # How long the same complaint stays quiet before it is said again.
     #

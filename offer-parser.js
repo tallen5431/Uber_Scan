@@ -1227,11 +1227,13 @@
    *
    * The largest, where there is more than one: what is asked downstream is how
    * much of the journey went missing, and the biggest missing piece answers it.
-   * null when nothing is missing. Not when the number will not read: LEG_ORPHAN
-   * matches ASCII digits and the stand-ins toNumber was written for and nothing
-   * else, so every token the pattern can produce becomes a number - checked by
-   * brute force over all 10,709,310 of them that carry a real digit, none of
-   * which fails. Hence no guard here for one that does. */
+   * null when nothing is missing, and ALSO null when an orphan was found and
+   * would not become a number - those two are told apart by `shortATime`, which
+   * is true only in the second case. See mostOfTheJourneyMissing.
+   *
+   * LEG_ORPHAN is built with the 'i' flag, so DC matches `L` and `q` as well as
+   * the characters it lists, and toNumber has no entry for either: `(3.q mi)`
+   * is a bracket this pattern really produces. */
   function untimedMiles(text, legs) {
     var found = orphanDistances(text, legs), worst = null, i, value;
     for (i = 0; i < found.length; i++) {
@@ -1251,7 +1253,11 @@
      how long this job takes. */
   function mostOfTheJourneyMissing(parsed) {
     var lost = parsed.untimedMiles, held = parsed.miles;
-    if (typeof lost !== 'number' || !isFinite(lost)) return false;
+    // No number for it: either nothing is missing, or a leg IS untimed and its
+    // distance would not read either - a journey missing a piece of unknown
+    // size, which is refused for the same reason a reading with no distance at
+    // all is. `shortATime` is what tells the two apart.
+    if (typeof lost !== 'number' || !isFinite(lost)) return !!parsed.shortATime;
     if (typeof held !== 'number' || !isFinite(held)) return true;
     return lost > held;
   }

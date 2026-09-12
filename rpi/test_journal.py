@@ -850,6 +850,43 @@ ok_('...and the row is written rather than refused', _typed['pay'] == 1030.0)
 ok_('...and marked not to be trusted, as it would have been either way',
     _typed['suspect'] is True)
 
+# --- the cap is a backstop, and it was destroying what it moved aside --------
+#
+# `_roll_if_huge` moved the live file onto `<journal>.1` with os.replace, which
+# overwrites — so the SECOND roll deleted the first archive, with no exception,
+# no complaint, and nothing left on disk to say it had happened. Measured on the
+# same mechanism at a small cap: 39 rows written, 9 still findable afterwards.
+#
+# That is the file this module's docstring calls append-only and irreplaceable,
+# and it is the failure mode of the very thing the cap is for: MAX_BYTES says
+# it exists so a bug writing on every frame instead of every offer cannot
+# quietly fill the card, and in exactly that case this rolled again and again
+# and shredded everything behind it.
+_roll_dir = tempfile.mkdtemp()
+_roll_path = os.path.join(_roll_dir, 'offers.jsonl')
+_book = JR.Journal(_roll_path, cap=300)
+for _i in range(1, 40):
+    _book.append({'v': 3, 'id': 'roll%d' % _i, 'seq': 1,
+                  'at': 1_789_000_000_000 + _i, 'pay': 10.0})
+_files = sorted(f for f in os.listdir(_roll_dir) if f.startswith('offers.jsonl'))
+_on_disk = 0
+for _f in _files:
+    _on_disk += sum(1 for _l in open(os.path.join(_roll_dir, _f)) if _l.strip())
+eq('every row written is still on the card after several rolls (%d files)'
+   % len(_files), _on_disk, 39)
+ok_('...with more than one roll behind it, or the check above is trivial',
+    len(_files) >= 3)
+# `.1` stays the NEWEST archive, because that is the one server.js stats to
+# notice a roll at all.
+_newest = os.path.join(_roll_dir, 'offers.jsonl.1')
+ok_('...and .1 is still the most recent one moved aside', os.path.exists(_newest))
+_ids = [json.loads(_l)['id'] for _l in open(_newest) if _l.strip()]
+_live = [json.loads(_l)['id'] for _l in open(_roll_path) if _l.strip()]
+ok_('...holding the rows just before the live file, not the oldest ones (%r)'
+    % (_ids[:2],),
+    _ids and _live and int(_ids[-1][4:]) == int(_live[0][4:]) - 1)
+shutil.rmtree(_roll_dir, ignore_errors=True)
+
 # --- a line that will not read is an offer that is gone ----------------------
 #
 # Skipping it is right: the file is append-only, it cannot be repaired, and one

@@ -618,6 +618,32 @@ class OfferAccumulator:
         # recognise the job, and the failure that matters is not seeing one at
         # all.
         merged['places'] = list(self.places) or (parsed.get('places') or [])
+        # ...and the two ends re-derived from that list, not left as whichever
+        # frame happened to be last read them.
+        #
+        # The line above exists because "an address is exactly the field a
+        # single frame loses", and then `pickup` and `dropoff` were still
+        # whatever dict(parsed) copied off the losing frame. A card whose map
+        # was read three times and lost on the fourth merged with BOTH
+        # addresses in `places` and None in both ends — measured on
+        # 'Celebration Blvd, Acworth' / 'N Cobb Pkwy NW, Acworth'. Those two
+        # fields are what the journal row stores, what map.html pins, and what
+        # the stacking advice asks sameArea() about, so the window's whole
+        # reason for keeping the addresses stopped at the field nothing uses.
+        #
+        # The parser's own rules are called rather than restated, as with
+        # to_pickup below: find_dropoff carries the refusal for a card that
+        # prints "Customer dropoff" and no address, and a second copy of a
+        # refusal is a second thing to get wrong.
+        #
+        # `text` is deliberately NOT passed. That argument is how find_dropoff
+        # sees the card saying it will not name a destination, and the merged
+        # text is one frame's — the one that happened to be last. Left out, the
+        # merge keeps the ends it can see in the places the window collected,
+        # and the per-frame refusal has already done its work: a frame that saw
+        # "Customer dropoff" contributed no dropoff to `self.places`.
+        merged['pickup'] = OP.find_pickup(merged['places'])
+        merged['dropoff'] = OP.find_dropoff(merged['places'])
         # Voted the same way, and for the stronger reason: this one *is* the
         # duration. _consensus takes the majority and breaks a tie with the
         # larger value, which for minutes-since-midnight is the later deadline —

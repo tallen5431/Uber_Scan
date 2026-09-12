@@ -3054,6 +3054,100 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### A brute force run against the wrong flags
+
+Last week's `untimed_miles` deleted its own guard for a token that will not
+become a number, on the strength of a brute force over every token `DC` can
+produce — 10,709,310 of them, none of which failed. The brute force was run
+against `DC` **case-sensitively**. `LEG_ORPHAN` is compiled `IGNORECASE`:
+
+    DC case-sensitive: 0123456789BIOQSZbilosz
+    DC IGNORECASE    : 0123456789BILOQSZbiloqsz
+
+`L` and `q` are in the class and `DIGIT_FIX` has no entry for either, so
+`(3.q mi)` is a bracket the pattern really produces and `to_number` answers
+None for it. With a second orphan already holding a number the comparison was
+`None > 9.0` — a **TypeError out of parse()**, on the Pi, where the browser port
+returned 9. A read that raises is a card the rig does not read.
+
+The lesson is narrower than "always guard": a claim about what a regex can
+produce has to be made against the flags it is compiled with.
+
+Restoring the skip is half of it. The other half is that an orphan which will
+not coerce still means a leg went untimed — the size is simply unknown, and
+unknown is not small. `most_of_the_journey_missing` refuses on `shortATime`
+when there is no number, the same way it refuses a reading with no distance at
+all. Returning None and letting the rule read it as "nothing missing" would
+have dropped the refusal exactly where the reading is worst.
+
+### Two ends the window kept and then threw away
+
+`_merged` rebuilds `places` from the whole window because "an address is exactly
+the field a single frame loses" — and then `pickup` and `dropoff` were still
+whatever `dict(parsed)` copied off the frame that lost it. A card whose map was
+read three times and lost on the fourth merged like this:
+
+    places  : ['Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth']
+    pickup  : None
+    dropoff : None
+
+Those two fields are what the journal row stores, what `map.html` pins, and what
+the stacking advice asks `sameArea()` about. The window's whole reason for
+keeping the addresses stopped one field short of everything that uses them. Both
+are re-derived from the merged places now, through the parser's own rules —
+including the refusal for a card that prints "Customer dropoff" and no address,
+which is the fault `find_dropoff` was corrected for in the first place.
+
+### The cap that deleted what it moved aside
+
+`_roll_if_huge` moved the live journal onto `<journal>.1` with `os.replace`,
+which overwrites. So the **second** roll deleted the first archive — no
+exception, no complaint, nothing on disk to say it had happened. On the same
+mechanism at a small cap: **39 rows written, 9 still findable afterwards.**
+
+That is the failure mode of the very thing the cap is for. `MAX_BYTES` says it
+exists so a bug writing on every frame instead of every offer cannot quietly
+fill the card, and in exactly that case this rolled again and again and shredded
+everything behind it. The chain is shifted now — `.1` becomes `.2`, `.2` becomes
+`.3` — so nothing is destroyed and `.1` stays the newest, which is what
+server.js stats to notice a roll at all. A second roll also says so out loud,
+because a hundred and twenty-eight megabytes of journal on a rig that makes a
+few megabytes a year is a bug, not a season.
+
+### A recovery that had never once fired
+
+`track.py` has a rule for the state the rest of the tracker cannot get out of:
+*"a screen that holds the centre, while the corners do not, is not a candidate
+to be weighed against a stored size — it is the phone."* It is guarded by
+`self.agreeing >= self.centre_agree`, and the size gate twelve lines below sets
+`agreeing = 0` on every refusal.
+
+The centre rule exists **for** candidates the size gate refuses. It was gated on
+a counter that its own precondition had just cleared, so it could never reach
+two. Measured over 40 checks of a phone re-seated to 0.72x sitting on the frame
+centre, with the corners parked aside: `centred` stayed 0.
+
+The rig did get out of that state — by the 30-second re-baseline, which fired
+and moved the corners. So this was a redundancy as well as a dead branch, and
+what it was worth was speed: half a minute of reading through corners that are
+on the wrong thing is most of an offer's life. It has its own counter now and
+adopts on the third check. Its guards were never exercised in that whole time,
+so they are pinned too: a wide bright thing is not the phone, nor a tall narrow
+one, nor a phone the corners are already on, nor an empty mount.
+
+### Two copies of the crop, and a multiplier that was never checked
+
+`crop_box` and `read_height` existed byte for byte on both `Geometry` and
+`Scanner`, and both copies were live: Geometry's are what `_look` reads,
+Scanner's are what scan_pi reads for the health line and for the crop outline on
+the live view. Two answers to one question drift, and these two decide which
+pixels tesseract is handed. Scanner's delegate to Geometry now.
+
+And the module docstring's headline argument — *"four times the pixels measured
+26% more time, so the wins are in not running it, not in shaving pixels"* — has
+the arithmetic wrong. 1.83MP against 0.76MP is **2.4** times the pixels, not
+four. The 26% was measured; the multiplier attached to it was not.
+
 ### One bad byte, and the whole journal read as empty
 
 A twelve-agent read of the tree, each agent held to this file's own standards
@@ -5779,7 +5873,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5547 checks
+npm test                # all 35 suites, 5576 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5793,7 +5887,7 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 714 checks, the shared corpus
+node tests/corpus.test.js       # 720 checks, the shared corpus
 node tests/parser.test.js       #  95 on the browser side alone
 node tests/advice.test.js       # 200 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
@@ -5801,8 +5895,8 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 751 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 238 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 757 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 244 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
@@ -5811,8 +5905,9 @@ python3 rpi/test_exposure.py    # 175 on flicker, brightness, gain and
                                 #     exposure, on both ends of running out,
                                 #     and on an empty mount in the sun never
                                 #     being reported as a phone
-python3 rpi/test_track.py       # 131 on following the phone as it drifts
-python3 rpi/test_journal.py     # 221 on keeping one row per offer, on a
+python3 rpi/test_track.py       # 138 on following the phone as it drifts, and
+                                #     on the centre recovery that never fired
+python3 rpi/test_journal.py     # 225 on keeping one row per offer, on a
                                 #     distrusted distance always saying so twice,
                                 #     and on the row agreeing with the screen
                                 #     about why a verdict was withheld

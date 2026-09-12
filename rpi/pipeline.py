@@ -10,10 +10,11 @@ The speed of this thing comes from what it refuses to do:
   * and it does not spend a third of each read compressing a PNG nobody wants
     (see stage_for_ocr).
 
-Tesseract's cost is mostly the recogniser walking the text, not the image: four
-times the pixels measured 26% more time. So the wins are in not running it, and
-in not making it read the same page twice (see OCR_CONFIG) — not in shaving
-pixels off a picture it was going to read either way.
+Tesseract's cost is mostly the recogniser walking the text, not the image:
+2.4 times the pixels — 1.83MP against 0.76MP — measured 26% more time. So the
+wins are in not running it, and in not making it read the same page twice (see
+OCR_CONFIG) — not in shaving pixels off a picture it was going to read either
+way.
 
 ...and the largest one was in not *starting* it. That paragraph was written
 about a `tesseract` process spawned per read, and a fresh process re-loads and
@@ -689,8 +690,11 @@ def preprocess(card, dark=None):
 # How much it is worth is smaller than it looks, and worth writing down so the
 # next person does not spend the read budget here. "Tesseract's cost is linear
 # in pixels" is folklore; measured on a real card it is nothing like linear —
-# 1.83MP against 0.76MP is four times the pixels for 26% more time, because the
-# cost is the recogniser walking the text rather than the image. Trimming to
+# 1.83MP against 0.76MP is 2.4 times the pixels for 26% more time, because the
+# cost is the recogniser walking the text rather than the image. (It said "four
+# times" here and in the module docstring for a while, which is the same two
+# measured megapixel figures with the arithmetic done wrong — and that
+# multiplier is what the whole paragraph rests on.) Trimming to
 # this budget also scales text down, and a card trimmed from 900px to 650px
 # still read correctly, so neither side of the trade is large. It stays because
 # an image nobody asked for is work nobody wanted, not because it is a lever.
@@ -1432,8 +1436,16 @@ class Scanner:
         an UberX card and a Shop & Deliver card are different heights and a
         two-leg card is taller than a one-leg card. Deriving it costs nothing
         and is right for the card actually in front of the camera.
+
+        Delegated rather than restated. This and `read_height` below were a
+        byte-for-byte second copy of Geometry's, and both copies were live:
+        Geometry's are what `_look` reads, these are what scan_pi reads for the
+        health line and for the crop outline on the live view. Two answers to
+        one question drift, and the two that would have drifted here decide
+        which pixels tesseract is handed — so a shift could have been read
+        through one crop and reported as another.
         """
-        return self.roi if self.roi else centred_roi(self.card_share)
+        return self.geometry().crop_box
 
     @property
     def read_height(self):
@@ -1456,11 +1468,11 @@ class Scanner:
         enough to clip the map away the quad is most of the way to being the
         card already, and warping as though it were half a screen makes a
         picture nearly twice as tall as the reader can use.
+
+        Delegated, for the reason given on `crop_box` above: Geometry is the one
+        home for both formulas.
         """
-        if not self.ocr_height:
-            return self.card_height
-        return int(min(max(self.card_height, round(self.ocr_height / self.card_share)),
-                       MAX_READ_HEIGHT))
+        return self.geometry().read_height
 
     def _motion(self, frame, scale=None):
         """How much the picture changed, over the phone rather than the cabin.

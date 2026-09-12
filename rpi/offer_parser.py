@@ -947,16 +947,27 @@ def untimed_miles(text, legs):
 
     The largest, where there is more than one: what is being asked downstream is
     how much of the journey went missing, and the biggest missing piece answers
-    it. None when nothing is missing. Not when the number will not read:
-    LEG_ORPHAN matches ASCII digits and the stand-ins to_number was written for
-    and nothing else, so every token the pattern can produce becomes a number.
-    Checked by brute force over all 10,709,310 of them that carry a real digit
-    — none fails — which is why there is no guard here for one that does. A
-    branch no input can reach is a branch no check can fail on.
+    it. None when nothing is missing, and ALSO None when an orphan was found and
+    would not become a number — those two are told apart by `shortATime`, which
+    is true only in the second case. See most_of_the_journey_missing.
+
+    There was no guard here for a token that will not coerce, on the strength of
+    a brute force over every token DC can produce. The brute force was run
+    against DC case-sensitively and LEG_ORPHAN is compiled IGNORECASE, so the
+    class also matches `L` and `q` — for which DIGIT_FIX has no entry and
+    to_number answers None. `(3.q mi)` is a bracket this pattern happily
+    produces, and with a second orphan already holding a number the comparison
+    below was `None > 9.0`: a TypeError out of parse(), on the Pi, where the
+    browser port returned 9. A read that raises is a card the rig does not read.
+
+    The lesson is narrower than "always guard": it is that a claim about what a
+    regex can produce has to be made against the flags it is compiled with.
     """
     worst = None
     for m in _orphan_distances(text, legs):
         value = to_number(m.group(1))
+        if value is None:
+            continue
         if worst is None or value > worst:
             worst = value
     return worst
@@ -978,7 +989,14 @@ def most_of_the_journey_missing(parsed):
     """
     lost = parsed.get('untimedMiles')
     if not isinstance(lost, (int, float)) or isinstance(lost, bool):
-        return False
+        # No number for it. Either nothing is missing — in which case
+        # `shortATime` is false and there is nothing to refuse — or a leg IS
+        # untimed and its distance would not read either, which is a journey
+        # missing a piece of unknown size. Unknown is not small: it is the same
+        # case as a reading with no distance at all, below, and it is refused
+        # for the same reason. Silently dropping the refusal here is what the
+        # first version of this did.
+        return bool(parsed.get('shortATime'))
     held = parsed.get('miles')
     if not isinstance(held, (int, float)) or isinstance(held, bool):
         return True
