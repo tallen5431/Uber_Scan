@@ -1354,6 +1354,60 @@
  ],
  "rate": [
   {
+   "name": "a leg that lost its minutes, and took the whole trip with it",
+   "_why": "The approach leg read, the trip leg did not, and the rate came out over the drive to the rider: $220.80/hr green against a true $12.40. Every figure in it is one the card printed, so doubt() passes it correctly - $18.40 and 5 minutes are each ordinary, and the pair clears SANE_RATE at the ten-minute floor. What the card also printed is the 7.8 miles beside the minutes that did not read, and that is what says most of the journey is absent.",
+   "text": "UberX $18.40 5 min (2.1 mi) away l hr 24 min (7.8 mi) trip",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "doubt", "doubt": "leg", "untimedMiles": 7.8 }
+  },
+  {
+   "name": "...and the same card once the hour reads",
+   "text": "UberX $18.40 5 min (2.1 mi) away 1 hr 24 min (7.8 mi) trip",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "no", "doubt": null, "untimedMiles": null, "perHour": 12.4 }
+  },
+  {
+   "name": "the leg that went missing was only the walk to the door",
+   "_why": "The mirror case, and the reason this is decided on the orphan's distance rather than on shortATime alone: here it is the APPROACH that lost its minutes, so the reading holds 7.3 of the journey's 8.4 miles and the rate is over by 15%, not by a factor of eight. A hedge, not a refusal - withholding the verdict here would cost the driver a usable answer on a card the rig very nearly read.",
+   "text": "$16.05 \u0663 min (1.1 mi) away 20 min (7.3 mi) trip",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "go", "doubt": null }
+  },
+  {
+   "name": "...and the same card with the trip leg lost instead",
+   "text": "$16.05 3 min (1.1 mi) away \u0662\u0660 min (7.3 mi) trip",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "doubt", "doubt": "leg", "untimedMiles": 7.3 }
+  },
+  {
+   "name": "a leg it could not time, on a reading with no distance at all",
+   "_why": "Both legs lost their minutes, so neither's distance was attributed and the reading is a duration with no miles under it. Knowing nothing about how far this job goes is not a reason to trust the minutes - it is the same case as holding less of the journey than went missing, and the rule has to say so or a card that read WORSE gets the verdict a card that read badly is refused.",
+   "text": "$20.00 30 min total l min (2.0 mi) away ll min (9.0 mi) trip",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "doubt", "doubt": "leg", "untimedMiles": 9.0 }
+  },
+  {
+   "name": "two legs untimed, and it is the bigger one that counts",
+   "_why": "What is being asked is how much of the journey went missing, so the biggest missing piece answers it. Taking the smaller would understate the damage on every card that lost more than one leg.",
+   "text": "$12.00 4 min (1.0 mi) away ll min (9.0 mi) trip ll min (14.0 mi) total",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "doubt", "doubt": "leg", "untimedMiles": 14.0 }
+  },
+  {
+   "name": "a leg it could not time, on a card whose total it could",
+   "_why": "The trip leg lost its minutes, but the card also printed a total and THAT read - so the journey in hand is the whole journey and nothing is missing from the rate. A rule keyed on shortATime would refuse this card; one that weighs the orphan against what the reading holds does not.",
+   "text": "$20.00 5 min (2.0 mi) away ll min (9.0 mi) trip 30 min (11.0 mi) total",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "go", "doubt": null, "minutes": 30 }
+  },
+  {
+   "name": "a stated distance nobody timed, no bigger than the journey held",
+   "_why": "A stacked card: the (4.0 mi) bracket belongs to no leg, so shortATime is true, but the reading already holds 4.0 miles and 36 minutes of it. Nothing is missing that the reading does not already have, and a rule keyed on shortATime alone would have refused this one too.",
+   "text": "$8.00 Guaranteed (4.0 mi) 25 min @ Pickup X (3.1 mi) 11 min @ Pickup Y",
+   "settings": { "target": 25, "costPerMile": 0 },
+   "expect": { "state": "no", "doubt": null }
+  },
+  {
    "name": "the real offer, gross",
    "text": "$7.09 6 items (6 units) 34 min (3.6 mi) total",
    "settings": {

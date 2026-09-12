@@ -139,6 +139,13 @@ class OfferAccumulator:
         # reading the word "total" is enough. Starts True so the first frame's
         # own answer is what it becomes. See OP.distance_without_a_time.
         self.short_a_time = True
+        # ...and how far the missing leg was, for as long as it is missing. The
+        # largest any frame named, because the frames disagree about what they
+        # failed to read and the biggest piece is the one that decides whether
+        # this reading may carry a rate at all. Meaningless once `short_a_time`
+        # goes false, and cleared with it below rather than left to be read as
+        # a live figure. See OP.untimed_miles.
+        self.untimed_miles = None
 
     def _find_slot(self, leg, taken):
         """The slot this reading belongs in, or None if it belongs in no slot yet."""
@@ -356,6 +363,10 @@ class OfferAccumulator:
             self.lone_miles.append((parsed['miles'],
                                     bool(parsed.get('milesHadDecimal'))))
         self.short_a_time = self.short_a_time and bool(parsed.get('shortATime'))
+        lost = parsed.get('untimedMiles')
+        if isinstance(lost, (int, float)) and not isinstance(lost, bool):
+            if self.untimed_miles is None or lost > self.untimed_miles:
+                self.untimed_miles = lost
 
         # What this frame read, kept beside what the others did. Raw where the
         # reader gave it raw: the line breaks are the part a later question is
@@ -583,6 +594,12 @@ class OfferAccumulator:
         # happened to arrive last, so a card the rig had already read properly
         # goes back to unfinished the moment one glare frame loses a leg.
         merged['shortATime'] = self.short_a_time
+        # Tied to the flag above rather than carried on its own. A frame that
+        # read the leg properly answers the question these two exist to ask, so
+        # the distance the earlier frames could not time is no longer a fact
+        # about this reading — and left standing it would go on withholding the
+        # verdict from a card the rig has since read whole.
+        merged['untimedMiles'] = self.untimed_miles if self.short_a_time else None
         # Every distinct frame's reading, so a question about the OCR can be
         # asked of what it really produced rather than of the one frame that
         # happened to win. See `self.texts`.

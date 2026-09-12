@@ -109,8 +109,18 @@ IMPOSSIBLE = dict(UNCERTAIN, state='doubt', doubt='rate', pay=136.0,
                   minutes=10.0, cardMinutes=10.0, billedMinutes=10.0, miles=3.1,
                   perHour=816.0, grossPerHour=816.0, whole=True)
 
+# A card whose trip leg lost its minutes. Every figure in it is one the card
+# really printed — $18.40 and five minutes are each ordinary — so the pair
+# clears every check on the figures, and the rate came out over the drive to
+# the rider instead of the job: $220.80/hr, green, against a true $12.40. What
+# the card also printed is the 7.8 miles beside the minutes that did not read.
+UNTIMED = dict(UNCERTAIN, state='doubt', doubt='leg', pay=18.40,
+               minutes=5.0, cardMinutes=5.0, billedMinutes=5.0, miles=2.1,
+               perHour=220.8, grossPerHour=220.8, whole=False,
+               untimedMiles=7.8)
+
 READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
-            'impossible': IMPOSSIBLE}
+            'impossible': IMPOSSIBLE, 'untimed': UNTIMED}
 
 # ...and every field above has to be one the rig actually sends.
 #
@@ -657,6 +667,19 @@ const framed = (page) => page.waitForFunction(
       label: await page.evaluate(LOOK, '#verdictLabel'),
       rate: await page.evaluate(LOOK, '#perHour'),
       pay: await page.evaluate(LOOK, '#vPay'),
+    };
+
+    // ...and the third kind, where no figure is wrong and the reading is
+    // nonetheless not the offer: the card printed two legs and only one of
+    // them was timed.
+    await page.evaluate((r) => window.__es.push(r), READINGS.untimed);
+    await page.waitForTimeout(200);
+    out.untimed = {
+      label: await page.evaluate(LOOK, '#verdictLabel'),
+      rate: await page.evaluate(LOOK, '#perHour'),
+      pay: await page.evaluate(LOOK, '#vPay'),
+      min: await page.evaluate(LOOK, '#vMin'),
+      warn: await page.evaluate(LOOK, '#warn'),
     };
     await page.close();
     await ctx.close();
@@ -1524,6 +1547,39 @@ try:
            (impossible.get('rate') or {}).get('text'), '--')
         ok_('...while the figures it was working from stay on screen',
             '136' in ((impossible.get('pay') or {}).get('text') or ''))
+
+    # The kind where every figure is one the card printed. $18.40 is an
+    # ordinary payout and five minutes an ordinary leg; the pair clears
+    # SANE_RATE at the ten-minute floor, so nothing about the arithmetic can
+    # refuse it. What is wrong is that the five minutes are the drive to the
+    # rider and the card also said an hour and twenty-four for the trip —
+    # $220.80/hr in green against a true $12.40.
+    ut = got.get('untimed') or {}
+    ok_('the untimed-leg reading was measured', bool(ut.get('label')))
+    if ut.get('label'):
+        label = (ut['label'].get('text') or '').strip()
+        ok_('a reading missing most of its journey is never an accept (%r)' % label,
+            'ACCEPT' not in label)
+        ok_('...and points at the time, which is the half that is short',
+            'TIME' in label)
+        eq('...withholding the rate rather than printing $220.80/hr',
+           (ut.get('rate') or {}).get('text'), '--')
+        # The figures stay: the driver is holding the same card and is the one
+        # who can see the leg the rig could not read.
+        ok_('...while the payout it read stays on screen',
+            '18.4' in ((ut.get('pay') or {}).get('text') or ''))
+        ok_('...and the minutes it was going to divide by',
+            '5' in ((ut.get('min') or {}).get('text') or ''))
+        # The label has room for three words. A driver who reads only
+        # "CHECK THE TIME" learns that a number looks odd, not that the rig is
+        # holding a fraction of the job — so the reason goes where there is
+        # room for it, with the size of the missing piece in it.
+        warn = (ut.get('warn') or {}).get('text') or ''
+        ok_('...saying in words what is missing (%r)' % warn[:70],
+            'could not time' in warn)
+        ok_('...and how much of the journey that was',
+            '7.8 mi' in warn)
+        ok_('...on the glass, not pushed off it', (ut.get('warn') or {}).get('shown'))
 
     # --- a Re-find the scanner refused -----------------------------------
     #

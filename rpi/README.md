@@ -3008,7 +3008,8 @@ accept and is the only place a customer's full address ever appears.
 
 `map.html` is where to look at all of this: it pins what it can, joins the two
 ends of each job, and — the half that matters for checking — lists what it could
-not place and why.
+not place and why. Four things were wrong with the first draft of it, and they
+are in [the section on the map](#four-faults-in-a-page-built-to-find-faults).
 
 **ACCEPT only when the whole range clears the line**, for the same reason a rate
 with no running cost taken off it cannot earn one: a range that straddles the
@@ -3052,6 +3053,134 @@ two links that lead somewhere else — the keypad and the offer log, both read
 parked — stand down, and the five used while the car is moving stay. The layout
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
+
+### Four faults in a page built to find faults
+
+`map.html` exists to let a person check what the rig read, because the rig
+cannot. Driven through a real browser against a stubbed geocoder, it had four
+faults of its own, and the first one is the one that would have cost someone
+else something.
+
+**The rate limit applied to nothing at all.** Nominatim asks for at most one
+request a second and blocks the projects that do not keep to it — and being
+blocked is not one bad run, it is this page not working for anyone who pulls
+this repo. The wait was written, and then asked for at the wrong moment:
+
+```js
+var hit = await lookup(q);                 // lookup() caches its own answer
+...
+if (!cached(q)) await sleep(1100);         // ...so this is never true
+```
+
+`lookup()` writes the answer into the cache before it returns, so the test made
+after it always found the key and always skipped the wait. Every lookup that
+used the network was exempt from the limit; only the ones that *failed* were
+slowed down, since a failure is not cached. Measured against the suite's stub:
+**six questions in 33 milliseconds**, under a rule of one a second. The fix is
+to ask before the call, not after — and the deeper fix is that the query string
+was being built by hand in three places and only one of the three was consulted
+at the right time. It is built in one now. The suite records the gap between
+every pair of questions and holds the smallest to a second: 1105ms measured,
+3ms on the reverted code.
+
+**One bad lookup hid the whole shift.** A geocoder handed a misread street
+answers anyway, with a real place somewhere and the same confidence as the right
+one. That is *exactly* what this page is for — a person spots a pin in Idaho
+instantly, where the rig never could. But `fitBounds` over a set containing that
+pin is a map of the United States with the shift as a single dot, so the one bad
+lookup hides the ninety good ones the driver came to check. Pins further than 75
+miles from the **median** of the rest — the median, because the mean is dragged
+by the very outlier being looked for — are now drawn in red, listed with how far
+out they are, and given no say in where the map looks. 75 miles refuses nothing
+real: a long ride is forty.
+
+Listing them and keeping them off-screen is a contradiction, so each listed
+stray takes the map to it when tapped. A stray that cannot be reached is a claim
+the driver cannot check, which is the thing this page is against.
+
+**A hundred offers at a dozen shops looked like a dozen jobs.** Every job at the
+same merchant geocodes to the same coordinate, and the page was stacking one
+marker per *offer* on the same pixel: popups unreachable under each other, and
+how often a place actually came up — most of what makes a map of a shift worth
+looking at — invisible. One pin per distinct place now, with the number of jobs
+drawn on it, keyed on the place **as the card wrote it** rather than on the
+coordinate: two spellings that happen to resolve to the same point are two
+things the rig read, and what the rig read is the subject.
+
+**And the sidebar lists stopped at twenty-five in silence.** The whole argument
+for that sidebar is that a map showing the fifth it managed reports the rig as
+doing better than it is. A list showing the first twenty-five of twenty-eight
+failures makes the identical mistake one level down. Each list says how many it
+did not show.
+
+Nine mutations, nine caught. The suite gained a pin in Idaho, a place shared by
+three offers, and twenty-six addresses nobody can find — the last two past the
+cap, deliberately, and dated newest so the journal's own ordering does not push
+the one named failure out past it and let a check pass by not running.
+
+### $220.80 an hour, on a card where every figure was right
+
+    UberX $18.40  5 min (2.1 mi) away  l hr 24 min (7.8 mi) trip
+
+The trip leg's hour is an `l`, so that leg has no readable duration and
+`find_legs` refuses it — correctly. The leg is then dropped whole, taking its
+7.8 miles with it, and the journey the rate is worked out over becomes **the
+drive to the rider**: $18.40 over five minutes. **$220.80/hr, green ACCEPT,
+against a true $12.40 PASS.**
+
+Nothing on the panel hedged it, and no check on the figures could. `$18.40` is
+an ordinary payout, `5 min` an ordinary leg, and the pair clears `SANE_RATE` at
+the ten-minute floor by a comfortable margin — `doubt()` passed it, and was
+right to. `is_whole` was already false, so the rig went on resampling, but a
+card whose hour never reads properly stands there in green for the whole life of
+the offer.
+
+**What was wrong was not a number.** It was that most of the journey was not in
+the reading at all — and the card says so, in the distance printed beside the
+minutes that did not read. `shortATime` has been detecting exactly that since
+the orphan-bracket rule was written; it was spent on `is_whole` and on nothing
+else, and `is_whole` only slows the rig down. It never reached the money.
+
+**Which leg went missing decides how bad it is**, and that is the reason this is
+not simply `shortATime`. Two cards from the corpus, one character apart:
+
+| card | reading | true |
+|---|---|---|
+| `$16.05 ٣ min (1.1 mi) away 20 min (7.3 mi) trip` | $48/hr | $42/hr |
+| `$16.05 3 min (1.1 mi) away ٢٠ min (7.3 mi) trip` | **$321/hr** | $42/hr |
+
+The first lost the approach, which costs the journey the two minutes it takes to
+reach the rider — a hedge, not a refusal, and refusing it would cost the driver
+a usable answer on a card the rig very nearly read. The second lost the trip,
+which costs it the job.
+
+`untimed_miles` reads the orphan brackets as numbers rather than counting them,
+and the rule is a comparison: **when the leg that could not be timed is bigger
+than the journey the reading holds, no rate is shown.** 1.1 against 7.3 is a
+hedge; 7.3 against 1.1 is a refusal. No label is needed for it, which matters on
+cards where the labels did not read either. A reading holding no distance at all
+is the same case: knowing nothing about how far a job goes is not a reason to
+trust its minutes.
+
+It joins `doubt` — `'leg'` — so the machinery is the one already there: the
+verdict is withheld, every figure stays on screen because the driver is holding
+the same card, and the row still reaches the journal, because a reading this
+project got wrong is the most useful row in the file. The panel says CHECK THE
+TIME with the reason under it in words, including how much of the trip is
+missing. A frame that reads the leg clears it.
+
+Of 266 corpus cards, eleven carry an orphan distance and **three** change
+verdict — every one of them the catastrophic kind. The stacked card whose
+`(4.0 mi)` belongs to no leg keeps its PASS; the approach-leg case above keeps
+its ACCEPT.
+
+Sixteen mutations, sixteen caught, across both ports and the panel. Two of them
+found real gaps rather than confirming the fix: no corpus card exercised a
+reading with no distance at all, and none had two untimed legs to prove the
+larger is the one that counts. A seventeenth — an orphan whose digits will not
+coerce — could not be caught, and brute force over all **10,709,310** tokens
+`LEG_ORPHAN` can produce says why: not one of them fails to become a number.
+The guard was deleted rather than kept as a line no check can fail on.
 
 ### The focus the shift was pinned at, and the frame it came from
 
@@ -5445,7 +5574,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5384 checks
+npm test                # all 35 suites, 5456 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5459,7 +5588,7 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 691 checks, the shared corpus
+node tests/corpus.test.js       # 714 checks, the shared corpus
 node tests/parser.test.js       #  95 on the browser side alone
 node tests/advice.test.js       # 200 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
@@ -5467,7 +5596,7 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 728 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 751 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 238 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -5523,7 +5652,7 @@ python3 rpi/test_doctor.py      #  51 on the preflight running to the end, and
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 330 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 340 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -5543,9 +5672,12 @@ python3 rpi/test_server.py      #  29 on the server's own edges: two readers of
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
                                 #     is not one
-python3 rpi/test_map.py         #  23 on the map check page: that it asks
-                                #     nobody anything until told to, and that
-                                #     it shows what it could not place
+python3 rpi/test_map.py         #  39 on the map check page: that it asks
+                                #     nobody anything until told to, that it
+                                #     keeps to one geocoder request a second,
+                                #     and that it shows what it could not
+                                #     place — including the pins that landed
+                                #     in another state
 python3 rpi/test_loop.py        #  30 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when

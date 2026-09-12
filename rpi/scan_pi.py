@@ -1315,6 +1315,15 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
         # is looking at the same card and is the one who can tell which of them
         # the camera got wrong.
         'doubt': rate.get('doubt'),
+        # How much of the journey the reading could not time, when that is why
+        # the verdict is being withheld. The panel says it out loud: "CHECK THE
+        # TIME" alone reads as one odd number, where what happened is that the
+        # rig is holding a fraction of the job and knows which fraction.
+        #
+        # Sent for the same reason `uncosted` is, and with its lesson in mind —
+        # a page branch keyed on a field nobody puts on the wire is a notice
+        # that has never once appeared in the car.
+        'untimedMiles': rate.get('untimedMiles'),
         # Whether the rate below is the offer or only a ceiling on it.
         #
         # live.html has had `if (r.uncosted)` since the uncosted cap was

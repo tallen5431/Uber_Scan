@@ -635,6 +635,10 @@
     var say = r.state === 'doubt'
       ? ({ pay: 'Check the pay.', time: 'Check the time.',
            speed: 'Check the distance.',
+           // Named for what the driver has to do about it, like the rest of
+           // these. "Part of the trip did not read" is the cause; looking at
+           // the card's time is the action.
+           leg: 'Check the time, most of the trip did not read.',
            // Both figures can be sane alone and impossible together, so this
            // one names the pair rather than picking a side.
            rate: 'Check the pay and the time.' }[r.doubt] || 'Read that again.')
@@ -1426,6 +1430,12 @@
       el.verdictLabel.textContent =
         { pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
           speed: 'CHECK THE DISTANCE',
+          // The time, because that is what is wrong with it: the reading is
+          // over one leg of a journey the card printed two of, so the minutes
+          // are the drive to the rider and the rate is the job's several times
+          // over. The long version is in the notes below, where there is room
+          // for it; this label has to be read at a glance from the seat.
+          leg: 'CHECK THE TIME',
           rate: 'CHECK PAY AND TIME' }[r.doubt] || 'READ AGAIN';
     } else {
       el.verdictLabel.textContent =
@@ -1539,6 +1549,18 @@
     // a washed-out card.
     if (tooBright) notes.push(TOO_BRIGHT);
     if (tooDim) notes.push(TOO_DIM);
+    // The label above has room for three words. This is where the reason goes,
+    // and it has to be here rather than only in the label, because "CHECK THE
+    // TIME" on its own reads as "one number looks odd" — when what happened is
+    // that the rig is holding a fraction of the journey and knows it.
+    if (r.doubt === 'leg') {
+      notes.push('The card shows a leg this reading could not time'
+                 + (typeof r.untimedMiles === 'number'
+                    ? ' — ' + r.untimedMiles.toFixed(1) + ' mi of it'
+                    : '')
+                 + ', so these minutes are part of the trip, not all of it. '
+                 + 'No rate is shown rather than one several times too high.');
+    }
     // Above the reading-quality notes below, because those describe a card the
     // rig read and this describes the rig not having done a thing the driver
     // asked for. It stands until a Re-find actually works.

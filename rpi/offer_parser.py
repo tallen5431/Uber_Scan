@@ -905,8 +905,8 @@ LEG_ORPHAN = re.compile(
     re.IGNORECASE | ASCII)
 
 
-def distance_without_a_time(text, legs):
-    """True when the card printed a bracketed distance that no leg claimed."""
+def _orphan_distances(text, legs):
+    """Every bracketed distance the card printed that no leg claimed."""
     spans = [(l['start'], l['end']) for l in legs]
     for m in LEG_ORPHAN.finditer(text):
         # The same real-digit rule the minutes beside it keep: a bracket full of
@@ -915,8 +915,74 @@ def distance_without_a_time(text, legs):
             continue
         if any(start <= m.start() and m.end() <= end for start, end in spans):
             continue
+        yield m
+
+
+def distance_without_a_time(text, legs):
+    """True when the card printed a bracketed distance that no leg claimed."""
+    for _ in _orphan_distances(text, legs):
         return True
     return False
+
+
+def untimed_miles(text, legs):
+    """How far the leg that lost its minutes was, if the card said.
+
+    The same orphan brackets `distance_without_a_time` counts, read as numbers
+    rather than counted — because WHICH leg went missing decides how bad the
+    damage is, and the card states that in miles whether or not it labelled
+    anything.
+
+    Losing the approach leg costs a journey the two minutes it takes to reach
+    the rider. Losing the trip leg costs it the job. Both set `shortATime`, and
+    on this driver's own corpus they differ by a factor of eight:
+
+        $16.05 ٣ min (1.1 mi) away 20 min (7.3 mi) trip   -> $48/hr vs a true $42
+        $16.05 3 min (1.1 mi) away ٢٠ min (7.3 mi) trip   -> $321/hr vs a true $42
+
+    One reading is worth showing with a hedge on it. The other is the failure
+    this project exists to refuse. The orphan's own distance is what tells them
+    apart, and it needs no label to read: 1.1 against a journey of 7.3, or 7.3
+    against a journey of 1.1.
+
+    The largest, where there is more than one: what is being asked downstream is
+    how much of the journey went missing, and the biggest missing piece answers
+    it. None when nothing is missing. Not when the number will not read:
+    LEG_ORPHAN matches ASCII digits and the stand-ins to_number was written for
+    and nothing else, so every token the pattern can produce becomes a number.
+    Checked by brute force over all 10,709,310 of them that carry a real digit
+    — none fails — which is why there is no guard here for one that does. A
+    branch no input can reach is a branch no check can fail on.
+    """
+    worst = None
+    for m in _orphan_distances(text, legs):
+        value = to_number(m.group(1))
+        if worst is None or value > worst:
+            worst = value
+    return worst
+
+
+def most_of_the_journey_missing(parsed):
+    """True when the leg this reading could not time is bigger than the ones it
+    could — so the minutes it is about to divide by are the small half.
+
+    Compared against the distance the reading ENDED UP with, from any source,
+    because that is the journey the rate is actually being worked out over. A
+    reading holding 2.1 miles of a card that also printed 7.8 has most of the
+    job missing; one holding 7.3 of a card that also printed 1.1 has the walk
+    to the door missing, which is a hedge, not a refusal.
+
+    Miles it has none of are the same case as miles smaller than the orphan: a
+    reading with no distance at all and a 44-mile leg it could not time knows
+    nothing about how long this job takes.
+    """
+    lost = parsed.get('untimedMiles')
+    if not isinstance(lost, (int, float)) or isinstance(lost, bool):
+        return False
+    held = parsed.get('miles')
+    if not isinstance(held, (int, float)) or isinstance(held, bool):
+        return True
+    return lost > held
 
 
 def legs_short_a_distance(legs, miles=None):
@@ -1788,6 +1854,9 @@ def parse(raw_text):
         # distance_without_a_time: this is not a number, it is the reason the
         # reading is not finished, and is_whole is where it is spent.
         'shortATime': distance_without_a_time(text, legs),
+        # ...and how far that leg was, which is what decides whether this is a
+        # reading to hedge or one to refuse outright. See untimed_miles.
+        'untimedMiles': untimed_miles(text, legs),
         'complete': is_complete(pay, minutes, deadline),
         # What the card says it is. None when the card did not say — the top
         # chip may simply not have been inside the crop — which is different
@@ -2049,6 +2118,29 @@ def rate(parsed, settings=None):
     # and the shopping allowance are the driver's own additions and a card is
     # not misread for having them applied.
     why = doubt(parsed['pay'], card_minutes, miles)
+    # ...and the one kind of wrong rate that no check on the figures can reach,
+    # because every figure in it is a figure the card really printed.
+    #
+    # A leg that lost its minutes is dropped whole, so the journey comes out
+    # over the WRONG leg rather than over a damaged number: $18.40 for the five
+    # minutes it takes to reach the rider, on a card whose trip leg says an
+    # hour and twenty-four. $220.80/hr, green, against a true $12.40 — and
+    # doubt() passes it, correctly, because $18.40 and 5 minutes are each an
+    # ordinary thing for a card to say and the pair clears SANE_RATE at the
+    # ten-minute floor.
+    #
+    # What is wrong is not a number, it is that most of the journey is not in
+    # the reading at all, and the card says so in the distance it printed
+    # beside the minutes that did not read. So this is asked of the shape of
+    # the reading rather than of its arithmetic, and it is asked LAST: a
+    # reading already doubted for its figures keeps the reason it was doubted
+    # for, which is the more specific of the two.
+    #
+    # It withholds the verdict and keeps every figure, exactly as the other
+    # doubts do. The rig goes on resampling — is_whole has been false all
+    # along — and the frame that reads the leg properly clears this with it.
+    if not why and most_of_the_journey_missing(parsed):
+        why = 'leg'
 
     return {
         'ready': True,
@@ -2095,6 +2187,12 @@ def rate(parsed, settings=None):
         # useful row in the file, and one that is quietly dropped cannot be
         # studied or counted. What is withheld is only the verdict.
         'doubt': why,
+        # How much of the journey the reading could not time, when that is
+        # why the verdict is being withheld. On the wire because the panel
+        # says it out loud — "CHECK THE TIME" alone reads as one odd number
+        # rather than as most of the trip being absent — and because a row
+        # in the journal saying only 'leg' cannot be argued with later.
+        'untimedMiles': parsed.get('untimedMiles') if why == 'leg' else None,
         # Whether the rate above is the offer or only a ceiling on it, so a
         # display can say which it is showing rather than leaving two different
         # kinds of number looking identical.

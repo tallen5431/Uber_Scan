@@ -51,6 +51,10 @@
          border: 1px solid var(--line); margin-left: 4px; }
   .tag.bad { color: var(--no); border-color: var(--no); }
   .tag.iffy { color: var(--warn); border-color: var(--warn); }
+  /* Listed strays are the one row here that does something when tapped, so
+     they have to look like it — and be big enough to hit with a thumb. */
+  .row.stray { cursor: pointer; padding: 9px 0; }
+  .row.stray:hover b { text-decoration: underline; }
   .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
   .warnbox { border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px;
              margin: 8px 14px; font-size: 12px; line-height: 1.5; }
@@ -108,6 +112,16 @@
 
   var offers = [];
   var map = null, layer = null;
+  // The marker for each place, by the name the card gave it, so a row in the
+  // sidebar can take the map to the pin it is describing.
+  var marks = {};
+
+  /* How far out of the shift a pin has to be before it is treated as a bad
+     lookup rather than a long trip. A shift happens in one metro; a long ride
+     is forty miles, so seventy-five refuses nothing real and catches the
+     geocoder answering a misread street with a real place in another state.
+     Up here rather than inside the run because the sidebar quotes it. */
+  var FAR_MILES = 75;
 
   function say(text) { el.status.textContent = text; }
 
@@ -130,7 +144,7 @@
         say(offers.length + ' offers · ' + withEnds.length + ' name somewhere · '
             + mappable.length + ' name both ends');
         el.place.disabled = withEnds.length === 0;
-        render([]);
+        render([], {});
       })
       .catch(function (e) { say('could not load: ' + (e && e.message || e)); });
   }
@@ -155,9 +169,32 @@
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
-  function lookup(place) {
+  /* One request a second, and the page has to hold itself to it: Nominatim
+     blocks the projects that do not, and being blocked here means this page
+     stops working for everyone who pulls this repo, not just for one run. */
+  var GAP_MS = 1100;
+
+  /* The string actually searched for, in ONE place.
+   *
+   * It used to be built by hand in three — inside lookup(), in the estimate of
+   * how many were left to do, and in the rate limit — and the third copy was
+   * consulted at the wrong moment, which is how the rate limit came to apply to
+   * nothing at all. lookup() writes the answer into the cache before it
+   * returns, so a check made AFTER it always finds the key present and always
+   * skipped the wait: measured against the map suite's stub, six questions went
+   * out in 33ms under a rule of one a second. Every lookup that used the
+   * network was exempt from the limit and every one that failed was not. */
+  function queryFor(place) {
     var hint = el.hint.value.trim();
-    var query = hint ? place + ', ' + hint : place;
+    return hint ? place + ', ' + hint : place;
+  }
+
+  function remembered(place) {
+    return Object.prototype.hasOwnProperty.call(cache, queryFor(place));
+  }
+
+  function lookup(place) {
+    var query = queryFor(place);
     if (Object.prototype.hasOwnProperty.call(cache, query)) {
       return Promise.resolve(cache[query]);
     }
@@ -198,28 +235,78 @@
       if (o.dropoff) wanted.push(o.dropoff);
     });
     var distinct = wanted.filter(function (v, i, all) { return all.indexOf(v) === i; });
-    var fresh = distinct.filter(function (q) {
-      var hint = el.hint.value.trim();
-      return !Object.prototype.hasOwnProperty.call(cache, hint ? q + ', ' + hint : q);
-    });
+    var fresh = distinct.filter(function (q) { return !remembered(q); });
     say(distinct.length + ' distinct places, ' + fresh.length + ' to look up'
-        + (fresh.length ? ' (about ' + fresh.length + 's)' : ' — all remembered'));
+        + (fresh.length ? ' (about ' + Math.ceil(fresh.length * GAP_MS / 1000) + 's)'
+                        : ' — all remembered'));
 
     var done = 0;
+    var left = fresh.length;
     var found = {};
     for (var i = 0; i < distinct.length; i++) {
       var q = distinct[i];
+      // Asked BEFORE the lookup. Afterwards the answer is already in the cache
+      // and the question "did this use the network" can only be answered wrong.
+      var wasKnown = remembered(q);
       var hit = await lookup(q);                                    // eslint-disable-line no-await-in-loop
       found[q] = hit;
       done++;
+      if (!wasKnown) left--;
       if (done % 3 === 0 || done === distinct.length) {
-        say('looked up ' + done + ' of ' + distinct.length);
+        say('looked up ' + done + ' of ' + distinct.length
+            + (left > 0 ? ' — about ' + Math.ceil(left * GAP_MS / 1000) + 's left' : ''));
       }
-      // Only sleep when the network was actually used.
-      var hint = el.hint.value.trim();
-      if (!Object.prototype.hasOwnProperty.call(cache, hint ? q + ', ' + hint : q)) {
-        await sleep(1100);                                          // eslint-disable-line no-await-in-loop
+      // Only wait when the network was actually used, and never after the last
+      // one: the gap is there to space requests out, and there is nothing left
+      // to space this one from.
+      if (!wasKnown && left > 0) {
+        await sleep(GAP_MS);                                        // eslint-disable-line no-await-in-loop
       }
+    }
+
+    /* --- pins that cannot be in the same shift as the rest ------------------
+     *
+     * A geocoder handed a misread street answers anyway, and the answer is a
+     * real place somewhere: "Daffodll Ln" becomes a Daffodil Lane four states
+     * away, with the same confidence as the right one. Two things go wrong
+     * then, and the second is the worse one.
+     *
+     * It puts a pin in the wrong place — which is what this page is FOR, since
+     * a person spots that instantly where the rig never could.
+     *
+     * And it silently ruins the view for everything else. fitBounds over a set
+     * containing one point eight hundred miles out is a map of the country with
+     * the shift as a single dot, so the one bad lookup hides the ninety good
+     * ones the driver came here to check.
+     *
+     * A shift happens in one metro. Distance from the MEDIAN of the pins, not
+     * from their mean, because the mean is dragged by exactly the outlier being
+     * looked for. The threshold is deliberately generous: a long ride is forty
+     * miles and this refuses nothing under seventy-five, so what it catches is
+     * another state rather than a longer trip than usual.
+     *
+     * They are still drawn, in red, and listed with how far out they are —
+     * refusing to show them would hide the very thing worth seeing. What they
+     * do not get is a say in where the map looks. See FAR_MILES. */
+    function median(values) {
+      var sorted = values.slice().sort(function (a, b) { return a - b; });
+      var mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+
+    var everyPoint = [];
+    distinct.forEach(function (q) { if (found[q]) everyPoint.push(found[q]); });
+    var middle = everyPoint.length
+      ? { lat: median(everyPoint.map(function (p) { return p.lat; })),
+          lon: median(everyPoint.map(function (p) { return p.lon; })) }
+      : null;
+    var strays = {};
+    if (middle) {
+      distinct.forEach(function (q) {
+        if (!found[q]) return;
+        var out = crowMiles(middle, found[q]);
+        if (out > FAR_MILES) strays[q] = out;
+      });
     }
 
     var placed = jobs.map(function (o) {
@@ -232,9 +319,15 @@
       // it. Over it means a pin is in the wrong place.
       var impossible = (crow !== null && stated !== null && crow > stated + 0.5);
       return { offer: o, from: a, to: b, crow: crow, stated: stated,
-               impossible: impossible };
+               impossible: impossible,
+               // How far out of the shift each end landed, when it did. Kept
+               // per end rather than as one flag, because which of the two is
+               // in another state is the whole of what the driver needs to
+               // know to judge it.
+               fromStray: o.pickup ? (strays[o.pickup] || null) : null,
+               toStray: o.dropoff ? (strays[o.dropoff] || null) : null };
     });
-    render(placed);
+    render(placed, strays);
     el.place.disabled = false;
     el.load.disabled = false;
     // Out of the offers that named BOTH ends, which are the only ones that
@@ -264,55 +357,109 @@
     return true;
   }
 
-  function dot(colour) {
-    return L.divIcon({ className: '', iconSize: [12, 12],
-      html: '<div style="width:12px;height:12px;border-radius:50%;background:'
-          + colour + ';border:2px solid #0b0d10"></div>' });
+  /* A dot, with the number of jobs on it when there is more than one. The
+     count is the point: a mount outside one restaurant is twelve offers, and
+     twelve identical pins stacked to the pixel look exactly like one. */
+  function dot(colour, count) {
+    var many = count > 1;
+    var size = many ? 20 : 12;
+    return L.divIcon({ className: '', iconSize: [size, size],
+      html: '<div style="width:' + size + 'px;height:' + size + 'px;'
+          + 'border-radius:50%;background:' + colour + ';border:2px solid #0b0d10;'
+          + 'color:#0b0d10;font:700 11px/' + (size - 4) + 'px system-ui,sans-serif;'
+          + 'text-align:center">' + (many ? count : '') + '</div>' });
   }
 
   function when(at) {
     try { return new Date(at).toLocaleString(); } catch (e) { return String(at); }
   }
 
-  function render(placed) {
+  /* --- one pin per place, not one per offer --------------------------------
+   *
+   * Every job at the same shop geocodes to the same coordinate, so the page
+   * was stacking a marker per offer on the same pixel. On this driver's real
+   * traffic that is a handful of merchants and a hundred offers: the map read
+   * as a dozen jobs, the popups were unreachable under each other, and how
+   * often a place actually came up — which is most of what makes a map of a
+   * shift worth looking at — was invisible.
+   *
+   * Keyed on the place as the CARD wrote it rather than on the coordinate. Two
+   * spellings the geocoder happened to resolve to the same point are two things
+   * the rig read, and this page exists to check what the rig read. */
+  function byPlace(placed) {
+    var seen = {}, order = [];
+    function note(name, point, role, p) {
+      if (!name || !point) return;
+      if (!seen[name]) {
+        seen[name] = { name: name, point: point, roles: {}, jobs: [] };
+        order.push(name);
+      }
+      seen[name].roles[role] = true;
+      seen[name].jobs.push(p);
+    }
+    placed.forEach(function (p) {
+      note(p.offer.pickup, p.from, 'pickup', p);
+      note(p.offer.dropoff, p.to, 'dropoff', p);
+    });
+    return order.map(function (k) { return seen[k]; });
+  }
+
+  function render(placed, strays) {
     if (!ensureMap()) return;
     if (layer) { map.removeLayer(layer); }
     layer = L.layerGroup().addTo(map);
+    strays = strays || {};
     var bounds = [];
+    marks = {};
+
+    byPlace(placed).forEach(function (place) {
+      var out = strays[place.name] || null;
+      // Red for a pin that cannot be in this shift, and it wins over both
+      // roles: whether a wrong coordinate was a pickup or a dropoff is not the
+      // thing to notice about it.
+      var colour = out ? '#f31260'
+                 : place.roles.pickup ? '#17c964' : '#f5a524';
+      var both = place.roles.pickup && place.roles.dropoff;
+      var pays = place.jobs.map(function (p) { return p.offer.pay; })
+                           .filter(function (v) { return typeof v === 'number'; });
+      var marker = L.marker([place.point.lat, place.point.lon],
+                            { icon: dot(colour, place.jobs.length) })
+        .bindPopup('<b>' + esc(place.name) + '</b>'
+                   + (out ? '<br><b>' + out.toFixed(0) + ' mi from everything else '
+                          + '— this pin is almost certainly wrong</b>' : '')
+                   + '<br><span class="note">' + esc(place.point.name) + '</span>'
+                   + '<br>' + place.jobs.length + (place.jobs.length === 1 ? ' job' : ' jobs')
+                   + (both ? ', as both ends'
+                           : place.roles.pickup ? ', picked up here' : ', dropped here')
+                   + (pays.length ? '<br>$' + Math.min.apply(null, pays).toFixed(2)
+                                    + (pays.length > 1
+                                       ? '–$' + Math.max.apply(null, pays).toFixed(2) : '')
+                                  : '')
+                   + '<br><span class="note">' + esc(when(place.jobs[0].offer.at))
+                   + '</span>')
+        .addTo(layer);
+      marks[place.name] = marker;
+      // A pin in another state gets drawn and gets no say in where the map
+      // looks. Including it in the bounds is how one bad lookup turns a map of
+      // a shift into a map of the country with the shift as a single dot.
+      if (!out) bounds.push([place.point.lat, place.point.lon]);
+    });
 
     placed.forEach(function (p) {
-      var money = '$' + (p.offer.pay != null ? p.offer.pay : '?')
-                + ' · ' + (p.offer.minutes != null ? p.offer.minutes : '?') + ' min';
-      if (p.from) {
-        L.marker([p.from.lat, p.from.lon], { icon: dot('#17c964') })
-          .bindPopup('<b>Pickup</b><br>' + esc(p.offer.pickup)
-                     + '<br><span class="note">' + esc(p.from.name) + '</span>'
-                     + '<br>' + esc(money) + '<br>' + esc(when(p.offer.at)))
-          .addTo(layer);
-        bounds.push([p.from.lat, p.from.lon]);
-      }
-      if (p.to) {
-        L.marker([p.to.lat, p.to.lon], { icon: dot('#f5a524') })
-          .bindPopup('<b>Dropoff</b><br>' + esc(p.offer.dropoff)
-                     + '<br><span class="note">' + esc(p.to.name) + '</span>'
-                     + '<br>' + esc(money))
-          .addTo(layer);
-        bounds.push([p.to.lat, p.to.lon]);
-      }
-      if (p.from && p.to) {
-        L.polyline([[p.from.lat, p.from.lon], [p.to.lat, p.to.lon]], {
-          color: p.impossible ? '#f31260' : '#7aa2f7',
-          weight: p.impossible ? 3 : 2,
-          dashArray: p.impossible ? '6 4' : null, opacity: .85
-        }).bindPopup((p.impossible ? '<b>This cannot be right</b><br>' : '')
-            + 'straight line ' + p.crow.toFixed(1) + ' mi'
-            + (p.stated !== null ? ', card said ' + p.stated + ' mi total' : ''))
-          .addTo(layer);
-      }
+      if (!(p.from && p.to)) return;
+      var wrongEnd = p.fromStray || p.toStray;
+      L.polyline([[p.from.lat, p.from.lon], [p.to.lat, p.to.lon]], {
+        color: (p.impossible || wrongEnd) ? '#f31260' : '#7aa2f7',
+        weight: (p.impossible || wrongEnd) ? 3 : 2,
+        dashArray: (p.impossible || wrongEnd) ? '6 4' : null, opacity: .85
+      }).bindPopup(((p.impossible || wrongEnd) ? '<b>This cannot be right</b><br>' : '')
+          + 'straight line ' + p.crow.toFixed(1) + ' mi'
+          + (p.stated !== null ? ', card said ' + p.stated + ' mi total' : ''))
+        .addTo(layer);
     });
 
     if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
-    sidebar(placed);
+    sidebar(placed, strays);
   }
 
   function esc(s) {
@@ -324,39 +471,75 @@
   /* The half that matters for checking: what could NOT be drawn, and why.
      A map that quietly shows the third of the offers it managed is a map that
      says the rig is doing better than it is. */
-  function sidebar(placed) {
+  /* No list on this page is allowed to stop at twenty-five and say nothing.
+     The whole argument for the sidebar is that a map showing the fifth it
+     managed reports the rig as doing better than it is — and a list that shows
+     the first twenty-five of ninety failures makes exactly that mistake one
+     level down. */
+  var LIST_MAX = 25;
+
+  function andTheRest(shown, total) {
+    return total > shown
+      ? '<div class="note">…and ' + (total - shown) + ' more, not listed.</div>'
+      : '';
+  }
+
+  function sidebar(placed, strays) {
     if (!placed.length) { el.sideEmpty.hidden = false; el.sideBody.hidden = true; return; }
     el.sideEmpty.hidden = true;
     el.sideBody.hidden = false;
+    strays = strays || {};
 
     var noEnd = offers.filter(function (o) { return !o.dropoff; });
     var lost = placed.filter(function (p) { return (p.offer.pickup && !p.from) || (p.offer.dropoff && !p.to); });
     var wrong = placed.filter(function (p) { return p.impossible; });
-    var drawn = placed.filter(function (p) { return p.from && p.to && !p.impossible; });
+    var drawn = placed.filter(function (p) {
+      return p.from && p.to && !p.impossible && !p.fromStray && !p.toStray;
+    });
+    var strayNames = Object.keys(strays).sort(function (a, b) { return strays[b] - strays[a]; });
 
     var html = '';
     html += '<h2>' + drawn.length + ' drawn end to end</h2>';
     html += '<div class="note">Green is the pickup, amber the dropoff, and the '
-          + 'line between them is a straight line, not a route.</div>';
+          + 'line between them is a straight line, not a route. A pin with a '
+          + 'number on it is that many jobs at the same place.</div>';
+
+    // First, because it is the failure that also breaks the view for
+    // everything else, and the one a person can settle at a glance.
+    html += '<h2>' + strayNames.length + ' nowhere near the rest</h2>';
+    html += '<div class="note">Further than ' + FAR_MILES + ' miles from the middle '
+          + 'of everything else here, which no shift is. A geocoder answers a '
+          + 'misread street as confidently as a real one, and the answer is a '
+          + 'real place somewhere. These are drawn in red and left out of the '
+          + 'map’s view, so one of them cannot hide the rest. Tap one to go to '
+          + 'it.</div>';
+    strayNames.slice(0, LIST_MAX).forEach(function (name) {
+      html += '<div class="row stray" data-place="' + esc(name) + '"><b>'
+           + esc(name) + '</b><span class="tag bad">'
+           + Math.round(strays[name]) + ' mi out</span></div>';
+    });
+    html += andTheRest(Math.min(strayNames.length, LIST_MAX), strayNames.length);
 
     html += '<h2>' + wrong.length + ' that cannot be right</h2>';
     html += '<div class="note">The straight line came out longer than the whole '
           + 'distance the card stated. A straight line cannot beat the road, so '
           + 'one of the two pins is in the wrong place.</div>';
-    wrong.slice(0, 25).forEach(function (p) {
+    wrong.slice(0, LIST_MAX).forEach(function (p) {
       html += '<div class="row"><b>' + esc(p.offer.pickup || '?') + '</b> → '
            + esc(p.offer.dropoff || '?') + '<span class="tag bad">'
            + p.crow.toFixed(1) + ' vs ' + p.stated + ' mi</span>'
            + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
     });
+    html += andTheRest(Math.min(wrong.length, LIST_MAX), wrong.length);
 
     html += '<h2>' + lost.length + ' the geocoder could not find</h2>';
-    lost.slice(0, 25).forEach(function (p) {
+    lost.slice(0, LIST_MAX).forEach(function (p) {
       var which = !p.from ? p.offer.pickup : p.offer.dropoff;
       html += '<div class="row"><b>' + esc(which) + '</b>'
            + '<span class="tag iffy">no match</span>'
            + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
     });
+    html += andTheRest(Math.min(lost.length, LIST_MAX), lost.length);
 
     html += '<h2>' + noEnd.length + ' with no dropoff at all</h2>';
     html += '<div class="note">The card never said where the job ends — Uber '
@@ -365,6 +548,17 @@
 
     el.sideBody.innerHTML = html;
   }
+
+  // A stray is listed precisely so it can be judged, and it cannot be judged
+  // off the view it was kept out of. One tap takes the map to it.
+  el.sideBody.addEventListener('click', function (ev) {
+    var row = ev.target.closest ? ev.target.closest('.stray') : null;
+    if (!row || !map) return;
+    var mark = marks[row.getAttribute('data-place')];
+    if (!mark) return;
+    map.setView(mark.getLatLng(), 12);
+    mark.openPopup();
+  });
 
   el.load.addEventListener('click', load);
   el.place.addEventListener('click', function () { placeAll(); });

@@ -1188,8 +1188,11 @@
   var LEG_ORPHAN = new RegExp(
     '\\(\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b\\s*\\)', 'gi');
 
-  function distanceWithoutATime(text, legs) {
-    var m, i, inside;
+  /* Every orphan bracket, handed out so the two questions asked of them -
+     is anything missing, and how much - are answered by one scan and one rule
+     about what counts. */
+  function orphanDistances(text, legs) {
+    var m, i, inside, out = [];
     LEG_ORPHAN.lastIndex = 0;
     while ((m = LEG_ORPHAN.exec(text)) !== null) {
       if (m.index === LEG_ORPHAN.lastIndex) LEG_ORPHAN.lastIndex++;
@@ -1200,9 +1203,57 @@
         if (legs[i].start <= m.index
             && m.index + m[0].length <= legs[i].end) { inside = true; break; }
       }
-      if (!inside) return true;
+      if (!inside) out.push(m);
     }
-    return false;
+    return out;
+  }
+
+  function distanceWithoutATime(text, legs) {
+    return orphanDistances(text, legs).length > 0;
+  }
+
+  /* How far the leg that lost its minutes was, if the card said.
+   *
+   * The same orphan brackets read as numbers rather than counted, because
+   * WHICH leg went missing decides how bad the damage is and the card states
+   * that in miles whether or not it labelled anything.
+   *
+   * Losing the approach leg costs a journey the two minutes it takes to reach
+   * the rider. Losing the trip leg costs it the job. Both set shortATime, and
+   * on this driver's own corpus they differ by a factor of eight:
+   *
+   *   $16.05 ٣ min (1.1 mi) away 20 min (7.3 mi) trip  -> $48/hr vs a true $42
+   *   $16.05 3 min (1.1 mi) away ٢٠ min (7.3 mi) trip  -> $321/hr vs a true $42
+   *
+   * The largest, where there is more than one: what is asked downstream is how
+   * much of the journey went missing, and the biggest missing piece answers it.
+   * null when nothing is missing. Not when the number will not read: LEG_ORPHAN
+   * matches ASCII digits and the stand-ins toNumber was written for and nothing
+   * else, so every token the pattern can produce becomes a number - checked by
+   * brute force over all 10,709,310 of them that carry a real digit, none of
+   * which fails. Hence no guard here for one that does. */
+  function untimedMiles(text, legs) {
+    var found = orphanDistances(text, legs), worst = null, i, value;
+    for (i = 0; i < found.length; i++) {
+      value = toNumber(found[i][1]);
+      if (worst === null || value > worst) worst = value;
+    }
+    return worst;
+  }
+
+  /* True when the leg this reading could not time is bigger than the ones it
+     could - so the minutes it is about to divide by are the small half.
+
+     Compared against the distance the reading ENDED UP with, from any source,
+     because that is the journey the rate is actually worked out over. Miles it
+     has none of are the same case as miles smaller than the orphan: a reading
+     with no distance and a 44-mile leg it could not time knows nothing about
+     how long this job takes. */
+  function mostOfTheJourneyMissing(parsed) {
+    var lost = parsed.untimedMiles, held = parsed.miles;
+    if (typeof lost !== 'number' || !isFinite(lost)) return false;
+    if (typeof held !== 'number' || !isFinite(held)) return true;
+    return lost > held;
   }
 
   /* `miles` is the distance the READING ended up with, from any source, and is
@@ -1460,6 +1511,9 @@
       // lost its minutes and took its miles with it. See distanceWithoutATime:
       // not a number, but the reason the reading is not finished.
       shortATime: distanceWithoutATime(text, legs),
+      // ...and how far that leg was, which is what decides whether this is a
+      // reading to hedge or one to refuse outright. See untimedMiles.
+      untimedMiles: untimedMiles(text, legs),
       // Enough to act on: without pay and time there is no rate to show.
       complete: isComplete(pay, minutes, deadline),
       // Null when the card did not say — the top chip may simply not have been
@@ -1710,6 +1764,22 @@
     // the shared corpus missed it because its fixture for that card asserts
     // miles and cost but never `state`.
     var why = doubt(parsed.pay, cardMinutes, miles);
+    /* ...and the one kind of wrong rate no check on the figures can reach,
+     * because every figure in it is a figure the card really printed.
+     *
+     * A leg that lost its minutes is dropped whole, so the journey comes out
+     * over the WRONG leg rather than over a damaged number: $18.40 for the
+     * five minutes it takes to reach the rider, on a card whose trip leg says
+     * an hour and twenty-four. $220.80/hr, green, against a true $12.40 - and
+     * doubt() passes it, correctly, because $18.40 and 5 minutes are each an
+     * ordinary thing for a card to say and the pair clears SANE_RATE at the
+     * ten-minute floor.
+     *
+     * What is wrong is not a number, it is that most of the journey is not in
+     * the reading at all, and the card says so in the distance it printed
+     * beside the minutes that did not read. Asked LAST: a reading already
+     * doubted for its figures keeps the more specific reason. */
+    if (!why && mostOfTheJourneyMissing(parsed)) why = 'leg';
 
     return {
       ready: true,
@@ -1754,6 +1824,11 @@
       // useful row in the file, and one that is quietly dropped cannot be
       // studied or counted. What is withheld is only the verdict.
       doubt: why,
+      // How much of the journey the reading could not time, when that is why
+      // the verdict is being withheld. On the wire because the panel says it
+      // out loud, and because a row saying only 'leg' cannot be argued with
+      // later.
+      untimedMiles: why === 'leg' ? parsed.untimedMiles : null,
       // Whether the rate above is the offer or only a ceiling on it, so a
       // display can say which it is showing rather than leaving two different
       // kinds of number looking identical.
