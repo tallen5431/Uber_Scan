@@ -675,6 +675,23 @@
       return 'You hid this one, so it is listed but left out of every figure '
            + 'on this page. "Put this back" below returns it to the count.';
     }
+    // Before the crop sentence below, and that ordering is the point: a row
+    // doubted for a leg is ALWAYS `whole === false`, so the generic sentence
+    // would take every one of them and explain it as a crop that clipped the
+    // card. The card was not clipped. Its second leg was in the picture and
+    // its hour read as an "l", which is a different fault with a different
+    // remedy — and a wrong explanation is worse than a vague one, because a
+    // driver reads it while deciding whether the rig made the mistake or they
+    // did.
+    if (r.doubt === 'leg') {
+      return 'The card showed a leg the scanner could not time'
+           + (typeof r.untimedMiles === 'number'
+              ? ' — ' + num(r.untimedMiles, 1) + ' mi of it' : '')
+           + ', so the '
+           + num(r.minutes, 0) + ' min this was worked out over is part of the '
+           + 'journey, not all of it. No verdict was given rather than one '
+           + 'several times too high.';
+    }
     if (r.whole === false) {
       return 'The scanner never saw the whole card — only part of the journey '
            + 'was in the crop, so this reads better than the offer was.';
@@ -855,7 +872,16 @@
     if (r.milesUncertain) flags.push('the distance was not trusted, so no running cost was charged');
     if (r.settled === false) flags.push('the reading was still changing when it was stored');
     if (r.whole === false) flags.push('only part of the card was in view');
-    if (r.suspect) flags.push('outside the range a real offer falls in');
+    // Two different things wear this flag now, and only one of them is about
+    // a figure being out of range. A reading missing most of its journey is
+    // marked not-to-be-trusted for a reason that has nothing to do with the
+    // size of any number in it — every one of them is a number the card
+    // printed — so it may not borrow the other's sentence.
+    if (r.suspect) {
+      flags.push(r.doubt === 'leg'
+        ? 'a leg of the journey never read, so this is part of it'
+        : 'outside the range a real offer falls in');
+    }
     // Typed on the keypad rather than read off a card: the figures are the
     // driver's own, there is no card text under this row, and "Seen as" has
     // nothing to say about it.
@@ -956,13 +982,22 @@
       + '<dl class="facts">'
       // A row the scanner refused to judge says so, rather than showing a dash
       // that reads as "this was not recorded". Not judging it was the decision.
-      + row('Called it', r.state === 'doubt'
-            ? ('no verdict — '
+      // A leg gets its own sentence rather than a slot in the list above it.
+      // Those all end "is outside anything a real offer does", and nothing
+      // about this reading is: every figure in it is one the card printed.
+      // What is wrong is that the reading is a fraction of the journey, and
+      // saying it the other way would send the driver to check numbers that
+      // are correct.
+      + row('Called it', r.state !== 'doubt'
+            ? (({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' })[r.state] || '--')
+            : r.doubt === 'leg'
+            ? 'no verdict — a leg of the journey never read, so the minutes '
+              + 'below are only part of it'
+            : ('no verdict — '
                + ({ pay: 'the pay', time: 'the time', speed: 'the distance',
                     rate: 'the pay against the time' }[r.doubt]
                   || 'the reading')
-               + ' is outside anything a real offer does')
-            : (({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' })[r.state] || '--'))
+               + ' is outside anything a real offer does'))
       + row('Your target', typeof r.target === 'number'
             ? money(r.target, 0) + '/hr' + (typeof r.band === 'number'
               ? ', amber within ' + r.band + '%' : '') : null)

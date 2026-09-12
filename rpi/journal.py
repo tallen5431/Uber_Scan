@@ -641,7 +641,24 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
     minutes = rate.get('cardMinutes')
     if minutes is None:
         minutes = parsed.get('minutes')
-    why = OP.doubt(pay, minutes, miles)
+    # Taken from the verdict rather than worked out again here, for the same
+    # reason `miles` and `minutes` above are: two answers to one question drift,
+    # and a row that disagrees with the screen the driver saw cannot be argued
+    # with later — which is the whole use of keeping it.
+    #
+    # They had already drifted. OP.doubt() takes three numbers and can only ask
+    # whether those three can be true; rate() also weighs the SHAPE of the
+    # reading, and refuses a rate worked out over one leg of a journey the card
+    # printed two of. So a card the panel refused at $220.80/hr was written down
+    # with `state: 'doubt'` and `doubt: None` — a row saying it was not judged
+    # and declining to say why, which is the one thing a record of a refusal is
+    # for. The offers page then explained it as a crop that clipped the card,
+    # which is a specific claim and a false one: the leg was in the crop and its
+    # hour read as an "l".
+    #
+    # The fallback is for a hand-built rate dict — the keypad, a test, an older
+    # row being re-rated — that has no verdict in it to take.
+    why = rate.get('doubt') if 'doubt' in rate else OP.doubt(pay, minutes, miles)
     # `places` overrides the reading's own, so a caller that has been watching
     # the card for longer than one reading can hand over everything it saw. The
     # settled upgrade rebuilds the row from the current reading, and an address
@@ -770,6 +787,20 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # is a reader bug, an implied 120mph is a misread time, and a receipt on
         # the screen is not an offer at all.
         'doubt': why,
+        # ...and for the one kind of doubt that is about a leg rather than a
+        # figure, how much of the journey never got timed. Without it the row
+        # says "leg" and a reader months later has no way to tell a missing walk
+        # to the door from a missing trip — which is the difference between a
+        # reading that was nearly right and one that was out by a factor of
+        # eight. None on every other row, including every row already on disk.
+        #
+        # Taken as it comes rather than re-tested against `why` here. rate()
+        # already sets this only for the verdict it belongs to, so a second
+        # `if why == 'leg'` cannot change any answer — it would be a guard no
+        # input can reach, which is a guard no check can fail on. That is also
+        # the fault this whole field was added to fix: two places working out
+        # the same thing, and only one of them right.
+        'untimedMiles': rate.get('untimedMiles'),
         # --- where it went ----------------------------------------------------
         # The one thing this file used to refuse on purpose, and the driver
         # asked for it: without somewhere named, an offer months later is a row

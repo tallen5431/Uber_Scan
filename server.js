@@ -796,7 +796,12 @@ var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles',
                    // that export is a spreadsheet with the driver's own test
                    // card silently mixed into it and no way to tell which row
                    // it is — which is the entire reason they hid it.
-                   'suspect', 'doubt', 'accepted', 'hidden',
+                   // ...and for the one doubt that names a leg rather than a
+                   // figure, how far that leg was. "leg" on its own cannot tell
+                   // a missing walk to the door from a missing trip, which is
+                   // the difference between a reading that was nearly right and
+                   // one out by a factor of eight. Empty on every other row.
+                   'suspect', 'doubt', 'untimedMiles', 'accepted', 'hidden',
                    // Which end is which. `places` below is what the card
                    // printed; these say which of them is the shop and which is
                    // somebody's front door, so an export can be replayed
@@ -1634,6 +1639,23 @@ function toCsv(offers) {
       // or three short strings a person reads in a cell, not something parsed
       // back.
       if (Array.isArray(v)) v = k === 'scans' ? JSON.stringify(v) : v.join('; ');
+      // `text` the same way, and for a reason measured on this driver's own
+      // export rather than argued about.
+      //
+      // It is what the reader read, line breaks and all, because the line
+      // breaks are the part a later question is most likely to need. Put in a
+      // cell raw and quoted, that is legal CSV — a quoted field may contain
+      // newlines, every proper reader handles it, and the 104 records in that
+      // export all have their 37 cells. It is also 2076 physical lines for 104
+      // offers, 103 of the 104 spanning more than one. `wc -l` says 2075
+      // offers. head, grep, a five-line script and any importer that splits on
+      // newlines all say something different from the truth, and none of them
+      // says it is guessing.
+      //
+      // JSON has the property wanted here: the text round-trips exactly, and
+      // one record is one line. `scans` is already encoded this way, two lines
+      // up, for the neighbouring version of the same problem.
+      if (k === 'text' && typeof v === 'string') v = JSON.stringify(v);
       return '"' + String(v).replace(/"/g, '""') + '"';
     });
     // A second, human-readable stamp. A spreadsheet will not turn epoch

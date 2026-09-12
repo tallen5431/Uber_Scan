@@ -3054,6 +3054,77 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### The row that said it was refused and would not say why
+
+`journal.py` was working the verdict out a second time:
+
+```python
+why = OP.doubt(pay, minutes, miles)      # three numbers
+```
+
+`rate()` already decided that, and it decides it on more: `OP.doubt` takes three
+figures and can only ask whether those three can be true, while `rate()` also
+weighs the shape of the reading and refuses a rate worked out over one leg of a
+journey the card printed two of. So the moment the refusal above existed, the
+two answers came apart — a card the panel refused at $220.80/hr was written down
+as `state: 'doubt'` with `doubt: None`. **A row saying it was not judged and
+declining to say why**, which is the one thing a record of a refusal is for. The
+CSV column had been exporting a blank reason for it.
+
+The offers page then explained it with the first branch that matched: *the
+scanner never saw the whole card — only part of the journey was in the crop*.
+The card was fully in the crop. Its second leg was in the picture and its hour
+read as an `l`. A wrong explanation is worse than a vague one, because it is
+read while deciding whether the rig made the mistake or the driver did.
+
+The row takes the verdict from `rate()` now, the way `miles` and `minutes`
+already do and for the reason already written above them — two answers to one
+question drift. It keeps `untimedMiles` too, since `leg` alone cannot tell a
+missing walk to the door from a missing trip, and that is the difference between
+a reading that was nearly right and one out by a factor of eight. The page has
+its own sentence for it, ahead of the crop one, and the flag no longer calls it
+*outside the range a real offer falls in* — nothing about it is.
+
+The medians were never affected: `whole === false` is true of every such row and
+`trustworthy()` excludes it. That held by argument rather than by construction,
+so the row now marks itself `suspect` as well — `whole` is an *argument* to
+`row_for`, and a caller that got it wrong would have put a $213/hr reading into
+the figures.
+
+Seven mutations, seven caught, after two rounds. The first round had two
+survivors and both were the check's fault rather than the code's: the fallback
+for a hand-built rate dict was being proved with a card where *nothing was
+wrong*, so both branches answered `None` and dropping the fallback looked like a
+working change. And a second `if why == 'leg'` guard turned out to be reachable
+by no input at all — `rate()` already sets the field only for that verdict — so
+it was deleted rather than propped up with a contrived fixture.
+
+### 104 offers, 2076 lines, and no check on the export
+
+The CSV is the one thing this project produces that leaves the machine and is
+opened by something else. Every page here is driven through a real browser. The
+export was tested by being looked at.
+
+`text` is the reader's own output, line breaks and all, because the line breaks
+are the part a later question is most likely to need. Put in a cell raw and
+quoted, that is **legal** CSV — a quoted field may contain newlines, every
+proper reader handles it, and all 104 records in the driver's own export have
+their 37 cells.
+
+It is also 2076 physical lines for 104 offers, **103 of the 104 spanning more
+than one**. `wc -l` says 2075 offers. So does `head`, so does `grep`, so does
+any five-line script or importer that splits on newlines — and not one of them
+says it is guessing. The fix is the one already used two lines above it in the
+same function, where `scans` is JSON-encoded to dodge the neighbouring version
+of this problem: the text round-trips exactly and one record is one line.
+
+The suite it never had now holds the export to the properties a spreadsheet
+fails silently on — every record carrying the header's cells, an address with a
+comma in it surviving as one cell, a quote the reader invented not ending the
+field early, booleans as something summable, an absent field empty rather than
+the word `None` — and to the round trip, so the column keeps being able to
+answer the question it is in the file for. Five mutations, five caught.
+
 ### Four faults in a page built to find faults
 
 `map.html` exists to let a person check what the rig read, because the rig
@@ -5574,7 +5645,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5456 checks
+npm test                # all 35 suites, 5488 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5607,8 +5678,10 @@ python3 rpi/test_exposure.py    # 175 on flicker, brightness, gain and
                                 #     and on an empty mount in the sun never
                                 #     being reported as a phone
 python3 rpi/test_track.py       # 131 on following the phone as it drifts
-python3 rpi/test_journal.py     # 192 on keeping one row per offer, and on a
-                                #     distrusted distance always saying so twice
+python3 rpi/test_journal.py     # 203 on keeping one row per offer, on a
+                                #     distrusted distance always saying so twice,
+                                #     and on the row agreeing with the screen
+                                #     about why a verdict was withheld
 python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  73 on what calibration may overwrite,
                                 #     which frame it is allowed to write from,
@@ -5662,16 +5735,18 @@ python3 rpi/test_dashboard.py   # 340 on what the driving screen shows while a
 python3 rpi/test_layout.py      # 429 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
-python3 rpi/test_offerspage.py  # 157 on the offers page as a driver reads it:
+python3 rpi/test_offerspage.py  # 166 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 108 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      #  29 on the server's own edges: two readers of
+python3 rpi/test_server.py      #  41 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
-                                #     is not one
+                                #     is not one — and on the CSV export, which
+                                #     is the one thing here that leaves the
+                                #     machine and had no check at all
 python3 rpi/test_map.py         #  39 on the map check page: that it asks
                                 #     nobody anything until told to, that it
                                 #     keeps to one geocoder request a second,

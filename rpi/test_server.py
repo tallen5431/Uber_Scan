@@ -328,6 +328,98 @@ finally:
     errlog.close()
     shutil.rmtree(work, ignore_errors=True)
 
+# --- the export, which had no check at all ----------------------------------
+#
+# The one artefact of this project that leaves the machine and gets opened by
+# something else. Every page here is tested through a browser; the CSV was
+# tested by being looked at.
+#
+# One offer has to be one line. Keeping the reader's own line breaks in `text`
+# is deliberate — they are the part a later question is most likely to need —
+# and putting them in a cell raw and quoted is legal CSV that every proper
+# reader handles. It is also what turned this driver's 104 offers into 2076
+# physical lines, 103 of the 104 spanning more than one: `wc -l` said 2075
+# offers, and so did every quick script, importer and `head` that splits on
+# newlines. None of them said it was guessing.
+import csv as _csv
+import io as _io
+
+# Inside the window, and past the date the server stops believing a clock: a
+# Pi with no RTC boots in 1970, so rows stamped before then are filtered out
+# and an export fixture dated 2023 is an export of nothing.
+_NOW = int(time.time() * 1000)
+
+_work = tempfile.mkdtemp()
+_journal = os.path.join(_work, 'offers.jsonl')
+_ROWS = [
+    # A card read over two lines, which is what the reader really produces.
+    {'v': 3, 'id': 'a1', 'seq': 1, 'at': _NOW - 600_000, 'pay': 16.05,
+     'minutes': 23.0, 'miles': 8.4, 'perHour': 30.0, 'state': 'go',
+     'suspect': False, 'doubt': None, 'untimedMiles': None, 'whole': True,
+     'places': ['Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta'],
+     'pickup': 'Cobb Pkwy NW, Kennesaw', 'dropoff': 'Canton Rd, Marietta',
+     'text': '$16.05 3 min (1.1 mi) away\n20 min (7.3 mi) trip',
+     'scans': ['$16.05 3 min\n(1.1 mi) away', '$16.05 3 min (1.1 mi) away']},
+    # A row refused for a leg, carrying the field that says how much went
+    # missing — and a place with a comma and a quote in it, which is what a
+    # cross street looks like when the reader has had a bad night.
+    {'v': 3, 'id': 'a2', 'seq': 1, 'at': _NOW - 300_000, 'pay': 18.40,
+     'minutes': 5.0, 'miles': 2.1, 'perHour': 213.24, 'state': 'doubt',
+     'suspect': True, 'doubt': 'leg', 'untimedMiles': 7.8, 'whole': False,
+     'places': ['Duval Ct & Manchester Ln, Villa Rica'],
+     'pickup': 'Duval Ct & Manchester Ln, Villa Rica', 'dropoff': None,
+     'text': 'UberX $18.40 5 min (2.1 mi) away\nl hr 24 min (7.8 "mi") trip'},
+]
+with open(_journal, 'w') as _fh:
+    for _r in _ROWS:
+        _fh.write(json.dumps(_r) + '\n')
+
+_proc, _base = start({'SCANNER': '0'}, _journal)
+try:
+    _body = urllib.request.urlopen(_base + '/api/journal.csv?days=3650',
+                                   timeout=10).read().decode('utf-8')
+    _records = list(_csv.reader(_io.StringIO(_body)))
+    _head, _rows = _records[0], _records[1:]
+    eq('the export has a row per offer', len(_rows), 2)
+    # The structural property, and the one a spreadsheet fails silently on.
+    eq('...every one of them with the header\'s cells',
+       sorted(set(len(r) for r in _rows)), [len(_head)])
+    # ...and the property that makes the file safe to count, grep and pipe.
+    _lines = _body.rstrip('\n').split('\n')
+    eq('one offer is one physical line (%d lines, %d offers)'
+       % (len(_lines), len(_rows)), len(_lines), len(_rows) + 1)
+    # The line breaks are kept, not thrown away: encoding them is what makes a
+    # record one line, and what comes back out has to be exactly what the rig
+    # recorded or the column stops being able to answer a question about the
+    # parser — which is the only reason it is in the file.
+    _first = dict(zip(_head, _rows[0]))
+    eq('...with the reader\'s own text coming back exactly as it was stored',
+       json.loads(_first['text']), _ROWS[0]['text'])
+    ok_('...line breaks and all', '\n' in json.loads(_first['text']))
+
+    _by = dict(zip(_head, _rows[1]))
+    eq('a row refused for a leg exports the refusal', _by.get('doubt'), 'leg')
+    eq('...and how much of the journey never got timed',
+       _by.get('untimedMiles'), '7.8')
+    # A comma inside a cell is the whole reason this file needs quoting, and
+    # 72% of this driver's distinct dropoffs are cross streets.
+    ok_('an address with a comma in it survives as one cell (%r)'
+        % _by.get('pickup'), _by.get('pickup') == 'Duval Ct & Manchester Ln, Villa Rica')
+    # A quote in the middle of a cell is how a CSV gets cut in half. This one
+    # is the reader's — a bracket read as a quote mark — and the cell-count
+    # check above is what proves it did not end the field; this proves the
+    # character itself survived rather than being stripped to make it safe.
+    ok_('...and a quote the reader invented survives without ending the field',
+        '"mi"' in json.loads(_by.get('text') or '""'))
+    eq('booleans come out as something a spreadsheet can sum',
+       _by.get('suspect'), '1')
+    eq('...both ways', dict(zip(_head, _rows[0])).get('suspect'), '0')
+    eq('a field the card never gave is empty, not the word None',
+       _by.get('dropoff'), '')
+finally:
+    stop(_proc)
+    shutil.rmtree(_work, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

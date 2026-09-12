@@ -796,6 +796,60 @@ for _name, _row in (('a split card', _split), ('an unsplit one', _whole_total)):
     ok_('%s carries both halves of the field' % _name,
         'toPickupMinutes' in _row and 'toPickupMiles' in _row)
 
+# --- the row and the screen have to say the same thing -----------------------
+#
+# The row was working the verdict out a second time. OP.doubt() takes three
+# numbers and can only ask whether those three can be true; rate() also weighs
+# the SHAPE of the reading and refuses a rate worked out over one leg of a
+# journey the card printed two of. So a card the panel refused at $220.80/hr
+# was written down as `state: 'doubt'` with `doubt: None` — a row saying it was
+# not judged and declining to say why, which is the one thing a record of a
+# refusal is for. The offers page then explained it as a crop that clipped the
+# card: a specific claim, and a false one.
+_leg = a_row('UberX $18.40 5 min (2.1 mi) away l hr 24 min (7.8 mi) trip')
+_leg_rate = P.rate(P.parse('UberX $18.40 5 min (2.1 mi) away l hr 24 min (7.8 mi) trip'),
+                   MONEY)
+eq('a row refused for a leg records that it was refused',
+   _leg['state'], 'doubt')
+eq('...and says which refusal it was, as the screen did',
+   (_leg['doubt'], _leg_rate['doubt']), ('leg', 'leg'))
+eq('...with how much of the journey never got timed',
+   _leg['untimedMiles'], 7.8)
+# Belt and braces, and the braces matter: `whole` is an ARGUMENT to row_for, so
+# a caller that got it wrong would put a $213/hr reading into the medians. The
+# row marks itself not-to-be-trusted on its own account as well.
+ok_('...and is kept out of the figures without relying on its caller',
+    _leg['suspect'] is True)
+ok_('...while still carrying every figure it read, for the record',
+    _leg['pay'] == 18.4 and _leg['minutes'] == 5.0 and _leg['miles'] == 2.1)
+
+# ...and the field is on every row, present or absent, for the same reason
+# toPickup* is: a reader cannot otherwise tell "nothing was missing" from "this
+# rig was too old to say".
+for _name, _row in (('a refused row', _leg), ('an ordinary one', _whole_total)):
+    ok_('%s carries the untimed distance' % _name, 'untimedMiles' in _row)
+eq('an ordinary row has none', _whole_total['untimedMiles'], None)
+
+# The fallback, for a rate dict built by hand — the keypad, a test, an older row
+# being re-rated — which has no verdict in it to take.
+#
+# The figures here are deliberately impossible: $1030 over ten minutes is the
+# lost decimal point this project has on record, and $1030 is past SANE_PAY on
+# its own. A row built from a dict with no verdict in it must still get one, or
+# dropping the fallback would look like a working change — both paths answer
+# None on a card where nothing is wrong.
+_HAND_BUILT = {'ready': True, 'state': 'go', 'perHour': 6180.0,
+               'grossPerHour': 6180.0, 'minutes': 10.0, 'miles': 3.0,
+               'cardMinutes': 10.0, 'net': 1030.0, 'cost': 0.0,
+               'perMin': 103.0, 'perMile': 343.3, 'target': 25, 'band': 15,
+               'costPerMile': 0.0, 'billedMinutes': 10.0}
+_typed = JR.row_for(P.parse('$1030.00 10 min (3.0 mi) total'), _HAND_BUILT,
+                    1_700_000_000_000, offer_id='t', seq=1)
+eq('a rate with no verdict in it still gets one worked out', _typed['doubt'], 'pay')
+ok_('...and the row is written rather than refused', _typed['pay'] == 1030.0)
+ok_('...and marked not to be trusted, as it would have been either way',
+    _typed['suspect'] is True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)

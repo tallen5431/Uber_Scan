@@ -266,6 +266,20 @@ FEEDS = {
                   'offers': [offer(0, pay=1030.0, state='no', suspect=True),
                              offer(1, accepted=True, pay=1184.0, suspect=True),
                              offer(2, pay=1251.0, state='no', suspect=True)]},
+    # A row the panel refused because the card showed a leg it could not time.
+    # Every figure in it is one the card printed, so nothing about its SIZE is
+    # wrong — which is exactly why it may not borrow the sentences written for
+    # rows whose figures are out of range, nor the one about a crop that
+    # clipped the card. Beside it, an ordinary row, so a page that explained
+    # everything this way would be caught too.
+    'leg': {'count': 2, 'total': 2, 'truncated': False, 'days': 7, 'hidden': 0,
+            'watched': {'saw': 2, 'kept': 2},
+            'unreadable': None, 'pairs': [],
+            'offers': [dict(offer(0, pay=18.40, minutes=5.0, state='doubt',
+                                  suspect=True), doubt='leg', untimedMiles=7.8,
+                            whole=False, miles=2.1, perHour=213.24,
+                            grossPerHour=220.8),
+                       offer(1, pay=10.0, minutes=20.0, state='no')]},
     'dots': {'count': len(DOTS), 'total': len(DOTS), 'truncated': False,
              'days': 7, 'hidden': 0, 'watched': {'saw': 5, 'kept': 5},
              'unreadable': None, 'pairs': [], 'offers': DOTS},
@@ -497,6 +511,18 @@ const TEXT = (sel) => {
       }
       out[name].findKeyboard = await page.evaluate(() =>
         document.getElementById('find').getAttribute('inputmode'));
+    }
+    if (name === 'leg') {
+      out[name].detail = await page.evaluate(() => {
+        const all = [].slice.call(document.querySelectorAll('#log details.offer'));
+        const d = all.filter((x) => x.getAttribute('data-id') === 'r0')[0];
+        if (!d) return { ids: all.map((x) => x.getAttribute('data-id')) };
+        d.open = true;
+        const flat = (el) => el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        return { aside: d.classList.contains('aside'),
+                 why: flat(d.querySelector('.why, .aside-why, p')),
+                 all: flat(d) };
+      });
     }
     // The chips and the order on the nothing-usable path.
     if (name === 'all aside') {
@@ -1131,6 +1157,36 @@ try:
         '1 of 3 offers you marked as taken' in (aside_feed['tookChip']['note'] or ''))
     eq('...and so does the order', aside_feed['byPay']['rows'], ['r2', 'r1', 'r0'])
     eq('...without day headers', aside_feed['byPay']['days'], 0)
+
+    # --- a row refused for a leg, and the two sentences it must not borrow -
+    #
+    # The row used to arrive here saying `state: 'doubt'` and `doubt: null`,
+    # because journal.py worked the verdict out a second time with a function
+    # that can only see three numbers. The page then explained it with the first
+    # branch that matched — a crop that clipped the card — which is a specific
+    # claim about a card that was fully in the crop, and its verdict line fell
+    # through to "the reading is outside anything a real offer does", which is
+    # false of every figure in it.
+    leg = (got.get('leg') or {}).get('detail') or {}
+    ok_('the refused row was found', bool(leg))
+    if leg:
+        ok_('...and is set aside', leg.get('aside'))
+        whole = leg.get('all') or ''
+        ok_('...explained by the leg that never read (%r)'
+            % whole[max(0, whole.find('leg')) - 30:][:90],
+            'could not time' in whole)
+        ok_('...with how much of the journey that was', '7.8 mi' in whole)
+        # The two it must NOT borrow. Both were what the page really said.
+        ok_('...not as a crop that clipped the card',
+            'was in the crop' not in whole)
+        ok_('...and not as a figure outside anything a real offer does',
+            'outside anything a real offer does' not in whole)
+        ok_('...nor flagged as a figure out of range',
+            'outside the range a real offer falls in' not in whole)
+        # Said plainly where the verdict would be, because "no verdict" with a
+        # dash beside it reads as "this was never recorded".
+        ok_('...and the verdict line says a leg never read',
+            'a leg of the journey never read' in whole)
 
     # --- what the reader actually read -----------------------------------
     #
