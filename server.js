@@ -341,7 +341,7 @@ function startScanner() {
           // that walks this file already knows to skip it — including the
           // scanner's own resume(), which must never mistake an annotation for
           // the last offer.
-          if (!sameCard) recordPairing(scanner.offer, Date.now());
+          if (!sameCard) recordPairing(scanner.offer, Date.now(), scanner.last);
         }
         // The destination, read off the screen that comes AFTER the accept.
         //
@@ -638,11 +638,38 @@ function withStack(read, now) {
  * Best-effort. A journal that cannot be written must never stop the panel from
  * answering — the advice is the product, this is the notebook.
  */
-function recordPairing(offer, now) {
+function recordPairing(offer, now, reading) {
   var held = holding(now);
   if (!held || !offer || typeof offer.id !== 'string') return;
-  var s = Advice.stack(held, offer, { target: offer.target, band: offer.band,
-                                      costPerMile: offer.costPerMile }, now);
+  // The driver's money, off the READING — not off the offer line.
+  //
+  // The offer line is what scan_pi.emit_offer() prints, and it has never
+  // carried target, band or costPerMile: they are the driver's settings, not
+  // properties of a card, and they ride the reading beside it. Taking them
+  // from `offer` handed Advice.stack three undefineds, which default to zero —
+  // a target of $0/hr that every rate on earth clears.
+  //
+  // So every pair row ever written said the panel had advised TAKE IT. The
+  // range and the geography in the row were right; the one field the row
+  // exists for was a constant. Measured on a real pair — $12.45 over 30 min in
+  // the car, a $3.00 over 40 min card offered against it, target 25: the panel
+  // showed 'no' and the row recorded 'go'.
+  //
+  // That is worse than not recording it. The comment above says this file is
+  // here to answer "when it said take both, was it right?", and a notebook in
+  // which it always said take both cannot be graded — it can only mislead
+  // whoever grades it.
+  //
+  // `withStack` two functions up has always read them off the reading. This is
+  // the same three values from the same place.
+  var money = reading || {};
+  var s = Advice.stack(held, offer, { target: money.target, band: money.band,
+                                      costPerMile: money.costPerMile }, now);
+  // ...and if there is no reading to take them from, the honest row says the
+  // panel's verdict is unknown rather than inventing one. `stack: null`
+  // already means "it said nothing", which is a different claim, so this is
+  // said in its own field.
+  var judged = typeof money.target === 'number';
   var row = {
     v: 1, kind: 'pair', at: now, id: offer.id,
     // The order already in the car.
@@ -666,7 +693,11 @@ function recordPairing(offer, now) {
                  // it a capped CLOSE CALL and a genuine one are the same row
                  // in the record, and they are not the same call.
                  uncosted: !!s.uncosted,
-                 state: s.state, sure: !!s.sure, ends: s.ends || null } : null
+                 state: s.state, sure: !!s.sure, ends: s.ends || null } : null,
+    // False when this row was written with no reading to take the driver's
+    // target from, so the state above is not what was on the panel. Absent
+    // from rows written before this existed, which is the same unknown.
+    judged: judged
   };
   appendLines(JSON.stringify(row) + '\n', function (err) {
     if (err) console.error('journal: could not record a pairing: ' + err.message);

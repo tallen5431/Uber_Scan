@@ -156,16 +156,26 @@ def main():
         journal_path = os.environ.get('JOURNAL') or JR.DEFAULT_PATH
         log = JR.Journal(journal_path)
         kept = len(log.rows())
-        check('the journal file is whole', log.torn <= 1,
-              ('%d row%s readable, none torn' % (kept, '' if kept == 1 else 's'))
-              if not log.torn else
-              '%d row%s readable, %d line%s unreadable'
-              % (kept, '' if kept == 1 else 's',
-                 log.torn, '' if log.torn == 1 else 's'),
-              'those offers are gone and cannot be recovered — the file is '
-              'append-only and nothing keeps a second copy of a line. One is '
-              'what a power cut costs; this many is a card starting to fail. '
-              'Copy %s somewhere else now, then check the card.' % journal_path)
+        if log.unreadable:
+            # Nothing may be concluded from a count of zero here. This branch
+            # exists because the count IS zero and the two previous readers of
+            # it — this check and sync.py — both read that as "a quiet week".
+            check('the journal file is whole', False,
+                  'could not be read at all (%s)' % log.unreadable,
+                  'this is not an empty journal, it is a journal nothing can '
+                  'read — and until it can be, nothing is being backed up '
+                  'either. Check %s: ls -l %s' % (journal_path, journal_path))
+        else:
+            check('the journal file is whole', log.torn <= 1,
+                  ('%d row%s readable, none torn' % (kept, '' if kept == 1 else 's'))
+                  if not log.torn else
+                  '%d row%s readable, %d line%s unreadable'
+                  % (kept, '' if kept == 1 else 's',
+                     log.torn, '' if log.torn == 1 else 's'),
+                  'those offers are gone and cannot be recovered — the file is '
+                  'append-only and nothing keeps a second copy of a line. One is '
+                  'what a power cut costs; this many is a card starting to fail. '
+                  'Copy %s somewhere else now, then check the card.' % journal_path)
     except Exception as e:                                    # noqa: BLE001
         check('the journal file is whole', False, str(e))
 

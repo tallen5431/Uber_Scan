@@ -3054,6 +3054,94 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### One bad byte, and the whole journal read as empty
+
+A twelve-agent read of the tree, each agent held to this file's own standards
+and made to prove its findings by running them. The two worst are both about
+the same thing: a figure or a record that is confidently wrong.
+
+**`rpi/journal.py` opened the journal as text.** The decode then happens for the
+whole file at once, so a single corrupt byte anywhere in it raises
+`UnicodeDecodeError` out of the iteration, the catch-all at the bottom throws
+away every row already parsed, and `rows()` hands back `[]`. Measured on a
+five-row file with one byte flipped:
+
+| reader | rows | torn |
+|---|---|---|
+| `server.js` | **4** | **1** |
+| `rpi/journal.py` | **0** | **0** |
+
+Four lines were still perfect JSON and Python returned none of them — and
+reported the file as whole, because the torn counter added the week before
+never ran either. One failing card sector cost the entire journal, silently.
+Read as bytes now, decoded a line at a time, so a bad byte costs its own line
+and no other. Two readers of one file disagreeing about what is in it is the
+fault this project keeps finding; this was the side that was wrong.
+
+**And `[]` meant two different things.** A file that cannot be opened at all is
+not a file with nothing in it, and every caller read it as the second. `sync.py`
+took the empty list as "nothing new", exited 0, and **stamped the copy fresh on
+the way out** — which `doctor.py` then reported as a healthy backup made minutes
+ago, next to its own journal check finding zero rows and zero torn and passing.
+A rig saying everything was fine while nothing at all was being copied off it,
+which is the one direction this backup must never fail in. `rows()` now sets
+`unreadable`; the sync refuses to stamp and exits non-zero; the preflight fails
+and says it is not an empty journal.
+
+### Every pairing said the panel had advised taking it
+
+`recordPairing` took the driver's money off the wrong object:
+
+```js
+Advice.stack(held, offer, { target: offer.target, band: offer.band,
+                            costPerMile: offer.costPerMile }, now)
+```
+
+`offer` is what `scan_pi.emit_offer()` prints, and it has never carried those
+three: they are the driver's settings, not properties of a card, and they ride
+the *reading* beside it. So `Advice.stack` got three undefineds, which default
+to zero — a target of $0/hr that every rate on earth clears. Measured on a real
+pair, $12.45 over 30 minutes in the car against a $3.00 over 40 card at a $25
+target:
+
+    what the PANEL showed : {"state":"no",  ...}
+    what the ROW recorded : {"state":"go",  ...}
+
+The range and the geography in the row were right. The one field the row exists
+for was a constant. The comment above that function says the file is there to
+answer *"when it said take both, was it right?"* — and a notebook in which it
+always said take both cannot be graded, only believed.
+
+**The suite passed throughout, and its own fixture is why.** `test_stacking.py`
+supplied `target`, `band` and `costPerMile` on the offer it fed in — fields the
+real scanner does not send — so the code under test was handed the very thing
+whose absence was the defect. That file carries a long comment at the top about
+this exact trap, written when it happened before. It had grown back on the
+pairing path. The fixture no longer invents them, and the check is now on the
+verdict's **value**, held against what `/api/status` is showing at the same
+moment, rather than on the key being present.
+
+### A token the installer had just proved works, dropped by systemd
+
+`tools/install-sync.sh` wrote `Environment=SYNC_TOKEN=$SYNC_TOKEN` unquoted.
+`rpi/install-service.sh` next door carries nine lines about exactly this hazard
+over `SCANNER_ARGS`; the sibling had none. Asked of systemd itself:
+
+    token 'a b'    -> Invalid environment assignment, ignoring: b
+    token 'pc%25'  -> Failed to resolve specifiers in SYNC_TOKEN=..., ignoring
+
+A passphrase with a space in it — which the installer has *just tested by using
+it to reach the copy* — is truncated into a log nobody reads. The far end then
+answers 403 to every run and the backup stops, with an installed timer and a
+success message on screen.
+
+Quoted now, and the `%` doubled, since systemd expands specifiers inside
+`Environment=` even within quotes. The quoting could not simply be written into
+the heredoc: bash performs quote removal *inside* `${SYNC_TOKEN:+...}`, so the
+quotes were gone before the line reached the file — measured, not guessed. The
+line is built in a variable first. That installer had no test at all; it has one
+now, and it asks systemd rather than a regex.
+
 ### A hole in the one file that cannot be rebuilt
 
 Three readers of `journal.jsonl` had the same line in them:
@@ -5691,7 +5779,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5518 checks
+npm test                # all 35 suites, 5547 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5724,7 +5812,7 @@ python3 rpi/test_exposure.py    # 175 on flicker, brightness, gain and
                                 #     and on an empty mount in the sun never
                                 #     being reported as a phone
 python3 rpi/test_track.py       # 131 on following the phone as it drifts
-python3 rpi/test_journal.py     # 212 on keeping one row per offer, on a
+python3 rpi/test_journal.py     # 221 on keeping one row per offer, on a
                                 #     distrusted distance always saying so twice,
                                 #     and on the row agreeing with the screen
                                 #     about why a verdict was withheld
@@ -5740,7 +5828,7 @@ python3 rpi/test_scan_pi.py     # 263 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
-python3 rpi/test_sync.py        # 139 on getting the offers off the car, and
+python3 rpi/test_sync.py        # 146 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      #  94 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
@@ -5763,10 +5851,12 @@ python3 rpi/test_lint.py        #  59 on the faults that only surface when a
 python3 rpi/test_handoff.py     #  50 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
-python3 rpi/test_service.py     #  38 on the systemd unit the installer writes
+python3 rpi/test_service.py     #  45 on the systemd units BOTH installers
+                                #     write, asking systemd itself whether an
+                                #     environment assignment survived
 python3 rpi/test_camera.py      #  34 on which tuning file opens the camera, and
                                 #     on who is already holding it
-python3 rpi/test_doctor.py      #  60 on the preflight running to the end, on
+python3 rpi/test_doctor.py      #  64 on the preflight running to the end, on
                                 #     slower not being reported as broken, and
                                 #     on a journal with a hole in it being
                                 #     reported at one line and failed at more
@@ -5786,7 +5876,7 @@ python3 rpi/test_layout.py      # 429 on every page fitting the screen it is
 python3 rpi/test_offerspage.py  # 171 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
-python3 rpi/test_stacking.py    # 108 on judging a second job against the one
+python3 rpi/test_stacking.py    # 110 on judging a second job against the one
                                 #     already in the car
 python3 rpi/test_server.py      #  48 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer

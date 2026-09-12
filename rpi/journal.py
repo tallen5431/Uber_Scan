@@ -135,6 +135,10 @@ class Journal:
         # before anything has been read, which is different from "none found"
         # only in that nobody has looked yet.
         self.torn = 0
+        # ...and why the last read gave up entirely, if it did. None means the
+        # rows handed back are the rows there are; a string means they are not,
+        # and nothing may be concluded from their number.
+        self.unreadable = None
 
     def append(self, row):
         """Add one row. Returns True if it reached the disk.
@@ -186,14 +190,40 @@ class Journal:
         parse is an offer that is simply gone. One is what a power cut costs and
         `append` above says so. A number that grows is a card beginning to fail,
         which is worth knowing while a backup can still save what is left.
+
+        Read as BYTES, and decoded one line at a time. That is not a detail.
+
+        Opened as text, the decode happens for the whole file at once, so a
+        single bad byte anywhere in it raises UnicodeDecodeError out of the
+        iteration and the handler at the bottom throws away every row already
+        parsed — measured on a five-row file with one byte flipped: four lines
+        still perfect JSON, and rows() handed back NONE of them, with `torn`
+        reporting the file as whole. One failing card sector cost the entire
+        journal, and said nothing.
+
+        server.js reads the same file the other way — buffers split on the
+        newline byte, each piece decoded on its own — and on that same file it
+        keeps the four and counts the one. Two readers of one file disagreeing
+        about what is in it is the fault this project keeps finding; this is
+        the side that was wrong.
+
+        `self.unreadable` is the other half. A file that cannot be opened at all
+        is a different thing from a file with nothing in it, and a caller that
+        cannot tell them apart will back up an empty journal and call it a
+        success — sync.py did exactly that, stamping the copy as fresh.
         """
         self.torn = 0
+        self.unreadable = None
         try:
             if not os.path.exists(self.path):
                 return []
             out = []
-            with open(self.path) as fh:
-                for line in fh:
+            with open(self.path, 'rb') as fh:
+                for raw in fh:
+                    # `replace`, so a bad byte becomes a character that will not
+                    # parse rather than an exception that ends the read. The
+                    # cost of a corrupt byte is then its own line and no other.
+                    line = raw.decode('utf-8', 'replace')
                     stripped = line.strip()
                     if not stripped:
                         continue
@@ -217,6 +247,10 @@ class Journal:
                         self.torn += 1
             return out[-limit:] if limit else out
         except Exception as e:
+            # The file itself: missing permissions, a disappearing mount, an IO
+            # error off the card. Not "there are no offers", and a caller that
+            # reads it as that will report a backup of nothing as a success.
+            self.unreadable = str(e)
             self._complain(e)
             return []
 

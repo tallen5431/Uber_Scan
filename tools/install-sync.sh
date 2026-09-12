@@ -107,6 +107,15 @@ EOF
 fi
 echo
 
+# Built here rather than inside the heredoc with ${SYNC_TOKEN:+...}, because
+# bash performs QUOTE REMOVAL inside that expansion: the quotes are gone by
+# the time the line reaches the file, which is the whole thing being fixed.
+# The SYNC_TO line above has no expansion wrapped round it and keeps its own.
+TOKEN_LINE=""
+if [ -n "$SYNC_TOKEN" ]; then
+    TOKEN_LINE="Environment=\"SYNC_TOKEN=${SYNC_TOKEN//%/%%}\""
+fi
+
 UNIT=/etc/systemd/system/uberscan-sync.service
 TIMER=/etc/systemd/system/uberscan-sync.timer
 
@@ -122,8 +131,20 @@ After=network.target
 Type=oneshot
 User=$RUN_AS
 WorkingDirectory=$REPO
-Environment=SYNC_TO=$SYNC_TO
-${SYNC_TOKEN:+Environment=SYNC_TOKEN=$SYNC_TOKEN}
+# Quoted, and the % doubled, because systemd reads Environment= as a
+# space-separated list of assignments and expands %-specifiers inside it even
+# when quoted. rpi/install-service.sh carries the same note over SCANNER_ARGS
+# and this file did not, which is the same fault twice.
+#
+# systemd's own verifier on the unit this used to write:
+#   token 'a b'    -> Invalid environment assignment, ignoring: b
+#   token 'pc%25'  -> Failed to resolve specifiers in SYNC_TOKEN=..., ignoring
+# Both drop the token INTO A LOG NOBODY READS and leave the unit looking
+# installed. The far end then answers 403 to every run, so a passphrase with a
+# space in it — which the installer had just tested successfully by hand —
+# silently ends the backup.
+Environment="SYNC_TO=$SYNC_TO"
+$TOKEN_LINE
 # Sends the offers and, alongside them, the 400-byte calibration, and brings
 # back what was done on the copy — ticks, hides, offers typed there — through
 # this rig's own server, which it expects at http://127.0.0.1:8080. If the

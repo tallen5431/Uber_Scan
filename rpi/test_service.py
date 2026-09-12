@@ -233,6 +233,109 @@ for wanted in ('daemon-reload', 'enable uberscan.service', 'restart uberscan.ser
 
 shutil.rmtree(work, ignore_errors=True)
 
+# --- the OTHER installer, which had no check at all -------------------------
+#
+# tools/install-sync.sh writes the unit that copies the offers out of the car.
+# install-service.sh next door carries nine lines about quoting Environment=,
+# and this one wrote the token unquoted - so systemd read it as a
+# space-separated list of assignments and threw the tail away. A passphrase
+# with a space in it, which the installer had just proved works by using it to
+# reach the copy, was dropped into a log nobody reads; the far end then
+# answered 403 to every run and the backup stopped, with an installed timer and
+# a success message.
+#
+# Asked of systemd itself rather than of a regex, because the rule being
+# checked is systemd's.
+SYNC_SCRIPT = os.path.join(ROOT, 'tools', 'install-sync.sh')
+sync_work = tempfile.mkdtemp()
+sync_stub = os.path.join(sync_work, 'bin')
+os.makedirs(sync_stub)
+for _name, _body in (
+    ('id', '#!/bin/sh\necho 0\n'),
+    # Drops the `-u <user>` the installer passes and runs the rest as-is.
+    ('sudo', '#!/bin/sh\nwhile [ "$1" = "-u" ]; do shift 2; done\nexec "$@"\n'),
+    ('systemctl', '#!/bin/sh\necho "$@" >> "%s/systemctl.log"\n' % sync_work),
+    # The installer refuses to write a unit until the copy answers. Nothing is
+    # being tested about that here, so it is made to answer.
+    ('curl', '#!/bin/sh\nexit 0\n'),
+):
+    _p = os.path.join(sync_stub, _name)
+    open(_p, 'w').write(_body)
+    os.chmod(_p, 0o755)
+
+sync_units = os.path.join(sync_work, 'units')
+os.makedirs(sync_units)
+sync_src = open(SYNC_SCRIPT).read()
+eq('the sync installer writes exactly one service unit',
+   sync_src.count('/etc/systemd/system/uberscan-sync.service'), 1)
+patched_sync = (sync_src
+                .replace('/etc/systemd/system/uberscan-sync.service',
+                         os.path.join(sync_units, 'uberscan-sync.service'))
+                .replace('/etc/systemd/system/uberscan-sync.timer',
+                         os.path.join(sync_units, 'uberscan-sync.timer'))
+                # The reachability gate runs real python against a real URL.
+                .replace("sys.exit(0 if isinstance(sync.far_end('$SYNC_TO'), dict) else 1)",
+                         'sys.exit(0)'))
+sync_project = os.path.join(sync_work, 'project')
+os.makedirs(os.path.join(sync_project, 'tools'))
+# The installer derives every path from its own location and refuses to write a
+# unit for a checkout with no sync in it — which is the right refusal and means
+# the stand-in needs one.
+os.makedirs(os.path.join(sync_project, 'rpi'))
+open(os.path.join(sync_project, 'rpi', 'sync.py'), 'w').write('# stand-in\n')
+sync_run = os.path.join(sync_project, 'tools', 'install-sync.sh')
+open(sync_run, 'w').write(patched_sync)
+
+# A token with a space in it, which is what a passphrase looks like.
+TOKEN = 'two words'
+sync_proc = subprocess.run(
+    ['bash', sync_run, 'https://nuc.example.net', TOKEN],
+    env=dict(os.environ, PATH=sync_stub + os.pathsep + os.environ.get('PATH', '')),
+    capture_output=True, text=True, timeout=120)
+sync_unit_path = os.path.join(sync_units, 'uberscan-sync.service')
+ok_('the sync installer runs and leaves a unit (%r)' % sync_proc.stderr[-90:],
+    os.path.exists(sync_unit_path))
+sync_unit = open(sync_unit_path).read() if os.path.exists(sync_unit_path) else ''
+
+if sync_unit:
+    ok_('...with the token in it', TOKEN in sync_unit)
+    # The property, not the spelling: systemd must end up with the whole token.
+    ok_('...as ONE assignment, not two words',
+        'Environment="SYNC_TOKEN=%s"' % TOKEN in sync_unit)
+    ok_('...and the address quoted the same way',
+        'Environment="SYNC_TO=https://nuc.example.net"' in sync_unit)
+    if shutil.which('systemd-analyze'):
+        verdict = subprocess.run(['systemd-analyze', 'verify', sync_unit_path],
+                                 capture_output=True, text=True, timeout=60)
+        said = verdict.stdout + verdict.stderr
+        # systemd's own words for the defect: "Invalid environment assignment,
+        # ignoring: words".
+        ok_('...and systemd itself keeps the assignment whole (%r)'
+            % said.strip()[:80],
+            'Invalid environment assignment' not in said)
+    else:
+        # Said out loud rather than passed quietly: a check that did not run is
+        # not a check that passed.
+        print('  (no systemd-analyze here, so systemd was not asked directly)')
+
+    # A percent sign is a systemd specifier even inside quotes, so it has to be
+    # doubled on the way in. Checked separately because quoting alone does not
+    # fix it.
+    pct_units = os.path.join(sync_work, 'pct')
+    os.makedirs(pct_units)
+    pct_run = os.path.join(sync_project, 'tools', 'pct.sh')
+    open(pct_run, 'w').write(patched_sync.replace(sync_units, pct_units))
+    subprocess.run(['bash', pct_run, 'https://nuc.example.net', 'pc%25'],
+                   env=dict(os.environ,
+                            PATH=sync_stub + os.pathsep + os.environ.get('PATH', '')),
+                   capture_output=True, text=True, timeout=120)
+    pct_path = os.path.join(pct_units, 'uberscan-sync.service')
+    if os.path.exists(pct_path):
+        ok_('a percent in the token is doubled, since systemd expands it',
+            'SYNC_TOKEN=pc%%25' in open(pct_path).read())
+
+shutil.rmtree(sync_work, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d service checks passed' % ok)
 sys.exit(1 if bad else 0)

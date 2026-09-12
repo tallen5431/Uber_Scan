@@ -882,6 +882,60 @@ eq('...and is counted rather than passed over in silence', _torn_log.torn, 1)
 ok_('...counting the row being written now as neither read nor lost',
     _torn_log.torn == 1 and len(_kept) == 1)
 
+# --- one bad byte costs one line, not the file -------------------------------
+#
+# Opened as text, the decode happens for the whole file at once: a single
+# corrupt byte raises UnicodeDecodeError out of the iteration, the handler at
+# the bottom throws away every row already parsed, and rows() hands back an
+# empty list with `torn` reporting the file as whole. Measured before the fix
+# on exactly this fixture: four of the five lines still perfect JSON, and NONE
+# of them returned.
+#
+# server.js reads the same file the other way — buffers split on the newline
+# byte, each piece decoded on its own — and kept the four. Two readers of one
+# file disagreeing about what is in it is the fault this project keeps finding.
+_bad_path = os.path.join(_torn_dir, 'badbyte.jsonl')
+_raw = bytearray()
+for _i in range(5):
+    _raw += (json.dumps({'v': 3, 'id': 'b%d' % _i, 'seq': 1,
+                         'at': 1_789_000_000_000 + _i, 'pay': 10.0}) + '\n').encode()
+_still_good = sum(1 for _l in bytes(_raw).split(b'\n') if _l.strip())
+_raw[200] = 0xff
+open(_bad_path, 'wb').write(bytes(_raw))
+_bad_log = JR.Journal(_bad_path)
+_bad_rows = _bad_log.rows()
+eq('a corrupt byte costs its own line and no other', len(_bad_rows), _still_good - 1)
+eq('...and that line is counted, not passed over', _bad_log.torn, 1)
+eq('...and the read is not reported as having failed', _bad_log.unreadable, None)
+# The rows that survived have to be usable, not just counted: this is the file
+# a backup is about to copy.
+ok_('...with the surviving rows intact',
+    all(isinstance(r, dict) and r.get('pay') == 10.0 for r in _bad_rows))
+
+# --- a file that cannot be read is not a file with nothing in it -------------
+#
+# The distinction the callers could not make. sync.py read an empty list as
+# "nothing new", exited 0 and stamped the copy fresh, which doctor.py then
+# reported as a healthy backup made minutes ago — a rig saying everything is
+# fine while nothing at all is being copied off it.
+_gone = os.path.join(_torn_dir, 'nodir', 'offers.jsonl')
+_unreadable = JR.Journal(_gone)
+eq('a journal that is simply absent reads as empty', _unreadable.rows(), [])
+eq('...and says nothing failed, because nothing did', _unreadable.unreadable, None)
+
+# Staged as a DIRECTORY where the journal should be, rather than by taking the
+# read permission away: the rig's own suites are run as root often enough that
+# a chmod-based fixture would quietly stop testing anything, and a check that
+# cannot fail is worse than no check. A directory refuses everybody.
+_locked = os.path.join(_torn_dir, 'notafile.jsonl')
+os.mkdir(_locked)
+_locked_log = JR.Journal(_locked)
+eq('a journal that cannot be opened reads as empty too', _locked_log.rows(), [])
+ok_('...but says so, so nobody reads the emptiness as a quiet week',
+    bool(_locked_log.unreadable))
+ok_('...naming what stopped it (%r)' % (_locked_log.unreadable or '')[:48],
+    'directory' in (_locked_log.unreadable or '').lower())
+
 # A whole file reports none, or the count above means nothing.
 _whole_path = os.path.join(_torn_dir, 'whole.jsonl')
 with open(_whole_path, 'w') as _fh:

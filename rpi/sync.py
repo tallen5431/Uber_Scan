@@ -114,9 +114,22 @@ def newest_at(base, timeout=TIMEOUT):
 
 
 def rows_since(path, floor_ms):
-    """Rows at or after `floor_ms`, oldest first."""
-    return [r for r in JR.Journal(path).rows()
+    """Rows at or after `floor_ms`, oldest first, and why if there are none.
+
+    Returns (rows, why_not). `why_not` is None when the list is the truth and a
+    sentence when it is not — the file could not be read at all, so an empty
+    list here means "nothing was learned", never "nothing is there".
+
+    Those two used to be the same answer, and the consequence was the worst
+    shape this tool has: a journal the reader could not open backed up as an
+    empty one, exit 0, "nothing new", and a fresh stamp on the way out — which
+    doctor.py then read as a healthy backup made minutes ago. The rig would
+    have reported everything fine while nothing was being copied off it.
+    """
+    log = JR.Journal(path)
+    rows = [r for r in log.rows()
             if isinstance(r, dict) and (r.get('at') or 0) >= floor_ms]
+    return rows, log.unreadable
 
 
 def send_config(base, path, token=None, timeout=TIMEOUT):
@@ -403,7 +416,16 @@ def main():
         elif came:
             say('%d tag(s) made on the copy came back, %d new here' % (pulled, came))
 
-    rows = rows_since(args.journal, floor)
+    rows, unreadable = rows_since(args.journal, floor)
+    if unreadable:
+        # No stamp, and a non-zero exit. Stamping here would tell doctor.py the
+        # offers were backed up minutes ago, which is exactly the sentence a
+        # driver would act on by not worrying.
+        print('the journal could not be read (%s) — nothing was sent, and the '
+              'backup stamp has been left alone so this does not look like a '
+              'successful run. Check %s can be read: ls -l %s'
+              % (unreadable, args.journal, args.journal), file=sys.stderr)
+        return 1
     if not rows:
         say('nothing new since %s' % time.strftime('%Y-%m-%d %H:%M',
                                                    time.localtime(floor / 1000.0)))

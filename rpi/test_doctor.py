@@ -287,6 +287,26 @@ ok_('...and what to do about it while there is still time',
 ok_('...alongside how much of the journal is still readable',
     any(_CHECK in l and 'readable' in l for l in _many_out.stdout.splitlines()))
 
+# ...and the case that is not a hole but a wall. rows() returns [] for a file it
+# could not open at all, which reads as "no offers yet" — so this check counted
+# zero rows, found zero torn, and passed, on a journal nothing can read. The
+# backup check above would have been saying the copy was reached minutes ago at
+# the same time, because sync.py stamped it on the way out of the same empty
+# list. A rig reporting itself healthy while nothing is being copied off it.
+#
+# Staged as a directory rather than a chmod: these suites are run as root often
+# enough that a permission fixture would quietly stop testing anything.
+_wall = os.path.join(_work, 'notafile.jsonl')
+os.mkdir(_wall)
+_wall_out = run(JOURNAL=_wall)
+_wall_seen = findings(_wall_out.stdout)
+eq('a journal nothing can read fails the check', _wall_seen.get(_CHECK), False)
+ok_('...saying it could not be read, not that it was empty',
+    'could not be read' in _wall_out.stdout)
+ok_('...and that this is not an empty journal',
+    'not an empty journal' in _wall_out.stdout)
+ok_('...naming the file to look at', _wall in _wall_out.stdout)
+
 import shutil as _shutil
 _shutil.rmtree(_work, ignore_errors=True)
 

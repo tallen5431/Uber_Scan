@@ -581,11 +581,19 @@ try:
                    'perHour': 19.2, 'dropoff': 'Oak Ln, Marietta'}))
     post(base, '/api/offers/mark', {'id': 'pairheld-7', 'accepted': True})
     ok_('...and is in the car', bool(get(base, '/api/status').get('holding')))
+    # No target, band or costPerMile on this, and that is the point of the
+    # fixture rather than an omission. They are the driver's settings, not
+    # properties of a card, and scan_pi.emit_offer() has never sent them — it
+    # sends id, pay, minutes, perHour, billedMinutes, miles, cost, dropoff,
+    # pickup, doubt, uncosted and nothing else. Supplying them here is the
+    # drift this file's own comment at the top warns about, and it hid a real
+    # defect for as long as it was here: recordPairing read the three off the
+    # OFFER, got undefined, and Advice.stack fell back to a target of zero, so
+    # every pair row ever written recorded the panel as having said take it.
     ok_('a second offer arrives while it is',
         put_offer({'id': 'paired-8', 'pay': 9.0, 'minutes': 20.0,
                    'billedMinutes': 20.0, 'miles': 4.0, 'cost': 1.2,
-                   'perHour': 23.4, 'target': 25.0, 'band': 15.0,
-                   'costPerMile': 0.3, 'dropoff': 'Chastain Rd NW, Kennesaw',
+                   'perHour': 23.4, 'dropoff': 'Chastain Rd NW, Kennesaw',
                    'pickup': 'Wingstop (Acworth)'}))
     time.sleep(0.8)
 
@@ -626,6 +634,26 @@ try:
         for field in ('worst', 'best', 'state'):
             ok_('...including %s, which is what gets graded' % field,
                 field in st)
+        # The field this row exists for, checked against its VALUE rather than
+        # its presence. `state in st` was true the whole time the value was a
+        # constant: the row was judged against a target of zero, which every
+        # rate clears, so every pairing ever recorded said take it. This pair
+        # is deliberately one the panel calls a close call — $12.00 over 30
+        # minutes already in the car, a $9.00 over 20 offered against it, at
+        # the $25 target the reading carries — so a return to a zero target
+        # shows up here as 'go'.
+        eq('...and the verdict is the one the driver was shown, not a default',
+           st.get('state'), 'warn')
+        # ...and the row says it was judged at all, so a reader can tell a
+        # graded pairing from one written before the panel had a target to
+        # judge against.
+        eq('...on a row that says it was judged', pr.get('judged'), True)
+        # Held against the live panel, not only against a literal: the same
+        # pair, asked of the server the same moment it was recorded.
+        _live = (get(base, '/api/status').get('stack') or {})
+        if _live:
+            eq('...and it agrees with what the panel is showing right now',
+               st.get('state'), _live.get('state'))
         # Two towns that are genuinely different, so the geography really was
         # asked and really did answer. A pairing that recorded `ends: null`
         # every time would look like data and be none.

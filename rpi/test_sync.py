@@ -125,7 +125,7 @@ try:
     write(pi, [offer(i, now - i * 300000) for i in range(25)])
 
     eq('the far end starts empty', SY.newest_at(far.base), 0)
-    sent = SY.rows_since(pi, 0)
+    sent, _unreadable = SY.rows_since(pi, 0)
     result = SY.send(far.base, sent)
     eq('every row is taken the first time', result['added'], 25)
     eq('...and stored', len(lines(far.journal)), 25)
@@ -243,7 +243,7 @@ try:
        SY.send(far.base, [{'v': 1, 'at': now, 'kind': 'mark', 'accepted': True}])['malformed'], 1)
 
     # The whole file, resent. Costs a few hundred kilobytes and changes nothing.
-    eq('--all is safe', SY.send(far.base, SY.rows_since(pi, 0))['added'], 0)
+    eq('--all is safe', SY.send(far.base, SY.rows_since(pi, 0)[0])['added'], 0)
 
     # --- the calibration rides along ------------------------------------
     # 400 bytes, and every number in it can be measured again — but re-aiming a
@@ -565,7 +565,7 @@ finally:
 # --- a token, for the day the far end leaves the VPN ------------------------
 guarded = FarEnd(token='letmein')
 try:
-    rows = SY.rows_since(pi, 0)
+    rows, _unreadable = SY.rows_since(pi, 0)
     try:
         SY.send(guarded.base, rows)
         eq('an upload with no token is refused', 'accepted', 'refused')
@@ -1023,6 +1023,48 @@ try:
        len(lines(old_far.journal)), 120)
 finally:
     old_far.close()
+
+# --- a journal nothing can read is not a journal with nothing in it ---------
+#
+# The worst shape this tool had. JR.Journal.rows() ends in a catch-all that
+# returns [], so a file that could not be opened handed back the same answer as
+# a quiet week. sync.py read that as "nothing new", exited 0, and stamped the
+# copy fresh on the way out — and doctor.py then reported a healthy backup made
+# minutes ago. The rig would have said everything was fine while nothing at all
+# was being copied off it, which is the one direction this backup must never
+# fail in.
+_ur_dir = tempfile.mkdtemp()
+# A DIRECTORY where the journal should be. Staged this way rather than with a
+# chmod because these suites are often run as root, and a fixture root walks
+# straight through is a check that cannot fail.
+_not_a_file = os.path.join(_ur_dir, 'offers.jsonl')
+os.mkdir(_not_a_file)
+
+_ur_far = FarEnd()
+try:
+    _code, _said = run_main(_ur_far.base, _not_a_file)
+    ok_('a journal that cannot be read is a failed run, not a quiet one (%r)' % _code,
+        _code != 0)
+    ok_('...saying what could not be read (%r)' % _said.strip()[:70],
+        'could not be read' in _said)
+    ok_('...and naming the file, since that is what has to be looked at',
+        _not_a_file in _said)
+    # The stamp is the whole point. doctor.py reads it and says how long ago
+    # the offers were backed up; writing one here is the rig telling the driver
+    # a backup happened when none did.
+    eq('...and no backup stamp is left behind', SY.last_synced(_not_a_file), None)
+    eq('...and nothing was sent to the copy', len(lines(_ur_far.journal)), 0)
+
+    # ...while a journal that is genuinely empty is still an ordinary quiet
+    # run, or the check above would just be refusing to work.
+    _empty = os.path.join(_ur_dir, 'empty.jsonl')
+    open(_empty, 'w').close()
+    _code2, _said2 = run_main(_ur_far.base, _empty)
+    eq('an empty journal is a quiet run, not a failure', _code2, 0)
+    ok_('...and does get its stamp', SY.last_synced(_empty) is not None)
+finally:
+    _ur_far.close()
+    shutil.rmtree(_ur_dir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
