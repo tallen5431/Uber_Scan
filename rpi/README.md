@@ -3054,6 +3054,66 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### Asking the phone where it is
+
+The Pi has no GPS and no clock. The phone in the mount has both, and a GPS
+server app on it hands them out over TCP on port 2947 — gpsd's port — to
+anything that asks. `rpi/gps.py` is the thing that asks.
+
+It is worth having because the geocoder is the weak link in everything this rig
+says about *where*. Handed "Chipotle" it answers with a Chipotle; handed a
+misread street it answers with a real street; both come back with the same
+confidence and neither is necessarily in the state the driver is in. A
+coordinate taken at the moment the card was read turns all of that from a guess
+into a lookup bounded to where the car actually was.
+
+Try it before anything depends on it:
+
+```sh
+python3 rpi/gps.py --from 100.75.197.117:2947
+```
+
+That address should be the phone's **Tailscale** one rather than its hotspot
+one — the hotspot's DHCP address changes and the tailnet's does not, so the
+same command keeps working when the rig is on wifi at home.
+
+**Most of the file is about not answering.** A rig somebody drives with cannot
+afford a position that is confidently wrong, and the phone's app runs on a
+timer — the one this was written against showed "Runtime Left 4:48" — so it
+stopping mid-shift is not an edge case. A fix older than twenty seconds is
+therefore NO fix, `fix()` returns None, and None is always available and always
+honest. The reader is off unless asked for, never blocks the scan loop, never
+holds a lock across the network, and reconnects quietly for ever.
+
+**The clock is the trap.** The Pi boots in 1970 and leaps forward when NTP
+answers, so the GPS's own timestamps cannot be compared against the Pi's wall
+clock to decide freshness — the two disagree by decades at boot. Staleness is
+measured entirely against the local clock: when we received the line, against
+what the local clock says now. Both readings come from the same wrong clock, so
+the error cancels and the answer is right while the rig still thinks it is 1970.
+A clock that jumps *backwards* mid-shift yields a negative age, and negative is
+refused too rather than reading as fresh.
+
+**Two protocols, because port 2947 is not a promise.** Real gpsd greets with a
+JSON VERSION banner and says nothing until it is asked to WATCH; several phone
+apps take the same port and simply push NMEA at whoever connects. Both are
+handled, and which is in use is decided by what arrives rather than by a flag.
+The WATCH command is sent only after a gpsd banner has actually been seen, so
+an app that merely borrowed the port is never sent something it did not
+advertise.
+
+`rpi/test_gps.py` is 89 checks and weighted the way the risk is — a little on
+parsing a good sentence, most of it on refusing to produce a number. It runs
+against a real socket on a real port, because the framing, the threading and
+the reconnect are the parts most likely to be wrong and a stubbed transport
+would check none of them; only the clock is faked. Seventeen mutants, seventeen
+caught, including every one of the refusals: Null Island, a latitude past the
+pole, an RMC the receiver marked void, a GGA with quality 0, a sentence that
+fails its own checksum, knots stored as metres per second, `ddmm.mmmm` read as
+a decimal, a boolean where a latitude should be, a sentence split across two
+packets, a sender with no line endings at all, and a stopped reader still
+showing a green light.
+
 ### A page nothing linked to, five buttons one press from dead, and a backup with a hole in it
 
 **The map page did not exist.** Not in the sense of being unwritten — it works,
@@ -6164,7 +6224,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5743 checks
+npm test                # all 36 suites, 5832 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
