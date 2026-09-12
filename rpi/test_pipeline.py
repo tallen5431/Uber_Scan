@@ -72,8 +72,17 @@ ok_('a box never leaves the quad',
 
 # The same input twice is the same box: nothing accumulates, so there is
 # nothing to drift. This is the property the old fitting could not have.
+#
+# Asked with OTHER calls in between, which is the whole of the property. It was
+# `eq(..., centred_roi(0.64), centred_roi(0.64))` — a pure function called twice
+# in a row and compared to itself, which is true of a function that accumulates
+# as readily as of one that does not. Mutating centred_roi to widen with the
+# history of shares it had seen left that version passing.
+_before = PL.centred_roi(0.64)
+for _share in (0.35, 0.9, 0.5, 0.64, 0.2, 1.0):
+    PL.centred_roi(_share)
 eq('it is a function of the geometry and nothing else',
-   PL.centred_roi(0.64), PL.centred_roi(0.64))
+   PL.centred_roi(0.64), _before)
 
 # --- money_is_clipped: the guard that stops a phantom payout ---------------
 # The only guard left that can throw a reading away, and the one that has to be:

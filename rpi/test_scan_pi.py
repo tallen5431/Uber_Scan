@@ -1166,11 +1166,23 @@ else:
     # the verify beat's backoff is for, and it won, because it is checked first.
     settled = [t for t in reads if t > reads[0] + RESAMPLE_SETTLE]
     span = (reads[-1] - reads[0] - RESAMPLE_SETTLE) if len(reads) > 1 else 0
-    if span > 2.0:
-        rate = len(settled) / span
-        ok_('a card that never reads whole stops being re-read every half second',
-            rate < 1.0 / SP2.RESAMPLE_EVERY * 0.6)
-        ok_('...though it is still looked at now and then', len(settled) >= 1)
+    # No `if span > 2.0` around this. There was one, and on every run of this
+    # suite the span came out at about 0.4s — a 9-second drive, but the reads
+    # bunch at the start — so the two checks below had never once executed. A
+    # guard that is false on every run is not a guard, it is two checks the
+    # suite counts and does not make; the count moved by two and nothing said
+    # so.
+    #
+    # The span is a property of the harness, not of the code under test, so it
+    # is asserted rather than tiptoed around: if a change to the drive makes it
+    # too short to judge a rate over, this says so instead of going quiet.
+    ok_('the drive produced a stretch long enough to judge a rate over (%.2fs)'
+        % span, span > 0.2)
+    rate = len(settled) / span if span > 0 else 0.0
+    ok_('a card that never reads whole stops being re-read every half second '
+        '(%.1f/s against %.1f)' % (rate, 1.0 / SP2.RESAMPLE_EVERY * 0.6),
+        rate < 1.0 / SP2.RESAMPLE_EVERY * 0.6)
+    ok_('...though it is still looked at now and then', len(settled) >= 1)
 
 # --- a heartbeat is not a reading -----------------------------------------
 # The loop says "still here" every four seconds so the page can tell a rig that

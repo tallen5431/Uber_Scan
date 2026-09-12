@@ -210,7 +210,19 @@ PAIR = {
     'stack': {'pay': 17.4, 'worst': 26.1, 'best': 34.8, 'leftMinutes': 20,
               'minMinutes': 20, 'maxMinutes': 40, 'state': 'go', 'sure': True,
               'ends': 'elsewhere', 'uncosted': False},
+    # The row saying its verdict really is the one the panel showed. Every pair
+    # row written before recordPairing got the driver's target off the reading
+    # has this absent, and `state` on those is a constant 'go' — see UNJUDGED
+    # below and saidWords() in journal.html.
+    'judged': True,
 }
+
+# ...and one of those older rows, which are all still on disk. The page may not
+# report its `state` as a word the panel used, because the panel did not use
+# it: the verdict was computed against a target of zero, which everything
+# clears. What the row CAN still be asked is the pair's own figures.
+UNJUDGED = dict(PAIR, id='r1', at=NOW - 600000)
+UNJUDGED.pop('judged')
 
 # Dots and rankings. The newest row was judged at a lower target than the
 # rest, so re-judging a row against "today's" target would colour it
@@ -252,7 +264,7 @@ FEEDS = {
              'unreadable': None, 'pairs': [], 'offers': BUSY_ROWS},
     'took six': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
                  'hidden': 0, 'watched': {'saw': 14, 'kept': 12},
-                 'unreadable': None, 'pairs': [PAIR], 'offers': TOOK_SIX},
+                 'unreadable': None, 'pairs': [PAIR, UNJUDGED], 'offers': TOOK_SIX},
     'verdicts': {'count': len(VERDICTS), 'total': len(VERDICTS),
                  'truncated': False, 'days': 7, 'hidden': 1,
                  'watched': {'saw': 8, 'kept': 8},
@@ -410,6 +422,19 @@ const TEXT = (sel) => {
           ? null : text('#pairsHead'),
         pairsLead: document.getElementById('pairsLead').hidden
           ? null : text('#pairsLead'),
+        // Each pairing's own detail, opened, so what the row SAYS the panel
+        // called it can be read rather than only the tally above it.
+        // Opened to read, then put back exactly as it was: leaving them open
+        // moves everything below down the page, and the checks further on
+        // measure whether things are on screen.
+        pairSaid: [].slice.call(document.querySelectorAll('#pairs details'))
+          .map(function (d) {
+            var was = d.open;
+            d.open = true;
+            var said = (d.textContent || '').replace(/\s+/g, ' ').trim();
+            d.open = was;
+            return said;
+          }),
         rows: document.querySelectorAll('#log details.offer').length,
         asked: window.__asked.length,
         // What the panel had said about the jobs that were worked.
@@ -948,6 +973,37 @@ try:
         'Second jobs' in (took['pairsHead'] or ''))
     ok_('...saying which way the panel went (%r)' % (took['pairsLead'] or '')[:70],
         'take it' in (took['pairsLead'] or ''))
+    # ...and counting a row whose verdict was never the panel's separately.
+    #
+    # recordPairing computed every pair's state against a target of zero for as
+    # long as it read the driver's settings off the offer line, which has never
+    # carried them — so those rows all say 'go' whatever the panel said, and
+    # they are all still on disk. Reporting them as "take it" is this page
+    # putting words in the panel's mouth; dropping them would hide how much of
+    # the record cannot be graded. Named instead.
+    ok_('...and naming the pairings whose verdict was not kept',
+        'not recorded' in (took['pairsLead'] or ''))
+    ok_('...without counting them as a verdict the panel gave (%r)'
+        % (took['pairsLead'] or '')[:70],
+        'take it <b>1</b>' in (took['pairsLead'] or '')
+        or 'take it 1' in (took['pairsLead'] or ''))
+    # ...and the row itself, not only the tally above it. This is the line a
+    # driver reads when grading one decision, and it is where the wrong word
+    # does the damage: "Called it: take it" about a pairing whose verdict was
+    # computed against a target of zero.
+    _said = took.get('pairSaid') or []
+    eq('both pairings are listed', len(_said), 2)
+    _judged = [t for t in _said if 'take it' in t]
+    _unjudged = [t for t in _said if 'not recorded' in t]
+    eq('...the one whose verdict was kept says what the panel called it',
+       len(_judged), 1)
+    eq('...and the one whose verdict was not says so instead', len(_unjudged), 1)
+    ok_('...explaining why, rather than leaving two words on their own',
+        _unjudged and 'was not kept' in _unjudged[0])
+    # The pair's own figures are unaffected and must still be there: what was
+    # lost is the verdict, not the money.
+    ok_('...while the pair\'s own figures are still shown',
+        _unjudged and '17.4' in _unjudged[0])
     for name in ('unreadable', 'all hidden', 'genuinely empty'):
         eq('...and staying away when there are none: %s' % name,
            got[name]['pairsHead'], None)

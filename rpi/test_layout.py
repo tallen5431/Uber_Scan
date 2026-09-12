@@ -800,6 +800,12 @@ for i, (state, ends, took) in enumerate([
             'pay': 17.2, 'worst': 19.4, 'best': 34.1, 'leftMinutes': 12,
             'minMinutes': 23, 'maxMinutes': 35, 'state': state,
             'sure': state != 'no', 'ends': ends},
+        # The row saying its verdict really is what the panel showed. Rows
+        # written before recordPairing took the driver's target from the
+        # reading have this absent, and the page reports those as "not
+        # recorded" rather than as a word the panel used — which is right, and
+        # is not what this file is measuring. These are modern rows.
+        'judged': True,
     })
     if took is not None:
         rows.append({'kind': 'mark', 'id': 'r%d' % (i * 3), 'accepted': took,

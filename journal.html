@@ -1492,8 +1492,17 @@
   // verdict — it is the panel declining to answer, which happens when a figure
   // was missing or the held job's own time had already run out, and it must
   // not be shown as a PASS.
-  function saidWords(s) {
+  //
+  // `judged` is the row saying whether that verdict is the one the driver was
+  // shown. server.js wrote every pair row's state with a target of zero for as
+  // long as recordPairing read the driver's settings off the offer line, which
+  // never carried them — so every one of those rows says "take it" whatever
+  // the panel said, and they are all still on disk. The flag is absent on them
+  // and true on rows written since. Absent is not "fine": it is the unknown,
+  // and this page may not report an unknown as a word the panel used.
+  function saidWords(s, judged) {
     if (!s) return 'no answer';
+    if (judged !== true) return 'not recorded';
     return s.state === 'go' ? 'take it'
          : s.state === 'warn' ? 'close call' : 'pass';
   }
@@ -1589,7 +1598,11 @@
       + row('Ends at', offer.dropoff ? esc(offer.dropoff) : 'not named on the card')
       + '</dl><h3>What the panel said</h3>'
       + '<dl class="facts">'
-      + row('Called it', saidWords(s))
+      + row('Called it', saidWords(s, p.judged))
+      + (p.judged === true ? '' : row('', 'This pairing was recorded before the '
+          + 'panel\u2019s target reached the record, so what it advised at the '
+          + 'time was not kept. The figures below are the pair\u2019s own and '
+          + 'are unaffected.'))
       + row('Both together', s ? money(s.pay, 2) : null)
       + row('Over', mins ? mins + ' min' : null)
       + row('Which is', s
@@ -1780,11 +1793,14 @@
     }
     el.pairsHead.hidden = false;
     el.pairsLead.hidden = false;
-    var said = { go: 0, warn: 0, no: 0, none: 0 };
-    var took = { go: 0, warn: 0, no: 0, none: 0 };
+    var said = { go: 0, warn: 0, no: 0, none: 0, unjudged: 0 };
+    var took = { go: 0, warn: 0, no: 0, none: 0, unjudged: 0 };
     var marked = 0;
     pairs.forEach(function (p) {
-      var k = p.stack ? p.stack.state : 'none';
+      // A row whose verdict was never the panel's cannot be counted as one.
+      // Counted in its own bucket instead of being dropped, because how many
+      // of these there are is the measurement — see the comment on saidWords.
+      var k = !p.stack ? 'none' : p.judged === true ? p.stack.state : 'unjudged';
       said[k]++;
       if (p.accepted !== undefined) marked++;
       if (p.accepted === true) took[k]++;
@@ -1802,6 +1818,11 @@
     if (said.warn) parts.push('close call <b>' + said.warn + '</b>');
     if (said.no) parts.push('pass <b>' + said.no + '</b>');
     if (said.none) parts.push('no answer <b>' + said.none + '</b>');
+    // Named, not folded into "no answer". The panel DID answer these; what was
+    // not kept is what it answered, and those are different facts about the
+    // record. Every pair row written before the target reached recordPairing
+    // lands here.
+    if (said.unjudged) parts.push('not recorded <b>' + said.unjudged + '</b>');
     var lead = 'The panel said: ' + parts.join(' · ') + '. ';
     // Counted against what was marked, not against every pairing. Dividing by
     // the total would read as "you ignored the advice" on a shift where the

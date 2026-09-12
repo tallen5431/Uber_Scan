@@ -231,19 +231,18 @@ function offer(atMinutes, pay, minutes, cost) {
   ok_('the recommended line survives every break threshold', spread <= 2);
 
   var a = A.advise(offers, { target: 30 });
-  if (a.ready) {
-    ok_('a market this clear gets an answer', a.ready);
-    ok_('...only ever when it held at every threshold', a.stable);
-    eq('...having been checked at each one', a.checkedAt.length, A.THRESHOLDS.length);
-    ok_('...with the line above the cheap tier', a.suggested > 5);
-    ok_('...and a plateau around it, not a single point', a.high >= a.low);
-    ok_('...pointing at the bottom of that plateau', a.suggested === a.low);
-  } else {
-    // Refusing is a legitimate outcome and has to say which kind of refusal.
-    ok_('...or it refuses, and says why',
-        ['thin', 'trips', 'unsettled', 'nolinehelps'].indexOf(a.reason) >= 0
-        || a.offers < 40);
-  }
+  // Not wrapped in `if (a.ready)`. It was, with `ok_('...gets an answer',
+  // a.ready)` INSIDE the branch — true by construction — and an else arm that
+  // accepted a refusal, so the whole block could go quiet and take five checks
+  // with it and the count would simply drop. This market is built to be
+  // answerable, so an answer is the assertion.
+  ok_('a market this clear gets an answer (reason: %s)'.replace('%s', String(a.reason)),
+      a.ready === true);
+  ok_('...only ever when it held at every threshold', a.stable);
+  eq('...having been checked at each one', a.checkedAt.length, A.THRESHOLDS.length);
+  ok_('...with the line above the cheap tier', a.suggested > 5);
+  ok_('...and a plateau around it, not a single point', a.high >= a.low);
+  ok_('...pointing at the bottom of that plateau', a.suggested === a.low);
 })();
 
 /* ---- it must refuse, far more often than it answers ---- */
@@ -467,13 +466,19 @@ function offer(atMinutes, pay, minutes, cost) {
   for (var i = 0; i < 90; i++) offers.push(offer(i * 1.5, 4, 25));
   for (var j = 0; j < 12; j++) offers.push(offer(200 + j * 37, 40, 25));
   var a = A.advise(offers, { target: 25 });
+  // Same shape as above, and the else arm here was `ok_(..., true)` — a check
+  // that cannot fail, standing in for three that would not run. Whether this
+  // market is answerable or refused, the fields it reports on are the claim:
+  // a refusal has to name its reason, and an answer has to carry what it saw.
   if (a.ready) {
     ok_('a disagreement between thresholds is reported, not averaged away',
         typeof a.stable === 'boolean');
     ok_('...with the spread it saw', typeof a.spread === 'number');
     ok_('...and every threshold it asked at', a.checkedAt.length > 1);
   } else {
-    ok_('...or nothing is claimed at all', true);
+    ok_('...or it refuses, and names which refusal (reason: %s)'
+          .replace('%s', String(a.reason)),
+        ['thin', 'trips', 'unsettled', 'nolinehelps'].indexOf(a.reason) >= 0);
   }
 })();
 

@@ -3054,6 +3054,75 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### Four checks that could not fail, one of them written that morning
+
+The audit's twelfth agent was pointed at the suites rather than the code, on
+this project's own rule that a check which cannot fail is worse than no check.
+It found four, and the first is the worst kind: a check written to verify a fix
+made the same day, reported as verification, that had never run.
+
+**`test_stacking.py`** compared the recorded pair verdict against the live panel
+with `get('/api/status').get('stack')`. `/api/status` has no top-level `stack` —
+the panel's is at `last.stack` — so the value was always `{}` and the `if _live:`
+around it meant the comparison had never once executed. There is no `if` now: an
+empty answer is a failure, because that endpoint is supposed to be showing a
+pair. Proved by forcing the panel's own verdict to 'go' and watching the suite
+fail, which it previously would not have.
+
+**`test_scan_pi.py`** guarded two resample checks with `if span > 2.0`. Measured
+across runs, the span is about 0.4s — a nine-second drive, but the reads bunch at
+the start — so those two checks had never executed either, and the suite's count
+was two short with nothing saying so. The span is a property of the harness, so
+it is asserted rather than tiptoed around; the count went from 263 to 266.
+
+**`test_pipeline.py`** had `eq('it is a function of the geometry and nothing
+else', centred_roi(0.64), centred_roi(0.64))` — a pure function called twice in a
+row and compared with itself, which is as true of a function that accumulates as
+of one that does not. Mutating `centred_roi` to widen with the history of shares
+it had seen left it passing. Other calls go in between now, and that mutation is
+caught.
+
+**`tests/advice.test.js`** had `if (a.ready) { ok_('a market this clear gets an
+answer', a.ready); … }` — true by construction inside the branch — with an else
+arm that accepted a refusal, so five checks could go quiet and the count would
+just drop. And a second `else { ok_(…, true) }`, which is the shape stated
+outright. The answerable market now asserts an answer; the refusal arm names
+which refusal.
+
+### A loss that read as a gain, next to the same figure written correctly
+
+live.html states the rule at line 615: *"-$10.60", not "$-10.6". A minus sign
+wedged between the dollar and the digits is a dash at a glance.* `rateText`,
+`money` and the `earned` figure all honour it. The working line under the
+headline had **its own copy** of the formatter and did not, and so did the shift
+line's median — so a card worth -$13.24/hr printed
+
+    -$13.2     the headline
+    $-13.2     the working line, immediately below it
+
+Reachable on an ordinary card at the IRS rate the README itself recommends:
+$2.50 over 12.4 miles at $0.70/mile. The duplicate is deleted — the working line
+calls `rateText` — and the median is signed the way the `earned` figure three
+lines above it already was. The check is made against every rendered text node
+on the page rather than one element, so a `$-` written anywhere is caught; it
+walks text nodes and skips `<script>`, because the page's own source contains
+the string `"$-10.6"` inside the comment explaining why it must never render one.
+
+### ...and the other half of the pairing fix
+
+Teaching `recordPairing` to use the driver's real target fixed what gets written
+from now on. Every pair row already on disk still says `go`, and the offers page
+was still reporting those as *"the panel said: take it"* — in the tally, in the
+per-row "Called it" line, and in the colour of each dot.
+
+`judged` is the row saying whether its verdict is the one the driver was shown.
+It is absent on every older row, and absent is not "fine" — it is the unknown,
+and this page may not report an unknown as a word the panel used. Those rows now
+read **not recorded**, with a sentence saying why and their own figures left
+alone, and they are counted in their own bucket rather than as a verdict: how
+many of the record cannot be graded is the measurement, and folding them into
+"no answer" would have hidden it just as reporting them as "take it" did.
+
 ### A brute force run against the wrong flags
 
 Last week's `untimed_miles` deleted its own guard for a token that will not
@@ -5873,7 +5942,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5576 checks
+npm test                # all 35 suites, 5597 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5919,7 +5988,7 @@ python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 263 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 266 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
@@ -5958,7 +6027,7 @@ python3 rpi/test_doctor.py      #  64 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 340 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 349 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -5968,10 +6037,10 @@ python3 rpi/test_dashboard.py   # 340 on what the driving screen shows while a
 python3 rpi/test_layout.py      # 429 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
-python3 rpi/test_offerspage.py  # 171 on the offers page as a driver reads it:
+python3 rpi/test_offerspage.py  # 178 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
-python3 rpi/test_stacking.py    # 110 on judging a second job against the one
+python3 rpi/test_stacking.py    # 112 on judging a second job against the one
                                 #     already in the car
 python3 rpi/test_server.py      #  48 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer

@@ -119,8 +119,19 @@ UNTIMED = dict(UNCERTAIN, state='doubt', doubt='leg', pay=18.40,
                perHour=220.8, grossPerHour=220.8, whole=False,
                untimedMiles=7.8)
 
+# A card that costs more to drive than it pays. $2.50 over 12.4 miles at the
+# IRS rate the README recommends is -$13.24/hr — an ordinary delivery card, not
+# a misread, and the shape this page has a rule about: "-$10.60", not "$-10.6",
+# because a minus wedged between the dollar and the digits is a dash at a
+# glance. The headline honoured it and the working line under it did not, so the
+# same loss appeared twice on one screen and one of them read as a gain.
+LOSS = dict(UNCERTAIN, state='no', pay=2.50, minutes=28.0, cardMinutes=28.0,
+            billedMinutes=28.0, miles=12.4, cost=8.68, perHour=-13.24,
+            grossPerHour=5.36, perMile=-1.07, milesUncertain=False,
+            uncosted=False, whole=True)
+
 READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
-            'impossible': IMPOSSIBLE, 'untimed': UNTIMED}
+            'impossible': IMPOSSIBLE, 'untimed': UNTIMED, 'loss': LOSS}
 
 # ...and every field above has to be one the rig actually sends.
 #
@@ -669,6 +680,35 @@ const framed = (page) => page.waitForFunction(
       pay: await page.evaluate(LOOK, '#vPay'),
     };
 
+    // A rate below zero, which is the one case where HOW a number is written
+    // decides whether it is read as a loss or a gain.
+    await page.evaluate((r) => window.__es.push(r), READINGS.loss);
+    await page.waitForTimeout(200);
+    out.loss = await page.evaluate(() => ({
+      rate: (document.querySelector('#perHour') || {}).textContent || '',
+      // Every figure on the glass at once, so a "$-" anywhere is caught
+      // wherever it is written rather than only where it was looked for.
+      //
+      // Walked as text NODES, skipping script and style: body.textContent
+      // includes the page's own inline source, and this page's source contains
+      // the string "$-10.6" inside the comment explaining why it must never
+      // render one. The first version of this check failed on that comment,
+      // which is the check measuring the wrong thing rather than the page
+      // being wrong.
+      body: (function () {
+        var walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+          acceptNode: function (n) {
+            var tag = n.parentNode && n.parentNode.nodeName;
+            return (tag === 'SCRIPT' || tag === 'STYLE')
+              ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+          }
+        });
+        var out = [], node;
+        while ((node = walk.nextNode())) out.push(node.nodeValue);
+        return out.join(' ').replace(/\s+/g, ' ');
+      })(),
+    }));
+
     // ...and the third kind, where no figure is wrong and the reading is
     // nonetheless not the offer: the card printed two legs and only one of
     // them was timed.
@@ -1014,6 +1054,12 @@ const framed = (page) => page.waitForFunction(
     // One job taken whose mileage cost more than it paid.
     ['negative', { offers: 2, counted: 2, setAside: 0, took: 1, median: 9,
                    earned: -1.25, earnedCost: 5.25, beforeClock: 0,
+                   unreadable: null, rolled: false, clockSet: true }, 200],
+    // ...and a whole stretch of them, so the MEDIAN itself is below zero. A
+    // rig with the IRS rate set and a run of short, far offers gets here, and
+    // this line wrote "$-12/hr" — the shape the page has a comment refusing.
+    ['redshift', { offers: 4, counted: 4, setAside: 0, took: 2, median: -12,
+                   earned: -8.40, earnedCost: 14.0, beforeClock: 0,
                    unreadable: null, rolled: false, clockSet: true }, 200],
   ]) {
     const ctx = await browser.newContext({
@@ -1548,6 +1594,33 @@ try:
         ok_('...while the figures it was working from stay on screen',
             '136' in ((impossible.get('pay') or {}).get('text') or ''))
 
+    # --- a loss, written so it reads as one ------------------------------
+    #
+    # live.html states the rule at line 615 — "-$10.60", not "$-10.6", because
+    # a minus sign wedged between the dollar and the digits is a dash at a
+    # glance — and honoured it in the headline, in `money`, and on the `earned`
+    # figure. The working line under the headline had its own copy of the
+    # formatter and did not, so a -$13.24/hr card printed "-$13.2" big and
+    # "$-13.2" immediately below it. The shift line's median had the same slip.
+    #
+    # Reachable on an ordinary card: $2.50 over 12.4 miles at the $0.70 IRS
+    # rate the README recommends.
+    loss = got.get('loss') or {}
+    ok_('the loss reading was measured', bool(loss))
+    if loss:
+        ok_('a rate below zero is shown as a loss in the headline (%r)'
+            % (loss.get('rate') or '').strip(),
+            (loss.get('rate') or '').strip().startswith('-$'))
+        # The property, asked of the whole screen rather than of one element:
+        # nowhere on the glass may a dollar sign be followed by a minus.
+        _where = (loss.get('body') or '')
+        _at = _where.find('$-')
+        ok_('...and nowhere on the screen is a minus written after the dollar (%r)'
+            % (_where[max(0, _at - 45):_at + 15] if _at >= 0 else ''),
+            _at < 0)
+        ok_('...while the figure itself is still there to read',
+            '13.2' in (loss.get('body') or ''))
+
     # The kind where every figure is one the card printed. $18.40 is an
     # ordinary payout and five minutes an ordinary leg; the pair clears
     # SANE_RATE at the ten-minute floor, so nothing about the arithmetic can
@@ -1812,6 +1885,19 @@ try:
         ok_('...and prints the sign before the dollar (%r)' % (neg.get('text') or '')[-24:],
             'took 1 for -$1 net' in (neg.get('text') or ''))
         ok_('...never as $-1', '$-' not in (neg.get('text') or ''))
+
+    # ...and the median, which had its own copy of the same slip. A shift of
+    # short, far offers with a running cost set puts this below zero.
+    red = got.get('shift_redshift') or {}
+    ok_('the below-zero median was measured', bool(red))
+    if red:
+        ok_('the shift median is signed before the dollar (%r)'
+            % (red.get('text') or '')[-34:],
+            'median -$12/hr' in (red.get('text') or ''))
+        ok_('...never as $-12', '$-' not in (red.get('text') or ''))
+        # Whole dollars, which is what this line has always shown: a median
+        # read at a glance from the driving seat does not want a decimal.
+        ok_('...and still in whole dollars', '-$12.0' not in (red.get('text') or ''))
 
 
     # --- a rig that stopped an hour ago does not look live --------------

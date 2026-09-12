@@ -650,10 +650,19 @@ try:
         eq('...on a row that says it was judged', pr.get('judged'), True)
         # Held against the live panel, not only against a literal: the same
         # pair, asked of the server the same moment it was recorded.
-        _live = (get(base, '/api/status').get('stack') or {})
-        if _live:
-            eq('...and it agrees with what the panel is showing right now',
-               st.get('state'), _live.get('state'))
+        #
+        # `last.stack`, not `stack`. The first version of this read the top
+        # level, where /api/status has never had one, so `_live` was always
+        # empty and the `if` around it meant the comparison had never once run
+        # — a check that cannot fail, in the check written to verify that a
+        # verdict is not a constant. There is no `if` now: an empty answer here
+        # is a failure, because this endpoint is supposed to be showing a pair.
+        _last = get(base, '/api/status').get('last') or {}
+        _live = _last.get('stack') or {}
+        ok_('the panel is showing a stack line for this pair (%r)'
+            % (sorted(_live)[:4],), bool(_live))
+        eq('...and the recorded verdict is the one it is showing',
+           st.get('state'), _live.get('state'))
         # Two towns that are genuinely different, so the geography really was
         # asked and really did answer. A pairing that recorded `ends: null`
         # every time would look like data and be none.
