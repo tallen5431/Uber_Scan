@@ -706,6 +706,18 @@
   // gain on its ceiling, already on the longest exposure, and the screen still
   // under target. The picture goes dark and the reads go with it.
   var tooDim = false;
+  // The scanner's own sentence for why the last Re-find did nothing, or null
+  // if the last one worked. Not a flag: the two reasons — nothing on the
+  // screen to find, and tracking switched off — want different things from the
+  // driver, and the end that knows which it was is the scanner.
+  //
+  // Pressing Re-find is a driver saying the outline is wrong, so the rig is
+  // reading through corners they have already judged bad. When the press is
+  // refused and nothing says so, they go back to driving believing it was
+  // fixed, and every read until they next look is warped through the same bad
+  // corners. This is the only state on this page where the driver has acted
+  // and the rig has not.
+  var refindRefused = null;
 
   // A card is under the reader right now. The gap this fills is the one the
   // driver actually notices: a read is about 1.4 seconds on a Pi 4 and this
@@ -1363,8 +1375,12 @@
       // Ahead of the phase message, because it is the one the driver can act
       // on: a washed-out card between offers is exactly the state where there
       // is no reading to hang it off, which is why it is here as well as below.
+      // `refindRefused` matters more here than in the block below: a Re-find
+      // is refused when there is nothing on the screen to find, and nothing on
+      // the screen to find is precisely this branch — no reading, so the notes
+      // further down never render at all.
       var setup = [tooBright ? TOO_BRIGHT : '', tooDim ? TOO_DIM : '',
-                   p.message || ''].filter(Boolean);
+                   refindRefused || '', p.message || ''].filter(Boolean);
       el.warn.textContent = setup.join(' ');
       el.warn.hidden = !setup.length;
       // No card, no address. Leaving the last one up would have it read as
@@ -1523,6 +1539,10 @@
     // a washed-out card.
     if (tooBright) notes.push(TOO_BRIGHT);
     if (tooDim) notes.push(TOO_DIM);
+    // Above the reading-quality notes below, because those describe a card the
+    // rig read and this describes the rig not having done a thing the driver
+    // asked for. It stands until a Re-find actually works.
+    if (refindRefused) notes.push(refindRefused);
     // A rate with no running cost taken off it is a CEILING, not the offer,
     // and the old wording — "pay shown before mileage cost" — described the
     // arithmetic without saying what it meant. On the owner's own shift 108 of
@@ -1680,6 +1700,10 @@
       // has to be read off the message before that happens.
       if (msg.tooBright !== undefined) tooBright = !!msg.tooBright;
       if (msg.tooDim !== undefined) tooDim = !!msg.tooDim;
+      // Same channel, same reason, and one more: a Re-find is refused most
+      // often when there is no screen to find, which is exactly when no
+      // reading is coming to carry the news.
+      if (msg.refindRefused !== undefined) refindRefused = msg.refindRefused || null;
       // A new offer on the record. `tookState` resets with it — the mark
       // belongs to the offer, not to the button.
       //
@@ -1976,7 +2000,14 @@
     resetBtn.textContent = '⟳ …';
     fetch('/api/recalibrate', { method: 'POST' })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      .then(function () { resetBtn.textContent = '⟳ re-finding'; })
+      // "asked", not "re-finding". Everything this promise knows is that a web
+      // handler touched a file; it has not spoken to the scanner and cannot
+      // know whether the scanner will honour the request or refuse it for want
+      // of a screen to find. It claimed the stronger of the two, so a refused
+      // press read on this screen exactly like a press that worked, and the
+      // driver went back to driving through corners they had just rejected.
+      // What actually happened arrives on the heartbeat, as a note.
+      .then(function () { resetBtn.textContent = '⟳ asked'; })
       .catch(function () { resetBtn.textContent = '⟳ failed'; })
       .then(function () {
         setTimeout(function () {

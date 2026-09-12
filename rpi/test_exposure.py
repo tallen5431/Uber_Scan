@@ -413,6 +413,18 @@ def lit_card(gain, dim=1.0):
     return np.clip(np.full((60, 40), 150.0 * gain * dim, np.float32), 0, 255).astype(np.uint8)
 
 
+def sunlit_cradle(gain, exposure, base=EX.DEFAULT_EXPOSURE):
+    """The same corner of the frame with the phone gone and sun on the mount.
+
+    Unlike `cabin`, this one answers the exposure as well as the gain, because
+    the whole point of it is a picture the rig cannot get out from under by
+    shortening: the multiplier is set so that even the shortest rung at the
+    lowest gain is still at full well.
+    """
+    v = 4000.0 * gain * (exposure or base) / float(base)
+    return np.clip(np.full((60, 40), v, np.float32), 0, 255).astype(np.uint8)
+
+
 g = EX.AutoGain(gain=1.5, every=6.0)
 for i in range(1, 31):
     g.update(cabin(g.gain), 100.0 + i * 6.0, has_screen=False)
@@ -500,6 +512,47 @@ g = EX.AutoGain(gain=1.5, every=6.0)
 for i in range(1, 31):
     g.update(cabin(g.gain), 100.0 + i * 6.0, has_screen=False)
 ok_('a phone that is not there is not a phone that is too dim', not g.too_dim)
+
+# ...and the same mount in the sun is not a phone that is too bright, which is
+# the identical mistake with the identical remedy printed the other way up. The
+# guard was on `too_dim` only. Sun on an empty cradle blows the window out just
+# as a phone at full brightness does — the camera runs out of room either way —
+# and the driver was told to turn down a screen that was in their pocket, in
+# the same red notice they are meant to act on when it is real.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=EX.DEFAULT_EXPOSURE)
+for i in range(1, 41):
+    g.update(sunlit_cradle(g.gain, g.exposure), 100.0 + i * 6.0, has_screen=False)
+ok_('a phone that is not there is not a phone that is too bright', not g.too_bright)
+ok_('...nor too dim, on the same picture', not g.too_dim)
+
+# The picture the rig cannot know about is the one it must still guess at:
+# --no-track leaves the caller with no answer, and a blown window is lit by any
+# measure. Turning the guard into "believe nothing unless the tracker speaks"
+# would silence the complaint on every rig running without a tracker.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=EX.DEFAULT_EXPOSURE)
+for i in range(1, 41):
+    g.update(sunlit_cradle(g.gain, g.exposure), 100.0 + i * 6.0)
+ok_('...but with nothing tracking, a blown window is still reported',
+    g.too_bright)
+
+# Once it is true it stays up until something can measure. A card at full well
+# is a card whose corners are hardest to hold, so the beat on which the
+# complaint is truest is the beat the tracker is likeliest to have dropped —
+# and a guard written over the whole flag, rather than over what sets it, takes
+# the notice off the screen at exactly that moment.
+g = EX.AutoGain(gain=1.5, every=6.0, exposure=EX.DEFAULT_EXPOSURE)
+blinding = np.full((60, 40), 255, np.uint8)
+for i in range(1, 41):
+    g.update(blinding, 100.0 + i * 6.0, has_screen=True)
+ok_('a phone the camera cannot take is reported', g.too_bright)
+for i in range(41, 51):
+    g.update(blinding, 100.0 + i * 6.0, has_screen=False)
+ok_('...and the report survives the tracker losing the blown-out card',
+    g.too_bright)
+for i in range(51, 61):
+    g.update(lit_card(g.gain), 100.0 + i * 6.0, has_screen=True)
+ok_('...clearing on the first beat that can measure the card at all',
+    not g.too_bright)
 
 # Nor may both ends be true at once, which would put two contradictory
 # instructions on the same screen.

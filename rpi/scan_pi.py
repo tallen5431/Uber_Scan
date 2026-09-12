@@ -865,6 +865,12 @@ def log(message):
 HEALTH_EVERY = 120.0
 SAMPLE_EVERY = 20.0
 
+# How long a refused Re-find stays on the driving screen. Long enough to be
+# read at a glance from the seat several heartbeats running, short enough that
+# the one refusal that is permanently true — `--no-track`, where the button can
+# never do anything — does not leave a notice up for the rest of the shift.
+REFIND_NOTICE_S = 25.0
+
 
 class Health:
     """Counts what happened, and says so occasionally.
@@ -890,6 +896,41 @@ class Health:
         # thing that fixes it is a slider on the driver's phone.
         self.too_bright = False
         self.too_dim = False
+        # Why the last Re-find did nothing, or None if the last one worked.
+        #
+        # A press that is refused used to be answered with a log line, and a log
+        # line is not somewhere a driver looks — the button on the live page
+        # went on to say "re-finding" either way, because the only thing it
+        # waits for is a web handler that touches a file and has never spoken to
+        # the scanner. So the rig quietly kept reading through the corners the
+        # driver had just asked it to abandon, and the screen said it had not.
+        # Carried as the scanner's own sentence rather than a flag, so the page
+        # states the reason it was actually given instead of guessing at one.
+        self.refind_refused = None
+        self.refind_refused_at = None
+
+    def refind_says(self, why, now):
+        """Record what the last Re-find did, or None if it worked."""
+        self.refind_refused = why
+        self.refind_refused_at = now if why else None
+
+    def refind_notice(self, now):
+        """The refusal, while it is still an answer to something just pressed.
+
+        Time-bounded, and the reason is `--no-track`: on a rig started that way
+        the refusal is permanently true — there are never any corners for the
+        button to move — so a notice with no expiry would go up on the first
+        press and stay there for the rest of the shift. A notice that cannot be
+        cleared is one the driver stops reading, which costs the notices that
+        can be. This is an answer to something they just did, so it lives about
+        as long as they might still be waiting for one, and pressing again
+        brings it straight back.
+        """
+        if not self.refind_refused or self.refind_refused_at is None:
+            return None
+        if now - self.refind_refused_at > REFIND_NOTICE_S:
+            return None
+        return self.refind_refused
 
     def reset(self, now):
         # None rather than time.time(): the window starts when the first read
@@ -1093,8 +1134,8 @@ def show(frame_text, rate, parsed, ms, locked):
 ALIVE_EVERY = 4.0
 
 
-def emit_alive(too_bright=False, too_dim=False):
-    """The beat, and the one condition that has to reach the driver without one.
+def emit_alive(too_bright=False, too_dim=False, refind_refused=None):
+    """The beat, and the conditions that have to reach the driver without one.
 
     `tooBright` rides here rather than on a reading because the state it
     describes is precisely the state where there may be no reading: the phone is
@@ -1102,10 +1143,17 @@ def emit_alive(too_bright=False, too_dim=False):
     is a slider the driver has in their hand. Sent every beat so the page can
     clear it as soon as it goes away, and outside `ready` so it can never
     overwrite a verdict.
+
+    `refindRefused` rides here for the same reason and one more: a refused
+    Re-find is most likely when there is no screen to read, so a channel that
+    needs a reading to carry it would be silent in exactly the case it exists
+    for. It is a sentence or None, never a flag — the reason belongs to the
+    scanner, which is the only end that knows it.
     """
     print(json.dumps({'alive': True, 'at': int(time.time() * 1000),
                       'tooBright': bool(too_bright),
-                      'tooDim': bool(too_dim)}), flush=True)
+                      'tooDim': bool(too_dim),
+                      'refindRefused': refind_refused or None}), flush=True)
 
 
 def emit_reading():
@@ -2089,7 +2137,8 @@ def main():
                 elif now_alive - last_alive > ALIVE_EVERY:
                     last_alive = now_alive
                     emit_alive(too_bright=health.too_bright,
-                               too_dim=health.too_dim)
+                               too_dim=health.too_dim,
+                               refind_refused=health.refind_notice(now_alive))
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate
@@ -2130,10 +2179,15 @@ def main():
                         # driver drew the box to escape.
                         found = PL.detect_screen_quad(luma, work_width=PL.DETECT_WIDTH)
                         if found is None:
+                            health.refind_says(
+                                'Re-find found no screen — the box you drew is '
+                                'still in use. Try again with the phone lit and '
+                                'a darker border around it.', now)
                             log('re-find asked for, but there is no screen in view to '
                                 'find — the box you drew is still in use. Try again '
                                 'with the phone lit and a darker border around it.')
                         else:
+                            health.refind_says(None, now)
                             quad_px = (np.asarray(found, dtype=np.float32)
                                        * np.asarray(track_scale, dtype=np.float32))
                             manual = False
@@ -2153,6 +2207,12 @@ def main():
                                 'from it again, and tracking is %s'
                                 % ('off (--no-track)' if tracker is None else 'on'))
                     elif tracker is not None:
+                        # Nothing to clear here. A refusal can only have come
+                        # from the branch above (which clears its own, and sets
+                        # `manual` False in the same breath) or from --no-track
+                        # below, and --no-track means this branch is never
+                        # reached again. A clear written here would be a line
+                        # nothing can execute and no check can fail on.
                         was = TR.distance(tracker.quad, tracker.calibrated)
                         tracker.start_over()
                         scanner.quad = tracker.quad
@@ -2187,6 +2247,9 @@ def main():
                               'phone really has been re-seated'
                               if tracker.rebaselines or tracker.centred else '')))
                     else:
+                        health.refind_says(
+                            'Re-find does nothing while tracking is off '
+                            '(--no-track) — the corners are already fixed.', now)
                         log('outline reset asked for, but tracking is off '
                             '(--no-track), so the corners are already fixed')
 

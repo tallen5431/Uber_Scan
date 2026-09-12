@@ -348,8 +348,19 @@ def _frame_to_keep(source, as_json, drawn=None, floor=None):
     perfectly good calibration says when the phone happens to be idle.
 
     So: look at a few, score them the way aiming scored them, and keep the
-    sharpest that clears the same floors. Returns (frame, quad, sharp) or
-    (None, None, None) with the reason already emitted.
+    sharpest that clears the same floors. Returns (frame, quad, sharp, lens) or
+    (None, None, None, None) with the reason already emitted.
+
+    The lens comes back with the frame, and that is the whole reason it is
+    returned rather than read off the source afterwards. `source.lens_position`
+    is rewritten by every single frame the preview pulls, and calibrate_from
+    pulls two dozen more through the exposure sweep before it writes the config
+    — so the number that got written was the focus at the end of a run of
+    forced exposure changes, not the focus the sharpest frame was taken at. The
+    scanner then pins that number for the whole shift. A calibration that pins a
+    focus nothing was ever judged at is the quiet version of a bad calibration:
+    every read of the night is a little softer than it should be, and nothing
+    says so.
 
     A hand-drawn box is never refused. It exists because the detector could not
     find the phone, so sending the driver back to the phase that failed them is
@@ -363,7 +374,7 @@ def _frame_to_keep(source, as_json, drawn=None, floor=None):
     from calibrate import MIN_CARD_PIXELS, SHARP_ROI, card_source_pixels
 
     floor = floor or MIN_CARD_PIXELS
-    best = (None, None, None)
+    best = (None, None, None, None)
     seen_quad = False
     small = None
     blurry = None
@@ -372,6 +383,9 @@ def _frame_to_keep(source, as_json, drawn=None, floor=None):
         if attempt:
             time.sleep(STABLE_INTERVAL)
         frame = source.frame()
+        # Read with the frame, not afterwards. See the docstring: everything
+        # below this loop moves the lens on and overwrites it.
+        lens_now = getattr(source, 'lens_position', None)
         if drawn is not None:
             quad = np.array(CX.in_pixels(drawn, (frame.shape[1], frame.shape[0])),
                             dtype=np.float32)
@@ -393,7 +407,7 @@ def _frame_to_keep(source, as_json, drawn=None, floor=None):
                 continue
 
         if best[2] is None or sharp > best[2]:
-            best = (frame, quad, sharp)
+            best = (frame, quad, sharp, lens_now)
 
     if best[0] is not None:
         return best
@@ -413,7 +427,7 @@ def _frame_to_keep(source, as_json, drawn=None, floor=None):
                % (round(blurry) if blurry else '?', PV.SHARP_FLOOR))
     emit({'phase': 'error', 'message': why + '. Nothing was written; aim again.'},
          as_json)
-    return None, None, None
+    return None, None, None, None
 
 
 def calibrate_from(source, as_json, drawn=None, floor=None):
@@ -434,7 +448,7 @@ def calibrate_from(source, as_json, drawn=None, floor=None):
     import pipeline as PL
     from calibrate import DEFAULT_ROI, card_source_pixels, load_existing
 
-    frame, quad, _ = _frame_to_keep(source, as_json, drawn, floor)
+    frame, quad, _, lens_at = _frame_to_keep(source, as_json, drawn, floor)
     if frame is None:
         return False
 
@@ -454,7 +468,10 @@ def calibrate_from(source, as_json, drawn=None, floor=None):
         'cropBox': DEFAULT_ROI,
         'cardHeight': 900,
         'capture': {'width': source.capture_size[0], 'height': source.capture_size[1]},
-        'lensPosition': source.lens_position,
+        # The focus the kept frame was actually taken at, not whatever the lens
+        # had drifted to by the end of the exposure sweep above. The scanner
+        # pins this for the whole shift.
+        'lensPosition': lens_at,
         'exposureTime': exposure_us,
         'exposureWhy': why,
         # Machine-readable, because `exposureWhy` above is prose and the run

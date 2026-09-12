@@ -1704,11 +1704,26 @@ eq('the heartbeat carries both flags, false by default',
 eq('...and true when they are', (beat(too_dim=True).get('tooDim'),
                                  beat(too_bright=True).get('tooBright')),
    (True, True))
+# A refused Re-find rides the same beat, and has to: the commonest refusal is
+# "there is no screen in view to find", which is also "no reading is coming",
+# so any channel that needs a reading would be silent in exactly the case it
+# exists for. Absent rather than false when there is nothing to say — this is a
+# sentence, and an empty one would render as a blank notice.
+eq('a beat with nothing to report carries no refusal',
+   beat().get('refindRefused'), None)
+eq('...nor when the scanner hands it an empty one',
+   beat(refind_refused='').get('refindRefused'), None)
+eq('...and carries the scanner\'s own words when there are some',
+   beat(refind_refused='no screen to find').get('refindRefused'),
+   'no screen to find')
+# Which refusal it was, and that the loop sets it at all, is measured in
+# test_loop.py against the real main() — here is only the wire.
+
 # The page reads these by name off the heartbeat; a rename here is a notice
 # that silently stops appearing.
 page = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), 'live.html')).read()
-for field in ('tooBright', 'tooDim'):
+for field in ('tooBright', 'tooDim', 'refindRefused'):
     ok_('live.html reads %s off the heartbeat' % field,
         'msg.%s' % field in page)
 

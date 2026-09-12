@@ -3053,6 +3053,109 @@ parked — stand down, and the five used while the car is moving stay. The layou
 suite measures the bar in all three states and holds the crowded one to clipping
 nothing the six-button bar did not already clip.
 
+### The focus the shift was pinned at, and the frame it came from
+
+Calibration keeps the sharpest of six frames, because the frame it writes the
+corners from is the frame every read of the shift is cropped against. It then
+measures the exposure on that screen — eight rungs, three frames each — and only
+after that writes the file, including:
+
+    'lensPosition': source.lens_position,
+
+`source.lens_position` is not a property of the calibration. `preview.py`
+rewrites it from the metadata of **every frame it pulls**, so by the time this
+line runs it holds the focus the lens had drifted to at the end of two dozen
+frames taken at forced exposures, with the lens free to hunt the whole way.
+Measured on a fixture stepping the lens 0.02 a frame: the kept frame was taken
+at **4.06** and the file was written with **4.60**, thirty frames later. The
+scanner pins that number for the entire shift.
+
+It is the quiet kind of wrong. `config.json` looks right. `config-preview.png`
+looks right, because the preview is rendered from the kept frame. Nothing says
+anything. The only symptom is that every read of the night is a little softer
+than it should be — and a softer read is a misread leg, or a lock that never
+happens, which is an offer that never reaches the journal at all.
+
+The lens now travels with the frame: `_frame_to_keep` reads it in the same
+breath as `source.frame()` and returns it alongside the frame and the quad, and
+`calibrate_from` writes the one that came back. Three mutations, three caught —
+the old line restored, the lens taken from the last frame of the run rather than
+the kept one, and the read moved one frame early.
+
+### A notice that told the driver to dim a phone in their pocket
+
+`too_bright` puts a red line on the driving screen: *the phone is brighter than
+the camera can take — turn the screen brightness down a notch.* It is set from
+`_split` saying the camera is out of room — gain on its floor, no shorter rung
+to fall to.
+
+An empty mount in direct sun is out of room in exactly the same way. `too_dim`
+has been guarded against that case since an empty cradle was first told apart
+from a dim card, on the grounds that *the driver would turn up a phone that is
+in their pocket*; the identical guard was simply missing from this end. Driven
+on the exposure harness with the tracker reporting no screen, forty beats of
+sunlit empty cradle raised the complaint every time.
+
+The guard goes on what **sets** the flag, not on the flag:
+
+```python
+self.too_bright = self.too_bright or (stuck and lit_screen)
+```
+
+`... and lit_screen` over the whole expression reads better and is wrong. A card
+at full well is a card whose corners are hardest to hold, so the beat on which
+the complaint is truest is the beat the tracker is likeliest to have dropped —
+and that version takes the notice off the screen at exactly that moment. Nothing
+is needed to clear it: the branch above already does, on the first beat that can
+measure the card at all. Three mutations, three caught, including the shape that
+silences the notice on any rig running `--no-track`.
+
+The controls were left alone deliberately, and it is a real trade. The same
+sunlit cradle walks the exposure down to the shortest rung and the gain to its
+floor, and the returning phone then needs six beats — **36 seconds**, against an
+offer that lives 30 to 45 — to climb back. Gating the *cut* on `has_screen` is
+the obvious fix and it deadlocks: a card blown out is a card the tracker cannot
+find, so the rig would refuse to darken the picture that is the reason it cannot
+see. That is the hole the down-branch already has eleven lines explaining. The
+false sentence is fixed; the recovery is measured and left.
+
+### A button that said it had done something it refused to do
+
+Pressing **⟳ Re-find** is the driver saying the outline is wrong. From that press
+on, the rig is reading through corners they have already judged bad.
+
+The scanner may refuse. A hand-drawn box is only given up for a screen it can
+actually see, and with `--no-track` there are no corners for the press to move
+at all. Both refusals went to the log — which is not a place anyone looks from
+the driving seat — and the button went on to say **"⟳ re-finding"** regardless,
+because the only thing it waits for is a web handler that touches a file and has
+never spoken to the scanner. A refused press and a press that worked were
+indistinguishable from the seat.
+
+Three changes, and the first is the smallest: the button now says **"⟳ asked"**,
+which is the whole of what the POST proves.
+
+The reason rides the heartbeat, as the scanner's own sentence rather than a
+flag — the two refusals want different things from the driver, and only that end
+knows which happened. It has to be the heartbeat: the commonest refusal is *there
+is no screen in view to find*, which is also *no reading is coming*, so any
+channel needing a reading would be silent in precisely the case it exists for.
+The live page renders it in both branches of `render()`, since the offer that
+arrives while the corners are wrong is exactly the offer being read through them.
+
+And it **expires**, after 25 seconds. That is there for `--no-track`, where the
+refusal is permanently true: with no expiry the first press would put a notice
+up for the rest of the shift, and a notice that cannot be cleared is one the
+driver stops reading — which costs the notices that can be. Press again and it
+comes straight back.
+
+Nine mutations, nine caught. The ninth is the one worth naming: an earlier round
+of eight caught everything and the suite was still wrong, because one of the
+eight — deleting the clear-on-success — was run against the browser suite, which
+never loads `scan_pi.py`. Chasing that MISS is what found the `--no-track` notice
+that could never go away, and one unreachable clear, now deleted rather than
+kept as a line no check can fail on.
+
 ### A suite that skipped two checks and said it passed
 
 The crop-box suite hands the file the web server wrote to `rpi/cropbox.py`, so
@@ -5342,7 +5445,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 35 suites, 5341 checks
+npm test                # all 35 suites, 5384 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -5370,19 +5473,22 @@ python3 rpi/test_accumulate.py  # 238 on merging readings across frames, on a
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 227 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
-python3 rpi/test_exposure.py    # 169 on flicker, brightness, gain and
-                                #     exposure, and on both ends of running out
+python3 rpi/test_exposure.py    # 175 on flicker, brightness, gain and
+                                #     exposure, on both ends of running out,
+                                #     and on an empty mount in the sun never
+                                #     being reported as a phone
 python3 rpi/test_track.py       # 131 on following the phone as it drifts
 python3 rpi/test_journal.py     # 192 on keeping one row per offer, and on a
                                 #     distrusted distance always saying so twice
 python3 rpi/test_repeats.py     #  54 on one card read many times
-python3 rpi/test_calibrate.py   #  66 on what calibration may overwrite, and
-                                #     which frame it is allowed to write from
+python3 rpi/test_calibrate.py   #  73 on what calibration may overwrite,
+                                #     which frame it is allowed to write from,
+                                #     and the focus that frame was taken at
 python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 259 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 263 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
@@ -5417,7 +5523,7 @@ python3 rpi/test_doctor.py      #  51 on the preflight running to the end, and
 python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 321 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 330 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -5440,9 +5546,10 @@ python3 rpi/test_server.py      #  29 on the server's own edges: two readers of
 python3 rpi/test_map.py         #  23 on the map check page: that it asks
                                 #     nobody anything until told to, and that
                                 #     it shows what it could not place
-python3 rpi/test_loop.py        #  13 on the scan loop re-telling a card once
-                                #     the rest of it arrives, and going quiet
-                                #     when a read never returns
+python3 rpi/test_loop.py        #  30 on the scan loop re-telling a card once
+                                #     the rest of it arrives, going quiet when
+                                #     a read never returns, and saying so when
+                                #     a button press is refused
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

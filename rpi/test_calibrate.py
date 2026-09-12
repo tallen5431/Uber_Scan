@@ -228,12 +228,13 @@ def why_not(said):
     return said[0]['message'] if said else ''
 
 
-def keep(frames, drawn=None, floor=None):
-    """Returns (frame, quad, sharp, messages)."""
+def keep(frames, drawn=None, floor=None, source=None):
+    """Returns (frame, quad, sharp, messages). The lens is checked separately,
+    further down, where the source has one that moves."""
     said = io.StringIO()
-    src = FakeSource(frames)
+    src = source if source is not None else FakeSource(frames)
     with contextlib.redirect_stdout(said):
-        frame, quad, sharp = AP._frame_to_keep(src, True, drawn, floor)
+        frame, quad, sharp, _lens = AP._frame_to_keep(src, True, drawn, floor)
     lines = [json.loads(l) for l in said.getvalue().splitlines() if l.strip()]
     return frame, quad, sharp, lines
 
@@ -297,6 +298,106 @@ frame, quad, sharp, said = keep([FAR] * AP.CALIBRATE_TRIES, floor=250)
 ok_('a lowered floor is honoured while calibrating too', frame is FAR)
 frame, quad, sharp, said = keep([GOOD] * AP.CALIBRATE_TRIES, floor=600)
 ok_('...and a raised one is as well', frame is None)
+
+# --- the focus written down is the focus the kept frame was taken at ---------
+#
+# `source.lens_position` is not a property of the calibration. It is a running
+# record of the last frame pulled: preview.py rewrites it from every request's
+# metadata. calibrate_from picked the sharpest frame, then ran the exposure
+# sweep — which pulls two dozen more frames through that same source, at forced
+# exposures, with the lens free to hunt the whole way — and only then wrote
+# `lensPosition`. So the focus the scanner pins for the entire shift was
+# wherever the lens happened to stop at the end of that sweep, and no frame at
+# that focus was ever judged sharp enough to calibrate on.
+#
+# It is the quiet kind of bad calibration: config.json looks right, the preview
+# looks right because the preview is made from the kept frame, and the only
+# symptom is that every read of the night is a little softer than it should be.
+# A softer read is a misread leg or a failed lock, and a failed lock is an offer
+# that never reaches the journal at all.
+#
+# Measured on this fixture, with the lens stepping 0.02 a frame: the kept frame
+# was taken at 4.06 and the old code wrote 4.60, thirty frames later.
+
+
+import time as _real_time
+
+
+class LensSource(object):
+    """A preview whose lens keeps moving, because a real one's does."""
+
+    capture_size = (1400, 1050)
+    scale_to_capture = 1.0
+
+    def __init__(self, frames, cam=None):
+        self.frames = list(frames)
+        self.taken = 0
+        self.lens_position = None
+        self.cam = cam
+
+    def frame(self):
+        f = self.frames[min(self.taken, len(self.frames) - 1)]
+        self.taken += 1
+        self.lens_position = round(4.0 + 0.02 * self.taken, 2)
+        return f
+
+
+class _Controls(object):
+    """A camera that takes exposure settings, so the sweep really runs."""
+
+    def set_controls(self, controls):
+        pass
+
+
+class _NoWaiting(object):
+    """`time`, minus the waiting — the sweep sleeps 0.45s on every rung."""
+
+    def __init__(self):
+        self.slept = 0.0
+
+    def sleep(self, seconds):
+        self.slept += seconds
+
+    def __getattr__(self, name):
+        return getattr(_real_time, name)
+
+
+# Sharpest third of six, so the kept frame is neither the first the loop sees
+# nor the last — a rule that took either end would pass by accident.
+RUN = [blurred, blurred, GOOD] + [blurred] * (AP.CALIBRATE_TRIES - 3)
+eq('the run is as long as the loop looks', len(RUN), AP.CALIBRATE_TRIES)
+
+src = LensSource(RUN)
+said = io.StringIO()
+with contextlib.redirect_stdout(said):
+    frame, _q, _s, lens_at = AP._frame_to_keep(src, True)
+ok_('the sharpest frame is still the one kept', frame is GOOD)
+eq('...and the lens comes back as it stood for THAT frame', lens_at, 4.06)
+ok_('...not as it stands after the run (%r)' % src.lens_position,
+    src.lens_position != lens_at)
+
+work = tempfile.mkdtemp()
+saved = (AP.CONFIG, AP.HERE, AP.time)
+try:
+    AP.CONFIG = os.path.join(work, 'config.json')
+    AP.HERE = work
+    AP.time = _NoWaiting()
+    src = LensSource(RUN, cam=_Controls())
+    said = io.StringIO()
+    with contextlib.redirect_stdout(said):
+        wrote = AP.calibrate_from(src, True)
+    with open(AP.CONFIG) as fh:
+        written = json.load(fh)
+finally:
+    AP.CONFIG, AP.HERE, AP.time = saved
+    shutil.rmtree(work, ignore_errors=True)
+
+ok_('the whole calibration runs through and writes a file', wrote)
+ok_('...with the exposure sweep pulling frames of its own after the kept one '
+    '(%d frames, lens left at %r)' % (src.taken, src.lens_position),
+    src.taken > AP.CALIBRATE_TRIES and src.lens_position != 4.06)
+eq('...and the focus in the file is the kept frame\'s, not the sweep\'s',
+   written['lensPosition'], 4.06)
 
 # --- the one frame calibration keeps comes through the shared opener --------
 #

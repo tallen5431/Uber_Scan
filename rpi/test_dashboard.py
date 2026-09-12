@@ -662,6 +662,78 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- Re-find, and the two things it may actually have done ---------------
+  stage = 'Re-find, and the two things it may actually have done';
+  //
+  // Pressing Re-find is a driver saying the outline is wrong. The scanner may
+  // refuse — a hand-drawn box is only given up for a screen it can see, and
+  // with --no-track there are no corners to move — and the refusal used to go
+  // to the log and nowhere else, while this button went on to say
+  // "re-finding". So a refused press and a press that worked looked identical
+  // from the seat, and the driver went back to driving through corners they
+  // had just rejected.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.route('**/api/recalibrate', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"ok":true}',
+    }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => window.__es.push(
+      { phase: 'scanning', message: '' }));
+    await page.evaluate(() => window.__es.push(
+      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
+        refindRefused: null }));
+    await page.waitForTimeout(150);
+    out.refind = { before: await page.evaluate(LOOK, '#warn') };
+
+    await page.click('#reset');
+    await page.waitForTimeout(250);
+    // All the POST proves is that a file was touched. It has not reached the
+    // scanner and cannot speak for it.
+    out.refind.pressed = await page.evaluate(LOOK, '#reset');
+
+    // The scanner's answer, on the beat — which is the only channel that runs
+    // in this state, because "no screen to find" is also "no reading coming".
+    const REFUSED = 'Re-find found no screen — the box you drew is still in '
+                  + 'use. Try again with the phone lit and a darker border '
+                  + 'around it.';
+    await page.evaluate((m) => window.__es.push(
+      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
+        refindRefused: m }), REFUSED);
+    await page.waitForTimeout(200);
+    out.refind.refused = await page.evaluate(LOOK, '#warn');
+
+    // It is not a blip on one beat: it stands until a press actually works,
+    // because the state it describes — corners the driver rejected, still in
+    // use — stands until then too.
+    await page.evaluate((m) => window.__es.push(
+      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
+        refindRefused: m }), REFUSED);
+    await page.waitForTimeout(200);
+    out.refind.stillRefused = await page.evaluate(LOOK, '#warn');
+
+    // ...and a reading arriving does not bury it either: the notes on a
+    // reading are rendered by a different branch of the same function.
+    await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
+    await page.waitForTimeout(200);
+    out.refind.onReading = await page.evaluate(LOOK, '#warn');
+
+    await page.evaluate(() => window.__es.push(
+      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
+        refindRefused: null }));
+    await page.waitForTimeout(200);
+    out.refind.cleared = await page.evaluate(LOOK, '#warn');
+    await page.close();
+    await ctx.close();
+  }
+
   // --- the connection line and the bar, against the server's snapshot ------
   stage = 'the connection line and the bar, against the server\'s snapshot';
   //
@@ -1452,6 +1524,40 @@ try:
            (impossible.get('rate') or {}).get('text'), '--')
         ok_('...while the figures it was working from stay on screen',
             '136' in ((impossible.get('pay') or {}).get('text') or ''))
+
+    # --- a Re-find the scanner refused -----------------------------------
+    #
+    # The one state on this page where the DRIVER has acted and the rig has
+    # not. Everything else here is the rig reporting something it saw; this is
+    # the rig declining to do a thing it was told to, and until the refusal
+    # reached the glass the button said "re-finding" regardless and the driver
+    # went on reading offers through corners they had already rejected.
+    rf = got.get('refind') or {}
+    ok_('the refused re-find was measured', bool(rf))
+    if rf:
+        eq('nothing is said about re-finding before the button is pressed',
+           (rf.get('before') or {}).get('shown'), False)
+        # The POST's own promise knows only that a web handler touched a file.
+        # It has not spoken to the scanner, so it may not speak for it.
+        pressed = ((rf.get('pressed') or {}).get('text') or '').strip()
+        ok_('the button claims only what the press proved (%r)' % pressed,
+            'asked' in pressed)
+        ok_('...and not that anything has been re-found', 'find' not in pressed)
+        refused = ((rf.get('refused') or {}).get('text') or '')
+        ok_('the scanner\'s refusal reaches the glass (%r)' % refused[:60],
+            'no screen' in refused and 'box you drew' in refused)
+        ok_('...on the glass, not pushed off it',
+            (rf.get('refused') or {}).get('shown'))
+        ok_('...and it stands on the next beat, not just the one that brought it',
+            'no screen' in ((rf.get('stillRefused') or {}).get('text') or ''))
+        # Different branch of render(): the notes on a reading are built
+        # separately from the notes shown while there is no reading, and a
+        # refused re-find belongs in both. The offer that arrives while the
+        # corners are wrong is exactly the offer being read through them.
+        ok_('...and survives an offer arriving',
+            'no screen' in ((rf.get('onReading') or {}).get('text') or ''))
+        ok_('...and goes when the scanner says the next one worked',
+            'no screen' not in ((rf.get('cleared') or {}).get('text') or ''))
 
     # --- the snapshot at load is a snapshot ------------------------------
     sn = got.get('snap') or {}

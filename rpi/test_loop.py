@@ -19,6 +19,15 @@ Each check here failed against the loop before its fix:
 - A read that never returned left the rig beating and silent, and the
   supervisor's silence watchdog could not see it.
 - The startup line counted journal lines and called them offers.
+- A Re-find the scanner refused was answered in the log and nowhere else,
+  while the button on the driving screen said it was re-finding.
+
+One warning about the stubbed reader, because it cost an afternoon here: it
+answers with whatever text the check asked for WHETHER OR NOT THERE IS A CARD
+IN FRONT OF IT. So a read, and an offer announced off it, happen on the first
+frame of every run, before anything is in the mount — neither is evidence that
+the camera can see a card. A check that needs one there must ask the camera
+(`cam_out`), not the loop.
 """
 
 import json
@@ -52,6 +61,7 @@ try:
     import testcards as TC
     import pipeline as PL
     import offer_parser as OP
+    import handoff as HO
     import scan_pi as SP
 except ImportError as e:
     print('%s — skipping the loop checks' % e)
@@ -120,22 +130,33 @@ def out_for(text):
 
 
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
-        hang_from=None, stuck_after=None):
+        hang_from=None, stuck_after=None, handoff=None, alive_every=None,
+        refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
-    return. Returns the journal rows, the announcements, the alive beats and
-    the log lines."""
+    return. `handoff`: a directory to point the button-press files at, so a
+    request written here cannot be eaten by a scanner running on the same
+    machine, nor this one eat theirs. Returns the journal rows, the
+    announcements, the alive beats and what rode them, and the log lines."""
     offer = TC.mount(TC.uberx_screen(), 1200)
     quad = PL.detect_screen_quad(offer)
     work = tempfile.mkdtemp()
     config = os.path.join(work, 'config.json')
     journal = os.path.join(work, 'journal.jsonl')
+    cfg = {'quad': [[float(x), float(y)] for x, y in quad], 'cardHeight': 900,
+           'capture': {'width': CAP[0], 'height': CAP[1]},
+           'lensPosition': 10.0, 'exposureTime': 16667,
+           'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30}}
+    cfg.update(config_extra or {})
     with open(config, 'w') as fh:
-        json.dump({'quad': [[float(x), float(y)] for x, y in quad], 'cardHeight': 900,
-                   'capture': {'width': CAP[0], 'height': CAP[1]},
-                   'lensPosition': 10.0, 'exposureTime': 16667,
-                   'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30}}, fh)
-    cam = FakeCam(offer, TC.blank())
+        json.dump(cfg, fh)
+    cam = FakeCam(offer, TC.blank(), appear_at=appear_at)
+    # Handed out so a check can ask what is really in the mount right now. The
+    # stubbed reader answers with whatever text the check asked for whether or
+    # not there is a card in front of it, so an announced offer is NOT evidence
+    # that the camera can see one.
+    if cam_out is not None:
+        cam_out.append(cam)
     calls = [0]
 
     def look(self, frames, now=None, geom=None):
@@ -145,7 +166,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 real_sleep(0.05)
         return [out_for(texts_for_call(calls[0], k)) for k in range(len(frames))]
 
-    announced, verdicts, beats, logs = [], [], [], []
+    announced, verdicts, beats, logs, alive = [], [], [], [], []
     real = (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
             PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
             SP.emit_reading)
@@ -154,13 +175,27 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     SP.start_camera = lambda *a, **k: cam
     SP.emit = lambda *a, **k: verdicts.append((a, k))
     SP.emit_offer = lambda *a, **k: announced.append(a)
-    SP.emit_alive = lambda *a, **k: beats.append(time.time())
+
+    def beat(*a, **k):
+        beats.append(time.time())
+        alive.append(dict(k))
+
+    SP.emit_alive = beat
     SP.log = lambda m: logs.append(m)
+    was_handoff = os.environ.get(HO.ENV_DIR)
+    if handoff:
+        os.environ[HO.ENV_DIR] = handoff
     PL.Scanner.look_many = look
     if health_every is not None:
         SP.HEALTH_EVERY = health_every
     if stuck_after is not None:
         SP.READ_STUCK_S = stuck_after
+    was_alive_every = SP.ALIVE_EVERY
+    if alive_every is not None:
+        SP.ALIVE_EVERY = alive_every
+    was_refind_s = SP.REFIND_NOTICE_S
+    if refind_notice_s is not None:
+        SP.REFIND_NOTICE_S = refind_notice_s
     deadline = time.time() + seconds
 
     def rows():
@@ -187,7 +222,15 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
          PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
          SP.emit_reading) = real
-    return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0], logs=logs)
+        SP.ALIVE_EVERY = was_alive_every
+        SP.REFIND_NOTICE_S = was_refind_s
+        if handoff:
+            if was_handoff is None:
+                os.environ.pop(HO.ENV_DIR, None)
+            else:
+                os.environ[HO.ENV_DIR] = was_handoff
+    return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
+                logs=logs, alive=alive)
 
 
 FRAG = '$16.05 20 min (7.3 mi) trip'
@@ -249,6 +292,114 @@ ok_('...and stopped beating once the read was stuck (last beat %.1fs ago)'
     % (last_gap or 0), last_gap is not None and last_gap > 6.0)
 ok_('...saying why, once',
     sum(1 for l in r['logs'] if 'stuck' in l) == 1)
+
+# --- a Re-find the rig cannot honour has to say so on the beat ---------------
+# Pressing Re-find is the driver saying the outline is wrong, so from that press
+# on the rig is reading through corners they have already judged bad. With
+# --no-track there is nothing for the press to move, and the refusal went to the
+# log — which is not a place a driver looks. The button on the live page went on
+# to say "re-finding" either way, because the only thing it waits for is a web
+# handler that touches a file and has never spoken to the scanner.
+handoff = tempfile.mkdtemp()
+open(os.path.join(handoff, 'uberscan-recalibrate'), 'w').close()
+r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=8.0,
+        handoff=handoff, alive_every=0.05,
+        until=lambda rows, ann, calls: calls >= 3)
+said = [b.get('refind_refused') for b in r['alive']]
+carried = [s for s in said if s]
+ok_('the refusal reaches the heartbeat (%r)' % (carried[:1],), bool(carried))
+ok_('...saying which refusal it was', carried and '--no-track' in carried[0])
+ok_('...and the log still has it too, for the day somebody reads one',
+    any('tracking is off' in l for l in r['logs']))
+ok_('...and the request was taken, not left to fire again on the next restart',
+    not any(os.path.exists(p) for p in HO.candidates(HO.RECALIBRATE)))
+
+# ...and a rig nobody has pressed anything on says nothing about re-finding.
+# Without this the check above passes on a flag that is simply always set.
+r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=8.0,
+        handoff=tempfile.mkdtemp(), alive_every=0.05,
+        until=lambda rows, ann, calls: calls >= 3)
+ok_('an unpressed button is not a refusal',
+    r['alive'] and not any(b.get('refind_refused') for b in r['alive']))
+
+# ...and it goes away on its own, which is the part that only matters because
+# of --no-track: there the refusal is permanently true, the button can never do
+# anything on that rig, and a notice with no expiry would go up on the first
+# press and stay up for the whole shift. A notice that cannot be cleared is one
+# the driver stops reading, and it takes the ones that can be with it.
+handoff = tempfile.mkdtemp()
+open(os.path.join(handoff, 'uberscan-recalibrate'), 'w').close()
+# Run on the clock rather than on a read count: the thing being measured is a
+# notice ageing out, so the run has to outlive it.
+r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=3.0,
+        handoff=handoff, alive_every=0.05, refind_notice_s=0.8)
+said = [bool(b.get('refind_refused')) for b in r['alive']]
+ok_('the refusal is on the beat to begin with (%d of %d beats)'
+    % (sum(said), len(said)), any(said))
+ok_('...and off it again once the press is old news', said and not said[-1])
+ok_('...having been there for several beats, not one', sum(said) > 1)
+
+# ...and a press that works takes the refusal down at once, rather than leaving
+# it to age out. Driven through the hand-drawn box, which is the only path where
+# both answers are reachable in one process: a rig with no tracker never gets a
+# press that works, and a rig with one never refuses.
+#
+# The card arrives partway through, so the first press — made against an empty
+# mount — is refused for want of a screen, and the second, dropped in once that
+# refusal has been seen, finds one.
+handoff = tempfile.mkdtemp()
+REQ = os.path.join(handoff, 'uberscan-recalibrate')
+open(REQ, 'w').close()
+pressed_again = [False]
+mount = []
+
+
+def press_again_once_refused(rows, ann, calls):
+    """Called from inside the loop, on its own sleep. Not a condition to stop
+    on — it returns False every time — but the only hook this harness has for
+    doing something to the rig mid-run.
+
+    Waits for the card to really be in the mount, asked of the camera rather
+    than inferred from the loop. Neither a read nor an announcement is evidence
+    here: the reader is stubbed and answers with a whole card on a blank frame,
+    so both happen on the first frame, and a press then is the same press
+    against the same empty mount the first one was refused for.
+    """
+    if (not pressed_again[0] and not os.path.exists(REQ)
+            and mount and mount[0].frame is mount[0].offer):
+        pressed_again[0] = True
+        open(REQ, 'w').close()
+    return False
+
+
+r = run(lambda n, k: WHOLE, seconds=10.0, handoff=handoff, alive_every=0.05,
+        appear_at=1.0, cam_out=mount,
+        config_extra={'manualBox': True, 'cropBox': [0.0, 0.0, 1.0, 1.0]},
+        until=press_again_once_refused)
+ok_('the first press, against an empty mount, was refused',
+    any('no screen in view' in l for l in r['logs']))
+ok_('...and said so on the beat',
+    any('box you drew' in (b.get('refind_refused') or '') for b in r['alive']))
+ok_('the second press, with the card there, was honoured',
+    any('finding the phone automatically' in l for l in r['logs']))
+said = [bool(b.get('refind_refused')) for b in r['alive']]
+ok_('...and took the refusal down with it, without waiting for it to age out',
+    pressed_again[0] and said and not said[-1])
+
+# --- the Health object's own account of a Re-find ---------------------------
+# Reachable directly, and worth reaching: the loop above can only ever show one
+# of the two answers per run, because a rig with no tracker never gets a press
+# that works and a rig with one never refuses.
+h = SP.Health()
+eq('a rig nobody has pressed anything on has nothing to say', h.refind_notice(1000.0), None)
+h.refind_says('no screen to find', 1000.0)
+eq('...a refusal is said', h.refind_notice(1000.0), 'no screen to find')
+eq('...and goes on being said while the press is recent',
+   h.refind_notice(1000.0 + SP.REFIND_NOTICE_S - 1.0), 'no screen to find')
+eq('...and stops once it is not', h.refind_notice(1000.0 + SP.REFIND_NOTICE_S + 1.0), None)
+h.refind_says('no screen to find', 1000.0)
+h.refind_says(None, 1002.0)
+eq('a press that worked leaves nothing behind', h.refind_notice(1002.0), None)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)

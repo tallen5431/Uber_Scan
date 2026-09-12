@@ -521,7 +521,7 @@ class AutoGain:
                 want = (light if self.exposure is None
                         else self.gain * self.candidates[-1])
 
-        ctrls = self._settle(want, blown)
+        ctrls = self._settle(want, blown, lit_screen)
 
         # Everything that can be spent has been spent, and it was not enough.
         # Asked after the move rather than inside _split, because _split does
@@ -535,10 +535,26 @@ class AutoGain:
                         and bright < self.target * (1 - GAIN_TOLERANCE))
         return ctrls
 
-    def _settle(self, want, blown):
+    def _settle(self, want, blown, lit_screen=True):
         """Pay for `want` units of light, and say what to send the camera."""
         gain, rung, stuck = self._split(want, blown)
-        self.too_bright = self.too_bright or stuck
+        # Only a screen the caller can actually see may be called too bright.
+        # `stuck` says the camera is out of room, which is as true of an empty
+        # mount in direct sun as of a phone at full brightness — and the
+        # sentence the driver then gets is "turn the screen brightness down a
+        # notch" about a phone that is in their pocket. `too_dim` has had this
+        # guard since an empty mount started being told apart from a dim card;
+        # it was only ever missing from this end. Measured on the harness in
+        # test_exposure: a sunlit empty mount raised it in 40 beats flat.
+        #
+        # Guarding what SETS it, not what it is, deliberately. A card blown out
+        # is a card whose corners are hard to hold, so the beat that makes the
+        # complaint truest is also the beat the tracker is most likely to have
+        # let go of — and `... and lit_screen` on the whole expression would
+        # take the notice off the screen exactly then. Nothing is needed to
+        # clear it: the branch above does that on the first beat that can
+        # measure at all.
+        self.too_bright = self.too_bright or (stuck and lit_screen)
 
         moved = rung is not None and rung != self.exposure
         ctrls = {}
