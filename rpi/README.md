@@ -3329,6 +3329,25 @@ came up, and how old that fix was. Absent whenever it is not known, which is
 most rows: no `--gps`, no answer, or a fix over twenty seconds old all produce
 the same honest nothing.
 
+**It is off until you pass it, and `npm start` does not pass it for you.** The
+server spawns the autopilot, which hands anything it does not recognise down to
+the scanner, so the whole route is one environment variable:
+
+```sh
+SCANNER_ARGS="--gps 100.x.y.z" npm start      # the phone's Tailscale address
+```
+
+The phone's GPS server app listens on 2947 and the port can be left off. Under
+systemd it goes in the unit's `Environment=` line, next to the other
+`SCANNER_ARGS` flags.
+
+Without it nothing is broken and nothing says so either, because there is
+nothing to say: rows carry no position, `map.html` searches on the typed hint
+the way it always did, and **◍ Where you were** draws nothing and reports "none
+carry a position". That last sentence is the one to look for when the feature
+seems to be doing nothing — it is the page saying the rows never knew, not the
+page failing to draw them.
+
 `map.html` then searches each place inside a box around where the car was, using
 Nominatim's `viewbox` with `bounded=1`. Sixty miles: generous enough that no
 real delivery is refused, tight enough that the nearest street of the same name
