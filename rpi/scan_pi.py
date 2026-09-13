@@ -929,15 +929,17 @@ class Health:
         # days later, and a counter that resets every thirty seconds cannot
         # answer them. See digest(), where both are incremented.
         #
-        # `address_refused_had_payout` is the rule-1 guard's own firing rate:
-        # a frame that yielded a full address AND a payout, refused because a
-        # screen with a payout on it is an offer and not a destination.
+        # `address_refused_as_offer` is the rule-1 guard's own firing rate: a
+        # frame that yielded a full address off a screen the rig judged to be
+        # an offer rather than a destination — because it carried a payout, or
+        # because it named a merchant, which is the half of that grammar that
+        # survives a payout lost to glare or the crop edge.
         #
         # `street_seen_no_address` is a frame with no payout, something
         # street-shaped in the text, and no address out of it. This is the one
         # expected to move, and what it measures is how much of the driver's
         # missing destination is find_address being strict on purpose.
-        self.address_refused_had_payout = 0
+        self.address_refused_as_offer = 0
         self.street_seen_no_address = 0
         self.gain = None
         self.bright = None
@@ -1077,10 +1079,10 @@ class Health:
                         'would accept'
                         % (self.street_seen_no_address,
                            '' if self.street_seen_no_address == 1 else 's'))
-        if self.address_refused_had_payout:
-            bits.append('%d address%s refused for being on a card with a payout'
-                        % (self.address_refused_had_payout,
-                           '' if self.address_refused_had_payout == 1 else 'es'))
+        if self.address_refused_as_offer:
+            bits.append('%d address%s refused for being on an offer card'
+                        % (self.address_refused_as_offer,
+                           '' if self.address_refused_as_offer == 1 else 'es'))
         # Brightness and banding, because "the picture looks dark" and "the
         # screen looks wavy" are things a person notices and a log should be
         # able to confirm or deny with a number.
@@ -1132,7 +1134,7 @@ class Health:
                  'kept': self.kept, 'reads': self.reads, 'failed': self.failed,
                  # Run totals, not window totals — see __init__.
                  'streetNoAddress': self.street_seen_no_address,
-                 'addressHadPayout': self.address_refused_had_payout}
+                 'addressAsOffer': self.address_refused_as_offer}
         self.reset(now)
         return tally
 
@@ -1881,11 +1883,20 @@ def main():
         rate = OP.rate(parsed, settings)
         out['parsed'], out['rate'] = parsed, rate
 
-        # The destination, when the driver asked for one and this reading has
-        # it. Taken from the frame's OWN parse, not from the merged reading:
-        # the accumulator exists to vote between frames of one offer card, and
-        # a navigation screen is not an offer — it has no payout, so it never
-        # enters a window and the merge has nothing to say about it.
+        # The destination, with or without the button, when this reading has
+        # one.
+        #
+        # Read off `out['parsed']` — which is the MERGED reading by the time
+        # this runs, since it was reassigned two statements above. An earlier
+        # version of this comment claimed the opposite ("the frame's OWN parse,
+        # not the merged reading") and was describing an intention rather than
+        # the code. What makes the intention true anyway is accumulate.add()
+        # itself: it returns the frame's parse unchanged whenever pay is None
+        # or zero (accumulate.py:350), so on exactly the screens this branch
+        # cares about there is nothing merged into it. That is worth stating
+        # as the reason it holds, because it is also the reason the payout test
+        # is a test of one frame — see the guard below, which needs a second
+        # arm because of it.
         #
         # Ahead of everything below, because none of that applies either. A
         # screen with an address and no payout is `complete: False`, which is
@@ -1952,8 +1963,36 @@ def main():
         #
         # The payout is the grammar that separates them, and it costs
         # nothing: a navigation screen has no payout to lose. All five of
-        # those cards carry one, so this closes the path completely.
-        found = shot.get('address') if shot.get('pay') is None else None
+        # those cards carry one.
+        #
+        # BUT THE PAYOUT IS NOT ENOUGH ON ITS OWN, and saying it was is how
+        # this branch got dangerous the moment the window came off it.
+        #
+        # `shot` is the reading for this frame, and accumulate.add() returns
+        # the frame's own parse unchanged whenever its pay is None or zero
+        # (accumulate.py:350) — the merge has nothing to vote with. So the
+        # payout test is a test of ONE FRAME. A frame of an offer card that
+        # loses its payout to glare, or to the crop edge the health line
+        # already counts as `clipped`, reads `pay: None` with the merchant's
+        # branch address still on it — and with no window to be inside any
+        # more, that address went out unprompted as the destination and was
+        # stapled to the card being screened. A restaurant recorded as where
+        # the customer lives, from one bad frame, with nothing saying so.
+        #
+        # So: a MERCHANT NAME is the other half of the grammar, and it is the
+        # half that survives a lost payout. A navigation screen names no
+        # merchant — it says "Dropoff <address> 12 min Start" and `places`
+        # comes back empty. An offer card names one whether or not its payout
+        # survived the frame: the `800 Forrest St NW` case reads
+        # `places: ['Wingstop 800 Forrest St NW, Atlanta, GA 30318', ...]`
+        # with the payout stripped out of the text entirely.
+        #
+        # Measured on this driver's own 272 cards: not one carries a `, ST ZIP`
+        # anchor at all, with or without its payout, so none of them can reach
+        # this branch either way. The guard is for the corpus the parser
+        # documents, not for the export.
+        an_offer = shot.get('pay') is not None or bool(shot.get('places'))
+        found = None if an_offer else shot.get('address')
         # ...and COUNTED, both ways, because all three outcomes look identical
         # from the driver's seat: "the rig didn't get it".
         #
@@ -1977,9 +2016,13 @@ def main():
         # not an argument that it was wrong to fire; loosening find_address on
         # the strength of it would put "89 Shanty Drive" — a background map
         # label — on the panel as a destination.
-        if shot.get('pay') is not None and shot.get('address'):
-            health.address_refused_had_payout += 1
-        elif shot.get('pay') is None and not shot.get('address') \
+        # Counted off `an_offer`, not off the payout alone. The guard has two
+        # arms now, and a counter that watched only one of them would make the
+        # other a silent refusal — which is the thing this counter exists to
+        # stop being possible.
+        if an_offer and shot.get('address'):
+            health.address_refused_as_offer += 1
+        elif not an_offer and not shot.get('address') \
                 and OP.STREET_ENDS.search(out.get('text') or ''):
             health.street_seen_no_address += 1
         # ...and said ONCE, not on every read that catches the same screen.
@@ -2312,6 +2355,19 @@ def main():
             'id': 'seen-%d' % at, 'seq': 1,
             'over': tally.get('over'), 'saw': tally.get('saw'),
             'kept': tally.get('kept'),
+            # ...and the destination scan's two blind spots, so they leave the
+            # Pi at all. Printing them in the health line puts them in a log on
+            # a machine in a car, which is not somewhere the driver can read
+            # and not somewhere they can send from; the journal syncs to the
+            # NUC on its own. Without this the numbers were dead on arrival —
+            # widened into the tally and dropped by the only thing that reads
+            # it, which is the fault this project deletes code for.
+            #
+            # Run totals rather than window totals, so the newest `seen` row
+            # carries the whole shift and reading two of them does not mean
+            # adding them up.
+            'streetNoAddress': tally.get('streetNoAddress'),
+            'addressAsOffer': tally.get('addressAsOffer'),
         })
 
     def collect():

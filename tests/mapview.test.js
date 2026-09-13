@@ -90,8 +90,16 @@ var box = MV.boxAround({ lat: 33.94, lon: -84.58 }).split(',').map(Number);
 ok_('the box is longitude first, and the left is west of the right',
     box[0] < box[2]);
 ok_('...and the top is north of the bottom', box[1] > box[3]);
-ok_('...sixty miles of latitude at least',
-    (box[1] - box[3]) * 69 / 2 >= 60);
+/* Bounded at BOTH ends. The padding means this is no longer exactly sixty, so
+   the check became "at least sixty" — and a bound that can only fail downward
+   stops being a bound at all: a box a hundred times too wide, which searches
+   half a continent and is the thing BOX_MILES exists to prevent, would pass it.
+   The ceiling is the padding's own worst case, half a step of latitude, so it
+   fails the moment the box grows for any reason other than the one intended. */
+var halfLat = (box[1] - box[3]) * 69 / 2;
+ok_('...sixty miles of latitude at least', halfLat >= 60);
+ok_('...and not appreciably more than that (' + halfLat.toFixed(1) + ' mi)',
+    halfLat <= 60 + (MV.ANCHOR_STEP / 2) * 69 + 0.5);
 ok_('...and wider than that in longitude, at this latitude',
     (box[2] - box[0]) > (box[1] - box[3]));
 eq('no anchor, no box', MV.boxAround(null), null);

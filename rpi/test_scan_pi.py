@@ -2096,7 +2096,7 @@ ok_('the premise: this run really did accept an address',
 eq('a screen that yielded an address is not counted as a street the rig '
    'refused', _nodrop_health and _nodrop_health.street_seen_no_address, 0)
 eq('...and nothing here was refused for carrying a payout either',
-   _nodrop_health and _nodrop_health.address_refused_had_payout, 0)
+   _nodrop_health and _nodrop_health.address_refused_as_offer, 0)
 
 # --- the street counter's condition, all four ways ---------------------------
 #
@@ -2337,6 +2337,52 @@ eq('...and a screen with a payout on it is never taken as a destination',
    len(run_paid['destinations']), 0)
 ok_('...over a run that really did read it', _paid_reads[0] >= 2)
 
+# ...and the same card with its PAYOUT LOST, which is the case the window used
+# to hide and passive capture does not.
+#
+# accumulate.add() hands back the frame's own parse whenever its pay is None,
+# so the payout test is a test of ONE FRAME. Glare, or the crop edge the health
+# line already counts as `clipped`, and an offer card reads `pay: None` with
+# the merchant's branch address still on it. Before this guard grew its second
+# arm, that address went out unprompted and was stapled to the card being
+# screened: a restaurant recorded as where the customer lives, off one bad
+# frame, with nothing saying so.
+#
+# The merchant name is what separates them and it is the half that survives a
+# lost payout — a navigation screen names none.
+_lost_reads = [0]
+_LOST = ('Guaranteed 23 min (4.6 mi) total Pickup '
+         'Wingstop 800 Forrest St NW, Atlanta, GA 30318')
+
+
+def _payout_lost_to_glare(self, frames, now=None, geom=None):
+    _lost_reads[0] += 1
+    parsed = OP2.parse(_LOST)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': _LOST, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+# The premise, in three parts, because this check is worthless if the fixture
+# stops being the case it is named after: no payout survived, an address did,
+# and the card still names its merchant.
+_lost_parse = OP2.parse(_LOST)
+eq('the premise: this frame lost its payout', _lost_parse.get('pay'), None)
+ok_('...and still reads a full address off the merchant line',
+    _lost_parse.get('address') is not None)
+ok_('...and still names the merchant, which is what gives it away',
+    bool(_lost_parse.get('places')))
+run_lost = run(TC.uberx_screen(), seconds=8.0, extra_argv=['--no-parallel'],
+               look=_payout_lost_to_glare, press_dropoff=False)
+ok_('...over a run that really did read it', _lost_reads[0] >= 2)
+eq('an offer card that lost its payout is still not a destination',
+   len(run_lost['destinations']), 0)
+_lost_health = run_lost.get('health')
+ok_('...and the refusal is counted, not silent',
+    _lost_health is not None and _lost_health.address_refused_as_offer >= 1)
+
 # ...and it is COUNTED, because a guard that throws work away silently cannot
 # be told apart from a rig that never saw anything. The driver taps the
 # customer dropoff to reveal the address while SCREENING, and on a screening
@@ -2346,7 +2392,7 @@ ok_('...over a run that really did read it', _paid_reads[0] >= 2)
 _paid_health = run_paid.get('health')
 ok_('the refusal is counted rather than thrown away silently',
     _paid_health is not None
-    and _paid_health.address_refused_had_payout >= 1)
+    and _paid_health.address_refused_as_offer >= 1)
 # The other direction, which is what stops this being a counter that only ever
 # goes up: the same run must NOT have counted a street it never refused.
 ok_('...and not confused with the other blind spot',
@@ -2388,7 +2434,7 @@ ok_('a street the rig would not accept is counted, so the strict rule can be '
     'judged on the road rather than guessed at',
     _bare_health is not None and _bare_health.street_seen_no_address >= 1)
 ok_('...and not counted as the payout refusal, which did not happen here',
-    _bare_health is not None and _bare_health.address_refused_had_payout == 0)
+    _bare_health is not None and _bare_health.address_refused_as_offer == 0)
 
 
 def _slow_address(self, frames, now=None, geom=None):

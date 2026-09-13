@@ -2871,8 +2871,28 @@
     });
 
     if (!placed) {
-      sheetSay('the geocoder found nothing for ' + (names.length > 1 ? 'either end'
-               : 'that') + ' — usually a misread address.');
+      /* Which kind of nothing, because "we asked and there is no such place"
+         and "we never got to ask" are different facts and only one of them is
+         about the rig's reading.
+
+         The geocoder keeps them apart on purpose — an empty answer is stored
+         as null, a lookup that could not be made is not stored at all so the
+         next press asks again. This page used to call both "usually a misread
+         address", which told a driver in a dead spot on I-75 that the rig had
+         misread a street it never got to ask about. The map page was split for
+         exactly this and this one was left behind; one question, answered two
+         ways, on the page the driver actually reads while working.
+
+         `undefined` is the transport failure: `found[q]` is only assigned when
+         an answer arrives, and the wide retry above has already had its go. */
+      var asked = names.filter(function (q) { return found[q] === null; });
+      sheetSay(asked.length
+        ? ('the geocoder found nothing for ' + (names.length > 1 ? 'either end'
+           : 'that') + ' — usually a misread address.')
+        : ('could not reach the geocoder for ' + (names.length > 1 ? 'either end'
+           : 'that') + ' — no network, or it was busy. Nothing is stored, so '
+           + 'pressing again will retry. This says nothing about whether the '
+           + 'rig read it correctly.'));
       return;
     }
     if (bounds.length > 1) sheetMap.fitBounds(bounds, { padding: [40, 40] });
