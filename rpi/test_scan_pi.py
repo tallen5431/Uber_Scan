@@ -2098,6 +2098,72 @@ eq('a screen that yielded an address is not counted as a street the rig '
 eq('...and nothing here was refused for carrying a payout either',
    _nodrop_health and _nodrop_health.address_refused_had_payout, 0)
 
+# --- the street counter's condition, all four ways ---------------------------
+#
+# The counter says "a screen with no payout had something street-shaped on it
+# and the rig would not accept it as an address". That is TWO tests joined, and
+# each has to be shown to matter on its own, because a mutation that drops
+# either one survives any check that only exercises the corners it agrees on.
+#
+# Both narrower mutations lived against the checks above, and the reason was
+# the fixtures, not the wiring:
+#
+#   text on the screen                       pay   address  street-shaped  count
+#   'Home 22 min ETA 8:41 PM Navigate'       none  no       no             0
+#   'Dropoff 3100 Esquire Dr N ...'          none  no       YES            1
+#   '... Daffodil Ln, Powder Springs, GA'    none  YES      no             0
+#   '... Daffodil Ln Powder Springs, GA'     none  YES      YES            0
+#
+# The last row is the one nothing reached. A comma after the street suffix is
+# what STREET_ENDS is looking for the ABSENCE of — it exists to find where a
+# street stops when the address did not say with a comma — so the address the
+# other fixtures use is street-shaped to a human and not to that rule. Without
+# a screen that is both, dropping `not shot.get('address')` changes nothing any
+# check could see, and the counter would tally screens the rig read perfectly.
+#
+# The first row is the other one: run_nodrop never sees it, because _nav_reads
+# is set to 2 just above so that run starts already showing the address.
+# run_drop does see it, which is what makes it the right place to ask.
+_drop_health = run_drop.get('health')
+ok_('the premise: the pressed run really did read screens before the address '
+    'came up', _nav_reads[0] >= 3)
+eq('a screen with neither a street nor an address is not counted',
+   _drop_health and _drop_health.street_seen_no_address, 0)
+
+_both_reads = [0]
+_BOTH = 'Dropoff 1234 Daffodil Ln Powder Springs, GA 30127 12 min Start'
+
+
+def _street_and_address(self, frames, now=None, geom=None):
+    """A screen that is street-shaped AND yields an address.
+
+    The same address the other fixtures use, with the comma after `Ln` taken
+    out — which is the form the parser's own comment names as the case
+    STREET_ENDS exists for.
+    """
+    _both_reads[0] += 1
+    parsed = OP2.parse(_BOTH)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': _BOTH, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+# Both halves of the premise, asserted rather than assumed: this text really
+# does satisfy the street rule AND really does yield an address. If either ever
+# stopped being true the check below would pass by not applying.
+ok_('the premise: this screen is street-shaped by the rig\'s own rule',
+    OP2.STREET_ENDS.search(_BOTH) is not None)
+ok_('...and yields an address the rig accepts',
+    OP2.parse(_BOTH).get('address') is not None)
+run_both = run(TC.uberx_screen(), seconds=8.0, extra_argv=['--no-parallel'],
+               look=_street_and_address, press_dropoff=False)
+ok_('...over a run that really did read it', _both_reads[0] >= 2)
+_both_health = run_both.get('health')
+eq('a street-shaped screen the rig DID read an address off is not counted as '
+   'one it refused', _both_health and _both_health.street_seen_no_address, 0)
+
 # ...while a press still says so, which is the difference the receiving end
 # acts on.
 if run_drop['destinations']:
