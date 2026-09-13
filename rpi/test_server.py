@@ -91,6 +91,22 @@ def get(base, path):
     return json.loads(urllib.request.urlopen(base + path, timeout=5).read().decode('utf-8'))
 
 
+def raw(base, path):
+    """Status, body and headers — for the endpoints that are not JSON.
+
+    The CSV is one of those, and the things worth checking about it are the
+    status code and two headers: a spreadsheet cannot carry "this download is
+    short" in a row without making its own totals wrong.
+    """
+    try:
+        with urllib.request.urlopen(base + path, timeout=5) as r:
+            return (r.status, r.read().decode('utf-8'),
+                    {k.lower(): v for k, v in r.headers.items()})
+    except urllib.error.HTTPError as e:
+        return (e.code, e.read().decode('utf-8'),
+                {k.lower(): v for k, v in e.headers.items()})
+
+
 def post(base, path, body):
     req = urllib.request.Request(
         base + path, data=json.dumps(body).encode('utf-8'),
@@ -300,6 +316,131 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- a card read twice, where only one reading saw the map --------------------
+#
+# The winner of the pay/minutes/miles vote is taken whole, and an address is not
+# one of the fields the vote is about — so a reading that scored best and lost
+# the map to glare took its empty `places` with it. That was already borrowed
+# from an agreeing reading. `pickup` and `dropoff` were not, and they are the
+# two fields everything downstream actually asks for: the offers page hides a
+# row's map controls without them and map.html's whole working set is
+# `o.pickup || o.dropoff`. So the row came back with an address printed on it
+# and no way to put it on a map.
+work = tempfile.mkdtemp()
+journal = os.path.join(work, 'journal.jsonl')
+write(journal, [
+    # Two readings of one card. Identical figures, so they agree; one saw the
+    # map and the other did not.
+    offer(1, NOW - 2000, id='twice', places=[], pickup=None, dropoff=None),
+    offer(1, NOW - 1000, id='twice', seq=2,
+          places=['Chick-fil-A (Dallas Hwy)', 'Old Mountain Rd NW, Kennesaw'],
+          pickup='Chick-fil-A (Dallas Hwy)',
+          dropoff='Old Mountain Rd NW, Kennesaw'),
+])
+proc, base = start({'SCANNER': '0'}, journal)
+try:
+    got = [o for o in (get(base, '/api/journal?days=0').get('offers') or [])
+           if o.get('id') == 'twice']
+    eq('the two readings fold into one row', len(got), 1)
+    row = got[0] if got else {}
+    ok_('...carrying the address the other reading saw',
+        (row.get('places') or []) and 'Chick-fil-A' in row['places'][0])
+    # The half that was missing. Without these the page prints the address and
+    # offers no map control for it, which reads as the page contradicting
+    # itself about one row.
+    eq('...and which end is the pickup',
+       row.get('pickup'), 'Chick-fil-A (Dallas Hwy)')
+    eq('...and which is the dropoff',
+       row.get('dropoff'), 'Old Mountain Rd NW, Kennesaw')
+finally:
+    stop(proc)
+    shutil.rmtree(work, ignore_errors=True)
+
+# ...and the ends are taken from the SAME reading the places came from. Two
+# readings of one card can disagree about where it goes, and a pickup off one
+# with a dropoff off another is a journey neither of them read.
+work = tempfile.mkdtemp()
+journal = os.path.join(work, 'journal.jsonl')
+write(journal, [
+    offer(1, NOW - 3000, id='three', places=[], pickup=None, dropoff=None),
+    # Disagrees about the figures, so it is not the preferred lender...
+    offer(2, NOW - 2000, id='three', seq=2, pay=99.0,
+          places=['Wrong Shop', 'Wrong St, Nowhere'],
+          pickup='Wrong Shop', dropoff='Wrong St, Nowhere'),
+    # ...and this one agrees, so it is.
+    offer(1, NOW - 1000, id='three', seq=3,
+          places=['Right Shop', 'Right St, Dallas'],
+          pickup='Right Shop', dropoff='Right St, Dallas'),
+])
+proc, base = start({'SCANNER': '0'}, journal)
+try:
+    got = [o for o in (get(base, '/api/journal?days=0').get('offers') or [])
+           if o.get('id') == 'three']
+    row = got[0] if got else {}
+    eq('the ends are borrowed from the reading that agrees about the card',
+       (row.get('pickup'), row.get('dropoff')),
+       ('Right Shop', 'Right St, Dallas'))
+    ok_('...and the places with them, from the same one',
+        (row.get('places') or [''])[0] == 'Right Shop')
+finally:
+    stop(proc)
+    shutil.rmtree(work, ignore_errors=True)
+
+# --- a CSV that cannot say it is short ----------------------------------------
+#
+# /api/journal and /api/journal.csv share one handler, and the CSV branch
+# returned before the three signals the JSON branch carries: `unreadable`,
+# `torn` and `truncated`. toCsv([]) is a header line and nothing else, so a
+# journal that could not be OPENED downloaded as 200 OK, Content-Disposition,
+# uber-scan-offers.csv, zero rows — the same file a quiet week produces, on the
+# one artefact a driver keeps and a backup script collects.
+#
+# readJournal's own comment is about exactly this: "[] is not 'I do not know',
+# it is 'there is nothing'". The JSON branch was made to honour that. This one
+# was not.
+work = tempfile.mkdtemp()
+# A journal that exists, has a size, and cannot be read: a directory where the
+# file should be. stat succeeds, open succeeds, read gives EISDIR — which is
+# the shape of the real fault (a server that can append and not read) without
+# needing a second user to reproduce it.
+os.mkdir(os.path.join(work, 'journal.jsonl'))
+proc, base = start({'SCANNER': '0'}, os.path.join(work, 'journal.jsonl'))
+try:
+    code, body, head = raw(base, '/api/journal.csv?days=7')
+    eq('an unreadable journal refuses the CSV rather than downloading an empty one',
+       code, 503)
+    ok_('...saying why (%r)' % body[:60], 'could not be read' in body)
+    # ...and the JSON branch still degrades rather than refusing, because a
+    # driver looking at the offers page is better served by the page.
+    page = get(base, '/api/journal?days=7')
+    ok_('...while the page is still served, with the reason on it',
+        (page.get('unreadable') or '') != '')
+finally:
+    stop(proc)
+    shutil.rmtree(work, ignore_errors=True)
+
+# ...and a CSV cut short by the cap says so in its headers rather than in a row.
+# A spreadsheet with an extra row in it is a spreadsheet with a wrong total, so
+# the disclosure cannot be in the body.
+work = tempfile.mkdtemp()
+journal = os.path.join(work, 'journal.jsonl')
+write(journal, [offer(i, NOW - i * 1000) for i in range(6)])
+proc, base = start({'SCANNER': '0'}, journal)
+try:
+    code, body, head = raw(base, '/api/journal.csv?days=0&limit=2')
+    eq('a capped CSV is still served', code, 200)
+    eq('...with the rows the cap left', len(body.strip().split('\n')), 3)
+    eq('...and a header saying what it is short of',
+       head.get('x-uber-scan-truncated'), '2 of 6')
+    code, body, head = raw(base, '/api/journal.csv?days=0&limit=0')
+    eq('...and limit=0 is genuinely uncapped',
+       len(body.strip().split('\n')), 7)
+    no_('...so it says nothing about being short',
+        head.get('x-uber-scan-truncated'))
+finally:
+    stop(proc)
+    shutil.rmtree(work, ignore_errors=True)
+
 # --- an address read while SCREENING, with no order in the car ---------------
 #
 # The driver's own words: "for doordash orders I need to tap the customer drop
@@ -377,8 +518,17 @@ if shutil.which('python3'):
         # restart loses it; the whole point of reading the address before
         # deciding is to still have it afterwards, on the offers page and on
         # the map.
-        rows = [json.loads(l) for l in open(journal) if l.strip()]
-        marks = [r for r in rows if r.get('kind') == 'mark' and r.get('dropoff')]
+        # Polled, not read once. `/api/status` answers as soon as the address
+        # is in memory, and the append that puts it on disk is a separate
+        # asynchronous write — so reading the file on the next line is a race
+        # that passes on an idle box and fails on a loaded one.
+        marks = []
+        for _ in range(100):
+            rows = [json.loads(l) for l in open(journal) if l.strip()]
+            marks = [r for r in rows if r.get('kind') == 'mark' and r.get('dropoff')]
+            if marks:
+                break
+            time.sleep(0.05)
         eq('the address is appended as a note naming the offer', len(marks), 1)
         eq('...naming it', marks[0].get('id'), 'o-screen')
         eq('...and carrying the address', marks[0].get('dropoff'),

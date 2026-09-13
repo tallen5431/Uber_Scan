@@ -408,26 +408,49 @@ screen empties. The case the timer exists for costs exactly what it did before,
 one beat; the case it was wasting on settles at about **12% duty instead of
 56%**.
 
-**The ceiling is that duty divided into what a read costs**, and it moved when
-the read did. It was 12s while a read was ~1.4s. Keeping the engine alive
-roughly halved that — the owner's shift recorded a median `ms` of 1517 before
-the change and it measured 2.12× end to end, so call it 715ms — and 12% of a
-715ms read is **6s**. Same duty, half the wait.
+**The ceiling was set as that duty divided into what a read costs**, and it
+moved when the read appeared to. It was 12s while a read was ~1.4s; keeping the
+engine alive was thought to have roughly halved that — the owner's shift
+recorded a median `ms` of 1517 before the change and it measured 2.12× end to
+end, so 715ms was assumed — and 12% of a 715ms read is 6s. Same duty, half the
+wait, and the table below said so.
 
-The wait is the thing being bought. A replacement offer does not move the motion
-gate, so the ceiling is exactly how long a driver can be looking at a verdict
-belonging to the previous card:
+**That 715ms never existed.** It was extrapolated from a speed-up seen on a
+development machine. Measured over 272 real offers out of the owner's own
+journal the median read is **1846ms** and the p90 is **3657ms**, so the duty at
+a 6s ceiling is **31%**, not 12% — and it has been 31% for as long as the
+ceiling has been 6s. The number was wrong; the rig was not.
 
 | | read cost | ceiling | duty | worst case |
 |---|---|---|---|---|
 | a flat beat | ~1.4s | 2.5s | 56% | 2.5s |
 | backing off, slow reader | ~1.4s | 12s | 12% | 12s |
-| backing off, kept engine | ~0.75s | **6s** | 12% | **6s** |
+| backing off, as assumed | ~0.75s | 6s | 12% | 6s |
+| **backing off, as measured** | **1.85s** | **6s** | **31%** | **6s** |
 
-The ceiling is now reached after two identical reads running (2.5 → 4.0 → 6.0)
+**6s stays, on the other argument.** The wait is the thing being bought: a
+replacement offer does not move the motion gate — 0.33 against a threshold of
+6.0 — so the ceiling is exactly how long a driver can be looking at a verdict
+belonging to the previous card. A third of a backed-off beat spent re-reading a
+card that is not changing is a real cost on a Pi that is also drawing a
+dashboard, and the lever is the ceiling; but every second added to it is a
+second spent deciding on a card that has gone, and that is money. The trade
+belongs to whoever drives the rig.
+
+The ceiling is reached after two identical reads running (2.5 → 4.0 → 6.0)
 rather than four. `READ_SECONDS` in scan_pi.py is where that cost is written
 down; two constants are derived from it and one of them lives in another file,
-which is how the last one went stale.
+which is how the last one went stale — and then this paragraph, the comment
+beside `VERIFY_MAX`, and the one beside `STALE_MS` in live.html all went stale
+the same way when the measured figure replaced the assumed one.
+
+Not one of the CHECKS went stale with them, and that is the difference worth
+keeping. `rpi/test_scan_pi.py` reads `READ_STALE_MS` and `STALE_MS` out of
+live.html rather than copying them, and derives the healthy gap from
+`VERIFY_MAX + READ_SECONDS_SLOW` rather than quoting a number — so correcting
+the read cost moved every bound at once. Prose cannot do that. What prose can
+do is name the constant instead of its value, which is what these three now
+do.
 
 ### What the preflight can and cannot see
 
@@ -6515,7 +6538,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 36 suites, 5938 checks
+npm test                # all 37 suites, 6200-odd checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -6622,12 +6645,21 @@ python3 rpi/test_server.py      #  48 on the server's own edges: two readers of
                                 #     is not one — and on the CSV export, which
                                 #     is the one thing here that leaves the
                                 #     machine and had no check at all
-python3 rpi/test_map.py         #  39 on the map check page: that it asks
+python3 rpi/test_map.py         #  70 on the map check page: that it asks
                                 #     nobody anything until told to, that it
                                 #     keeps to one geocoder request a second,
-                                #     and that it shows what it could not
-                                #     place — including the pins that landed
-                                #     in another state
+                                #     that it shows what it could not place —
+                                #     including the pins that landed in
+                                #     another state — and that the positions
+                                #     the rig's own GPS recorded are drawn
+                                #     only when asked for
+node tests/mapview.test.js      #  77 on the deciding behind both maps, with
+                                #     no map: the geometry, the cache, and the
+                                #     one-request-a-second rule against a fake
+                                #     clock, which is what makes the awkward
+                                #     cases — two walks in a row, a cache hit
+                                #     mid-walk, a hotspot that drops — cost
+                                #     milliseconds instead of seconds
 python3 rpi/test_loop.py        #  30 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when

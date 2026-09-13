@@ -184,10 +184,24 @@
         // was computed here for a while and read by nothing — a place whose
         // own rows are silent gets no anchor on purpose, see anchorFor.
         var fixes = offers.map(MV.fixOf).filter(Boolean);
+        // ...and whether this is the whole window or the newest part of it.
+        //
+        // The request asks for 5000 and the days box goes to 365. Past the cap
+        // the server keeps the newest and drops the oldest, and says so in
+        // `truncated` and `total` — which this page fetched and ignored, so a
+        // year cut to its newest 5000 was reported as "5000 offers" and every
+        // count in the sidebar was taken off an unannounced subset. That is
+        // the exact defect the two fields were added for, on the sibling page;
+        // this is a page whose whole job is checking whether the rig is right
+        // about a range, so reporting the range short is worse here.
+        var short = body && body.truncated
+          ? ' · newest ' + offers.length + ' of ' + body.total
+            + ' — narrow the days to see the rest'
+          : '';
         say(offers.length + ' offers · ' + withEnds.length + ' name somewhere · '
             + mappable.length + ' name both ends'
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
-                            : ' · none carry a position'));
+                            : ' · none carry a position') + short);
         el.place.disabled = withEnds.length === 0;
         render([], {});
       })

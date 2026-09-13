@@ -510,6 +510,10 @@ const TEXT = (sel) => {
         nothing: document.getElementById('nothing').hidden
           ? null : text('#nothing'),
         caveats: list('#caveats li'),
+        // Where the export points. The sentence beside the row count tells
+        // the driver to "use the CSV for the rest", so this link is the only
+        // thing standing behind that promise.
+        csv: document.getElementById('csv').getAttribute('href'),
         days: list('.day'),
         pairsHead: document.getElementById('pairsHead').hidden
           ? null : text('#pairsHead'),
@@ -1485,6 +1489,21 @@ try:
     # ...and the same sentence may not appear over a window where every row
     # was written by the same thing, or the check above passes on a page that
     # cries mixture at everything.
+    # --- the escape hatch the page points at --------------------------------
+    #
+    # The list stops at LOG_MAX and the window stops at the server's JSON cap,
+    # and the sentence under both says "use the CSV for the rest". That link
+    # used to carry the server's own ceiling — 20000 — on the reasoning that a
+    # ceiling is not a default. A ceiling is still a cap: past it the download
+    # kept the newest rows and dropped the oldest, silently, which is the half
+    # a driver exports a year to look at.
+    #
+    # `limit=0` is uncapped: the handler's test is `if (limit && ...)`.
+    _csv = (got.get('took six') or {}).get('csv') or ''
+    ok_('the CSV link is uncapped (%r)' % _csv, 'limit=0' in _csv)
+    no_('...and does not carry the JSON cap', 'limit=5000' in _csv)
+    no_('...nor the server ceiling', 'limit=20000' in _csv)
+
     # --- one job on a map, without leaving the log -------------------------
     #
     # "It would be convenient if it could do it in the existing program page.

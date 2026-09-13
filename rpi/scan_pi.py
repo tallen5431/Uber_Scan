@@ -261,18 +261,36 @@ READ_SECONDS_SLOW = 3.7       # p90; the worst measured was 5.9
 # the thirty-second silence watchdog on the other side is for.
 READ_STUCK_S = 60.0
 
-# ...and the ceiling, which is that cost divided by the duty cycle this is
-# willing to spend on looking at a card that has not changed.
+# ...and the ceiling, which is how long the driver can be looking at a verdict
+# that belongs to the card BEFORE the one on the screen.
 #
-# It was 12.0, chosen when a read was ~1.4s: 1.4/12 is a 12% duty, against the
-# 56% a flat 2.5s beat cost. The duty was the whole argument, and the read then
-# halved, so the same argument now lands at 6.0 — 0.75/6.0 is the same 12% for
-# half the wait.
+# That is the whole of what this number buys, and it is worth being exact about
+# why. A replacement offer is the same layout, the same colours and different
+# digits, so it moves the motion gate by 0.33 against a threshold of 6.0 —
+# indistinguishable from nothing happening. Looking on a timer is the only
+# thing that notices it, and this ceiling is how long that takes at worst.
 #
-# The wait is what this buys. A *replacement* offer does not move the motion
-# gate, so the ceiling is exactly how long the driver can be looking at a
-# verdict that belongs to the previous card. Twelve seconds of that was the
-# price of a slow reader; it is not the price of this one.
+# THE DUTY CYCLE IS NO LONGER THE ARGUMENT, AND USED TO BE.
+#
+# This paragraph used to read: "It was 12.0, chosen when a read was ~1.4s:
+# 1.4/12 is a 12% duty... the read then halved, so the same argument now lands
+# at 6.0 — 0.75/6.0 is the same 12% for half the wait."
+#
+# The 0.75 was never measured. It was extrapolated from a speed-up seen on a
+# development machine, and READ_SECONDS above now carries the owner's own 272
+# reads instead: a median of 1.85s. So the real duty at this ceiling is 31%,
+# not 12%, and it always was — the number was wrong, not the rig.
+#
+# 6.0 stays, on the other argument. A third of a backed-off beat spent
+# re-reading a card that is not changing is a real cost on a Pi that is also
+# drawing a dashboard, and raising the ceiling is the lever — but every second
+# added is a second a driver can spend reading a verdict about a card that is
+# gone, and that is money. The trade belongs to whoever drives the rig.
+#
+# What is NOT allowed is the old sentence: it told a future reader the duty was
+# 12%, which is an invitation to restore 12.0 on arithmetic that was never
+# true. See the duty check in rpi/test_scan_pi.py, which states the real figure
+# and is wide enough to notice it moving.
 VERIFY_MAX = 6.0
 
 
@@ -2529,11 +2547,31 @@ def main():
                     have_screen = (None if tracker is None
                                    else not tracker.status()['lost'])
                     was_exposure = auto_gain.exposure
-                    # The photometric picture, before any preprocessing — the
-                    # same window and the same measure the controller steers by,
-                    # so the health line's number is the controller's number.
-                    health.bright = EX.brightness(lit)
                     ctrls = auto_gain.update(lit, now, has_screen=have_screen)
+                    # The photometric picture, before any preprocessing — the
+                    # same window and the same measure the controller steers
+                    # by, so the health line's number is the controller's
+                    # number.
+                    #
+                    # Taken FROM the controller now rather than measured again
+                    # beside it. `brightness` is a percentile: a full
+                    # order-statistic pass in float32 over the card window,
+                    # which update() performs anyway on the very same array —
+                    # so this line was a second identical pass on every frame
+                    # the camera produced, all shift, for a figure the log
+                    # prints once every two minutes.
+                    #
+                    # It also makes the sentence above true rather than merely
+                    # likely. Two derivations of one measurement agree until
+                    # one of them changes, and this is the pair the comment was
+                    # already claiming were the same.
+                    #
+                    # Left alone when the beat did not run: update() returns
+                    # early between beats without measuring, and `bright` is
+                    # then about an older frame. The health line keeps the last
+                    # figure it had, which is what it did before.
+                    if auto_gain.bright is not None:
+                        health.bright = auto_gain.bright
                     if ctrls:
                         cam.set_controls(ctrls)
                     if 'AnalogueGain' in ctrls:
@@ -2814,6 +2852,20 @@ DOUBT_LABELS = {'pay': 'CHECK PAY', 'time': 'CHECK TIME', 'speed': 'CHECK MILES'
                 'screen': 'NOT AN OFFER'}
 
 
+
+# The card's own figures, as a line, with a gap where a card said nothing.
+#
+# `'%s min' % None` prints the literal word "None", and on a delivery card that
+# is not an edge case: Uber and DoorDash both state a DEADLINE and no duration,
+# so `parsed['minutes']` is None on the whole of that half of a shift. The rig's
+# own screen drew `$12.00  None min  2.4 mi` under a green ACCEPT.
+#
+# A dash, which is what every other screen here draws for a figure that is not
+# there, and what the driver already reads as "the card did not say".
+def _fig(value, places=1):
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return '--'
+    return ('%%.%df' % places) % value
 def render_panel(rate, parsed, size=(800, 480), whole=True):
     """Big, flat, readable at a glance and at arm's length.
 
@@ -2850,8 +2902,10 @@ def render_panel(rate, parsed, size=(800, 480), whole=True):
     if rate['state'] == 'doubt':
         cv2.putText(panel, DOUBT_LABELS.get(rate.get('doubt'), 'READ AGAIN'),
                     (40, 150), cv2.FONT_HERSHEY_SIMPLEX, 2.6, (255, 255, 255), 6)
+        # The card's own numbers here, deliberately — see above. What is not
+        # deliberate is printing the word "None" where it said nothing.
         cv2.putText(panel, '$%.2f  %s min  %s mi'
-                    % (parsed['pay'], parsed['minutes'], parsed['miles']),
+                    % (parsed['pay'], _fig(parsed['minutes']), _fig(parsed['miles'])),
                     (40, 300), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (255, 255, 255), 4)
         cv2.putText(panel, 'that is not what a real offer looks like',
                     (40, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (210, 210, 210), 2)
@@ -2873,7 +2927,23 @@ def render_panel(rate, parsed, size=(800, 480), whole=True):
     if gross is not None and round(gross) != round(rate['perHour']):
         cv2.putText(panel, '$%.0f/hr raw' % gross, (40, 350),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.1, (210, 210, 210), 2)
-    cv2.putText(panel, '$%.2f  %s min  %s mi' % (parsed['pay'], parsed['minutes'], parsed['miles']),
+    # The figures the RATE above was worked out over, not the ones the parser
+    # first read.
+    #
+    # This drew `parsed['minutes']`, which is what the card printed as a
+    # duration — and a delivery card prints a deadline instead, so on the whole
+    # DoorDash half of a shift it was None and this line read `$12.00  None min
+    # 2.4 mi` beneath a green ACCEPT at $36/hr. The rate had a perfectly good
+    # twenty minutes; it just was not the field being drawn.
+    #
+    # emit() has always sent the verdict's own figures to the web page, which
+    # is why that screen has been right about these cards and this one has not:
+    # a driver checking one against the other was reading two different fields
+    # with the same label. Same source now.
+    cv2.putText(panel, '$%.2f  %s min  %s mi'
+                % (parsed['pay'],
+                   _fig(rate.get('minutes', parsed.get('minutes'))),
+                   _fig(rate.get('miles', parsed.get('miles')))),
                 (40, 400), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
     return panel
 

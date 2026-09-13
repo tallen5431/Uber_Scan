@@ -103,11 +103,22 @@ function isServable(pathname) {
 
 /* ---------- the Pi scanner, as a child of this process ----------
  *
- * Started automatically when rpi/config.json exists, because that file only
- * exists once the camera has been aimed and calibrated — which is exactly the
- * point at which running the scanner starts making sense. There is no
+ * Started automatically wherever rpi/autopilot.py exists — that is, on any
+ * checkout of this repository that has the rig's code in it. There is no
  * environment variable to set, since a process manager runs `npm start` with no
  * shell to set one in. SCANNER=0 turns it off.
+ *
+ * NOT gated on rpi/config.json, which is what this said. The autopilot
+ * calibrates itself, so waiting for that file would mean waiting for a manual
+ * step that no longer exists — see scannerEnabled(), which says so, and
+ * calibrated(), which reads config.json for the status field and gates
+ * nothing.
+ *
+ * Worth being exact about because of which way the error points. A driver on a
+ * never-calibrated Pi reads this, concludes no camera process has been
+ * spawned, and runs `python3 rpi/calibrate.py` or `rpi/preview.py` by hand —
+ * against a camera this process is already holding. Both READMEs describe the
+ * real behaviour; only this paragraph did not.
  */
 var scanner = {
   proc: null,
@@ -408,7 +419,20 @@ function startScanner() {
               v: 1, kind: 'mark', at: Date.now(),
               id: scanner.offer.id,
               dropoff: read.dropoff.line
-            }) + '\n', function () { /* the panel already has it */ });
+            }) + '\n', function (err) {
+              // Said out loud, because every other write to this file says so
+              // and this one is a deliberate press the driver expects to be
+              // kept. An SD card remounted read-only mid-shift is the classic
+              // Pi failure — rpi/journal.py names it — and the panel would go
+              // on confirming "Dropoff read as ..." off the stream, which is
+              // broadcast whether or not the row landed. The address would
+              // then be gone at the next restart with nothing anywhere having
+              // mentioned it, while the pairing row written seconds earlier
+              // logged ITS failure on the same file.
+              if (err) {
+                console.error('journal: could not record a dropoff: ' + err.message);
+              }
+            });
           }
           // What was read is said to the panel over the stream, which is
           // where it was always coming from: live.html listens for
@@ -681,6 +705,44 @@ function holding(now) {
   return h;
 }
 
+/* The offer as Advice.stack has to see it: timed the way the HELD job is timed.
+ *
+ * `stack` reads `offer.minutes`, and the two sides of the comparison were not
+ * the same quantity. The held job is stored with `billedMinutes` where it has
+ * one — the driver's own pad and shopping allowance included — and the new
+ * offer arrived as the reading, whose `minutes` is what the CARD printed. So a
+ * shop order was compared against a ride's worth of clock.
+ *
+ * Measured on a real pair: a $22.00 shop order billed at 95 minutes, an
+ * identical card offered against it. Timed off the card the panel draws a
+ * worst case of $18.86/hr over 95-140 minutes; timed the way the held job is
+ * timed it is $13.89/hr over 95-190. The floor was overstated by 36% on the
+ * one line that exists to say whether a second job is worth taking.
+ *
+ * And on a delivery card it was not overstated, it was absent. Uber and
+ * DoorDash state a deadline and no duration, so `minutes` is null there,
+ * `stack` returns null at its own guard, and the line said nothing at all —
+ * on the whole of that half of a shift, with nothing on the screen to say a
+ * question had been asked and not answered.
+ *
+ * `billedMinutes` and nothing else. A fallback to `cardMinutes` was written
+ * here and taken out again: rate() sets both from the same computation, so
+ * whenever the first is absent the second is too — measured on a card with no
+ * pay and on one with no time, where `ready` is false and both come back null.
+ * A second source that can never answer when the first could not is a branch
+ * no input reaches, and this project deletes those rather than leaving them to
+ * look like they are protecting something.
+ *
+ * A reading with neither is left exactly as it arrived, which is what it was
+ * before this function existed: `stack` has its own guard and returns null. */
+function timedLikeTheHeldJob(read) {
+  if (!read) return read;
+  var billed = read.billedMinutes;
+  if (typeof billed !== 'number' || !isFinite(billed)) return read;
+  if (billed === read.minutes) return read;
+  return Object.assign({}, read, { minutes: billed });
+}
+
 /* What the pair would pay, when there is a pair.
  *
  * Worked out here rather than on the page because the order being carried is
@@ -701,7 +763,8 @@ function withStack(read, now) {
     ? { pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null }
     : null;
   read.stack = held
-    ? Advice.stack(held, read, { target: read.target, band: read.band,
+    ? Advice.stack(held, timedLikeTheHeldJob(read),
+                   { target: read.target, band: read.band,
                                  costPerMile: read.costPerMile }, now)
     : null;
   return read;
@@ -753,8 +816,9 @@ function recordPairing(offer, now, reading) {
   // `withStack` two functions up has always read them off the reading. This is
   // the same three values from the same place.
   var money = reading || {};
-  var s = Advice.stack(held, offer, { target: money.target, band: money.band,
-                                      costPerMile: money.costPerMile }, now);
+  var s = Advice.stack(held, timedLikeTheHeldJob(offer),
+                       { target: money.target, band: money.band,
+                         costPerMile: money.costPerMile }, now);
   // ...and if there is no reading to take them from, the honest row says the
   // panel's verdict is unknown rather than inventing one. `stack: null`
   // already means "it said nothing", which is a different claim, so this is
@@ -1259,7 +1323,34 @@ function bestReading(rows) {
     var lender = (agrees.length ? agrees : lends)[0];
     // Copied rather than assigned into. These row objects come straight off the
     // journal and are read again by the next request.
-    if (lender) best = Object.assign({}, best, { places: lender.places });
+    //
+    // All three fields, or the fact is only half repaired. This borrowed
+    // `places` alone — the list a reader looks at — and left `pickup` and
+    // `dropoff`, which are the two fields everything DOWNSTREAM asks for: the
+    // offers page hides a row's map controls without them, map.html's whole
+    // working set is `o.pickup || o.dropoff`, and Advice.sameArea compares
+    // dropoffs. So a card whose winning reading lost the map to glare came
+    // back with "Where: Chick-fil-A → Old Mountain Rd NW" printed on it and no
+    // way to put it on a map, which reads as the page contradicting itself
+    // about one row.
+    //
+    // From the SAME lender, not from whichever reading happens to have each
+    // one. Two readings of a card can disagree about where it goes, and a
+    // pickup off one with a dropoff off another is a journey neither of them
+    // read.
+    //
+    // Unconditionally, because this branch is reached only when the winner has
+    // no places — and both ends are derived FROM places in every writer this
+    // project has, so a winner with no places has no ends either. A guard
+    // asking whether it does was written here and taken out again rather than
+    // left to look like it was protecting something.
+    if (lender) {
+      best = Object.assign({}, best, {
+        places: lender.places,
+        pickup: lender.pickup || null,
+        dropoff: lender.dropoff || null
+      });
+    }
   }
   return best;
 }
@@ -2460,6 +2551,21 @@ function route(req, res) {
         phase: scanner.phase,
         running: !!scanner.proc,
         restarts: scanner.restarts,
+        // ...and how many times it has fallen over ALL EVENING, which the
+        // number above deliberately does not say.
+        //
+        // `restarts` is a backoff ladder and resets after any run longer than
+        // HEALTHY_RUN_MS, which is right for a backoff and wrong for a record:
+        // a rig that hit four unrelated hiccups across a shift, each time
+        // coming back and running for minutes, answered this endpoint with
+        // `restarts: 0`. Nothing anywhere said the camera had gone down at
+        // all.
+        //
+        // This tally was already being kept for exactly that and was read by
+        // nothing. Same argument as `wedged` below, which the comment there
+        // states: "a lifetime tally, deliberately not cleared when the
+        // replacement starts: it is the only trace a wedge leaves".
+        fell: scanner.lifetimeRestarts || 0,
         // Times it was killed for going quiet while still running, as opposed
         // to times it fell over on its own. The two have different causes and
         // a count that merges them explains neither.
@@ -2726,10 +2832,40 @@ function route(req, res) {
       var total = offers.length;
       if (limit && offers.length > limit) offers = offers.slice(-limit);
       if (pathname === '/api/journal.csv') {
-        return send(res, 200, toCsv(offers), {
+        // A journal that could not be READ is refused here rather than
+        // downloaded as an empty spreadsheet.
+        //
+        // The branch above it exists for exactly this — "an empty history and
+        // an unreadable one look identical otherwise, and the second is the
+        // one worth acting on" — and the JSON reply carries `unreadable`,
+        // `torn` and `truncated` further down so the offers page can say all
+        // three. This branch returned before any of them, and toCsv([]) is a
+        // header line and nothing else: 200 OK, Content-Disposition,
+        // `uber-scan-offers.csv`, no rows. Indistinguishable from a quiet
+        // week, on the one artefact a driver saves and a backup script
+        // collects. README.md calls this "a CSV of everything".
+        //
+        // The state is not hypothetical: readJournal's own comment records a
+        // server running as a user that could append to the journal and not
+        // read it.
+        if (unreadable) {
+          return send(res, 503, 'the journal could not be read (' + unreadable
+                      + ')\n', { 'Content-Type': 'text/plain; charset=utf-8' });
+        }
+        // Lines that WERE written and are now unreadable, and rows the cap
+        // dropped. Neither can be a row in the file — a spreadsheet with an
+        // extra row in it is a spreadsheet with a wrong total — so they go in
+        // the headers, where curl -i and every HTTP client can see them and
+        // nothing that parses the CSV has to change.
+        var head = {
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': 'attachment; filename="uber-scan-offers.csv"'
-        });
+        };
+        if (torn) head['X-Uber-Scan-Torn'] = String(torn);
+        if (total > offers.length) {
+          head['X-Uber-Scan-Truncated'] = offers.length + ' of ' + total;
+        }
+        return send(res, 200, toCsv(offers), head);
       }
       // What the rig watched go past, over the same window. Summed here rather
       // than shipped row by row: there is one of these every couple of minutes

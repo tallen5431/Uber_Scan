@@ -355,19 +355,43 @@
     });
   };
 
+  /* "Nobody there" and "nobody answered" are different answers.
+   *
+   * This used to turn both into null, and `lookup` below then remembered that
+   * null for ever — in localStorage, so across runs, across days, and on the
+   * machine at home too. A hotspot that drops for four seconds part way
+   * through a paced walk is the ordinary case in a car, and every place asked
+   * inside that gap became a permanent "the geocoder could not find this":
+   * never asked again, listed on the map page as a misread address, with the
+   * only recovery being "Forget lookups", which throws away every good answer
+   * as well.
+   *
+   * The rule is already written down forty lines below, for the Leaflet
+   * loader: "A FAILED load is not kept. Being offline once is the ordinary
+   * case here, and a page that remembered the failure would refuse to draw a
+   * map for the rest of the session after one dead moment at a red light."
+   * The geocoder did the opposite, and durably.
+   *
+   * So a transport failure THROWS and an empty answer returns null. Only the
+   * second is a fact about the place. */
   Geocoder.prototype.ask = function (query, box) {
     var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q='
             + encodeURIComponent(query)
             + (box ? '&viewbox=' + encodeURIComponent(box) + '&bounded=1' : '');
     return this.fetch(url, { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (r) {
+        // A refusal is not an answer either. 429 and 403 are what Nominatim
+        // sends a client it is throttling or has blocked, and caching those as
+        // "no such place" would turn a bad minute into a permanent hole.
+        if (!r.ok) throw new Error('geocoder said ' + (r.status || '?'));
+        return r.json();
+      })
       .then(function (hits) {
         var hit = hits && hits[0];
         return hit ? { lat: Number(hit.lat), lon: Number(hit.lon),
                        name: hit.display_name, kind: hit.type || '',
                        bounded: !!box } : null;
-      })
-      .catch(function () { return null; });    // offline, blocked, rate-limited
+      });
   };
 
   Geocoder.prototype.lookup = function (place, box) {
@@ -379,8 +403,15 @@
     return this.paced(function () {
       return self.ask(self.queryFor(place), box);
     }).then(function (found) {
+      // Only an answer that actually arrived is remembered. See ask().
       self.remember(key, found);
       return found;
+    }, function () {
+      // Could not ask. Not stored, so the next run asks again — and answered
+      // as `undefined` rather than null, which is what lets a caller tell
+      // "asked, nothing there" from "never got to ask". Everything that only
+      // wants a pin treats both as falsy and is unaffected.
+      return undefined;
     });
   };
 

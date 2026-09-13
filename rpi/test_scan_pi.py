@@ -681,6 +681,49 @@ ok_('...and the difference is in the verdict, not the figures',
 ok_('a panel drawn without saying costs no confidence',
     np.array_equal(SP.render_panel(_rate('go', 35.3), _card), _full))
 
+# --- the figures under the verdict are the ones the verdict was made from ---
+#
+# This line drew `parsed['minutes']`, which is the duration the CARD printed —
+# and a delivery card prints a DEADLINE and no duration, so on that whole half
+# of a shift it is None. `'%s min' % None` is the literal word "None", so the
+# rig's own screen read
+#
+#     $12.00  None min  2.4 mi
+#
+# beneath a green ACCEPT at $36/hr. The rate had a perfectly good twenty
+# minutes; it was not the field being drawn. emit() has always sent the
+# verdict's own figures to live.html, which is why the web page has been right
+# about these cards and the panel bolted to the dashboard has not — a driver
+# checking one screen against the other was reading two different fields under
+# the same label.
+_facts = slice(378, 416)
+
+
+def _panel_with(parsed_minutes, rate_minutes, miles=2.4):
+    r = _rate('go', 36.0)
+    r['minutes'] = rate_minutes
+    r['miles'] = miles
+    return SP.render_panel(r, {'pay': 12.0, 'minutes': parsed_minutes,
+                               'miles': miles})
+
+
+_deadline = _panel_with(None, 20.0)
+_stated = _panel_with(20.0, 20.0)
+ok_('a deadline card draws the same figures as a card that stated them',
+    np.array_equal(_deadline[_facts], _stated[_facts]))
+# ...and when the rate genuinely has no time either, the line says so with the
+# mark every other screen here uses, not with the word "None".
+_blank = SP.render_panel(dict(_rate('go', 36.0), miles=2.4),
+                         {'pay': 12.0, 'minutes': None, 'miles': 2.4})
+ok_('...and a figure nothing knows is drawn as a gap, not as a word',
+    not np.array_equal(_blank[_facts], _stated[_facts]))
+eq('nothing is drawn as a dash', SP._fig(None), '--')
+eq('...and so is anything that is not a number', SP._fig('20'), '--')
+# A bool is an int in Python, and `%.1f` on True is "1.0" — a figure on the one
+# screen a driver reads while moving.
+eq('...including a boolean', SP._fig(True), '--')
+eq('a number is drawn as itself', SP._fig(20.0), '20.0')
+
 # ...and the loop actually says. A panel that can qualify a reading and a loop
 # that never tells it are different facts, which is the shape of fault this
 # project keeps finding.

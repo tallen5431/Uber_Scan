@@ -356,10 +356,15 @@ PLACE_MERCHANT = re.compile(r'^(.{2,44}?\([^)]{2,40}\))\s*(.{4,})$', ASCII)
 # JUNCTION: the destination is `<street> & <street>` and the merchant is not.
 #
 # So the seam is the start of the junction, and the merchant is what comes
-# before it. The LAST junction on the piece, not the first: a merchant's own
-# bracketed branch can contain one — `Olive Garden (Ernest W Barrett Pkwy NW &
-# Roberts Ct) Farm Place Ct NE & Farm Place Dr NE, Woodstock` — and taking the
-# first would cut the merchant in half and call its address the destination.
+# before it — when there is EXACTLY ONE. See where this is used: a piece
+# holding two junctions is one the reader cannot split, and it stores neither
+# half rather than guess which ampersand is the seam.
+#
+# This paragraph said "the LAST junction on the piece, not the first", which
+# was true of a draft and never of the code beside it. An editor making the
+# code match the comment would write `at = seams[-1].start()` and reintroduce
+# the exact failure the use-site refuses: half a merchant welded to a good
+# address and stored as where the job ENDED.
 #
 # Capitalised words only, and at most four each side, so this anchors on a
 # street name rather than on the first ampersand in a line of icon-row sludge.

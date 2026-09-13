@@ -72,12 +72,23 @@ BRIGHT_PERCENTILE = 90
 CLIPPED_AT = 250.0
 CLIPPED_FRACTION = 0.08     # above this much blown-out white, back off
 
-# Gain moves in steps this size, and stays inside these limits. Small steps
-# because this runs between offers and has no deadline; limits because gain is
-# noise, and past about 8x an IMX519 frame is mush.
+# The size of one gain move, and the limits it stays inside. Small because this
+# runs between offers and has no deadline; limited because gain is noise, and
+# past about 8x an IMX519 frame is mush.
 #
-# The step is for going *up*, which is the direction that can rail and that
-# costs noise. Coming down is sized from the picture instead — see update().
+# The step is for coming DOWN off a blown frame, which is the one direction
+# that cannot be sized from the picture: every percentile of a card at full
+# well reads 255, so the measurement says the same thing at 1.25x as at 8x and
+# there is nothing in it to divide by. So the cut starts here and squares each
+# beat the picture comes back blown — see `self.cut` and BLOWN_ESCALATE.
+#
+# Going UP is sized from the picture, because there the measurement means
+# something: `want = light * min(self.target / bright, UP_MAX)`.
+#
+# This paragraph said the opposite — "the step is for going *up* ... coming
+# down is sized from the picture instead" — with the code beside it doing each
+# one the other way round. An editor trusting it would look for the
+# rail-and-noise argument in the wrong branch.
 GAIN_STEP = 1.18
 GAIN_LIMITS = (1.0, 8.0)
 GAIN_TOLERANCE = 0.10       # within 10% of target is close enough to leave alone
@@ -367,12 +378,15 @@ class AutoGain:
     """
 
     def __init__(self, gain=1.5, target=TARGET_BRIGHT, every=6.0,
-                 step=GAIN_STEP, limits=GAIN_LIMITS, exposure=None,
+                 limits=GAIN_LIMITS, exposure=None,
                  candidates=None):
         self.gain = float(gain)
         self.target = target
         self.every = every
-        self.step = step
+        # `step` was a constructor parameter and `self.step` a field, and
+        # nothing read either: no caller ever passed one, and the only use of
+        # GAIN_STEP is BLOWN_STEP, which seeds `self.cut`. Deleted rather than
+        # left to look like a knob.
         self.limits = limits
         # The exposure measured at calibration, and the ceiling this may never
         # go above: that value was chosen because it stops the screen rippling,
@@ -392,6 +406,19 @@ class AutoGain:
             rungs = {c for c in rungs if c <= exposure}
         self.candidates = tuple(sorted(rungs))
         self.last = None
+        # The brightness this controller last steered by, so the caller does
+        # not have to measure it again.
+        #
+        # `brightness` is a percentile over the whole window — a full
+        # order-statistic pass in float32 over the card — and the scan loop was
+        # doing exactly that, on the same array, on the line before it called
+        # this: once for the health line and once here, every frame the camera
+        # produced, for a number printed to the log every two minutes.
+        #
+        # None until a beat actually runs. This method returns early when the
+        # beat is not due, and answering with the last measurement would be
+        # answering about a different frame.
+        self.bright = None
         # How hard to cut the next time the picture comes back at full well.
         # Grows while it keeps coming back, resets the moment it does not.
         self.cut = BLOWN_STEP
@@ -455,7 +482,7 @@ class AutoGain:
             return {}
         self.last = now
 
-        bright = brightness(gray)
+        bright = self.bright = brightness(gray)
         if bright <= 0:
             return {}
 

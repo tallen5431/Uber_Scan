@@ -259,6 +259,36 @@ for page in ('journal.html', 'live.html', 'index.html', 'scan.html'):
         ok_('%s says %r at most once, so two spans cannot share one wording '
             '(%d)' % (page, phrase, seen), seen <= 1)
 
+# --- the two readers' shared numbers ------------------------------------------
+#
+# offer-parser.js and rpi/offer_parser.py are one rule with two
+# implementations, held to one corpus — and a corpus can only see what it can
+# make the two disagree ABOUT. A cap on how many places a card may hold is not
+# one of those: reaching it needs a card with five, which no fixture has, so
+# both ports could cap at different numbers and every check would pass.
+#
+# It is not a display cap either. journal.py:content_of folds the places tuple
+# into the fingerprint that decides whether a new reading SUPERSEDES an older
+# one, so a rig keeping five and a phone keeping four make two fingerprints for
+# the same physical card, and it stops being recognised as the same card.
+#
+# Read out of the two files rather than imported, because the point is that the
+# NUMBERS agree, and importing one of them would only prove it agrees with
+# itself. MAX_PLACES was a bare `4` at the end of findPlaces on the JS side
+# when this was written, which is how it came to be worth checking.
+_js = open(os.path.join(ROOT, 'offer-parser.js')).read()
+_py = open(os.path.join(ROOT, 'rpi', 'offer_parser.py')).read()
+for _name in ('MAX_PLACE', 'MAX_PLACES', 'SANE_RATE', 'SANE_MPH', 'MAX_MPH',
+              'UNREADABLE_MPH', 'SANE_RATE_OVER_MINUTES'):
+    _j = re.search(r'\bvar\s+%s\s*=\s*([0-9.]+)\s*;' % _name, _js)
+    _p = re.search(r'(?m)^%s\s*=\s*([0-9.]+)\s*$' % _name, _py)
+    ok_('%s is a named constant in the JavaScript reader' % _name, _j is not None)
+    ok_('...and in the Python one', _p is not None)
+    if _j and _p:
+        eq('...and the two agree about it (js %s, py %s)'
+           % (_j.group(1), _p.group(1)),
+           float(_j.group(1)), float(_p.group(1)))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)

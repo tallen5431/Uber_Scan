@@ -46,6 +46,10 @@ def ok_(name, cond):
     eq(name, bool(cond), True)
 
 
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 def skip(why):
     print('%s — skipping the browser-scanner checks' % why)
     sys.exit(0)
@@ -446,8 +450,28 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
       rowPay: row.pay, rowGross: row.grossPerHour,
       // What the parse alone would have given, so the check can say the two
       // really are different and is not passing by coincidence.
-      parsedMinutes: parsed.minutes, parsedMiles: parsed.miles
+      parsedMinutes: parsed.minutes, parsedMiles: parsed.miles,
+      // Which end is which. The Pi's rows carry these and the browser's did
+      // not, so every offer read on the PHONE was invisible to both map
+      // surfaces — each of which filters on exactly these two fields — with
+      // the places sitting in the row all along.
+      rowPickup: row.pickup, rowDropoff: row.dropoff,
+      parsedPickup: parsed.pickup, parsedDropoff: parsed.dropoff
     };
+  });
+
+  // ...on a card that names both ends, since the one above names none.
+  out.rowEnds = await page.evaluate(() => {
+    var settings = { target: 25, band: 15, costPerMile: 0.30 };
+    var parsed = OfferParser.parse(
+      '$8.83\n23 min (4.6 mi) total\nPickup\nPapa Johns (Kennesaw)\n'
+      + 'Cobb Pkwy NW, Acworth');
+    var rate = OfferParser.rate(parsed, settings);
+    var row = JournalClient.row(parsed, rate, settings,
+                                { browser: true, prefix: 'e' });
+    return { pickup: row.pickup, dropoff: row.dropoff,
+             places: row.places || [],
+             parsedPickup: parsed.pickup, parsedDropoff: parsed.dropoff };
   });
 
   // The same figures, to the same number of places the Pi writes them to.
@@ -997,6 +1021,31 @@ try:
     # display and the only place a person meets the stored figure is the CSV.
     # Measured on this card: the Pi wrote 19.43 and the phone wrote
     # 19.434782608695652 into the column beside it.
+    # --- which end is which, on a row the browser wrote ---------------------
+    #
+    # The Pi's rows carry `pickup` and `dropoff`; the browser's carried only
+    # `places`. Both map surfaces ask for the two fields and not the list — the
+    # offers page hides a row's map controls without them, and map.html's whole
+    # working set is `o.pickup || o.dropoff` — so an offer read on the phone
+    # was on no map at all. That is the worst half to lose: the phone's scanner
+    # exists for the nights the rig cannot read, so those rows are the ones
+    # with no other record of where the job went.
+    _ends = got.get('rowEnds') or {}
+    ok_('the browser parser names both ends of this card',
+        _ends.get('parsedPickup') and _ends.get('parsedDropoff'))
+    eq('...and the row it writes carries the pickup',
+       _ends.get('pickup'), _ends.get('parsedPickup'))
+    eq('...and the dropoff', _ends.get('dropoff'), _ends.get('parsedDropoff'))
+    # ...and an end the card did NOT name is absent from the row rather than
+    # present and empty, which downstream would read as "this went somewhere".
+    # The card two fixtures up prints "Pickup Papa Johns" and no destination.
+    _ra2 = got.get('rowAgrees') or {}
+    eq('a card naming only its pickup writes that pickup',
+       _ra2.get('rowPickup'), _ra2.get('parsedPickup'))
+    ok_('...and it really is only the pickup', bool(_ra2.get('parsedPickup'))
+        and not _ra2.get('parsedDropoff'))
+    no_('...so the row carries no dropoff at all', _ra2.get('rowDropoff'))
+
     rr = got.get('rowRounds') or {}
     ok_('the rounding fixture produced a row', bool(rr))
     if rr:

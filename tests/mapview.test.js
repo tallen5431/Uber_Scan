@@ -297,20 +297,62 @@ function gaps(sent) {
   eq('...which is asked', D.sent.length, 2);
   ok_('...with the hint in it', D.sent[1].url.indexOf('Georgia') !== -1);
 
-  /* A dead network is an empty answer, not an exception. The page has to be
-   * able to say "could not find" over every place rather than stop at the
-   * first one the hotspot dropped. */
+  /* A dead network does not stop the walk — and is not remembered as an
+   * answer about the place.
+   *
+   * This is the difference between "nobody there" and "nobody answered", and
+   * it used to be collapsed: both became null, and null went into the cache,
+   * and the cache is localStorage. A hotspot that drops for four seconds part
+   * way through a paced walk is the ordinary case in a car, and every place
+   * asked inside that gap became a permanent "the geocoder could not find
+   * this" — never asked again, listed on the map page as a misread address,
+   * with the only recovery being to throw away every good answer too. */
   var dead = new MV.Geocoder({
     now: function () { return 0; }, sleep: function () { return Promise.resolve(); },
     fetch: function () { return Promise.reject(new Error('offline')); }
   });
-  eq('a request that throws is an answer of nothing',
-     await dead.lookup('Anywhere', null), null);
+  eq('a request that never arrives is not an answer about the place',
+     await dead.lookup('Anywhere', null), undefined);
+  no_('...and is not remembered as one', dead.knows('Anywhere', null));
   var refused = new MV.Geocoder({
     now: function () { return 0; }, sleep: function () { return Promise.resolve(); },
-    fetch: function () { return Promise.resolve({ ok: false }); }
+    fetch: function () { return Promise.resolve({ ok: false, status: 429 }); }
   });
-  eq('...and so is a refusal', await refused.lookup('Anywhere', null), null);
+  // 429 and 403 are what Nominatim sends a client it is throttling or has
+  // blocked. Caching those as "no such place" turns a bad minute into a
+  // permanent hole in the map.
+  eq('...nor is a refusal', await refused.lookup('Anywhere', null), undefined);
+  no_('...which is also not remembered', refused.knows('Anywhere', null));
+  // An answer that DID arrive and held nothing is a fact about the place, and
+  // is remembered — that is what makes the second run of a week free.
+  var nothing = new MV.Geocoder({
+    now: function () { return 0; }, sleep: function () { return Promise.resolve(); },
+    fetch: function () {
+      return Promise.resolve({ ok: true, json: function () { return Promise.resolve([]); } });
+    }
+  });
+  eq('an answer that arrived and held nothing is a null',
+     await nothing.lookup('Nowhere At All', null), null);
+  ok_('...and that one IS remembered', nothing.knows('Nowhere At All', null));
+  // ...and a walk carries on through the dead patch rather than stopping at
+  // the first place the hotspot dropped.
+  var flaky = 0;
+  var patchy = new MV.Geocoder({
+    now: function () { return 0; }, sleep: function () { return Promise.resolve(); },
+    fetch: function () {
+      flaky++;
+      if (flaky === 2) return Promise.reject(new Error('offline'));
+      return Promise.resolve({ ok: true, json: function () {
+        return Promise.resolve([{ lat: '33.9', lon: '-84.5', display_name: 'x', type: 'road' }]);
+      } });
+    }
+  });
+  var through = {};
+  await patchy.walk(['a', 'b', 'c'], function () { return null; }, through);
+  eq('a walk through a dead patch asks for all three', flaky, 3);
+  ok_('...keeps the answers either side of it', !!through.a && !!through.c);
+  no_('...and leaves the one it could not ask to be asked again',
+      patchy.knows('b', null));
 
   /* --- the whole run ------------------------------------------------------
    *

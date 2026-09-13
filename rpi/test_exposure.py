@@ -8,6 +8,7 @@ this gets tested without a phone and a dark room.
 """
 
 import os
+import re
 import sys
 
 import numpy as np
@@ -814,6 +815,46 @@ ok_('a daylight rung is never elected as the calibrated exposure',
 # naming a number the sensor never used.
 ok_('every candidate fits inside a 30fps frame', max(EX.FLICKER_SAFE) <= 33333)
 ok_('...including the default', EX.DEFAULT_EXPOSURE <= 33333)
+
+# --- the brightness the controller steered by, kept for the caller ---------
+#
+# `brightness` is a percentile: a full order-statistic pass in float32 over the
+# card window, about 7ms for a megapixel on a desktop and several times that on
+# a Pi 4. The scan loop wanted the same number for its health line and measured
+# it AGAIN, on the same array, on the line before it called update() — every
+# frame the camera produced, all shift, for a figure the log prints once every
+# two minutes.
+#
+# Two derivations of one measurement also agree only until one of them changes,
+# and the comment beside that line already claimed they were the same number.
+_seen = EX.AutoGain(gain=1.5, every=6.0)
+ok_('a controller that has not looked yet reports no brightness',
+    _seen.bright is None)
+_seen.update(np.full((50, 50), 205, np.uint8), 100.0)
+ok_('...and reports one after a beat', isinstance(_seen.bright, float))
+eq('...which is the measure it steered by',
+   _seen.bright, EX.brightness(np.full((50, 50), 205, np.uint8)))
+# A beat that is not due does not measure, so the figure must not be replaced
+# with one about a frame the controller never looked at.
+_was = _seen.bright
+_seen.update(np.full((50, 50), 40, np.uint8), 100.1)
+eq('a look that was not due leaves the last measurement alone',
+   _seen.bright, _was)
+_seen.update(np.full((50, 50), 40, np.uint8), 200.0)
+ok_('...and the next beat replaces it', _seen.bright < _was)
+
+# ...and the loop takes it from there rather than measuring a second time.
+#
+# A static check because the value either way is identical — the pass is
+# deterministic — so the only thing that can tell a single measurement from two
+# is whether the second call is written down.
+_loop = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          'scan_pi.py')).read()
+_code = re.sub(r'(?m)^\s*#.*$', '', _loop)
+eq('the scan loop measures the card brightness no times of its own',
+   _code.count('EX.brightness('), 0)
+ok_('...and reads the controller\'s instead',
+    'auto_gain.bright' in _code)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d exposure checks passed' % ok)

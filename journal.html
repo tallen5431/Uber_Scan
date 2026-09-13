@@ -1701,7 +1701,17 @@
       + '<h3>The job already in the car</h3>'
       + '<dl class="facts">'
       + row('Payout', money(held.pay, 2))
-      + row('Time on the card', num(held.minutes, 0) === null
+      // BILLED time, not the card's — and the two are different numbers.
+      //
+      // server.js stores the held job with `billedMinutes` where it has one,
+      // which is the card's duration plus the driver's own pickup pad and
+      // shopping allowance. On a 30-item shop order stated as 45 minutes with
+      // a 90-second-an-item allowance that is 95, and this row called it
+      // "Time on the card" — a duration the card never printed, on the one
+      // page whose stated purpose is letting a driver check what the panel
+      // said against the cards they remember. The offer beside it really does
+      // carry the card's own minutes, under the same label.
+      + row('Billed time', num(held.minutes, 0) === null
             ? null : num(held.minutes, 0) + ' min')
       + row('Already elapsed', typeof held.heldMs === 'number'
             ? Math.round(held.heldMs / 60000) + ' min' : null)
@@ -2649,12 +2659,22 @@
 
   function load() {
     var seq = ++loadSeq;
-    // The server's own ceiling, not its default. The JSON cap protects the
-    // DOM — a phone will not render 60000 rows — but the CSV is streamed
-    // straight to a file, and it is the thing this page points at for the rows
-    // the cap drops. Sending the same limit made the escape hatch stop exactly
-    // where the problem started.
-    el.csv.href = '/api/journal.csv?limit=20000&' + windowQuery();
+    // No cap at all, which is what an escape hatch has to be.
+    //
+    // The JSON cap protects the DOM — a phone will not render 60000 rows — but
+    // the CSV is streamed straight to a file, and it is the thing this page
+    // points at for the rows the cap drops: the sentence beside the count says
+    // "use the CSV for the rest". This used to send the server's own ceiling,
+    // 20000, on the reasoning that the ceiling is not the default — and a
+    // ceiling is still a cap. Past it the download quietly kept the newest
+    // rows and dropped the oldest, which is the half a driver exports a year
+    // to look at.
+    //
+    // `limit=0` is uncapped: the handler's test is `if (limit && ...)`, and
+    // clampNumber's floor is zero. The CSV also now says in its headers when
+    // it is short of the window, so a cap that arrives some other way cannot
+    // be silent either.
+    el.csv.href = '/api/journal.csv?limit=0&' + windowQuery();
     fetch('/api/journal?' + windowQuery())
       .then(function (r) { return r.json(); })
       .then(function (data) { if (seq === loadSeq) render(data); })

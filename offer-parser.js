@@ -543,6 +543,21 @@
    * looks for a seam in a piece that is over it. */
   var MAX_PLACE = 60;
 
+  /* ...and how many of them one card may hold.
+   *
+   * Named here because it is named in the Python port, where its own comment
+   * says why: "the accumulator and the journal both cap their own collections
+   * at the same number and three copies of it is three chances to disagree
+   * about what a card can hold". This side had the fourth copy, as a bare `4`
+   * at the end of findPlaces, where nothing could see it disagree.
+   *
+   * It is not only a display cap. `journal.py:content_of` folds the places
+   * tuple into the fingerprint that decides whether a new reading SUPERSEDES
+   * an older one, so a rig keeping five places and a phone keeping four make
+   * two different fingerprints for the same physical card — and the card stops
+   * being recognised as the same card. */
+  var MAX_PLACES = 4;
+
   /* ...and an address ends at its town. Nothing on the card marks the end of
    * one, which is what left "Lakeview Ter & Windmill Dr, Dallas ill" in the
    * journal — the "ill" is the bottom icon row. A comma, a capitalised name or
@@ -1002,7 +1017,7 @@
         if (looksLikeAPlace(piece)) keep(piece);
       }
     }
-    return out.slice(0, 4);
+    return out.slice(0, MAX_PLACES);
   }
 
   function findLegs(text) {
@@ -1988,5 +2003,6 @@
            legsShortADistance: legsShortADistance,
            SANE_PAY: SANE_PAY, SANE_MINUTES: SANE_MINUTES, SANE_MPH: SANE_MPH,
            SANE_RATE: SANE_RATE, SANE_RATE_OVER_MINUTES: SANE_RATE_OVER_MINUTES,
-           MAX_MPH: MAX_MPH, UNREADABLE_MPH: UNREADABLE_MPH };
+           MAX_MPH: MAX_MPH, UNREADABLE_MPH: UNREADABLE_MPH,
+           MAX_PLACE: MAX_PLACE, MAX_PLACES: MAX_PLACES};
 }));

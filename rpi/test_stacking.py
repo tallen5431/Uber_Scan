@@ -155,7 +155,15 @@ READ_PAYLOAD = json.loads(_buf.getvalue().strip())
 # unbreakable entry in it teaches you to trust the whole list less. It is still
 # emitted, because the call site asks for it and a payload that does not answer
 # its caller is the shape of defect this block exists to catch.
-for _need in ('ready', 'pay', 'minutes', 'target', 'costPerMile', 'dropoff'):
+for _need in ('ready', 'pay', 'minutes', 'target', 'costPerMile', 'dropoff',
+              # ...and the time the pair is actually measured over. `minutes`
+              # is what the CARD printed and is null on every delivery card,
+              # where the card states a deadline instead. The held job is
+              # stored with its billed time, so timing the new offer off the
+              # card compared a shop order against a ride's worth of clock —
+              # and timed nothing at all where the card printed no duration.
+              # See timedLikeTheHeldJob in server.js.
+              'billedMinutes', 'cardMinutes'):
     eq('a real reading carries %s' % _need, _need in READ_PAYLOAD, True)
 eq('...with the target the verdict was judged against',
    READ_PAYLOAD['target'], 25.0)
@@ -184,6 +192,25 @@ eq('...with the line the server stores', DROP_PAYLOAD['dropoff'].get('line'),
 eq('...and the reading it must not be confused with carries a string',
    isinstance(READ_PAYLOAD['dropoff'], str), True)
 
+# The other shape of reading, and the one the stack line went silent on.
+#
+# Uber and DoorDash both state a DEADLINE and no duration, so `minutes` is null
+# and the time the verdict was made over is `cardMinutes`. Advice.stack reads
+# `offer.minutes` and returns null when it is missing, so the second-job line
+# said nothing at all on that whole half of a shift — and said it the same way
+# it says "the two jobs are fine together", which is with no line.
+#
+# Derived from the real payload rather than written out, so a field that stops
+# being emitted fails here rather than being quietly absent from the fixture.
+DEADLINE_PAYLOAD = dict(READ_PAYLOAD, minutes=None, cardMinutes=34.0,
+                        billedMinutes=34.0, fromDeadline=True, deliverBy=1140)
+eq('the delivery-card reading states no duration',
+   DEADLINE_PAYLOAD['minutes'], None)
+eq('...but does state the time the verdict was made over',
+   DEADLINE_PAYLOAD['cardMinutes'], 34.0)
+
+DEADLINE = os.path.join(work, 'deadline')
+
 fake = os.path.join(work, 'fakescan.py')
 with open(fake, 'w') as fh:
     fh.write(
@@ -191,6 +218,8 @@ with open(fake, 'w') as fh:
         'QUEUE = %r\n'
         'DROP = %r\n'
         'QUIET = %r\n'
+        'DEADLINE = %r\n'
+        'LATE = %r\n'
         'READ = %r\n'
         'DROPPED = %r\n'
         'sent = dropped = None\n'
@@ -210,9 +239,10 @@ with open(fake, 'w') as fh:
         '        dropped = ask\n'
         '        print(json.dumps(DROPPED), flush=True)\n'
         '    if not os.path.exists(QUIET):\n'
-        '        print(json.dumps(READ), flush=True)\n'
+        '        print(json.dumps(LATE if os.path.exists(DEADLINE) else READ), flush=True)\n'
         '    time.sleep(0.2)\n'
-        % (QUEUE, DROP, QUIET, READ_PAYLOAD, DROP_PAYLOAD))
+        % (QUEUE, DROP, QUIET, DEADLINE, DEADLINE_PAYLOAD,
+           READ_PAYLOAD, DROP_PAYLOAD))
 
 
 def put_dropoff(tag):
@@ -771,6 +801,48 @@ try:
         ok_('a row of scans parses back into whole frames',
             isinstance(frames, list) and all(isinstance(f, str) for f in frames))
         break
+
+    # --- the delivery card, which had no second-job line at all --------------
+    #
+    # Advice.stack reads `offer.minutes`, and a delivery card states a deadline
+    # and no duration — so the line returned null and the panel drew nothing,
+    # on the whole of that half of a shift. Nothing distinguished it from "the
+    # two jobs are fine together", which is also nothing.
+    #
+    # And where the card DID state a duration, the two sides of the comparison
+    # were still different quantities: the held job is stored with its billed
+    # time, the new offer arrived with the card's. On a $22.00 shop order
+    # billed at 95 minutes against an identical card, the worst case came out
+    # $18.86/hr over 95-140 minutes instead of $13.89 over 95-190 — the floor
+    # overstated by 36% on the one line that says whether to take a second job.
+    # An order back in the car first — earlier stages put one down, and with
+    # nothing being carried there is correctly no second-job line to draw.
+    ok_('an order to stack onto is on the record', put_offer(HELD))
+    post(base, '/api/offers/mark', {'id': 'held-1', 'accepted': True})
+    ok_('...and in the car',
+        (get(base, '/api/status').get('holding') or {}).get('pay') == 12.0)
+    open(DEADLINE, 'w').close()
+    _deadline_stack = None
+    for _ in range(120):
+        _last = get(base, '/api/status').get('last') or {}
+        if _last.get('fromDeadline'):
+            _deadline_stack = _last.get('stack')
+            break
+        time.sleep(0.1)
+    ok_('the delivery card reached the panel',
+        _deadline_stack is not None or _last.get('fromDeadline') is True)
+    ok_('...and it gets a second-job line like any other card (%r)'
+        % (_deadline_stack if not isinstance(_deadline_stack, dict)
+           else {k: _deadline_stack[k] for k in ('state', 'minMinutes', 'maxMinutes')
+                 if k in _deadline_stack}),
+        isinstance(_deadline_stack, dict))
+    if isinstance(_deadline_stack, dict):
+        # Timed over the deadline's own minutes, which is what the verdict was
+        # made from — not over the null the card printed as a duration.
+        ok_('...timed over the minutes the verdict was made from (%r)'
+            % _deadline_stack.get('maxMinutes'),
+            (_deadline_stack.get('maxMinutes') or 0) >= 34.0)
+    os.remove(DEADLINE)
 
 finally:
     proc.terminate()

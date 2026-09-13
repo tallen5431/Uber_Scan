@@ -101,6 +101,25 @@ var JournalClient = (function () {
       legs: parsed.legs || 0,
       hasTotal: !!parsed.hasTotal,
       places: parsed.places && parsed.places.length ? parsed.places : undefined,
+      // ...and which of them is which END, which the Pi's own rows carry and
+      // these did not.
+      //
+      // `places` is the list; `pickup` and `dropoff` are the two facts anything
+      // downstream actually asks for. Both map surfaces filter on them — the
+      // offers page puts a row's map controls behind `r.pickup`/`r.dropoff`,
+      // and map.html's whole working set is `o.pickup || o.dropoff` — so every
+      // offer read on the PHONE was invisible to both, with its places sitting
+      // in the row all along.
+      //
+      // Which is the worst half to lose: the phone's scanner exists for the
+      // nights the rig cannot read, so the rows that only it produced are the
+      // ones with no other record of where the job went.
+      //
+      // parse() already decides this, and the Pi calls the same two functions
+      // on the same field. Taken from `parsed` rather than recomputed here, so
+      // there is no second rule to drift.
+      pickup: parsed.pickup || undefined,
+      dropoff: parsed.dropoff || undefined,
       text: parsed.text || undefined,
       // Rounded, because rpi/journal.py rounds. The same field, written by the
       // same project, into the same file, under two rules — and the second rule
