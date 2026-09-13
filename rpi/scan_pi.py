@@ -222,16 +222,37 @@ VERIFY_EVERY = 2.5
 # written for costs exactly what it did before: one beat.
 VERIFY_BACKOFF = 1.6
 
-# What a read costs, near enough for the arithmetic that hangs off it.
+# What a read costs. TWO numbers, because two different questions were being
+# answered by one of them.
 #
-# Not measured here — it cannot be, this file has no camera — but it is the
-# number two constants below and one in live.html are derived from, and leaving
-# it implicit is how they went out of step with a reader that got faster. The
-# owner's own shift recorded a median `ms` of 1517 before the engine stopped
-# being thrown away per read, and that change measured 2.12x end to end on a
-# development machine: 1517 / 2.12 is about 715ms. Rounded up, because being
-# wrong in this direction only costs a slightly lazier beat.
-READ_SECONDS = 0.75
+# There was a single `READ_SECONDS = 0.75`, derived rather than measured: "the
+# owner's own shift recorded a median of 1517ms before the engine stopped being
+# thrown away per read, and that change measured 2.12x on a development machine:
+# 1517 / 2.12 is about 715ms". A development machine is not a Pi 4 that is also
+# drawing a dashboard, and the speedup did not arrive on the rig.
+#
+# Measured on 272 real offers out of the owner's own journal:
+#
+#     min 390   p25 1405   median 1846   p75 2636   p90 3657   p99 4812   max 5915
+#
+# 99.3% of real reads are slower than the 750ms that was assumed. So every piece
+# of arithmetic hanging off it was out, and out in the optimistic direction.
+#
+# The two questions are not the same question:
+#
+#   TYPICAL is for duty cycle — what share of the verify beat is spent reading a
+#   card that is not changing. The median is the right statistic: it says what
+#   the rig usually does.
+#
+#   SLOW is for worst-case gaps — how long the driving page may hear nothing
+#   from a HEALTHY rig before it is entitled to dim the verdict. A median is the
+#   wrong statistic for a bound; one read in two is slower than it, and dimming
+#   a good verdict is the failure being guarded against. The p90 is used, and
+#   the max is written down beside it so the margin is visible.
+#
+# Rounded to a tenth. Nothing here is fine enough to care past that.
+READ_SECONDS = 1.85           # median of the owner's own 272
+READ_SECONDS_SLOW = 3.7       # p90; the worst measured was 5.9
 # How long one read may be in flight before the rig treats itself as stuck.
 # A read that never returns left the loop alive, beating, silent and never
 # reading again: every card's trigger was deferred to `read_wanted` and never
@@ -2765,7 +2786,13 @@ DOUBT_LABELS = {'pay': 'CHECK PAY', 'time': 'CHECK TIME', 'speed': 'CHECK MILES'
                 # the card when the time is what was misread. Added with the
                 # reason itself; without it this panel fell back to READ AGAIN
                 # while the other two screens named it.
-                'rate': 'CHECK PAY & TIME'}
+                'rate': 'CHECK PAY & TIME',
+                # Not a figure to check — there is no offer to check it
+                # against. Uber's route planner and DoorDash's idle screen both
+                # reached this panel with a payout on them, at $68.18/hr in
+                # green and $376.50/hr. "CHECK PAY" would send the driver
+                # looking for a card that is not there. See NOT_AN_OFFER.
+                'screen': 'NOT AN OFFER'}
 
 
 def render_panel(rate, parsed, size=(800, 480), whole=True):

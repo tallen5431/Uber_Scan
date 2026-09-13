@@ -786,6 +786,29 @@
      the other rule depends on the invention happening to contain the merchant's
      name — an accident of how this reader fails rather than something to lean
      on. */
+  /* Screens that are the app talking about ITSELF, not offering a job.
+   *
+   * parse() has no offer-card token it can require. 79 of the owner's own 272
+   * recorded cards carry none of "Accept", "Decline", "Guaranteed" or "Pickup"
+   * — they are ride offers that read as a payout, a rating and two legs — so
+   * demanding a positive anchor would refuse a third of the real traffic. The
+   * only thing that can be required is the ABSENCE of the app's own furniture.
+   *
+   * Two screens in those 272 produced a verdict, and both were confident:
+   * Uber's route planner ("Drive ... 50 min $120 ... Add stops < Share") read
+   * as $120 over 105 minutes, $68.18/hr, a green ACCEPT; and DoorDash's idle
+   * screen ("This dash / Finding offers. / You're in a good place to wait for
+   * offers") read as $12.55 over 2 minutes, $376.50/hr. Neither is catchable
+   * by the numbers — $68/hr is an ordinary rate, and $12.55 is under the flat
+   * pay cap doubt() applies below ten minutes.
+   *
+   * TWO phrases, and both earn their place. Four were written first; mutation
+   * testing showed the other two were already covered by "finding offers", and
+   * a pattern nothing can show is dead weight. Each of these is the ONLY
+   * evidence against its own phantom — including the second frame of the idle
+   * screen, where most of the text did not survive the read. */
+  var NOT_AN_OFFER = /add\s*stops|finding\s*offers/i;
+
   var DROPOFF_NOT_STATED = /custom[ea]r\s*drop\s*-?\s*off/i;
 
   function placeKey(value) {
@@ -1481,6 +1504,10 @@
       // destination scan used to trust that count and had no guard of its own;
       // it refuses any frame carrying a payout now. See findAddress.
       address: findAddress(text),
+      // Whether this is a screen rather than an offer. See NOT_AN_OFFER.
+      // Reported, not acted on here: parse() says what it read and rate()
+      // decides what to do about it, the same division the other doubts keep.
+      notAnOffer: NOT_AN_OFFER.test(text || ''),
       // The legs behind the sum, so a caller holding readings from several
       // frames can merge the ones a single frame missed.
       legDetail: used.map(function (l) {
@@ -1786,6 +1813,16 @@
      * beside the minutes that did not read. Asked LAST: a reading already
      * doubted for its figures keeps the more specific reason. */
     if (!why && mostOfTheJourneyMissing(parsed)) why = 'leg';
+
+    /* ...and a screen that is not an offer at all.
+     *
+     * Last of the reasons, because it is the least likely and the others are
+     * about figures this one has no opinion on. Withheld rather than dropped,
+     * like every other doubt: if this rule ever fires on a genuine card, a
+     * withheld verdict costs one offer the driver can still see on the phone,
+     * where refusing to parse would lose the row and leave a hole nothing
+     * could account for later. See NOT_AN_OFFER. */
+    if (!why && parsed.notAnOffer) why = 'screen';
 
     return {
       ready: true,

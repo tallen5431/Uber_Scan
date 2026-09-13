@@ -689,6 +689,16 @@
     // remedy — and a wrong explanation is worse than a vague one, because a
     // driver reads it while deciding whether the rig made the mistake or they
     // did.
+    // Before the leg branch, and before the crop sentence below it, because
+    // this row is not a misread card — it is not a card. Explaining it as a
+    // reading problem would send the driver looking for an offer that never
+    // existed.
+    if (r.doubt === 'screen') {
+      return 'This was the app itself rather than an offer — a route being '
+           + 'planned, or a dash waiting for one — so the figures on it are '
+           + 'not a job. No verdict was given, and it is in none of the '
+           + 'figures above.';
+    }
     if (r.doubt === 'leg') {
       return 'The card showed a leg the scanner could not time'
            + (typeof r.untimedMiles === 'number'
@@ -886,6 +896,10 @@
     if (r.suspect) {
       flags.push(r.doubt === 'leg'
         ? 'a leg of the journey never read, so this is part of it'
+        // ...and a third reason, which is neither a figure out of range nor a
+        // journey half read: a screen that was not an offer at all.
+        : r.doubt === 'screen'
+        ? 'the app itself rather than an offer'
         : 'outside the range a real offer falls in');
     }
     // Typed on the keypad rather than read off a card: the figures are the
@@ -999,6 +1013,12 @@
             : r.doubt === 'leg'
             ? 'no verdict — a leg of the journey never read, so the minutes '
               + 'below are only part of it'
+            // ...and the one where the figures are fine and there is no offer
+            // under them. The sentence below ends "is outside anything a real
+            // offer does", which is exactly wrong here: the figures are
+            // ordinary, they just belong to a screen rather than to a job.
+            : r.doubt === 'screen'
+            ? 'no verdict — this was the app itself, not an offer'
             : ('no verdict — '
                + ({ pay: 'the pay', time: 'the time', speed: 'the distance',
                     rate: 'the pay against the time' }[r.doubt]

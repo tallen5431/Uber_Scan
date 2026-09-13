@@ -792,9 +792,31 @@ ok_('a stale verdict cannot outlive the ceiling', SP.VERIFY_MAX <= 15.0)
 # down to hold the same duty cycle and the beat it backs off *from* stayed put.
 ok_('...and the ceiling is a real saving over the fast beat',
     SP.VERIFY_MAX >= SP.VERIFY_EVERY * 2)
-# ...and it is the read cost that sets it, not a number somebody liked.
-ok_('the ceiling spends about a tenth of the time reading',
-    0.08 <= SP.READ_SECONDS / SP.VERIFY_MAX <= 0.16)
+# ...and how much of that ceiling is spent reading, which is now a measured
+# number rather than an assumed one.
+#
+# This asserted "the ceiling spends about a tenth of the time reading",
+# `0.08 <= READ_SECONDS / VERIFY_MAX <= 0.16`, and it passed because
+# READ_SECONDS was 0.75 — a figure derived from a development machine's speedup
+# that never arrived on the Pi. Measured over 272 real offers the median read is
+# 1846ms, so the true share is 31%, not a tenth. The check was true about a
+# constant and false about the rig.
+#
+# Stated as what it is. A third of the backed-off beat spent re-reading a card
+# that is not changing is a real cost on a Pi that is also drawing a dashboard,
+# and the lever is VERIFY_MAX — but raising it lets a REPLACEMENT card sit
+# unread for longer, which is money, and that trade belongs to whoever drives
+# the rig rather than to this file. The band is wide enough to hold the honest
+# figure and tight enough to notice if it moves.
+ok_('the ceiling spends between a fifth and half its time reading (%.0f%%)'
+    % (100.0 * SP.READ_SECONDS / SP.VERIFY_MAX),
+    0.20 <= SP.READ_SECONDS / SP.VERIFY_MAX <= 0.50)
+# ...and the two read costs are the two things they claim to be, or the split
+# between them is decoration.
+ok_('a slow read is slower than a typical one',
+    SP.READ_SECONDS_SLOW > SP.READ_SECONDS)
+ok_('...and both are inside what the reader is allowed before it counts as stuck',
+    SP.READ_SECONDS_SLOW < SP.READ_STUCK_S)
 
 # --- the reader, on its own ------------------------------------------------
 # The queue between the loop and the OCR. Checked apart from the loop because
@@ -1220,7 +1242,14 @@ ok_('...and how long the scanner may be quiet', PAGE_STALE is not None)
 
 # The healthy worst case, from the scanner's own constants: a full backed-off
 # beat with a read on the end of it.
-healthy = SP2.VERIFY_MAX + SP2.READ_SECONDS
+#
+# A SLOW read, not a typical one. This used READ_SECONDS, which is now the
+# median — and a median is the wrong statistic for a bound, because one read in
+# two is slower than it. The failure being guarded against here is the page
+# dimming a verdict that is perfectly good, and it happens on the slow reads:
+# measured over 272 real offers, p90 is 3657ms against the 750ms this arithmetic
+# used to assume, and the worst was 5915ms.
+healthy = SP2.VERIFY_MAX + SP2.READ_SECONDS_SLOW
 ok_('the verdict window clears a full verify beat and the read on the end of it',
     healthy < PAGE_READ_STALE / 1000.0)
 # ...and is not so much larger that a stopped rig looks alive for a shift.

@@ -1353,6 +1353,48 @@
   }
  ],
  "rate": [
+ {
+  "name": "DoorDash waiting for offers, read as a $376/hr offer",
+  "_why": "Off the owner's own rig: the app's idle screen, with the dash's takings so far ($12.55) read as a payout and the zone's “1-2 min” wait read as the job's duration. $376.50/hr, and the panel called it CLOSE CALL. Nothing in the numbers can catch it — $12.55 is under the flat pay cap doubt() applies below ten minutes — so the screen's own words are the only evidence. The app says it is LOOKING for offers; a card offering a job never says that.",
+  "text": "$12.55\nThis dash\nHong Kong Chinese\nFinding offers.\nYou're in a good place to wait for\noffers\nZone offer wait\n1-2 min",
+  "settings": {
+   "target": 25,
+   "band": 15,
+   "costPerMile": 0.3
+  },
+  "expect": {
+   "state": "doubt",
+   "doubt": "screen"
+  }
+ },
+ {
+  "name": "...and the same screen read a second time, through the map behind it",
+  "_why": "The other frame of the same screen, mangled differently — the phrase that gives it away survives where most of the text did not. Both frames have to be refused or the accumulator merges a refused one with an accepted one.",
+  "text": "a @ 2*-@ om <\n9S $12.55 Easton” @\nng 2\nva PE (3\n® ie\nva Crom. @ te\n7 Hong Kong @Minesé SAS\nps Total Wine eindrert American LLC) - ce\nDey ESS\nee M S\neB | =\na SS\nSRY x\nSoa ,\nsat = oO NY\nvs 9 4 S\nal - . r-\ngas) Finding offers..\nPS .\n; ewes You're more likely to get offers at\nhy hotspots.\nAe Zone offer wait\nBRE 1-2 min\nRe",
+  "settings": {
+   "target": 25,
+   "band": 15,
+   "costPerMile": 0.3
+  },
+  "expect": {
+   "state": "doubt",
+   "doubt": "screen"
+  }
+ },
+ {
+  "name": "Uber's route planner, read as a $120 offer and called ACCEPT",
+  "_why": "The worst of the three: “Drive … 50 min $120 … Add stops < Share” became $120 over 105 minutes at $68.18/hr, green, with suspect false and no doubt at all. $68/hr is an ordinary rate, so no arithmetic could refuse it. “Add stops” appears on this screen and on none of the owner's other 271 cards.",
+  "text": "eet é@\ng\nG@s_p\nDrive i & x\na 8 50 min $ 50 min $120\n5 min (2.3 mi)\n@ Add stops < Share o",
+  "settings": {
+   "target": 25,
+   "band": 15,
+   "costPerMile": 0.3
+  },
+  "expect": {
+   "state": "doubt",
+   "doubt": "screen"
+  }
+ },
   {
    "name": "a leg that lost its minutes, and took the whole trip with it",
    "_why": "The approach leg read, the trip leg did not, and the rate came out over the drive to the rider: $220.80/hr green against a true $12.40. Every figure in it is one the card printed, so doubt() passes it correctly - $18.40 and 5 minutes are each ordinary, and the pair clears SANE_RATE at the ten-minute floor. What the card also printed is the 7.8 miles beside the minutes that did not read, and that is what says most of the journey is absent.",

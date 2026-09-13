@@ -1466,6 +1466,44 @@ def find_address(text):
 # because it is the card stating the fact directly, where the other rule depends
 # on the invention happening to contain the merchant's name, which is an
 # accident of how this reader fails rather than something to rely on.
+# Screens that are the app talking about ITSELF, not offering a job.
+#
+# parse() has no offer-card token it can require. 79 of the owner's own 272
+# recorded cards carry none of "Accept", "Decline", "Guaranteed" or "Pickup" —
+# they are ride offers that read as a payout, a rating and two legs — so
+# demanding a positive anchor would refuse a third of the real traffic. The
+# only thing that can be required is the ABSENCE of the app's own furniture.
+#
+# Two screens in those 272 produced a verdict, and both were confident:
+#
+#   "Drive i & x / a 8 50 min $ 50 min $120 / 5 min (2.3 mi) / @ Add stops
+#    < Share o"          -> $120, 105 min, 2.3 mi, $68.18/hr, ACCEPT, green
+#
+#   "$12.55 / This dash / Hong Kong Chinese / Finding offers. / You're in a
+#    good place to wait for offers"   -> $12.55, 2 min, $376.50/hr, CLOSE CALL
+#
+# The first is Uber's route planner. The second is DoorDash's idle screen — the
+# app saying in so many words that it has NO offers — with the dash's takings so
+# far read as a payout. Neither is catchable by the numbers: $68/hr is an
+# ordinary rate, and $12.55 is under the flat pay cap doubt() applies below ten
+# minutes.
+#
+# TWO phrases, and both earn their place. Four were written first — the other
+# two were "good place to wait" and "this dash", off the same DoorDash screen —
+# and mutation testing showed the screen was already caught by "finding offers"
+# without them. A pattern nothing can show is dead weight, and a comment
+# claiming each phrase is necessary would have been false for half of them. If
+# a future card needs another, it will arrive with a card attached.
+#
+# These two are each the ONLY evidence against their own phantom: "add stops"
+# for the route planner, "finding offers" for the idle screen, including the
+# second frame of it where most of the text did not survive the read.
+NOT_AN_OFFER = re.compile(
+    r'add\s*stops'                 # Uber's route planner
+    r'|finding\s*offers',          # DoorDash, with no offers to show
+    re.IGNORECASE | ASCII)
+
+
 DROPOFF_NOT_STATED = re.compile(r'custom[ea]r\s*drop\s*-?\s*off', re.IGNORECASE | ASCII)
 
 
@@ -1832,6 +1870,11 @@ def parse(raw_text):
         # now — see digest() in scan_pi.py, which refuses any frame carrying a
         # payout. See find_address.
         'address': find_address(text),
+        # Whether this is a screen rather than an offer. See NOT_AN_OFFER.
+        #
+        # Reported, not acted on here: parse() says what it read and rate()
+        # decides what to do about it, the same division the other doubts keep.
+        'notAnOffer': bool(NOT_AN_OFFER.search(text or '')),
         # The legs behind the sum, so a caller holding readings from several
         # frames can merge the ones a single frame missed.
         # `labelled` travels with them. is_whole re-runs
@@ -2159,6 +2202,19 @@ def rate(parsed, settings=None):
     # along — and the frame that reads the leg properly clears this with it.
     if not why and most_of_the_journey_missing(parsed):
         why = 'leg'
+
+    # ...and a screen that is not an offer at all.
+    #
+    # Last of the reasons, because it is the least likely and the others are
+    # about figures this one has no opinion on. Withheld rather than dropped,
+    # like every other doubt: if this rule ever fires on a genuine card, a
+    # withheld verdict costs the driver one offer they can still see on the
+    # phone, where refusing to parse would lose the row entirely and leave a
+    # hole nothing could account for later. See NOT_AN_OFFER for the two real
+    # screens that made it necessary — $68.18/hr in green off Uber's route
+    # planner, and $376.50/hr off DoorDash saying it had no offers.
+    if not why and parsed.get('notAnOffer'):
+        why = 'screen'
 
     return {
         'ready': True,

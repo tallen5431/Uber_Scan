@@ -820,15 +820,28 @@
   //
   // The scanner's ceiling on that beat is VERIFY_MAX and a read lands on the
   // end of it, so the largest healthy gap between verdicts is those two added
-  // together. This was 20s when the ceiling was 12s and a read was 1.4s; both
-  // of those halved, and a window that stays wide after the thing it was sized
-  // against got quicker is a window that lets a dead rig look alive for longer
-  // than it has to. 6.0 + 0.75 is 6.75s, and this leaves most of it again as
-  // slack for a loaded Pi.
+  // together. The arithmetic that gave 12000 was "6.0 + 0.75 is 6.75s, and this
+  // leaves most of it again as slack" — and the 0.75 was never measured. It was
+  // extrapolated from a speed-up seen on a development machine, and the rig is
+  // a Pi 4 that is also drawing this page.
+  //
+  // Measured on 272 real offers out of the owner's own journal: the median read
+  // is 1846ms and the p90 is 3657ms, against the 750ms assumed. So the honest
+  // healthy gap is 6.0 + 3.7 = 9.7s, not 6.75s, and a 12s window left 2.3s of
+  // slack where it was supposed to leave most of the gap again. One read in ten
+  // is slower than the p90; at the worst read measured, 5915ms, a perfectly
+  // good verdict came within 90 milliseconds of being dimmed as stale — on the
+  // hardest card, which is the one the driver most needs to trust.
+  //
+  // 16s: comfortably over 1.5x the honest gap and well under 2.5x it, so a
+  // loaded Pi is not called dead and a genuinely dead one is not called alive
+  // for a shift. The scanner's own constants are what set it — see
+  // READ_SECONDS_SLOW in scan_pi.py, which is the p90 and is used wherever a
+  // WORST case is meant rather than a typical one.
   //
   // The two constants live in two files. test_scan_pi.py reads this one out of
   // this page and asserts the relationship, rather than keeping a copy of it.
-  var READ_STALE_MS = 12000;
+  var READ_STALE_MS = 16000;
 
   // An age off the wire, made safe to subtract from this page's clock.
   //
@@ -1727,6 +1740,14 @@
     // and it has to be here rather than only in the label, because "CHECK THE
     // TIME" on its own reads as "one number looks odd" — when what happened is
     // that the rig is holding a fraction of the journey and knows it.
+    // Before the leg note, because it is about the screen rather than about a
+    // figure on it: when this fires there is no offer for any of the other
+    // sentences to be about.
+    if (r.doubt === 'screen') {
+      notes.push('This looks like the app itself rather than an offer — a '
+                 + 'route being planned, or a dash waiting for one. No rate is '
+                 + 'shown, because the figures are not a job.');
+    }
     if (r.doubt === 'leg') {
       notes.push('The card shows a leg this reading could not time'
                  + (typeof r.untimedMiles === 'number'
