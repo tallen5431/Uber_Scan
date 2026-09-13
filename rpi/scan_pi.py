@@ -29,6 +29,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cropbox as CX
 import exposure as EX
+import gps as GPS
 import handoff as HO
 import offer_parser as OP
 import pipeline as PL
@@ -1487,6 +1488,15 @@ def main():
                     help='read one frame at a time. The default reads the '
                          'confirming frame alongside the first, which is 56%% '
                          'of the wall clock for the same evidence')
+    ap.add_argument('--gps', default=None, metavar='HOST[:PORT]',
+                    help='a phone running a GPS server app, e.g. '
+                         '100.75.197.117:2947 — its Tailscale address rather '
+                         'than its hotspot one, so it keeps working wherever '
+                         'the rig is. Each offer is then stamped with where the '
+                         'car was, which is what lets the map page resolve a '
+                         'place near you rather than near anywhere. Off unless '
+                         'given, and a phone that is not answering costs '
+                         'nothing but the absence of the stamp.')
     ap.add_argument('--no-track', action='store_true',
                     help='never re-find the phone; use the calibrated corners exactly')
     ap.add_argument('--screen-fps', type=float, default=1.0 / SNAPSHOT_SCREEN,
@@ -1569,6 +1579,21 @@ def main():
     tracker = None if (args.no_track or manual) else TR.QuadTracker(
         scanner.quad, scale=track_scale,
         calibrated=np.array(cfg['quad'], dtype=np.float32))
+
+    # Where the car is, when a phone is willing to say. Off unless --gps was
+    # given, and a bad address is a line on stderr rather than a refusal to
+    # start: the rig's job is to read offers, and it does that whether or not
+    # anything knows where it is doing it. See rpi/gps.py, which is most
+    # concerned with not answering.
+    phone = None
+    if args.gps:
+        try:
+            phone = GPS.Phone(args.gps).start()
+            log('asking %s:%d for a position' % (phone.host, phone.port))
+        except (ValueError, OSError) as e:
+            print('could not use --gps %r (%s) — carrying on without a '
+                  'position on each offer' % (args.gps, e), file=sys.stderr)
+            phone = None
 
     # Calibration already found focus with autofocus; reuse it rather than
     # making the driver rediscover a number that cannot change on a fixed mount.
@@ -2000,9 +2025,17 @@ def main():
                 health.saw += 1
 
         if offer_log is not None and rate['ready'] and out['locked']:
+            # Asked at the moment the row is written rather than kept on the
+            # loop, because that is the moment the position belongs to. `fix()`
+            # takes a lock, reads a dict and returns — it never touches the
+            # network — so this cannot make a read slow, and it answers None
+            # whenever there is no phone, no answer, or an answer too old to
+            # stand for where the car is now.
             landed = offer_log.consider(parsed, rate, ms=out['ms']['total'],
                                         locked=out['locked'], whole=whole,
-                                        settled=stable) is not None
+                                        settled=stable,
+                                        where=phone.fix() if phone else None
+                                        ) is not None
             # Nothing written because there was nothing new to say means an
             # earlier reading of this same card already landed, which is still
             # a card that reached the file.
@@ -2712,6 +2745,8 @@ def main():
         pass
     finally:
         reader.close()
+        if phone is not None:
+            phone.stop()
         cam.stop()
         cam.close()
         if args.display:

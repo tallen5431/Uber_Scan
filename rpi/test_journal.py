@@ -1004,6 +1004,122 @@ eq('...so the offer after the power cut survives', len(_after_rows), 2)
 eq('...and the stub it was fused against is now counted too', _after.torn, 2)
 shutil.rmtree(_torn_dir, ignore_errors=True)
 
+# --- where the car was when the card came up --------------------------------
+#
+# The position is the thing that turns the map from a guess into a lookup: a
+# geocoder handed "Chipotle" answers with a Chipotle, and only a coordinate
+# taken at the moment says WHICH. So it has to reach the row, and — much more
+# important — it has to be absent whenever it is not known, because a row at the
+# wrong place is worse than a row that admits it does not know.
+
+_CARD = ('Delivery\n$8.83\n23 min (4.6 mi) total\nPickup\n'
+         'McDonalds\nCustomer dropoff')
+_parsed = P.parse(_CARD)
+_rate = P.rate(_parsed, MONEY)
+
+_fix = {'lat': 34.011700123, 'lon': -84.610499876, 'ageSeconds': 1.24,
+        'source': 'gpsd'}
+_row = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g1', seq=1,
+                  where=_fix)
+eq('a fix reaches the row', (_row['lat'], _row['lon']), (34.0117, -84.6105))
+eq('...rounded to about a metre, not stored to fourteen places',
+   _row['lat'], round(34.011700123, 5))
+eq('...and how old the fix was is kept with it', _row['gpsAge'], 1.2)
+
+# The half that matters. Every one of these means "nobody told me", and the row
+# has to say so rather than claim a place.
+for _name, _absent in (('no GPS configured at all', None),
+                       ('a phone that answered nothing', {}),
+                       ('a fix with no latitude', {'lon': -84.6}),
+                       # Half a coordinate is not half a position. A `lat` on
+                       # its own is the shape a reader tests for before drawing
+                       # a pin, so it has to be absent rather than lonely.
+                       ('a fix with no longitude', {'lat': 34.0}),
+                       # isinstance(True, int) is True in Python, so a boolean
+                       # would otherwise round to 1.0 and land off West Africa.
+                       ('a fix whose latitude is a boolean',
+                        {'lat': True, 'lon': True}),
+                       ('a fix whose latitude is a string',
+                        {'lat': '34.0', 'lon': '-84.6'}),
+                       # An age with no position to attach it to. The age is
+                       # only meaningful as "how old is THIS pin"; on its own it
+                       # is a number in a column that reads as a GPS having
+                       # worked.
+                       ('an age with no coordinate under it',
+                        {'ageSeconds': 1.5}),
+                       ('...and an age beside a refused coordinate',
+                        {'lat': True, 'lon': True, 'ageSeconds': 1.5})):
+    _r = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g2', seq=1,
+                    where=_absent)
+    eq('%s leaves the row without a latitude' % _name, _r['lat'], None)
+    eq('...and without a longitude', _r['lon'], None)
+    eq('...and without an age', _r['gpsAge'], None)
+
+# A row written before any of this existed reads back the same way, which is
+# what stops the map inventing a pin for a year of history.
+_old = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g3', seq=1)
+eq('a row written with no `where` at all has no position', _old['lat'], None)
+eq('...and no age either', _old['gpsAge'], None)
+
+# Through the real OfferLog and the real accumulator, which is how the loop
+# reaches it.
+# A directory of its own, deliberately: `work` is torn down further up, and a
+# log pointing into a deleted directory writes nothing and says nothing —
+# journal.py never raises into the scan loop, by design. The first version of
+# this section used `fresh()` and every check in it passed for that reason.
+_gps_dir = tempfile.mkdtemp()
+_gps_log = JR.OfferLog(JR.Journal(os.path.join(_gps_dir, 'gps.jsonl')))
+_gps_acc = OfferAccumulator()
+_p1 = _gps_acc.add(P.parse(_CARD), now=1_700_000_000.0)
+_landed = _gps_log.consider(_p1, P.rate(_p1, MONEY), now=1_700_000_000.0,
+                            locked=True, where=_fix)
+ok_('the log writes a row with the fix on it', _landed is not None)
+if _landed:
+    eq('...carrying the position', (_landed['lat'], _landed['lon']),
+       (34.0117, -84.6105))
+
+# ...and the same log, a later card, with the phone gone quiet. The position
+# must not persist: OfferLog holds an identity across readings of one card, and
+# a place that stuck would put this card where the last one was — which is the
+# worst kind of wrong, because it is plausible.
+_gone_acc = OfferAccumulator()
+_p2 = _gone_acc.add(
+    P.parse('Delivery\n$12.40\n31 min (7.2 mi) total\nPickup\nWendys'),
+    now=1_700_000_600.0)
+_gone = _gps_log.consider(_p2, P.rate(_p2, MONEY), now=1_700_000_600.0,
+                          locked=True, where=None)
+ok_('a later card with no fix is still written', _gone is not None)
+if _gone:
+    eq('...and does not inherit the last card\'s position', _gone['lat'], None)
+    eq('...nor its age', _gone['gpsAge'], None)
+
+# The settled upgrade carries it too. A row is written the moment a reading
+# CHANGES, so `settled` is false by construction at that moment; the same
+# reading coming back once more supersedes it with the flag it has earned. That
+# second row is a separate call to row_for, and it is the one a reader keeps —
+# anything reading this file takes the last row of each id — so a position that
+# reached only the first row would be a position the map never sees.
+_up_dir = tempfile.mkdtemp()
+_up_log = JR.OfferLog(JR.Journal(os.path.join(_up_dir, 'up.jsonl')))
+_up_acc = OfferAccumulator()
+_u1 = _up_acc.add(P.parse(_CARD), now=1_700_001_000.0)
+_up_log.consider(_u1, P.rate(_u1, MONEY), now=1_700_001_000.0, locked=True,
+                 settled=False, where=_fix)
+_u2 = _up_acc.add(P.parse(_CARD), now=1_700_001_000.5)
+_settled_row = _up_log.consider(_u2, P.rate(_u2, MONEY), now=1_700_001_000.5,
+                                locked=True, settled=True, where=_fix)
+ok_('the same reading again is superseded by a settled row',
+    _settled_row is not None and _settled_row.get('settled') is True)
+if _settled_row:
+    eq('...and that row carries the position as well',
+       (_settled_row['lat'], _settled_row['lon']), (34.0117, -84.6105))
+_up_rows = _up_log.journal.rows()
+eq('...as the last row of the id, which is the one a reader keeps',
+   (_up_rows[-1]['lat'], _up_rows[-1]['lon']), (34.0117, -84.6105))
+shutil.rmtree(_up_dir, ignore_errors=True)
+
+shutil.rmtree(_gps_dir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)

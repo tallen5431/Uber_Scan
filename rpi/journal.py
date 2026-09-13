@@ -530,10 +530,16 @@ class OfferLog:
         return row
 
     def consider(self, parsed, rate, now=None, ms=None, locked=None,
-                 settled=False, whole=True):
+                 settled=False, whole=True, where=None):
         """Offer one confident reading. Returns the row written, or None.
 
         The caller decides confidence; this decides novelty.
+
+        `where` is a fix from gps.Phone, or None. Passed straight through to the
+        row rather than remembered on the log: the position belongs to the
+        moment a row was written, and an offer read over ninety seconds while
+        the car moves has no single place it happened. A row that was written
+        without a fix stays without one.
         """
         at = now_ms(now)
         episode = parsed.get('episode')
@@ -653,7 +659,7 @@ class OfferLog:
                                   offer_id=self.id, seq=self.seq, ms=ms,
                                   locked=locked, settled=True, whole=whole,
                                   keep_places=self.keep_places,
-                                  places=list(self.places))
+                                  places=list(self.places), where=where)
                 if self.journal.append(upgrade):
                     self.written += 1
                     self.landed_id = self.id
@@ -666,7 +672,8 @@ class OfferLog:
         row = row_for(parsed, rate, at, first_at=self.first_at,
                       offer_id=self.id, seq=self.seq, ms=ms, locked=locked,
                       settled=settled, whole=whole,
-                      keep_places=self.keep_places, places=list(self.places))
+                      keep_places=self.keep_places, places=list(self.places),
+                      where=where)
         if self.journal.append(row):
             self.written += 1
             self.landed_id = self.id
@@ -715,7 +722,7 @@ def content_of(parsed, places=None):
 
 def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
             locked=None, settled=False, whole=True, keep_places=True,
-            places=None):
+            places=None, where=None):
     """One offer, as it will be stored.
 
     Numbers only, and each one either read off the card or derived from the
@@ -871,6 +878,38 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # it must never reach a median. It is written anyway, because an offer
         # that simply disappears is a hole nothing can account for later.
         'whole': bool(whole),
+        # --- where the car was when the card came up --------------------------
+        #
+        # Absent unless a GPS was reachable AND its fix was fresh, which is most
+        # of the time: `gps.Phone.fix()` returns None for a position older than
+        # twenty seconds, and the rig runs without a phone at all by default. A
+        # row with no lat is a row that did not know, and that is a different
+        # thing from a row at (0, 0).
+        #
+        # This is what makes the map exact instead of inferential. Handed
+        # "Chipotle" a geocoder answers with a Chipotle, and handed a misread
+        # street it answers with a real street somewhere — both with the same
+        # confidence, neither necessarily in the state the driver was in. One
+        # coordinate at the moment the card was read turns that from a guess
+        # into a lookup bounded to where the car actually was.
+        #
+        # Five decimal places is about a metre, which is far finer than anything
+        # here asks and still keeps the row small.
+        #
+        # `gpsAge` is kept because it is the difference between a position and a
+        # claim. A fix a second old is where the car was; one nineteen seconds
+        # old is a third of a mile of motorway ago, and a reader months later
+        # can only tell those apart if the number is written down.
+        # Both or neither. Half a coordinate is not half a position, it is no
+        # position with a number attached — and a `lat` on its own is exactly
+        # the shape a reader would test for before drawing a pin. gps.py cannot
+        # produce one, because parse_line refuses a fix missing either half;
+        # this is the same rule stated where the row is built, so that a caller
+        # handing over a dict from somewhere else cannot write one in.
+        'lat': _pair(where, 'lat'),
+        'lon': _pair(where, 'lon'),
+        'gpsAge': (_round(where.get('ageSeconds'), 1)
+                   if _pair(where, 'lat') is not None else None),
         # Whether the merged reading had stopped moving. Recorded rather than
         # required: a card whose OCR never settles is exactly the marginal
         # reading worth studying later, and refusing to write it would leave
@@ -953,3 +992,20 @@ def _round(value, places):
     if not isinstance(value, (int, float)):
         return None
     return round(value, places) if places else int(round(value))
+
+
+def _pair(where, which):
+    """One half of a coordinate, and only when the other half is there too.
+
+    Five decimal places is about a metre — finer than anything here asks, and
+    small enough to keep a row a row. Booleans are excluded explicitly because
+    `isinstance(True, int)` is True in Python, and a `lat: true` sailing through
+    into a pin is the kind of thing that only shows up on a map.
+    """
+    if not isinstance(where, dict):
+        return None
+    lat, lon = where.get('lat'), where.get('lon')
+    for v in (lat, lon):
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return None
+    return _round(lat if which == 'lat' else lon, 5)

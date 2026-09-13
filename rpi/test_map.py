@@ -74,23 +74,31 @@ def free_port():
 NOW = int(time.time() * 1000)
 
 
-def offer(i, pickup, dropoff, miles, at=None):
+def offer(i, pickup, dropoff, miles, at=None, where=None):
     at = NOW - (i + 1) * 600000 if at is None else at
-    return {'id': 'o%d' % i, 'seq': 1, 'at': at,
-            'firstAt': at, 'pay': 12.0, 'minutes': 25.0,
-            'billedMinutes': 25.0, 'miles': miles, 'cost': 1.5,
-            'costPerMile': 0.3, 'perHour': 28.8, 'whole': True,
-            'suspect': False, 'doubt': None, 'pickup': pickup,
-            'dropoff': dropoff, 'places': [p for p in (pickup, dropoff) if p],
-            'content': ['c%d' % i]}
+    row = {'id': 'o%d' % i, 'seq': 1, 'at': at,
+           'firstAt': at, 'pay': 12.0, 'minutes': 25.0,
+           'billedMinutes': 25.0, 'miles': miles, 'cost': 1.5,
+           'costPerMile': 0.3, 'perHour': 28.8, 'whole': True,
+           'suspect': False, 'doubt': None, 'pickup': pickup,
+           'dropoff': dropoff, 'places': [p for p in (pickup, dropoff) if p],
+           'content': ['c%d' % i]}
+    # Where the car was when the card came up, as rpi/gps.py stamps it. Absent
+    # on most of these on purpose: every row written before the rig had a GPS
+    # has no position, and the page has to keep working for them.
+    if where:
+        row['lat'], row['lon'], row['gpsAge'] = where[0], where[1], 1.2
+    return row
 
 
 ROWS = [
-    offer(0, 'Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta', 9.0),
+    offer(0, 'Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta', 9.0,
+          where=(34.0117, -84.6105)),
     offer(1, 'Kroger (Chastain)', 'Nowhere At All Ln, Atlantis', 6.0),
     # Kennesaw to Atlanta is about 25 miles as the crow flies; the card says 3.
     # One of those two pins has to be wrong, and the page has to say so.
-    offer(2, 'Cobb Pkwy NW, Kennesaw', 'Peachtree St NE, Atlanta', 3.0),
+    offer(2, 'Cobb Pkwy NW, Kennesaw', 'Peachtree St NE, Atlanta', 3.0,
+          where=(34.0170, -84.6001)),
     # ...and one the card never gave a destination for at all, which is most of
     # this driver's real traffic.
     offer(3, 'Zaxbys', None, 5.0),
@@ -99,7 +107,13 @@ ROWS = [
     # like every other — and until the page weighed it against the rest of the
     # shift, one of these made the map a picture of the United States with
     # Atlanta as a dot.
-    offer(4, 'Cobb Pkwy NW, Kennesaw', 'W Boise Ave', 4.0),
+    # ...and it carries a position, which is what makes it the interesting one:
+    # the car was in Kennesaw, so a box around Kennesaw refuses Idaho outright.
+    # That is the whole point of the box, and it is also the case that proves
+    # the pin is not simply LOST — refused, then asked again wide, then drawn in
+    # red and kept out of the map's framing like any other stray.
+    offer(4, 'Cobb Pkwy NW, Kennesaw', 'W Boise Ave', 4.0,
+          where=(34.0150, -84.6050)),
 ] + [
     # Twenty-six the geocoder has never heard of, which is two past the
     # twenty-five a list shows. A list that stops there and says nothing is the
@@ -120,7 +134,7 @@ const base = process.argv[2];
 // and which of those lines it marks as impossible.
 const STUB = `
   window.__pins = []; window.__lines = []; window.__asked = [];
-  window.__askedAt = [];
+  window.__askedAt = []; window.__boxes = [];
   window.L = {
     map: function () { return { setView: function (ll) { window.__view = ll; return this; },
       removeLayer: function () {}, addLayer: function () {},
@@ -172,14 +186,31 @@ const KNOWN = {
   await page.addInitScript(STUB);
 
   await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
-    const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
-    await page.evaluate((s) => { window.__asked.push(s);
-                                 window.__askedAt.push(Date.now()); }, q).catch(() => {});
+    const u = new URL(route.request().url());
+    const q = decodeURIComponent(u.searchParams.get('q') || '');
+    const box = u.searchParams.get('viewbox');
+    const bounded = u.searchParams.get('bounded') === '1';
+    await page.evaluate((a) => { window.__asked.push(a[0]);
+                                 window.__boxes.push(a[1]);
+                                 window.__askedAt.push(Date.now()); },
+                        [q, box || null]).catch(() => {});
     const town = Object.keys(KNOWN).find((t) => q.toLowerCase().includes(t));
     if (!town) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
     }
     const [lat, lon] = KNOWN[town];
+    // The real Nominatim returns nothing outside the box when bounded=1, and
+    // that is the entire point of sending one: an answer eighteen hundred miles
+    // away stops being offered rather than being offered and then argued with.
+    if (bounded && box) {
+      const [left, top, right, bottom] = box.split(',').map(Number);
+      const inside = lon >= Math.min(left, right) && lon <= Math.max(left, right)
+                  && lat >= Math.min(top, bottom) && lat <= Math.max(top, bottom);
+      if (!inside) {
+        return route.fulfill({ status: 200, contentType: 'application/json',
+                               body: '[]' });
+      }
+    }
     return route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify([{ lat: String(lat), lon: String(lon),
         display_name: town + ', GA, USA', type: 'road' }]) });
@@ -227,6 +258,9 @@ const KNOWN = {
     lines: window.__lines.length,
     impossible: window.__lines.filter((l) => l.opts && l.opts.dashArray).length,
     asked: window.__asked.slice(),
+    boxes: window.__boxes.slice(),
+    cacheKeys: Object.keys(JSON.parse(
+      localStorage.getItem('uberscan.geocode.v1') || '{}')),
     // Every gap between two consecutive questions, in ms. The geocoder this
     // page uses asks for at most one request a second and blocks the projects
     // that do not keep to it.
@@ -350,8 +384,16 @@ try:
 
     # --- what it drew ------------------------------------------------------
     asked = placed.get('asked') or []
-    ok_('every distinct place was looked up once (%d)' % len(asked),
-        len(asked) == len(set(asked)))
+    # Once each, plus exactly one more for each place its own box refused —
+    # those are asked again without the box so a pin is never lost to the
+    # anchoring. Anything beyond that is the page asking the same question
+    # twice, which is a rate limit spent on nothing.
+    twice = [q for q in set(asked) if asked.count(q) > 1]
+    ok_('nothing is asked more than twice (%r)' % (twice[:3],),
+        all(asked.count(q) <= 2 for q in set(asked)))
+    ok_('...and the only place asked twice is the one its box refused (%r)'
+        % (twice,),
+        all('Boise' in q for q in twice))
     # Kennesaw appears as the pickup of two different offers and must be asked
     # about once, not twice: the cache is keyed on the place, not the offer.
     eq('...including one shared by two offers',
@@ -469,6 +511,83 @@ try:
     ok_('a truncated list says how many it did not show (%r)'
         % [f for f in side.split('…') if 'more, not listed' in f][:1],
         'more, not listed' in side)
+
+    # --- searched near where the car actually was ---------------------------
+    #
+    # The driver's own words: "usually the pickup/restaurant is the closest one
+    # to me". A geocoder cannot know that and a coordinate can. Since rpi/gps.py
+    # a row carries where the car was when the card came up, so a place named by
+    # such a row is searched inside a box around that position rather than
+    # around a hint typed once for a whole week.
+    #
+    # The fixture gives two of the offers a position near Kennesaw and leaves
+    # the rest without one, which is the real mixture: every row written before
+    # the rig had a GPS has none.
+    boxes = placed.get('boxes') or []
+    asked_all = placed.get('asked') or []
+    eq('every question is recorded with the box it was asked in',
+       len(boxes), len(asked_all))
+    with_box = [b for b in boxes if b]
+    ok_('some places were searched inside a box (%d of %d)'
+        % (len(with_box), len(boxes)), len(with_box) > 0)
+    ok_('...and some were not, because their rows carried no position',
+        len(with_box) < len(boxes))
+
+    # The box is around the position, and it is the right way round: Nominatim
+    # wants left,top,right,bottom — longitude first. Swapping the pair is the
+    # mistake that draws a box in the Indian Ocean and refuses everything.
+    for b in with_box[:1]:
+        left, top, right, bottom = [float(x) for x in b.split(',')]
+        ok_('the box is longitude-first (%s)' % b, left < right)
+        ok_('...and latitude descends from top to bottom', top > bottom)
+        ok_('...and it surrounds where the car was (34.01, -84.61)',
+            left <= -84.61 <= right and bottom <= 34.01 <= top)
+        # A degree of longitude is shorter than a degree of latitude away from
+        # the equator, so a box of equal DEGREES is too narrow east to west. At
+        # 34°N the longitude span has to be about 1.2x the latitude span.
+        ok_('...and is not a square of degrees, which would be too narrow '
+            'east-west (%.2f vs %.2f)' % (right - left, top - bottom),
+            (right - left) > (top - bottom) * 1.1)
+
+    # What it is FOR. 'Cobb Pkwy NW, Kennesaw' is named by rows that carried a
+    # position, so it is asked inside a box; 'W Boise Ave' is named by a row
+    # that did not, so it is asked wide — and comes back from Idaho, which is
+    # what makes the stray list worth having in the first place.
+    kennesaw = [b for q, b in zip(asked_all, boxes) if 'Kennesaw' in q]
+    ok_('the place named by rows with a position is asked inside a box',
+        kennesaw and all(kennesaw))
+    zaxbys = [b for q, b in zip(asked_all, boxes) if 'Zaxbys' in q]
+    ok_('...and one named only by rows without a position is asked wide',
+        zaxbys and not any(zaxbys))
+
+    # The case the box exists for, and the case that proves it does not simply
+    # lose pins. The car was in Kennesaw; the street was misread; the geocoder
+    # has a real W Boise Ave in Idaho. Bounded, it is refused. Then it is asked
+    # again without the box, through the same paced walk, and comes back — so it
+    # is still drawn, still red, and still kept out of the map's framing.
+    boise = [b for q, b in zip(asked_all, boxes) if 'Boise' in q]
+    eq('a place its own box refuses is asked twice: bounded, then wide',
+       [bool(b) for b in boise], [True, False])
+    # Under two different keys, or the wide answer overwrites the bounded one
+    # and the box stops being applied from the second run onward — silently,
+    # because everything still works.
+    keys = placed.get('cacheKeys') or []
+    boise_keys = [k for k in keys if 'Boise' in k]
+    eq('...and remembered under two keys, not one', len(boise_keys), 2)
+    ok_('...one of which carries the box it was asked in (%r)' % (boise_keys,),
+        any('@' in k for k in boise_keys)
+        and any('@' not in k for k in boise_keys))
+    # ...and the place is still on the map, which is the thing that would have
+    # been lost. It lands in the stray list, because Idaho is eighteen hundred
+    # miles from the rest of the shift — drawn, listed, and kept out of the
+    # map's framing, which is exactly what should happen to it.
+    boise_pin = [p for p in (placed.get('pinDetail') or [])
+                 if 'Boise' in (p.get('popup') or '')]
+    ok_('the refused place is still pinned (%d)' % len(boise_pin), boise_pin)
+    if boise_pin:
+        ok_('...and marked as nowhere near the rest, which is what it is (%r)'
+            % (boise_pin[0].get('popup') or '')[:70],
+            'almost certainly wrong' in (boise_pin[0].get('popup') or ''))
 
     # --- asking twice costs nothing ----------------------------------------
     eq('a second run asks the geocoder nothing new',

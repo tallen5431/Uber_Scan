@@ -145,8 +145,20 @@
         offers = (body && body.offers) || [];
         var withEnds = offers.filter(function (o) { return o.pickup || o.dropoff; });
         var mappable = offers.filter(function (o) { return o.pickup && o.dropoff; });
+        // The fallback anchor: the middle of everywhere the rig knew it was
+        // over this range. Used for a place named only by rows with no fix —
+        // every row recorded before the rig had a GPS, and every row where the
+        // fix had gone stale — which is better than the typed hint and costs
+        // nothing, because a shift happens in one metro.
+        var fixes = offers.map(fixOf).filter(Boolean);
+        HOME = fixes.length
+          ? { lat: median(fixes.map(function (p) { return p.lat; })),
+              lon: median(fixes.map(function (p) { return p.lon; })) }
+          : null;
         say(offers.length + ' offers · ' + withEnds.length + ' name somewhere · '
-            + mappable.length + ' name both ends');
+            + mappable.length + ' name both ends'
+            + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
+                            : ' · none carry a position'));
         el.place.disabled = withEnds.length === 0;
         render([], {});
       })
@@ -193,27 +205,139 @@
     return hint ? place + ', ' + hint : place;
   }
 
-  function remembered(place) {
-    return Object.prototype.hasOwnProperty.call(cache, queryFor(place));
+  /* --- where the car was, which is the whole of the improvement ------------
+   *
+   * The driver's own words: "usually the pickup/restaurant is the closest one
+   * to me". That is exactly the question a geocoder cannot answer and a
+   * coordinate can. Handed "Chipotle" it returns a Chipotle, and handed a
+   * misread street it returns a real street somewhere — both with the same
+   * confidence, and the `near` box above is one hint for a whole week, which
+   * is no help at all to a driver who works more than one side of a metro.
+   *
+   * Since rpi/gps.py, a row carries the position the car was at when the card
+   * came up. So each place can be searched inside a box around where the driver
+   * actually was at that moment, rather than around a string they typed once.
+   *
+   * The MEDIAN of the positions that named it, not the mean: a shop appears on
+   * a dozen offers over a week, and one row whose GPS was wrong should not drag
+   * the box. Places named by rows with no position — everything recorded before
+   * the rig had a GPS, and every row where the fix was stale — get no anchor and
+   * fall back to the typed hint, which is what this page did for all of them. */
+  var HOME = null;          // the median of every position in the loaded range
+
+  function median(values) {
+    var sorted = values.slice().sort(function (a, b) { return a - b; });
+    var mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   }
 
-  function lookup(place) {
-    var query = queryFor(place);
-    if (Object.prototype.hasOwnProperty.call(cache, query)) {
-      return Promise.resolve(cache[query]);
-    }
+  function fixOf(o) {
+    return (typeof o.lat === 'number' && typeof o.lon === 'number'
+            && isFinite(o.lat) && isFinite(o.lon)) ? { lat: o.lat, lon: o.lon }
+                                                   : null;
+  }
+
+  function anchorFor(place) {
+    var seen = [];
+    offers.forEach(function (o) {
+      if (o.pickup !== place && o.dropoff !== place) return;
+      var at = fixOf(o);
+      if (at) seen.push(at);
+    });
+    // No anchor unless the rows that named THIS place knew where they were.
+    //
+    // The middle of the whole range was tried as a fallback and is deliberately
+    // not used: on a journal where only the last week carries positions, it
+    // would box a place from eight months and two cities ago to last week's
+    // metro and refuse it. A place whose own rows are silent about where they
+    // were is a place this page knows nothing new about, and it is asked
+    // exactly the way it was asked before any of this existed.
+    if (!seen.length) return null;
+    return { lat: median(seen.map(function (p) { return p.lat; })),
+             lon: median(seen.map(function (p) { return p.lon; })) };
+  }
+
+  /* How wide to draw that box.
+   *
+   * Generous on purpose. The pickup is minutes away and the dropoff can be
+   * forty miles, so a box tight enough to be clever would refuse the long
+   * deliveries — and the thing being excluded here is not "a bit further than
+   * usual", it is another state. Sixty miles is comfortably outside any real
+   * job and comfortably inside the nearest place with the same street name.
+   *
+   * A degree of latitude is about 69 miles everywhere; a degree of longitude is
+   * that times the cosine of the latitude, which at 34°N is about 57. Getting
+   * that factor wrong would draw a box a fifth too narrow in the direction this
+   * driver's metro is widest. */
+  var BOX_MILES = 60;
+
+  function boxAround(at) {
+    if (!at) return null;
+    var dLat = BOX_MILES / 69.0;
+    var dLon = BOX_MILES / (69.0 * Math.max(0.2, Math.cos(at.lat * Math.PI / 180)));
+    // Nominatim wants <left>,<top>,<right>,<bottom> — longitude first.
+    return [(at.lon - dLon).toFixed(4), (at.lat + dLat).toFixed(4),
+            (at.lon + dLon).toFixed(4), (at.lat - dLat).toFixed(4)].join(',');
+  }
+
+  /* The cache key. It has to carry the box: the same place asked inside a box
+     and asked without one are two different questions with two different right
+     answers, and storing the second under the first's key is how a good answer
+     gets overwritten by a worse one. */
+  function keyFor(place, box) {
+    return queryFor(place) + (box ? ' @' + box : '');
+  }
+
+  function remembered(place, box) {
+    return Object.prototype.hasOwnProperty.call(cache, keyFor(place, box));
+  }
+
+  /* When the last question actually went out, so the rate limit is a property
+   * of the PAGE rather than of one loop.
+   *
+   * It was a sleep at the bottom of the asking loop, which is correct for one
+   * loop and wrong the moment there are two: the places a box refuses are asked
+   * again in a second walk, and the gap between the last question of the first
+   * and the first question of the second was nobody's business. Measured
+   * against the map suite's stub: 4ms, under a rule of one a second.
+   *
+   * Waiting BEFORE the request rather than after it also drops the "except the
+   * last one" special case — there is no trailing wait to skip, because nothing
+   * waits except immediately before talking. */
+  var lastAsk = 0;
+
+  async function paced(fn) {
+    var due = lastAsk + GAP_MS - Date.now();
+    if (due > 0) await sleep(due);
+    lastAsk = Date.now();
+    return fn();
+  }
+
+  function ask(query, box) {
     var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q='
-            + encodeURIComponent(query);
+            + encodeURIComponent(query)
+            + (box ? '&viewbox=' + encodeURIComponent(box) + '&bounded=1' : '');
     return fetch(url, { headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (hits) {
         var hit = hits && hits[0];
-        var found = hit ? { lat: Number(hit.lat), lon: Number(hit.lon),
-                            name: hit.display_name, kind: hit.type || '' } : null;
-        remember(query, found);
-        return found;
+        return hit ? { lat: Number(hit.lat), lon: Number(hit.lon),
+                       name: hit.display_name, kind: hit.type || '',
+                       bounded: !!box } : null;
       })
       .catch(function () { return null; });      // offline, blocked, rate-limited
+  }
+
+  function lookup(place, box) {
+    var key = keyFor(place, box);
+    if (Object.prototype.hasOwnProperty.call(cache, key)) {
+      return Promise.resolve(cache[key]);
+    }
+    return paced(function () { return ask(queryFor(place), box); })
+      .then(function (found) {
+        remember(key, found);
+        return found;
+      });
   }
 
   /* Straight-line miles, which is the only distance this page can compute. It
@@ -239,33 +363,71 @@
       if (o.dropoff) wanted.push(o.dropoff);
     });
     var distinct = wanted.filter(function (v, i, all) { return all.indexOf(v) === i; });
-    var fresh = distinct.filter(function (q) { return !remembered(q); });
-    say(distinct.length + ' distinct places, ' + fresh.length + ' to look up'
+    // The box each place will be searched inside, worked out once. A place
+    // named by rows that carried a position gets one around where the car
+    // actually was; everything else falls back to the middle of the range, and
+    // then to nothing, which is what this page did for every place before the
+    // rig could say where it was.
+    var boxes = {};
+    distinct.forEach(function (q) { boxes[q] = boxAround(anchorFor(q)); });
+    var anchored = distinct.filter(function (q) { return !!boxes[q]; }).length;
+    var fresh = distinct.filter(function (q) { return !remembered(q, boxes[q]); });
+    say(distinct.length + ' distinct places, ' + anchored + ' searched near '
+        + 'where you were, ' + fresh.length + ' to look up'
         + (fresh.length ? ' (about ' + Math.ceil(fresh.length * GAP_MS / 1000) + 's)'
                         : ' — all remembered'));
 
-    var done = 0;
-    var left = fresh.length;
     var found = {};
-    for (var i = 0; i < distinct.length; i++) {
-      var q = distinct[i];
-      // Asked BEFORE the lookup. Afterwards the answer is already in the cache
-      // and the question "did this use the network" can only be answered wrong.
-      var wasKnown = remembered(q);
-      var hit = await lookup(q);                                    // eslint-disable-line no-await-in-loop
-      found[q] = hit;
-      done++;
-      if (!wasKnown) left--;
-      if (done % 3 === 0 || done === distinct.length) {
-        say('looked up ' + done + ' of ' + distinct.length
-            + (left > 0 ? ' — about ' + Math.ceil(left * GAP_MS / 1000) + 's left' : ''));
+
+    /* One paced walk over a list of places, in ONE place.
+     *
+     * The pacing used to be inline here, and then a second, unpaced request
+     * appeared inside lookup() for the places a box refused — which sent two
+     * questions back to back under a rule of one a second. Measured against the
+     * map suite's stub: 3ms apart. Being blocked by Nominatim would stop this
+     * page working for everyone who pulls the repo, so there is exactly one
+     * loop that talks to it and everything goes through this. */
+    async function walk(list, boxFor, note) {
+      var todo = list.filter(function (q) { return !remembered(q, boxFor(q)); });
+      var left = todo.length, done = 0;
+      for (var i = 0; i < list.length; i++) {
+        var q = list[i];
+        // Asked BEFORE the lookup. Afterwards the answer is already in the
+        // cache and "did this use the network" can only be answered wrong.
+        var wasKnown = remembered(q, boxFor(q));
+        // The waiting lives in `paced`, around the request itself, so a place
+        // already remembered costs nothing and two walks in a row cannot
+        // produce a gap neither of them owns.
+        var hit = await lookup(q, boxFor(q));                       // eslint-disable-line no-await-in-loop
+        found[q] = hit;
+        done++;
+        if (!wasKnown) left--;
+        if (done % 3 === 0 || done === list.length) {
+          say(note + ' ' + done + ' of ' + list.length
+              + (left > 0 ? ' — about ' + Math.ceil(left * GAP_MS / 1000) + 's left' : ''));
+        }
       }
-      // Only wait when the network was actually used, and never after the last
-      // one: the gap is there to space requests out, and there is nothing left
-      // to space this one from.
-      if (!wasKnown && left > 0) {
-        await sleep(GAP_MS);                                        // eslint-disable-line no-await-in-loop
-      }
+    }
+
+    await walk(distinct, function (q) { return boxes[q]; }, 'looked up');
+
+    /* Places a box refused, asked again without one.
+     *
+     * A box is a claim that the answer is within sixty miles of where the car
+     * was, and almost every empty answer means the address was misread badly
+     * enough that nothing near the driver matches — which is worth knowing and
+     * is what the sidebar's "could not find" list is for. But it can also be a
+     * genuinely distant one, and a pin LOST to a feature meant to gain pins is
+     * the wrong trade. So they are asked wide, through the same paced walk, and
+     * what comes back is judged by the stray test like everything else.
+     *
+     * Only the ones that had a box AND came back empty, so the cost is
+     * proportional to the problem rather than to the size of the journal. */
+    var refused = distinct.filter(function (q) { return boxes[q] && !found[q]; });
+    if (refused.length) {
+      say(refused.length + ' were not found near you — asking again without '
+          + 'the box (about ' + Math.ceil(refused.length * GAP_MS / 1000) + 's)');
+      await walk(refused, function () { return null; }, 'asked wide');
     }
 
     /* --- pins that cannot be in the same shift as the rest ------------------
@@ -292,12 +454,6 @@
      * They are still drawn, in red, and listed with how far out they are —
      * refusing to show them would hide the very thing worth seeing. What they
      * do not get is a say in where the map looks. See FAR_MILES. */
-    function median(values) {
-      var sorted = values.slice().sort(function (a, b) { return a - b; });
-      var mid = Math.floor(sorted.length / 2);
-      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    }
-
     var everyPoint = [];
     distinct.forEach(function (q) { if (found[q]) everyPoint.push(found[q]); });
     var middle = everyPoint.length

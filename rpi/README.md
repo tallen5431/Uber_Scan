@@ -3102,6 +3102,58 @@ unrounded one, so the billed-minutes check needs a shopping allowance (7 items
 at 25 seconds bills 25.9166… minutes), and the missing-figure check needs a card
 that names no distance at all.
 
+### Searching near where the car actually was
+
+The driver's own words: *"usually the pickup/restaurant is the closest one to
+me"*. That is exactly the question a geocoder cannot answer and a coordinate
+can. Handed "Chipotle" it returns a Chipotle; handed a misread street it returns
+a real street somewhere; both come back with the same confidence.
+
+So `rpi/gps.py` is now wired in. `--gps HOST[:PORT]` on the scanner, and every
+offer row carries `lat`, `lon` and `gpsAge` — where the car was when the card
+came up, and how old that fix was. Absent whenever it is not known, which is
+most rows: no `--gps`, no answer, or a fix over twenty seconds old all produce
+the same honest nothing.
+
+`map.html` then searches each place inside a box around where the car was, using
+Nominatim's `viewbox` with `bounded=1`. Sixty miles: generous enough that no
+real delivery is refused, tight enough that the nearest street of the same name
+in another state is. A place is boxed **only when the rows that named it carried
+a position** — the middle of the whole range was tried as a fallback and
+deliberately dropped, because on a journal where only the last week has
+positions it would box a place from eight months and two cities ago to last
+week's metro and refuse it.
+
+**Three things went wrong writing this, and all three were caught by the checks
+rather than by reading it back.**
+
+A box that refuses everything would lose pins to a feature meant to gain them.
+So a place its own box refused is asked again without one, and what comes back
+is judged by the stray test like anything else. The first version did that
+retry *inside* `lookup`, which sent two questions back to back under a rule of
+one per second — measured against the suite's stub at 3ms apart. Being blocked
+by Nominatim would stop this page working for everyone who pulls the repo. The
+rate limit is now a property of the page rather than of one loop: a single
+`paced()` wrapper waits *before* a request based on when the last one went out,
+which also removes the "except the last one" special case that a sleep-after
+needs.
+
+The box has to be longitude-first (`left,top,right,bottom`) and it must not be a
+square of *degrees* — a degree of longitude at 34°N is about 57 miles against
+latitude's 69, so equal degrees draws a box a fifth too narrow in the direction
+this driver's metro is widest.
+
+And the cache key has to carry the box, or the wide answer overwrites the
+bounded one and the anchoring silently stops applying from the second run
+onward.
+
+Seven mutants, seven caught — but only after the fixture was changed. The
+original one never made a box refuse anything, so the retry, the enforcement
+and the cache key were all unexercised and three mutants sailed through. The
+fixture now gives the offer whose street was misread a position near Kennesaw,
+so its Idaho answer is refused by its own box, asked again wide, and drawn red
+as a stray. That is the whole feature in one row.
+
 ### Asking the phone where it is
 
 The Pi has no GPS and no clock. The phone in the mount has both, and a GPS
@@ -6272,7 +6324,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 36 suites, 5857 checks
+npm test                # all 36 suites, 5909 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
