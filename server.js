@@ -415,9 +415,11 @@ function startScanner() {
           // behaviour it had.
           var wasAsked = read.dropoff.asked !== false;
           var carrying = holding(Date.now());
+          var kept = false;
           if (carrying && (wasAsked || !carrying.dropoff)) {
             carrying.dropoff = read.dropoff.line;
             carrying.dropoffScanned = true;
+            kept = true;
           } else if (carrying) {
             // Held, already knows where it ends, and nobody asked. Nothing to
             // do — and nothing to say either, because the driver did not ask a
@@ -435,6 +437,7 @@ function startScanner() {
             // to be able to say which it is holding.
             scanner.offer.dropoff = read.dropoff.line;
             scanner.offer.dropoffScanned = true;
+            kept = true;
             // ...and appended, as its own line naming the offer. The same
             // shape as a tick: the journal is append-only, so this is a note
             // ABOUT a row rather than an edit to it, and the copy at home
@@ -463,6 +466,31 @@ function startScanner() {
           // `msg.dropoff.line` and shows it on the button. A driver who
           // presses this with nothing to attach an address to still sees what
           // was read, and that is what they need.
+          //
+          // ...but only if they PRESSED, or if it was kept.
+          //
+          // That distinction did not exist when this was written: every
+          // dropoff message followed a press, so "say what was read" was
+          // always an answer to a question somebody asked. Unprompted
+          // sightings broke it. The branch above refuses to overwrite a
+          // destination the card itself stated and says so — "nothing to say
+          // either, because the driver did not ask a question to be answered"
+          // — and then the stream said it anyway, because the broadcast is
+          // outside all of this.
+          //
+          // What the driver saw: holding an order whose destination came off
+          // the card, a navigation screen for somewhere else catches one read,
+          // and the panel's ⌖ button turns green reading "Dropoff read as
+          // <the other address>". It is not the held job's destination, it is
+          // not on the record, and /api/status cannot correct it — the poll
+          // only rewrites `destSaid` when the held order is `dropoffScanned`
+          // or when there is no held order at all, and this is neither. It
+          // stands until the order ends.
+          //
+          // A press still shows what was read even when nothing could be
+          // attached to it, which is the case the paragraph above is about and
+          // is deliberately unchanged.
+          if (!wasAsked && !kept) { delete read.dropoff; }
           //
           // `scanner.dropoff` and `scanner.dropoffAt` were kept here for that
           // and are gone. They were written on every read and not one line in

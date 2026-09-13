@@ -91,6 +91,43 @@ def get(base, path):
     return json.loads(urllib.request.urlopen(base + path, timeout=5).read().decode('utf-8'))
 
 
+def listen(base, seconds):
+    """Collect what /api/events broadcasts, in the background, for a while.
+
+    The panel is a reader of this stream and nothing else — live.html sets the
+    ⌖ button's state straight off `msg.dropoff.line`. So "what does the driver
+    end up believing" is a question about what leaves here, and polling
+    /api/status cannot answer it: the status reflects what was STORED, and the
+    whole class of fault here is the stream saying something the store refused.
+
+    Its own thread, started before the scanner has anything to say, because the
+    stream carries what happens next rather than what already has.
+    """
+    import threading
+    seen = []
+
+    def pump():
+        try:
+            fh = urllib.request.urlopen(base + '/api/events', timeout=seconds + 5)
+            end = time.time() + seconds
+            while time.time() < end:
+                line = fh.readline()
+                if not line:
+                    break
+                line = line.decode('utf-8', 'replace').strip()
+                if line.startswith('data:'):
+                    try:
+                        seen.append(json.loads(line[5:].strip()))
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+    t = threading.Thread(target=pump, daemon=True)
+    t.start()
+    return seen
+
+
 def raw(base, path):
     """Status, body and headers — for the endpoints that are not JSON.
 
@@ -582,6 +619,19 @@ if shutil.which('python3'):
             '    print(json.dumps({"dropoff": {"line": line, "street": "1 X St",\n'
             '        "city": "Kennesaw", "state": "GA", "zip": "30144",\n'
             '        "asked": asked, "at": int(time.time() * 1000)}}), flush=True)\n'
+            # Before any card at all, so there is nothing to attach it to and
+            # nothing is stored — the one case where the driver DID ask and the
+            # answer is kept nowhere. Showing it anyway is deliberate: they
+            # pressed the button, and what the rig read is what they need.
+            #
+            # The pause is not padding. Everything below is checked against
+            # what left over the stream, and the fixture starts talking the
+            # moment the scanner is spawned — without it the first line can be
+            # gone before the listener has connected, and the check would pass
+            # or fail on how busy the box was.
+            'time.sleep(1.0)\n'
+            'addr("444 No Card Yet Rd, Kennesaw, GA 30144", True)\n'
+            'time.sleep(0.7)\n'
             '# A card that named nowhere: an unasked sighting fills it.\n'
             'card("o-blank", None)\n'
             'time.sleep(0.7)\n'
@@ -599,6 +649,10 @@ if shutil.which('python3'):
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
                         'SCANNER_ARGS': fake}, journal)
     try:
+        # Started before the fixture's first card, because the stream carries
+        # what happens next. See listen().
+        told = listen(base, 8.0)
+
         def wait_offer(i, patience=8.0):
             for _ in range(int(patience * 20)):
                 s = get(base, '/api/status')
@@ -634,6 +688,51 @@ if shutil.which('python3'):
         eq('an address the driver asked for overrules the card',
            (get(base, '/api/status').get('offer') or {}).get('dropoff'),
            '333 Asked For Ave, Kennesaw, GA 30144')
+
+        # --- and what the PANEL was told, which is a different question ------
+        #
+        # Refusing to store it is only half the job. live.html sets the ⌖
+        # button's caption and its green "done" state straight off
+        # `msg.dropoff.line`, and the broadcast used to sit outside all three
+        # branches above — so the sighting this server had just declined went
+        # out to the panel anyway. The comment beside the refusal said
+        # "nothing to say either, because the driver did not ask a question to
+        # be answered", and then it said it.
+        #
+        # What the driver got: holding an order whose destination came off the
+        # card, a navigation screen for somewhere else catches one read, and
+        # the button turns green reading "Dropoff read as 222 Wrong Way Dr" —
+        # not the held job's destination, not on the record, and /api/status
+        # cannot take it back, because the poll only rewrites the caption when
+        # the held order is `dropoffScanned` or when there is no held order,
+        # and this is neither.
+        time.sleep(0.6)
+        lines = [(m.get('dropoff') or {}).get('line') for m in told
+                 if isinstance(m, dict) and m.get('dropoff')]
+        # The premise: this stream was alive and did carry the ones that count.
+        ok_('the panel was told about the sighting that filled a blank',
+            any((l or '').startswith('111') for l in lines))
+        ok_('...and about the one the driver asked for',
+            any((l or '').startswith('333') for l in lines))
+        # ...and NOT about the one that changed nothing.
+        no_('an unasked sighting the server refused is not announced to the '
+            'panel either (%r)' % (lines,),
+            any((l or '').startswith('222') for l in lines))
+        # ...while a PRESS with nothing to attach it to is still shown, which
+        # is the other direction and the one that keeps this a bound rather
+        # than a mute button. The driver asked; what the rig read is what they
+        # need, whether or not there was a card to hang it on. Silencing both
+        # passes every check above — the asked address up there happens to be
+        # one the server kept — so without this the fix could be "say nothing
+        # unless it was stored" and nothing would notice.
+        ok_('a press with nothing to attach it to is still shown to the driver '
+            '(%r)' % (lines,),
+            any((l or '').startswith('444') for l in lines))
+        # ...and it really was kept nowhere, or the line above is checking the
+        # easy case rather than the one it names.
+        no_('...though nothing was written down for it',
+            any('No Card Yet' in (r.get('dropoff') or '')
+                for r in [json.loads(l) for l in open(journal) if l.strip()]))
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
