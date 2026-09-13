@@ -1221,8 +1221,8 @@ def emit_reading():
           flush=True)
 
 
-def emit_dropoff(address, ms=None):
-    """The destination, once the driver has asked for it and it has been read.
+def emit_dropoff(address, ms=None, asked=True):
+    """The destination, once it has been read off the screen.
 
     Its own line, like the offer id and for the same reason: it is not part of a
     verdict and must not be able to stand in for one. Nothing about this reading
@@ -1242,6 +1242,15 @@ def emit_dropoff(address, ms=None):
         'city': address.get('city'),
         'state': address.get('state'),
         'zip': address.get('zip'),
+        # Whether the driver ASKED for this one, or the rig simply saw it.
+        #
+        # The two are different claims and the receiving end treats them
+        # differently: a press is the driver saying "this screen is the
+        # destination", and it overrules whatever the card said. An unprompted
+        # sighting is the rig filling in a blank, and it may only fill a blank
+        # — see server.js, which will not let one overwrite a destination the
+        # card itself named.
+        'asked': bool(asked),
         'ms': ms,
         'at': int(time.time() * 1000)}}), flush=True)
 
@@ -1767,6 +1776,10 @@ def main():
     dropoff_until = 0.0
     dropoff_seen = None
     last_dropoff_read = 0.0
+    # The last address sent, so a navigation screen sitting there for twenty
+    # minutes is reported once rather than on every read that happens to catch
+    # it. A DIFFERENT address is a different job and is always sent.
+    dropoff_said = None
     last_resample = 0.0
     last_verify = 0.0
     verify_every = VERIFY_EVERY
@@ -1822,7 +1835,7 @@ def main():
         # is how a loop rewritten into a closure loses its memory without
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
-        nonlocal dropoff_until, dropoff_seen
+        nonlocal dropoff_until, dropoff_seen, dropoff_said
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as
@@ -1856,51 +1869,116 @@ def main():
         # it in - the driver who took a moment to get the destination up is
         # exactly the driver whose address arrives at the end of the window.
         started = read_at if read_at is not None else time.time()
-        if started < dropoff_until and dropoff_seen is None:
-            shot = out['parsed'] or {}
-            # A SCREEN WITH A PAYOUT ON IT IS AN OFFER, NOT A DESTINATION.
+        # WITH OR WITHOUT THE BUTTON.
+        #
+        # This branch used to run only inside the window a press opens, and the
+        # window is not what made it safe. What makes it safe is the payout
+        # test below — a screen with a payout on it is an offer, not a
+        # destination — and that test knows nothing about windows.
+        #
+        # What the window buys is READS, not safety. The driver presses the
+        # button after accepting, when the phone has settled into a navigation
+        # screen that is not going to move, and a still picture moves the motion
+        # gate not at all: without forced reads nothing would be looked at. That
+        # is still true and the window still does it, further down.
+        #
+        # But the case the driver actually asked about is different. Screening,
+        # they TAP the dropoff pin to reveal the address — and a tap changes the
+        # screen, which is exactly what the motion gate is for. A read happens
+        # at that moment anyway. The rig was looking straight at the address and
+        # throwing it away for want of a button press.
+        #
+        # So the address is taken from any read that finds one, and the window
+        # goes on forcing reads when the screen will not move on its own. Two
+        # actions become one, and the one that remains is the one the driver was
+        # already doing on their phone.
+        #
+        # `dropoff_seen` still closes the window on the first answer inside it —
+        # see below — because that is about stopping two dozen forced reads, not
+        # about stopping a second address.
+        asked = started < dropoff_until
+        shot = out['parsed'] or {}
+        # A SCREEN WITH A PAYOUT ON IT IS AN OFFER, NOT A DESTINATION.
+        #
+        # The window opens the instant the button is pressed, and the driver
+        # then has to get the destination up — so the first reads of almost
+        # every window are of the offer card still sitting there. An offer
+        # card is supposed to yield no address, and the parser says so in a
+        # comment: "None on every one of the 604 offer cards on file". That
+        # is no longer true. Over the 900 card texts on file now, five DO
+        # yield one, because the merchant's branch address carries the same
+        # `, ST ZIP` anchor a real address does:
+        #
+        #     800 Forrest St NW, Atlanta, GA 30318   <- off a Delivery card
+        #     100 Rosemont Ct, Hiram, GA 30141
+        #     2603 E, GA 30106                       <- and two fragments
+        #
+        # Any one of them ends the window with the WRONG answer and stops it
+        # looking: the order in the car is then recorded as ending where it
+        # started, the stack line compares the next offer against a
+        # restaurant, and the pairing written to the journal says `scanned:
+        # true` — a full address, confidently wrong. That is the expensive
+        # direction.
+        #
+        # The payout is the grammar that separates them, and it costs
+        # nothing: a navigation screen has no payout to lose. All five of
+        # those cards carry one, so this closes the path completely.
+        found = shot.get('address') if shot.get('pay') is None else None
+        # ...and said ONCE, not on every read that catches the same screen.
+        #
+        # A navigation screen can sit in front of the camera for the whole of a
+        # delivery. Every read that happens for some other reason catches it,
+        # and each one would be a line on the wire and a note appended to the
+        # journal — the same address, twenty times, on the card it already
+        # names. A DIFFERENT address is a different job and is always sent.
+        #
+        # Compared on the line, which is the thing stored and shown. Two reads
+        # of one screen can differ in the parts around it without disagreeing
+        # about where the job goes.
+        #
+        # NOT when the driver asked. `dropoff_said` is never cleared — there is
+        # no moment in this loop that means "a new job began" — so without
+        # `not asked` it is a suppression that never lifts: the second delivery
+        # of a shift to an address already seen is silently dropped, and
+        # pressing ⌖ does not rescue it, because this sits ABOVE the branch
+        # that answers. Worse than saying nothing: `dropoff_until = 0.0` is
+        # inside that branch too, so a suppressed press closes no window and
+        # burns all twelve seconds of forced reads with the rig unresponsive
+        # and not one line said about why.
+        #
+        # A press is a question, and a question asked twice gets answered
+        # twice. The unprompted path keeps the suppression whole, which is
+        # where it earns its keep: a navigation screen sits in front of the
+        # camera for a whole delivery and nobody asked about any of it.
+        #
+        # The card is deliberately NOT the boundary here. Clearing this when a
+        # new card is read sounds narrower and is much wider — `carrying` is
+        # null unless the driver pressed "took it", so an unprompted sighting
+        # falls through to the screening branch in server.js and staples the
+        # address onto whatever card is on screen now, `dropoffScanned: true`.
+        # Once per address is a stale answer; once per screened card is a
+        # confidently wrong one.
+        if found and not asked and (found.get('line') or None) == dropoff_said:
+            found = None
+        if found:
+            dropoff_seen = found
+            dropoff_said = found.get('line')
+            # Closed the moment it is answered, and what that closes is the
+            # READ BEAT below - not this branch. `dropoff_seen` already
+            # stops a second answer on its own, so an earlier comment
+            # claiming this guards against overwriting was naming a job it
+            # does not do, which is how a line like it gets deleted later.
             #
-            # The window opens the instant the button is pressed, and the driver
-            # then has to get the destination up — so the first reads of almost
-            # every window are of the offer card still sitting there. An offer
-            # card is supposed to yield no address, and the parser says so in a
-            # comment: "None on every one of the 604 offer cards on file". That
-            # is no longer true. Over the 900 card texts on file now, five DO
-            # yield one, because the merchant's branch address carries the same
-            # `, ST ZIP` anchor a real address does:
-            #
-            #     800 Forrest St NW, Atlanta, GA 30318   <- off a Delivery card
-            #     100 Rosemont Ct, Hiram, GA 30141
-            #     2603 E, GA 30106                       <- and two fragments
-            #
-            # Any one of them ends the window with the WRONG answer and stops it
-            # looking: the order in the car is then recorded as ending where it
-            # started, the stack line compares the next offer against a
-            # restaurant, and the pairing written to the journal says `scanned:
-            # true` — a full address, confidently wrong. That is the expensive
-            # direction.
-            #
-            # The payout is the grammar that separates them, and it costs
-            # nothing: a navigation screen has no payout to lose. All five of
-            # those cards carry one, so this closes the path completely.
-            found = shot.get('address') if shot.get('pay') is None else None
-            if found:
-                dropoff_seen = found
-                # Closed the moment it is answered, and what that closes is the
-                # READ BEAT below - not this branch. `dropoff_seen` already
-                # stops a second answer on its own, so an earlier comment
-                # claiming this guards against overwriting was naming a job it
-                # does not do, which is how a line like it gets deleted later.
-                #
-                # What it saves is up to two dozen more forced reads over the
-                # rest of the window, and on a Pi a read is several seconds of
-                # the whole computer's attention. Left open, the driver presses
-                # the button, gets their address, and then finds the rig
-                # unresponsive until the twelve seconds run out.
-                dropoff_until = 0.0
-                if args.json:
-                    emit_dropoff(found, ms=out.get('ms'))
-                log('destination read: %s' % found.get('line'))
+            # What it saves is up to two dozen more forced reads over the
+            # rest of the window, and on a Pi a read is several seconds of
+            # the whole computer's attention. Left open, the driver presses
+            # the button, gets their address, and then finds the rig
+            # unresponsive until the twelve seconds run out.
+            dropoff_until = 0.0
+            if args.json:
+                emit_dropoff(found, ms=out.get('ms'), asked=asked)
+            log('destination read%s: %s'
+                % ('' if asked else ' (unprompted)', found.get('line')))
         # Anything with a payout is worth a second look; anything without is
         # not an offer and should not hold the loop open.
         #

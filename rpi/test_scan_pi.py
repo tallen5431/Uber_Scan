@@ -242,9 +242,13 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     # window, that the window keeps reading a still picture, and that an address
     # found inside it leaves the process. emit_dropoff on its own was already
     # covered, and covering the piece is not covering the path.
+    # Both halves of the call. `asked` travels as a keyword — it says whether
+    # the driver pressed the button or the rig simply saw the address, and the
+    # receiving end treats those differently — so a recorder that kept only the
+    # positional arguments could not see it at all.
     destinations = []
     real_dropoff = SP.emit_dropoff
-    SP.emit_dropoff = lambda *a, **k: (destinations.append(a),
+    SP.emit_dropoff = lambda *a, **k: (destinations.append((a[0] if a else None, k)),
                                        real_dropoff(*a, **k))[1]
 
     # The button. Written before the loop starts, which is the same file the
@@ -2011,21 +2015,121 @@ eq('a destination is not a verdict', run_drop['ready'], [])
 eq('...and not an offer on the record', run_drop['announced'], [])
 eq('...and not a journal row', run_drop['rows'], [])
 
-# The control: with no press, the same screens produce nothing at all. Without
-# it the checks above would pass on a loop that read every frame as a
-# destination.
+# --- and with no press at all, which is the case the driver actually has ----
 #
-# The card DOES appear in this one, which is the difference that makes the check
-# mean anything. On the still blank screen used above the motion gate never
-# fires, so the reader is never called, and "no destination came out" would be
-# true of a loop that had not looked at anything — a check that goes quiet
-# exactly when the thing it watches does. So the reads are asserted too.
+# Their own words: "I need to manually tap the map label address so that makes
+# sense that it is not in most of the frames." The address is revealed by a tap
+# on their PHONE — and a tap changes the screen, which is exactly what the
+# motion gate is for. A read happens at that moment anyway, so the rig was
+# looking straight at the address and throwing it away for want of a second
+# action on the rig itself.
+#
+# This check asserted the opposite — "an address nobody asked for is not a
+# destination" — and it was right about the code and wrong about the driver.
+# What the window buys is READS, and it still buys them: after an accept the
+# phone settles into a navigation screen that does not move, and a still
+# picture produces none. What the window never was is the thing that made
+# looking SAFE. That is the payout test, which knows nothing about windows and
+# is checked on its own below.
+#
+# The card DOES appear in this run, which is what makes it mean anything: on a
+# still blank screen the gate never fires, the reader is never called, and any
+# claim about what came out would be true of a loop that had not looked.
 _nav_reads[0] = 2
 run_nodrop = run(TC.uberx_screen(), seconds=10.0, extra_argv=['--no-parallel'],
                  look=_nav_then_address)
 ok_('a run with no press still reads the screen', _nav_reads[0] > 2)
-eq('...and an address nobody asked for is not a destination',
-   run_nodrop['destinations'], [])
+eq('...and an address it finds there is a destination, unasked',
+   len(run_nodrop['destinations']), 1)
+if run_nodrop['destinations']:
+    eq('...the one that was on the screen',
+       run_nodrop['destinations'][0][0].get('line'),
+       '1234 Daffodil Ln, Powder Springs, GA 30127')
+    # Marked as a sighting rather than an answer. The receiving end treats the
+    # two differently: a press is the driver saying "this screen is the
+    # destination" and overrules what the card said; an unprompted sighting may
+    # fill a blank and may not overwrite one.
+    eq('...and said to be unprompted',
+       run_nodrop['destinations'][0][1].get('asked'), False)
+# Once, however many reads catch the same screen. A navigation screen can sit in
+# front of the camera for a whole delivery, and every read that catches it would
+# be a line on the wire and a note appended to the journal — the same address,
+# twenty times, on the card it already names.
+eq('...and said once, not on every read that catches the same screen',
+   len(run_nodrop['destinations']), 1)
+
+# ...while a press still says so, which is the difference the receiving end
+# acts on.
+if run_drop['destinations']:
+    eq('a destination the driver asked for says it was asked for',
+       run_drop['destinations'][0][1].get('asked'), True)
+
+
+# --- the same address, asked for twice --------------------------------------
+#
+# "Said once" is a suppression, and `dropoff_said` is never cleared: there is
+# no moment in this loop that means "a new job began". So on the second
+# delivery of a shift to an address already seen, the driver presses ⌖ and the
+# answer is thrown away as a repeat — of a job that ended an hour ago.
+#
+# And it is worse than a silence. The suppression sits ABOVE the branch that
+# answers, and `dropoff_until = 0.0` is INSIDE that branch, so a suppressed
+# press closes no window: twelve seconds of forced reads every half second, a
+# rig that will not respond, and not one line saying why. The driver's
+# conclusion is that the button is broken, and on the second delivery to an
+# address it is.
+#
+# A press is a question. A question asked twice gets answered twice.
+_asked_reads = [0]
+_ASKED_NAV = 'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start'
+
+
+def _address_every_time(self, frames, now=None, geom=None):
+    """The same navigation screen, every read, all run."""
+    _asked_reads[0] += 1
+    parsed = OP2.parse(_ASKED_NAV)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': _ASKED_NAV, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+# Two presses in one run: the second is written the moment the first is
+# answered, which is the shape the road has — one delivery finishes, another is
+# taken to the same block. The card never appears, so every read here is one a
+# press asked for.
+#
+# The second press goes through the same file the server's /api/dropoff writes.
+# run() has already pointed handoff at this run's own directory for the press
+# it staged itself, so pressing again is writing the file again — no path is
+# worked out here that the loop does not work out the same way.
+import handoff as HOF2
+_presses = [1]
+
+
+def _press_again(st):
+    if st['destinations'] >= 1 and _presses[0] < 2:
+        _presses[0] = 2
+        for where in HOF2.candidates(HOF2.DROPOFF):
+            open(where, 'w').close()
+    return st['destinations'] >= 2
+
+
+run_twice = run(TC.uberx_screen(), seconds=SP2.DROPOFF_WINDOW + 20.0,
+                appear_at=10_000.0, extra_argv=['--no-parallel'],
+                look=_address_every_time, press_dropoff=True,
+                until=_press_again)
+
+eq('the button, pressed twice for one address, answers twice',
+   len(run_twice['destinations']), 2)
+if len(run_twice['destinations']) == 2:
+    eq('...with the address both times, not a blank second answer',
+       [(d[0] or {}).get('line') for d in run_twice['destinations']],
+       ['1234 Daffodil Ln, Powder Springs, GA 30127'] * 2)
+    eq('...both marked as asked for', [d[1].get('asked')
+                                       for d in run_twice['destinations']],
+       [True, True])
 
 
 # --- a read that outlives the window it went out in ------------------------
@@ -2094,6 +2198,38 @@ if run_card['destinations']:
        '1234 Daffodil Ln, Powder Springs, GA 30127')
 ok_('...found past the card, so the card really was offered and refused',
     _card_reads[0] >= 3)
+
+
+# A screen with a PAYOUT on it is an offer, not a destination — with or without
+# a press. That test is the whole of what makes looking safe, and taking the
+# window away must not have taken it with it. Five of the 900 card texts on file
+# yield an address, off a merchant's branch: `800 Forrest St NW, Atlanta, GA
+# 30318` is a Delivery card, not a place anybody is going.
+_paid_reads = [0]
+
+
+def _address_with_a_payout(self, frames, now=None, geom=None):
+    _paid_reads[0] += 1
+    text = ('$12.00 Guaranteed 23 min (4.6 mi) total Pickup '
+            'Wingstop 800 Forrest St NW, Atlanta, GA 30318')
+    parsed = OP2.parse(text)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+run_paid = run(TC.uberx_screen(), seconds=8.0, appear_at=10_000.0,
+               extra_argv=['--no-parallel'], look=_address_with_a_payout,
+               press_dropoff=False)
+ok_('the card really did carry an address to be tempted by',
+    OP2.parse('$12.00 Guaranteed 23 min (4.6 mi) total Pickup '
+              'Wingstop 800 Forrest St NW, Atlanta, GA 30318').get('address')
+    is not None)
+eq('...and a screen with a payout on it is never taken as a destination',
+   len(run_paid['destinations']), 0)
+ok_('...over a run that really did read it', _paid_reads[0] >= 2)
 
 
 def _slow_address(self, frames, now=None, geom=None):

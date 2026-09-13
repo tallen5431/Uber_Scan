@@ -203,7 +203,7 @@
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
                             : ' · none carry a position') + short);
         el.place.disabled = withEnds.length === 0;
-        render([], {});
+        render([], {}, {});
       })
       .catch(function (e) { say('could not load: ' + (e && e.message || e)); });
   }
@@ -223,7 +223,7 @@
     el.load.disabled = true;
     try {
       var run = await MV.placeAll(offers, geo, say);
-      render(run.placed, run.strays);
+      render(run.placed, run.strays, run.found);
       say(run.done);
     } finally {
       // In a finally, because a lookup that throws must not leave the page
@@ -269,7 +269,7 @@
     try { return new Date(at).toLocaleString(); } catch (e) { return String(at); }
   }
 
-  function render(placed, strays) {
+  function render(placed, strays, found) {
     if (!ensureMap()) return;
     if (layer) { map.removeLayer(layer); }
     layer = L.layerGroup().addTo(map);
@@ -324,7 +324,7 @@
     });
 
     if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
-    sidebar(placed, strays);
+    sidebar(placed, strays, found);
     // Redrawn with the rest, since the range may have changed under it. If it
     // was not showing it stays not showing — a toggle that turns itself back
     // on is a toggle that was not a decision.
@@ -413,7 +413,7 @@
       : '';
   }
 
-  function sidebar(placed, strays) {
+  function sidebar(placed, strays, found) {
     if (!placed.length) { el.sideEmpty.hidden = false; el.sideBody.hidden = true; return; }
     el.sideEmpty.hidden = true;
     el.sideBody.hidden = false;
@@ -468,14 +468,52 @@
     });
     html += andTheRest(Math.min(wrong.length, LIST_MAX), wrong.length);
 
-    html += '<h2>' + lost.length + ' the geocoder could not find</h2>';
-    lost.slice(0, LIST_MAX).forEach(function (p) {
-      var which = !p.from ? p.offer.pickup : p.offer.dropoff;
-      html += '<div class="row"><b>' + esc(which) + '</b>'
+    /* Split, because "we asked and there is no such place" and "we never got
+       to ask" are different facts with different answers, and only one of them
+       is about the driver's OCR.
+
+       The geocoder keeps them apart on purpose — an empty answer is stored as
+       null, a lookup that could not be made is not stored at all, so the next
+       run asks again. Both arrive here as a missing pin, and reporting both as
+       "could not find" told a driver whose phone lost signal for ten seconds
+       that a dozen of their streets do not exist. They then go looking at the
+       crop and the focus for a fault that was the tunnel on I-75.
+
+       Read off `found` rather than off the judged end, because judge() folds
+       the two into null deliberately — every other caller wants "this end has
+       no pin" and should not have to know which kind. This is the one place
+       that does. */
+    /* Which end is the one without a pin. Asking `!p.from` alone answers
+       "pickup" for an offer that never named a pickup, and then reads the
+       bucket off a name that does not exist — so it mirrors the test that put
+       the row in this list: a named pickup with no pin, or else the dropoff. */
+    function nameOf(p) {
+      return (p.offer.pickup && !p.from) ? p.offer.pickup : p.offer.dropoff;
+    }
+    var asked = lost.filter(function (p) { return (found || {})[nameOf(p)] === null; });
+    var unasked = lost.filter(function (p) { return (found || {})[nameOf(p)] !== null; });
+
+    html += '<h2>' + asked.length + ' the geocoder could not find</h2>';
+    asked.slice(0, LIST_MAX).forEach(function (p) {
+      html += '<div class="row"><b>' + esc(nameOf(p)) + '</b>'
            + '<span class="tag iffy">no match</span>'
            + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
     });
-    html += andTheRest(Math.min(lost.length, LIST_MAX), lost.length);
+    html += andTheRest(Math.min(asked.length, LIST_MAX), asked.length);
+
+    if (unasked.length) {
+      html += '<h2>' + unasked.length + ' could not be asked</h2>';
+      html += '<div class="note">The lookup never reached OpenStreetMap — no '
+            + 'network, or it was busy. Nothing is stored for these, so they '
+            + 'are asked again next time you press Place. This says nothing '
+            + 'about whether the rig read them correctly.</div>';
+      unasked.slice(0, LIST_MAX).forEach(function (p) {
+        html += '<div class="row"><b>' + esc(nameOf(p)) + '</b>'
+             + '<span class="tag iffy">not asked</span>'
+             + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
+      });
+      html += andTheRest(Math.min(unasked.length, LIST_MAX), unasked.length);
+    }
 
     html += '<h2>' + noEnd.length + ' with no dropoff at all</h2>';
     html += '<div class="note">The card never said where the job ends — Uber '

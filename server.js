@@ -395,11 +395,35 @@ function startScanner() {
         // slot here would attach the address to a job everything else has
         // given up on.
         if (read.dropoff && typeof read.dropoff.line === 'string') {
+          // Whether the driver ASKED for this one, or the rig simply saw it.
+          //
+          // The scanner now reports an address off any screen that has one and
+          // no payout, not only inside the window a button press opens — the
+          // driver taps the dropoff pin on their phone, which is a screen
+          // change the motion gate already reads, so the rig was looking
+          // straight at it and throwing it away for want of a second action.
+          //
+          // The two are not the same claim. A press is the driver saying "this
+          // screen is the destination", and it overrules what the card said.
+          // An unprompted sighting is the rig filling in a blank: it may fill
+          // one and may not overwrite one. Otherwise a navigation screen left
+          // up between offers would quietly rewrite the destination of a card
+          // that had named its own — a confidently wrong answer arrived at
+          // without anybody asking a question.
+          //
+          // Missing means asked, so a scanner older than this field keeps the
+          // behaviour it had.
+          var wasAsked = read.dropoff.asked !== false;
           var carrying = holding(Date.now());
-          if (carrying) {
+          if (carrying && (wasAsked || !carrying.dropoff)) {
             carrying.dropoff = read.dropoff.line;
             carrying.dropoffScanned = true;
-          } else if (screeningCard(Date.now())) {
+          } else if (carrying) {
+            // Held, already knows where it ends, and nobody asked. Nothing to
+            // do — and nothing to say either, because the driver did not ask a
+            // question to be answered.
+          } else if (screeningCard(Date.now())
+                     && (wasAsked || !scanner.offer.dropoff)) {
             // Onto the card being screened, and onto its journal row.
             //
             // In memory first, because the panel and the stack line read

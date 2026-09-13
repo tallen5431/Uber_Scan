@@ -114,6 +114,22 @@ ROWS = [
     # red and kept out of the map's framing like any other stray.
     offer(4, 'Cobb Pkwy NW, Kennesaw', 'W Boise Ave', 4.0,
           where=(34.0150, -84.6050)),
+    # ...and one the geocoder could not be REACHED about, which is a different
+    # fact from one it has never heard of and used to be reported as the same
+    # one. A driver in a dead spot on I-75 was told a dozen of their streets do
+    # not exist, and went looking at the crop for a fault that was the tunnel.
+    #
+    # Deliberately carries no position, so it gets no box and is therefore not
+    # part of the "asked wide" retry — one question in the first run, one in
+    # the second, which is what the cache check below counts on.
+    #
+    # ...and no pickup either, which is the shape that catches a real mistake:
+    # the list decides which end is missing, and asking "is there no pickup
+    # pin?" answers YES for a row that never named a pickup, then reads the
+    # bucket off a name that does not exist. It also keeps this row out of
+    # every count the rest of the suite pins — it names one end, so "name both
+    # ends", "drawn end to end" and the shared-pin count are all untouched.
+    offer(31, None, 'Unreachable Way, Atlantis', 5.0),
 ] + [
     # Twenty-six the geocoder has never heard of, which is two past the
     # twenty-five a list shows. A list that stops there and says nothing is the
@@ -211,6 +227,10 @@ const KNOWN = {
                                  window.__boxes.push(a[1]);
                                  window.__askedAt.push(Date.now()); },
                         [q, box || null]).catch(() => {});
+    // The network, not the geocoder. An aborted request is what a dead spot
+    // actually looks like to the page: no status, no body, a rejected fetch.
+    // Nothing may be stored for it, or a tunnel becomes a permanent verdict.
+    if (q.indexOf('Unreachable') !== -1) { return route.abort(); }
     const town = Object.keys(KNOWN).find((t) => q.toLowerCase().includes(t));
     if (!town) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
@@ -449,8 +469,8 @@ try:
 
     # --- it reads the same list the offers page reads ----------------------
     status = on_load.get('status') or ''
-    ok_('the page counts the offers it loaded (%r)' % status, '31 offers' in status)
-    ok_('...how many name somewhere', '31 name somewhere' in status)
+    ok_('the page counts the offers it loaded (%r)' % status, '32 offers' in status)
+    ok_('...how many name somewhere', '32 name somewhere' in status)
     ok_('...and how many name both ends', '4 name both ends' in status)
     ok_('the button is live once there is something to place', on_load.get('canPlace'))
 
@@ -495,6 +515,21 @@ try:
         'could not find' in side)
     ok_('...by the text that was searched for',
         'Nowhere At All Ln' in side)
+
+    # ...and the two kinds of missing pin are told apart. "We asked and there
+    # is no such place" is about the OCR; "we never got to ask" is about the
+    # network, and only one of them is worth going to look at the rig for.
+    ok_('a lookup the network refused is not reported as a place that does '
+        'not exist', 'could not be asked' in side)
+    ok_('...naming it, so the driver can see which one it was',
+        'Unreachable Way' in side)
+    # The one that WAS asked stays where it was. A split that swept everything
+    # into the new heading would pass both checks above and say nothing.
+    _find_at = side.find('could not find')
+    _ask_at = side.find('could not be asked')
+    ok_('...while a place that really was asked stays under "could not find"',
+        _find_at != -1 and _ask_at != -1
+        and _find_at < side.find('Nowhere At All Ln') < _ask_at)
 
     # The commonest case in this driver's real journal, and the one a map would
     # otherwise silently omit: the card never said where the job ends.
@@ -713,9 +748,19 @@ try:
             % (boise_pin[0].get('popup') or '')[:70],
             'almost certainly wrong' in (boise_pin[0].get('popup') or ''))
 
-    # --- asking twice costs nothing ----------------------------------------
-    eq('a second run asks the geocoder nothing new',
-       (got.get('again') or {}).get('newQuestions'), 0)
+    # --- asking twice costs nothing, except what could not be asked --------
+    #
+    # Everything that was ANSWERED is remembered and not asked again, which is
+    # what makes re-checking a map free. The one place the network refused is
+    # deliberately not remembered — a transport failure stored as "no such
+    # place" is a wrong answer kept forever, and the driver would have to know
+    # to clear the cache to undo a tunnel. So it, and only it, is asked again.
+    #
+    # A count rather than "more than zero": if this ever reads 2 the wide
+    # retry has started firing on it, and if it reads 27 the cache has stopped
+    # working and the reason would be hidden by a looser check.
+    eq('a second run re-asks only what it could not ask the first time',
+       (got.get('again') or {}).get('newQuestions'), 1)
 
 finally:
     server.terminate()

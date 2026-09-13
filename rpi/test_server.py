@@ -550,6 +550,94 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- an address nobody asked for fills a blank and overwrites nothing ---------
+#
+# The scanner now reports an address off any screen that has one and no payout,
+# not only inside the window a button press opens: the driver taps the dropoff
+# pin on their phone, which is a screen change the motion gate already reads.
+#
+# The two are not the same claim. A press is the driver saying "this screen is
+# the destination", and it overrules what the card said. An unprompted sighting
+# is the rig filling in a blank — because a navigation screen left up between
+# offers would otherwise quietly rewrite the destination of a card that named
+# its own, which is a confidently wrong answer arrived at without anybody asking
+# a question.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'unasked.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import json, sys, time\n'
+            'def card(i, dropoff):\n'
+            '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
+            '        "grossPerHour": 36.0, "pay": 12.0, "minutes": 24.0, "miles": 5.0,\n'
+            '        "cost": 1.75, "billedMinutes": 24.0, "target": 25, "band": 15,\n'
+            '        "costPerMile": 0.35, "at": int(time.time() * 1000),\n'
+            '        "offer": {"id": i, "pay": 12.0, "minutes": 24.0,\n'
+            '                  "billedMinutes": 24.0, "miles": 5.0, "cost": 1.75,\n'
+            '                  "perHour": 30.0, "target": 25, "band": 15,\n'
+            '                  "costPerMile": 0.35, "dropoff": dropoff}}), flush=True)\n'
+            'def addr(line, asked):\n'
+            '    print(json.dumps({"dropoff": {"line": line, "street": "1 X St",\n'
+            '        "city": "Kennesaw", "state": "GA", "zip": "30144",\n'
+            '        "asked": asked, "at": int(time.time() * 1000)}}), flush=True)\n'
+            '# A card that named nowhere: an unasked sighting fills it.\n'
+            'card("o-blank", None)\n'
+            'time.sleep(0.7)\n'
+            'addr("111 Filled In Rd, Kennesaw, GA 30144", False)\n'
+            'time.sleep(0.7)\n'
+            '# A card that named its own end: an unasked sighting must not move it.\n'
+            'card("o-named", "Oak Ln, Marietta")\n'
+            'time.sleep(0.7)\n'
+            'addr("222 Wrong Way Dr, Kennesaw, GA 30144", False)\n'
+            'time.sleep(0.7)\n'
+            '# ...and the driver ASKING does move it.\n'
+            'addr("333 Asked For Ave, Kennesaw, GA 30144", True)\n'
+            'time.sleep(600)\n')
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+    try:
+        def wait_offer(i, patience=8.0):
+            for _ in range(int(patience * 20)):
+                s = get(base, '/api/status')
+                if (s.get('offer') or {}).get('id') == i:
+                    return s
+                time.sleep(0.05)
+            return {}
+
+        wait_offer('o-blank')
+        time.sleep(1.0)
+        blank = (get(base, '/api/status').get('offer') or {})
+        eq('an address nobody asked for fills a card that named nowhere',
+           blank.get('dropoff'), '111 Filled In Rd, Kennesaw, GA 30144')
+        ok_('...and is still marked as read off the screen',
+            blank.get('dropoffScanned') is True)
+
+        wait_offer('o-named')
+        time.sleep(1.0)
+        named = (get(base, '/api/status').get('offer') or {})
+        eq('...but does not overwrite a card that named its own end',
+           named.get('dropoff'), 'Oak Ln, Marietta')
+        # ...and nothing was written about it either, because nothing changed.
+        rows = [json.loads(l) for l in open(journal) if l.strip()]
+        no_('...nor writes one down',
+            any('Wrong Way' in (r.get('dropoff') or '') for r in rows))
+
+        # The press still overrules, which is the whole difference.
+        for _ in range(120):
+            now = (get(base, '/api/status').get('offer') or {})
+            if (now.get('dropoff') or '').startswith('333'):
+                break
+            time.sleep(0.05)
+        eq('an address the driver asked for overrules the card',
+           (get(base, '/api/status').get('offer') or {}).get('dropoff'),
+           '333 Asked For Ave, Kennesaw, GA 30144')
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a card too old to attach an address to ----------------------------------
 #
 # The ceiling, which is the whole of what keeps the old rule's protection. An

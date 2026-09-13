@@ -130,14 +130,56 @@
    * driver's metro is widest. */
   var BOX_MILES = 60;
 
+  /* ...and snapped to a grid before it is drawn, which is what makes a place
+   * you go back to stay looked up.
+   *
+   * The box is part of the cache key — it has to be, since the same place
+   * asked inside a box and asked wide are two different questions. But the
+   * anchor is the MEDIAN of the fixes on whichever rows are loaded, so one
+   * more card from the same shop moves it a few hundred feet, and the journal
+   * page's 7-day button against the map page's 30 moves it further. Every one
+   * of those writes a new key for a place already answered. Measured on three
+   * rows of one shop, taking the newest 3, 2 and 1: three keys, three asks.
+   *
+   * The places this costs are exactly the ones worth caching — the shops you
+   * are sent back to. At one question a second, a page of them is a minute of
+   * a driver watching an empty map fill in.
+   *
+   * A quarter degree is about 17 miles, so an anchor moving within one cell
+   * asks the same question. The box is then padded by half a step in each
+   * direction so the snapped box still CONTAINS every point the true box
+   * would have: the answer stays a superset of the one that was wanted, never
+   * a narrower search that quietly misses a long delivery.
+   *
+   * That is also why the cosine is taken at the cell edge furthest from the
+   * equator rather than at the snapped centre. Cosine shrinks away from the
+   * equator, so the widest the true box could have been anywhere in this cell
+   * is at its outer edge; taking it at the centre would let a box near the top
+   * of a cell come out narrower than the one it stands in for, and the
+   * superset claim above would be false in exactly the direction that loses
+   * places.
+   *
+   * Changing how the key is built strands what is already stored under the old
+   * one, so the first map drawn after this lands asks its places again and is
+   * slow once. The cache is not versioned out from under it: the answers taken
+   * WITHOUT a box are keyed on the place alone, they are still right, and
+   * throwing them away to tidy up would make that first map slower than it
+   * needs to be. The stranded boxed entries are a few KB that nothing reads. */
+  var ANCHOR_STEP = 0.25;
+
   function boxAround(at, miles) {
     if (!at) return null;
     var wide = miles || BOX_MILES;
-    var dLat = wide / 69.0;
-    var dLon = wide / (69.0 * Math.max(0.2, Math.cos(at.lat * Math.PI / 180)));
+    var half = ANCHOR_STEP / 2;
+    var lat = Math.round(at.lat / ANCHOR_STEP) * ANCHOR_STEP;
+    var lon = Math.round(at.lon / ANCHOR_STEP) * ANCHOR_STEP;
+    var edge = Math.abs(lat) + half;
+    var dLat = wide / 69.0 + half;
+    var dLon = wide / (69.0 * Math.max(0.2, Math.cos(edge * Math.PI / 180)))
+             + half;
     // Nominatim wants <left>,<top>,<right>,<bottom> — longitude first.
-    return [(at.lon - dLon).toFixed(4), (at.lat + dLat).toFixed(4),
-            (at.lon + dLon).toFixed(4), (at.lat - dLat).toFixed(4)].join(',');
+    return [(lon - dLon).toFixed(4), (lat + dLat).toFixed(4),
+            (lon + dLon).toFixed(4), (lat - dLat).toFixed(4)].join(',');
   }
 
   /* --- pins that cannot be in the same shift as the rest ------------------
@@ -556,5 +598,6 @@
            straysAmong: straysAmong, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, byPlace: byPlace,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
-           BOX_MILES: BOX_MILES, FAR_MILES: FAR_MILES, GAP_MS: GAP_MS };
+           BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,
+           FAR_MILES: FAR_MILES, GAP_MS: GAP_MS };
 }));

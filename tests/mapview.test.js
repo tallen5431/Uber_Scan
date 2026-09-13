@@ -90,11 +90,50 @@ var box = MV.boxAround({ lat: 33.94, lon: -84.58 }).split(',').map(Number);
 ok_('the box is longitude first, and the left is west of the right',
     box[0] < box[2]);
 ok_('...and the top is north of the bottom', box[1] > box[3]);
-ok_('...sixty miles of latitude, give or take',
-    Math.abs((box[1] - box[3]) * 69 / 2 - 60) < 1);
+ok_('...sixty miles of latitude at least',
+    (box[1] - box[3]) * 69 / 2 >= 60);
 ok_('...and wider than that in longitude, at this latitude',
     (box[2] - box[0]) > (box[1] - box[3]));
 eq('no anchor, no box', MV.boxAround(null), null);
+
+/* ---- the same place, asked the same question --------------------------
+ *
+ * The anchor is a median over whichever rows are loaded, so it moves when a
+ * card is added or the day range is changed. The box is part of the cache
+ * key, so an anchor that moves is a place asked again — and the places it
+ * costs are the ones you go back to.
+ *
+ * Snapped, an anchor moving within a cell asks the same question. These
+ * three points are within a few hundred feet of each other, which is the
+ * spread one more card of the same shop actually produces. */
+var NEARBY = [{ lat: 34.0300, lon: -84.6000 },
+              { lat: 34.0330, lon: -84.6012 },
+              { lat: 34.0290, lon: -84.5980 }];
+var keys = NEARBY.map(function (at) { return MV.boxAround(at); });
+eq('an anchor that drifts a few hundred feet asks the same question',
+   keys.filter(function (k) { return k !== keys[0]; }).length, 0);
+// ...and not by making every question the same one. A place in the next
+// metro is still a different question, or the box has stopped meaning
+// anything.
+no_('...while somewhere genuinely else is still a different one',
+    MV.boxAround({ lat: 33.7490, lon: -84.3880 }) === keys[0]);
+
+/* What the padding is for. Snapping moves the centre by up to half a step,
+ * so without padding the snapped box would sit off to one side of the box
+ * that was wanted and a place out the other side would fall outside it —
+ * a narrower search that quietly misses the long deliveries, which is the
+ * one direction BOX_MILES exists to prevent. The box must therefore
+ * CONTAIN every point the true box would have. */
+var worst = { lat: 34.0000 + MV.ANCHOR_STEP / 2, lon: -84.5000 + MV.ANCHOR_STEP / 2 };
+var wb = MV.boxAround(worst).split(',').map(Number);
+var reach = [[MV.BOX_MILES / 69, 0], [-MV.BOX_MILES / 69, 0],
+             [0, MV.BOX_MILES / (69 * Math.cos(worst.lat * Math.PI / 180))],
+             [0, -MV.BOX_MILES / (69 * Math.cos(worst.lat * Math.PI / 180))]];
+ok_('...and still reaches sixty miles every way from where the car was',
+    reach.every(function (d) {
+      var la = worst.lat + d[0], lo = worst.lon + d[1];
+      return lo >= wb[0] && lo <= wb[2] && la <= wb[1] && la >= wb[3];
+    }));
 // The cosine guard. Without the floor, a driver at the pole gets a division by
 // something near zero and a box spanning the planet — which is not a box at
 // all, and quietly turns the whole feature off while looking like it works.
