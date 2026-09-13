@@ -102,6 +102,16 @@ class OfferAccumulator:
         # checked. Never voted on — an address is not arithmetic and a rate is
         # not computed from it — so what one frame saw is kept.
         self.places = []
+        # Whether any frame of this card saw the card refuse to name a
+        # destination — "Customer dropoff" and no address, which is 18% of the
+        # cards this rig is shown.
+        #
+        # A union across the window, like `places`, and for the mirror-image
+        # reason. `places` keeps what ANY frame saw because a frame that missed
+        # an address is not evidence there was none; this keeps what any frame
+        # saw because a frame that missed the refusal is not evidence the card
+        # named somewhere. Both are one-way: once seen, kept for the window.
+        self.end_refused = False
         # Every distinct reading of this card, in the order they arrived.
         #
         # The merged row keeps ONE frame's text, and the whole reason this class
@@ -117,7 +127,32 @@ class OfferAccumulator:
         # card in a car. See SCANS_PER_OFFER.
         self.texts = []
         self.samples = 0
-        self.max_legs = 0
+        # The most legs of each KIND any single frame reported.
+        #
+        # Two counters and not one, and the difference is a card read at six
+        # times its rate. The single `max_legs` this replaces was described as
+        # "no frame of a real card lists more legs than the card has, so the
+        # most any single frame reported is a ceiling on the union" — and the
+        # inequality in that sentence points the wrong way. Every frame seeing
+        # at most N legs makes N a LOWER bound on what the card has, not an
+        # upper one, so using it to trim the union throws away real legs in
+        # exactly the case this class exists for: the card no single frame ever
+        # read whole.
+        #
+        # Measured on a $16.05 two-leg ride card read three times, trip leg
+        # alone then away leg twice: the window held both legs, the trim kept
+        # only the away leg, and the panel drew $188.64/hr in green on a card
+        # worth $32.47/hr. The frame that produced it is the one the pipeline
+        # locks on, because two identical reads are what locking means.
+        #
+        # An approach leg and a trip leg are different kinds — the card's own
+        # wording says which, see APPROACH_TAIL — so a union holding one of each
+        # is not evidence of a misread. Counting them separately keeps the guard
+        # the cap was written for (a misread duration inventing a leg lands in
+        # the same kind as its neighbours and is outvoted there) while no longer
+        # refusing a card the frames only ever saw in halves.
+        self.max_approach = 0
+        self.max_other = 0
         self.corrected = False
         # Whether any frame's distance token printed a decimal point. ORed like
         # `hasTotal` and for the same reason: one frame reading the point is
@@ -351,11 +386,12 @@ class OfferAccumulator:
         self.samples += 1
         self.last_add = now
 
-        # No frame of a real card lists more legs than the card has, so the most
-        # any single frame reported is a ceiling on the union. Without it a
+        # Per kind, for the reason in `self.max_approach`. Without any cap a
         # misread *duration* invents a leg the same way a misread distance used
         # to, and nothing outvotes it because it sits in a slot of its own.
-        self.max_legs = max(self.max_legs, len(detail))
+        _approach_here = sum(1 for l in detail if l.get('isApproach'))
+        self.max_approach = max(self.max_approach, _approach_here)
+        self.max_other = max(self.max_other, len(detail) - _approach_here)
         self.corrected = self.corrected or bool(parsed.get('milesCorrected'))
         self.had_decimal = self.had_decimal or bool(parsed.get('milesHadDecimal'))
         if parsed.get('miles') is not None and not any(
@@ -427,6 +463,13 @@ class OfferAccumulator:
             self.deadlines.append(parsed['deliverBy'])
         # Capped where the parser caps its own list, so a window of frames that
         # each read the map slightly differently cannot grow one.
+        # The parser's own rule, on this frame's own text, before the union
+        # below throws the connection between the two away. Asked here because
+        # this is the only place both halves exist at once: `self.places` is a
+        # union across frames and `text` is one frame's, so by the time _merged
+        # runs there is no text that can be said to belong to the list.
+        if OP.DROPOFF_NOT_STATED.search(parsed.get('text') or ''):
+            self.end_refused = True
         for place in parsed.get('places') or []:
             if len(self.places) >= MAX_PLACES:
                 break
@@ -438,14 +481,34 @@ class OfferAccumulator:
 
         return self._merged(parsed)
 
+    def _within_caps(self, slots):
+        """Drop slots beyond what any one frame saw OF THAT KIND.
+
+        More slots of a kind than any frame ever reported of that kind means at
+        least one is a misread, so the best-supported survive — the ones most
+        frames agreed on. Counting kinds separately is what stops a card whose
+        approach and trip legs were never seen in the same frame from losing
+        one of them; see `self.max_approach`.
+
+        Order is preserved. The legs are the journey in the order the card
+        printed it, and `to_pickup` reads the first one.
+        """
+        keep = []
+        for approach, cap in ((True, self.max_approach), (False, self.max_other)):
+            group = [l for l in slots if bool(l.get('isApproach')) is approach]
+            # A cap of zero for a group that has members cannot happen — a slot
+            # is only ever of a kind because some frame reported that kind — so
+            # there is no arithmetic here that can empty a group it should not.
+            if cap and len(group) > cap:
+                group = sorted(group, key=lambda l: -l['seen'])[:cap]
+            keep.extend(id(l) for l in group)
+        return [l for l in slots if id(l) in keep]
+
     def _merged(self, parsed):
         legs = list(self.legs)
         totals = [l for l in legs if l['isTotal']]
         used = totals or legs
-        if self.max_legs and len(used) > self.max_legs:
-            # More slots than any frame ever saw legs: at least one is a misread.
-            # Keep the best-supported, which is the ones most frames agreed on.
-            used = sorted(used, key=lambda l: -l['seen'])[:self.max_legs]
+        used = self._within_caps(used)
 
         minutes = None
         miles = None
@@ -636,14 +699,32 @@ class OfferAccumulator:
         # prints "Customer dropoff" and no address, and a second copy of a
         # refusal is a second thing to get wrong.
         #
-        # `text` is deliberately NOT passed. That argument is how find_dropoff
-        # sees the card saying it will not name a destination, and the merged
-        # text is one frame's — the one that happened to be last. Left out, the
-        # merge keeps the ends it can see in the places the window collected,
-        # and the per-frame refusal has already done its work: a frame that saw
-        # "Customer dropoff" contributed no dropoff to `self.places`.
+        # `text` is deliberately NOT passed, and the refusal it carries is
+        # supplied separately instead.
+        #
+        # Not passing it is right: find_dropoff would search the merged text for
+        # each place, and the merged text is ONE frame's while `places` is the
+        # union of all of them — so a place another frame contributed is simply
+        # not in that string, the search returns -1, and the guard that would
+        # have refused it does not fire. find_dropoff says as much itself.
+        #
+        # But the earlier version of this comment went on to claim the refusal
+        # had already done its work, "a frame that saw 'Customer dropoff'
+        # contributed no dropoff to `self.places`" — and that is false. The
+        # places list is find_places() output, which has no refusal in it; the
+        # refusal lives in find_dropoff, behind the `text` being withheld here.
+        # Measured: a delivery card reading "Customer dropoff" whose crop caught
+        # a street off the map behind it parses per-frame to dropoff None and
+        # merged to 'Lake Dr SE, Marietta' — a destination the card explicitly
+        # declined to give, written to the journal, pinned on the map, and
+        # handed to sameArea() as the answer to whether a second job sends the
+        # driver backwards.
+        #
+        # So the refusal is carried across the window on its own, as a union
+        # like the places are. See `self.end_refused`.
         merged['pickup'] = OP.find_pickup(merged['places'])
-        merged['dropoff'] = OP.find_dropoff(merged['places'])
+        merged['dropoff'] = (None if self.end_refused
+                             else OP.find_dropoff(merged['places']))
         # Voted the same way, and for the stronger reason: this one *is* the
         # duration. _consensus takes the majority and breaks a tie with the
         # larger value, which for minutes-since-midnight is the later deadline —

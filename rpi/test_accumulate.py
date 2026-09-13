@@ -281,13 +281,50 @@ acc = OfferAccumulator()
 acc.add(P.parse('$12.45 5 min (1.2 mi) away'), now=1500.0)
 merged = acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=1500.5)
 eq('two different single legs are still one card', merged['mergedFrom'], 2)
-# What it then reports is a separate matter, and unchanged by any of this: the
-# union is capped at the most legs any single frame saw, which is one, so the
-# second leg is trimmed back off. The cap is what stops a misread duration
-# inventing a leg, and it cannot tell that case from this one. The loop does
-# not act on the result — `whole` requires a total or two legs, so nothing is
-# spoken and it keeps resampling until a frame sees the card entire.
-eq('the union is still capped at one frame\'s worth', merged['legs'], 1)
+# ...and what it reports is now the card. This used to trim the second leg
+# straight back off: the union was capped at the most legs any single frame
+# saw, which is one here, and the comment that stood in this place said the cap
+# "cannot tell that case from this one".
+#
+# It can now, because the two legs are of different KINDS — the card's own
+# wording marks one as the approach — and the cap is counted per kind. What the
+# old behaviour cost is not hypothetical: on a $16.05 ride card read as trip,
+# away, away, the window held both legs, the trim kept the away leg alone, and
+# the panel drew $188.64/hr in green on a card worth $32.47/hr. The frame that
+# produced it is the one the pipeline locks on, two identical reads being what
+# locking means.
+#
+# The old comment also claimed the loop did not act on the result because
+# `whole` needs a total or two legs. Half true: nothing is SPOKEN, but rate()
+# still returned 'go', the panel still drew the figure, and scan_pi writes the
+# row on `ready and locked` rather than on `whole`.
+eq('the union now holds both legs, because they are different kinds',
+   merged['legs'], 2)
+eq('...so the merge reports the whole journey', merged['minutes'], 28.0)
+eq('...and the whole distance', merged['miles'], 9.6)
+eq('...which is the card, not the half of it that was read twice',
+   round(P.rate(merged, money)['perHour'], 2), 20.51)
+
+# The guard the cap was written for, which has to survive all of that: a misread
+# duration inventing a leg. The union grows to three slots while no single frame
+# ever reported more than two, and the invented one lands in the same KIND as
+# the real trip leg — so it is outvoted there rather than being kept in a slot
+# of its own, which is what the cap is for.
+#
+# Different frames each mis-reading the trip, not one frame listing three legs:
+# a frame that really does report three raises its own ceiling, and neither this
+# version nor the one before it guards that. The guard is about the UNION
+# outgrowing every frame.
+acc = OfferAccumulator()
+for _ in range(3):
+    acc.add(P.parse('$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip'), now=1600.0)
+_invented = acc.add(P.parse('$12.45 5 min (1.2 mi) away 41 min (0.2 mi) trip'),
+                    now=1600.5)
+eq('the window really is holding a third slot, or nothing below is a trim',
+   len(acc.legs), 3)
+eq('a leg no other frame saw is still trimmed away', _invented['legs'], 2)
+eq('...leaving the journey the frames agreed on', _invented['minutes'], 28.0)
+eq('...and its distance', _invented['miles'], 9.6)
 
 # A card whose total line arrives after its legs matches no slot either, and
 # resetting to it is harmless: a total is the whole journey by itself.
@@ -1066,6 +1103,57 @@ eq('a card that names only the shop still has no dropoff',
    _cust['dropoff'], None)
 eq('...and the shop is where it starts, which is all the card said',
    _cust['pickup'], _cust['places'][0] if _cust['places'] else None)
+
+# ...and the case that shop-only fixture cannot reach: a card that refuses to
+# name a destination WHILE the crop catches a street off the map behind it.
+#
+# This is where the merge invented one. `self.places` is find_places() output
+# and carries no refusal — the refusal lives in find_dropoff, behind the `text`
+# the merge deliberately withholds — so per-frame the dropoff was None and
+# merged it was the street. A destination the card explicitly declined to give,
+# written to the journal, pinned on the map, and handed to sameArea() as the
+# answer to whether a second job sends the driver backwards.
+#
+# The fixture has to produce the street through the real parser rather than
+# being handed a places list, or it proves nothing about what a camera does.
+_MAP_LEAK = ("$8.00\n5 min (1.1 mi) away\n20 min (7.3 mi) trip\n"
+             "Lake Dr SE, Marietta\nPickup\nChuy's\nCustomer dropoff")
+_leak_frame = P.parse(_MAP_LEAK)
+eq('the fixture really does leak a street into the places (%r)'
+   % (_leak_frame.get('places'),),
+   len(_leak_frame.get('places') or []) > 1, True)
+eq('...and the parser refuses it per-frame, which is the behaviour to keep',
+   _leak_frame.get('dropoff'), None)
+# ...and without the card's own words it would be offered, or the check above
+# passes for a reason that has nothing to do with the refusal.
+eq('...only because the card said so, not because the street is unusable', bool(P.find_dropoff(_leak_frame.get('places'), None) is not None), True)
+
+acc = OfferAccumulator()
+for _ in range(3):
+    _leak = acc.add(P.parse(_MAP_LEAK))
+eq('the merge does not invent a destination the card refused to give',
+   _leak['dropoff'], None)
+eq('...while still keeping the street it saw, which is evidence either way', bool(any('Lake Dr' in p for p in (_leak['places'] or []))), True)
+
+# The refusal is a UNION across the window, like the places are. A frame that
+# missed "Customer dropoff" — a partial read, a hand over the screen — is not
+# evidence that the card named somewhere, so one frame seeing it settles the
+# window.
+_HALF = "$8.00\n5 min (1.1 mi) away\n20 min (7.3 mi) trip\nLake Dr SE, Marietta\nPickup\nChuy's"
+eq('the half-read frame on its own does name an end (%r)'
+   % (P.parse(_HALF).get('dropoff'),),
+   P.parse(_HALF).get('dropoff') is not None, True)
+acc = OfferAccumulator()
+acc.add(P.parse(_MAP_LEAK))          # one frame saw the refusal
+_after = acc.add(P.parse(_HALF))     # the next one did not
+eq('...so a later frame that missed the refusal does not undo it',
+   _after['dropoff'], None)
+
+# ...and the refusal does not outlive the card it belonged to.
+acc.reset()
+_fresh = acc.add(P.parse(_HALF))
+eq('a new card starts without the last one\'s refusal',
+   _fresh['dropoff'] is not None, True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)

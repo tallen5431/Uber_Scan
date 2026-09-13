@@ -3102,6 +3102,80 @@ unrounded one, so the billed-minutes check needs a shopping allowance (7 items
 at 25 seconds bills 25.9166… minutes), and the missing-figure check needs a card
 that names no distance at all.
 
+### A leg the window had, thrown away; a destination the card refused, invented
+
+Both from the audit fleet, both verified by running the real code before
+anything was changed, and both in `accumulate.py` — the module that turns
+several half-read frames into one offer.
+
+**The union of legs was capped by a bound pointing the wrong way.** The comment
+read: *"No frame of a real card lists more legs than the card has, so the most
+any single frame reported is a ceiling on the union."* The first clause is true
+and the second does not follow from it. If every frame sees at most N legs, N is
+a **lower** bound on what the card has — and it was being used as an upper bound
+on what the union may keep, which throws away real legs in precisely the case
+this module exists for: the card no single frame ever read whole.
+
+Measured on a $16.05 two-leg ride card read three times — trip leg alone, then
+away leg twice — the window held both legs and the merge returned only the away
+leg: **$188.64/hr on a card worth $32.47/hr**, drawn green. The frame that
+produces it is the one the pipeline locks on, two identical reads being what
+locking means. A note appears beside it (`whole: false`), but `rate()` still says
+ACCEPT and `scan_pi` writes the row on `ready and locked`, not on `whole`.
+
+The cap is counted per KIND now. An approach leg and a trip leg are different
+things — the card's own wording says which — so a union holding one of each is
+not evidence of a misread, while an invented leg still lands in the same kind as
+its neighbours and is outvoted there. The suite's own check used to assert the
+old behaviour, with a comment conceding the cap "cannot tell that case from this
+one". It can now. Six mutants, six caught.
+
+**And the merge invented a destination on a card that refused to give one.** The
+comment there was mine, from earlier in this same session: *"the per-frame
+refusal has already done its work: a frame that saw 'Customer dropoff'
+contributed no dropoff to `self.places`"*. That is false. `self.places` is
+`find_places()` output, which carries no refusal; the refusal lives in
+`find_dropoff`, behind the `text` the merge deliberately withholds.
+
+Withholding the text is still right — `find_dropoff` searches it for each place,
+and the merged text is ONE frame's while `places` is the union of all of them, so
+a place another frame contributed is not in that string at all. What was missing
+is that the refusal has to travel separately. It is a union across the window
+now, like the places are, and for the mirror-image reason: a frame that missed an
+address is not evidence there was none, and a frame that missed the refusal is
+not evidence the card named somewhere.
+
+Reachable, and demonstrated: a delivery card reading "Customer dropoff" whose
+crop caught a street off the map behind it parses per-frame to `dropoff: None`
+and merged to `'Lake Dr SE, Marietta'` — a destination the card explicitly
+declined to give, written to the journal, pinned on the map, and handed to
+`sameArea()` as the answer to whether a second job sends the driver backwards.
+
+### A check that fired one run in four with nothing wrong
+
+Chasing the leg fix turned up a suite failure that was not the leg fix. The same
+check fails at HEAD, once in four runs under load, and it is worth writing down
+because of *why*.
+
+`test_scan_pi.py` asserted that "a card that never reads whole stops being
+re-read every half second", as a rate: reads per second over the stretch after
+the resample burst. The drive produces 12 reads, of which **exactly one** lands
+after the settle mark. A rate computed from one read is not a rate — it is the
+question "did that read land more than 0.83s after the mark", and the answer
+moves with how busy the machine is. Under load the drive stalls, the last read
+lands earlier, the span shrinks, and the rate goes *up* through the threshold.
+
+The fault the check exists for is a shape, not a rate: each read inside the
+burst used to push the burst's end four seconds further out, so a card that never
+reads whole was re-read every half second for as long as it sat on screen. With
+that bug the reads spread across the drive; without it they bunch at the front
+and stop. That is a ratio of two counts, which no amount of load can move.
+Mutating the real arming condition now gives 9 of 22 reads after the burst
+against 1 of 12 when healthy — a shape, with room either side of it.
+
+A check that fires when nothing is wrong is worse than no check, because it
+teaches whoever reads it to skip the line.
+
 ### Searching near where the car actually was
 
 The driver's own words: *"usually the pickup/restaurant is the closest one to
@@ -6324,7 +6398,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 36 suites, 5909 checks
+npm test                # all 36 suites, 5924 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 

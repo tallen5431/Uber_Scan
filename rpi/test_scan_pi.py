@@ -1164,25 +1164,35 @@ else:
     # further out, so a card that never reads whole held the reader at one read
     # every half second for as long as it was on screen — the opposite of what
     # the verify beat's backoff is for, and it won, because it is checked first.
+    early = [t for t in reads if t <= reads[0] + RESAMPLE_SETTLE]
     settled = [t for t in reads if t > reads[0] + RESAMPLE_SETTLE]
-    span = (reads[-1] - reads[0] - RESAMPLE_SETTLE) if len(reads) > 1 else 0
-    # No `if span > 2.0` around this. There was one, and on every run of this
-    # suite the span came out at about 0.4s — a 9-second drive, but the reads
-    # bunch at the start — so the two checks below had never once executed. A
-    # guard that is false on every run is not a guard, it is two checks the
-    # suite counts and does not make; the count moved by two and nothing said
-    # so.
+
+    # Counts, not a rate. This was a rate — reads per second over the stretch
+    # after the burst — and it could not work, for a reason the numbers say
+    # plainly: measured over three runs the drive produces 12 reads of which
+    # exactly ONE lands after the settle mark. A rate computed from one read is
+    # not a rate; it is the question "did that read land more than 0.83s after
+    # the mark", and the answer moves with how busy the machine is. Under a
+    # loaded suite the drive stalls, the last read lands earlier, `span` shrinks
+    # and the rate goes UP through the threshold. Measured: this failed once in
+    # four runs under load, at HEAD, with nothing wrong.
     #
-    # The span is a property of the harness, not of the code under test, so it
-    # is asserted rather than tiptoed around: if a change to the drive makes it
-    # too short to judge a rate over, this says so instead of going quiet.
-    ok_('the drive produced a stretch long enough to judge a rate over (%.2fs)'
-        % span, span > 0.2)
-    rate = len(settled) / span if span > 0 else 0.0
+    # A check that fires when nothing is wrong is worse than no check, because
+    # it teaches whoever reads it to skip the line.
+    #
+    # The fault it exists for is a SHAPE: each read inside the burst used to
+    # push the burst's end four seconds further out, so a card that never reads
+    # whole was re-read every half second for as long as it sat on screen. With
+    # that bug the reads spread evenly across the drive; without it they bunch
+    # at the front and stop. That is a ratio of two counts, which no amount of
+    # load can move, and it is what is asked here.
+    ok_('the drive produced a burst to judge at all (%d reads)' % len(reads),
+        len(reads) >= 6)
+    ok_('...and ran long enough to have an after (%d early, %d settled)'
+        % (len(early), len(settled)), len(settled) >= 1)
     ok_('a card that never reads whole stops being re-read every half second '
-        '(%.1f/s against %.1f)' % (rate, 1.0 / SP2.RESAMPLE_EVERY * 0.6),
-        rate < 1.0 / SP2.RESAMPLE_EVERY * 0.6)
-    ok_('...though it is still looked at now and then', len(settled) >= 1)
+        '(%d of %d reads came after the burst)' % (len(settled), len(reads)),
+        len(settled) * 4 <= len(early))
 
 # --- a heartbeat is not a reading -----------------------------------------
 # The loop says "still here" every four seconds so the page can tell a rig that
