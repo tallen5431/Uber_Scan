@@ -34,6 +34,13 @@
   }
   button.go { background: #0d5c31; border-color: #17c964; color: #d7ffe6; }
   button[disabled] { opacity: .5; cursor: default; }
+  /* A toggle has to look like it is on. Not colour alone — the rig's panel is
+     read in daylight through a windscreen, and a border that merely changes
+     hue is the first thing that stops being visible. */
+  button[aria-pressed="true"] {
+    border-color: #7aa2f7; color: #cfe0ff;
+    box-shadow: inset 0 0 0 1px #7aa2f7;
+  }
   .split { display: grid; grid-template-columns: minmax(0, 1fr) 340px;
            min-height: 0; }
   @media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); }
@@ -85,6 +92,13 @@
     <label>near <input type="text" id="hint" placeholder="Georgia, USA"></label>
     <button id="load">Load offers</button>
     <button id="place" class="go" disabled>Place them on a map</button>
+    <!-- Where the car actually was, which needs no geocoder and no network:
+         the rows carry it, off the rig's own GPS. Off by default because it is
+         a hundred dots over the pins and the pins are the subject — but it is
+         the only thing on this page that is MEASURED rather than looked up,
+         and so the only thing that can say a pin is in the wrong place without
+         being in the wrong place itself. -->
+    <button id="trail" aria-pressed="false" title="Draw where the rig's GPS said the car was">◍ Where you were</button>
     <button id="forget" title="Throw away the remembered lookups on this device">Forget lookups</button>
     <span class="note" id="status">no offers loaded yet</span>
   </div>
@@ -106,28 +120,47 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="map-view.js"></script>
 <script>
 (function () {
   'use strict';
 
   var el = {};
-  ['days', 'hint', 'load', 'place', 'forget', 'status', 'map', 'side',
+  ['days', 'hint', 'load', 'place', 'forget', 'trail', 'status', 'map', 'side',
    'sideEmpty', 'sideBody'].forEach(function (id) { el[id] = document.getElementById(id); });
 
   var offers = [];
-  var map = null, layer = null;
+  var map = null, layer = null, trail = null;
   // The marker for each place, by the name the card gave it, so a row in the
   // sidebar can take the map to the pin it is describing.
   var marks = {};
 
+  /* Everything with no map in it — the geocoder, the rate limit, the box drawn
+     around where the car was, the test for a pin that cannot be in this shift —
+     lives in map-view.js. This file is the drawing and nothing else, so the
+     offers page can have the same map without a second copy of the deciding.
+     See the header there for why a coordinate computed by this rig is never
+     allowed to become a number the driver acts on. */
+  var MV = window.MapView;
+
   /* How far out of the shift a pin has to be before it is treated as a bad
-     lookup rather than a long trip. A shift happens in one metro; a long ride
-     is forty miles, so seventy-five refuses nothing real and catches the
-     geocoder answering a misread street with a real place in another state.
-     Up here rather than inside the run because the sidebar quotes it. */
-  var FAR_MILES = 75;
+     lookup rather than a long trip. Quoted by the sidebar, which is why it is
+     read out here rather than left inside the run. */
+  var FAR_MILES = MV.FAR_MILES;
 
   function say(text) { el.status.textContent = text; }
+
+  /* One geocoder for the page, so the one-a-second rule is a property of the
+     page and not of whichever loop happens to be running. */
+  var CACHE_KEY = 'uberscan.geocode.v1';
+  var geo = new MV.Geocoder({
+    hint: function () { return el.hint.value; },
+    store: {
+      get: function () { return localStorage.getItem(CACHE_KEY); },
+      set: function (s) { localStorage.setItem(CACHE_KEY, s); },
+      clear: function () { localStorage.removeItem(CACHE_KEY); }
+    }
+  });
 
   /* --- what the rig knows --------------------------------------------------
    *
@@ -145,16 +178,12 @@
         offers = (body && body.offers) || [];
         var withEnds = offers.filter(function (o) { return o.pickup || o.dropoff; });
         var mappable = offers.filter(function (o) { return o.pickup && o.dropoff; });
-        // The fallback anchor: the middle of everywhere the rig knew it was
-        // over this range. Used for a place named only by rows with no fix —
-        // every row recorded before the rig had a GPS, and every row where the
-        // fix had gone stale — which is better than the typed hint and costs
-        // nothing, because a shift happens in one metro.
-        var fixes = offers.map(fixOf).filter(Boolean);
-        HOME = fixes.length
-          ? { lat: median(fixes.map(function (p) { return p.lat; })),
-              lon: median(fixes.map(function (p) { return p.lon; })) }
-          : null;
+        // How many rows can say where the car was, which is what decides
+        // whether a place gets searched near the driver or searched blind.
+        // Counted rather than averaged: the middle of every fix in the range
+        // was computed here for a while and read by nothing — a place whose
+        // own rows are silent gets no anchor on purpose, see anchorFor.
+        var fixes = offers.map(MV.fixOf).filter(Boolean);
         say(offers.length + ' offers · ' + withEnds.length + ' name somewhere · '
             + mappable.length + ' name both ends'
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
@@ -165,339 +194,31 @@
       .catch(function (e) { say('could not load: ' + (e && e.message || e)); });
   }
 
-  /* --- the geocoder --------------------------------------------------------
+  /* --- the run ------------------------------------------------------------
    *
-   * Nominatim, which is free, keyless and asks for at most one request a
-   * second. That rate is kept deliberately rather than hopefully: a page that
-   * hammers it gets the whole project blocked, and there is no hurry here.
+   * The geocoder, the one-a-second rule, the box around where the car was, the
+   * second walk for the places a box refused, and the test for a pin that
+   * cannot be in this shift are all in map-view.js. Every one of them used to
+   * be here, and every one of them is wanted by the offers page too.
    *
-   * Answers are cached in localStorage under the exact string searched, so the
-   * second run of a week costs nothing and the driver can re-check a map
-   * without asking anybody anything. */
-  var CACHE_KEY = 'uberscan.geocode.v1';
-  var cache = {};
-  try { cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') || {}; } catch (e) { cache = {}; }
-
-  function remember(key, value) {
-    cache[key] = value;
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); } catch (e) { /* full or private */ }
-  }
-
-  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-
-  /* One request a second, and the page has to hold itself to it: Nominatim
-     blocks the projects that do not, and being blocked here means this page
-     stops working for everyone who pulls this repo, not just for one run. */
-  var GAP_MS = 1100;
-
-  /* The string actually searched for, in ONE place.
-   *
-   * It used to be built by hand in three — inside lookup(), in the estimate of
-   * how many were left to do, and in the rate limit — and the third copy was
-   * consulted at the wrong moment, which is how the rate limit came to apply to
-   * nothing at all. lookup() writes the answer into the cache before it
-   * returns, so a check made AFTER it always finds the key present and always
-   * skipped the wait: measured against the map suite's stub, six questions went
-   * out in 33ms under a rule of one a second. Every lookup that used the
-   * network was exempt from the limit and every one that failed was not. */
-  function queryFor(place) {
-    var hint = el.hint.value.trim();
-    return hint ? place + ', ' + hint : place;
-  }
-
-  /* --- where the car was, which is the whole of the improvement ------------
-   *
-   * The driver's own words: "usually the pickup/restaurant is the closest one
-   * to me". That is exactly the question a geocoder cannot answer and a
-   * coordinate can. Handed "Chipotle" it returns a Chipotle, and handed a
-   * misread street it returns a real street somewhere — both with the same
-   * confidence, and the `near` box above is one hint for a whole week, which
-   * is no help at all to a driver who works more than one side of a metro.
-   *
-   * Since rpi/gps.py, a row carries the position the car was at when the card
-   * came up. So each place can be searched inside a box around where the driver
-   * actually was at that moment, rather than around a string they typed once.
-   *
-   * The MEDIAN of the positions that named it, not the mean: a shop appears on
-   * a dozen offers over a week, and one row whose GPS was wrong should not drag
-   * the box. Places named by rows with no position — everything recorded before
-   * the rig had a GPS, and every row where the fix was stale — get no anchor and
-   * fall back to the typed hint, which is what this page did for all of them. */
-  var HOME = null;          // the median of every position in the loaded range
-
-  function median(values) {
-    var sorted = values.slice().sort(function (a, b) { return a - b; });
-    var mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-  }
-
-  function fixOf(o) {
-    return (typeof o.lat === 'number' && typeof o.lon === 'number'
-            && isFinite(o.lat) && isFinite(o.lon)) ? { lat: o.lat, lon: o.lon }
-                                                   : null;
-  }
-
-  function anchorFor(place) {
-    var seen = [];
-    offers.forEach(function (o) {
-      if (o.pickup !== place && o.dropoff !== place) return;
-      var at = fixOf(o);
-      if (at) seen.push(at);
-    });
-    // No anchor unless the rows that named THIS place knew where they were.
-    //
-    // The middle of the whole range was tried as a fallback and is deliberately
-    // not used: on a journal where only the last week carries positions, it
-    // would box a place from eight months and two cities ago to last week's
-    // metro and refuse it. A place whose own rows are silent about where they
-    // were is a place this page knows nothing new about, and it is asked
-    // exactly the way it was asked before any of this existed.
-    if (!seen.length) return null;
-    return { lat: median(seen.map(function (p) { return p.lat; })),
-             lon: median(seen.map(function (p) { return p.lon; })) };
-  }
-
-  /* How wide to draw that box.
-   *
-   * Generous on purpose. The pickup is minutes away and the dropoff can be
-   * forty miles, so a box tight enough to be clever would refuse the long
-   * deliveries — and the thing being excluded here is not "a bit further than
-   * usual", it is another state. Sixty miles is comfortably outside any real
-   * job and comfortably inside the nearest place with the same street name.
-   *
-   * A degree of latitude is about 69 miles everywhere; a degree of longitude is
-   * that times the cosine of the latitude, which at 34°N is about 57. Getting
-   * that factor wrong would draw a box a fifth too narrow in the direction this
-   * driver's metro is widest. */
-  var BOX_MILES = 60;
-
-  function boxAround(at) {
-    if (!at) return null;
-    var dLat = BOX_MILES / 69.0;
-    var dLon = BOX_MILES / (69.0 * Math.max(0.2, Math.cos(at.lat * Math.PI / 180)));
-    // Nominatim wants <left>,<top>,<right>,<bottom> — longitude first.
-    return [(at.lon - dLon).toFixed(4), (at.lat + dLat).toFixed(4),
-            (at.lon + dLon).toFixed(4), (at.lat - dLat).toFixed(4)].join(',');
-  }
-
-  /* The cache key. It has to carry the box: the same place asked inside a box
-     and asked without one are two different questions with two different right
-     answers, and storing the second under the first's key is how a good answer
-     gets overwritten by a worse one. */
-  function keyFor(place, box) {
-    return queryFor(place) + (box ? ' @' + box : '');
-  }
-
-  function remembered(place, box) {
-    return Object.prototype.hasOwnProperty.call(cache, keyFor(place, box));
-  }
-
-  /* When the last question actually went out, so the rate limit is a property
-   * of the PAGE rather than of one loop.
-   *
-   * It was a sleep at the bottom of the asking loop, which is correct for one
-   * loop and wrong the moment there are two: the places a box refuses are asked
-   * again in a second walk, and the gap between the last question of the first
-   * and the first question of the second was nobody's business. Measured
-   * against the map suite's stub: 4ms, under a rule of one a second.
-   *
-   * Waiting BEFORE the request rather than after it also drops the "except the
-   * last one" special case — there is no trailing wait to skip, because nothing
-   * waits except immediately before talking. */
-  var lastAsk = 0;
-
-  async function paced(fn) {
-    var due = lastAsk + GAP_MS - Date.now();
-    if (due > 0) await sleep(due);
-    lastAsk = Date.now();
-    return fn();
-  }
-
-  function ask(query, box) {
-    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q='
-            + encodeURIComponent(query)
-            + (box ? '&viewbox=' + encodeURIComponent(box) + '&bounded=1' : '');
-    return fetch(url, { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (hits) {
-        var hit = hits && hits[0];
-        return hit ? { lat: Number(hit.lat), lon: Number(hit.lon),
-                       name: hit.display_name, kind: hit.type || '',
-                       bounded: !!box } : null;
-      })
-      .catch(function () { return null; });      // offline, blocked, rate-limited
-  }
-
-  function lookup(place, box) {
-    var key = keyFor(place, box);
-    if (Object.prototype.hasOwnProperty.call(cache, key)) {
-      return Promise.resolve(cache[key]);
-    }
-    return paced(function () { return ask(queryFor(place), box); })
-      .then(function (found) {
-        remember(key, found);
-        return found;
-      });
-  }
-
-  /* Straight-line miles, which is the only distance this page can compute. It
-     is never the driving distance, and that asymmetry is exactly what makes it
-     useful as a check: a straight line between two points CANNOT be longer
-     than the road between them. Where it is, one of the two pins is wrong. */
-  function crowMiles(a, b) {
-    var R = 3958.8, toRad = Math.PI / 180;
-    var dLat = (b.lat - a.lat) * toRad, dLon = (b.lon - a.lon) * toRad;
-    var la = a.lat * toRad, lb = b.lat * toRad;
-    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-          + Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(la) * Math.cos(lb);
-    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-  }
-
+   * What is left in this function is what only this page can do: turn the
+   * buttons off while it runs, hand the wording to the status line, and draw
+   * the answer. */
   async function placeAll() {
     el.place.disabled = true;
     el.load.disabled = true;
-    var jobs = offers.filter(function (o) { return o.pickup || o.dropoff; });
-    var wanted = [];
-    jobs.forEach(function (o) {
-      if (o.pickup) wanted.push(o.pickup);
-      if (o.dropoff) wanted.push(o.dropoff);
-    });
-    var distinct = wanted.filter(function (v, i, all) { return all.indexOf(v) === i; });
-    // The box each place will be searched inside, worked out once. A place
-    // named by rows that carried a position gets one around where the car
-    // actually was; everything else falls back to the middle of the range, and
-    // then to nothing, which is what this page did for every place before the
-    // rig could say where it was.
-    var boxes = {};
-    distinct.forEach(function (q) { boxes[q] = boxAround(anchorFor(q)); });
-    var anchored = distinct.filter(function (q) { return !!boxes[q]; }).length;
-    var fresh = distinct.filter(function (q) { return !remembered(q, boxes[q]); });
-    say(distinct.length + ' distinct places, ' + anchored + ' searched near '
-        + 'where you were, ' + fresh.length + ' to look up'
-        + (fresh.length ? ' (about ' + Math.ceil(fresh.length * GAP_MS / 1000) + 's)'
-                        : ' — all remembered'));
-
-    var found = {};
-
-    /* One paced walk over a list of places, in ONE place.
-     *
-     * The pacing used to be inline here, and then a second, unpaced request
-     * appeared inside lookup() for the places a box refused — which sent two
-     * questions back to back under a rule of one a second. Measured against the
-     * map suite's stub: 3ms apart. Being blocked by Nominatim would stop this
-     * page working for everyone who pulls the repo, so there is exactly one
-     * loop that talks to it and everything goes through this. */
-    async function walk(list, boxFor, note) {
-      var todo = list.filter(function (q) { return !remembered(q, boxFor(q)); });
-      var left = todo.length, done = 0;
-      for (var i = 0; i < list.length; i++) {
-        var q = list[i];
-        // Asked BEFORE the lookup. Afterwards the answer is already in the
-        // cache and "did this use the network" can only be answered wrong.
-        var wasKnown = remembered(q, boxFor(q));
-        // The waiting lives in `paced`, around the request itself, so a place
-        // already remembered costs nothing and two walks in a row cannot
-        // produce a gap neither of them owns.
-        var hit = await lookup(q, boxFor(q));                       // eslint-disable-line no-await-in-loop
-        found[q] = hit;
-        done++;
-        if (!wasKnown) left--;
-        if (done % 3 === 0 || done === list.length) {
-          say(note + ' ' + done + ' of ' + list.length
-              + (left > 0 ? ' — about ' + Math.ceil(left * GAP_MS / 1000) + 's left' : ''));
-        }
-      }
+    try {
+      var run = await MV.placeAll(offers, geo, say);
+      render(run.placed, run.strays);
+      say(run.done);
+    } finally {
+      // In a finally, because a lookup that throws must not leave the page
+      // with both its buttons dead and no way to try again. The old version
+      // re-enabled them on the line after render() and so had exactly that
+      // failure for any error between here and there.
+      el.place.disabled = false;
+      el.load.disabled = false;
     }
-
-    await walk(distinct, function (q) { return boxes[q]; }, 'looked up');
-
-    /* Places a box refused, asked again without one.
-     *
-     * A box is a claim that the answer is within sixty miles of where the car
-     * was, and almost every empty answer means the address was misread badly
-     * enough that nothing near the driver matches — which is worth knowing and
-     * is what the sidebar's "could not find" list is for. But it can also be a
-     * genuinely distant one, and a pin LOST to a feature meant to gain pins is
-     * the wrong trade. So they are asked wide, through the same paced walk, and
-     * what comes back is judged by the stray test like everything else.
-     *
-     * Only the ones that had a box AND came back empty, so the cost is
-     * proportional to the problem rather than to the size of the journal. */
-    var refused = distinct.filter(function (q) { return boxes[q] && !found[q]; });
-    if (refused.length) {
-      say(refused.length + ' were not found near you — asking again without '
-          + 'the box (about ' + Math.ceil(refused.length * GAP_MS / 1000) + 's)');
-      await walk(refused, function () { return null; }, 'asked wide');
-    }
-
-    /* --- pins that cannot be in the same shift as the rest ------------------
-     *
-     * A geocoder handed a misread street answers anyway, and the answer is a
-     * real place somewhere: "Daffodll Ln" becomes a Daffodil Lane four states
-     * away, with the same confidence as the right one. Two things go wrong
-     * then, and the second is the worse one.
-     *
-     * It puts a pin in the wrong place — which is what this page is FOR, since
-     * a person spots that instantly where the rig never could.
-     *
-     * And it silently ruins the view for everything else. fitBounds over a set
-     * containing one point eight hundred miles out is a map of the country with
-     * the shift as a single dot, so the one bad lookup hides the ninety good
-     * ones the driver came here to check.
-     *
-     * A shift happens in one metro. Distance from the MEDIAN of the pins, not
-     * from their mean, because the mean is dragged by exactly the outlier being
-     * looked for. The threshold is deliberately generous: a long ride is forty
-     * miles and this refuses nothing under seventy-five, so what it catches is
-     * another state rather than a longer trip than usual.
-     *
-     * They are still drawn, in red, and listed with how far out they are —
-     * refusing to show them would hide the very thing worth seeing. What they
-     * do not get is a say in where the map looks. See FAR_MILES. */
-    var everyPoint = [];
-    distinct.forEach(function (q) { if (found[q]) everyPoint.push(found[q]); });
-    var middle = everyPoint.length
-      ? { lat: median(everyPoint.map(function (p) { return p.lat; })),
-          lon: median(everyPoint.map(function (p) { return p.lon; })) }
-      : null;
-    var strays = {};
-    if (middle) {
-      distinct.forEach(function (q) {
-        if (!found[q]) return;
-        var out = crowMiles(middle, found[q]);
-        if (out > FAR_MILES) strays[q] = out;
-      });
-    }
-
-    var placed = jobs.map(function (o) {
-      var a = o.pickup ? found[o.pickup] : null;
-      var b = o.dropoff ? found[o.dropoff] : null;
-      var crow = (a && b) ? crowMiles(a, b) : null;
-      var stated = typeof o.miles === 'number' ? o.miles : null;
-      // The card's distance covers getting to the pickup as well as the job,
-      // so the straight line between the two ends should be comfortably under
-      // it. Over it means a pin is in the wrong place.
-      var impossible = (crow !== null && stated !== null && crow > stated + 0.5);
-      return { offer: o, from: a, to: b, crow: crow, stated: stated,
-               impossible: impossible,
-               // How far out of the shift each end landed, when it did. Kept
-               // per end rather than as one flag, because which of the two is
-               // in another state is the whole of what the driver needs to
-               // know to judge it.
-               fromStray: o.pickup ? (strays[o.pickup] || null) : null,
-               toStray: o.dropoff ? (strays[o.dropoff] || null) : null };
-    });
-    render(placed, strays);
-    el.place.disabled = false;
-    el.load.disabled = false;
-    // Out of the offers that named BOTH ends, which are the only ones that
-    // could ever be drawn end to end. Counting against everything that named
-    // anywhere would fold "the card never said where this went" into the same
-    // figure as "the geocoder got it wrong", and those are different problems
-    // with different answers. The first is counted on its own below.
-    var couldDraw = jobs.filter(function (o) { return o.pickup && o.dropoff; }).length;
-    var ok = placed.filter(function (p) { return p.from && p.to && !p.impossible; }).length;
-    say(ok + ' of ' + couldDraw + ' drawn end to end');
   }
 
   /* --- drawing ------------------------------------------------------------- */
@@ -534,36 +255,6 @@
     try { return new Date(at).toLocaleString(); } catch (e) { return String(at); }
   }
 
-  /* --- one pin per place, not one per offer --------------------------------
-   *
-   * Every job at the same shop geocodes to the same coordinate, so the page
-   * was stacking a marker per offer on the same pixel. On this driver's real
-   * traffic that is a handful of merchants and a hundred offers: the map read
-   * as a dozen jobs, the popups were unreachable under each other, and how
-   * often a place actually came up — which is most of what makes a map of a
-   * shift worth looking at — was invisible.
-   *
-   * Keyed on the place as the CARD wrote it rather than on the coordinate. Two
-   * spellings the geocoder happened to resolve to the same point are two things
-   * the rig read, and this page exists to check what the rig read. */
-  function byPlace(placed) {
-    var seen = {}, order = [];
-    function note(name, point, role, p) {
-      if (!name || !point) return;
-      if (!seen[name]) {
-        seen[name] = { name: name, point: point, roles: {}, jobs: [] };
-        order.push(name);
-      }
-      seen[name].roles[role] = true;
-      seen[name].jobs.push(p);
-    }
-    placed.forEach(function (p) {
-      note(p.offer.pickup, p.from, 'pickup', p);
-      note(p.offer.dropoff, p.to, 'dropoff', p);
-    });
-    return order.map(function (k) { return seen[k]; });
-  }
-
   function render(placed, strays) {
     if (!ensureMap()) return;
     if (layer) { map.removeLayer(layer); }
@@ -572,7 +263,7 @@
     var bounds = [];
     marks = {};
 
-    byPlace(placed).forEach(function (place) {
+    MV.byPlace(placed).forEach(function (place) {
       var out = strays[place.name] || null;
       // Red for a pin that cannot be in this shift, and it wins over both
       // roles: whether a wrong coordinate was a pickup or a dropoff is not the
@@ -620,6 +311,70 @@
 
     if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
     sidebar(placed, strays);
+    // Redrawn with the rest, since the range may have changed under it. If it
+    // was not showing it stays not showing — a toggle that turns itself back
+    // on is a toggle that was not a decision.
+    drawTrail();
+  }
+
+  /* --- where the car actually was -----------------------------------------
+   *
+   * Every other mark on this page is a GUESS: a place name off a card, handed
+   * to a geocoder, answered with a coordinate that is right most of the time.
+   * These are not. They are what the rig's own GPS said at the moment the card
+   * came up, and they are the only thing here that can contradict a pin
+   * without being the same kind of thing as the pin.
+   *
+   * Which makes the useful reading the disagreement. A pickup pin a long way
+   * from every position the car held that evening is a pin to distrust,
+   * whatever the geocoder said — and the driver can see that in one look
+   * without anything here having to decide it for them.
+   *
+   * Drawn small, translucent and below the pins on purpose. This is context,
+   * not the subject, and a hundred opaque dots over the jobs would bury what
+   * the page is for. Overlap is information too: a dark patch is where the car
+   * sat waiting, which is most of a shift. */
+  function drawTrail() {
+    if (!map) return;
+    if (trail) { map.removeLayer(trail); trail = null; }
+    if (el.trail.getAttribute('aria-pressed') !== 'true') return;
+    var fixes = offers.map(function (o) {
+      var at = MV.fixOf(o);
+      return at ? { at: at, offer: o } : null;
+    }).filter(Boolean);
+    trail = L.layerGroup().addTo(map);
+    fixes.forEach(function (f) {
+      L.circleMarker([f.at.lat, f.at.lon], {
+        radius: 4, weight: 1, color: '#7aa2f7', opacity: .5,
+        fillColor: '#7aa2f7', fillOpacity: .22
+      }).bindPopup('<b>where the car was</b><br><span class="note">'
+                   + esc(when(f.offer.at)) + '</span>'
+                   // The age of the fix at the moment it was recorded. A
+                   // position twenty seconds stale is half a mile at fifty
+                   // miles an hour, and a driver judging a pin by its distance
+                   // from these dots is owed that.
+                   + (typeof f.offer.gpsAge === 'number'
+                      ? '<br><span class="note">fix was ' + f.offer.gpsAge
+                        + 's old</span>' : ''))
+        .addTo(trail);
+    });
+    // These sit under the job pins without being asked to. A circleMarker is
+    // an SVG shape and lives in Leaflet's overlay pane; the job pins are
+    // divIcons and live in the marker pane, which is above it. So the context
+    // cannot end up on top of the subject however many times either is
+    // redrawn — which a z-order fiddled by hand at the end of a redraw could.
+    return fixes.length;
+  }
+
+  function trailNote() {
+    var fixes = offers.filter(function (o) { return !!MV.fixOf(o); }).length;
+    if (el.trail.getAttribute('aria-pressed') !== 'true') return;
+    say(fixes + ' position' + (fixes === 1 ? '' : 's') + ' the rig recorded'
+        + (fixes < offers.length
+           ? ' — ' + (offers.length - fixes) + ' of these offers carry none'
+           : '')
+        + (fixes ? '. A pin far from every one of these is a pin to distrust.'
+                 : '. Nothing here knows where the car was.'));
   }
 
   function esc(s) {
@@ -684,8 +439,15 @@
     html += '<div class="note">The straight line came out longer than the whole '
           + 'distance the card stated. A straight line cannot beat the road, so '
           + 'one of the two pins is in the wrong place.</div>';
+    // Tappable like a stray, and for the same reason: this row says one of two
+    // pins is wrong and gives no way to look at either. Tapping fits BOTH ends
+    // in the view rather than centring on one, because the question a driver
+    // has here is which of the two is out of place, and that can only be
+    // answered by seeing them together.
     wrong.slice(0, LIST_MAX).forEach(function (p) {
-      html += '<div class="row"><b>' + esc(p.offer.pickup || '?') + '</b> → '
+      html += '<div class="row stray" data-place="' + esc(p.offer.pickup || '')
+           + '" data-other="' + esc(p.offer.dropoff || '') + '"><b>'
+           + esc(p.offer.pickup || '?') + '</b> → '
            + esc(p.offer.dropoff || '?') + '<span class="tag bad">'
            + p.crow.toFixed(1) + ' vs ' + p.stated + ' mi</span>'
            + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
@@ -709,22 +471,41 @@
     el.sideBody.innerHTML = html;
   }
 
-  // A stray is listed precisely so it can be judged, and it cannot be judged
-  // off the view it was kept out of. One tap takes the map to it.
+  // A row in this list is there precisely so it can be JUDGED, and a stray
+  // cannot be judged off the view it was deliberately kept out of. One tap
+  // takes the map to it.
   el.sideBody.addEventListener('click', function (ev) {
     var row = ev.target.closest ? ev.target.closest('.stray') : null;
     if (!row || !map) return;
     var mark = marks[row.getAttribute('data-place')];
-    if (!mark) return;
-    map.setView(mark.getLatLng(), 12);
-    mark.openPopup();
+    var other = marks[row.getAttribute('data-other') || ''];
+    if (!mark && !other) return;
+    // Both ends together when the row is about a pair, because "which of these
+    // two is in the wrong place" is not a question one pin can answer.
+    if (mark && other) {
+      // The markers' own positions, handed over as they come. Unpacking them
+      // into lat/lng pairs here would be one more place that has to know how
+      // a position is shaped, and fitBounds takes either.
+      map.fitBounds([mark.getLatLng(), other.getLatLng()], { padding: [50, 50] });
+      mark.openPopup();
+      return;
+    }
+    var one = mark || other;
+    map.setView(one.getLatLng(), 12);
+    one.openPopup();
   });
 
   el.load.addEventListener('click', load);
   el.place.addEventListener('click', function () { placeAll(); });
+  el.trail.addEventListener('click', function () {
+    var on = el.trail.getAttribute('aria-pressed') === 'true';
+    el.trail.setAttribute('aria-pressed', on ? 'false' : 'true');
+    drawTrail();
+    if (on) say('positions hidden');
+    else trailNote();
+  });
   el.forget.addEventListener('click', function () {
-    cache = {};
-    try { localStorage.removeItem(CACHE_KEY); } catch (e) { /* private mode */ }
+    geo.forget();
     say('remembered lookups thrown away');
   });
 

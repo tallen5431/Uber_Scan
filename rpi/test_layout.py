@@ -734,6 +734,63 @@ const FRAMES = JSON.parse(framesJson);
             pageWide: d.scrollWidth > d.clientWidth + 1,
           };
         });
+
+        /* The map sheet, on every panel this gets bolted to.
+         *
+         * Opened by hand rather than by pressing a control: the fixture's
+         * offers name no places, and nothing here is about the geocoder. What
+         * is being measured is the CSS — that the sheet fits the glass, and
+         * that the room it takes is given back to the log underneath, so the
+         * last offer in the list can still be scrolled to.
+         *
+         * That second one had already gone wrong once. The sheet is taller on
+         * the 3.5" hat, where half a screen is a map too small to read, and
+         * the rule handing the room back stayed at the height the sheet used
+         * to be — which puts the end of the log permanently under the panel on
+         * the one screen where the log is shortest. */
+        out[panel[0] + ' sheet'] = await page.evaluate(async () => {
+          const d = document.documentElement;
+          const sheet = document.getElementById('sheet');
+          document.getElementById('sheetWhere').textContent =
+            'Chastain Rd NW, Kennesaw  →  Peachtree St NE, Atlanta';
+          document.getElementById('sheetNote').textContent =
+            '24.6 mi straight line, card said 3 mi in total — which cannot be '
+            + 'right, so one of these pins is wrong.';
+          document.getElementById('sheetOut').hidden = false;
+          sheet.hidden = false;
+          document.body.classList.add('sheeted');
+          await new Promise((r) => requestAnimationFrame(() => r()));
+          const box = sheet.getBoundingClientRect();
+          const app = document.getElementById('app');
+          // Scrolled to the very bottom, which is where a sheet that takes
+          // room without giving it back hides the oldest rows.
+          window.scrollTo(0, d.scrollHeight);
+          await new Promise((r) => requestAnimationFrame(() => r()));
+          const rows = [].slice.call(document.querySelectorAll('#log details.offer'));
+          const last = rows[rows.length - 1];
+          const lastBox = last ? last.getBoundingClientRect() : null;
+          const shut = document.getElementById('sheetShut').getBoundingClientRect();
+          window.scrollTo(0, 0);
+          return {
+            // On the glass, top and bottom, and no wider than it.
+            onScreen: box.top >= -1 && box.bottom <= d.clientHeight + 1
+                      && box.left >= -1 && box.right <= d.clientWidth + 1,
+            height: Math.round(box.height),
+            // Enough map to tell one side of a metro from the other. Below
+            // about 120px the tiles are a texture rather than a place.
+            mapTall: Math.round(
+              document.getElementById('sheetMap').getBoundingClientRect().height),
+            // The close button, which is the only way out on a screen with no
+            // keyboard, has to be reachable and hittable.
+            shutOn: shut.top >= -1 && shut.bottom <= d.clientHeight + 1,
+            shutTall: Math.round(shut.height),
+            // The last row of the log, with the page scrolled as far as it
+            // goes: its top must clear the top of the sheet.
+            lastClear: lastBox ? lastBox.top < box.top - 1 : null,
+            padded: Math.round(parseFloat(getComputedStyle(app).paddingBottom)),
+            pageWide: d.scrollWidth > d.clientWidth + 1,
+          };
+        });
       }
       await page.close();
     }
@@ -1155,6 +1212,34 @@ try:
                    pairs['outside'], 0)
                 eq('...and the page still not scrolling sideways at %s' % panel,
                    pairs['pageWide'], False)
+
+            # The map sheet. See the driver for why it is opened by hand.
+            sheet = got.get('%s sheet' % panel)
+            if name == 'journal.html' and sheet:
+                ok_('the map sheet fits the glass at %s (%dpx tall)'
+                    % (panel, sheet['height']), sheet['onScreen'])
+                # Below about this, the tiles are a texture rather than a
+                # place, and the sheet is answering the question by not
+                # answering it.
+                ok_('...with enough map to read at %s (%dpx)'
+                    % (panel, sheet['mapTall']), sheet['mapTall'] >= 110)
+                # The only way out on a screen with no keyboard.
+                ok_('...and the way to close it on screen at %s' % panel,
+                    sheet['shutOn'])
+                ok_('...big enough to press at %s (%dpx)' % (panel, sheet['shutTall']),
+                    sheet['shutTall'] >= 30)
+                # The room the sheet takes, handed back to the list under it.
+                # Without this the end of the log is unreachable for as long as
+                # the sheet is open — and it is open exactly when a driver is
+                # working through the list.
+                ok_('...and the last offer can still be scrolled clear of it at %s'
+                    ' (padded %dpx under a %dpx sheet)'
+                    % (panel, sheet['padded'], sheet['height']),
+                    sheet['lastClear'] is not False)
+                ok_('...with the room given back at least as tall as the sheet '
+                    'at %s' % panel, sheet['padded'] >= sheet['height'])
+                eq('...and no sideways scroll at %s' % panel,
+                   sheet['pageWide'], False)
 
             layers = r.get('layers') or []
             if len(layers) > 1:

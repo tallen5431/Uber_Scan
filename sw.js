@@ -23,7 +23,7 @@
  * install would not have put it back: a phone with no signal would have lost
  * the scanner entirely, in the name of shipping a scanner fix.
  */
-var SHELL = 'uberscan-shell-v49';
+var SHELL = 'uberscan-shell-v50';
 
 /* Bumped only when the vendored engine itself changes, which is rare and
  * deliberate. Held apart from the shell so that shipping app code never costs
@@ -44,6 +44,12 @@ var ASSETS = [
   'live.html',
   'journal.html',
   'advice.js',
+  // The offers page loads this on every open now, for its map sheet. Leaflet
+  // and the tiles are deliberately NOT here: they come from a CDN, they are
+  // large, and the sheet says so plainly when there is no signal. What must
+  // not happen is the offers page itself failing to open in a car park
+  // because one of its scripts was missing from the shell.
+  'map-view.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

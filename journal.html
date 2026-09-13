@@ -10,6 +10,11 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
 <script src="advice.js"></script>
+<!-- The deciding behind the map sheet: the geocoder, the one-request-a-second
+     rule, the box drawn around where the car was. Shared with map.html rather
+     than copied into it, and it is a few kB of plain script — Leaflet, which
+     is not, is fetched only if somebody presses one of the map controls. -->
+<script src="map-view.js"></script>
 <style>
   /* live.html is a screen glanced at while driving and is sized to fill the
      viewport exactly. This one is read while parked, it scrolls, and it is the
@@ -390,6 +395,63 @@
     .find input { font-size: 17px; }
     .maplink { font-size: 16px; min-height: 44px; padding: 8px 16px; }
   }
+
+  /* --- the map, in this page ----------------------------------------------
+   *
+   * The driver's own words: "it would be convenient if it could do it in the
+   * existing program page. As each route click opens a new tab currently."
+   * Three taps down the log was three tabs, and the offers page was left
+   * behind each time — which on a phone means finding your place again in a
+   * list of ninety.
+   *
+   * A sheet over the bottom rather than a panel in the flow, because the flow
+   * is the thing being read. Inserting a 300px map between two offers moves
+   * every row below it and loses exactly the place this exists to keep. */
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: var(--panel); border-top: 1px solid var(--line);
+    box-shadow: 0 -8px 24px rgba(0,0,0,.45);
+    display: grid; grid-template-rows: auto 1fr auto;
+    /* Half the viewport, and never taller than it. On the 480px-high rig panel
+       that is 240px of map, which is enough to tell one side of a metro from
+       the other — the question this answers. */
+    height: min(52dvh, 420px);
+  }
+  #sheet[hidden] { display: none; }
+  #sheetHead { display: flex; gap: 8px; align-items: baseline;
+               padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  #sheetWhere { font-weight: 700; font-size: 14px; flex: 1 1 auto;
+                min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }
+  #sheetShut { flex: none; font: inherit; font-size: 20px; line-height: 1;
+               padding: 4px 12px; min-height: 34px;
+               background: var(--panel-2); color: var(--text);
+               border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  #sheetMap { min-height: 0; background: var(--panel-2); }
+  #sheetFoot { padding: 7px 12px; border-top: 1px solid var(--line);
+               font-size: 12px; color: var(--muted);
+               display: flex; gap: 8px; align-items: center; }
+  #sheetNote { flex: 1 1 auto; min-width: 0; }
+  .leaflet-container { background: var(--panel-2); }
+  /* The sheet covers the bottom bar and the last few rows of the log. Given
+     back as padding while it is open, so the last offer in the list can still
+     be reached — a list whose end is permanently under a panel is a list that
+     silently loses its oldest rows. */
+  body.sheeted #app { padding-bottom: min(54dvh, 436px); }
+  @media (max-height: 420px) {
+    /* The 3.5" hat. Half of 320px is a map too small to read, so it takes
+       more of the screen and the log gives way — on this screen the map IS
+       the thing being looked at, because nothing else fits anyway. */
+    #sheet { height: 70dvh; }
+    /* ...and the room given back has to grow with it. Written once at 54dvh
+       beside a sheet that was 52, this rule stayed behind when the sheet got
+       taller here — which puts the last rows of the log permanently under the
+       panel on the one screen where the log is shortest. */
+    body.sheeted #app { padding-bottom: 72dvh; }
+    #sheetHead, #sheetFoot { padding: 4px 8px; }
+    #sheetWhere { font-size: 12px; }
+    #sheetFoot { font-size: 11px; }
+  }
 </style>
 </head>
 <body>
@@ -557,6 +619,28 @@
   </nav>
 </main>
 
+<!-- Where one job went, without leaving the log.
+     Outside <main> on purpose: it is fixed to the viewport, and a fixed child
+     of a transformed or clipped ancestor is positioned against that ancestor
+     instead of the screen. Empty and hidden until something is asked for, so a
+     page opened with no signal is exactly the page it was before this existed. -->
+<div id="sheet" hidden aria-live="polite">
+  <div id="sheetHead">
+    <span id="sheetWhere"></span>
+    <button type="button" id="sheetShut" aria-label="Close the map">×</button>
+  </div>
+  <div id="sheetMap"></div>
+  <div id="sheetFoot">
+    <span id="sheetNote"></span>
+    <!-- The one question this map cannot answer. A straight line between two
+         pins is three miles that might be five minutes or twenty, and driving
+         time with real traffic is the whole reason the route link existed. So
+         it is still here — moved from the row, where it cost a tab every time,
+         to the panel, where it is one tap from the job already on screen. -->
+    <a class="maplink" id="sheetOut" hidden target="_blank" rel="noopener noreferrer">⤳ drive</a>
+  </div>
+</div>
+
 <script>
 (function () {
   'use strict';
@@ -568,7 +652,9 @@
    'blocksHead', 'kindsHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
    'find', 'findNote', 'live', 'nothing', 'ladder',
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
-   'pairs', 'pairsHead', 'pairsLead', 'runsAll'].forEach(function (id) {
+   'pairs', 'pairsHead', 'pairsLead', 'runsAll',
+   'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
+   'sheetNote', 'sheetOut'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -759,34 +845,36 @@
     return 'No rate could be worked out from this reading.';
   }
 
-  /* The map links for one offer: each end on its own, and the route between
+  /* The map controls for one offer: each end on its own, and the route between
      them when both are known.
 
-     The route is the one worth having. It answers with real driving time and
-     real traffic, which is the question the rig's own arithmetic cannot reach -
-     a straight line between two ends is three miles that might be five minutes
-     or twenty. */
+     These used to be three links to Google, each opening a tab. The driver's
+     complaint was exactly that \u2014 "each route click opens a new tab currently"
+     \u2014 and the cost is not the tab, it is the log: on a phone, coming back to a
+     list of ninety offers means finding your place in it again, every time.
+
+     So they open the sheet at the bottom of THIS page instead, and the one
+     thing the sheet cannot do \u2014 driving time, with real traffic \u2014 is a link
+     inside it, one tap from the job already on screen. */
   function mapRow(r) {
-    var links = [];
-    var pick = Advice.mapSearch(r.pickup);
-    var drop = Advice.mapSearch(r.dropoff);
-    var route = Advice.mapRoute(r.pickup, r.dropoff);
-    if (pick) links.push(link(pick, '\u2691 pickup'));
-    if (drop) links.push(link(drop, '\u2691 dropoff'));
-    if (route) links.push(link(route, '\u2933 route'));
+    var acts = [];
+    var pick = Advice.mapQuery(r.pickup);
+    var drop = Advice.mapQuery(r.dropoff);
+    if (pick) acts.push(opener(r.id, 'pickup', '\u2691 pickup'));
+    if (drop) acts.push(opener(r.id, 'dropoff', '\u2691 dropoff'));
+    if (pick && drop) acts.push(opener(r.id, 'both', '\u2933 route'));
     // Nothing at all when the card named nowhere searchable, rather than a row
-    // of dead controls. A link that opens a map of somewhere irrelevant is
-    // worse than no link: it costs a tap and a moment's belief.
-    return links.length ? row('On a map', links.join(' ')) : '';
+    // of dead controls. A control that opens a map of somewhere irrelevant is
+    // worse than none: it costs a tap and a moment's belief.
+    return acts.length ? row('On a map', acts.join(' ')) : '';
   }
 
-  /* Opened away from this page on purpose. The offers page is often the thing
-     being read while the rig keeps scanning, and navigating it away to a map
-     loses the place in the log. `noopener` because a foreign tab must not get a
-     handle on this one. */
-  function link(href, label) {
-    return '<a class="maplink" href="' + esc(href) + '" target="_blank"'
-         + ' rel="noopener noreferrer">' + label + '</a>';
+  /* A button, not a link, and the difference is not cosmetic. A link with no
+     href that a script intercepts is announced to a screen reader as a link
+     and does nothing when followed with the keyboard; a button is a button. */
+  function opener(id, which, label) {
+    return '<button type="button" class="maplink" data-map="' + esc(id)
+         + '" data-end="' + which + '">' + label + '</button>';
   }
 
   /* `how` names the kind of value, not a decoration: 'quiet' for the reading's
@@ -1029,18 +1117,16 @@
               ? ', amber within ' + r.band + '%' : '') : null)
       + ((r.places && r.places.length)
          ? row('Where', esc(r.places.join(' \u2192 '))) : '')
-      // ...and the same places handed to a map.
+      // ...and the same places on a map, in the sheet at the bottom of this
+      // page. See showOnMap.
       //
-      // No coordinates are computed anywhere for this. The card names places in
-      // words and a map takes words, so the query goes to Google as text and
-      // Google resolves it, in this browser, when the link is pressed.
-      //
-      // That is the safer design and not merely the cheaper one. A geocoder run
-      // by the rig would turn a misread street into a confident coordinate and
-      // then into a distance on the panel - wrong, and silent. Opened as a map,
-      // the same misreading is a PIN IN THE WRONG PLACE, which a person spots
-      // at a glance. The check moves from the machine, which cannot do it, to
-      // the driver, who can. See Advice.mapSearch.
+      // Nothing is looked up until one of these is pressed, and nothing that
+      // comes back changes a number here. A geocoder run by the rig, turning a
+      // misread street into a confident coordinate and then into a distance on
+      // the panel, is the failure this project refuses above all others —
+      // wrong, and silent. Drawn as a pin instead, the same misreading is
+      // visibly in Illinois, which a person settles at a glance. The check
+      // moves from the machine, which cannot make it, to the driver, who can.
       + mapRow(r)
       + (r.fromDeadline
          ? row('Time from', 'the delivery deadline, not a stated duration',
@@ -1681,7 +1767,7 @@
    * `newest` is null on the empty path — there is no row to read a cost per
    * mile off — and the line about running costs is dropped rather than guessed
    * at. */
-  function showCaveats(data, setAside, newest, ticks) {
+  function showCaveats(data, setAside, newest, ticks, counted) {
     var notes = ['These are offers the scanner read, not trips taken — it cannot '
                  + 'see the Accept button and never touches it, so tick the ones '
                  + 'you took and it will keep the tally.'];
@@ -1793,13 +1879,58 @@
                  + 'free. Ticking more of what you take is what makes it '
                  + 'mean more.');
     }
-    // Only when something was actually deducted. "Rates are after $0.00/mi of
-    // running costs" is a sentence about nothing, and it invites the reader to
-    // hunt for a subtraction that never happened.
-    if (newest) {
-      notes.push(newest.costPerMile > 0
-        ? 'Rates are after ' + money(newest.costPerMile, 2) + '/mi of running costs.'
-        : 'No running cost is set, so these are what the offers paid before the car.');
+    // What came off for the car, across the rows ABOVE rather than off one of
+    // them.
+    //
+    // This read `newest.costPerMile` — one row — and stated it as a fact about
+    // every rate on the page. The rows are not all written by the same thing:
+    // the rig seeds a new config at $0.30/mi, while the keypad and the phone's
+    // own scanner default to zero and have no way to ask the rig what it uses.
+    // Both write through the same door into the same file, so a journal can
+    // hold net rates and gross ones together — and the sentence describing them
+    // was whichever kind happened to be newest, which is the opposite of the
+    // truth for the other half.
+    //
+    // A rate with nothing taken off is not a worse net rate, it is a different
+    // quantity, and a median over both is a median over two populations. The
+    // rows are not excluded — that would empty the page for anyone who has
+    // never set a cost, which is the commonest case of all — but the mixing is
+    // named, because a figure a reader cannot interpret is worse than one they
+    // can distrust.
+    var rates = (counted || []).map(function (r) {
+      return typeof r.costPerMile === 'number' ? r.costPerMile : 0;
+    });
+    var withCost = rates.filter(function (c) { return c > 0; });
+    var levels = withCost.filter(function (c, i, all) { return all.indexOf(c) === i; })
+                         .sort(function (a, b) { return a - b; });
+    // "$0.28 and $0.30 and $0.33 and $0.35 and $0.40/mi" is a list nobody
+    // reads to the end of. Past two settings the pair that matters is the
+    // extremes, because what the reader is being told is the width of the
+    // mixing, not its membership.
+    var perMile = levels.length > 2
+      ? 'between ' + money(levels[0], 2) + ' and ' + money(levels[levels.length - 1], 2)
+      : levels.map(function (c) { return money(c, 2); }).join(' and ');
+    if (!rates.length) {
+      // Nothing counted, so nothing to describe. The `newest` fallback is for
+      // the empty-page path, which passes no rows at all.
+      if (newest) {
+        notes.push(newest.costPerMile > 0
+          ? 'Rates are after ' + money(newest.costPerMile, 2) + '/mi of running costs.'
+          : 'No running cost is set, so these are what the offers paid before the car.');
+      }
+    } else if (!withCost.length) {
+      notes.push('No running cost is set, so these are what the offers paid '
+                 + 'before the car.');
+    } else if (withCost.length === rates.length) {
+      notes.push('Rates are after ' + perMile + '/mi of running costs.');
+    } else {
+      notes.push('<b>' + withCost.length + '</b> of these <b>' + rates.length
+                 + '</b> had ' + perMile
+                 + '/mi of running costs taken off and <b>'
+                 + (rates.length - withCost.length) + '</b> did not — so the '
+                 + 'figures above mix what offers paid before the car with what '
+                 + 'they paid after it. Rows made on the keypad or the phone use '
+                 + 'that device&rsquo;s own setting, not the rig&rsquo;s.');
     }
     // A list, not a paragraph. These are four unrelated facts — what the rows
     // are, what was set aside, what is hidden, what came off for the car — and
@@ -2354,7 +2485,7 @@
              pairedBy: pairedBy, data: data };
     renderList();
 
-    showCaveats(data, setAside, newest, ticks);
+    showCaveats(data, setAside, newest, ticks, kept);
 
     // Said rather than only drawn. Everything above this point is a redraw
     // with no event a screen reader can notice.
@@ -2552,6 +2683,204 @@
           + 'and this page only reads it.';
       });
   }
+
+  /* ---------- one job, on a map, without leaving the log -------------------
+   *
+   * The rig does not geocode and must not: a coordinate invented from a
+   * misread street, turned into a distance, turned into a number on the panel
+   * is the failure this project refuses above all others — confidently wrong,
+   * and silent. See the header of map-view.js, and Advice.mapSearch, which
+   * makes the same argument at length.
+   *
+   * Nothing here breaks that rule, and the reason is what the answer is USED
+   * for. A pin is looked at. It never becomes a rate, a verdict, a billed
+   * distance or a cent of anything: the numbers on this page are the ones off
+   * the card, before this sheet opened and after it closes. What a pin can do
+   * is be visibly in Illinois, which is a misreading caught by a person in the
+   * one way a machine cannot catch it.
+   *
+   * And it is asked only when the driver asks. The offers page sends nothing
+   * anywhere on load — some of these places are where customers live — which
+   * is why this is a button per row and not a map that fills itself in. */
+  var MV = window.MapView;
+  var sheetMap = null, sheetLayer = null;
+  var sheetFor = null;      // the id + end currently shown, to make a repeat tap a close
+
+  /* The same Geocoder and the same remembered answers as map.html, because it
+     is the same question asked of the same places. A second cache under a
+     second key would ask Nominatim everything twice. */
+  var geo = MV ? new MV.Geocoder({
+    hint: function () { return ''; },
+    store: {
+      get: function () { return localStorage.getItem('uberscan.geocode.v1'); },
+      set: function (s) { localStorage.setItem('uberscan.geocode.v1', s); },
+      clear: function () { localStorage.removeItem('uberscan.geocode.v1'); }
+    }
+  }) : null;
+
+  function shutSheet() {
+    el.sheet.hidden = true;
+    document.body.classList.remove('sheeted');
+    sheetFor = null;
+  }
+
+  function sheetSay(text) { el.sheetNote.textContent = text; }
+
+  function rowById(id) {
+    var all = (lastData && lastData.offers) || [];
+    for (var i = 0; i < all.length; i++) if (all[i].id === id) return all[i];
+    return null;
+  }
+
+  async function showOnMap(id, end) {
+    var r = rowById(id);
+    if (!r) return;
+    // map-view.js is same-origin and in the service worker's shell, so this
+    // should not happen — but a control that does nothing at all, silently, is
+    // the second of this project's named faults, and "should not happen" is
+    // not a reason to leave one in. The Google link below still works, which
+    // is what these controls did before the sheet existed.
+    if (!MV) {
+      el.sheet.hidden = false;
+      document.body.classList.add('sheeted');
+      el.sheetWhere.textContent = [r.pickup, r.dropoff].filter(Boolean).join('  →  ');
+      sheetSay('map-view.js did not load, so there is no map here. The link '
+               + 'beside this still opens one.');
+      var only = end === 'both' ? Advice.mapRoute(r.pickup, r.dropoff)
+                                : Advice.mapSearch(end === 'pickup' ? r.pickup : r.dropoff);
+      el.sheetOut.hidden = !only;
+      if (only) el.sheetOut.href = only;
+      return;
+    }
+    // A second tap on the control that opened it puts it away. Without this
+    // the only way to close the sheet is the × — which on the hat is a 34px
+    // target next to nothing else, and the control that opened it is the one
+    // under the thumb already.
+    if (sheetFor === id + '/' + end && !el.sheet.hidden) { shutSheet(); return; }
+    sheetFor = id + '/' + end;
+
+    var want = end === 'pickup' ? [r.pickup]
+             : end === 'dropoff' ? [r.dropoff]
+             : [r.pickup, r.dropoff];
+    el.sheetWhere.textContent = want.filter(Boolean).join('  →  ');
+    el.sheet.hidden = false;
+    document.body.classList.add('sheeted');
+
+    // Driving time with real traffic, which no pin on this page can give. It
+    // is set before anything is looked up, so a driver on a dead hotspot still
+    // gets the one control that would have worked anyway.
+    var out = end === 'both' ? Advice.mapRoute(r.pickup, r.dropoff)
+                             : Advice.mapSearch(want[0]);
+    el.sheetOut.hidden = !out;
+    if (out) el.sheetOut.href = out;
+
+    sheetSay('loading the map…');
+    var ready = await MV.needLeaflet(document, {
+      css: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+      js: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    });
+    // Said plainly rather than left as an empty grey box. The rig runs off a
+    // phone hotspot in a car and this is the ordinary case at a bad moment,
+    // not an error — and the ⤳ drive link beside this message is the thing
+    // that was there before any of this existed.
+    if (!ready || sheetFor !== id + '/' + end) {
+      if (!ready) sheetSay('no signal for the map — the library and the tiles '
+                           + 'both come from the network.');
+      return;
+    }
+    if (!sheetMap) {
+      sheetMap = L.map(el.sheetMap, { zoomControl: true }).setView([33.94, -84.58], 10);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '© OpenStreetMap'
+      }).addTo(sheetMap);
+    }
+    // The sheet was display:none when the map was made, so Leaflet measured a
+    // box of zero and drew one tile in the corner. Asked again now it is on
+    // screen — and again after the next frame, because the grid row it lives
+    // in is sized from the viewport and is not final within this tick.
+    sheetMap.invalidateSize();
+    requestAnimationFrame(function () { if (sheetMap) sheetMap.invalidateSize(); });
+
+    sheetSay('looking up ' + want.filter(Boolean).length + '…');
+    var found = {};
+    var boxes = {};
+    var names = want.filter(Boolean);
+    names.forEach(function (q) {
+      boxes[q] = MV.boxAround(MV.anchorFor((lastData && lastData.offers) || [], q));
+    });
+    await geo.walk(names, function (q) { return boxes[q]; }, found);
+    // Asked again without the box, exactly as the map page does it: a box is a
+    // claim that the answer is within sixty miles of where the car was, and a
+    // genuinely distant dropoff must not be lost to a feature meant to find it.
+    var refused = names.filter(function (q) { return boxes[q] && !found[q]; });
+    if (refused.length) await geo.walk(refused, function () { return null; }, found);
+
+    // The driver may have tapped another row while those were in flight. The
+    // pins about to be drawn would then be the wrong job's, under the right
+    // job's heading — a confidently wrong answer, which is the one thing this
+    // page may never produce.
+    if (sheetFor !== id + '/' + end) return;
+
+    if (sheetLayer) sheetMap.removeLayer(sheetLayer);
+    sheetLayer = L.layerGroup().addTo(sheetMap);
+    var bounds = [];
+    var placed = 0;
+    names.forEach(function (q) {
+      var hit = found[q];
+      if (!hit) return;
+      placed++;
+      var isPick = q === r.pickup;
+      L.circleMarker([hit.lat, hit.lon], {
+        radius: 8, color: '#0b0d10', weight: 2,
+        fillColor: isPick ? '#17c964' : '#f5a524', fillOpacity: 1
+      }).bindPopup('<b>' + esc(q) + '</b><br><span style="opacity:.7">'
+                   + esc(hit.name || '') + '</span>').addTo(sheetLayer);
+      bounds.push([hit.lat, hit.lon]);
+    });
+
+    if (!placed) {
+      sheetSay('the geocoder found nothing for ' + (names.length > 1 ? 'either end'
+               : 'that') + ' — usually a misread address.');
+      return;
+    }
+    if (bounds.length > 1) sheetMap.fitBounds(bounds, { padding: [40, 40] });
+    else sheetMap.setView(bounds[0], 14);
+
+    // What the sheet is FOR, said out loud. A straight line cannot beat the
+    // road, so a straight line longer than the whole distance the card stated
+    // means one of these two pins is in the wrong place — and it is the PIN
+    // that is doubted here, never the card, whose figures are what every
+    // number on this page is still made of.
+    if (placed === 2) {
+      var judged = MV.judge([r], found, {})[0];
+      sheetSay(judged.crow.toFixed(1) + ' mi straight line'
+        + (judged.stated !== null ? ', card said ' + judged.stated + ' mi in total' : '')
+        + (judged.impossible
+           ? ' — which cannot be right, so one of these pins is wrong.'
+           : '.'));
+    } else if (names.length > 1) {
+      sheetSay('only one end could be found. Green is the pickup, amber the dropoff.');
+    } else {
+      sheetSay(found[names[0]].name || '');
+    }
+  }
+
+  el.sheetShut.addEventListener('click', shutSheet);
+  // The sheet covers the bottom of the log and takes the keyboard nowhere, so
+  // Escape has to reach it — otherwise a keyboard user who opened it has no
+  // way to put it away but to find a 34px × with the mouse.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !el.sheet.hidden) shutSheet();
+  });
+  el.log.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('button[data-map]');
+    if (!b) return;
+    // The controls sit inside a <summary>, and a click there toggles the
+    // <details> it belongs to. Opening the map would otherwise fold the row
+    // it is about.
+    e.preventDefault();
+    showOnMap(b.getAttribute('data-map'), b.getAttribute('data-end'));
+  });
 
   // One handler for the whole log, because the rows are rebuilt on every load
   // and per-row listeners would be re-attached each time for nothing.

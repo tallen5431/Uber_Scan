@@ -134,15 +134,32 @@ const base = process.argv[2];
 // and which of those lines it marks as impossible.
 const STUB = `
   window.__pins = []; window.__lines = []; window.__asked = [];
-  window.__askedAt = []; window.__boxes = [];
+  window.__askedAt = []; window.__boxes = []; window.__dots = [];
   window.L = {
     map: function () { return { setView: function (ll) { window.__view = ll; return this; },
-      removeLayer: function () {}, addLayer: function () {},
+      // A removed group takes its dots with it. Without this a toggle that
+      // never cleaned up would look identical to one that did — and drawing
+      // the positions twice over each other is exactly the bug a redraw
+      // invites.
+      removeLayer: function (g) {
+        window.__dots = window.__dots.filter(function (d) { return d.group !== g; });
+      },
+      addLayer: function () {},
       // Recorded, because which pins get a say in where the map looks is the
       // whole of what the stray rule does.
       fitBounds: function (b) { window.__bounds = b; } }; },
     tileLayer: function () { return { addTo: function () { return this; } }; },
     layerGroup: function () { return { addTo: function () { return this; } }; },
+    // The positions the rig's own GPS recorded, which are the one thing on
+    // this page that is measured rather than looked up. Kept apart from
+    // __pins: a check that counted both together could not tell a job pin
+    // from a dot showing where the car was.
+    circleMarker: function (ll, opts) {
+      var m = { ll: ll, opts: opts, group: null,
+                bindPopup: function (h) { this.popup = h; return this; },
+                addTo: function (g) { this.group = g; window.__dots.push(this);
+                                      return this; } };
+      return m; },
     divIcon: function (o) { return o; },
     marker: function (ll, opts) {
       var m = { ll: ll, icon: (opts && opts.icon) || {},
@@ -280,6 +297,61 @@ const KNOWN = {
   await page.waitForTimeout(200);
   out.chased = await page.evaluate(() => ({ view: window.__view || null,
                                             opened: window.__opened || null }));
+
+  /* --- where the car actually was ---------------------------------------
+   *
+   * Off until asked for, because it is a hundred dots over the pins and the
+   * pins are the subject. Once on, it is the only thing on this page that was
+   * MEASURED rather than looked up — and so the only thing that can say a pin
+   * is wrong without being the same kind of guess as the pin. */
+  stage = 'the trail';
+  out.beforeTrail = await page.evaluate(() => window.__dots.length);
+  await page.click('#trail');
+  await page.waitForTimeout(300);
+  out.trail = await page.evaluate(() => ({
+    dots: window.__dots.length,
+    where: window.__dots.map(function (d) { return d.ll; }),
+    // The age of the fix, which is what tells a driver how far the car could
+    // have moved between the reading and the dot.
+    popups: window.__dots.map(function (d) {
+      return String(d.popup || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    }),
+    pressed: document.getElementById('trail').getAttribute('aria-pressed'),
+    status: document.getElementById('status').textContent.trim(),
+    // The job pins must not have been disturbed by any of this.
+    pins: window.__pins.length,
+  }));
+  // Pressing it twice must not leave two sets of dots on top of each other,
+  // and pressing it a third time must bring them back.
+  await page.click('#trail');
+  await page.waitForTimeout(200);
+  out.trailOff = await page.evaluate(() => ({
+    dots: window.__dots.length,
+    pressed: document.getElementById('trail').getAttribute('aria-pressed'),
+    status: document.getElementById('status').textContent.trim(),
+  }));
+  await page.click('#trail');
+  await page.waitForTimeout(200);
+  out.trailAgain = await page.evaluate(() => window.__dots.length);
+
+  // A row that says one of TWO pins is wrong, tapped. Centring on one of them
+  // cannot answer which, so both have to end up in the view together.
+  stage = 'chasing a pair';
+  await page.evaluate(() => {
+    window.__bounds = null;
+    // The Kennesaw-to-Atlanta one specifically. Two real pins, twenty-five
+    // miles apart, over a card that said three — which is the case where a
+    // driver genuinely cannot tell which end is wrong without seeing both.
+    // The Boise row is in this list too and is a different question: that one
+    // is answered by the stray list above, in red, at a glance.
+    var rows = [].slice.call(document.querySelectorAll('#sideBody .stray'))
+      .filter(function (r) {
+        return (r.getAttribute('data-other') || '').indexOf('Atlanta') !== -1;
+      });
+    if (rows[0]) rows[0].click();
+  });
+  await page.waitForTimeout(200);
+  out.chasedPair = await page.evaluate(() => window.__bounds || null);
 
   // A second run must ask nothing: the answers are remembered on the device,
   // which is what makes re-checking a map free and keeps the geocoder unbothered.
@@ -501,6 +573,54 @@ try:
     ok_('tapping a stray takes the map to it (%r)' % (view,),
         view and abs(float(view[0]) - 43.615) < 0.01)
     ok_('...and opens what it says about it', bool(chased.get('opened')))
+
+    # A row that says one of TWO pins is wrong. Centring on one of them cannot
+    # answer which, and that is the only question the row raises.
+    pair = got.get('chasedPair') or []
+    eq('tapping a "cannot be right" row frames both its ends (%r)' % (pair,),
+       len(pair), 2)
+    ok_('...the Kennesaw end',
+        pair and any(abs(float(p[0]) - 34.023) < 0.01 for p in pair))
+    ok_('...and the Atlanta one it cannot be that far from',
+        pair and any(abs(float(p[0]) - 33.749) < 0.01 for p in pair))
+
+    # --- where the car actually was -----------------------------------------
+    #
+    # Every other mark on this page is a guess: a name off a card, handed to a
+    # geocoder, answered with a coordinate that is right most of the time.
+    # These are not — they are what the rig's own GPS said at the moment the
+    # card came up, and they are the only thing here that can contradict a pin
+    # without being the same kind of thing as the pin.
+    eq('nothing is drawn about the car until it is asked for',
+       got.get('beforeTrail'), 0)
+    trail = got.get('trail') or {}
+    # Three of the thirty-one rows carry a position. The rest were written
+    # before the rig had a GPS, and the page has to keep working for them.
+    eq('...and then one dot per row that knows where it was',
+       trail.get('dots'), 3)
+    ok_('...at the positions those rows carry (%r)' % (trail.get('where'),),
+        (trail.get('where') or [])
+        and all(abs(float(w[0]) - 34.01) < 0.02 for w in trail['where']))
+    # A position twenty seconds stale is half a mile at fifty miles an hour,
+    # and a driver judging a pin by its distance from these dots is owed that.
+    ok_('...saying how old each fix was (%r)' % (trail.get('popups') or [''])[0],
+        any('old' in p for p in (trail.get('popups') or [])))
+    ok_('...counted in the status line (%r)' % trail.get('status'),
+        '3 positions' in (trail.get('status') or ''))
+    # The whole reason for showing them, said where it can be read.
+    ok_('...with what a pin far from all of them means',
+        'distrust' in (trail.get('status') or ''))
+    eq('...and the job pins are untouched by any of it',
+       trail.get('pins'), (got.get('placed') or {}).get('pins'))
+    ok_('...and the button says it is on', trail.get('pressed') == 'true')
+    # Drawing them twice over each other would look identical on a real map
+    # and be a leak on every redraw.
+    eq('turning it off takes the dots away', (got.get('trailOff') or {}).get('dots'), 0)
+    ok_('...and says so rather than leaving the last count standing (%r)'
+        % (got.get('trailOff') or {}).get('status'),
+        'hidden' in ((got.get('trailOff') or {}).get('status') or ''))
+    eq('...and turning it on again draws them once, not twice',
+       got.get('trailAgain'), 3)
 
     # --- a list that stops has to say it stopped ----------------------------
     #

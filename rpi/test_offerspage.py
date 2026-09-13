@@ -69,13 +69,14 @@ NOW = 1700000000000
 # $48.00 net against $60.00 gross — and across all twelve, $96.00 against
 # $120.00.
 def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
-          places=None, hidden=False, suspect=False, text=None):
+          places=None, hidden=False, suspect=False, text=None, per_mile=0.33,
+          pickup=None, dropoff=None):
     row = {
         'id': 'r%d' % i, 'at': NOW - i * 600000, 'firstAt': NOW - i * 600000,
         'pay': pay, 'minutes': minutes, 'miles': 6.0,
         'perHour': round((pay - cost) / (minutes / 60.0), 2),
         'grossPerHour': round(pay / (minutes / 60.0), 2),
-        'cost': cost, 'costPerMile': 0.33, 'target': 25, 'band': 15,
+        'cost': cost, 'costPerMile': per_mile, 'target': 25, 'band': 15,
         'legs': 2, 'whole': True, 'accepted': accepted,
     }
     # What the panel printed in the car at the time, which is what "What you
@@ -92,6 +93,14 @@ def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
         row['suspect'] = True
     if text is not None:
         row['text'] = text
+    # The two ends as the card named them, and the position the rig's GPS had
+    # when it read the card. Both are what the map sheet is built out of: the
+    # names are what gets searched, and the fix is what the search is boxed
+    # around.
+    if pickup is not None:
+        row['pickup'] = pickup
+    if dropoff is not None:
+        row['dropoff'] = dropoff
     return row
 
 
@@ -256,6 +265,39 @@ def _runs(count):
 RUNS = _runs(12)
 FEW_RUNS = _runs(3)
 
+# Two writers, one file. The rig seeds a new config at $0.30/mi and subtracts
+# it; the keypad and the phone's own scanner default to zero and subtract
+# nothing. Both post through /api/journal/ingest into the same journal, so a
+# window can hold four net rates and three gross ones — and the page used to
+# describe all seven with whichever kind happened to be newest.
+#
+# The rows here are built so the two piles cannot be told apart by their pay:
+# every one is $10.00 over twenty minutes. Only the subtraction differs, which
+# is what makes a median over the seven a median over two different quantities.
+MIXED_COST = ([offer(i, cost=1.80, per_mile=0.30, state='go') for i in range(4)]
+              + [offer(4 + i, cost=0.0, per_mile=0.0, state='go')
+                 for i in range(3)])
+
+# Cards that named where they went, which is what the map sheet is for.
+#
+# Three shapes, and the page has to tell them apart. A job with both ends. A
+# job the card only named one end of — Uber prints "Customer dropoff" and no
+# address until you accept, which is most of this driver's traffic. And a job
+# whose dropoff the geocoder cannot place at all, which is what a badly
+# misread street looks like from here.
+#
+# The first two carry a GPS fix, so their lookups get boxed around where the
+# car actually was; the third deliberately does not, so the case of a place
+# with no anchor is on the page too.
+MAPPED = [
+    dict(offer(0, state='go', pickup='Chastain Rd NW, Kennesaw',
+               dropoff='Oak Ln, Marietta'), lat=34.02, lon=-84.61),
+    dict(offer(1, state='warn', pickup='Chastain Rd NW, Kennesaw'),
+         lat=34.02, lon=-84.61),
+    offer(2, state='no', pickup='Chastain Rd NW, Kennesaw',
+          dropoff='Zzqx Nowhere Blvd'),
+]
+
 # The four answers /api/journal can give. Every field here is one the server
 # actually sends — see the send() call in the /api/journal branch.
 FEEDS = {
@@ -301,6 +343,13 @@ FEEDS = {
     'few runs': {'count': len(FEW_RUNS), 'total': len(FEW_RUNS), 'truncated': False,
                  'days': 7, 'hidden': 0, 'watched': {'saw': 9, 'kept': 9},
                  'unreadable': None, 'pairs': [], 'offers': FEW_RUNS},
+    'mapped': {'count': len(MAPPED), 'total': len(MAPPED), 'truncated': False,
+               'days': 7, 'hidden': 0, 'watched': {'saw': 3, 'kept': 3},
+               'unreadable': None, 'pairs': [], 'offers': MAPPED},
+    'mixed cost': {'count': len(MIXED_COST), 'total': len(MIXED_COST),
+                   'truncated': False, 'days': 7, 'hidden': 0,
+                   'watched': {'saw': 7, 'kept': 7},
+                   'unreadable': None, 'pairs': [], 'offers': MIXED_COST},
     'weeks': {'count': len(WEEKS), 'total': len(WEEKS), 'truncated': False,
               'days': 30, 'hidden': 0, 'watched': {'saw': 21, 'kept': 21},
               'unreadable': None, 'pairs': [], 'offers': WEEKS},
@@ -364,6 +413,31 @@ const STUB = (feed) => `
       }
     });
   })();
+  // The public geocoder, answered here so no check ever sends a customer's
+  // street to a real service, and so "was anything asked at all" can be read
+  // back. Only two places have answers; everything else comes back empty,
+  // which is what a misread street really gets.
+  window.__geo = [];
+  const PLACES = {
+    'chastain': [34.010, -84.580],
+    'oak ln': [33.952, -84.549],
+  };
+  // Leaflet, faked before the page can fetch it from a CDN. Two jobs: prove
+  // the page never blocks on a network library, and record what got drawn.
+  window.__pins = []; window.__views = [];
+  window.L = {
+    map: function () { return {
+      setView: function (c) { window.__views.push(c); return this; },
+      fitBounds: function (b) { window.__views.push(b); return this; },
+      invalidateSize: function () { return this; },
+      removeLayer: function () { return this; } }; },
+    tileLayer: function () { return { addTo: function () { return this; } }; },
+    layerGroup: function () { return { addTo: function () { return this; } }; },
+    circleMarker: function (ll, o) {
+      var m = { ll: ll, opts: o, bindPopup: function (h) { this.popup = h; return this; },
+                addTo: function () { window.__pins.push(this); return this; } };
+      return m; }
+  };
   const REAL = window.fetch;
   window.fetch = function (url, opts) {
     window.__asked.push(String(url));
@@ -373,6 +447,17 @@ const STUB = (feed) => `
         json: () => Promise.resolve(${JSON.stringify(feed)}),
         text: () => Promise.resolve(${JSON.stringify(JSON.stringify(feed))}),
       });
+    }
+    if (String(url).indexOf('nominatim') !== -1) {
+      const u = new URL(String(url));
+      const q = decodeURIComponent(u.searchParams.get('q') || '');
+      window.__geo.push({ q: q, box: u.searchParams.get('viewbox') || null,
+                          at: Date.now() });
+      const key = Object.keys(PLACES).find((k) => q.toLowerCase().indexOf(k) !== -1);
+      const hit = key ? [{ lat: String(PLACES[key][0]), lon: String(PLACES[key][1]),
+                           display_name: key + ', GA, USA', type: 'road' }] : [];
+      return Promise.resolve({ ok: true, status: 200,
+                               json: () => Promise.resolve(hit) });
     }
     return REAL.call(window, url, opts);
   };
@@ -595,6 +680,69 @@ const TEXT = (sel) => {
         await page.waitForTimeout(250);
         out[name].runs.refolded = await runsNow();
       }
+    }
+    /* --- the map sheet ---------------------------------------------------
+     *
+     * The driver's complaint was that every map control opened a tab and left
+     * the log behind. These now open a sheet over the bottom of this page, so
+     * what is checked is: nothing is looked up until one is pressed, pressing
+     * one draws the right pins, and the page is still the page underneath.
+     *
+     * Leaflet is faked in the stub above rather than fetched, which also
+     * proves the page does not sit waiting on a CDN before it will show
+     * anything. */
+    if (name === 'mapped') {
+      const sheet = () => ({
+        open: !document.getElementById('sheet').hidden,
+        where: (document.getElementById('sheetWhere').textContent || '').trim(),
+        note: (document.getElementById('sheetNote').textContent || '').trim(),
+        out: document.getElementById('sheetOut').hidden
+          ? null : document.getElementById('sheetOut').getAttribute('href'),
+        pins: window.__pins.length,
+        asked: window.__geo.map((g) => g.q),
+        boxes: window.__geo.map((g) => !!g.box),
+      });
+      // Open every row, so the controls inside them can be pressed.
+      await page.evaluate(() => {
+        document.querySelectorAll('#log details.offer').forEach((d) => { d.open = true; });
+      });
+      await page.waitForTimeout(200);
+      out[name].beforeAny = await page.evaluate(sheet);
+      out[name].controls = await page.evaluate(() =>
+        [].slice.call(document.querySelectorAll('#log button[data-map]'))
+          .map((b) => b.getAttribute('data-map') + '/' + b.getAttribute('data-end')
+                    + ':' + (b.textContent || '').trim()));
+      // Picked by the row it belongs to rather than by its place in the list,
+      // so a change to the sort order cannot quietly point these checks at a
+      // different job than the one they describe.
+      const tap = (id, end) => page.evaluate((a) => {
+        const b = document.querySelector('#log button[data-map="' + a[0]
+                                         + '"][data-end="' + a[1] + '"]');
+        if (b) b.click();
+        return !!b;
+      }, [id, end]);
+      // r0 is the job that named both ends.
+      stage = name + ' — map sheet';
+      out[name].tapped = await tap('r0', 'both');
+      // Two lookups at one a second, plus the walk's own overhead.
+      await page.waitForTimeout(3600);
+      out[name].route = await page.evaluate(sheet);
+      // The log is still the log: a sheet that navigated away, or that ate
+      // the rows underneath it, would be exactly the thing being replaced.
+      out[name].stillThere = await page.evaluate(() => ({
+        rows: document.querySelectorAll('#log details.offer').length,
+        padded: document.body.classList.contains('sheeted'),
+        url: location.pathname,
+      }));
+      // Pressing the same control again puts it away.
+      await tap('r0', 'both');
+      await page.waitForTimeout(250);
+      out[name].shut = await page.evaluate(sheet);
+      // ...and a dropoff nothing can place says so rather than showing an
+      // empty map with no explanation. r2's dropoff has no answer anywhere.
+      await tap('r2', 'dropoff');
+      await page.waitForTimeout(2600);
+      out[name].lost = await page.evaluate(sheet);
     }
     if (name === 'took six') {
       // A mark, made on an opened row a long way down the list: the row
@@ -1298,6 +1446,96 @@ try:
                 for c in _cav))
     no_('...and nothing is said when the file is whole',
         any('could not be read at all' in c for c in got['took six']['caveats']))
+
+    # --- gross rates and net ones in one median ----------------------------
+    #
+    # The note about running costs read the NEWEST row's cost per mile and
+    # stated it as a fact about every rate on the page. The rig subtracts
+    # $0.30/mi by default; the keypad and the phone's scanner subtract nothing
+    # and have no way to ask the rig what it uses. Both write into the same
+    # file, so the sentence was true of one pile and the exact opposite of the
+    # truth for the other.
+    _mix = got['mixed cost']['caveats']
+    _said = ' | '.join(c for c in _mix if 'running cost' in c)[:160]
+    ok_('a window holding both gross and net rates says so (%r)' % _said,
+        any('4' in c and '7' in c and 'did not' in c for c in _mix
+            if 'running cost' in c))
+    ok_('...naming the rate that was actually taken off',
+        any('$0.30/mi' in c for c in _mix))
+    ok_('...and warning the figures above mix the two',
+        any('mix what offers paid before the car' in c for c in _mix))
+    # One claim about running costs, not two. A page that pushed the plain
+    # sentence AND the mixed one would pass every check above while telling
+    # the reader both that all seven rates are net and that three of them are
+    # not — which is the original bug back, wearing the new wording.
+    eq('...and makes exactly one claim about them',
+       len([c for c in _mix if 'running cost' in c]), 1)
+    # ...and the same sentence may not appear over a window where every row
+    # was written by the same thing, or the check above passes on a page that
+    # cries mixture at everything.
+    # --- one job on a map, without leaving the log -------------------------
+    #
+    # "It would be convenient if it could do it in the existing program page.
+    # As each route click opens a new tab currently." Three taps down the log
+    # was three tabs, and on a phone each one meant finding your place again
+    # in a list of ninety.
+    _m = got['mapped']
+    # The page must not send a single place anywhere on load. Some of these are
+    # where customers live, and the whole arrangement is that the driver
+    # decides, one job at a time.
+    eq('the offers page geocodes nothing until asked',
+       _m['beforeAny']['asked'], [])
+    no_('...and shows no map', _m['beforeAny']['open'])
+    # Three controls on each job that named both ends, and ONE on the job the
+    # card only named a pickup for — a route control there would open a map of
+    # a journey to nowhere, which costs a tap and a moment's belief.
+    ok_('the route control reached the job it names', _m['tapped'])
+    eq('a job with both ends gets all three controls (%r)' % _m['controls'],
+       sorted(c.split(':')[0] for c in _m['controls'] if c.startswith('r0/')),
+       ['r0/both', 'r0/dropoff', 'r0/pickup'])
+    eq('...and a job that named only a pickup gets just the one',
+       [c.split(':')[0] for c in _m['controls'] if c.startswith('r1/')],
+       ['r1/pickup'])
+    eq('...with one control per named end and no more',
+       len(_m['controls']), 7)
+
+    _r = _m['route']
+    ok_('pressing route opens the sheet in this page', _r['open'])
+    ok_('...naming both ends (%r)' % _r['where'],
+        'Chastain' in _r['where'] and 'Oak Ln' in _r['where'])
+    eq('...and looking up exactly those two', len(_r['asked']), 2)
+    # Boxed around where the car was, which is the whole of the improvement:
+    # "usually the pickup/restaurant is the closest one to me".
+    ok_('...near where the car actually was', all(_r['boxes']))
+    eq('...drawing a pin for each', _r['pins'], 2)
+    # The one question a pin cannot answer. Driving time with real traffic is
+    # why the route link existed at all, so it survives — moved from the row,
+    # where it cost a tab every time, into the sheet.
+    ok_('...and the way to real driving directions is still there (%r)' % _r['out'],
+        _r['out'] and 'google.com/maps/dir' in _r['out'])
+    # What the sheet is FOR: a straight line cannot beat the road.
+    ok_('...with the straight line measured against the card (%r)' % _r['note'],
+        'straight line' in _r['note'] and 'card said' in _r['note'])
+
+    eq('the log is still underneath it', _m['stillThere']['rows'], 3)
+    ok_('...given room so its last row can still be reached',
+        _m['stillThere']['padded'])
+    eq('...and nothing navigated anywhere', _m['stillThere']['url'], '/journal.html')
+    no_('pressing the same control again puts the sheet away', _m['shut']['open'])
+
+    # A place the geocoder cannot find is the commonest real failure — a badly
+    # misread street — and an empty map with no caption looks exactly like a
+    # map that is still loading.
+    ok_('an unplaceable address says so rather than showing nothing (%r)'
+        % _m['lost']['note'], 'found nothing' in _m['lost']['note'])
+
+    _one = [c for c in got['took six']['caveats'] if 'running cost' in c]
+    ok_('a window written by one device gets the plain sentence (%r)'
+        % ' | '.join(_one)[:100],
+        any('Rates are after $0.33/mi of running costs.' == c for c in _one))
+    no_('...and is not described as a mixture',
+        any('did not' in c for c in _one))
+    eq('...also exactly once', len(_one), 1)
 
 finally:
     proc.terminate()

@@ -302,8 +302,17 @@ html, body {
  * an 800x480 panel and a 44px box inside it grows the row and pushes the
  * verdict. A wide short target is what a mouse needs; a finger-sized one is
  * what would break the layout. */
+/* Worn by both an <a> and a <button> since the offers page's map controls
+   stopped opening tabs. A button is a button to the keyboard and to a screen
+   reader, which a link with no href is not — but it arrives with the browser's
+   own font, background and centring, so those three are said here rather than
+   left to whichever element happens to carry the class. */
 .maplink {
   display: inline-block;
+  font: inherit;
+  background: none;
+  cursor: pointer;
+  text-align: center;
   /* Never shrinks, and never gives up its place in the row. See .stackline:
      as an inline-block child of a clipped box this used to be laid out
      entirely outside the panel and could not be pressed at all. */

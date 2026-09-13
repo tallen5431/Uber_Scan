@@ -154,7 +154,8 @@ it read `package.json`, and it will serve instead.
 | `journal-client.js` | Hands an offer typed here, or read by the phone's scanner, to the rig's journal when there is one to answer |
 | `server.js` | Zero-dependency static server; the Node entry point |
 | `journal.html` | Every offer the scanner kept, and what it adds up to |
-| `map.html` | Puts the places the rig read on a map, to check whether they are right — one pin per place, with the pins that landed in another state drawn in red and listed rather than allowed to set the view. Needs a network; asks nothing until you press the button |
+| `map.html` | Puts a whole range of places on a map, to check whether the rig is right about where the work happened — one pin per place, with the pins that landed in another state drawn in red and listed rather than allowed to set the view, and a toggle for the positions the rig's own GPS recorded. Needs a network; asks nothing until you press the button |
+| `map-view.js` | The deciding behind both maps with no map in it — the geocoder, its one-request-a-second rule, the box drawn around where the car was, and the test for a pin that cannot be in this shift. Runs under Node, which is what lets the rate limit be checked against a fake clock |
 | `live.html` | The driving screen: the rig's verdict, the phone as the camera sees it, and the controls used while moving |
 | `scan.html`, `scan.js`, `scan.css` | The phone's own scanner — a photo of the offer card, read on the phone; see [SCANNING.md](SCANNING.md) |
 | `offer-parser.js` | Turns the text off a card into pay, minutes and miles — one corpus, shared with the Pi's port |
@@ -212,6 +213,21 @@ So the Pi scanner keeps one line per offer it was confident about, in
   rig still works is not a job you were given, and left in it drags every median
   toward whatever that card says. Hide one, or hide *every* reading of that card
   — now and in future — so checking the rig costs nothing.
+* **see where one went, without leaving the list.** The map controls on a row
+  open a sheet over the bottom of this page rather than a new tab, so three
+  offers checked is three taps and not three tabs with the log lost behind
+  them. Green is the pickup, amber the dropoff, and the caption measures the
+  straight line between them against the distance the card itself stated — a
+  straight line cannot beat the road, so a longer one means a pin is in the
+  wrong place. Driving time with real traffic is the one thing a pin cannot
+  give, and the link to it is inside the sheet.
+
+  Nothing is looked up until you press one of those controls. Some of these
+  places are where customers live, and the rig never sends any of them
+  anywhere by itself; the lookup happens in your browser, when you ask. Nor
+  does anything that comes back change a figure on the page: every number here
+  is still the one the card printed. A pin is for looking at, and what it is
+  good for is being visibly in the wrong state.
 
 If a line in that file is ever unreadable — a power cut mid-write, or a card
 going bad — the offers page says so and says plainly that those offers cannot be

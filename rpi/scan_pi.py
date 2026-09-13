@@ -209,7 +209,7 @@ VERIFY_EVERY = 2.5
 # ...and how far that beat backs off while the answer keeps coming back the
 # same, up to a ceiling.
 #
-# A read costs about 1.4 seconds of a Pi 4, of which 91% is inside tesseract,
+# A read costs about 1.8 seconds of a Pi 4, of which most is inside tesseract,
 # and a card sits on the screen for tens of seconds. Re-reading it every 2.5s
 # for all of that is the loop's largest single expense and it buys almost
 # nothing: one real recording has the same card read four times in seventy
@@ -279,7 +279,7 @@ VERIFY_MAX = 6.0
 class Reader:
     """The OCR, moved off the loop that holds the camera.
 
-    A read is about 1.4 seconds on a Pi 4, 91% of it inside tesseract, and for
+    A read is about 1.8 seconds on a Pi 4, most of it inside tesseract, and for
     all of that the loop below used to be doing nothing whatever: no capture
     requests serviced, so no frames written for the live view — the picture the
     driver is looking at to decide whether to press Accept freezes for a second
@@ -1143,10 +1143,17 @@ def show(frame_text, rate, parsed, ms, locked):
 # anything for twelve seconds, and it used to infer that from reads — which was
 # always a little indirect and is now wrong. Between offers the motion gate can
 # hold a still picture for minutes without a single read, and *during* an offer
-# the verify beat backs off to twelve seconds, so a card sitting unchanged with
-# a 1.4s read on the end of the beat produces a 13.4s silence. The page would
-# dim the verdict and say the rig had stopped at the exact moment the driver is
-# reading it to decide.
+# the verify beat backs off to VERIFY_MAX, so a card sitting unchanged with a
+# read on the end of the beat produces a silence of the two added together —
+# 6.0 + 3.7 is 9.7s at the p90 read, and the worst read measured is 5.9s. The
+# page would dim the verdict and say the rig had stopped at the exact moment the
+# driver is reading it to decide.
+#
+# The figures in this paragraph were "twelve seconds" and "a 1.4s read", giving
+# 13.4s, and both were stale: the ceiling is 6.0 and a read is 1.85s at the
+# median. The conclusion survived the correction, which is luck rather than
+# design — see READ_SECONDS, where the estimate that produced them is replaced
+# by the owner's own 272 measured reads.
 #
 # So the loop says so itself, on a beat well inside that window. It is one small
 # line of JSON: no verdict, no numbers, nothing that can overwrite a reading —
@@ -1181,7 +1188,7 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None):
 def emit_reading():
     """A card is in front of the reader and the reader has started on it.
 
-    The one thing the driver could not see. A read is about 1.4 seconds on a
+    The one thing the driver could not see. A read is about 1.8 seconds on a
     Pi 4 and 91% of it is inside tesseract, and for every one of those seconds
     the dashboard said WAITING FOR AN OFFER over a row of dashes — which is what
     it says when there is nothing on the phone at all. The card was there, the
