@@ -2276,6 +2276,67 @@
  "_places_comment": "Where an offer went, so it can be found again months later. Checked as an exact list because the risk is not missing one, it is inventing one: a journal full of half-read map furniture is worse than one that cannot be searched by place. The 'from fast charger' badge on the Uber card and the '(2 orders)' after the Papa John's name are both things a looser reader would have swallowed.",
  "places": [
   {
+   "name": "a merchant and a junction with nothing between them",
+   "text": "27 min (7.3 mi) total Smash Hit Burgers - Kennesaw Allgood Rd & Monarch Dr, Marietta",
+   "expect": [
+    "Smash Hit Burgers",
+    "Kennesaw Allgood Rd & Monarch Dr, Marietta"
+   ]
+  },
+  {
+   "name": "...which is sixty-one characters, and used to store nothing at all",
+   "text": "21min (6.1 mi) total West Cobb Diner Burnt Hickory Rd NW & Nelirose Dr NW, Kennesaw @ Matching may take longer",
+   "expect": [
+    "West Cobb Diner",
+    "Burnt Hickory Rd NW & Nelirose Dr NW, Kennesaw"
+   ]
+  },
+  {
+   "name": "...and the bracketed seam still wins where there is one, before any of this",
+   "text": "22min (5.9 mi) total Olive Garden (Ernest W Barrett Pkwy NW & Roberts Ct) Farm Place Ct NE & Farm Place Dr NE, Woodstock",
+   "expect": [
+    "Olive Garden (Ernest W Barrett Pkwy NW & Roberts Ct)",
+    "Farm Place Ct NE & Farm Place Dr NE, Woodstock"
+   ]
+  },
+  {
+   "name": "two junctions and no bracket is a piece the reader cannot split, and it does not guess",
+   "text": "27 min (7.3 mi) total Freddy's Frozen Custard & Steakburgers Hamby Place Dr NW & Travistock Pl NW, Acworth",
+   "expect": []
+  },
+  {
+   "name": "...including the back end of a merchant the window cut in half, whose good destination would otherwise be read as where the job ENDED",
+   "text": "27 min (7.3 mi) total NW & Barretts Lake Blvd) Glencrest Dr & Sourwood Dr, Marietta",
+   "expect": []
+  },
+  {
+   "name": "a merchant whose own name has an ampersand is not split on it",
+   "text": "27 min (7.3 mi) total Applebee's Grill & Bar",
+   "expect": [
+    "Applebee's Grill & Bar"
+   ]
+  },
+  {
+   "name": "...and where splitting at one of two would weld half a merchant onto a good address and store it as where the job ENDED",
+   "text": "27 min (7.3 mi) total jersey mikes subs pkwy NW & Barretts Blvd) Glencrest Dr & Sourwood Dr, Dallas",
+   "expect": []
+  },
+  {
+   "name": "a piece short enough to store whole is stored whole, seam or no seam",
+   "text": "27 min (7.3 mi) total Papa Mario Pizza Kirk Ln NW & Kirk View Ct, Dallas",
+   "expect": [
+    "Papa Mario Pizza Kirk Ln NW & Kirk View Ct, Dallas"
+   ]
+  },
+  {
+   "name": "the junction is capitalised words only, so OCR sludge before it stays on the merchant rather than joining the address, where it would cost the lookup",
+   "text": "21min (6.1 mi) total West Cobb Diner ee aa nie Oak Dr & Pine Blf, Marietta Georgia USA",
+   "expect": [
+    "West Cobb Diner ee aa nie",
+    "Oak Dr & Pine Blf, Marietta Georgia"
+   ]
+  },
+  {
    "name": "a delivery merchant behind a Pickup label",
    "text": "Decline High paying offer! Your Platinum status gave you priority for this offer. $41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa John's Store 3317 (2 orders) Customer dropoff Customer dropoff Accept 27",
    "expect": [

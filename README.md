@@ -256,6 +256,16 @@ Two things it is careful about:
   Only what the card itself printed, never free text off the map behind it. They
   are in `/api/journal` and in the CSV.
 
+  Uber writes that pair two ways. Sometimes the merchant has its branch in
+  brackets and the destination follows, and the closing bracket is the seam.
+  Sometimes there is nothing between them but a map-pin icon, which the camera
+  reads as `7`, `9`, `©` or nothing at all — and on those the reader splits at
+  the junction instead, because the destination is `<street> & <street>` and
+  the merchant is not. Where there are two junctions and no bracket it stores
+  neither half rather than guess which ampersand is the seam: a card with no
+  destination is a gap, and a card claiming the job ended at the restaurant it
+  started from is a wrong answer.
+
   It is a real trade: this is a record of where you were and when, it lives on a
   card in a vehicle, and it is copied to the machine at home. `"keepPlaces":
   false` alongside the other settings in `rpi/config.json` turns it off and

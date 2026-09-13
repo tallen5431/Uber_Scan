@@ -513,8 +513,35 @@
    *
    * The card's own grammar separates them: Uber prints the merchant with its
    * branch in brackets and where the job goes after that, so the closing
-   * bracket is the seam. */
-  var PLACE_MERCHANT = /^(.{2,44}?\([^)]{2,34}\))\s*(.{4,})$/;
+   * bracket is the seam.
+   *
+   * 40 inside the brackets rather than 34, measured. `Wendy's (3442 Ernest W.
+   * Barrett Parkway N.W.)` is 35 and `Olive Garden (Ernest W Barrett Pkwy NW &
+   * Roberts Ct)` is 37, and on the driver's own 272-card export those two were
+   * the only cards the limit touched: both stored NOTHING, because the seam was
+   * one character out of reach and the whole piece then failed the length check
+   * below. */
+  var PLACE_MERCHANT = /^(.{2,44}?\([^)]{2,40}\))\s*(.{4,})$/;
+
+  /* The other seam, for the cards that write no brackets.
+   *
+   * Uber's second layout puts the merchant and the destination on one line with
+   * nothing but a map-pin icon between them, and the camera turns that icon into
+   * whatever it likes — `7`, `9`, `©`, or nothing at all. There is no character
+   * to split on. What there IS, on 13 of the 15 cards this went wrong on, is a
+   * JUNCTION: the destination is `<street> & <street>` and the merchant is not.
+   *
+   * Exactly one junction, or nothing: see where this is used. A piece with two
+   * of them is one the parser cannot read, not one to guess at.
+   *
+   * Capitalised words only, and at most four each side, so this anchors on a
+   * street name rather than on the first ampersand in a line of icon sludge. */
+  var PLACE_JUNCTION_AT = /(?:[A-Z][A-Za-z'.]*\s+){0,3}[A-Z][A-Za-z'.]*\s*&\s*(?:[A-Z][A-Za-z'.]*\s+){0,3}[A-Z][A-Za-z'.]*/g;
+
+  /* The longest thing that may be stored as one place. Named because two rules
+   * consult it: `keep` refuses anything over it, and the junction seam only
+   * looks for a seam in a piece that is over it. */
+  var MAX_PLACE = 60;
 
   /* ...and an address ends at its town. Nothing on the card marks the end of
    * one, which is what left "Lakeview Ter & Windmill Dr, Dallas ill" in the
@@ -866,7 +893,7 @@
     var out = [];
     function keep(value) {
       value = trimPlace(value);
-      if (value.length < 3 || value.length > 60) return;
+      if (value.length < 3 || value.length > MAX_PLACE) return;
       if (!/[A-Za-z]{2}/.test(value)) return;
       for (var i = 0; i < out.length; i++) {
         if (out[i].toLowerCase() === value.toLowerCase()) return;
@@ -919,6 +946,57 @@
           var drop = endsAtTown(trimPlace(pair[2]));
           if (looksLikeAPlace(drop)) keep(drop);
           continue;
+        }
+        // Too long to store whole, and the reason it is too long is that it
+        // holds BOTH ends of the job with no bracket between them.
+        //
+        // This was a silent drop: `keep` refuses anything over 60 characters,
+        // so `Smash Hit Burgers - Kennesaw Allgood Rd & Monarch Dr, Marietta`
+        // — sixty-one — went in the bin with the merchant, the junction and
+        // the town in it, and the card stored no place at all. On the driver's
+        // own 272 that happened 15 times. The cap is right: a journal full of
+        // half-read map furniture is worse than one that cannot be searched.
+        // What was wrong is throwing away a piece the parser's own test had
+        // just called a place, and saying nothing.
+        if (trimPlace(piece).length > MAX_PLACE && looksLikeAPlace(piece)) {
+          PLACE_JUNCTION_AT.lastIndex = 0;
+          var seams = [], sm;
+          while ((sm = PLACE_JUNCTION_AT.exec(piece)) !== null) seams.push(sm.index);
+          // Exactly one, or the parser does not know which ampersand is the
+          // seam and does not guess. Two means either the merchant's own name
+          // has an ampersand — `Freddy's Frozen Custard & Steakburgers Hamby
+          // Place Dr NW & Travistock Pl NW, Acworth`, where splitting at
+          // either puts half a street name on the wrong side — or the
+          // 130-character window cut through a merchant's bracket and left
+          // its back end here: `NW & Barretts Lake Blvd) Glencrest Dr &
+          // Sourwood Dr, Marietta`.
+          //
+          // That second one is why refusing is not merely cautious. The
+          // destination in it is good, and keeping only that is still WRONG:
+          // it goes into the list ahead of the merchant a later leg finds,
+          // findPickup takes the first place and findDropoff takes what is
+          // left, and the card comes out saying the job ENDED at Jersey
+          // Mike's, which is where it began. A missing dropoff is a gap; that
+          // is a wrong answer, and this parser may produce the first and not
+          // the second.
+          if (seams.length === 1) {
+            var seam = seams[0];
+            var shop = trimPlace(piece.slice(0, seam));
+            var dest = endsAtTown(trimPlace(piece.slice(seam)));
+            // Neither half is judged here and neither needs to be. `keep`
+            // already refuses anything too short, too long or with no letters
+            // in it, and a piece that begins at a junction match begins with a
+            // capitalised street word and holds an ampersand — so asking
+            // looksLikeAPlace about it was a test no input could fail, which
+            // reads like a guard and guards nothing.
+            //
+            // The merchant is kept unasked for the same reason the bracketed
+            // branch keeps it: "Smash Hit Burgers" names no street and no
+            // town, and it is still where the driver goes first.
+            if (shop) keep(shop);
+            keep(dest);
+            continue;
+          }
         }
         piece = endsAtTown(piece);
         if (looksLikeAPlace(piece)) keep(piece);

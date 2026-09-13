@@ -603,8 +603,12 @@ try:
         and all(abs(float(w[0]) - 34.01) < 0.02 for w in trail['where']))
     # A position twenty seconds stale is half a mile at fifty miles an hour,
     # and a driver judging a pin by its distance from these dots is owed that.
+    # The number, not the word around it. A check for "old" passes on the
+    # sentence with the figure taken out of it, which is the whole of what
+    # this is for — 1.2 seconds is nothing and 20 is half a mile at fifty
+    # miles an hour.
     ok_('...saying how old each fix was (%r)' % (trail.get('popups') or [''])[0],
-        any('old' in p for p in (trail.get('popups') or [])))
+        all('fix was 1.2s old' in p for p in (trail.get('popups') or [''])))
     ok_('...counted in the status line (%r)' % trail.get('status'),
         '3 positions' in (trail.get('status') or ''))
     # The whole reason for showing them, said where it can be read.
