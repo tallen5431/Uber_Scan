@@ -246,6 +246,21 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     # the driver pressed the button or the rig simply saw the address, and the
     # receiving end treats those differently — so a recorder that kept only the
     # positional arguments could not see it at all.
+    # The Health object the loop builds, so a test can read the counters it
+    # keeps. Captured rather than scraped out of the log line, because the log
+    # line only prints a counter that is non-zero — and "the number did not
+    # appear" would then pass for both "it stayed at nought" and "the counter
+    # is not wired up at all".
+    healths = []
+    real_health_cls = SP.Health
+
+    def _make_health(*a, **k):
+        made = real_health_cls(*a, **k)
+        healths.append(made)
+        return made
+
+    SP.Health = _make_health
+
     destinations = []
     real_dropoff = SP.emit_dropoff
     SP.emit_dropoff = lambda *a, **k: (destinations.append((a[0] if a else None, k)),
@@ -303,6 +318,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         SP.start_camera, SP.emit = real_start, real_emit
         SP.emit_offer = real_offer
         SP.emit_dropoff = real_dropoff
+        SP.Health = real_health_cls
         PL.Scanner.look_many = real_look
         PL.Scanner.should_read = real_should
         TR.QuadTracker.disputing = real_disputing
@@ -324,7 +340,8 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     return dict(cam=cam, rows=rows, ready=ready, ready_kw=ready_kw,
                 announced=announced, gate_calls=gate_calls,
                 destinations=destinations, verdicts=verdicts,
-                config=config, journal=journal, started=len(started))
+                config=config, journal=journal, started=len(started),
+                health=(healths[-1] if healths else None))
 
 
 # --- a ride offer, end to end ----------------------------------------------
@@ -2230,6 +2247,59 @@ ok_('the card really did carry an address to be tempted by',
 eq('...and a screen with a payout on it is never taken as a destination',
    len(run_paid['destinations']), 0)
 ok_('...over a run that really did read it', _paid_reads[0] >= 2)
+
+# ...and it is COUNTED, because a guard that throws work away silently cannot
+# be told apart from a rig that never saw anything. The driver taps the
+# customer dropoff to reveal the address while SCREENING, and on a screening
+# tap the offer card is still on the screen — so if the crop catches the payout
+# and the label in one frame, this guard is also the screening case failing.
+# Both look the same from the driver's seat: "the rig didn't get it".
+_paid_health = run_paid.get('health')
+ok_('the refusal is counted rather than thrown away silently',
+    _paid_health is not None
+    and _paid_health.address_refused_had_payout >= 1)
+# The other direction, which is what stops this being a counter that only ever
+# goes up: the same run must NOT have counted a street it never refused.
+ok_('...and not confused with the other blind spot',
+    _paid_health is not None and _paid_health.street_seen_no_address == 0)
+
+# The counter that is expected to move: a screen with no payout, something
+# street-shaped on it, and no address the rig will accept. This is what says
+# whether find_address being strict on purpose is what stands between this
+# driver and an automatic destination — it returns None on all 272 of their
+# exported cards, so nothing on file can answer it.
+_bare_reads = [0]
+
+
+def _street_but_no_address(self, frames, now=None, geom=None):
+    """A navigation screen whose label carries no town, state or ZIP.
+
+    Which is exactly what the driver photographed: their own map label read
+    `3100 Esquire Dr N`. find_address refuses it, and should — `89 Shanty
+    Drive` is a background map label that would pass the same loose rule.
+    """
+    _bare_reads[0] += 1
+    text = 'Dropoff 3100 Esquire Dr N 14 min Start'
+    parsed = OP2.parse(text)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+eq('the premise: a street with no town, state or ZIP is refused',
+   OP2.parse('Dropoff 3100 Esquire Dr N 14 min Start').get('address'), None)
+run_bare = run(TC.uberx_screen(), seconds=8.0, extra_argv=['--no-parallel'],
+               look=_street_but_no_address, press_dropoff=False)
+ok_('...over a run that really did read it', _bare_reads[0] >= 2)
+eq('...and nothing was taken as a destination', len(run_bare['destinations']), 0)
+_bare_health = run_bare.get('health')
+ok_('a street the rig would not accept is counted, so the strict rule can be '
+    'judged on the road rather than guessed at',
+    _bare_health is not None and _bare_health.street_seen_no_address >= 1)
+ok_('...and not counted as the payout refusal, which did not happen here',
+    _bare_health is not None and _bare_health.address_refused_had_payout == 0)
 
 
 def _slow_address(self, frames, now=None, geom=None):

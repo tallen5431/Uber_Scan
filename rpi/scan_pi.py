@@ -924,6 +924,21 @@ class Health:
         self.reset(None)
         self.relocks = 0
         self.rebaselines = 0
+        # The destination scan's two blind spots, counted for the whole run
+        # rather than per window — these are questions asked about a shift,
+        # days later, and a counter that resets every thirty seconds cannot
+        # answer them. See digest(), where both are incremented.
+        #
+        # `address_refused_had_payout` is the rule-1 guard's own firing rate:
+        # a frame that yielded a full address AND a payout, refused because a
+        # screen with a payout on it is an offer and not a destination.
+        #
+        # `street_seen_no_address` is a frame with no payout, something
+        # street-shaped in the text, and no address out of it. This is the one
+        # expected to move, and what it measures is how much of the driver's
+        # missing destination is find_address being strict on purpose.
+        self.address_refused_had_payout = 0
+        self.street_seen_no_address = 0
         self.gain = None
         self.bright = None
         self.banding = None
@@ -1054,6 +1069,18 @@ class Health:
             bits.append('%d found no payout' % self.no_pay)
         if self.clipped:
             bits.append('%d had the payout at the crop edge' % self.clipped)
+        # Outside the tracker block on purpose: these say nothing about the
+        # corners, and a rig started with --no-track is exactly the one whose
+        # destination scan is worth watching.
+        if self.street_seen_no_address:
+            bits.append('%d screen%s had a street on it and no address the rig '
+                        'would accept'
+                        % (self.street_seen_no_address,
+                           '' if self.street_seen_no_address == 1 else 's'))
+        if self.address_refused_had_payout:
+            bits.append('%d address%s refused for being on a card with a payout'
+                        % (self.address_refused_had_payout,
+                           '' if self.address_refused_had_payout == 1 else 'es'))
         # Brightness and banding, because "the picture looks dark" and "the
         # screen looks wavy" are things a person notices and a log should be
         # able to confirm or deny with a number.
@@ -1102,7 +1129,10 @@ class Health:
                             'is out of date' % self.rebaselines)
         log('health over %.0fs: %s' % (now - self.since, '; '.join(bits)))
         tally = {'over': int(now - self.since), 'saw': self.saw,
-                 'kept': self.kept, 'reads': self.reads, 'failed': self.failed}
+                 'kept': self.kept, 'reads': self.reads, 'failed': self.failed,
+                 # Run totals, not window totals — see __init__.
+                 'streetNoAddress': self.street_seen_no_address,
+                 'addressHadPayout': self.address_refused_had_payout}
         self.reset(now)
         return tally
 
@@ -1924,6 +1954,34 @@ def main():
         # nothing: a navigation screen has no payout to lose. All five of
         # those cards carry one, so this closes the path completely.
         found = shot.get('address') if shot.get('pay') is None else None
+        # ...and COUNTED, both ways, because all three outcomes look identical
+        # from the driver's seat: "the rig didn't get it".
+        #
+        # The driver's own words are that on a DoorDash order they tap the
+        # customer dropoff to reveal the address while screening — and on a
+        # screening tap the offer card is still on the screen. If the crop
+        # catches the payout and the revealed label in the same frame, the
+        # guard above throws the address away and nothing anywhere records
+        # that it happened. That is the guard doing its job and it is also
+        # the screening case failing, and the two are indistinguishable
+        # without a number.
+        #
+        # So: how often the guard actually fired, and how often a screen went
+        # past with something street-shaped on it that find_address refused.
+        # The second is the one expected to move, and it is the one that says
+        # whether the strict `street, ST ZIP` rule is what stands between this
+        # driver and an automatic destination — find_address returns None on
+        # all 272 of their exported cards, so nothing on file can answer it.
+        #
+        # Counted, NOT acted on. A number saying how often a guard fired is
+        # not an argument that it was wrong to fire; loosening find_address on
+        # the strength of it would put "89 Shanty Drive" — a background map
+        # label — on the panel as a destination.
+        if shot.get('pay') is not None and shot.get('address'):
+            health.address_refused_had_payout += 1
+        elif shot.get('pay') is None and not shot.get('address') \
+                and OP.STREET_ENDS.search(out.get('text') or ''):
+            health.street_seen_no_address += 1
         # ...and said ONCE, not on every read that catches the same screen.
         #
         # A navigation screen can sit in front of the camera for the whole of a
