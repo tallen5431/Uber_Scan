@@ -2075,6 +2075,29 @@ if run_nodrop['destinations']:
 eq('...and said once, not on every read that catches the same screen',
    len(run_nodrop['destinations']), 1)
 
+# ...and a screen the rig DID get an address out of is not also counted as a
+# street it refused.
+#
+# This run is the one that pins the street counter's condition rather than just
+# its wiring. Replacing that condition with `elif True:` — so it fires on every
+# payout-free read whatever is on the screen — survived every other check in
+# this file: the payout fixture never reaches the elif at all, and the refused-
+# street fixture increments either way. Only a run that produces a GOOD address,
+# and reads screens with no street on them, can tell the difference.
+#
+# It matters because of what the number is for. The counter exists to say how
+# much of this driver's missing destination is find_address being strict on
+# purpose, and that is the evidence that would justify loosening it. A counter
+# that also counts every screen it read perfectly argues for loosening a rule
+# that is working — the wrong direction, off a number nobody can check.
+_nodrop_health = run_nodrop.get('health')
+ok_('the premise: this run really did accept an address',
+    _nodrop_health is not None and len(run_nodrop['destinations']) == 1)
+eq('a screen that yielded an address is not counted as a street the rig '
+   'refused', _nodrop_health and _nodrop_health.street_seen_no_address, 0)
+eq('...and nothing here was refused for carrying a payout either',
+   _nodrop_health and _nodrop_health.address_refused_had_payout, 0)
+
 # ...while a press still says so, which is the difference the receiving end
 # acts on.
 if run_drop['destinations']:
