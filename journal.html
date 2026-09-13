@@ -1117,6 +1117,18 @@
               ? ', amber within ' + r.band + '%' : '') : null)
       + ((r.places && r.places.length)
          ? row('Where', esc(r.places.join(' \u2192 '))) : '')
+      // An address the driver revealed on their phone and had the rig read,
+      // rather than one the card printed.
+      //
+      // Its own row and its own label, because the two are different degrees
+      // of evidence and the difference is the whole reason this one is worth
+      // having. A cross street off a card is what the reader made of a line of
+      // OCR on a screen nobody confirmed; this is what the phone said when it
+      // was asked, which is why it beats the card's own dropoff where a row
+      // carries both. Folding it into "Where" would hide that a card printing
+      // "Customer dropoff" now has an address at all.
+      + (r.dropoffScanned && r.dropoff
+         ? row('Dropoff, read off your phone', esc(r.dropoff)) : '')
       // ...and the same places on a map, in the sheet at the bottom of this
       // page. See showOnMap.
       //

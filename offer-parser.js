@@ -1586,6 +1586,12 @@
       // Reported, not acted on here: parse() says what it read and rate()
       // decides what to do about it, the same division the other doubts keep.
       notAnOffer: NOT_AN_OFFER.test(text || ''),
+      // Whether the card REFUSED a destination, as opposed to the reader
+      // simply not finding one. Uber prints "Customer dropoff" where the
+      // address will be, so the address exists and the driver has not earned
+      // it yet — one tap on the phone reveals it. Both arrive downstream as a
+      // null dropoff and only this one is a state anybody can act on.
+      endRefused: DROPOFF_NOT_STATED.test(text || ''),
       // The legs behind the sum, so a caller holding readings from several
       // frames can merge the ones a single frame missed.
       legDetail: used.map(function (l) {

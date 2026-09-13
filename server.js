@@ -351,11 +351,30 @@ function startScanner() {
         // null on 18% of accepted jobs, which is what makes the stacking advice
         // silent on 39% of the pairs it is asked about.
         //
-        // Only when there IS an order in the car. Read with nothing held, this
-        // is an address belonging to no job, and storing it would measure the
-        // next offer against wherever the driver happened to be pointing the
-        // camera. It is also why nothing here touches `scanner.offer`: the
-        // offer is a card that was read, and this is not one.
+        // It also goes onto the CARD ON THE PANEL, when there is no order in
+        // the car and there is a card.
+        //
+        // This paragraph used to say the opposite — "only when there IS an
+        // order in the car... nothing here touches `scanner.offer`" — and the
+        // reasoning behind it was sound for the flow it was written for. Read
+        // with nothing held and no card up, this is an address belonging to no
+        // job, and storing it would measure the next offer against wherever
+        // the driver happened to be pointing the camera.
+        //
+        // What that missed is the driver's actual habit: "for doordash orders
+        // I need to tap the customer drop off location to show the address
+        // when screening". They reveal the address BEFORE deciding, because
+        // where a job ends is half of whether it is worth taking. In that
+        // moment there is no held order — and there is a card, with an id, on
+        // the panel, which is not "wherever the camera happened to be
+        // pointing". The guard that matters was never "an order is held", it
+        // was "this address belongs to something identifiable".
+        //
+        // So: the held order first, because with one in the car that is the
+        // stronger claim — every pair judged against it is nonsense without an
+        // end. Otherwise the offer on the slot, and only while it is still the
+        // card in front of the driver. With neither, nothing is stored, which
+        // is exactly what happened before.
         //
         // Asked through holding(), never off `scanner.holding` directly. That
         // field is the raw slot; holding() is the question "is an order being
@@ -369,12 +388,45 @@ function startScanner() {
           if (carrying) {
             carrying.dropoff = read.dropoff.line;
             carrying.dropoffScanned = true;
+          } else if (screeningCard(Date.now())) {
+            // Onto the card being screened, and onto its journal row.
+            //
+            // In memory first, because the panel and the stack line read
+            // `scanner.offer` and a destination that only reached the file
+            // would be invisible until the page was reloaded. `dropoffScanned`
+            // travels with it for the same reason it does on a held order: a
+            // destination the rig READ off a navigation screen and one the
+            // CARD stated are different degrees of evidence, and the row has
+            // to be able to say which it is holding.
+            scanner.offer.dropoff = read.dropoff.line;
+            scanner.offer.dropoffScanned = true;
+            // ...and appended, as its own line naming the offer. The same
+            // shape as a tick: the journal is append-only, so this is a note
+            // ABOUT a row rather than an edit to it, and the copy at home
+            // merges it by the same newest-wins rule as everything else.
+            appendLines(JSON.stringify({
+              v: 1, kind: 'mark', at: Date.now(),
+              id: scanner.offer.id,
+              dropoff: read.dropoff.line
+            }) + '\n', function () { /* the panel already has it */ });
           }
-          // Kept either way, so the page can say what was read even when there
-          // was nothing to attach it to - a driver who presses the button with
-          // no order held needs to see that, not silence.
-          scanner.dropoff = read.dropoff;
-          scanner.dropoffAt = Date.now();
+          // What was read is said to the panel over the stream, which is
+          // where it was always coming from: live.html listens for
+          // `msg.dropoff.line` and shows it on the button. A driver who
+          // presses this with nothing to attach an address to still sees what
+          // was read, and that is what they need.
+          //
+          // `scanner.dropoff` and `scanner.dropoffAt` were kept here for that
+          // and are gone. They were written on every read and not one line in
+          // this repository ever read them back — the comment above them said
+          // "so the page can say what was read", which the page does, from the
+          // stream, having never asked for these. State nothing consults is
+          // not a store, it is a claim in a comment.
+          //
+          // The reload case they would have covered is covered by the two
+          // fields that are real: a held order carries `dropoff` and
+          // `dropoffScanned`, and since this change so does the card on the
+          // slot, both of which /api/status already sends.
         }
         // The scan loop's own voice — a reading or a heartbeat — as opposed to
         // the autopilot's progress messages. Only this arms the watchdog, and
@@ -541,6 +593,44 @@ function touchWatchFile(view) {
     if (err) return;
     fs.rename(WATCH_PATH + '.part', WATCH_PATH, function () {});
   });
+}
+
+/* How long a card stays "the one in front of the driver", for the purpose of
+ * attaching an address to it.
+ *
+ * The panel's own verdict goes stale at sixteen seconds of silence, and this is
+ * deliberately far longer, because the two are answering different questions. A
+ * verdict has to stop being trusted quickly: it is a number the driver acts on
+ * and a stale one is a wrong one. Attaching an address is not that — it is a
+ * note on a card that was definitely on the screen a moment ago, and the driver
+ * has to leave this panel, tap the dropoff on their phone, wait for the map to
+ * settle and come back. Sixteen seconds would not survive doing the thing the
+ * button asks for.
+ *
+ * Two minutes, and it is a ceiling rather than a target: what it exists to
+ * refuse is an address landing on a card from an hour ago, read while the
+ * driver was pointing the camera at something else entirely. Inside two
+ * minutes there is no other card it could plausibly belong to — the rig would
+ * have read one and replaced the slot.
+ *
+ * Overridable for the same reason HOLD_GRACE_MS is: a check that has to wait
+ * out two minutes of real clock to prove the ceiling exists is a check nobody
+ * runs, and a ceiling nothing proves is a ceiling that quietly stops being
+ * one. */
+var SCREENING_MS = Number(process.env.SCREENING_MS);
+if (!isFinite(SCREENING_MS) || SCREENING_MS < 0) SCREENING_MS = 120000;
+
+/* The card being screened, or null — the offer on the slot, while it is still
+ * recent enough for an address read now to belong to it.
+ *
+ * Asked as a function for the same reason holding() is: `scanner.offer` is the
+ * raw slot and holds the last card read whenever that was, which on a rig left
+ * running overnight is a card from yesterday. */
+function screeningCard(now) {
+  var o = scanner.offer;
+  if (!o || typeof o.id !== 'string' || !o.id) return null;
+  if (!scanner.offerAt) return null;
+  return (now - scanner.offerAt) <= SCREENING_MS ? o : null;
 }
 
 /* The order the driver is currently carrying, or null.
@@ -1229,6 +1319,17 @@ function latestPerOfferUncached(rows) {
         if (r.hidden !== undefined && when >= (m.hiddenAt || 0)) {
           m.hidden = r.hidden; m.hiddenAt = when;
         }
+        // Where the job went, read off the phone rather than off the card.
+        //
+        // Folded by `at` like the other two and for the same reason: a
+        // destination read in the car at 11:00 must beat one read at home at
+        // 10:00 whichever order the two journals merge in. Its own field, not
+        // folded in with `accepted`, because a mark may carry only one of them
+        // and an older row about the other is still the newest word on it.
+        if (typeof r.dropoff === 'string' && r.dropoff
+            && when >= (m.dropoffAt || 0)) {
+          m.dropoff = r.dropoff; m.dropoffAt = when;
+        }
       }
       return;
     }
@@ -1281,6 +1382,12 @@ function latestPerOfferUncached(rows) {
     if (mark) {
       if (mark.accepted !== undefined) o.accepted = mark.accepted;
       if (mark.hidden !== undefined) o.hidden = mark.hidden;   // an id beats a rule
+      // A destination the driver revealed beats one the card never gave — and
+      // beats one it DID give, too, because a card's own dropoff is what the
+      // reader made of a line of OCR and this is what the phone actually said
+      // when asked. `dropoffScanned` marks the difference so nothing
+      // downstream has to guess which kind it is holding.
+      if (mark.dropoff) { o.dropoff = mark.dropoff; o.dropoffScanned = true; }
     }
   });
 

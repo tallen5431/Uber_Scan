@@ -1269,8 +1269,45 @@
   var destBusy = false;
   var destSaid = '';
 
+  /* The other state this button is for, which it did not used to have.
+   *
+   * It was built for after the accept: an order is in the car, its card never
+   * said where the job ends, and the address is on the navigation screen. That
+   * is still what it does — and it is not when the driver actually wants to
+   * know.
+   *
+   * The driver's own words: "for doordash orders I need to tap the customer
+   * drop off location to show the address when screening so it would be
+   * possible to search on the map". They are already tapping the phone to
+   * reveal the address BEFORE deciding, because where a job ends is half of
+   * whether it is worth taking. The rig was looking away.
+   *
+   * Three conditions, and each one is doing work:
+   *
+   *   Nothing held, because with an order in the car the button already means
+   *   something and that meaning wins — the held order's missing end is the
+   *   stronger claim, since every pair judged against it is nonsense without.
+   *
+   *   A card the rig has on record, with an id, because an address read
+   *   against no card is an address belonging to no job. That is the exact
+   *   thing server.js refuses to store, and it is right to.
+   *
+   *   And the card is still UP. `onRecord` is deliberately not cleared — the
+   *   Took button names an offer whose card has gone — so without this the
+   *   button would sit lit for the rest of the shift after one card with no
+   *   destination. Measured off the same clock the verdict's own "stale" uses,
+   *   so the control disappears when the thing it is about does.
+   */
+  function screeningEnd() {
+    if (holdingNow) return false;
+    if (!onRecord || !onRecord.id) return false;
+    if (onRecord.dropoff) return false;
+    return Date.now() - readAt <= READ_STALE_MS;
+  }
+
   function showDest() {
-    el.dest.hidden = !holdingNow;
+    var screening = screeningEnd();
+    el.dest.hidden = !holdingNow && !screening;
     // A LABEL, always, and the answer said in colour instead.
     //
     // This used to become the address itself once one had been read. The bar is
@@ -1301,23 +1338,42 @@
     // HELD order's — when it is the new card's own dropoff that is missing,
     // nothing this button does can help, and a control that asks to be pressed
     // for no gain is worse than one that says nothing.
-    var wants = !destBusy && !destSaid && holdingNow && heldEnds === null;
+    //
+    // Screening asks to be pressed on a narrower condition than holding does:
+    // the card has to have REFUSED a destination, not merely failed to yield
+    // one. Uber printing "Customer dropoff" means the address exists and is
+    // one tap away on the phone; a card the reader simply got nothing off has
+    // nothing to reveal, and lighting up over it would be asking for a press
+    // that cannot help. See endRefused, which is why the two are now telling
+    // apart at all.
+    var wants = !destBusy && !destSaid
+      && (holdingNow ? heldEnds === null
+                     : (screening && !!onRecord.endRefused));
     el.dest.classList.toggle('wanted', wants);
     el.dest.title = destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
-      : wants
+      : wants && holdingNow
       ? 'The order you are carrying has no address on record, so the rig '
         + 'cannot say whether a second job ends near it. Read it off your '
         + 'phone. It does not touch your phone.'
-      : 'Read the destination off your phone, so the next offer can be judged '
-        + 'on where it ends as well as what it pays. It does not touch your phone.';
+      : wants
+      ? 'This card says “Customer dropoff” and no address. Tap the dropoff on '
+        + 'your phone and press this, and where it goes is on the record '
+        + 'before you decide. It does not touch your phone.'
+      : holdingNow
+      ? 'Read the destination off your phone, so the next offer can be judged '
+        + 'on where it ends as well as what it pays. It does not touch your phone.'
+      : 'Read where this card goes off your phone. It does not touch your phone.';
     // ...and said out loud, because the colour is the only thing on screen that
     // changed and a screen reader cannot see it.
     el.dest.setAttribute('aria-label', destSaid
       ? 'Dropoff read as ' + destSaid + '. Press again to read it afresh.'
-      : wants
+      : wants && holdingNow
       ? 'Read the dropoff off your phone. The order you are carrying has no '
         + 'address on record, so second jobs cannot be judged on where they end.'
+      : wants
+      ? 'Read the dropoff off your phone. This card says Customer dropoff and '
+        + 'gives no address.'
       : 'Read the dropoff off your phone');
   }
 
@@ -1949,6 +2005,12 @@
         }
         onRecord = msg.offer;
         showTook();
+        // ...and the dropoff button, whose whole screening condition is a
+        // property of THIS offer: whether it named a destination and whether
+        // the card refused one. The tick below would get there within a
+        // second; a second is a long time on a screen the driver is reading
+        // to decide, and the card may be gone by then.
+        showDest();
       }
       // A read started, and — on the next message carrying a verdict — ended.
       // Same shape as the two above: no `ready`, so it cannot stand in for one.
@@ -2481,6 +2543,11 @@
   setInterval(function () {
     render();
     showConnection();
+    // The screening state ages out on a clock and nothing arrives to announce
+    // it: between cards the scanner can be silent for minutes, which is the
+    // whole reason this tick exists. Without it ⌖ Dropoff would stay lit over
+    // a card that left the screen long ago.
+    showDest();
     // The shift figures ride the one-second tick rather than adding a timer of
     // their own, on an elapsed check so the cadence is three minutes however
     // many ticks it took. `document.hidden` because this tick keeps running in

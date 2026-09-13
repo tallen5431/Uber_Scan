@@ -45,6 +45,10 @@ def ok_(name, cond):
     eq(name, bool(cond), True)
 
 
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 if shutil.which('node') is None:
     print('no node on this machine — skipping the server checks')
     sys.exit(0)
@@ -292,6 +296,158 @@ if shutil.which('python3'):
             (after.get('last') or {}).get('stack') is None)
         ok_('...nor the order', after.get('holding') is None)
         ok_('...and still carries the reading', (after.get('last') or {}).get('ready') is True)
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
+# --- an address read while SCREENING, with no order in the car ---------------
+#
+# The driver's own words: "for doordash orders I need to tap the customer drop
+# off location to show the address when screening so it would be possible to
+# search on the map". They reveal the address before deciding. Until now the
+# rig threw that reading away: the ⌖ Dropoff button attached an address to the
+# order in the car, and during screening there is no order in the car.
+#
+# What must not come back with it is the thing the old rule was protecting
+# against — an address read with nothing on the screen, landing on whatever
+# card happens to be in the slot. So the guard moved rather than lifted: it is
+# the card being SCREENED, which is an id and a clock, not merely "not held".
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'screening.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import json, sys, time\n'
+            'def card(i):\n'
+            '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
+            '        "grossPerHour": 36.0, "pay": 12.0, "minutes": 24.0, "miles": 5.0,\n'
+            '        "cost": 1.75, "billedMinutes": 24.0, "target": 25, "band": 15,\n'
+            '        "costPerMile": 0.35, "dropoff": None, "endRefused": True,\n'
+            '        "at": int(time.time() * 1000),\n'
+            '        "offer": {"id": i, "pay": 12.0, "minutes": 24.0, "billedMinutes": 24.0,\n'
+            '                  "miles": 5.0, "cost": 1.75, "perHour": 30.0, "target": 25,\n'
+            '                  "band": 15, "costPerMile": 0.35, "dropoff": None,\n'
+            '                  "endRefused": True}}), flush=True)\n'
+            'def addr(line):\n'
+            '    print(json.dumps({"dropoff": {"line": line, "street": "3100 Esquire Dr NW",\n'
+            '        "city": "Kennesaw", "state": "GA", "zip": "30144",\n'
+            '        "at": int(time.time() * 1000)}}), flush=True)\n'
+            'addr("nobody home, 0 Nowhere St, X, GA 30000")\n'
+            'time.sleep(0.6)\n'
+            'card("o-screen")\n'
+            'time.sleep(0.6)\n'
+            'addr("3100 Esquire Dr NW, Kennesaw, GA 30144")\n'
+            'time.sleep(600)\n')
+    # The row the rig itself would have written for this card. server.js does
+    # not write offer rows — the scanner does, straight to the file — so a
+    # fake scanner that only speaks on stdout leaves the journal with a note
+    # about a card that is not in it, and the check below would be measuring
+    # the fixture rather than the merge.
+    write(journal, [dict(offer(1, NOW - 1000), id='o-screen', dropoff=None)])
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+    try:
+        def wait_for(fn, patience=8.0):
+            for _ in range(int(patience * 20)):
+                s = get(base, '/api/status')
+                if fn(s):
+                    return s
+                time.sleep(0.05)
+            return None
+
+        got = wait_for(lambda s: ((s.get('offer') or {}).get('dropoff')))
+        ok_('an address read while screening reaches the card on the panel',
+            got is not None)
+        eq('...as the address itself',
+           (got.get('offer') or {}).get('dropoff'),
+           '3100 Esquire Dr NW, Kennesaw, GA 30144')
+        # Said to be a SCAN rather than something the card printed. The two are
+        # different degrees of evidence and the row has to be able to say which
+        # it is holding: a cross street off a card is what the reader made of a
+        # line of OCR, this is what the phone said when it was asked.
+        ok_('...and marked as scanned rather than read off the card',
+            (got.get('offer') or {}).get('dropoffScanned') is True)
+        # ...and nothing went in the car. Reading an address is not accepting a
+        # job, and a hold started here would measure every later offer against
+        # a job the driver never took.
+        ok_('...without putting an order in the car', got.get('holding') is None)
+
+        # On the record, not only in memory. The panel is process memory and a
+        # restart loses it; the whole point of reading the address before
+        # deciding is to still have it afterwards, on the offers page and on
+        # the map.
+        rows = [json.loads(l) for l in open(journal) if l.strip()]
+        marks = [r for r in rows if r.get('kind') == 'mark' and r.get('dropoff')]
+        eq('the address is appended as a note naming the offer', len(marks), 1)
+        eq('...naming it', marks[0].get('id'), 'o-screen')
+        eq('...and carrying the address', marks[0].get('dropoff'),
+           '3100 Esquire Dr NW, Kennesaw, GA 30144')
+        # The first address arrived before any card did. The old rule refused
+        # it for being unheld; the new one refuses it for having nothing to
+        # belong to, which is the reason that was always doing the work.
+        no_('an address read with no card on the panel is not written down',
+            any('Nowhere' in (r.get('dropoff') or '') for r in rows))
+        # ...and it comes back off the file the same way, which is the half a
+        # driver actually sees.
+        page = get(base, '/api/journal?days=7')
+        mine = [o for o in (page.get('offers') or []) if o.get('id') == 'o-screen']
+        eq('the offers page shows the row it landed on', len(mine), 1)
+        eq('...with the address on it', mine[0].get('dropoff'),
+           '3100 Esquire Dr NW, Kennesaw, GA 30144')
+        ok_('...still saying it was scanned', mine[0].get('dropoffScanned') is True)
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
+# --- a card too old to attach an address to ----------------------------------
+#
+# The ceiling, which is the whole of what keeps the old rule's protection. An
+# address read long after the card left the screen belongs to nothing, and
+# putting it on the last card the rig happened to read is exactly the
+# confidently-wrong answer this project refuses. Two minutes in the car; a
+# tenth of a second here, because a check that waits out the real window is a
+# check nobody runs.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'stale.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import json, sys, time\n'
+            'print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
+            '    "grossPerHour": 36.0, "pay": 12.0, "minutes": 24.0, "miles": 5.0,\n'
+            '    "cost": 1.75, "billedMinutes": 24.0, "target": 25, "band": 15,\n'
+            '    "costPerMile": 0.35, "at": int(time.time() * 1000),\n'
+            '    "offer": {"id": "o-old", "pay": 12.0, "minutes": 24.0,\n'
+            '              "billedMinutes": 24.0, "miles": 5.0, "cost": 1.75,\n'
+            '              "perHour": 30.0, "target": 25, "band": 15,\n'
+            '              "costPerMile": 0.35, "dropoff": None}}), flush=True)\n'
+            'time.sleep(1.5)\n'
+            'print(json.dumps({"dropoff": {"line": "3100 Esquire Dr NW, Kennesaw, GA 30144",\n'
+            '    "street": "3100 Esquire Dr NW", "city": "Kennesaw", "state": "GA",\n'
+            '    "zip": "30144", "at": int(time.time() * 1000)}}), flush=True)\n'
+            'time.sleep(600)\n')
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'SCREENING_MS': '300'}, journal)
+    try:
+        # The address is announced on the stream, not on /api/status — see
+        # live.html's `msg.dropoff.line` listener, which is where the button
+        # gets what it shows. So this waits out the fake's own schedule rather
+        # than polling for a field, and then asks the two questions that are
+        # about storage.
+        time.sleep(2.6)
+        s = get(base, '/api/status')
+        no_('an address read after the card went stale does not land on it',
+            (s.get('offer') or {}).get('dropoff'))
+        rows = [json.loads(l) for l in open(journal) if l.strip()]
+        no_('...and is not written down either',
+            any(r.get('kind') == 'mark' and r.get('dropoff') for r in rows))
+        # The card itself is untouched, rather than quietly acquiring an
+        # address from a reading that came too late to be about it.
+        eq('...and the card on the slot is the one it always was',
+           (s.get('offer') or {}).get('id'), 'o-old')
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)

@@ -707,8 +707,17 @@ if shutil.which('python3'):
 _page = open(os.path.join(ROOT, 'live.html')).read()
 
 ok_('the driving screen has a dropoff button', 'id="dest"' in _page)
-ok_('...and it is hidden until there is an order to attach one to',
-    re.search(r'el\.dest\.hidden\s*=\s*!holdingNow', _page) is not None)
+# Hidden unless there is something to attach an address TO. That used to mean
+# only an order in the car; it now also means a card on the panel with no
+# destination, which is when the driver is actually tapping the dropoff on
+# their phone. What must not change is that it is conditional at all — a
+# control for a state you are not in teaches people to ignore the bar.
+ok_('...and it is hidden unless there is something to attach one to',
+    re.search(r'el\.dest\.hidden\s*=\s*!holdingNow\s*&&\s*!screening', _page)
+    is not None)
+ok_('...where screening means a card that is still up and has no destination',
+    re.search(r'function screeningEnd\(\)[\s\S]{0,400}?onRecord\.dropoff',
+              _page) is not None)
 ok_('...and asks the server for a read',
     "ask('/api/dropoff'" in _page)
 # `ask`, not `fetch`, and that is the property rather than the spelling. A bare
@@ -718,8 +727,12 @@ ok_('...and asks the server for a read',
 # that bar goes through the one helper that puts a deadline on it.
 ok_('...through the call that has a deadline on it, not a bare fetch',
     "fetch('/api/dropoff'" not in _page)
+# Registered like every other control. Asked as "is it in the list" rather
+# than "is it last in the list": the spelling `'drop', 'dest']` was the whole
+# test, so adding one more id after it failed a check about the dropoff button
+# for a reason that had nothing to do with the dropoff button.
 ok_('...and is registered like every other control',
-    re.search(r"'drop',\s*'dest'\]", _page) is not None)
+    re.search(r"'dest'[,\]]", _page) is not None)
 
 # The destination arrives seconds later on the scanner's own stream, not as the
 # reply to the press - so the page has to be listening for it. Without this the

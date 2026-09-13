@@ -506,8 +506,41 @@ html, body {
  *
  * Six buttons are left alone even though some labels overflow on the 3.5" hat:
  * losing a control the driver can still see is a worse trade than a clipped
- * word, and at six the word is still most of the button. */
-.bottombar:has(#took:not([hidden])):has(#drop:not([hidden])) .parked {
+ * word, and at six the word is still most of the button.
+ *
+ * THE CONDITION, NOT ONE CASE OF IT.
+ *
+ * This rule used to be `:has(#took:not([hidden])):has(#drop:not([hidden]))` on
+ * its own — which is not "the bar is full", it is one particular way of being
+ * full. It was written when the only way to reach seven was a card on the
+ * panel with an order already in the car, and it was exactly right for as long
+ * as that stayed true.
+ *
+ * It stopped being true twice. ⌖ Dropoff appears whenever an order is held, so
+ * an order carried past the point where the card goes stale already showed
+ * drop and dest with took hidden: seven buttons, and the test silent. And ⌖
+ * Dropoff now also appears during SCREENING — a card with no destination and
+ * nothing in the car — which is took and dest with no drop. Neither said
+ * anything. The labels simply clip, on the panel the driver reads while the
+ * car is moving.
+ *
+ * Three of the buttons here are conditional (took, drop, dest) and three are
+ * always on, so the bar overflows exactly when TWO of the three are showing:
+ * 3 + 2 + the two parked links is seven. That is the condition, and all three
+ * pairs of it are written out below.
+ *
+ * Enumerated rather than counted because CSS cannot count — and enumerated
+ * here rather than computed in the page because this has to follow the DOM
+ * however the state arrives. A class set by live.html's own code is right only
+ * while live.html's own code is what moved the buttons, and it is not: the
+ * layout suite stages the fullest bar by setting `hidden` directly, which is
+ * also what any future caller will do.
+ *
+ * A fourth conditional button means four more pairs. If that ever happens the
+ * honest move is to stop enumerating and give the bar a scroll. */
+.bottombar:has(#took:not([hidden])):has(#drop:not([hidden])) .parked,
+.bottombar:has(#took:not([hidden])):has(#dest:not([hidden])) .parked,
+.bottombar:has(#drop:not([hidden])):has(#dest:not([hidden])) .parked {
   display: none;
 }
 .bottombar button, .bottombar .linkbtn {

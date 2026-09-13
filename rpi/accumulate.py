@@ -725,6 +725,22 @@ class OfferAccumulator:
         merged['pickup'] = OP.find_pickup(merged['places'])
         merged['dropoff'] = (None if self.end_refused
                              else OP.find_dropoff(merged['places']))
+        # ...and WHY there is none, which is not the same fact and is the one
+        # the driving screen needs.
+        #
+        # A missing destination has two causes that look identical downstream.
+        # The card printed "Customer dropoff" and no address, which is Uber
+        # saying the address exists and you may not see it yet — and one tap on
+        # the phone reveals it. Or the reader simply found nothing, and there
+        # is nothing to reveal.
+        #
+        # Only the first is a state where ⌖ Dropoff does anything, and a
+        # control that asks to be pressed for no gain is worse than one that
+        # says nothing. Carried rather than recomputed from the merged text:
+        # the refusal is a union across the whole window — one frame of five
+        # can be the one that caught the words — and a second derivation off
+        # whichever text survived the merge would disagree with this one.
+        merged['endRefused'] = self.end_refused
         # Voted the same way, and for the stronger reason: this one *is* the
         # duration. _consensus takes the majority and breaks a tie with the
         # larger value, which for minutes-since-midnight is the later deadline —

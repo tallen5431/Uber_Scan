@@ -205,6 +205,13 @@ So the Pi scanner keeps one line per offer it was confident about, in
   tagged, with the reason on each. They are left out of the figures above, but
   an offer missing from the record with nothing saying why is exactly what makes
   a record impossible to check.
+* **the destination you revealed on your phone, on the row.** An offer card
+  often prints “Customer dropoff” and no address, so where the job ends is
+  unknown at the moment it matters most. Tap the dropoff on your phone and
+  press **⌖ Dropoff** on the driving screen while the card is up, and the
+  address goes on that offer's row — labelled as read off the phone rather
+  than printed on the card, because the two are different kinds of evidence.
+  It is also what puts the job on the map.
 * **tick the ones you took.** The scanner cannot see the Accept button and never
   touches it, so it cannot know — but you can tell it, and once you do the page
   shows what you actually worked against what you were offered, per day and

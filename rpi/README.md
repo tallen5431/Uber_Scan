@@ -3003,8 +3003,30 @@ genuine pair.
 they are proper street addresses — `Payne Rd & Stately Dr, Woodstock`,
 `Villa Rica Hwy, Dallas`, `Greenside Dr, Austell`. That is the honest ceiling
 for mapping the offers themselves: about one in five. The other route to a
-destination is the ⌖ Dropoff scan, which reads the navigation screen *after* the
-accept and is the only place a customer's full address ever appears.
+destination is the ⌖ Dropoff scan, which reads the address off the phone and is
+the only place a customer's full address ever appears.
+
+**That scan now runs before the decision as well as after it.** It was built
+for the screen that comes after the accept, and that is the wrong moment: the
+driver's own words are *"for doordash orders I need to tap the customer drop
+off location to show the address when screening so it would be possible to
+search on the map"*. They reveal the address BEFORE deciding, because where a
+job ends is half of whether it is worth taking — and the rig was looking away.
+
+So ⌖ Dropoff appears in one more state: no order in the car, a card on the
+panel, and no destination on it. It asks to be pressed only when the card
+REFUSED one — `endRefused`, which parse() and the accumulator both now report,
+because "Uber printed *Customer dropoff*" and "the reader found nothing" arrive
+identically as a null dropoff and only the first is a state a tap can fix.
+
+The address then lands on the card being screened rather than on an order in
+the car, appended as a note naming the offer the same way a tick is. server.js
+used to refuse exactly this, and the paragraph saying so was right about the
+danger and wrong about the guard: *"Read with nothing held, this is an address
+belonging to no job"*. The guard that was doing the work was never "an order is
+held", it was "this belongs to something identifiable" — so it became
+`screeningCard()`, an id and a two-minute clock. An address read long after the
+card left the screen still lands nowhere.
 
 `map.html` is where to look at all of this: it pins what it can, joins the two
 ends of each job, and — the half that matters for checking — lists what it could

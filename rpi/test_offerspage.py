@@ -70,7 +70,7 @@ NOW = 1700000000000
 # $120.00.
 def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
           places=None, hidden=False, suspect=False, text=None, per_mile=0.33,
-          pickup=None, dropoff=None):
+          pickup=None, dropoff=None, scanned=False):
     row = {
         'id': 'r%d' % i, 'at': NOW - i * 600000, 'firstAt': NOW - i * 600000,
         'pay': pay, 'minutes': minutes, 'miles': 6.0,
@@ -101,6 +101,8 @@ def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
         row['pickup'] = pickup
     if dropoff is not None:
         row['dropoff'] = dropoff
+    if scanned:
+        row['dropoffScanned'] = True
     return row
 
 
@@ -296,6 +298,12 @@ MAPPED = [
          lat=34.02, lon=-84.61),
     offer(2, state='no', pickup='Chastain Rd NW, Kennesaw',
           dropoff='Zzqx Nowhere Blvd'),
+    # A card that printed "Customer dropoff" and no address, whose destination
+    # the driver revealed on their phone and had the rig read. The only reason
+    # this row has an end at all.
+    dict(offer(3, state='go', pickup='Chastain Rd NW, Kennesaw',
+               dropoff='Oak Ln, Marietta', scanned=True),
+         lat=34.02, lon=-84.61),
 ]
 
 # The four answers /api/journal can give. Every field here is one the server
@@ -344,7 +352,7 @@ FEEDS = {
                  'days': 7, 'hidden': 0, 'watched': {'saw': 9, 'kept': 9},
                  'unreadable': None, 'pairs': [], 'offers': FEW_RUNS},
     'mapped': {'count': len(MAPPED), 'total': len(MAPPED), 'truncated': False,
-               'days': 7, 'hidden': 0, 'watched': {'saw': 3, 'kept': 3},
+               'days': 7, 'hidden': 0, 'watched': {'saw': 4, 'kept': 4},
                'unreadable': None, 'pairs': [], 'offers': MAPPED},
     'mixed cost': {'count': len(MIXED_COST), 'total': len(MIXED_COST),
                    'truncated': False, 'days': 7, 'hidden': 0,
@@ -708,6 +716,10 @@ const TEXT = (sel) => {
       });
       await page.waitForTimeout(200);
       out[name].beforeAny = await page.evaluate(sheet);
+      out[name].said = await page.evaluate(() =>
+        [].slice.call(document.querySelectorAll('#log details.offer'))
+          .map((d) => d.getAttribute('data-id') + ': '
+                    + (d.textContent || '').replace(/\s+/g, ' ').trim()));
       out[name].controls = await page.evaluate(() =>
         [].slice.call(document.querySelectorAll('#log button[data-map]'))
           .map((b) => b.getAttribute('data-map') + '/' + b.getAttribute('data-end')
@@ -1497,7 +1509,24 @@ try:
        [c.split(':')[0] for c in _m['controls'] if c.startswith('r1/')],
        ['r1/pickup'])
     eq('...with one control per named end and no more',
-       len(_m['controls']), 7)
+       len(_m['controls']), 10)
+
+    # An address the driver revealed on their phone, on the row it belongs to.
+    #
+    # It reaches the row as a note, the way a tick does, and until now the page
+    # had nowhere to put it: "Where" is built from `places`, which is what the
+    # CARD printed, and a card printing "Customer dropoff" prints no address at
+    # all. So the one offer whose destination is known only because the driver
+    # asked for it showed no destination.
+    _r3 = [c for c in (_m['said'] or []) if c.startswith('r3:')]
+    ok_('an address read off the phone is shown on its row (%r)'
+        % (_r3 or [''])[0][-90:],
+        _r3 and 'read off your phone' in _r3[0] and 'Oak Ln, Marietta' in _r3[0])
+    # ...and said to have been read rather than printed. The two are different
+    # degrees of evidence, and the difference is why this one is worth having.
+    _r0 = [c for c in (_m['said'] or []) if c.startswith('r0:')]
+    no_('...and a destination the card itself printed is not claimed as one',
+        _r0 and 'read off your phone' in _r0[0])
 
     _r = _m['route']
     ok_('pressing route opens the sheet in this page', _r['open'])
@@ -1517,7 +1546,7 @@ try:
     ok_('...with the straight line measured against the card (%r)' % _r['note'],
         'straight line' in _r['note'] and 'card said' in _r['note'])
 
-    eq('the log is still underneath it', _m['stillThere']['rows'], 3)
+    eq('the log is still underneath it', _m['stillThere']['rows'], 4)
     ok_('...given room so its last row can still be reached',
         _m['stillThere']['padded'])
     eq('...and nothing navigated anywhere', _m['stillThere']['url'], '/journal.html')

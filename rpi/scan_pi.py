@@ -1311,6 +1311,12 @@ def emit_offer(offer_id, parsed, rate):
                  if rate.get('ready') and rate.get('cost') is not None else None),
         'dropoff': parsed.get('dropoff'),
         'pickup': parsed.get('pickup'),
+        # Whether the card REFUSED a destination or the reader merely found
+        # none. Both arrive as `dropoff: null` and only the first is a state
+        # the driver can do something about — Uber prints "Customer dropoff"
+        # and the address is one tap away on the phone. See the bottom bar's
+        # ⌖ Dropoff, which asks to be pressed on this and on nothing else.
+        'endRefused': bool(parsed.get('endRefused')),
         # The two fields that decide whether a verdict may be stated at all,
         # and the reason they have to travel on THIS line and not only on the
         # reading beside it.
@@ -1408,6 +1414,12 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
         # the fields separately and therefore have them.
         'dropoff': parsed.get('dropoff'),
         'pickup': parsed.get('pickup'),
+        # Whether the card REFUSED a destination or the reader merely found
+        # none. Both arrive as `dropoff: null` and only the first is a state
+        # the driver can do something about — Uber prints "Customer dropoff"
+        # and the address is one tap away on the phone. See the bottom bar's
+        # ⌖ Dropoff, which asks to be pressed on this and on nothing else.
+        'endRefused': bool(parsed.get('endRefused')),
         # `target` and `band`: Advice.stack takes the target from the reading
         # and falls back to ZERO when it is not a number - and `worst >= 0` is
         # true of almost every pair, so the stack line was painted GREEN, "take

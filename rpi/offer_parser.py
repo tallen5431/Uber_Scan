@@ -1968,6 +1968,18 @@ def parse(raw_text):
         # Reported, not acted on here: parse() says what it read and rate()
         # decides what to do about it, the same division the other doubts keep.
         'notAnOffer': bool(NOT_AN_OFFER.search(text or '')),
+        # Whether the card REFUSED a destination, as opposed to the reader
+        # simply not finding one. Uber prints "Customer dropoff" where the
+        # address will be, which means the address exists and the driver has
+        # not earned it yet — one tap on the phone reveals it.
+        #
+        # Both arrive downstream as `dropoff: None` and only this one is a
+        # state anybody can act on. Said by parse() as well as by the
+        # accumulator so a SINGLE frame carries it: the accumulator unions the
+        # refusal across a window, which is stronger, but a reading that never
+        # went through one would otherwise report a card that plainly said the
+        # words as a card that said nothing.
+        'endRefused': bool(DROPOFF_NOT_STATED.search(text or '')),
         # The legs behind the sum, so a caller holding readings from several
         # frames can merge the ones a single frame missed.
         # `labelled` travels with them. is_whole re-runs

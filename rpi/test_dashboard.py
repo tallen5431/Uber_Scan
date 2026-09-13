@@ -58,6 +58,10 @@ def ok_(name, cond):
     eq(name, bool(cond), True)
 
 
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 def skip(why):
     print('%s — skipping the dashboard checks' % why)
     sys.exit(0)
@@ -781,6 +785,91 @@ const framed = (page) => page.waitForFunction(
               <= document.documentElement.clientHeight + 1,
       };
     });
+
+    /* --- the same button, before the accept ------------------------------
+     *
+     * The driver's own words: "for doordash orders I need to tap the customer
+     * drop off location to show the address when screening". They reveal the
+     * address BEFORE deciding, because where a job ends is half of whether it
+     * is worth taking — and the button was hidden in exactly that moment,
+     * because it was built for the screen that comes after.
+     *
+     * Nothing held, a card on the panel, and the card printed "Customer
+     * dropoff": that is the state, and it is the only one where pressing this
+     * changes anything. */
+    const barShape = () => {
+      const bar = document.querySelector('.bottombar');
+      const on = [].slice.call(bar.children)
+        .filter((b) => !b.hidden && getComputedStyle(b).display !== 'none');
+      const r = bar.getBoundingClientRect();
+      // A label that does not fit its own button. The bar is a grid of equal
+      // columns, so this is what "seven buttons" actually costs — and it costs
+      // it on the panel the driver reads while the car is moving.
+      const clipped = on.filter((b) => b.scrollWidth > b.clientWidth + 1);
+      return { count: on.length,
+               labels: on.map((b) => (b.textContent || '').trim()),
+               clipped: clipped.map((b) => (b.textContent || '').trim()),
+               wide: r.right > document.documentElement.clientWidth + 1 };
+    };
+    // Put the held order down first, so this is genuinely the no-order case.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, { holding: null, stack: null,
+                                             dropoff: null, endRefused: true }));
+    await page.evaluate((r) => window.__es.push(r),
+      { offer: { id: 'o-screen', pay: 8.04, minutes: 23, perHour: 14.71,
+                 dropoff: null, endRefused: true }, at: 3 });
+    await page.waitForTimeout(250);
+    out['screening ' + panel[0]] = await page.evaluate((shape) => {
+      const dest = document.getElementById('dest');
+      const bar = new Function('return (' + shape + ')')();
+      return { hidden: dest.hidden, cls: dest.className,
+               title: dest.title, bar: bar() };
+    }, barShape.toString());
+
+    // ...and a card the reader simply got nothing off. The button still shows
+    // — reading the dropoff is still worth doing — but it must not ASK to be
+    // pressed, because there is nothing on the card saying an address exists.
+    await page.evaluate((r) => window.__es.push(r),
+      { offer: { id: 'o-quiet', pay: 8.04, minutes: 23, perHour: 14.71,
+                 dropoff: null, endRefused: false }, at: 4 });
+    await page.waitForTimeout(250);
+    out['screening-quiet ' + panel[0]] = await page.evaluate(() => {
+      const dest = document.getElementById('dest');
+      return { hidden: dest.hidden, cls: dest.className };
+    });
+
+    // ...and a card that has aged off the screen. `onRecord` is deliberately
+    // never cleared — the Took button names an offer whose card has gone — so
+    // without a clock on it this button would sit lit for the rest of the
+    // shift after one card with no destination, over a card the driver cannot
+    // see and a phone showing something else entirely.
+    //
+    // Sent as a replay with an age on it rather than waited out: sixteen
+    // seconds per panel is a minute and a half of the suite's budget to prove
+    // one `<=`.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, { replay: true, ageMs: 30000,
+                                             holding: null, stack: null }));
+    await page.waitForTimeout(250);
+    out['screening-stale ' + panel[0]] = await page.evaluate(() => ({
+      hidden: document.getElementById('dest').hidden,
+      parked: getComputedStyle(document.querySelector('.parked')).display,
+    }));
+    // ...and back, so what follows is not measuring a stale page.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, { holding: null, stack: null,
+                                             dropoff: null, endRefused: true }));
+    await page.waitForTimeout(250);
+
+    // ...and a card that DID name where it goes. Nothing to reveal, so
+    // nothing to offer: a control for a state you are not in is a control
+    // that teaches people to ignore the bar.
+    await page.evaluate((r) => window.__es.push(r),
+      { offer: { id: 'o-known', pay: 8.04, minutes: 23, perHour: 14.71,
+                 dropoff: 'Oak Ln, Marietta', endRefused: false }, at: 5 });
+    await page.waitForTimeout(250);
+    out['screening-known ' + panel[0]] = await page.evaluate(() =>
+      document.getElementById('dest').hidden);
 
     await page.close();
     await ctx.close();
@@ -1963,6 +2052,69 @@ try:
         ok_('%s: ...but stops asking once that end is on record (%r)'
             % (panel, known.get('destClass')),
             'wanted' not in (known.get('destClass') or ''))
+
+        # --- and the same button BEFORE the accept -----------------------
+        #
+        # "For doordash orders I need to tap the customer drop off location to
+        # show the address when screening so it would be possible to search on
+        # the map." The driver already reveals the address before deciding.
+        # The rig was looking away: this button existed only once the job was
+        # in the car, which is after the decision it would have informed.
+        scr = got.get('screening ' + panel) or {}
+        no_('%s: the dropoff button is there while screening' % panel,
+            scr.get('hidden'))
+        # Asking to be pressed, because the card SAID the address exists —
+        # "Customer dropoff" is Uber declining to show it, not silence.
+        ok_('%s: ...and asks to be pressed on a card that refused a '
+            'destination (%r)' % (panel, scr.get('cls')),
+            'wanted' in (scr.get('cls') or ''))
+        # ...and says what it is for in words that fit the screening case, not
+        # the held-order one. The two states share a button and share nothing
+        # else: one is about a job in the car, the other about a card on screen.
+        ok_('%s: ...and its title is about the card, not a held order (%r)'
+            % (panel, (scr.get('title') or '')[:60]),
+            'Customer dropoff' in (scr.get('title') or '')
+            and 'carrying' not in (scr.get('title') or ''))
+
+        # THE BAR. Adding one more button to a state that already had six is
+        # what makes this a control question rather than a wiring one.
+        bar = scr.get('bar') or {}
+        eq('%s: ...and nothing on the bar is clipped by it (%r)'
+           % (panel, bar.get('clipped')), bar.get('clipped'), [])
+        no_('%s: ...nor pushed off the screen' % panel, bar.get('wide'))
+        # Six is what the bar was measured to hold. The two that stand down
+        # lead to pages read while parked; the rest are used moving.
+        ok_('%s: ...with the bar no fuller than it fits (%d: %r)'
+            % (panel, bar.get('count') or 0, bar.get('labels')),
+            (bar.get('count') or 99) <= 6)
+
+        # A card the reader simply got nothing off is a different state. The
+        # button still shows — reading the dropoff is still worth doing — but
+        # it must not ask, because nothing on that card says an address is
+        # there to be revealed. A light that is always on is not a signal.
+        quiet = got.get('screening-quiet ' + panel) or {}
+        no_('%s: a card that merely yielded no destination still offers the '
+            'button' % panel, quiet.get('hidden'))
+        ok_('%s: ...but does not ask to be pressed (%r)'
+            % (panel, quiet.get('cls')),
+            'wanted' not in (quiet.get('cls') or ''))
+
+        # ...and a card that named where it goes offers nothing at all.
+        ok_('%s: a card that named its destination hides the button' % panel,
+            got.get('screening-known ' + panel) is True)
+
+        # ...and neither does a card that has aged off the screen. The button
+        # must not sit lit over a card the driver can no longer see.
+        stale_card = got.get('screening-stale ' + panel) or {}
+        ok_('%s: a card that aged off the screen takes the button with it'
+            % panel, stale_card.get('hidden') is True)
+        # ...and the bar goes back to holding the two parked links, which is
+        # the other half of the same fact.
+        # Shown, not any particular way of being shown. `inline-block` was
+        # what this asserted and `flex` is what the bar actually uses — a
+        # check that passes or fails on a value it has no opinion about.
+        no_('%s: ...and the bar stops shedding the parked-use links' % panel,
+            stale_card.get('parked') == 'none')
 
         # ...and the address above it, which is the other item in that column
         # with no minimum size. It drew 9px tall for a 15px font on the rig's
