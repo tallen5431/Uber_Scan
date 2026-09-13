@@ -3102,6 +3102,101 @@ unrounded one, so the billed-minutes check needs a shopping allowance (7 items
 at 25 seconds bills 25.9166… minutes), and the missing-figure check needs a card
 that names no distance at all.
 
+### The rig invented two offers out of screens that were not offers
+
+272 real cards arrived from the owner's own rig — every row carrying both what
+the parser concluded AND the raw OCR it concluded it from, which makes the whole
+export a ground truth the parser can be re-run against.
+
+The payout is read reliably: a re-parse of all 272 texts disagrees with the
+stored `pay` on **zero** rows. What is not reliable is knowing when there is no
+offer on the screen at all.
+
+**Uber's route planner, read as a $120 ACCEPT.**
+
+    Drive i & x
+    a 8 50 min $ 50 min $120
+    5 min (2.3 mi)
+    @ Add stops < Share o
+
+$120 over 105 minutes — three "legs", 50 + 50 + 5 — at $68.18/hr, `state: go`,
+green, `suspect: false`, no doubt at all.
+
+**DoorDash's idle screen, read as $376.50/hr.**
+
+    $12.55
+    This dash
+    Hong Kong Chinese
+    Finding offers.
+    You're in a good place to wait for offers
+    Zone offer wait
+    1-2 min
+
+The dash's takings so far became the payout and the zone's *wait estimate*
+became the job's duration. The app is saying, in so many words, that it has no
+offers.
+
+Neither is catchable by the numbers. $68/hr is an ordinary rate; $12.55 is under
+the flat pay cap `doubt()` applies below ten minutes. And a positive test — "a
+real card says Accept, or Guaranteed, or Pickup" — is not available either: **79
+of the 272 carry none of those**. They are ride offers that read as a payout, a
+rating and two legs, so demanding an anchor would refuse a third of the real
+traffic.
+
+What is left is the app's own furniture. `NOT_AN_OFFER` holds two phrases — `add
+stops` and `finding offers` — each the only evidence against its own phantom,
+each appearing on no genuine card in the 272. A card offering a job does not
+announce that it is looking for one.
+
+Four phrases were written first. Mutation testing showed two of them earned
+nothing: the idle screen was already caught by `finding offers` without them, so
+they went, and the comment that would have claimed each was necessary went with
+them. Seven mutants, seven caught, across both ports.
+
+**Withheld, not dropped.** It is a `doubt` reason like the others: the row is
+written, `suspect` is set, it is in none of the figures, and the panel says NOT
+AN OFFER instead of a rate. If this rule ever fires on a genuine card it costs
+one verdict the driver can still read off the phone — where refusing to parse
+would lose the row and leave a hole nothing could account for later.
+
+Three of 272 cards change. All three are phantoms. All three previously produced
+a confident verdict.
+
+### What a read really costs
+
+The same export settles a number that had been estimated rather than measured.
+`READ_SECONDS` was 0.75, derived in a comment as *"the owner's own shift recorded
+a median of 1517ms before the engine stopped being thrown away per read, and
+that change measured 2.12x on a development machine: 1517 / 2.12 is about
+715ms"*. A development machine is not a Pi 4 that is also drawing a dashboard,
+and the speed-up did not arrive on the rig:
+
+    min 390   p25 1405   median 1846   p75 2636   p90 3657   p99 4812   max 5915
+
+**99.3% of real reads are slower than the 750ms assumed**, and every piece of
+arithmetic hanging off it was optimistic.
+
+It was also one constant doing two jobs. *Typical* is for duty cycle — what
+share of the verify beat is spent re-reading a card that is not changing — and
+the median is the right statistic for that. *Worst case* is for the driving
+page's staleness window, and a median is precisely the wrong statistic for a
+bound, because one read in two is slower than it. So there are two now:
+`READ_SECONDS` (1.85, the median) and `READ_SECONDS_SLOW` (3.7, the p90, with
+the measured max of 5.9 written down beside it).
+
+Two things followed. The page's verdict window was 12s against an honest healthy
+gap of 6.0 + 3.7 = 9.7s — it was sized for 6.75s and left 2.3s of slack where it
+meant to leave most of the gap again. At the worst read measured, a perfectly
+good verdict came within **90 milliseconds** of being dimmed as stale, on the
+hardest card, which is the one a driver most needs to trust. It is 16s now.
+
+And the suite's claim that "the ceiling spends about a tenth of the time
+reading" was true about a constant and false about the rig: the real figure is
+31%. The check states the measured band now. Getting that third back means
+raising `VERIFY_MAX`, which lets a *replacement* card sit unread for longer —
+money against CPU, and a trade that belongs to whoever drives the rig rather
+than to a test file.
+
 ### A leg the window had, thrown away; a destination the card refused, invented
 
 Both from the audit fleet, both verified by running the real code before
@@ -6398,7 +6493,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 36 suites, 5924 checks
+npm test                # all 36 suites, 5938 checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
