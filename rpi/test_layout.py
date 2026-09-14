@@ -86,6 +86,30 @@ def skip(why):
     sys.exit(0)
 
 
+def crashed(stderr):
+    """A driver that RAN and produced nothing is a FAILED suite.
+
+    This used to be a skip, which exits 0, so `tools/test.sh` counted the suite
+    as passed with none of its checks run. It is the same conflation `hung()`
+    was written for and it was only half fixed: a driver that stops answering
+    is caught, a driver that THROWS still slipped through as "the browser
+    produced nothing".
+
+    A machine that cannot run these at all — no chromium — is the one case
+    where exiting 0 is right, and every driver here now says so explicitly by
+    printing {skip: 'no chromium'} and returning. That is a signal; this is the
+    absence of one. Reading the difference out of stderr was considered and
+    rejected: it makes the suite guess from a message it does not control.
+    """
+    tail = (stderr or '').strip()[-400:]
+    print('FAIL  the driver produced nothing — none of the %s checks ran'
+          % 'layout')
+    if tail:
+        print('      ' + tail.replace('\n', '\n      '))
+    print('\n%d passed, %d FAILED' % (ok, bad + 1))
+    sys.exit(1)
+
+
 def free_port():
     s = socket.socket()
     s.bind(('127.0.0.1', 0))
@@ -808,7 +832,12 @@ const FRAMES = JSON.parse(framesJson);
   }
   await browser.close();
   console.log(JSON.stringify(out));
-})().catch(e => { console.log(JSON.stringify({ skip: 'browser: ' + e.message })); });
+})().catch((e) => { console.log(JSON.stringify(
+  // A throw anywhere in this driver is a FAULT, not a machine that
+  // could not run the checks. Reported as `skip` it exited 0 and the
+  // whole suite counted as passed with nothing run. The one real skip
+  // — no chromium — is printed above, before anything can throw.
+  { __crashed: String((e && e.stack) || e) })); });
 '''
 
 work = tempfile.mkdtemp()
@@ -945,8 +974,11 @@ try:
     try:
         got = json.loads(line)
     except Exception:
-        skip('the browser produced nothing (%s)'
-             % (proc2.stderr or '')[-200:].replace('\n', ' '))
+        crashed(proc.stderr)
+    # A throw in the driver, which the catch at its foot now reports as
+    # its own thing rather than as a skip — see crashed().
+    if got.get('__crashed'):
+        crashed(got['__crashed'])
     if got.get('skip'):
         skip(got['skip'])
 

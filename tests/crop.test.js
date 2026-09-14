@@ -34,7 +34,41 @@ var ROOT = path.join(__dirname, '..');
    exists to catch. */
 var HANDOFF_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'uberscan-crop-'));
 var CROP_PATH = path.join(HANDOFF_DIR, 'uberscan-cropbox.json');
-var PORT = 8791;
+/* A free port, asked of the operating system, rather than a number written
+   here.
+ 
+   It was 8791, fixed. Anything else already listening on 8791 answers this
+   test's requests instead of the server it spawned — and answers them WELL: a
+   real uber-scan server returns 200 and the right ordered corners, because
+   that part is pure arithmetic. What it does not do is write to this test's
+   own handoff directory, so `written()` came back null and the suite reported
+
+     FAIL  ...and is what lands in the file for the scanner: got null want {...}
+
+   which reads exactly like the server having stopped writing the crop box. It
+   cost an hour of looking at the wrong file. The stranger on the port was a
+   leftover probe server nobody had killed; on the owner's own machine it could
+   be anything at all.
+
+   Chosen the way the Python suites here already choose one — bind to 0, read
+   what the kernel gave, let it go. The gap between letting go and the server
+   binding is a race in principle and not one in practice: nothing else on this
+   machine is hunting for a port in that moment, which is exactly the situation
+   a fixed number does NOT enjoy. */
+var net = require('net');
+
+function freePort() {
+  return new Promise(function (resolve, reject) {
+    var probe = net.createServer();
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', function () {
+      var got = probe.address().port;
+      probe.close(function () { resolve(got); });
+    });
+  });
+}
+
+var PORT = null;
 
 var ok = 0, bad = 0;
 function eq(name, got, want) {
@@ -73,13 +107,18 @@ function clear() {
 }
 
 // SCANNER=0 so the test does not try to start a camera it does not have.
-var server = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-  env: Object.assign({}, process.env, {
-    PORT: String(PORT), SCANNER: '0', HTTPS_PORT: '0',
-    UBERSCAN_HANDOFF_DIR: HANDOFF_DIR
-  }),
-  stdio: ['ignore', 'ignore', 'inherit']
-});
+// Spawned inside the run below, once the port is known.
+var server = null;
+
+function startServer() {
+  server = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
+    env: Object.assign({}, process.env, {
+      PORT: String(PORT), SCANNER: '0', HTTPS_PORT: '0',
+      UBERSCAN_HANDOFF_DIR: HANDOFF_DIR
+    }),
+    stdio: ['ignore', 'ignore', 'inherit']
+  });
+}
 
 function waitForServer(tries) {
   return new Promise(function (resolve, reject) {
@@ -95,6 +134,8 @@ function waitForServer(tries) {
 
 (async function () {
   try {
+    PORT = await freePort();
+    startServer();
     await waitForServer(50);
     clear();
 
