@@ -1806,7 +1806,6 @@ def main():
     # Until when the driver's "read the dropoff" press is still live, and the
     # last address it produced. See DROPOFF_WINDOW and dropoff_requested.
     dropoff_until = 0.0
-    dropoff_seen = None
     last_dropoff_read = 0.0
     # The last address sent, so a navigation screen sitting there for twenty
     # minutes is reported once rather than on every read that happens to catch
@@ -1867,7 +1866,7 @@ def main():
         # is how a loop rewritten into a closure loses its memory without
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
-        nonlocal dropoff_until, dropoff_seen, dropoff_said
+        nonlocal dropoff_until, dropoff_said
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as
@@ -1934,9 +1933,9 @@ def main():
         # actions become one, and the one that remains is the one the driver was
         # already doing on their phone.
         #
-        # `dropoff_seen` still closes the window on the first answer inside it —
-        # see below — because that is about stopping two dozen forced reads, not
-        # about stopping a second address.
+        # The window still closes on the first answer inside it — see below —
+        # because that is about stopping two dozen forced reads, not about
+        # stopping a second address.
         asked = started < dropoff_until
         shot = out['parsed'] or {}
         # A SCREEN WITH A PAYOUT ON IT IS AN OFFER, NOT A DESTINATION.
@@ -2062,13 +2061,18 @@ def main():
         if found and not asked and (found.get('line') or None) == dropoff_said:
             found = None
         if found:
-            dropoff_seen = found
             dropoff_said = found.get('line')
             # Closed the moment it is answered, and what that closes is the
-            # READ BEAT below - not this branch. `dropoff_seen` already
-            # stops a second answer on its own, so an earlier comment
-            # claiming this guards against overwriting was naming a job it
-            # does not do, which is how a line like it gets deleted later.
+            # READ BEAT below - not this branch.
+            #
+            # This used to say `dropoff_seen` stopped a second answer on its
+            # own, and used that to argue an older comment was naming a job
+            # nothing did. `dropoff_seen` was assigned in three places and
+            # read in none — so the argument for deleting a line rested on a
+            # variable that did no work at all, which is the more expensive
+            # half of a comment that lies. What stops a second answer is
+            # `dropoff_said`, above, and only for a sighting nobody asked
+            # for: a press is a question and always gets answered.
             #
             # What it saves is up to two dozen more forced reads over the
             # rest of the window, and on a Pi a read is several seconds of
@@ -2560,7 +2564,6 @@ def main():
                 # motion gate scores as nothing happening.
                 if dropoff_requested():
                     dropoff_until = now + DROPOFF_WINDOW
-                    dropoff_seen = None
                     # `do_read` here looks redundant against the beat further
                     # down, and on the FIRST press it is: last_dropoff_read
                     # starts at 0.0, so the beat fires on this same pass. It is
