@@ -492,9 +492,13 @@ html, body {
  * the 3.5" panel: the verdict card is 222px of 320 and a second 44px row does
  * not fit under it.
  *
- * The two that stand down lead to the keypad and the offer log, which are read
- * parked. The five that stay are the ones used while the car is moving. They
- * come back the moment either conditional button goes away.
+ * The one that stands down leads to the keypad. It comes back the moment a
+ * conditional button goes away.
+ *
+ * It used to be two — the keypad AND the offer log, on the grounds that both
+ * are read parked. That grouping is what made the offer log unreachable during
+ * a shift, and undoing it is the change this rule is now paired with. See the
+ * second rule below for where the seventh control comes from instead.
  *
  * Not one of them has room, so there is no width test here — a threshold that
  * every panel falls below is a threshold pretending to be a decision. The bar
@@ -526,8 +530,12 @@ html, body {
  *
  * Three of the buttons here are conditional (took, drop, dest) and three are
  * always on, so the bar overflows exactly when TWO of the three are showing:
- * 3 + 2 + the two parked links is seven. That is the condition, and all three
- * pairs of it are written out below.
+ * 3 always + 2 conditional + ⌨ Type + ▤ Offers is seven. That is the
+ * condition, and all three pairs of it are written out below.
+ *
+ * Shedding ⌨ Type alone brings that back to six. The third conditional button
+ * makes it seven again and is handled by its own rule after this one, because
+ * it needs a different control to stand down — not another link.
  *
  * Enumerated rather than counted because CSS cannot count — and enumerated
  * here rather than computed in the page because this has to follow the DOM
@@ -541,6 +549,50 @@ html, body {
 .bottombar:has(#took:not([hidden])):has(#drop:not([hidden])) .parked,
 .bottombar:has(#took:not([hidden])):has(#dest:not([hidden])) .parked,
 .bottombar:has(#drop:not([hidden])):has(#dest:not([hidden])) .parked {
+  display: none;
+}
+
+/* ...and ▤ Offers is no longer one of the two that stand down.
+ *
+ * THE BUG THIS FIXES IS A NAVIGATION ONE, NOT A LAYOUT ONE.
+ *
+ * The rule above fires when the bar is full, and the bar is full exactly when
+ * an order is in the car or a card is being screened — which is to say
+ * whenever the driver is working. So the only link to the offer log left the
+ * screen for the whole of a shift and came back when the car was empty. The
+ * driver's words were that they could not get to the offers page from here,
+ * and they were right: it was there, and never when they looked.
+ *
+ * "Read parked" was the reason it was grouped with the keypad, and it is true
+ * — but it answers a different question than the one that matters. The driver
+ * pulls over BECAUSE they want the list; the way to it has to be on the screen
+ * in front of them when they do, not conditional on having put the order down
+ * first.
+ *
+ * THE ARITHMETIC, WHICH IS THE WHOLE CONSTRAINT.
+ *
+ * Six controls fit and seven do not — that is settled above, and at six some
+ * labels already overrun on the 3.5" hat, a trade this file has taken
+ * deliberately. Counting with Offers kept:
+ *
+ *   conditionals showing   0     1     2     3
+ *   always on              3     3     3     3
+ *   ⌨ Type                 1     1     -     -
+ *   ▤ Offers               1     1     1     1
+ *                         ---   ---   ---   ---
+ *                          5     6     6     7   <- one too many
+ *
+ * So the fullest bar has to give up one more, and the honest candidate is ▣
+ * Set box rather than the log: it re-draws the crop region, which is a thing
+ * done once with the car stationary and the phone being seated in the mount,
+ * not with a job in the car and a card on the screen. ⟳ Re-find stays, because
+ * the tracker can lose the corners at any moment and that is a thing the
+ * driver fixes where they are.
+ *
+ * All three, not two of them — this is the one state the rule above does not
+ * already cover the shedding for, and writing it as a third pair would shed
+ * Set box whenever any two showed, which costs a control for nothing. */
+.bottombar:has(#took:not([hidden])):has(#drop:not([hidden])):has(#dest:not([hidden])) #setBox {
   display: none;
 }
 .bottombar button, .bottombar .linkbtn {

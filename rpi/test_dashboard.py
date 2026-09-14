@@ -67,6 +67,28 @@ def skip(why):
     sys.exit(0)
 
 
+def hung(stage):
+    """A driver that stopped is a FAILED suite, not a skipped one.
+
+    These two used to be the same exit. `skip` is for a machine that cannot run
+    the checks at all — no chromium — and exiting 0 there is right: nothing was
+    learned and nothing was broken. A driver that hung is the opposite. It got
+    as far as some particular control and waited for it until the watchdog gave
+    up, which is a fact ABOUT THE PAGE, and it reported it by exiting 0.
+
+    That is not hypothetical. Making ▣ Set box stand down on the fullest bar
+    put a `page.click('#setBox')` in front of a control that was deliberately
+    no longer there; Playwright waited out the whole five minutes; this printed
+    one line and exited 0; and tools/test.sh said all 37 suites passed with 468
+    of these checks never run. The regression was real, it was mine, and the
+    only reason it was caught is that the line happened to be read.
+    """
+    print('FAIL  the driver hung in "%s" — none of the dashboard checks ran'
+          % stage)
+    print('\n%d passed, %d FAILED' % (ok, bad + 1))
+    sys.exit(1)
+
+
 def free_port():
     s = socket.socket()
     s.bind(('127.0.0.1', 0))
@@ -234,7 +256,7 @@ const framed = (page) => page.waitForFunction(
   // suite that hung until the runner's own timeout killed it in silence.
   let stage = 'start';
   setTimeout(() => {
-    console.log(JSON.stringify({ skip: 'the driver hung in "' + stage + '"' }));
+    console.log(JSON.stringify({ __hung: stage }));
     process.exit(2);
   }, 300000).unref();
   for (const panel of PANELS) {
@@ -1185,6 +1207,24 @@ const framed = (page) => page.waitForFunction(
     out.snap.viewBefore = await page.evaluate(() => ({
       phone: document.body.classList.contains('phoneview'),
       stored: localStorage.getItem('uberscan.liveView') }));
+    // Out of the fullest bar first.
+    //
+    // ▣ Set box stands down when all three conditional buttons are up — an
+    // order in the car, a card on the panel and a destination to read — so
+    // that ▤ Offers can stay, which is the one route to the offer log and used
+    // to vanish for the whole of a shift. See styles.css.
+    //
+    // The order goes down rather than the click being faked through
+    // evaluate(): a control the driver cannot see is not one this suite should
+    // be able to press either, and clicking it in script would have gone on
+    // passing while the button was unreachable on the glass. Putting the order
+    // down is also what a driver does before re-cropping.
+    stage = 'snap: out of the fullest bar';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: null }));
+    await page.waitForTimeout(250);
     stage = 'snap: setBox';
     await page.click('#setBox');
     await page.waitForTimeout(200);
@@ -1260,19 +1300,6 @@ const framed = (page) => page.waitForFunction(
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
     await framed(page);
-    // An offer on record and an order in the car, so Took, Drop and ⌖ Dropoff
-    // are all on the bar to be pressed.
-    await page.evaluate(() => window.__es.push({
-      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 10.0,
-      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 20.0, dropoff: null },
-      // `offer`, not an `id` on the reading: "Took $10.00?" names the offer on
-      // RECORD, which is a different thing from the card on screen and arrives
-      // in its own field. Without it the button is hidden and the press below
-      // waits for a control that is never going to appear.
-      offer: { id: 'o-hang', pay: 10.0, minutes: 20.0, billedMinutes: 20.0,
-               miles: 4.0, cost: 1.4 } }));
-    await page.waitForTimeout(300);
     const barState = () => page.evaluate(() => {
       const one = (id) => {
         const e = document.getElementById(id);
@@ -1288,9 +1315,21 @@ const framed = (page) => page.waitForFunction(
     const press = (id) => page.click(id, { timeout: 4000 })
       .then(() => true, () => false);
     out.hung = { pressedOk: {} };
-    for (const id of ['#took', '#drop', '#dest', '#reset']) {
-      out.hung.pressedOk[id] = await press(id);
-    }
+    // The crop control FIRST, while the bar is not yet at its fullest.
+    //
+    // ▣ Set box stands down once all three conditional buttons are up, so that
+    // ▤ Offers can stay — it is the one route to the offer log and it used to
+    // vanish for the whole of a shift. See styles.css. So the order of this
+    // block is now load-bearing rather than incidental: pressing Set box after
+    // the order is in the car is pressing a control that is deliberately not
+    // there, and Playwright waits for it until the whole driver is killed for
+    // hanging. Which is exactly what happened, and the suite reported it as a
+    // SKIP.
+    //
+    // Reached by a real click rather than faked through evaluate(), because a
+    // control the driver cannot see is not one this suite should be able to
+    // press either.
+    //
     // The crop control needs a box drawn before it will send anything, which
     // is a drag on the picture — done through the page's own pointer events so
     // the box is the one a driver would have made.
@@ -1305,6 +1344,24 @@ const framed = (page) => page.waitForFunction(
       await page.mouse.up();
       await page.waitForTimeout(150);
       out.hung.pressedOk['#drawUse'] = await press('#drawUse');
+    }
+    // ...and now an offer on record and an order in the car, so Took, Drop and
+    // ⌖ Dropoff are all on the bar to be pressed. The crop button keeps the
+    // busy state it was left in — its fetch is hung like every other — so it
+    // is still the thing being measured when barState() is read below.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 10.0,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 20.0, dropoff: null },
+      // `offer`, not an `id` on the reading: "Took $10.00?" names the offer on
+      // RECORD, which is a different thing from the card on screen and arrives
+      // in its own field. Without it the button is hidden and the press below
+      // waits for a control that is never going to appear.
+      offer: { id: 'o-hang', pay: 10.0, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4 } }));
+    await page.waitForTimeout(300);
+    for (const id of ['#took', '#drop', '#dest', '#reset']) {
+      out.hung.pressedOk[id] = await press(id);
     }
     await page.waitForTimeout(400);
     out.hung.pressed = await barState();
@@ -1658,6 +1715,18 @@ try:
     except Exception:
         skip('the browser produced nothing (%s)'
              % (proc2.stderr or '')[-200:].replace('\n', ' '))
+    # A hang first, and separately, because the two mean opposite things —
+    # see hung().
+    #
+    # `__hung`, not `hung`, and the underscores are load-bearing: this driver
+    # already returns a section called `out.hung` — the hung-CONNECTION
+    # scenario, which is ordinary data from a run that went fine. Named plainly
+    # the two collided, and every healthy run reported itself as a driver that
+    # had stopped, printing the whole section where the stage name goes. It was
+    # caught by the check it was breaking, on the first full run after it
+    # landed. A harness signal has to be spellable in a way page data never is.
+    if got.get('__hung'):
+        hung(got['__hung'])
     if got.get('skip'):
         skip(got['skip'])
 

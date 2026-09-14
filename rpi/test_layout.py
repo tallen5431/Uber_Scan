@@ -77,6 +77,10 @@ def ok_(name, cond):
     eq(name, bool(cond), True)
 
 
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 def skip(why):
     print('%s — skipping the layout checks' % why)
     sys.exit(0)
@@ -634,6 +638,12 @@ const FRAMES = JSON.parse(framesJson);
             });
             return {
               count: kids.length,
+              // WHICH controls survived, not only how many. A count alone
+              // cannot say whether the bar shed the link to the offer log or
+              // the keypad, and that difference is the whole of why this bar
+              // was changed: the log stood down for the entire length of a
+              // shift and nobody could see it had.
+              labels: kids.map((el) => (el.textContent || '').trim()),
               width: Math.round(box(bar).width),
               height: Math.round(box(bar).height),
               shortest: kids.length ? Math.min(...kids.map((el) => box(el).height)) : 0,
@@ -1010,13 +1020,16 @@ try:
                 # while a job is already in the car.
                 bar = phone.get('bar') or {}
                 plain, full = bar.get('plain') or {}, bar.get('full') or {}
-                # With both conditional buttons up, the two links that lead
-                # somewhere else stand down — on every panel, because not one of
-                # them has room for seven. The five that stay are the ones used
-                # while the car is moving.
-                eq('the crowded bar sheds the parked-use links at %s (bar %spx)'
+                # With both conditional buttons up, the keypad link stands down
+                # — on every panel, because not one of them has room for seven.
+                # The six that stay are the ones wanted while the car is
+                # moving, and the way to the offer log is one of them.
+                eq('the crowded bar sheds the keypad link at %s (bar %spx)'
                    % (panel, full.get('width')),
-                   full.get('count'), 5)
+                   full.get('count'), 6)
+                no_('...which is the one that goes, at %s (%r)'
+                    % (panel, full.get('labels')),
+                    any('Type' in l for l in (full.get('labels') or [])))
                 ok_('...and still fits the glass at %s' % panel,
                     not bar.get('over'))
                 ok_('...with every control still 44px tall at %s (%.4gpx)'
@@ -1062,6 +1075,39 @@ try:
                 crowded = bar.get('crowded') or {}
                 eq('the fullest bar carries six controls at %s (bar %spx)'
                    % (panel, crowded.get('width')), crowded.get('count'), 6)
+
+                # THE WAY TO THE OFFER LOG SURVIVES EVERY STATE OF THIS BAR.
+                #
+                # It did not. ▤ Offers was grouped with the keypad as a
+                # "read parked" link and shed by the rule above — which fires
+                # when an order is in the car or a card is being screened, so
+                # the only route to the log left the screen for the whole of a
+                # shift and came back when the car was empty. The driver could
+                # not get to their offers page and the bar looked fine, because
+                # what was checked was how many controls survived and never
+                # which.
+                #
+                # All four states, not just the fullest: the fault was that one
+                # particular state hid it, and a check that only looks at the
+                # widest bar would have missed exactly this one.
+                for _state in ('plain', 'before', 'full', 'crowded'):
+                    _labels = (bar.get(_state) or {}).get('labels') or []
+                    ok_('the way to the offers page is on the bar in "%s" at '
+                        '%s (%r)' % (_state, panel, _labels),
+                        any('Offers' in l for l in _labels))
+                # ...and what gives way instead, in the one state that needs a
+                # sixth thing to go: the control that re-draws the crop region,
+                # which is done with the car stationary and the phone being
+                # seated in the mount — not with a job in the car and a card on
+                # the screen. ⟳ Re-find stays; the tracker can lose the corners
+                # at any moment and that is fixed where the driver is.
+                _crowded_labels = crowded.get('labels') or []
+                no_('...and ▣ Set box is what stands down for it at %s (%r)'
+                    % (panel, _crowded_labels),
+                    any('Set box' in l for l in _crowded_labels))
+                ok_('...while Re-find stays, because corners are lost while '
+                    'moving at %s' % panel,
+                    any('Re-find' in l for l in _crowded_labels))
                 ok_('...each still 44px tall at %s (%.4gpx, bar %spx tall)'
                     % (panel, crowded.get('shortest') or 0, crowded.get('height')),
                     (crowded.get('shortest') or 0) >= 43.5)

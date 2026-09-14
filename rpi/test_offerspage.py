@@ -61,6 +61,25 @@ def skip(why):
     sys.exit(0)
 
 
+def hung(stage):
+    """A driver that stopped is a FAILED suite, not a skipped one.
+
+    `skip` is for a machine that cannot run these at all — no chromium — where
+    exiting 0 is right, because nothing was learned and nothing was broken. A
+    driver that hung is the opposite: it reached some particular control and
+    waited for it until the watchdog gave up, which is a fact about the page,
+    and it used to report that by exiting 0. tools/test.sh then counted the
+    suite as passed with none of its checks run.
+
+    Not hypothetical — it happened to the dashboard suite the day this was
+    written, hiding a real regression behind "all 37 suites passed".
+    """
+    print('FAIL  the driver hung in "%s" — none of the %s checks ran'
+          % (stage, 'offers-page'))
+    print('\n%d passed, %d FAILED' % (ok, bad + 1))
+    sys.exit(1)
+
+
 NOW = 1700000000000
 
 # Six offers taken out of twelve, with a running cost on each — the shape that
@@ -490,7 +509,7 @@ const TEXT = (sel) => {
   // it in silence.
   let stage = 'start';
   setTimeout(() => {
-    console.log(JSON.stringify({ skip: 'the driver hung on "' + stage + '"' }));
+    console.log(JSON.stringify({ __hung: stage }));
     process.exit(2);
   }, 400000).unref();
   for (const [name, feed] of Object.entries(FEEDS)) {
@@ -948,6 +967,10 @@ try:
     except Exception:
         skip('the browser produced nothing (%s)'
              % (run.stderr or '')[-200:].replace('\n', ' '))
+    # A hang first, and separately, because the two mean opposite
+    # things — see hung().
+    if got.get('__hung'):
+        hung(got['__hung'])
     if got.get('skip'):
         skip(got['skip'])
 

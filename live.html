@@ -654,7 +654,24 @@
          reads the wrong screen is to press it again. -->
     <button type="button" class="linkbtn" id="dest" hidden>⌖ Dropoff</button>
     <a class="linkbtn parked" href="index.html">⌨ Type</a>
-    <a class="linkbtn parked" href="journal.html">▤ Offers</a>
+    <!-- NOT `parked`, which it used to be, and that was the whole of why the
+         offers page was hard to reach.
+
+         The rule that sheds the parked links fires when the bar is full — and
+         the bar is full exactly when an order is in the car or a card is being
+         screened, which is to say whenever the driver is working. So the one
+         link to the log stood down precisely during the hours it would be
+         wanted, and came back when the car was empty. The link was there the
+         whole time; it was just never there when anybody looked.
+
+         It is still read parked. That is not the same question as whether it
+         can be REACHED while moving: the driver pulls over, and the way to the
+         list has to be on the screen in front of them when they do, not
+         conditional on them having put the order down first.
+
+         What stands down in its place is the keypad link, and — in the fullest
+         state only — ▣ Set box. See styles.css for the arithmetic. -->
+    <a class="linkbtn" href="journal.html">▤ Offers</a>
     <button type="button" class="linkbtn" id="setBox">▣ Set box</button>
     <button type="button" class="linkbtn" id="reset">⟳ Re-find</button>
     <!-- Two things this picture gets used for, and they want opposite
