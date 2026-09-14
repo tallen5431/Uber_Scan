@@ -331,6 +331,26 @@ function startScanner() {
           if (sameCard && scanner.offer.accepted !== undefined) {
             read.offer.accepted = scanner.offer.accepted;
           }
+          // ...and the destination read off the PHONE, for the same reason.
+          //
+          // A later reading is a better reading of the CARD. It says nothing
+          // about what the phone answered when the driver asked it, and this
+          // assignment replaces the slot object wholesale — so without this the
+          // press was thrown away by the next reading of the card it belonged
+          // to, which arrives within seconds because every card here is read
+          // repeatedly as the reading improves.
+          //
+          // What made that a wrong ADDRESS rather than a lost one: the guard
+          // below is `wasAsked || !scanner.offer.dropoff`, and wiping the field
+          // re-opens it. The next unprompted sighting — a navigation screen
+          // left up, the previous job's — was then accepted over the press and
+          // appended as a second mark. Reproduced end to end: pressed for
+          // "123 Oak St", the card read again, and the panel and the journal
+          // both ended up saying "999 Wrong Way Dr".
+          if (sameCard && scanner.offer.dropoffScanned && scanner.offer.dropoff) {
+            read.offer.dropoff = scanner.offer.dropoff;
+            read.offer.dropoffScanned = true;
+          }
           scanner.offer = read.offer;
           if (!sameCard) scanner.offerAt = Date.now();
           // ...and if there is an order in the car, WRITE THE PAIRING DOWN.
@@ -1486,8 +1506,27 @@ function latestPerOfferUncached(rows) {
         // 10:00 whichever order the two journals merge in. Its own field, not
         // folded in with `accepted`, because a mark may carry only one of them
         // and an older row about the other is still the newest word on it.
-        if (typeof r.dropoff === 'string' && r.dropoff
-            && when >= (m.dropoffAt || 0)) {
+        //
+        // A PRESS OUTRANKS A SIGHTING, whenever each of them arrived.
+        //
+        // Newest-wins alone is right between two of a kind and wrong across
+        // them: a navigation screen caught at 11:05 is not better evidence
+        // than the driver deliberately answering at 11:00, and folding on `at`
+        // alone let the later one erase both the address and the fact that a
+        // press had ever happened. The comment here used to warn about the
+        // opposite — "folding it separately would let a press at 11:00 vouch
+        // for a sighting at 11:05" — which is a real hazard and is why the bit
+        // still travels with the address rather than on its own. It was
+        // guarding the direction that could not happen.
+        //
+        // Kept even though the live path can no longer produce that pair,
+        // because this fold also merges the copy synced from the NUC, where
+        // rows arrive in whatever order the two journals are reconciled in.
+        var rAsked = r.asked !== false;
+        var beatsIt = m.dropoff === undefined
+          || (rAsked && !m.dropoffAsked)
+          || (rAsked === m.dropoffAsked && when >= (m.dropoffAt || 0));
+        if (typeof r.dropoff === 'string' && r.dropoff && beatsIt) {
           m.dropoff = r.dropoff; m.dropoffAt = when;
           // ...and whether anybody ASKED for it, carried with the address
           // rather than folded on its own, because it is a property of THIS

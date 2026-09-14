@@ -299,6 +299,40 @@ try:
        (folded.get('off42') or {}).get('dropoff'),
        '333 Asked For Ave, Kennesaw, GA 30144')
 
+    # ...and a sighting does not displace a press, however late it arrives.
+    #
+    # Newest-wins is right between two of a kind and wrong across them. A
+    # navigation screen caught at 11:05 is not better evidence than the driver
+    # deliberately answering at 11:00, and folding on `at` alone let the later
+    # one erase the address AND the fact that a press had happened at all.
+    #
+    # The live path can no longer produce that pair — see the card-re-read
+    # check below — but this fold also merges the copy synced from the NUC,
+    # where rows arrive in whatever order the two journals reconcile in. So the
+    # sighting is staged LATER than the press here deliberately: the ordering
+    # that would win on `at`.
+    write(journal, [
+        offer(43, NOW - 5000),
+        {'v': 1, 'kind': 'mark', 'id': 'off43', 'at': NOW - 4000,
+         'dropoff': '444 Asked First Rd, Kennesaw, GA 30144', 'asked': True},
+        {'v': 1, 'kind': 'mark', 'id': 'off43', 'at': NOW - 1000,
+         'dropoff': '555 Seen Later Dr, Kennesaw, GA 30144', 'asked': False},
+        # ...while two of a KIND still fold newest-first, or the rule would
+        # have stopped being about presses and started being about order.
+        offer(44, NOW - 5000),
+        {'v': 1, 'kind': 'mark', 'id': 'off44', 'at': NOW - 4000,
+         'dropoff': '666 Pressed Early Rd, Kennesaw, GA 30144', 'asked': True},
+        {'v': 1, 'kind': 'mark', 'id': 'off44', 'at': NOW - 1000,
+         'dropoff': '777 Pressed Again Dr, Kennesaw, GA 30144', 'asked': True},
+    ], mode='a')
+    folded = {r.get('id'): r for r in get(base, '/api/journal?days=0').get('offers', [])}
+    eq('a later sighting does not displace an earlier press',
+       (folded.get('off43') or {}).get('dropoff'),
+       '444 Asked First Rd, Kennesaw, GA 30144')
+    eq('...while a later press does displace an earlier one',
+       (folded.get('off44') or {}).get('dropoff'),
+       '777 Pressed Again Dr, Kennesaw, GA 30144')
+
     # --- a mark that carries its offer, after a restart -----------------------
     # The offer on record is process memory. The panel keeps "Took?" across a
     # server restart, the driver presses it, the mark is written — and no
@@ -795,6 +829,89 @@ if shutil.which('python3'):
         no_('...though nothing was written down for it',
             any('No Card Yet' in (r.get('dropoff') or '')
                 for r in [json.loads(l) for l in open(journal) if l.strip()]))
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
+# --- the card is read again, and the press survives it -----------------------
+#
+# `scanner.offer = read.offer` replaces the slot wholesale, and it used to
+# carry only `accepted` across. So the destination a driver had just pressed
+# for was thrown away by the NEXT reading of the card it belonged to — which
+# arrives within seconds, because every card here is read repeatedly as the
+# reading improves and a fuller one is re-announced.
+#
+# Losing it would be bad enough. What made it a WRONG address is the guard
+# beside it: `wasAsked || !scanner.offer.dropoff` re-opens the moment the field
+# is wiped, so the next unprompted sighting — a navigation screen left up, the
+# previous job's, another app — was accepted over the press and appended as a
+# second mark. Reproduced before the fix: pressed for "123 Oak St", the card
+# read again, and both the panel and the journal ended up saying "999 Wrong Way
+# Dr", with the press still on disk underneath and never shown again.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'reread.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import json, time\n'
+            'def card(i, miles):\n'
+            '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
+            '        "grossPerHour": 36.0, "pay": 12.0, "minutes": 24.0,\n'
+            '        "miles": miles, "cost": 1.75, "billedMinutes": 24.0,\n'
+            '        "target": 25, "band": 15, "costPerMile": 0.35,\n'
+            '        "at": int(time.time() * 1000),\n'
+            '        "offer": {"id": i, "pay": 12.0, "minutes": 24.0,\n'
+            '                  "billedMinutes": 24.0, "miles": miles,\n'
+            '                  "cost": 1.75, "perHour": 30.0, "target": 25,\n'
+            '                  "band": 15, "costPerMile": 0.35,\n'
+            '                  "dropoff": None}}), flush=True)\n'
+            'def addr(line, asked):\n'
+            '    print(json.dumps({"dropoff": {"line": line, "street": "1 X St",\n'
+            '        "city": "Kennesaw", "state": "GA", "zip": "30144",\n'
+            '        "asked": asked, "at": int(time.time() * 1000)}}), flush=True)\n'
+            '# A card that names nowhere, which is 129 of this driver\'s 272.\n'
+            'card("o-reread", 5.0)\n'
+            'time.sleep(0.7)\n'
+            'addr("123 Oak St, Kennesaw, GA 30144", True)\n'
+            'time.sleep(0.7)\n'
+            '# The SAME card, read fuller — a corrected mileage.\n'
+            'card("o-reread", 8.4)\n'
+            'time.sleep(0.7)\n'
+            'addr("999 Wrong Way Dr, Dallas, GA 30132", False)\n'
+            'time.sleep(600)\n')
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+    try:
+        def slot(patience=8.0):
+            for _ in range(int(patience * 20)):
+                s = (get(base, '/api/status').get('offer') or {})
+                if s.get('id') == 'o-reread':
+                    return s
+                time.sleep(0.05)
+            return {}
+
+        slot()
+        # Wait past the re-reading AND the sighting that follows it, so what is
+        # asserted is the end state rather than a moment before the damage.
+        time.sleep(2.6)
+        now = (get(base, '/api/status').get('offer') or {})
+        # The premise: the card really was read a second time, or this passes
+        # by never reaching the case it is named after.
+        eq('the card really was read again', now.get('miles'), 8.4)
+        eq('...and the address the driver pressed for survived it',
+           now.get('dropoff'), '123 Oak St, Kennesaw, GA 30144')
+        ok_('...still marked as read off the screen',
+            now.get('dropoffScanned') is True)
+        rows = [json.loads(l) for l in open(journal) if l.strip()]
+        no_('...and no sighting was written over it',
+            any('Wrong Way' in (r.get('dropoff') or '') for r in rows))
+        page = get(base, '/api/journal?days=0')
+        mine = [o for o in (page.get('offers') or []) if o.get('id') == 'o-reread']
+        if mine:
+            eq('...so the offers page shows what was pressed for',
+               mine[0].get('dropoff'), '123 Oak St, Kennesaw, GA 30144')
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
