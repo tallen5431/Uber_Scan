@@ -445,7 +445,24 @@ function startScanner() {
             appendLines(JSON.stringify({
               v: 1, kind: 'mark', at: Date.now(),
               id: scanner.offer.id,
-              dropoff: read.dropoff.line
+              dropoff: read.dropoff.line,
+              // Whether the driver ASKED, carried onto the row rather than
+              // being decided here and forgotten.
+              //
+              // The guard above is about the card on the slot AT THIS MOMENT;
+              // the fold that applies this mark is about the row on disk,
+              // which is merged newest-wins from every reading of that offer
+              // and can carry a dropoff the in-memory card has since lost —
+              // readings of one card differ, and `bestReading` borrows ends
+              // from whichever one had them. Without this field the fold has
+              // no way to tell a press from a sighting and overwrites either
+              // way, which is a wrong destination written into an append-only
+              // file that syncs to the NUC.
+              //
+              // Absent means asked, matching how the reading itself is read
+              // above, so rows written before this field existed keep the
+              // behaviour they were written under.
+              asked: wasAsked
             }) + '\n', function (err) {
               // Said out loud, because every other write to this file says so
               // and this one is a deliberate press the driver expects to be
@@ -1472,6 +1489,20 @@ function latestPerOfferUncached(rows) {
         if (typeof r.dropoff === 'string' && r.dropoff
             && when >= (m.dropoffAt || 0)) {
           m.dropoff = r.dropoff; m.dropoffAt = when;
+          // ...and whether anybody ASKED for it, carried with the address
+          // rather than folded on its own, because it is a property of THIS
+          // address and not of the offer. Folding it separately would let a
+          // press at 11:00 vouch for a sighting at 11:05.
+          //
+          // Absent means asked, matching the reading and the mark, so rows
+          // written before the field existed keep the behaviour they were
+          // written under. Named `dropoffAsked` rather than `asked` because
+          // `marks` is a per-field fold and a bare `asked` reads as a property
+          // of the mark as a whole, which is how the first version of this was
+          // wrong: the field was simply never copied here, so every sighting
+          // arrived at the guard below as `undefined` and was let through as a
+          // press.
+          m.dropoffAsked = r.asked !== false;
         }
       }
       return;
@@ -1530,7 +1561,26 @@ function latestPerOfferUncached(rows) {
       // reader made of a line of OCR and this is what the phone actually said
       // when asked. `dropoffScanned` marks the difference so nothing
       // downstream has to guess which kind it is holding.
-      if (mark.dropoff) { o.dropoff = mark.dropoff; o.dropoffScanned = true; }
+      //
+      // WHEN ASKED. That sentence was the whole justification and it stopped
+      // being true when the scanner began reporting addresses nobody pressed
+      // for: an unprompted sighting is not the phone answering a question, it
+      // is a navigation screen that happened to be in front of the camera, and
+      // it may belong to the job before this one. So it may fill a blank and
+      // may not overwrite — the same rule the live path already keeps, which
+      // this did not, because the guard there tests the card in MEMORY and
+      // this tests the row on disk. Those diverge: the row is merged
+      // newest-wins across every reading of the offer and `bestReading`
+      // borrows ends from whichever reading had them, so a card whose later
+      // readings lost the address still has one here.
+      //
+      // Absent means asked, so the rows already in this journal — and any
+      // written by an older rig still reporting only presses — keep the
+      // behaviour they were written under.
+      if (mark.dropoff && (mark.dropoffAsked || !o.dropoff)) {
+        o.dropoff = mark.dropoff;
+        o.dropoffScanned = true;
+      }
     }
   });
 

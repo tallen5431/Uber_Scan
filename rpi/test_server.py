@@ -255,6 +255,50 @@ try:
     eq('a tally from before the clock is not what the rig watched',
        (page.get('watched') or {}).get('saw'), 0)
 
+    # --- a sighting nobody asked for, against a card that named its own end ---
+    #
+    # The live path already refuses this: an unprompted address may fill a
+    # blank and may not overwrite. The JOURNAL did not, and the two guards look
+    # at different things — the live one tests the card in memory at that
+    # moment, this one is the fold that merges every row for an offer,
+    # newest-wins, where `bestReading` has been borrowing ends from whichever
+    # reading had them. So a card whose later readings lost the address still
+    # carries one here while `scanner.offer.dropoff` is empty, the live guard
+    # lets the mark through, and the fold used to apply it unconditionally.
+    #
+    # A wrong destination, written into an append-only file, synced to the NUC.
+    # Both rows are staged directly because that divergence is the whole point
+    # and a live run cannot be made to produce it on demand.
+    write(journal, [
+        offer(40, NOW - 5000, dropoff='Oak Ln, Marietta'),
+        {'v': 1, 'kind': 'mark', 'id': 'off40', 'at': NOW - 1000,
+         'dropoff': '222 Wrong Way Dr, Kennesaw, GA 30144', 'asked': False},
+        # ...and one that named nowhere, which is the case the sighting is FOR.
+        offer(41, NOW - 5000),
+        {'v': 1, 'kind': 'mark', 'id': 'off41', 'at': NOW - 1000,
+         'dropoff': '111 Filled In Rd, Kennesaw, GA 30144', 'asked': False},
+        # ...and a press, which still overrules the card. Absent `asked` means
+        # asked, so rows written before that field existed keep their meaning —
+        # written without it here deliberately, because that is what is already
+        # in this driver's journal.
+        offer(42, NOW - 5000, dropoff='Oak Ln, Marietta'),
+        {'v': 1, 'kind': 'mark', 'id': 'off42', 'at': NOW - 1000,
+         'dropoff': '333 Asked For Ave, Kennesaw, GA 30144'},
+    ], mode='a')
+    folded = {r.get('id'): r for r in get(base, '/api/journal?days=0').get('offers', [])}
+    eq('an unasked sighting does not overwrite a card that named its own end',
+       (folded.get('off40') or {}).get('dropoff'), 'Oak Ln, Marietta')
+    no_('...and the row is not claimed as scanned either',
+        (folded.get('off40') or {}).get('dropoffScanned'))
+    eq('...while the same sighting fills a card that named nowhere',
+       (folded.get('off41') or {}).get('dropoff'),
+       '111 Filled In Rd, Kennesaw, GA 30144')
+    ok_('...and that one IS marked as scanned',
+        (folded.get('off41') or {}).get('dropoffScanned') is True)
+    eq('...and a press still overrules the card, as it always did',
+       (folded.get('off42') or {}).get('dropoff'),
+       '333 Asked For Ave, Kennesaw, GA 30144')
+
     # --- a mark that carries its offer, after a restart -----------------------
     # The offer on record is process memory. The panel keeps "Took?" across a
     # server restart, the driver presses it, the mark is written — and no
@@ -678,6 +722,24 @@ if shutil.which('python3'):
         rows = [json.loads(l) for l in open(journal) if l.strip()]
         no_('...nor writes one down',
             any('Wrong Way' in (r.get('dropoff') or '') for r in rows))
+
+        # The mark that WAS written says which kind it is.
+        #
+        # Checked where it is written rather than only where it is read. The
+        # fold refuses an unasked address over a card that named its own end,
+        # and the checks for that stage their rows directly — so they prove the
+        # fold and say nothing about whether this path ever sets the field. Cut
+        # it to a constant here and every one of them still passes, which is a
+        # guard resting on a value nothing produces.
+        #
+        # It matters because the live guard tests the card in MEMORY and the
+        # fold tests the row on disk, and the two can disagree: a card whose
+        # later readings lost its address is blank here and still has one
+        # there. That is the case this bit is carried for.
+        filled = [r for r in rows if 'Filled In' in (r.get('dropoff') or '')]
+        eq('the sighting that filled a blank was written down', len(filled), 1)
+        if filled:
+            eq('...and says nobody asked for it', filled[0].get('asked'), False)
 
         # The press still overrules, which is the whole difference.
         for _ in range(120):
