@@ -916,6 +916,80 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- the press this button exists for, with an order in the car --------------
+#
+# An offer card does not say where a delivery ends: Uber prints "Customer
+# dropoff" and the address appears only on the screen after the accept. So
+# capturing it once the order is IN THE CAR is the whole reason ⌖ Dropoff
+# exists — and that path updated process memory and nothing else.
+#
+# It reached disk only if another card happened to arrive before the order
+# ended, because the pairing row carries the held job's dropoff. Finish a
+# delivery with no offer in between, or end the shift, or restart the server,
+# and the address the driver deliberately captured was gone: off the offers
+# page, off the map, out of the stack line's reasoning, with nothing saying it
+# had ever been there.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'held.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import json, sys, time\n'
+            '# Long enough for the mark below to put the order in the car\n'
+            '# first — the press being tested is one made while HOLDING.\n'
+            'time.sleep(2.0)\n'
+            'print(json.dumps({"dropoff": {"line": "77 Held Job Way, Kennesaw, GA 30144",\n'
+            '    "street": "77 Held Job Way", "city": "Kennesaw", "state": "GA",\n'
+            '    "zip": "30144", "asked": True,\n'
+            '    "at": int(time.time() * 1000)}}), flush=True)\n'
+            'time.sleep(600)\n')
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+    try:
+        code, reply = post(base, '/api/offers/mark', {
+            'id': 'o-held', 'accepted': True,
+            'offer': {'id': 'o-held', 'pay': 14.0, 'minutes': 30.0,
+                      'billedMinutes': 30.0, 'miles': 6.0, 'cost': 2.1,
+                      'dropoff': None}})
+        eq('the order goes in the car', code, 200)
+        ok_('...and the server says it is holding', reply.get('holding') is True)
+
+        # The address, once the scanner reports it. Polled rather than slept
+        # on: the append is asynchronous and reading the file on the next line
+        # is a race that passes on an idle box and fails on a loaded one.
+        marks = []
+        for _ in range(200):
+            rows = [json.loads(l) for l in open(journal) if l.strip()]
+            marks = [r for r in rows
+                     if r.get('kind') == 'mark' and r.get('dropoff')]
+            if marks:
+                break
+            time.sleep(0.05)
+        eq('a press while holding is written down', len(marks), 1)
+        if marks:
+            eq('...naming the order in the car', marks[0].get('id'), 'o-held')
+            eq('...and carrying the address',
+               marks[0].get('dropoff'), '77 Held Job Way, Kennesaw, GA 30144')
+            eq('...and saying the driver asked for it', marks[0].get('asked'), True)
+        # The premise, so this cannot pass by the order having quietly expired
+        # and the address landing on some other path.
+        held = get(base, '/api/status').get('holding') or {}
+        eq('...while the order really was still in the car',
+           held.get('dropoff'), '77 Held Job Way, Kennesaw, GA 30144')
+        ok_('...and marked as read off the screen',
+            held.get('dropoffScanned') is True)
+        # ...and it survives a restart, which is the whole point of writing it.
+        page = get(base, '/api/journal?days=0')
+        mine = [o for o in (page.get('offers') or []) if o.get('id') == 'o-held']
+        if mine:
+            eq('...so the offers page has it off the file',
+               mine[0].get('dropoff'), '77 Held Job Way, Kennesaw, GA 30144')
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a card too old to attach an address to ----------------------------------
 #
 # The ceiling, which is the whole of what keeps the old rule's protection. An

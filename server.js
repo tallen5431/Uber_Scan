@@ -440,6 +440,41 @@ function startScanner() {
             carrying.dropoff = read.dropoff.line;
             carrying.dropoffScanned = true;
             kept = true;
+            // ...and written down, which it was not.
+            //
+            // This is the case the button EXISTS for. An offer card does not
+            // say where a delivery ends — Uber prints "Customer dropoff" and
+            // the address only appears on the screen after the accept — so the
+            // whole point is to capture it once the order is in the car. That
+            // path updated process memory and nothing else.
+            //
+            // It reached disk only if another card happened to arrive before
+            // the order ended, because the pairing row carries the held job's
+            // dropoff. Finish a delivery with no offer in between, or end the
+            // shift, or restart the server, and the address the driver had
+            // deliberately captured was simply gone — off the offers page, off
+            // the map, out of the stack line's reasoning, with nothing saying
+            // it had ever been there.
+            //
+            // Its own mark, the same shape and the same `asked` bit as the
+            // screening path writes, so the fold applies both by one rule.
+            if (carrying.id) {
+              appendLines(JSON.stringify({
+                v: 1, kind: 'mark', at: Date.now(),
+                id: carrying.id,
+                dropoff: read.dropoff.line,
+                asked: wasAsked
+              }) + '\n', function (err) {
+                // Said out loud for the same reason the screening branch says
+                // it: a read-only SD card mid-shift is the classic Pi failure,
+                // and the panel would otherwise go on confirming an address
+                // that reached nothing.
+                if (err) {
+                  console.error('journal: could not record a held dropoff: '
+                                + err.message);
+                }
+              });
+            }
           } else if (carrying) {
             // Held, already knows where it ends, and nobody asked. Nothing to
             // do — and nothing to say either, because the driver did not ask a
