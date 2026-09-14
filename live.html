@@ -2039,6 +2039,27 @@
         if (!onRecord || onRecord.id !== msg.offer.id) {
           tookState = false;
           tookFailed = false;
+          // ...and the destination read off the last card, which belongs to
+          // that card and not to this one.
+          //
+          // `destSaid` was cleared by a press, by a held order ending, and by
+          // a page load — and by nothing at all on the screening path, which
+          // is the path the passive capture made ordinary. Screen a card that
+          // prints "Customer dropoff", tap the pin on the phone, decline, and
+          // the next card arrived with the button already green: "Dropoff read
+          // as 123 Oak St. Press again to read it afresh", naming a job the
+          // driver had just turned down.
+          //
+          // The worse half is the silence. `wants` — the amber "this one needs
+          // a press" state — is gated on `!destSaid`, so a card that genuinely
+          // refuses a destination stopped asking for one. Accept it and every
+          // stack verdict for the rest of that delivery reads ENDS ?, with the
+          // one control that would fix it sitting there claiming the answer
+          // was already in.
+          //
+          // /api/status is fetched once, at load — it is not a poll — so
+          // nothing downstream was ever going to catch this up.
+          destSaid = '';
         }
         onRecord = msg.offer;
         showTook();

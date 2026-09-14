@@ -538,6 +538,20 @@ const framed = (page) => page.waitForFunction(
     // rig's own panel while a 42-character address needs 238 - it arrived as
     // "1234 Daffodil L...", which is neither a label nor an address anyone can
     // check. There is no width to win: the bar is full.
+    // Nothing in the car first, so what follows is the SCREENING path.
+    //
+    // Without this the next card below arrives while an order is still held,
+    // and `if (holdingNow && !msg.holding) destSaid = ''` — the clearing that
+    // has always existed for an order ENDING — fires and hides whether the
+    // screening path clears anything at all. Both mutations of the new rule
+    // survived against a fixture that skipped this line.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 12.45,
+      minutes: 28.0, miles: 5.0, cost: 1.75, target: 25, band: 15,
+      holding: null,
+      offer: { id: 'o-screen', pay: 12.45, minutes: 28.0, billedMinutes: 28.0,
+               miles: 5.0, cost: 1.75, dropoff: null, endRefused: true } }));
+    await page.waitForTimeout(150);
     await page.evaluate(() => window.__es.push({ dropoff: {
       line: '1234 Daffodil Ln, Powder Springs, GA 30127',
       street: '1234 Daffodil Ln', city: 'Powder Springs',
@@ -557,6 +571,50 @@ const framed = (page) => page.waitForFunction(
                fits: document.documentElement.scrollWidth
                      <= document.documentElement.clientWidth + 1 };
     });
+    // The SAME card, read again — a fuller reading, which arrives constantly.
+    // The answer belongs to this card and must survive its own re-readings, or
+    // clearing on a new card becomes clearing on every message and the driver
+    // watches the button forget what they just told it.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 31.0, grossPerHour: 37.0, pay: 12.45,
+      minutes: 26.0, miles: 6.2, cost: 2.05, target: 25, band: 15,
+      holding: null,
+      offer: { id: 'o-screen', pay: 12.45, minutes: 26.0, billedMinutes: 26.0,
+               miles: 6.2, cost: 2.05, dropoff: null, endRefused: true } }));
+    await page.waitForTimeout(200);
+    out.destSameCard = await page.evaluate(() => {
+      const el = document.getElementById('dest');
+      return { done: el.classList.contains('done'),
+               title: el.getAttribute('title') || '' };
+    });
+
+    // ...and then the NEXT card, which is a different job and must not inherit
+    // that answer.
+    //
+    // `destSaid` was cleared by a press, by a held order ending, and by a page
+    // load — and by nothing on the screening path, which is the path the
+    // passive capture made ordinary. /api/status is fetched once at load
+    // rather than polled, so nothing downstream caught it up either.
+    //
+    // What the driver got: screen a card printing "Customer dropoff", tap the
+    // pin on the phone, decline, and the next card arrived with the button
+    // already green, naming the job they had just turned down. And the amber
+    // "this one needs a press" state is gated on `!destSaid`, so the card that
+    // genuinely refused a destination stopped asking for one.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 31.0, grossPerHour: 37.0, pay: 9.5,
+      minutes: 18.0, miles: 3.0, cost: 1.05, target: 25, band: 15,
+      holding: null,
+      offer: { id: 'o-next', pay: 9.5, minutes: 18.0, billedMinutes: 18.0,
+               miles: 3.0, cost: 1.05, dropoff: null, endRefused: true } }));
+    await page.waitForTimeout(200);
+    out.destNextCard = await page.evaluate(() => {
+      const el = document.getElementById('dest');
+      return { done: el.classList.contains('done'),
+               title: el.getAttribute('title') || '',
+               label: el.getAttribute('aria-label') || '' };
+    });
+
     // Marking is the one thing on this screen that changes the count, so it is
     // the one time the figures are worth asking for off the timer. Left to the
     // three-minute poll, a driver would press "took it" and watch the number
@@ -2007,6 +2065,32 @@ try:
         ok_('...with the address still readable on the control',
             '1234 Daffodil Ln' in (scanned.get('title') or ''))
         ok_('...and the panel still fits', scanned.get('fits'))
+
+        # ...and the NEXT card does not inherit that answer.
+        #
+        # The button carried the previous job's address onto a card the driver
+        # had just been shown — green, reading "press again to read it afresh",
+        # about a job they had declined. And the amber "this one needs a press"
+        # state is gated on there being no address, so the new card, which
+        # refuses a destination of its own, stopped asking for one: accept it
+        # and every stack verdict for that delivery reads ENDS ?, with the one
+        # control that would fix it claiming the answer was already in.
+        # ...while a re-reading of the SAME card keeps it. Clearing on a new
+        # card is one line away from clearing on every message, and that
+        # version passes every check above: the driver presses, the card is
+        # read again a second later, and the button forgets.
+        same = got.get('destSameCard') or {}
+        ok_('a re-reading of the same card keeps the destination (%r)'
+            % (same.get('title') or '')[:70], same.get('done'))
+        ok_('...and still names it', '1234 Daffodil Ln' in (same.get('title') or ''))
+
+        nextDest = got.get('destNextCard') or {}
+        no_('a new card does not inherit the last one destination (%r)'
+            % (nextDest.get('title') or '')[:70], nextDest.get('done'))
+        no_('...nor names it to a screen reader',
+            '1234 Daffodil Ln' in (nextDest.get('label') or ''))
+        no_('...nor on the control itself',
+            '1234 Daffodil Ln' in (nextDest.get('title') or ''))
 
         # A mark belongs to an offer, not to the button. This is asked while
         # the previous offer is still marked: a tick carried onto the next card
