@@ -168,12 +168,33 @@ class OfferAccumulator:
         # cards on file take this path, the "Add a delivery" shape, where a plus
         # inside the bracket defeats the leg's own distance group.
         self.lone_miles = []
-        # Whether EVERY frame so far has seen a distance it could not attribute
-        # to a leg. True until a frame reads the card whole, because that is the
-        # direction that clears it: one good frame is enough, the way one frame
-        # reading the word "total" is enough. Starts True so the first frame's
-        # own answer is what it becomes. See OP.distance_without_a_time.
+        # Whether the best reading so far still has a distance it could not
+        # attribute to a leg.
+        #
+        # "One good frame is enough, the way one frame reading the word total
+        # is enough" was the rule, written as `and` across frames. The two are
+        # not alike. Reading the word "total" is something a frame can only do
+        # by seeing MORE of the card; not seeing an orphan bracket is something
+        # a frame can do by seeing LESS. LEG_ORPHAN needs a literal "(", so one
+        # character of damage is enough — `lUmin@s5 mi)` where the other seven
+        # frames of that window read `(45 mi)`, which is real OCR from this
+        # driver's own export.
+        #
+        # So the frame that read the MOST timed legs governs, and a frame that
+        # did see an orphan always keeps the doubt. A worse frame can no longer
+        # cancel it, and — because `and` is one-way — it could not be restored
+        # afterwards by the good frames that followed. Measured on the owner's
+        # own card: one character of damage turned "CHECK THE TIME" into a
+        # spoken green ACCEPT at $46.87/hr on a job worth $16.14.
+        #
+        # Starts True so the first frame's own answer is what it becomes. See
+        # OP.distance_without_a_time.
         self.short_a_time = True
+        # How many timed legs the fullest frame managed, which is what "read
+        # more of the card" means here. Not the leg COUNT on the merged
+        # reading: that grows as slots fill across frames, and the question is
+        # about one frame's own view.
+        self.most_timed = 0
         # ...and how far the missing leg was, for as long as it is missing. The
         # largest any frame named, because the frames disagree about what they
         # failed to read and the biggest piece is the one that decides whether
@@ -398,7 +419,25 @@ class OfferAccumulator:
                 l.get('miles') is not None for l in detail):
             self.lone_miles.append((parsed['miles'],
                                     bool(parsed.get('milesHadDecimal'))))
-        self.short_a_time = self.short_a_time and bool(parsed.get('shortATime'))
+        _timed_here = len(detail)
+        if _timed_here > self.most_timed:
+            # A fuller reading than anything before it, so its answer governs
+            # in both directions. This is the only thing that may CLEAR the
+            # doubt: a frame with no more timed legs than its predecessors has
+            # not shown the card is whole, it has only failed to notice what
+            # they saw.
+            self.most_timed = _timed_here
+            self.short_a_time = bool(parsed.get('shortATime'))
+            if not self.short_a_time:
+                self.untimed_miles = None
+        elif parsed.get('shortATime') and _timed_here >= self.most_timed:
+            # As full as the best so far, and it can see a gap the best one
+            # missed. Evidence of a gap wins a tie, the way every other one-way
+            # signal here is unioned — isTotal, labelled, isApproach,
+            # end_refused, shop — because losing a signal is what a glare frame
+            # does. A frame that read LESS says nothing and is ignored, which is
+            # what keeps a card already read whole from flickering back.
+            self.short_a_time = True
         lost = parsed.get('untimedMiles')
         if isinstance(lost, (int, float)) and not isinstance(lost, bool):
             if self.untimed_miles is None or lost > self.untimed_miles:

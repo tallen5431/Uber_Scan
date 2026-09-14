@@ -612,6 +612,32 @@ eq('...and the time the lost leg was hiding', _m.get('minutes'), 22.0)
 _n, _m = _episodes([(_LOST, None), (_LOST, None), (_READ, None)])
 eq('...whichever order the good frame arrives in', _m.get('shortATime'), False)
 
+# ...but only a frame that read MORE of the card. An equally full frame that
+# simply failed to notice the gap does not get to clear it.
+#
+# LEG_ORPHAN needs a literal "(", so one character of damage hides the orphan
+# without costing a leg — `lUmin@s5 mi)` where the other seven frames of that
+# window read `(45 mi)` is real OCR out of this driver's own export. Under the
+# old rule, ANDed across the window, that single frame cleared the doubt for
+# good: `and` is one-way, so the good frames that followed could not put it
+# back. Measured on the driver's own $8.08 card, one damaged frame turned
+# "CHECK THE TIME" into a spoken green ACCEPT at $46.87/hr on a job worth
+# $16.14, and it stayed there.
+_HID = _LOST.replace('(44 mi)', '@44 mi)')
+# The premise, both halves: the damage must cost no leg, or this is testing
+# "read less" rather than the tie it is named after.
+eq('the damaged frame sees no gap', P.parse(_HID).get('shortATime'), False)
+eq('...and is no less complete for it',
+   len([l for l in (P.parse(_HID).get('legDetail') or []) if l.get('minutes') is not None]),
+   len([l for l in (P.parse(_LOST).get('legDetail') or []) if l.get('minutes') is not None]))
+
+_n, _m = _episodes([(_HID, None), (_LOST, None)])
+eq('a frame that only failed to notice the gap does not clear it',
+   _m.get('shortATime'), True)
+# ...and the distance is still carried, or the panel has a doubt it cannot
+# explain.
+eq('...and still says how far went untimed', _m.get('untimedMiles'), 44.0)
+
 # --- the distance's own two markers describe the merge, not the last frame ---
 #
 # `milesChecked` and `milesHadDecimal` are not numbers, they are the two things
