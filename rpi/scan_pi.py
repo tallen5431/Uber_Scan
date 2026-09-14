@@ -1074,13 +1074,23 @@ class Health:
         # Outside the tracker block on purpose: these say nothing about the
         # corners, and a rig started with --no-track is exactly the one whose
         # destination scan is worth watching.
+        #
+        # ...and SAID to be run totals, which every other number on this line is
+        # not. The line is headed "health over 120s" and everything else in it
+        # was counted inside that window and reset; these two are kept for the
+        # whole run, because they answer a question about a shift. Without the
+        # marker a driver reading two consecutive lines sees "3 screens" and
+        # then "3 screens" and concludes it happened twice — or sees it climb
+        # and reads a rate that is really a total. `relocks` below has said
+        # "since start" for exactly this reason since long before these existed.
         if self.street_seen_no_address:
-            bits.append('%d screen%s had a street on it and no address the rig '
-                        'would accept'
+            bits.append('%d screen%s since start had a street on it and no '
+                        'address the rig would accept'
                         % (self.street_seen_no_address,
                            '' if self.street_seen_no_address == 1 else 's'))
         if self.address_refused_as_offer:
-            bits.append('%d address%s refused for being on an offer card'
+            bits.append('%d address%s since start refused for being on an '
+                        'offer card'
                         % (self.address_refused_as_offer,
                            '' if self.address_refused_as_offer == 1 else 'es'))
         # Brightness and banding, because "the picture looks dark" and "the

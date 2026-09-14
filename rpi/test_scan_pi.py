@@ -79,6 +79,10 @@ def ok_(name, cond):
     eq(name, bool(cond), True)
 
 
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 class Request(object):
     """One capture, which the loop is obliged to give back."""
 
@@ -1803,6 +1807,46 @@ ok_('...and says what to do about it', 'brightness up' in dim)
 bright = health_line(too_bright=True)
 ok_('a rig with too much light still says so', 'OVER-EXPOSED' in bright)
 ok_('...and says the opposite thing to do', 'brightness down' in bright)
+
+# --- the two run totals, on a line headed with a window ----------------------
+#
+# Every other number on this line was counted inside the window named in its
+# heading — "health over 121s" — and reset afterwards. These two are kept for
+# the whole run, because what they answer is a question about a shift.
+#
+# Unmarked, a driver reading two consecutive lines sees "3 screens" and then "3
+# screens" and concludes it happened twice; or watches it climb and reads a rate
+# that is really a total. The counters exist to be sent back and argued from —
+# they are the evidence that would justify loosening find_address, and loosening
+# it on a misread number puts a background map label on the panel as a
+# destination. A number that cannot be read correctly is worse than no number.
+#
+# `re-locked %dx since start` has carried that marker since long before these
+# existed, which is the convention being followed rather than invented.
+counted = health_line(street_seen_no_address=3, address_refused_as_offer=2)
+ok_('the health line carries the street counter (%r)'
+    % counted.strip()[:90], 'had a street on it' in counted)
+ok_('...and says it is a run total, not this window',
+    'screens since start' in counted)
+ok_('...and the same for the addresses it refused',
+    'addresses since start' in counted)
+# ...and the window heading is still there, or the marker is answering a
+# question nobody was asked.
+ok_('...on a line that still names the window it is headed with (%r)'
+    % counted.strip()[:40], 'health over' in counted)
+# Singular reads as English too — these are small numbers most of the time, and
+# "1 screens" on the line a driver is asked to send back is the kind of thing
+# that makes them doubt the rest of it.
+one = health_line(street_seen_no_address=1, address_refused_as_offer=1)
+ok_('one of each reads as English (%r)'
+    % one.strip()[:90],
+    'screen since start' in one and 'address since start' in one)
+no_('...without the plural', 'screens since start' in one)
+# Nought says nothing at all, rather than a line of zeroes on every window.
+quiet_counts = health_line()
+no_('a run with neither says nothing about them',
+    'since start had a street' in quiet_counts
+    or 'since start refused' in quiet_counts)
 
 # The heartbeat is what the live page reads, and it is a separate path from the
 # health line: a rig can be perfectly healthy in every other respect and still

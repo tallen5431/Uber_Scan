@@ -255,6 +255,7 @@ function fakeGeo(answers, opts) {
   var sent = [];
   var geo = new MV.Geocoder({
     hint: opts.hint || function () { return ''; },
+    store: opts.store || null,
     now: function () { return clock.t; },
     // Sleeping moves the clock and nothing else, so a whole week of lookups
     // runs in a millisecond and the gaps are still exactly what they would be.
@@ -343,6 +344,41 @@ function gaps(sent) {
   await D.geo.lookup('Duval Ct', null);
   eq('...which is asked', D.sent.length, 2);
   ok_('...with the hint in it', D.sent[1].url.indexOf('Georgia') !== -1);
+
+  /* TWO PAGES, ONE DEVICE.
+   *
+   * The map page and the offers page both build a Geocoder over the same
+   * localStorage key, and a PWA keeps both alive — opening the map from a row
+   * on the offers page leaves two of these in existence. Each reads the store
+   * ONCE, when it is constructed. Writing the whole in-memory copy back on
+   * every answer then means whichever page answers last writes its own
+   * snapshot over everything the other learned in between.
+   *
+   * What that costs is work, not correctness: the addresses are gone, nothing
+   * says so, and the next press pays the one-a-second rate limit again for
+   * places already found — the exact cost the anchor snapping exists to
+   * remove, reintroduced by the page next to it.
+   *
+   * Staged as it really happens: both built while the store is empty, which is
+   * what makes both snapshots stale. */
+  var device = { blob: '{}' };
+  var shared = { get: function () { return device.blob; },
+                 set: function (v) { device.blob = v; },
+                 clear: function () { device.blob = '{}'; } };
+  var P1 = fakeGeo({ 'Kroger': { lat: 33.9, lon: -84.5 } }, { store: shared });
+  var P2 = fakeGeo({ 'Zaxbys': { lat: 33.8, lon: -84.4 } }, { store: shared });
+  await P1.geo.lookup('Kroger', null);
+  await P2.geo.lookup('Zaxbys', null);
+  var onDevice = JSON.parse(device.blob);
+  ok_('the first page answer is still on the device after the second writes',
+      Object.prototype.hasOwnProperty.call(onDevice, 'Kroger'));
+  ok_('...alongside the second page own answer',
+      Object.prototype.hasOwnProperty.call(onDevice, 'Zaxbys'));
+  // ...and the page that wrote last has the other's work in memory too, so it
+  // does not ask again for something already on the device.
+  ok_('...and the second page need not ask about the first page place',
+      P2.geo.knows('Kroger', null));
+
 
   /* A dead network does not stop the walk — and is not remembered as an
    * answer about the place.

@@ -371,11 +371,49 @@
                                                 this.keyFor(place, box));
   };
 
+  /* Kept, and merged into what is on the device NOW rather than over it.
+   *
+   * The cache is read once, in the constructor, and this used to write the
+   * whole in-memory copy back on every answer. One page open, that is the same
+   * thing. Two pages open — the map and the offers page, which is an ordinary
+   * way to use this, and a PWA keeps them both alive — and it is not: each
+   * holds a snapshot from the moment it loaded, and whichever answers last
+   * writes its own over everything the other learned in between.
+   *
+   * What that costs is not a wrong answer, it is work. The addresses are gone,
+   * nothing says so, and the next press pays the one-a-second rate limit again
+   * for places that had already been found — which is precisely the cost the
+   * anchor snapping above exists to remove.
+   *
+   * Re-read, merge, write. Everything the other page learned survives, and the
+   * merged result is kept in memory too, so this page GETS the other's work
+   * rather than only preserving it.
+   *
+   * Which side wins a key both hold is deliberately not a rule, because the
+   * two cannot disagree: `lookup` answers from the cache without asking when
+   * it already knows a key, so a page never produces a second answer for one.
+   * A different box or a typed hint makes a different key, not a conflict. The
+   * property that matters, and the one the check holds this to, is that no key
+   * is lost — which both directions satisfy. A mutation swapping them survives
+   * the suite, and that is honest rather than a gap: there is no input that
+   * tells them apart.
+   *
+   * Not a lock, and it does not need to be: two writes racing still each
+   * re-read first, so the loser has already merged the winner's entries or
+   * will on its next answer. The failure this removes is systematic — one page
+   * reliably clobbering the other — not a rare interleaving. */
   Geocoder.prototype.remember = function (key, value) {
     this.cache[key] = value;
     if (!this.store) return;
-    try { this.store.set(JSON.stringify(this.cache)); }
-    catch (e) { /* full, or private mode */ }
+    try {
+      var onDevice = {};
+      try { onDevice = JSON.parse(this.store.get() || '{}') || {}; }
+      catch (e) { onDevice = {}; }
+      var mine = this.cache;
+      Object.keys(mine).forEach(function (k) { onDevice[k] = mine[k]; });
+      this.cache = onDevice;
+      this.store.set(JSON.stringify(onDevice));
+    } catch (e) { /* full, or private mode */ }
   };
 
   Geocoder.prototype.forget = function () {
