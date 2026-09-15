@@ -99,6 +99,10 @@
          and so the only thing that can say a pin is in the wrong place without
          being in the wrong place itself. -->
     <button id="trail" aria-pressed="false" title="Draw where the rig's GPS said the car was">◍ Where you were</button>
+    <!-- The miles nobody pays for: from the end of one job you took to the
+         start of the next. Needs no geocoder beyond the pins already placed,
+         and only ever joins offers you ticked as taken. -->
+    <button id="chain" aria-pressed="false" title="Join the jobs you took, in the order the offers came">⇢ The order you drove</button>
     <button id="forget" title="Throw away the remembered lookups on this device">Forget lookups</button>
     <span class="note" id="status">no offers loaded yet</span>
   </div>
@@ -126,11 +130,14 @@
   'use strict';
 
   var el = {};
-  ['days', 'hint', 'load', 'place', 'forget', 'trail', 'status', 'map', 'side',
-   'sideEmpty', 'sideBody'].forEach(function (id) { el[id] = document.getElementById(id); });
+  ['days', 'hint', 'load', 'place', 'forget', 'trail', 'chain', 'status', 'map',
+   'side', 'sideEmpty', 'sideBody'].forEach(function (id) { el[id] = document.getElementById(id); });
 
   var offers = [];
-  var map = null, layer = null, trail = null;
+  var map = null, layer = null, trail = null, order = null;
+  // What the last run judged, kept so the order-you-drove toggle can be turned
+  // on and off without geocoding the range again.
+  var placedNow = [];
   // The marker for each place, by the name the card gave it, so a row in the
   // sidebar can take the map to the pin it is describing.
   var marks = {};
@@ -271,6 +278,7 @@
 
   function render(placed, strays, found) {
     if (!ensureMap()) return;
+    placedNow = placed || [];
     if (layer) { map.removeLayer(layer); }
     layer = L.layerGroup().addTo(map);
     strays = strays || {};
@@ -329,6 +337,85 @@
     // was not showing it stays not showing — a toggle that turns itself back
     // on is a toggle that was not a decision.
     drawTrail();
+    drawChain();
+  }
+
+  /* --- the miles nobody paid for -------------------------------------------
+   *
+   * MapView.chain decides what joins what; this draws it. Dashed and violet so
+   * it cannot be mistaken for either of the two lines already on the map: the
+   * blue one inside a job is distance the card paid for, and a red one is a
+   * pin the page is accusing of being wrong. These are neither. They are the
+   * empty run between one job ending and the next beginning, which is the
+   * thing a driver is actually judging when they ask whether a second offer
+   * was worth taking. */
+  function drawChain() {
+    if (!map) return;
+    if (order) { map.removeLayer(order); order = null; }
+    if (el.chain.getAttribute('aria-pressed') !== 'true') return;
+    var run = MV.chain(placedNow);
+    order = L.layerGroup().addTo(map);
+    run.hops.forEach(function (h) {
+      L.polyline([[h.from.lat, h.from.lon], [h.to.lat, h.to.lon]], {
+        color: '#c084fc', weight: 3, dashArray: '2 7', opacity: .9
+      }).bindPopup('<b>' + esc(h.fromName || '?') + '</b> → <b>'
+          + esc(h.toName || '?') + '</b>'
+          + '<br>straight line ' + h.miles.toFixed(1) + ' mi with nobody in the car'
+          // The clock this rig has is when each CARD CAME UP, and the popup
+          // says exactly that. Wording it as drive time would be inventing a
+          // measurement out of two unrelated timestamps.
+          + '<br><span class="note">' + spell(h.ms) + ' between the two offers '
+          + 'coming up</span>'
+          // Three answers. Silence on `false` because "we checked and it was
+          // not a stack" is not worth a line, and silence on null because the
+          // card never said how long the first job was — writing "not a stack"
+          // there would be the rig reporting a thing it cannot know.
+          + (h.stacked
+             ? '<br><b>a stack</b><span class="note"> — the second came up '
+               + 'before the first was due to finish, so this line is not an '
+               + 'empty run</span>'
+             : h.stacked === null
+               ? '<br><span class="note">the first card never said how long it '
+                 + 'would take, so whether this was an empty run is not '
+                 + 'known</span>' : '')
+          + (h.skipped
+             ? '<br><span class="note">' + h.skipped + ' job'
+               + (h.skipped === 1 ? '' : 's') + ' in between could not be put on '
+               + 'the map, so the car did not go straight from one of these to '
+               + 'the other</span>' : ''))
+        .addTo(order);
+    });
+    return run;
+  }
+
+  function spell(ms) {
+    var mins = Math.round(Math.max(0, ms) / 60000);
+    if (mins < 60) return mins + ' min';
+    return Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm';
+  }
+
+  /* The headline is the total, not the count. "Nine hops" is trivia; "you drove
+     thirty-one miles nobody paid you for" is the reason to look at this. */
+  function chainNote() {
+    var run = MV.chain(placedNow);
+    if (!run.taken) {
+      say('nothing in this range is ticked as taken, so there is no order to '
+          + 'draw — the ✓ on the offer log is what marks a job you ran');
+      return;
+    }
+    if (!run.hops.length) {
+      say(run.taken + ' taken, but no two of them could be joined'
+          + (run.unplaced ? ' — ' + run.unplaced + ' have no usable pin' : ''));
+      return;
+    }
+    var empty = run.hops.reduce(function (sum, h) { return sum + h.miles; }, 0);
+    var stacks = run.hops.filter(function (h) { return h.stacked; }).length;
+    say(run.hops.length + ' hop' + (run.hops.length === 1 ? '' : 's')
+        + ' between ' + run.taken + ' jobs you took · '
+        + empty.toFixed(1) + ' straight-line miles nobody paid for'
+        + (stacks ? ' · ' + stacks + ' of them stacked' : '')
+        + (run.unplaced ? ' · ' + run.unplaced + ' taken jobs have no pin and '
+                        + 'were stepped over' : ''));
   }
 
   /* --- where the car actually was -----------------------------------------
@@ -555,6 +642,13 @@
     drawTrail();
     if (on) say('positions hidden');
     else trailNote();
+  });
+  el.chain.addEventListener('click', function () {
+    var on = el.chain.getAttribute('aria-pressed') === 'true';
+    el.chain.setAttribute('aria-pressed', on ? 'false' : 'true');
+    drawChain();
+    if (on) say('order hidden');
+    else chainNote();
   });
   el.forget.addEventListener('click', function () {
     geo.forget();

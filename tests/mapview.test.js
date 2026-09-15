@@ -242,6 +242,145 @@ eq('a place used as both ends is one pin with both roles',
                         { pickup: 'Duval Ct', dropoff: 'Chipotle' }], FOUND, {}))
      .filter(function (p) { return p.roles.pickup && p.roles.dropoff; }).length, 2);
 
+/* ---- the shift in the order it happened ----------------------------------
+ *
+ * The miles between two jobs are the ones nobody pays for, and they are what
+ * decides whether a stack was worth taking. The danger in drawing them is that
+ * a journal is mostly offers that were DECLINED: join those in time order and
+ * the map shows a route through places the car never went, which looks like
+ * evidence and is fiction. So the gate is `accepted`, and it is checked first
+ * because everything else here is only worth having if that holds. */
+var HOUR = 3600000;
+var T0 = 1700000000000;
+var SHIFT = MV.chain(MV.judge([
+  // Deliberately out of time order in the list: the journal is folded per
+  // offer and nothing promises these arrive sorted.
+  { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + HOUR,
+    accepted: true, minutes: 20 },
+  { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true, minutes: 20 },
+  // Turned down. It sits between the two in neither time nor space, and it
+  // must not appear in the chain at all.
+  { pickup: 'Chipotle', dropoff: 'Manchester Ln', at: T0 + HOUR / 2, minutes: 20 }
+], FOUND, strays));
+eq('only the jobs that were ticked count as taken', SHIFT.taken, 2);
+eq('...and two of them make one hop', SHIFT.hops.length, 1);
+// The hop is the EMPTY run: out of where the last job ended, into where the
+// next one began. Drawing pickup-to-pickup or dropoff-to-dropoff would be a
+// line the car never drove.
+eq('the hop leaves from where the first job ended', SHIFT.hops[0].fromName, 'Duval Ct');
+eq('...and arrives where the next one began', SHIFT.hops[0].toName, 'Manchester Ln');
+// The COORDINATE as well as the name, because the two are worked out from the
+// same end separately. A line drawn between the right pair of points under the
+// wrong pair of names, or the reverse, is a popup that lies about a line that
+// is fine — and either half on its own cannot catch that.
+eq('...from the coordinate that end resolved to',
+   SHIFT.hops[0].from.lat, FOUND['Duval Ct'].lat);
+eq('...to the coordinate the next one resolved to',
+   SHIFT.hops[0].to.lon, FOUND['Manchester Ln'].lon);
+ok_('...having sorted them by time and not by list order',
+    SHIFT.hops[0].a.offer.at < SHIFT.hops[0].b.offer.at);
+ok_('...and it has straight-line miles on it', SHIFT.hops[0].miles > 0);
+no_('an hour apart on a twenty-minute job is not a stack', SHIFT.hops[0].stacked);
+
+// A second offer that came up before the first was due to finish is a stack,
+// and the line between them is then NOT an empty run — the popup says so, and
+// it can only say so if this flag is right.
+var STACK = MV.chain(MV.judge([
+  { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true, minutes: 30 },
+  { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + 6 * 60000,
+    accepted: true, minutes: 30 }
+], FOUND, {}));
+ok_('an offer six minutes into a thirty-minute job is a stack', STACK.hops[0].stacked);
+// A card that never stated a duration cannot say whether the next offer
+// interrupted it — and `false` would read on the map exactly like "we checked,
+// and it did not". Null is the third answer and the difference matters: these
+// two offers are a minute apart, which under any stated duration at all would
+// have come back true.
+eq('a job with no stated minutes cannot say whether the next one stacked',
+   MV.chain(MV.judge([
+     { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true },
+     { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + 60000, accepted: true }
+   ], FOUND, {})).hops[0].stacked, null);
+eq('...where a card that did state one answers yes or no',
+   MV.chain(MV.judge([
+     { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true, minutes: 20 },
+     { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + HOUR, accepted: true }
+   ], FOUND, {})).hops[0].stacked, false);
+
+/* A pin in another state is a bad lookup, not a place. Chaining to one would
+   drag the evening's route out to Illinois and back, and the empty miles the
+   page quotes would be wrong by the width of four states. The job still
+   belongs in the chain — it was taken — so the usable end stands in. */
+var STRAYEND = MV.chain(MV.judge([
+  { pickup: 'Chipotle', dropoff: 'Daffodll Ln', at: T0, accepted: true },
+  { pickup: 'Manchester Ln', dropoff: 'Duval Ct', at: T0 + HOUR, accepted: true }
+], FOUND, strays));
+eq('a job whose dropoff landed in another state still joins the chain',
+   STRAYEND.hops.length, 1);
+eq('...leaving from the end that is not a stray', STRAYEND.hops[0].fromName, 'Chipotle');
+ok_('...and the miles are a real shift, not four states',
+    STRAYEND.hops[0].miles < 75);
+// And the same on the way IN, which is a separate line of code reading a
+// separate field: a stray PICKUP must not be what the chain arrives at either.
+var STRAYSTART = MV.chain(MV.judge([
+  { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0, accepted: true },
+  { pickup: 'Daffodll Ln', dropoff: 'Duval Ct', at: T0 + HOUR, accepted: true }
+], FOUND, strays));
+eq('a job whose pickup landed in another state still joins the chain',
+   STRAYSTART.hops.length, 1);
+eq('...arriving at the end that is not a stray', STRAYSTART.hops[0].toName, 'Duval Ct');
+ok_('...and the miles are a real shift, not four states',
+    STRAYSTART.hops[0].miles < 75);
+
+/* A taken job with nothing placeable does not break the chain and does not
+   vanish from it either. It is stepped over, and the hop it fell inside
+   carries the count — drawing across a gap without saying it is a gap is the
+   same lie the rest of this page exists to refuse. */
+var GAP = MV.chain(MV.judge([
+  { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true },
+  { pickup: 'Nowhere At All', dropoff: 'Nor Here', at: T0 + HOUR, accepted: true },
+  { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + 2 * HOUR, accepted: true }
+], FOUND, strays));
+eq('a job that could not be placed does not break the chain', GAP.hops.length, 1);
+eq('...and the hop says a job is unaccounted for inside it', GAP.hops[0].skipped, 1);
+eq('...and it is still counted as taken', GAP.taken, 3);
+eq('...and named as having no pin', GAP.unplaced, 1);
+// The count belongs to the hop it fell inside and to no other. Carried
+// forward, every later hop in the shift would claim a job went missing inside
+// it too, and a driver checking the one real gap would find four.
+var GAPTHEN = MV.chain(MV.judge([
+  { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true },
+  { pickup: 'Nowhere At All', dropoff: 'Nor Here', at: T0 + HOUR, accepted: true },
+  { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + 2 * HOUR, accepted: true },
+  { pickup: 'Duval Ct', dropoff: 'Manchester Ln', at: T0 + 3 * HOUR, accepted: true }
+], FOUND, strays));
+eq('the gap is reported once', GAPTHEN.hops[0].skipped, 1);
+eq('...and the hop after it is clean', GAPTHEN.hops[1].skipped, 0);
+// Counted over the whole list rather than off the running total, which resets
+// at every hop — so an unplaceable job that came LAST would otherwise be
+// dropped from the reckoning silently.
+eq('a taken job with no pin at the end of the shift is still counted',
+   MV.chain(MV.judge([
+     { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true },
+     { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + HOUR, accepted: true },
+     { pickup: 'Nowhere At All', dropoff: 'Nor Here', at: T0 + 2 * HOUR, accepted: true }
+   ], FOUND, strays)).unplaced, 1);
+
+// Without a timestamp there is no order to put it in, and putting it first or
+// last would be inventing one.
+eq('a taken job with no time cannot be placed in an order',
+   MV.chain(MV.judge([{ pickup: 'Chipotle', dropoff: 'Duval Ct', accepted: true }],
+                     FOUND, {})).taken, 0);
+
+// The offers page calls this on every draw, before anybody has ticked
+// anything. It must answer nothing rather than throw.
+eq('an empty range has no hops', MV.chain([]).hops.length, 0);
+eq('...and nothing taken', MV.chain([]).taken, 0);
+eq('...and no argument at all is the same', MV.chain().hops.length, 0);
+eq('a range with nothing ticked draws no chain',
+   MV.chain(MV.judge([{ pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0 }],
+                     FOUND, {})).taken, 0);
+
 /* ---- the rate limit, against a clock that costs nothing -------------------
  *
  * The reason this is worth a fake clock: the rule is one request a second, so
@@ -330,6 +469,31 @@ function gaps(sent) {
   ok_('...and the boxed question carried the box',
       C.sent[0].url.indexOf('viewbox=') !== -1 && C.sent[0].url.indexOf('bounded=1') !== -1);
   no_('...where the wide one did not', C.sent[1].url.indexOf('viewbox=') !== -1);
+
+  /* ...and the "near" box does not fork the cache for a place that HAS one.
+   *
+   * The map page passes whatever the driver typed into "near"; the offers page
+   * passes nothing. Both build a Geocoder over the same store. Applied to
+   * every lookup, one word typed on one page made every key there different
+   * from the same place asked on the other — so the two stopped sharing, and
+   * the one-a-second limit was paid twice for places already found.
+   *
+   * The hint is for a row whose car position was never recorded: no box, so
+   * nothing stops the geocoder answering with a same-named street in another
+   * state. A boxed place does not need it, and the box says where to look more
+   * precisely than a town name does. */
+  var typed = 'Georgia';
+  var hinted = fakeGeo({}, { hint: function () { return typed; } });
+  var plain = fakeGeo({});
+  var someBox = MV.boxAround({ lat: 33.9, lon: -84.5 });
+  eq('a boxed place is asked the same way whether or not a town was typed',
+     hinted.geo.keyFor('Duval Ct', someBox), plain.geo.keyFor('Duval Ct', someBox));
+  // ...and the hint still does its job where there is no box, which is the
+  // only case it was ever for.
+  no_('an unboxed place still takes the hint',
+      hinted.geo.keyFor('Duval Ct', null) === plain.geo.keyFor('Duval Ct', null));
+  ok_('...and the hint is what makes the difference',
+      hinted.geo.keyFor('Duval Ct', null).indexOf('Georgia') !== -1);
 
   /* The hint is part of the question, so it has to be part of the key too. A
    * driver who types a town after a blank run must not get the answers from

@@ -300,6 +300,88 @@
     return order.map(function (k) { return seen[k]; });
   }
 
+  /* --- the shift in the order it happened ----------------------------------
+   *
+   * Every job already draws its own pickup-to-dropoff line. What nothing drew
+   * is the part BETWEEN two jobs: the run from where one ended to where the
+   * next began, which no card pays for and no card mentions. That run is the
+   * whole of what makes a stack good or bad — two offers can each look fine
+   * and still be forty minutes apart in opposite directions — and on a map of
+   * unconnected pairs it is invisible.
+   *
+   * ONLY JOBS THE DRIVER TICKED. A journal is mostly offers that were turned
+   * down; joining those in time order would draw a route through places the
+   * car never went, which is a picture that looks like evidence and is
+   * fiction. So `accepted` is the gate, and a range with nothing ticked gets
+   * no chain at all — which the page has to say out loud rather than show as
+   * an empty map.
+   *
+   * A job whose pins are both missing, or both in another state, does not
+   * break the chain: it is stepped over and the hop it fell inside carries the
+   * count, so the popup can say a job is unaccounted for between these two.
+   * Drawing over a gap without saying it is a gap would be the same lie one
+   * level down.
+   *
+   * The times here are when each CARD CAME UP, which is the only clock the rig
+   * has. It is not when the job was delivered and must never be worded as
+   * though it were. What it does answer exactly is whether the next offer
+   * arrived while the last one was still running — `stacked` — and that is the
+   * difference between an empty run and a second pickup on the way. */
+  function chain(placed) {
+    var steps = [];
+    (placed || []).forEach(function (p) {
+      if (!p.offer.accepted) return;
+      if (typeof p.offer.at !== 'number' || !isFinite(p.offer.at)) return;
+      // A stray is a bad lookup, not a place. Using one as a chain end would
+      // draw the whole evening's route out to it and back, and the deadhead
+      // miles quoted in the popup would be off by the width of a state.
+      var from = (p.from && !p.fromStray) ? p.from : null;
+      var to = (p.to && !p.toStray) ? p.to : null;
+      steps.push({
+        p: p, at: p.offer.at,
+        // Where the chain arrives, and where it leaves. For a job with only
+        // one usable end these are the same point, and that is right: the job
+        // is one dot on the route rather than a segment of it.
+        into: from || to, intoName: from ? p.offer.pickup : p.offer.dropoff,
+        outOf: to || from, outName: to ? p.offer.dropoff : p.offer.pickup
+      });
+    });
+    steps.sort(function (a, b) { return a.at - b.at; });
+
+    var hops = [], last = null, missed = 0;
+    steps.forEach(function (s) {
+      if (!s.into) { missed++; return; }
+      if (last) {
+        var stated = typeof last.p.offer.minutes === 'number' ? last.p.offer.minutes : null;
+        var apart = s.at - last.at;
+        hops.push({
+          from: last.outOf, to: s.into,
+          fromName: last.outName, toName: s.intoName,
+          a: last.p, b: s.p,
+          miles: crowMiles(last.outOf, s.into),
+          ms: apart,
+          skipped: missed,
+          // Three answers, not two. A card that never stated a duration cannot
+          // say whether the next offer interrupted it, and `false` there would
+          // read on the map exactly like "we checked, and it did not" — which
+          // is the rig claiming to know something it does not. Null is the
+          // third answer, and the popup says nothing rather than either.
+          stacked: stated === null ? null : apart < stated * 60000
+        });
+      }
+      missed = 0;
+      last = s;
+    });
+
+    return {
+      hops: hops,
+      taken: steps.length,
+      // Counted over the whole list rather than off `missed`, which resets at
+      // every hop and so loses any unplaceable job that came last.
+      unplaced: steps.filter(function (s) { return !s.into; }).length
+    };
+  }
+
   /* --- the geocoder --------------------------------------------------------
    *
    * Nominatim, which is free, keyless and asks for at most one request a
@@ -353,7 +435,25 @@
    * it returns, so a check made AFTER it always finds the key present and
    * always skipped the wait: six questions went out in 33ms under a rule of
    * one a second. */
-  Geocoder.prototype.queryFor = function (place) {
+  /* The question actually sent, and therefore half the cache key.
+   *
+   * The hint — the map page's "near" box — applies ONLY to a place with no
+   * box around it. That is the case it exists for: a row whose car position
+   * was never recorded gets no sixty-mile box, so nothing stops the geocoder
+   * answering with a same-named street in another state, and typing "Georgia"
+   * is how the driver says which one they meant.
+   *
+   * Applied to every lookup, as it was, it silently forked the cache. The
+   * offers page passes no hint and this page passes whatever is in the box, so
+   * one word typed here made every key on this page different from the same
+   * place asked there — and both pages share one store. The lookups stopped
+   * being shared, and the one-a-second rate limit got paid twice for places
+   * already found.
+   *
+   * A boxed place does not need the hint: the box already says where to look,
+   * and it says it more precisely than a town name. */
+  Geocoder.prototype.queryFor = function (place, box) {
+    if (box) return place;
     var hint = (this.hint() || '').trim();
     return hint ? place + ', ' + hint : place;
   };
@@ -363,7 +463,7 @@
      answers, and storing the second under the first's key is how a good answer
      gets overwritten by a worse one. */
   Geocoder.prototype.keyFor = function (place, box) {
-    return this.queryFor(place) + (box ? ' @' + box : '');
+    return this.queryFor(place, box) + (box ? ' @' + box : '');
   };
 
   Geocoder.prototype.knows = function (place, box) {
@@ -481,7 +581,7 @@
       return Promise.resolve(this.cache[key]);
     }
     return this.paced(function () {
-      return self.ask(self.queryFor(place), box);
+      return self.ask(self.queryFor(place, box), box);
     }).then(function (found) {
       // Only an answer that actually arrived is remembered. See ask().
       self.remember(key, found);
@@ -634,7 +734,7 @@
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
            fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
            straysAmong: straysAmong, placesIn: placesIn, jobsIn: jobsIn,
-           judge: judge, byPlace: byPlace,
+           judge: judge, byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS };

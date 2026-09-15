@@ -25,6 +25,7 @@ above them — what the page asks for, what it does with the answers, what it
 refuses to draw — is the real page.
 """
 
+import re
 import json
 import os
 import shutil
@@ -202,6 +203,11 @@ const STUB = `
       // invites.
       removeLayer: function (g) {
         window.__dots = window.__dots.filter(function (d) { return d.group !== g; });
+        // Lines go too, and for the same reason: a chain toggled off that
+        // merely stopped adding lines would look identical to one that took
+        // its own away, and pressing it twice would leave two sets of dashes
+        // over each other.
+        window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
       },
       addLayer: function () {},
       // Recorded, because which pins get a say in where the map looks is the
@@ -227,9 +233,15 @@ const STUB = `
                 getLatLng: function () { return this.ll; },
                 openPopup: function () { window.__opened = this.ll; return this; } };
       window.__pins.push(m); return m; },
-    polyline: function (pts, opts) { window.__lines.push({ pts: pts, opts: opts });
-      return { bindPopup: function () { return this; },
-               addTo: function () { return this; } }; }
+    polyline: function (pts, opts) {
+      // The popup and the group it was added to are both kept. What a line
+      // SAYS is half of what it is for — a hop that draws the right dashes
+      // over the wrong words is a map that lies about a line that is fine —
+      // and the group is what makes turning it off observable.
+      var l = { pts: pts, opts: opts, group: null,
+                bindPopup: function (h) { this.popup = h; return this; },
+                addTo: function (g) { this.group = g; return this; } };
+      window.__lines.push(l); return l; }
   };
 `;
 
@@ -397,6 +409,49 @@ const KNOWN = {
   await page.waitForTimeout(200);
   out.trailAgain = await page.evaluate(() => window.__dots.length);
 
+  /* --- the miles nobody paid for ----------------------------------------
+   *
+   * Each job already draws its own line, and that line is distance the card
+   * paid for. What nothing drew is the run BETWEEN two jobs, which is the
+   * whole of what makes a stack good or bad and is invisible on a map of
+   * unconnected pairs. Off until asked for, like the trail, and joining only
+   * the offers the driver ticked as taken. */
+  stage = 'the chain';
+  out.beforeChain = await page.evaluate(() => window.__lines.length);
+  await page.click('#chain');
+  await page.waitForTimeout(300);
+  out.chain = await page.evaluate((n) => {
+    var fresh = window.__lines.slice(n);
+    return {
+      hops: fresh.length,
+      pts: fresh.map(function (l) { return l.pts; }),
+      colours: fresh.map(function (l) { return l.opts && l.opts.color; }),
+      dashed: fresh.every(function (l) { return !!(l.opts && l.opts.dashArray); }),
+      popups: fresh.map(function (l) {
+        return String(l.popup || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      }),
+      pressed: document.getElementById('chain').getAttribute('aria-pressed'),
+      status: document.getElementById('status').textContent.trim(),
+      // The job lines and the job pins must not have been disturbed by any of
+      // this: the chain is drawn over the map, not instead of it.
+      before: n, pins: window.__pins.length
+    };
+  }, out.beforeChain);
+  // Twice must not leave two sets of dashes on top of each other, and a third
+  // press has to bring them back.
+  await page.click('#chain');
+  await page.waitForTimeout(200);
+  out.chainOff = await page.evaluate((n) => ({
+    lines: window.__lines.length,
+    was: n,
+    pressed: document.getElementById('chain').getAttribute('aria-pressed'),
+    status: document.getElementById('status').textContent.trim(),
+  }), out.beforeChain);
+  await page.click('#chain');
+  await page.waitForTimeout(200);
+  out.chainAgain = await page.evaluate((n) => window.__lines.length - n,
+                                       out.beforeChain);
+
   // A row that says one of TWO pins is wrong, tapped. Centring on one of them
   // cannot answer which, so both have to end up in the view together.
   stage = 'chasing a pair';
@@ -444,6 +499,24 @@ journal = os.path.join(work, 'journal.jsonl')
 with open(journal, 'w') as fh:
     for row in ROWS:
         fh.write(json.dumps(row) + '\n')
+    # ...and which of them the driver actually ran, which is the only thing
+    # that may be joined into a route. A journal is mostly offers that were
+    # turned down, and chaining those in time order would draw a picture of a
+    # shift that never happened.
+    #
+    # Five, chosen to cover every branch of the chain in one shift:
+    #   o4  oldest, and its dropoff landed in Idaho — the chain has to leave
+    #       from the end that is not a stray, or the empty miles it quotes come
+    #       out eighteen hundred instead of twenty;
+    #   o2  both ends real and far apart;
+    #   o1  dropoff the geocoder never heard of, so one usable end;
+    #   o0  both ends real;
+    #   o5  neither end placeable, and newest — a taken job that cannot be
+    #       drawn must still be counted, and counting it off the running tally
+    #       would lose it precisely because it came last.
+    for oid in ('o0', 'o1', 'o2', 'o4', 'o5'):
+        fh.write(json.dumps({'v': 1, 'kind': 'mark', 'at': NOW,
+                             'id': oid, 'accepted': True}) + '\n')
 
 port = free_port()
 server = subprocess.Popen(
@@ -716,6 +789,76 @@ try:
         'hidden' in ((got.get('trailOff') or {}).get('status') or ''))
     eq('...and turning it on again draws them once, not twice',
        got.get('trailAgain'), 3)
+
+    # --- the miles nobody paid for ------------------------------------------
+    #
+    # Five jobs were ticked as taken. Four of them can be put somewhere, so
+    # three hops join them; the fifth can be put nowhere and is stepped over
+    # rather than breaking the chain or disappearing from the reckoning.
+    chain = got.get('chain') or {}
+    eq('nothing is joined up until it is asked for', got.get('beforeChain'),
+       (got.get('placed') or {}).get('lines'))
+    eq('...and then the taken jobs are joined in order', chain.get('hops'), 3)
+    ok_('...in a colour of their own, so a hop is not read as a paid mile (%r)'
+        % (chain.get('colours'),),
+        (chain.get('colours') or []) and all(c == '#c084fc' for c in chain['colours']))
+    ok_('...and dashed, because nothing was measuring this run', chain.get('dashed'))
+    ok_('...and the button says it is on', chain.get('pressed') == 'true')
+    eq('...and the job pins are untouched by any of it',
+       chain.get('pins'), (got.get('placed') or {}).get('pins'))
+
+    # THE check on this feature. The oldest taken job ended, according to the
+    # card, on a street the geocoder answered with Boise. Chaining to that pin
+    # would quote eighteen hundred empty miles for a shift inside one metro,
+    # and — worse — draw the evening as a trip to Idaho and back. The job is
+    # still in the chain; it is joined by the end that is not a stray.
+    pts = chain.get('pts') or []
+    ok_('no hop is drawn to the pin in another state (%r)' % (pts,),
+        pts and all(abs(float(p[0]) - 43.615) > 0.01
+                    for line in pts for p in line))
+    status3 = chain.get('status') or ''
+    ok_('the empty miles are totalled where they can be read (%r)' % status3,
+        'nobody paid for' in status3)
+    # Twenty-ish miles of it, Atlanta back up to Chastain and across to
+    # Kennesaw. The figure is the point: a chain that reached Boise would put
+    # this near two thousand and the sentence around it would be unchanged.
+    _miles = re.search(r'([\d.]+) straight-line miles', status3)
+    ok_('...as a figure a shift inside one metro could actually have (%r)'
+        % (_miles and _miles.group(1)),
+        _miles and 5.0 < float(_miles.group(1)) < 75.0)
+    ok_('...counting the jobs it joined', '3 hops between 5 jobs' in status3)
+    # A taken job that could not be put anywhere is not quietly dropped. It is
+    # the newest of the five, which is exactly the one a running tally loses.
+    ok_('...and saying a taken job was stepped over (%r)' % status3,
+        '1 taken jobs have no pin' in status3)
+
+    # What a hop SAYS is half of what it is for. A driver reading these is
+    # deciding whether the second offer was worth taking, and the two facts
+    # that answer that are how far apart the ends were and whether the next
+    # card came up while the last job was still running.
+    pops = chain.get('popups') or []
+    ok_('a hop says where it left and where it arrived (%r)' % (pops[:1],),
+        pops and any('Peachtree' in p and 'Chastain' in p for p in pops))
+    ok_('...how far that was with nobody in the car',
+        pops and all('with nobody in the car' in p for p in pops))
+    # The rig's only clock is when each CARD CAME UP. Worded as drive time it
+    # would be a measurement invented out of two unrelated timestamps.
+    ok_('...and says which clock that is, rather than implying drive time',
+        pops and all('between the two offers coming up' in p for p in pops))
+    # Every one of these cards states twenty-five minutes and they are ten to
+    # twenty minutes apart, so all three are stacks — the case where the line
+    # is NOT an empty run, and saying nothing about it would let a driver read
+    # a second pickup on the way as a dead run across the metro.
+    ok_('...and a second offer that came up mid-job is called a stack',
+        pops and all('a stack' in p for p in pops))
+
+    eq('turning it off takes the dashes away', (got.get('chainOff') or {}).get('lines'),
+       (got.get('chainOff') or {}).get('was'))
+    ok_('...and says so rather than leaving the last total standing (%r)'
+        % (got.get('chainOff') or {}).get('status'),
+        'hidden' in ((got.get('chainOff') or {}).get('status') or ''))
+    eq('...and turning it on again draws them once, not twice',
+       got.get('chainAgain'), 3)
 
     # --- a list that stops has to say it stopped ----------------------------
     #
