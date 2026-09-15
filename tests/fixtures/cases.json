@@ -972,9 +972,32 @@
    }
   },
   {
-   "name": "...so two such offers in one frame owe BOTH distances",
+   "name": "...and two such offers in one frame are TWO offers, not one long one",
+   "_why": "This expected 76 min and 20.4 mi - both cards summed under the larger payout. Uber's Trip Radar screen lists offers, so the top of the next card shows below the first, and a leg reads the same whichever card it came off. Measured on row 227 of this driver's own export: a $22.03 card reading 35 min / 19.7 mi was published as 54 min / 32.5 mi by taking a leg off the $16.08 card below it - PASS $13.64/hr, spoken aloud, on a job worth about $27.63/hr net. They declined a job that cleared their target. A card's own legs sit between its headline and the next one, and $25.60 for 76 minutes is a claim no card on this screen makes.",
    "text": "$25.60 Guaranteed (incl. tips) 8.3 mi + 36 min @ Retail pickup GoPuff (Drive) $10.40 Guaranteed (incl. tips) 12.1 mi + 40 min @ Pickup Talkin Tacos",
    "expect": {
+    "minutes": 36,
+    "miles": 8.3
+   }
+  },
+  {
+   "name": "...and the ends come off the same card as the money",
+   "_why": "The other half of the Trip Radar bleed. A place is read off the line after a leg, so when the legs of two cards were summed the other card's addresses joined `places` too - and find_dropoff takes the LAST place, which is always the intruding card's because it reads lower down. Measured on row 230 of this driver's own export: a $13.06 card was stored with 'Canton Hwy & Elm St, Woodstock', the destination of the $11.02 card above it. That is the field the map pin, the stack line and Advice.sameArea all read, and it goes into the append-only journal.",
+   "text": "$11.02 * 4.95 8 min (2.4 mi) Arnold Mill Rd & Mornington Cir, Woodstock 12 min (4.0 mi) Canton Hwy & Elm St, Woodstock $13.06 * 4.90 9 min (3.1 mi) Cumming Hwy, Canton 15 min (6.6 mi) Gardenia Curv & Plumeria St, Canton",
+   "expect": {
+    "pay": 13.06,
+    "minutes": 24,
+    "miles": 9.7,
+    "pickup": "Cumming Hwy, Canton",
+    "dropoff": "Gardenia Curv & Plumeria St, Canton"
+   }
+  },
+  {
+   "name": "...while a BATCH, which states one payout over two legs, still owes both",
+   "_why": "The boundary is the next headline, so a card that prints one payout and two pickups is untouched - which is the case the rule above must not break.",
+   "text": "$36.00 Guaranteed (incl. tips) 8.3 mi + 36 min @ Retail pickup GoPuff (Drive) 12.1 mi + 40 min @ Pickup Talkin Tacos",
+   "expect": {
+    "pay": 36.0,
     "minutes": 76,
     "miles": 20.4
    }

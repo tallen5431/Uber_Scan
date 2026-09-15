@@ -185,7 +185,15 @@
     '\\$\\s*(?:' + DC + '{1,4}(?:[.,]' + DC + '{1,2})?)\\s*'
     + '(?:m[il1|]ns?|mi)\\b', 'gi');
 
-  function findPay(text) {
+  /* The offer's headline payout, and — if asked — where every candidate was.
+   *
+   * `where` is filled with {value, at} for each figure that passed this
+   * filter. parse() needs it to know where one card stops: Uber's Trip Radar
+   * screen lists offers, so the top of the NEXT card shows below the first,
+   * and the only thing marking the boundary is where the next headline starts.
+   * Gathered here rather than re-derived by the caller so there is one rule
+   * for what counts as a headline rather than two that can drift. */
+  function findPay(text, where) {
     var chips = collect(text, PAY_CHIP);
     var units = collectSpans(text, PAY_IS_A_DURATION);
     var all = collect(text, MONEY_STRICT);
@@ -247,9 +255,45 @@
       }
       if (!allDigits) continue;
       var v = toNumber(all[i].value);
-      if (v !== null && v > 0 && v < 2000 && (best === null || v > best)) best = v;
+      if (v !== null && v > 0 && v < 2000) {
+        if (where) where.push({ value: v, at: all[i].index });
+        if (best === null || v > best) best = v;
+      }
     }
+    if (where) where.sort(function (a, b) { return a.at - b.at; });
     return best;
+  }
+
+  /* The legs belonging to the headline payout, and nothing below it.
+   *
+   * Trip Radar is a LIST of offers: the top of the next card shows under the
+   * first, and its legs read exactly like more legs of this one. Nothing in
+   * the grammar of a leg says which card it came off, so they were summed.
+   *
+   * Measured on row 227 of this driver's own export, real frames, no damage:
+   * a $22.03 card stating 35 min / 19.7 mi was read as 54 min / 32.5 mi by
+   * taking a leg off the $16.08 card below it — published as PASS $13.64/hr
+   * and spoken aloud, on a job worth about $27.63/hr net. They declined a job
+   * that cleared their target, and nothing said why.
+   *
+   * A card's own legs sit after its payout and before the next card's. A BATCH
+   * — one payout over two pickups — has a single headline and is untouched,
+   * which is the case this must not break. */
+  function oneCard(legs, where) {
+    if (!where || where.length < 2) return legs;
+    var top = where[0], i;
+    for (i = 1; i < where.length; i++) {
+      if (where[i].value > top.value) top = where[i];
+    }
+    var edge = null;
+    for (i = 0; i < where.length; i++) {
+      if (where[i].at > top.at && (edge === null || where[i].at < edge)) {
+        edge = where[i].at;
+      }
+    }
+    return legs.filter(function (l) {
+      return l.start > top.at && (edge === null || l.start < edge);
+    });
   }
 
   // Spans of a pattern that captures nothing of its own.
@@ -1460,6 +1504,13 @@
   function parse(rawText) {
     var text = normalize(rawText);
     var legs = findLegs(text);
+    // Asked once. The legs need the candidate positions and the reading needs
+    // the amount, and they must be the same answer — two calls would be two
+    // chances to disagree about which figure is the headline, which is the
+    // whole thing this boundary rests on.
+    var payWhere = [];
+    var pay = findPay(text, payWhere);
+    legs = oneCard(legs, payWhere);
 
     var totals = legs.filter(function (l) { return l.isTotal; });
     var used = totals.length ? totals : legs;
@@ -1486,7 +1537,6 @@
     var items = itemMatch ? toNumber(itemMatch[1]) : null;
     if (items !== null && (items < 0 || items > 200)) items = null;
 
-    var pay = findPay(text);
 
     // A delivery card states no duration and puts its distance on its own, so
     // neither reaches the sum above.

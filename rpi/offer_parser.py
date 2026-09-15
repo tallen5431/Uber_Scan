@@ -598,8 +598,19 @@ PAY_IS_A_DURATION = re.compile(
     re.IGNORECASE | ASCII)
 
 
-def find_pay(text):
+def find_pay(text, where=None):
+    """The offer's headline payout, and — if asked — where every candidate was.
+
+    `where` is filled with (amount, position) for every figure that passed this
+    filter, in the order they appear. parse() needs that to know where one card
+    stops: Uber's Trip Radar screen lists offers, so the top of the NEXT card
+    shows below the first, and the only thing marking the boundary is where the
+    next headline starts. Gathered HERE rather than re-derived by the caller so
+    there is one rule for what counts as a headline rather than two that can
+    drift apart.
+    """
     chips = [m.span() for m in PAY_CHIP.finditer(text)]
+    found = []
     units = [m.span() for m in PAY_IS_A_DURATION.finditer(text)]
 
     def in_chip(m):
@@ -637,8 +648,10 @@ def find_pay(text):
             continue
         v = to_number(m.group(1).strip())
         # The offer headline is the largest dollar figure; promo lines are smaller.
-        if v is not None and 0 < v < 2000 and (best is None or v > best):
-            best = v
+        if v is not None and 0 < v < 2000:
+            found.append((v, m.start()))
+            if best is None or v > best:
+                best = v
 
     # A headline the reader cut in half. See PAY_SPLIT: the halves are put back
     # together only where the card's own label follows them, and the joined
@@ -653,8 +666,12 @@ def find_pay(text):
         if not (HAS_DIGIT.search(m.group(1)) and HAS_DIGIT.search(m.group(2))):
             continue
         v = to_number(m.group(1).strip() + m.group(2).strip())
-        if v is not None and 0 < v < 2000 and (best is None or v > best):
-            best = v
+        if v is not None and 0 < v < 2000:
+            found.append((v, m.start()))
+            if best is None or v > best:
+                best = v
+    if where is not None:
+        where.extend(sorted(found, key=lambda pair: pair[1]))
     return best
 
 
@@ -1802,9 +1819,59 @@ def find_places(text, legs):
     return out[:MAX_PLACES]
 
 
+def one_card(text, legs, where):
+    """The legs belonging to the headline payout, and nothing below it.
+
+    Uber's Trip Radar screen is a LIST of offers: the top of the next card
+    shows under the first, and its legs read exactly like more legs of this
+    one. Nothing in the grammar of a leg says which card it came off, so they
+    were summed together.
+
+    Measured on this driver's own export, row 227 — real frames, no damage:
+
+        $22.03 ... 12 min (6.6 mi) ... 23 mins (13.1 mi) ...
+        $16.08 ... 2 19 min (12.8 mi)          <- a SECOND offer
+
+    find_pay takes the largest figure, so the payout stayed $22.03 while the
+    minutes and miles grew by a leg off the $16.08 card: 35 min / 19.7 mi read
+    as 54 min / 32.5 mi, published as PASS $13.64/hr with no doubt and spoken
+    aloud. The card in front of the driver was worth about $27.63/hr net — an
+    ACCEPT against their target. They declined a job that cleared their line,
+    and nothing anywhere said why.
+
+    The boundary is the next headline. A card's own legs sit after its payout
+    and before the next card's, so that is what is kept. `where` is every
+    candidate find_pay accepted, in the order they appear, so this asks the
+    same question find_pay asked rather than a second version of it.
+
+    Returns the legs to use and whether anything was cut, because a frame that
+    can see two cards may also be cropping the first: the reading is not whole
+    and the rig should keep looking for a frame like row 227's first, where the
+    second card is out of shot and the sum is already right.
+    """
+    if len(where) < 2:
+        return legs, False
+    starts = [at for _v, at in where]
+    # The headline this reading is priced on, which find_pay chose by size
+    # rather than by position — so it is not always the first one on screen.
+    top = max(where, key=lambda pair: pair[0])[1]
+    after = [at for at in starts if at > top]
+    edge = min(after) if after else None
+    kept = [l for l in legs
+            if l['start'] > top and (edge is None or l['start'] < edge)]
+    return kept, len(kept) != len(legs)
+
+
 def parse(raw_text):
     text = normalize(raw_text)
     legs = find_legs(text)
+    _where = []
+    # Asked once. The legs need the candidate positions and the reading
+    # needs the amount, and they must be the same answer — two calls would
+    # be two chances for them to disagree about which figure is the
+    # headline, which is the whole thing this boundary rests on.
+    pay = find_pay(text, _where)
+    legs, _spilled = one_card(text, legs, _where)
 
     totals = [l for l in legs if l['isTotal']]
     used = totals or legs
@@ -1837,7 +1904,6 @@ def parse(raw_text):
     if items is not None and not (0 <= items <= 200):
         items = None
 
-    pay = find_pay(text)
 
     # A delivery card states no duration and puts its distance on its own, so
     # neither reaches the sum above.
