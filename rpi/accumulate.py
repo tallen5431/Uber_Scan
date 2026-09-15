@@ -194,7 +194,14 @@ class OfferAccumulator:
         # more of the card" means here. Not the leg COUNT on the merged
         # reading: that grows as slots fill across frames, and the question is
         # about one frame's own view.
-        self.most_timed = 0
+        #
+        # MINUS ONE, so the first frame always governs whatever it read —
+        # including nothing. A DoorDash card states a deadline rather than a
+        # duration and has no timed legs at all, so at zero it never cleared
+        # the flag above, stayed not-whole, and every one of those cards became
+        # CHECK THE TIME. Caught by the end-to-end money suite rendering real
+        # card images, after the parser suites had all passed.
+        self.most_timed = -1
         # ...and how far the missing leg was, for as long as it is missing. The
         # largest any frame named, because the frames disagree about what they
         # failed to read and the biggest piece is the one that decides whether

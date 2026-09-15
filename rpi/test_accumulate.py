@@ -25,6 +25,14 @@ def eq(name, got, want):
         print('FAIL  %s: got %r want %r' % (name, got, want))
 
 
+def ok_(name, cond):
+    eq(name, bool(cond), True)
+
+
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 # --- the case from the road: one frame sees one leg, the next sees the other --
 acc = OfferAccumulator()
 first = acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=100.0)
@@ -637,6 +645,26 @@ eq('a frame that only failed to notice the gap does not clear it',
 # ...and the distance is still carried, or the panel has a doubt it cannot
 # explain.
 eq('...and still says how far went untimed', _m.get('untimedMiles'), 44.0)
+
+# ...and a card with NO timed legs at all still finishes.
+#
+# A DoorDash card states a deadline rather than a duration, so it has no legs
+# to count. The rule above asks whether a frame read MORE of the journey than
+# anything before it, and "more than nothing" has to include nothing, or the
+# first frame never governs and the flag keeps the True it started at: every
+# delivery card on the rig became CHECK THE TIME and none of them could be
+# spoken. The end-to-end money suite caught that by rendering real card images
+# after every parser suite here had passed, which is why this check lives in
+# the file the rule lives in.
+_DEADLINE = '$41.11 Guaranteed 9.8 mi Deliver by 7:15 PM'
+# The premise: this really is a card with nothing to count.
+eq('the deadline card has no timed leg to count',
+   len([l for l in (P.parse(_DEADLINE).get('legDetail') or [])
+        if l.get('minutes') is not None]), 0)
+_n, _m = _episodes([(_DEADLINE, None), (_DEADLINE, None)])
+no_('a card that states a deadline instead of legs is not short a time',
+    _m.get('shortATime'))
+ok_('...so it finishes, and can be spoken', P.is_whole(_m))
 
 # --- the distance's own two markers describe the merge, not the last frame ---
 #
