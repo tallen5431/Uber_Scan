@@ -1925,6 +1925,34 @@ const framed = (page) => page.waitForFunction(
       // to re-check.
       asked: window.__asked.slice(),
       note: document.getElementById('viewNote').textContent.trim() }));
+    /* Why a pin is missing, in the kinds this project keeps apart everywhere
+       else. "The card named nowhere to collect it" is about the CARD; "the
+       geocoder found nothing" is about the rig's reading; "the geocoder could
+       not be reached" is about the tunnel on I-75. One sentence for all three
+       is how a driver in a dead spot gets told their streets do not exist. */
+    stage = 'the map mode: a pickup that cannot be placed';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
+      minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-map-3', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
+               miles: 3.0, cost: 1.0, pickup: 'Unfindable Rd, Atlantis',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(2600);
+    out.mapUnplaceable = await page.evaluate(
+      () => document.getElementById('viewNote').textContent.trim());
+
+    stage = 'the map mode: a card that names no pickup';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
+      minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-map-4', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
+               miles: 3.0, cost: 1.0, dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(1800);
+    out.mapNoPickup = await page.evaluate(
+      () => document.getElementById('viewNote').textContent.trim());
+
     // ...and back out, which also has to give the picture back.
     stage = 'the map mode: back to the picture';
     await page.click('#viewMode');
@@ -3254,6 +3282,20 @@ try:
     eq('...with nothing drawn on a map nobody asked for', stored.get('drew'), 0)
     ok_('...and the button offers the scene, as on any other load (%r)'
         % stored.get('label'), 'Scene' in (stored.get('label') or ''))
+
+    # Three kinds of missing pin, and only one of them is about the rig's
+    # reading. Folding them into one sentence is the fault the offers page and
+    # the map page were both split for; this line is the third place that has
+    # to keep them apart.
+    unplaceable = got.get('mapUnplaceable') or ''
+    ok_('a pickup the geocoder cannot find says so (%r)' % unplaceable,
+        'found nothing for the pickup' in unplaceable)
+    noPick = got.get('mapNoPickup') or ''
+    # The card naming no pickup is not the geocoder failing to place one, and
+    # "could not be placed" blames the lookup for something the card did.
+    ok_('...and a card that names no pickup blames the card, not the lookup '
+        '(%r)' % noPick,
+        'does not say where to collect it' in noPick)
 
     off = got.get('mapOff') or {}
     # Round to the start: the label offers the scene again, which is what it

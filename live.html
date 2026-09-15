@@ -2834,26 +2834,49 @@
      straight line and not a road, because a driver acting on it is acting on
      three geocoded points. */
   function mapLine(want, found, here, pick, drop, held) {
-    var missing = want.names.filter(function (q) { return !found[q]; });
+    /* Why a place has no pin, in the three kinds this project keeps apart
+       everywhere else — because only one of them is about the rig's reading.
+       An empty answer is stored as null; a lookup that could not be MADE is
+       not stored at all, so the next press asks again. Reporting the second as
+       the first told a driver in a dead spot on I-75 that a dozen of their
+       streets do not exist, and they went looking at the crop for a fault that
+       was the tunnel. */
+    var missed = want.names.filter(function (q) { return !found[q]; });
+    var dead = missed.filter(function (q) { return found[q] === undefined; });
+
     var gap = MV.detour(here, pick, held);
     if (gap !== null) {
       return (gap < 0.5 ? 'this pickup is on your way'
                         : '+' + gap.toFixed(1) + ' mi out of your way')
         + ' — straight lines, not roads'
-        + (missing.length ? ' · ' + missing.length + ' place'
-                          + (missing.length === 1 ? '' : 's') + ' not found' : '');
+        + (missed.length
+           ? ' · ' + missed.length + (dead.length ? ' not asked' : ' not found')
+           : '');
     }
-    // No detour to state, and the reason matters: a driver told nothing
-    // assumes the rig checked and found nothing worth saying.
+
+    // No detour to state, and WHICH of these it is matters: a driver told
+    // nothing assumes the rig checked and found nothing worth saying.
     if (!here) return 'no position on the recent offers, so there is nothing '
                     + 'to measure this pickup against';
     if (!want.held) return holdingNow
       ? 'the order in your car has no address on record — ⌖ Dropoff reads it '
         + 'off your phone'
       : 'nothing in the car to compare this against';
-    if (!pick) return 'this card’s pickup could not be placed';
-    if (!held) return 'the order in your car could not be placed';
-    return 'straight lines, not roads';
+    // The card naming no pickup is not the geocoder failing to place one, and
+    // saying "could not be placed" for it blames the lookup for something the
+    // card did. Uber prints the merchant on every offer, so this is rare — but
+    // "rare" is how a wrong sentence survives a year on a panel.
+    if (!want.pickup) return 'this card does not say where to collect it';
+    if (!pick) return found[want.pickup] === undefined
+      ? 'could not reach the geocoder for the pickup — no network, or it was '
+        + 'busy. Nothing is stored, so switching back here asks again.'
+      : 'the geocoder found nothing for the pickup — usually a misread name';
+    // ...and the same for the other end of the comparison. `want.held` is
+    // already known to be set by the time this is reached, so this one really
+    // is the lookup and not the card.
+    return found[want.held] === undefined
+      ? 'could not reach the geocoder for where your order is going'
+      : 'the geocoder found nothing for where your order is going';
   }
 
   // Last, not beside the button it belongs to: it can put the pane into map
