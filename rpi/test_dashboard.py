@@ -1834,6 +1834,16 @@ const framed = (page) => page.waitForFunction(
       label: document.getElementById('viewMode').textContent.trim(),
       asked: window.__asked.slice() }));
     await page.click('#viewMode');            // → map
+    // The moment after the switch, while the lookups are still going. Closing
+    // the stream points the <img> at a blank pixel, and a blank pixel LOADS —
+    // so the frame handler runs, over a map, and would rewrite this line to
+    // "camera view · inset is what the reader sees". The geocoder is held to
+    // one question a second, so that wrong caption sits on the glass for the
+    // whole of the wait below.
+    await page.waitForTimeout(350);
+    out.mapWhileLoading = await page.evaluate(() => ({
+      note: document.getElementById('viewNote').textContent.trim(),
+      mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none' }));
     // Two lookups at a second apart, plus the journal fetch and the draw.
     await page.waitForTimeout(4200);
     out.mapOn = await page.evaluate(() => ({
@@ -1877,6 +1887,23 @@ const framed = (page) => page.waitForFunction(
     });
     await page.waitForTimeout(900);
     out.mapFrames = framesWhileMapped;
+    // A frame that FAILS while the map is up. Reachable: switching to the map
+    // points the <img> at a blank pixel, and a still request that was already
+    // in flight is aborted by that — which Chrome reports as an error on the
+    // element. Unguarded, that runs noFrameYet, which adds `gone`; `gone`
+    // hands the whole panel to the verdict, so a camera hiccup takes the map
+    // down and leaves the driver a button reading ⛶ Phone over half an empty
+    // screen. Dispatched directly rather than raced for, because the timing
+    // that produces it is the browser's and not this suite's to arrange.
+    stage = 'the map mode: a frame that fails underneath it';
+    await page.evaluate(() => document.getElementById('view')
+                                .dispatchEvent(new Event('error')));
+    await page.waitForTimeout(250);
+    out.mapOnError = await page.evaluate(() => ({
+      gone: document.getElementById('viewWrap').classList.contains('gone'),
+      mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
+      note: document.getElementById('viewNote').textContent.trim(),
+      marks: (window.__marks || []).length }));
     // A NEW card, while the map is up. The pins must follow it.
     stage = 'the map mode: the next card';
     await page.evaluate(() => window.__es.push({
@@ -1907,6 +1934,49 @@ const framed = (page) => page.waitForFunction(
       mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
       imgShown: getComputedStyle(document.getElementById('view')).display !== 'none',
       stored: localStorage.getItem('uberscan.liveView') }));
+    await page.close();
+  }
+
+  /* --- the map over a card that names nowhere ------------------------------
+   *
+   * Most cards are this: 129 of the driver's own 272 name no dropoff, and Uber
+   * prints no address at all until you accept. showMap says so and returns at
+   * once — no lookups, no await — so the line is on the glass BEFORE the blank
+   * pixel that closed the stream finishes loading.
+   *
+   * That load runs the frame handler, over a map. Unguarded it overwrites the
+   * line with "camera view · inset is what the reader sees" and, with nothing
+   * async behind it to put the line back, that is what stays there: a caption
+   * describing a picture, under a map, on the commonest card there is.
+   */
+  {
+    stage = 'the map over a card that names nowhere';
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    let askedHere = 0;
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      askedHere++;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15, holding: null,
+      offer: { id: 'o-nowhere', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4 } }));
+    await page.waitForTimeout(300);
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await page.waitForTimeout(1200);
+    out.mapNowhere = await page.evaluate(() => ({
+      note: document.getElementById('viewNote').textContent.trim(),
+      mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
+      gone: document.getElementById('viewWrap').classList.contains('gone') }));
+    out.mapNowhere.asked = askedHere;
     await page.close();
   }
 
@@ -3056,6 +3126,17 @@ try:
     # anything, which is the same fault as asking on load.
     eq('the map is not written into the remembered view', on.get('stored'), 'scene')
 
+    # Closing the stream points the picture at a blank pixel, and a blank pixel
+    # LOADS — so the frame handler runs while the map is up. Unguarded it
+    # rewrites this line to "camera view · inset is what the reader sees", over
+    # a map, for the whole of the second or two the lookups take.
+    loading = got.get('mapWhileLoading') or {}
+    ok_('the line says the map is loading, not what the camera is showing (%r)'
+        % loading.get('note'),
+        'camera view' not in (loading.get('note') or '')
+        and "phone's screen" not in (loading.get('note') or ''))
+    ok_('...and the map is already the pane while it loads', loading.get('mapShown'))
+
     asked = on.get('asked') or []
     # Three places: this card's two ends and where the order in the car is
     # going. The third is what the driver's question is ABOUT — "would it be
@@ -3105,20 +3186,58 @@ try:
     # number as a measured one.
     ok_('...and that it is a straight line and not a road', 'not roads' in note)
 
+    # A frame that fails while the map is up. `gone` collapses the view column
+    # and hands the whole panel to the verdict, which is right when there is no
+    # picture and wrong when the pane has a map in it — a camera hiccup would
+    # take the map down and leave a button reading ⛶ Phone over half an empty
+    # screen.
+    onerr = got.get('mapOnError') or {}
+    ok_('a frame that fails does not take the map down', onerr.get('mapShown'))
+    ok_('...nor collapse the pane it is in', not onerr.get('gone'))
+    ok_('...nor replace the line under it with a camera notice (%r)'
+        % onerr.get('note'),
+        'no camera view' not in (onerr.get('note') or ''))
+    eq('...and the pins stay where they were', onerr.get('marks'), 4)
+
     # Thirty frames a second down a phone hotspot, for a picture nobody can
     # see, is a cost that only shows up as a bill.
     eq('the camera stops being fetched while the map is up', got.get('mapFrames'), 0)
 
     # A map left standing over the next card's numbers is the same confidently
     # wrong answer the rest of this panel refuses.
+    #
+    # Counted pins cannot tell a redraw from a stale map: the old card left
+    # four behind and the new one draws four, so the count is 4 either way and
+    # the check passed with the rule deleted. What distinguishes them is WHICH
+    # pin is the pickup — the second card swaps the two ends, so the green one
+    # moves from the Chipotle to the Canton Rd end.
     nxtMap = got.get('mapNext') or {}
     eq('a new card redraws the map rather than leaving the last one up',
        len(nxtMap.get('marks') or []), 4)
+    _green = [m for m in (nxtMap.get('marks') or []) if m.get('fill') == '#17c964']
+    ok_('...with the pickup pin on the new card\'s pickup (%r)'
+        % (_green and _green[0].get('ll'),),
+        len(_green) == 1 and abs(float(_green[0]['ll'][0]) - 33.980) < 0.001)
     # Both cards name the same three places, so nothing new may be asked: the
     # answers are remembered on the device, which is what makes re-checking a
     # map free and keeps the geocoder unbothered.
     eq('...without asking the geocoder anything it already knew',
        len(nxtMap.get('asked') or []), 3)
+
+    # The commonest card there is: 129 of this driver's own 272 name no
+    # dropoff, and Uber prints no address until you accept. showMap says so and
+    # returns at once, so there is nothing async behind the line to put it back
+    # when the blank pixel that closed the stream loads and runs the frame
+    # handler over the map.
+    nowhere = got.get('mapNowhere') or {}
+    ok_('a card that names nowhere says so under the map (%r)'
+        % nowhere.get('note'), 'names nowhere' in (nowhere.get('note') or ''))
+    ok_('...and is not overwritten by the caption for a picture',
+        'camera view' not in (nowhere.get('note') or '')
+        and "phone's screen" not in (nowhere.get('note') or ''))
+    ok_('...with the map still the pane', nowhere.get('mapShown'))
+    eq('...and nothing looked up, because there was nothing to look up',
+       nowhere.get('asked'), 0)
 
     # Two guards keep the privacy gate and only one of them is exercised by the
     # press: the mode is never written to storage, and a stored one is never

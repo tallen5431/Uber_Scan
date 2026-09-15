@@ -2149,12 +2149,6 @@
         // second; a second is a long time on a screen the driver is reading
         // to decide, and the card may be gone by then.
         showDest();
-        // ...and the map, if that is what the pane is showing. It draws THIS
-        // card's ends, so a map left standing over a new card's numbers is the
-        // same confidently-wrong answer the rest of this page refuses. It is a
-        // no-op unless the places actually changed, so a card re-read forty
-        // times over is one drawing and no new lookups.
-        if (viewMode === 'map') showMap();
       }
       // A read started, and — on the next message carrying a verdict — ended.
       // Same shape as the two above: no `ready`, so it cannot stand in for one.
@@ -2198,10 +2192,6 @@
         heldEnds = msg.holding ? (msg.holding.dropoff || null) : undefined;
         showDrop();
         showDest();
-        // The order in the car is half the map's picture — it is the "route I
-        // am going anyways" the detour is measured against. Taking one on, or
-        // dropping one off, changes the answer and has to change the drawing.
-        if (viewMode === 'map') showMap();
       }
       // The destination, arriving seconds after the button was pressed. Its own
       // message, carrying no verdict: there is no offer on the screen it was
@@ -2213,6 +2203,25 @@
         destBusy = false;
         showDest();
       }
+      /* ...and the map, if that is what the pane is showing.
+       *
+       * ONE call, after every branch above has had its say. It was two — one
+       * where the card lands, one where the held order does — and both halves
+       * of the picture are set by different branches: the card's ends up
+       * there, the order in the car down here. A message carrying both ran the
+       * first call while `holdingNow` and `heldEnds` still held the LAST
+       * order's, so the map was drawn against a hold that had already ended,
+       * and the second call then hit the busy guard and did nothing. It
+       * corrected itself a beat later through the catch-up in showMap's
+       * finally, which is a bug fixing itself by accident.
+       *
+       * It also made the second call unreachable in every message shape the
+       * server actually sends, so deleting it changed nothing that any test
+       * could see — which is how a rule ends up with no check on it at all.
+       *
+       * A no-op unless the places actually changed, so a card re-read forty
+       * times over is one drawing and no new lookups. */
+      if (viewMode === 'map') showMap();
       render();
       showConnection();
     };
@@ -2432,15 +2441,24 @@
   view.addEventListener('load', function () {
     // The blank pixel that closed the stream is a load like any other, and
     // taken as a frame it would rewrite the caption — over a map — to say the
-    // phone's screen was on the glass.
-    if (viewMode === 'map') return;
-    sawAFrame();
+    // phone's screen was on the glass. So the caption is skipped.
+    //
+    // The CHAIN is deliberately not stopped here. Returning outright was the
+    // obvious thing and it made the rule live in two places: frameDone was
+    // never reached, so refreshView's own guard could not fire, and a check
+    // that cannot fire is not a check — it survived every mutation because
+    // nothing could reach it. Falling through means the guard in refreshView
+    // is the single place "no frames while the map is up" is decided, and it
+    // is exercised on every frame that lands after the switch.
+    if (viewMode !== 'map') sawAFrame();
     if (!streaming) frameDone();
   });
   view.addEventListener('error', function () {
-    // Nothing is being asked for, so nothing has failed. Left unguarded this
-    // reports a camera that has stopped and takes the map down with it.
-    if (viewMode === 'map') return;
+    // No guard on the map here, deliberately. noFrameYet is what adds `gone`
+    // and so what would take the map down, and it refuses to on its own — a
+    // second test for the same thing in front of it meant neither could be
+    // checked: delete either one and the other still caught it, so nothing in
+    // the suite could tell whether the rule was there at all.
     if (streaming) {
       // The connection dropped, or this browser will not render the stream.
       // One retry, because a scanner restarting underneath it is the ordinary
