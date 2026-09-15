@@ -610,6 +610,20 @@ const FRAMES = JSON.parse(framesJson);
             cutRight: Math.max(0, r.right - d.clientWidth),
             rowH: document.getElementById('app').getBoundingClientRect().height,
             over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+            // The third thing this pane can be. Measured here rather than in a
+            // block of its own, because the question about the map on a
+            // dashboard panel is the same question as about the picture: does
+            // it take the row without pushing the bar off the glass.
+            // What is actually PAINTED, not what the property says. `img.hidden`
+            // answered true while the picture was still filling the pane: the
+            // page styles it `display: block`, which is an author rule and beats
+            // the browser's own `[hidden] { display: none }`. A check on the
+            // property passed and the map underneath it was two pixels tall.
+            mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
+            mapH: document.getElementById('liveMap').getBoundingClientRect().height,
+            imgShown: getComputedStyle(img).display !== 'none' && r.height > 2,
+            note: (document.getElementById('viewNote').textContent || '').trim(),
+            noteH: document.getElementById('viewNote').getBoundingClientRect().height,
           };
         };
         const shown = await page.evaluate(LOOKAT);
@@ -729,6 +743,32 @@ const FRAMES = JSON.parse(framesJson);
         shown.sceneLoaded = scene.loaded;
         shown.sceneCut = Math.max(scene.cutTop, scene.cutBottom,
                                   scene.cutLeft, scene.cutRight);
+        // ...and once more, into the map. Leaflet comes from a CDN this box
+        // cannot reach, which is the interesting case rather than a limitation
+        // of the harness: a rig on a phone hotspot in a car is offline several
+        // times a shift, and what has to hold is that the pane says so, keeps
+        // the bar reachable, and still offers the picture back.
+        shown.mapReachable = await page.click('#viewMode', { timeout: 5000 })
+          .then(() => true, () => false);
+        await page.waitForTimeout(600);
+        const onMap = await page.evaluate(LOOKAT);
+        shown.mapLabel = onMap.label;
+        shown.mapShown = onMap.mapShown;
+        shown.mapImgShown = onMap.imgShown;
+        shown.mapH = onMap.mapH;
+        shown.mapRowH = onMap.rowH;
+        shown.mapOver = onMap.over;
+        shown.mapNote = onMap.note;
+        shown.mapNoteH = onMap.noteH;
+        // ...and back to the picture, which is where the driver spends the
+        // shift. A cycle that cannot be completed is a driver stuck on a map.
+        shown.backReachable = await page.click('#viewMode', { timeout: 5000 })
+          .then(() => true, () => false);
+        await page.waitForTimeout(600);
+        const back = await page.evaluate(LOOKAT);
+        shown.backLabel = back.label;
+        shown.backMapShown = back.mapShown;
+        shown.backImgShown = back.imgShown;
         out[panel[0] + ' phoneview'] = shown;
       }
       // The one section on this page about two offers at once.
@@ -1181,9 +1221,60 @@ try:
                     'view=scene' in phone['sceneSrc'])
                 eq('...and the button lets go at %s' % panel,
                    phone['scenePressed'], 'false')
-                ok_('...and offers the phone back at %s (%r)'
+                # The cycle is screen → scene → map → screen, so what the scene
+                # offers next is the map. A third mode on this control rather
+                # than a seventh button in the bar: the bar holds six, and ▤
+                # Offers already cost ▣ Set box its slot in the fullest state.
+                ok_('...and offers the map next at %s (%r)'
                     % (panel, phone['sceneLabel']),
-                    'Phone' in phone['sceneLabel'])
+                    'Map' in phone['sceneLabel'])
+
+                # --- the map mode ---------------------------------------
+                #
+                # Leaflet is fetched from a CDN this box cannot reach, which is
+                # the ordinary case for a rig on a hotspot rather than an
+                # artefact of the harness. What has to hold offline is that the
+                # pane says so and the driver is not stranded there.
+                ok_('the view toggle is still reachable on the map at %s' % panel,
+                    phone['mapReachable'])
+                ok_('the map takes the pane at %s' % panel, phone['mapShown'])
+                # Both at once is the failure a swap exists to avoid: two dense
+                # images over each other in a 269px-wide pane make neither
+                # readable, and the picture's whole job is letting the numbers
+                # be checked against what the card said.
+                ok_('...instead of the picture, not over it at %s' % panel,
+                    not phone['mapImgShown'])
+                ok_('...and says what happened rather than showing a grey box '
+                    'at %s (%r)' % (panel, phone['mapNote'][:60]),
+                    len(phone['mapNote']) > 10)
+                # Said where it can be READ. The caption is hidden outright on a
+                # dashboard panel — "camera view · inset is what the reader
+                # sees" is a label on a picture that says what it is — and the
+                # map's line is not that: it is the answer the driver switched
+                # modes to get. Hidden with the rest, the mode ships with its
+                # conclusion invisible on the one screen it is for.
+                ok_('...on the glass rather than hidden with the caption at %s '
+                    '(%.0fpx)' % (panel, phone['mapNoteH']),
+                    phone['mapNoteH'] > 8)
+                # The assertion the whole dashboard layout exists to make. A
+                # map that overflows its row pushes the bar of controls off the
+                # glass, and a driver is not going to scroll.
+                ok_('...without pushing anything off the glass at %s' % panel,
+                    not phone['mapOver'])
+                if dashboard:
+                    ok_('...taking the row rather than a fixed 240px at %s '
+                        '(%.0fpx of %.0f)'
+                        % (panel, phone['mapH'], phone['mapRowH']),
+                        phone['mapH'] > 120)
+                # ...and the way out. A cycle that cannot be completed is worse
+                # than a toggle: the driver pressed once for a look and cannot
+                # get the picture back.
+                ok_('the cycle comes back to the phone at %s' % panel,
+                    phone['backReachable'])
+                ok_('...offering the scene again at %s (%r)'
+                    % (panel, phone['backLabel']), 'Scene' in phone['backLabel'])
+                ok_('...with the picture back at %s' % panel, phone['backImgShown'])
+                ok_('...and the map put away at %s' % panel, not phone['backMapShown'])
                 if dashboard and h >= 400:
                     # The whole point. A portrait phone in a landscape cell is
                     # bounded by height, so this only pays if it gets the

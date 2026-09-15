@@ -74,6 +74,31 @@
     return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
   }
 
+  /* How far out of the way a stop is — the driver's own question about a
+     second offer, in the one form this file is allowed to answer it.
+     Their words: "it would be helpful to see how they may chain together and
+     if it makes sense to pickup the second offer since it would be mostly
+     along the route I am going anyways."
+
+     Going from `from` to `to` by way of `via`, less going straight there. Zero
+     means the stop is on the line already; a big number means it is behind
+     you.
+
+     READ THE HEADER OF THIS FILE BEFORE USING THIS. It is a number derived
+     from three geocoded points, which is the exact kind of number that must
+     never reach the panel's verdict, rate or distance. It may be shown beside
+     the pins it was computed from, on a map the driver chose to open, where
+     they can see for themselves whether the three pins are in sensible places.
+     It may not be shown anywhere it would be read as a fact about the job.
+
+     Null when any of the three is missing, because a detour computed off two
+     points is not a smaller detour — it is no answer with a number attached,
+     and this one would come out as zero, which reads as "right on your way". */
+  function detour(from, via, to) {
+    if (!from || !via || !to) return null;
+    return crowMiles(from, via) + crowMiles(via, to) - crowMiles(from, to);
+  }
+
   /* Where the car was when a card came up, off the row itself.
    *
    * `isFinite` and not merely `typeof`, because a row whose lat came back as
@@ -732,7 +757,7 @@
   }
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
-           fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
+           detour: detour, fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
            straysAmong: straysAmong, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,

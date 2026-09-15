@@ -9,6 +9,17 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
+<!-- The deciding behind the map mode: the geocoder, its one-a-second rule, the
+     shared cache of answers, the box drawn around where the car was, and the
+     detour arithmetic. Same-origin, in the service worker's shell, and the
+     same file the offer log and the map page use — which is the point. A
+     second copy of this reasoning on the panel is how one question comes to
+     have two answers that drift apart.
+
+     Leaflet is NOT loaded here. It comes from a CDN and this page has to open
+     on a dead hotspot; it is fetched the first time somebody switches to the
+     map, and never otherwise. -->
+<script src="map-view.js"></script>
 <style>
   /* Read at arm's length, in a car, at a glance. Nothing subtle here. */
   #app { justify-content: center; }
@@ -109,6 +120,15 @@
        bar ended up off the glass. `100%` is the row, and the row is what is
        actually left over. */
     #viewWrap img { max-height: 100%; object-fit: contain; }
+    /* The map takes the row the same way, and takes what is LEFT of it rather
+       than all of it: the caption under it is the line that says how far out
+       of the way the pickup is, which is the whole reason a driver switched
+       here. At `height: 100%` the map is the row on its own and that line is
+       pushed off the glass — on this panel there is exactly one row to spend
+       and nothing below it scrolls. */
+    #viewWrap:has(#liveMap:not([hidden])) { flex-direction: column;
+                                            align-items: stretch; }
+    #liveMap { flex: 1; min-height: 0; }
     /* The details block has no room on a dashboard panel and is hidden below,
        but it still needs a cell or it lands in the middle of the grid. */
     #raw { grid-column: 1 / -1; grid-row: 2; }
@@ -224,6 +244,16 @@
        line ends 11px inside the border. */
     #verdict:has(#stack:not([hidden])) .working .net { display: none; }
     #raw, #viewNote { display: none; }
+    /* ...except when it is the map's line, which is the one thing the caption
+       has ever had worth a row. "camera view · inset is what the reader sees"
+       is a label on a picture that says what it is; "+3.2 mi out of your way"
+       is the answer the driver switched modes to get, and a map with it hidden
+       is a map they have to judge by eye alone. Bigger than the 11px above for
+       the same reason everything on this panel is: it is read at arm's length,
+       through a windscreen, at a glance. */
+    #viewWrap:has(#liveMap:not([hidden])) #viewNote {
+      display: block; font-size: 15px; color: var(--text); padding: 5px 0 0;
+    }
   }
 
   /* Smaller again, and the arithmetic behind the headline gives up most of its
@@ -403,8 +433,40 @@
     border: 1px solid var(--line); background: var(--panel);
   }
   #viewWrap img.stalefeed { opacity: .4; }
+  /* `display: block` above is an author rule and the browser's own
+     `[hidden] { display: none }` is not, so setting .hidden on the picture did
+     nothing at all to it. In map mode the img went on taking the pane — it is
+     `width: 100%` — and the map grew to the two pixels of its own border,
+     which is a map-shaped border and no map. */
+  #viewWrap img[hidden] { display: none; }
   #viewNote { font-size: 11px; color: var(--muted); text-align: center; padding: 6px 0 0; }
   #viewWrap.gone img { display: none; }
+
+  /* The map mode, in the same pane and the same shape as the picture it
+     replaces, so switching between them does not move the rest of the page.
+     A min-height because a Leaflet map in a box of zero draws one tile in the
+     corner and nothing else, and on a phone the wrapper has no height of its
+     own to give it. */
+  #liveMap {
+    width: 100%; border-radius: 14px;
+    border: 1px solid var(--line); background: var(--panel);
+  }
+  /* Stacked down the page, the pane has no row to take a height from and a
+     Leaflet map in a box of zero draws one tile in the corner — so the map
+     needs a height of its own here. Portrait only, and deliberately: the
+     landscape layout gives it the row and a min-height written once for both
+     wins over that rule by coming later in the file. Measured, not reasoned
+     about — 240px inside a 200px row at 480x320 pushed the bar of controls
+     clean off the glass, and `overflow: hidden` on #app means nothing reports
+     it. The driver just cannot reach the button that would put the map away. */
+  @media (orientation: portrait) { #liveMap { min-height: 240px; } }
+  #liveMap[hidden] { display: none; }
+  /* Leaflet's own default is white, which on this panel is a flash of daylight
+     at a red light before the tiles land. */
+  #liveMap .leaflet-container { background: var(--panel); }
+  /* Drawn for a driver, not for a desk: the popups on this panel are read at
+     arm's length and dismissed with a bluetooth mouse. */
+  #liveMap .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
 
   /* Drawing the box to read. The scanner finds the phone by looking for it,
      which is right almost always and useless when it is not — a reflection, a
@@ -574,6 +636,24 @@
        page looks right. -->
   <figure id="viewWrap">
     <img id="view" alt="live camera view">
+    <!-- The same pane, showing a map instead of a picture.
+         The driver's own words: "it is helpful having the phone screen display
+         so I can verify that the numbers were read correctly... but it would
+         also be helpful to have the map view so I can visually see the route
+         as well as how they may chain together."
+
+         A third mode on the picture rather than a fourth thing beside it, and
+         a swap rather than a transparency. Two dense images over each other in
+         a 269px-wide pane at 800x480 makes both unreadable, and the phone
+         picture's whole job is letting the numbers be checked against what the
+         card actually said — degrading that works against the one thing this
+         rig exists for.
+
+         Empty until asked for. Leaflet and the tiles come from the network and
+         the geocoder is asked about places customers live, so switching here
+         is the press that decides it — the same gate as "Place them on a map"
+         on the map page. -->
+    <div id="liveMap" hidden></div>
     <!-- Where the driver says the card is, when the scanner cannot find it. -->
     <div id="drawn" hidden></div>
     <figcaption id="viewNote">camera view · inset is what the reader sees</figcaption>
@@ -2069,6 +2149,12 @@
         // second; a second is a long time on a screen the driver is reading
         // to decide, and the card may be gone by then.
         showDest();
+        // ...and the map, if that is what the pane is showing. It draws THIS
+        // card's ends, so a map left standing over a new card's numbers is the
+        // same confidently-wrong answer the rest of this page refuses. It is a
+        // no-op unless the places actually changed, so a card re-read forty
+        // times over is one drawing and no new lookups.
+        if (viewMode === 'map') showMap();
       }
       // A read started, and — on the next message carrying a verdict — ended.
       // Same shape as the two above: no `ready`, so it cannot stand in for one.
@@ -2112,6 +2198,10 @@
         heldEnds = msg.holding ? (msg.holding.dropoff || null) : undefined;
         showDrop();
         showDest();
+        // The order in the car is half the map's picture — it is the "route I
+        // am going anyways" the detour is measured against. Taking one on, or
+        // dropping one off, changes the answer and has to change the drawing.
+        if (viewMode === 'map') showMap();
       }
       // The destination, arriving seconds after the button was pressed. Its own
       // message, carrying no verdict: there is no offer on the screen it was
@@ -2218,29 +2308,50 @@
      server.js. It is a query parameter and not a header because the <img> tag
      is what makes these requests, and an <img> cannot set a header. */
   var VIEW_KEY = 'uberscan.liveView';
-  // The phone, unless the driver has said otherwise.
-  //
-  // The other picture is the whole cabin with the calibrated corners drawn on
-  // it, which answers "is the mount aimed right?" — a question you ask once,
-  // while setting the rig up. During a shift the screen is being used to read
-  // and work the phone through, and in the scene view the phone is about a
-  // third of a 640px-wide thumbnail of a car interior. The stored choice still
-  // wins in both directions; only the answer for a rig nobody has told has
-  // changed.
-  var phoneView = true;
+  /* Three things this pane can be, cycled by one button.
+   *
+   *   screen — the phone's own display, flattened. What the driver reads the
+   *            card off, and what lets them check the rig's figures against
+   *            what the card actually said.
+   *   scene  — the whole cabin with the calibrated corners on it, which
+   *            answers "is the mount aimed right?". A question you ask once,
+   *            while setting the rig up.
+   *   map    — where this offer's ends are, against where the car is and where
+   *            the order already in it is going.
+   *
+   * A mode on the existing control rather than a fourth button: the bottom bar
+   * holds six, and ▤ Offers already cost ▣ Set box its slot in the fullest
+   * state. A third mode costs no columns at all.
+   *
+   * The phone, unless the driver has said otherwise. During a shift the screen
+   * is being used to read and work the phone through, and in the scene view
+   * the phone is about a third of a 640px-wide thumbnail of a car interior.
+   */
+  var viewMode = 'screen';
   try {
     var stored = localStorage.getItem(VIEW_KEY);
-    if (stored) phoneView = stored === 'screen';
-  } catch (e) { phoneView = true; }
+    if (stored === 'screen' || stored === 'scene') viewMode = stored;
+  } catch (e) { viewMode = 'screen'; }
 
+  /* Which picture to ask the rig for. In map mode there is no picture: the
+     frame requests stop, which is also what tells the scanner nobody is
+     watching. Asked for `screen` anyway when the value is wanted, because the
+     map is not a third thing the rig can photograph. */
   function streamUrl() {
-    return '/api/frame.mjpeg?view=' + (phoneView ? 'screen' : 'scene');
+    return '/api/frame.mjpeg?view=' + (viewMode === 'scene' ? 'scene' : 'screen');
   }
   var FRAME_GAP = 30;          // a floor for the fallback, so it cannot spin
   var streaming = false;
   var streamTried = 0;
   var framePending = false;
   var watchdog = null;
+  // Whether the stream was running when the map took the pane, so it can be
+  // put back rather than silently demoted to stills.
+  var wasStreaming = false;
+  // One transparent pixel, which is how the <img> is made to let go of an open
+  // multipart connection without raising an error the page would read as a
+  // camera that has died.
+  var BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
   // The phone view's layout — the picture height-first beside a narrow
   // verdict — is for a portrait picture of a phone. The rig writes a
@@ -2250,14 +2361,14 @@
   // The class follows the picture, not the button.
   function layoutForFrame() {
     var portrait = view.naturalHeight > view.naturalWidth;
-    document.body.classList.toggle('phoneview', phoneView && portrait);
+    document.body.classList.toggle('phoneview', viewMode === 'screen' && portrait);
     return portrait;
   }
 
   function sawAFrame() {
     viewWrap.classList.remove('gone');
     var portrait = layoutForFrame();
-    viewNote.textContent = phoneView
+    viewNote.textContent = viewMode === 'screen'
       ? (portrait ? "the phone's screen, flattened"
                   : 'camera view while the rig finds the phone')
       : 'camera view · inset is what the reader sees';
@@ -2266,6 +2377,12 @@
   }
 
   function noFrameYet() {
+    // Not while the map is up. `gone` collapses the view column and hands the
+    // whole panel to the verdict, and a frame that never arrives — the rig
+    // restarting, a camera unplugged — would otherwise take the map down with
+    // it and leave the driver looking at a button that says ⛶ Phone over an
+    // empty half of screen.
+    if (viewMode === 'map') return;
     viewWrap.classList.add('gone');
     viewNote.textContent = 'no camera view yet — the scanner writes one every few seconds';
   }
@@ -2297,8 +2414,13 @@
   // actually carry.
   function refreshView() {
     if (streaming || document.hidden || framePending) return;
+    // Nothing is fetched while the map is up. Thirty frames a second down a
+    // phone hotspot for a picture nobody can see is the kind of cost that only
+    // shows up as a bill, and the same requests are what tell the scanner
+    // somebody is watching — see touchWatchFile in server.js.
+    if (viewMode === 'map') return;
     framePending = true;
-    view.src = '/api/frame.jpg?view=' + (phoneView ? 'screen' : 'scene')
+    view.src = '/api/frame.jpg?view=' + (viewMode === 'scene' ? 'scene' : 'screen')
              + '&t=' + Date.now();
   }
 
@@ -2308,10 +2430,17 @@
   }
 
   view.addEventListener('load', function () {
+    // The blank pixel that closed the stream is a load like any other, and
+    // taken as a frame it would rewrite the caption — over a map — to say the
+    // phone's screen was on the glass.
+    if (viewMode === 'map') return;
     sawAFrame();
     if (!streaming) frameDone();
   });
   view.addEventListener('error', function () {
+    // Nothing is being asked for, so nothing has failed. Left unguarded this
+    // reports a camera that has stopped and takes the map down with it.
+    if (viewMode === 'map') return;
     if (streaming) {
       // The connection dropped, or this browser will not render the stream.
       // One retry, because a scanner restarting underneath it is the ordinary
@@ -2331,6 +2460,10 @@
       if (streaming) { streaming = false; view.src = ''; }
       return;
     }
+    // ...and a tab that comes back to a map must not start a stream behind it.
+    // The picture is restored by the button, which is the thing that put the
+    // map there.
+    if (viewMode === 'map') return;
     streamTried = 0;
     startStream();
   });
@@ -2371,27 +2504,342 @@
   // button again every time the page reloads is the kind of small tax that
   // ends with the feature unused.
   var viewModeBtn = document.getElementById('viewMode');
+  var liveMap = document.getElementById('liveMap');
+
+  // screen → scene → map → screen. The label says what pressing it gets you,
+  // not what you are looking at, which is the rule the two-way version already
+  // kept.
+  var NEXT = { screen: 'scene', scene: 'map', map: 'screen' };
+  var LABEL = { screen: '⛶ Scene', scene: '⛶ Map', map: '⛶ Phone' };
 
   function applyViewMode() {
+    var onMap = viewMode === 'map';
+    liveMap.hidden = !onMap;
+    view.hidden = onMap;
     layoutForFrame();
-    viewModeBtn.setAttribute('aria-pressed', phoneView ? 'true' : 'false');
-    // The label says what pressing it gets you, not what you are looking at.
-    viewModeBtn.textContent = phoneView ? '⛶ Scene' : '⛶ Phone';
-    if (!viewWrap.classList.contains('gone')) sawAFrame();
+    // Still a mode rather than a navigation, and still pressed when it is not
+    // showing the ordinary picture: the phone's screen is this panel's resting
+    // state and both of the others are a departure from it.
+    viewModeBtn.setAttribute('aria-pressed', viewMode === 'screen' ? 'true' : 'false');
+    viewModeBtn.textContent = LABEL[viewMode];
+    if (onMap) {
+      // `gone` hands the whole panel to the verdict, which is right when there
+      // is no picture and wrong when the pane has a map in it.
+      viewWrap.classList.remove('gone');
+      showMap();
+    } else if (!viewWrap.classList.contains('gone')) {
+      sawAFrame();
+    }
   }
 
   viewModeBtn.addEventListener('click', function () {
-    phoneView = !phoneView;
-    try { localStorage.setItem(VIEW_KEY, phoneView ? 'screen' : 'scene'); } catch (e) { /* private mode */ }
+    viewMode = NEXT[viewMode] || 'screen';
+    // The map is deliberately NOT remembered. Switching to it is what asks a
+    // public geocoder about places customers live, and a remembered map mode
+    // would make the next page load ask without anybody pressing anything —
+    // which moves that decision away from the person whose decision it is.
+    // The two pictures are remembered exactly as before.
+    try {
+      if (viewMode !== 'map') localStorage.setItem(VIEW_KEY, viewMode);
+    } catch (e) { /* private mode */ }
     applyViewMode();
     // The mode rides on the request for a frame, so the rig does not hear
     // about it until the next one is asked for. A stream is one request that
     // never ends — it would go on delivering the old picture until something
     // else restarted it — so it is restarted here.
-    if (streaming) startStream();
+    if (viewMode === 'map') {
+      // A multipart stream is one request that never ends, and left open
+      // behind a hidden <img> it goes on pulling thirty frames a second down a
+      // phone hotspot for a picture nobody is looking at. Pointing the element
+      // at a blank pixel is what actually closes the connection; dropping the
+      // src attribute does it too and fires an error, which this page reads as
+      // a rig that has stopped.
+      wasStreaming = streaming;
+      streaming = false;
+      framePending = false;
+      view.src = BLANK;
+    } else if (wasStreaming) {
+      // Back to a picture, and back to the stream if that is what it was —
+      // otherwise one trip through the map would leave the panel on stills for
+      // the rest of the shift, at 30ms a frame instead of the writer's rate.
+      wasStreaming = false;
+      startStream();
+    } else if (streaming) startStream();
     else refreshView();
   });
 
+  /* --- the map mode --------------------------------------------------------
+   *
+   * WHAT THIS IS FOR, in the driver's own words: "it would also be helpful to
+   * have the map view so I can visually see the route as well as how they may
+   * chain together and if it makes sense to pickup the second offer since it
+   * would be mostly along the route I am going anyways."
+   *
+   * So the picture is: where the car is, where the order already in it is
+   * going, and where this new one starts and ends. Four points and the lines
+   * between them answer a question the card's own words cannot — ENDS ? is the
+   * chip on about half of real pairs, because most cards name no destination
+   * until you accept.
+   *
+   * WHAT IT IS NOT ALLOWED TO DO. Read the header of map-view.js. Nothing
+   * computed from a geocoded point may become a rate, a verdict or a billed
+   * distance on this panel; the whole project refuses a number that is
+   * confidently wrong and silent. The one figure that leaves this function is
+   * the detour, and it is stated under the pins it was computed from, on a map
+   * the driver pressed a button to open, in straight-line miles that are named
+   * as straight-line miles. It never touches #perHour, the verdict, or the
+   * stack line.
+   *
+   * AND NOTHING IS LOOKED UP UNTIL THE BUTTON IS PRESSED. Some of these places
+   * are where customers live, the rig itself never sends them anywhere, and
+   * switching to this mode is the press that decides it — the same gate as
+   * "Place them on a map" on the map page. It is deliberately not remembered,
+   * so a reload cannot ask on nobody's behalf. */
+  var MV = window.MapView;
+  var mapGeo = null;
+  var theMap = null, mapLayer = null;
+  // Which set of places is drawn, so a card re-read forty times a second does
+  // not re-draw forty times, and so an answer that arrives after the driver
+  // has moved on is thrown away rather than pinned under the new card's
+  // heading.
+  var mapFor = null;
+  var mapBusy = false;
+  // Where the car was, off the newest journal row that carries a position.
+  // Measured by the rig's own GPS rather than looked up, which is what makes
+  // it the one point here that can contradict a pin.
+  var carFix = null, carAsked = 0;
+
+  function mapSay(text) { viewNote.textContent = text; }
+
+  /* The places this offer and the order in the car are about. Kept in one
+     place because the KEY is built from it too, and a key that disagreed with
+     what was drawn is how a map ends up showing the last card under this
+     card's numbers. */
+  function mapWants() {
+    var o = onRecord || {};
+    var held = holdingNow ? (heldEnds || null) : null;
+    var names = [o.pickup, o.dropoff, held].filter(Boolean)
+      .filter(function (v, i, all) { return all.indexOf(v) === i; });
+    return { pickup: o.pickup || null, dropoff: o.dropoff || null,
+             held: held, names: names };
+  }
+
+  /* Where the car is, from the journal rather than from the browser. The
+     panel's browser sits on a LAN address over plain http, where the
+     geolocation API is refused outright, and would answer from wifi if it
+     were not. The rig stamps every row with its own GPS fix — see rpi/gps.py —
+     so the newest row that carries one is where the car was when the last card
+     came up, which on a working shift is minutes old. */
+  function askCar() {
+    var now = Date.now();
+    if (carFix && now - carAsked < 120000) return Promise.resolve(carFix);
+    carAsked = now;
+    return fetch('/api/journal?days=1&limit=400')
+      .then(function (r) { return r.json(); })
+      .then(function (body) {
+        var rows = (body && body.offers) || [];
+        var best = null;
+        rows.forEach(function (row) {
+          var at = MV.fixOf(row);
+          if (!at) return;
+          if (!best || (row.at || 0) >= best.at) best = { at: row.at || 0, where: at };
+        });
+        carFix = best ? best.where : null;
+        return carFix;
+      })
+      .catch(function () { return carFix; });
+  }
+
+  async function showMap() {
+    if (!MV) {
+      // map-view.js is same-origin and in the service worker's shell, so this
+      // should not happen. A control that does nothing at all, silently, is
+      // this project's second named fault, and "should not happen" has never
+      // been a reason to leave one in.
+      mapSay('map-view.js did not load, so there is no map here.');
+      return;
+    }
+    var want = mapWants();
+    var key = want.names.join('|');
+    if (mapBusy) return;
+    if (mapFor === key && theMap) return;
+    mapFor = key;
+
+    if (!want.names.length) {
+      // Short on purpose. This line is a row of the panel, and at 15px a
+      // sentence that explains itself fully runs to three of them — which it
+      // takes off the map, on the one screen with a single row to spend.
+      mapSay('this card names nowhere yet — ⌖ Dropoff reads it off your phone');
+      return;
+    }
+
+    mapBusy = true;
+    try {
+      mapSay('loading the map…');
+      var ready = await MV.needLeaflet(document, {
+        css: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+        js: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+      });
+      // Said plainly rather than left as a grey rectangle. A rig on a phone
+      // hotspot in a car has no signal several times a shift and that is the
+      // ordinary case, not an error — and ⛶ Phone puts the picture back.
+      if (!ready) {
+        mapSay('no signal for the map — the library and the tiles both come '
+               + 'from the network. ⛶ Phone puts the picture back.');
+        return;
+      }
+      if (viewMode !== 'map' || mapFor !== key) return;
+
+      if (!theMap) {
+        theMap = L.map(liveMap, { zoomControl: true }).setView([33.94, -84.58], 11);
+        // The attribution stays. These tiles are given away on the condition
+        // that it does, and a panel being small is not an exemption.
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19, attribution: '© OpenStreetMap'
+        }).addTo(theMap);
+        mapGeo = new MV.Geocoder({
+          // No "near" box on this panel and nothing to type one into at the
+          // wheel. The box around the car's own position is the better answer
+          // anyway and is what this page uses — see boxFor below.
+          hint: function () { return ''; },
+          store: {
+            get: function () { return localStorage.getItem('uberscan.geocode.v1'); },
+            set: function (s) { localStorage.setItem('uberscan.geocode.v1', s); },
+            clear: function () { localStorage.removeItem('uberscan.geocode.v1'); }
+          }
+        });
+      }
+      // The pane was display:none when the map was made, so Leaflet measured a
+      // box of zero and drew one tile in the corner. Asked again now it is on
+      // screen, and again after the next frame, because the grid row it lives
+      // in is sized from the viewport and is not final within this tick.
+      theMap.invalidateSize();
+      requestAnimationFrame(function () { if (theMap) theMap.invalidateSize(); });
+
+      var here = await askCar();
+      if (viewMode !== 'map' || mapFor !== key) return;
+
+      mapSay('looking up ' + want.names.length
+             + (want.names.length === 1 ? ' place…' : ' places…'));
+      var found = {};
+      // A box around where the car actually is, which is the whole of what
+      // makes a street name answerable: handed "Cobb Pkwy" a geocoder returns
+      // a real Cobb Pkwy somewhere, and this driver works one metro.
+      var box = here ? MV.boxAround(here) : null;
+      await mapGeo.walk(want.names, function () { return box; }, found);
+      // Asked again without the box, exactly as the other two pages do it: a
+      // box is a claim that the answer is within sixty miles of the car, and a
+      // genuinely distant dropoff must not be lost to a feature meant to find
+      // things.
+      var refused = want.names.filter(function (q) { return box && !found[q]; });
+      if (refused.length) await mapGeo.walk(refused, function () { return null; }, found);
+
+      // The driver has been shown a different card since these went out. The
+      // pins about to be drawn would be the old one's, under the new one's
+      // numbers — a confidently wrong answer, which is the one thing this
+      // panel may never produce.
+      if (viewMode !== 'map' || mapFor !== key) return;
+      drawMap(want, found, here);
+    } finally {
+      mapBusy = false;
+      // A card that arrived while those lookups were in flight was dropped:
+      // the busy guard returned before `mapFor` was touched, so nothing
+      // remembered that a newer card was waiting and the map went on showing
+      // the old one until the card after that. Caught up here instead, which
+      // is also the only place that knows the walk has finished.
+      if (viewMode === 'map' && mapFor !== mapWants().names.join('|')) showMap();
+    }
+  }
+
+  /* One dot, sized and coloured for a panel read at arm's length through a
+     windscreen. Bigger than the map page's, which is read at a desk. */
+  function mapDot(at, colour, label, ring) {
+    return L.circleMarker([at.lat, at.lon], {
+      radius: ring ? 11 : 9, weight: 3, color: '#0b0d10',
+      fillColor: colour, fillOpacity: ring ? 0.35 : 1
+    }).bindPopup('<b>' + label + '</b>');
+  }
+
+  function drawMap(want, found, here) {
+    if (mapLayer) theMap.removeLayer(mapLayer);
+    mapLayer = L.layerGroup().addTo(theMap);
+    var bounds = [];
+    function put(at, colour, label, ring) {
+      if (!at) return;
+      mapDot(at, colour, label, ring).addTo(mapLayer);
+      bounds.push([at.lat, at.lon]);
+    }
+
+    var pick = want.pickup ? found[want.pickup] : null;
+    var drop = want.dropoff ? found[want.dropoff] : null;
+    var held = want.held ? found[want.held] : null;
+
+    // The car first, because every other mark here is a guess and this one is
+    // not. A pickup pin a long way from it is a pin to distrust whatever the
+    // geocoder said, and the driver can see that in one look.
+    put(here, '#7aa2f7', 'where you were', true);
+    put(held, '#f5a524', 'where the order in your car is going');
+    put(pick, '#17c964', 'pick this one up');
+    put(drop, '#f5a524', 'and drop it here');
+
+    // The run already committed to, and the run this card would add. Dashed
+    // for the detour, solid for the job, which is the same distinction the map
+    // page draws: a dashed line is miles nobody pays for.
+    if (here && held) {
+      L.polyline([[here.lat, here.lon], [held.lat, held.lon]],
+                 { color: '#f5a524', weight: 3, opacity: .8 }).addTo(mapLayer);
+    }
+    if (here && pick) {
+      L.polyline([[here.lat, here.lon], [pick.lat, pick.lon]],
+                 { color: '#c084fc', weight: 3, dashArray: '2 7',
+                   opacity: .9 }).addTo(mapLayer);
+    }
+    if (pick && drop) {
+      L.polyline([[pick.lat, pick.lon], [drop.lat, drop.lon]],
+                 { color: '#17c964', weight: 3, opacity: .85 }).addTo(mapLayer);
+    }
+    if (pick && held) {
+      L.polyline([[pick.lat, pick.lon], [held.lat, held.lon]],
+                 { color: '#c084fc', weight: 3, dashArray: '2 7',
+                   opacity: .9 }).addTo(mapLayer);
+    }
+
+    if (bounds.length > 1) theMap.fitBounds(bounds, { padding: [34, 34] });
+    else if (bounds.length) theMap.setView(bounds[0], 13);
+
+    mapSay(mapLine(want, found, here, pick, drop, held));
+  }
+
+  /* The one line of words under the map, and the only figure this mode
+     produces. It answers the question the driver asked it for — is this pickup
+     on my way, or behind me — and it says in the same breath that it is a
+     straight line and not a road, because a driver acting on it is acting on
+     three geocoded points. */
+  function mapLine(want, found, here, pick, drop, held) {
+    var missing = want.names.filter(function (q) { return !found[q]; });
+    var gap = MV.detour(here, pick, held);
+    if (gap !== null) {
+      return (gap < 0.5 ? 'this pickup is on your way'
+                        : '+' + gap.toFixed(1) + ' mi out of your way')
+        + ' — straight lines, not roads'
+        + (missing.length ? ' · ' + missing.length + ' place'
+                          + (missing.length === 1 ? '' : 's') + ' not found' : '');
+    }
+    // No detour to state, and the reason matters: a driver told nothing
+    // assumes the rig checked and found nothing worth saying.
+    if (!here) return 'no position on the recent offers, so there is nothing '
+                    + 'to measure this pickup against';
+    if (!want.held) return holdingNow
+      ? 'the order in your car has no address on record — ⌖ Dropoff reads it '
+        + 'off your phone'
+      : 'nothing in the car to compare this against';
+    if (!pick) return 'this card’s pickup could not be placed';
+    if (!held) return 'the order in your car could not be placed';
+    return 'straight lines, not roads';
+  }
+
+  // Last, not beside the button it belongs to: it can put the pane into map
+  // mode, and the map mode's own state has to exist before it does.
   applyViewMode();
 
   // --- drawing the box to read -------------------------------------------
@@ -2416,13 +2864,17 @@
   var box = null;             // {x, y, w, h} as fractions, or null
   var dragFrom = null;
 
-  // Whether the scene is on loan from the phone view for a drawing.
-  var lentScene = false;
+  // Which mode the scene is on loan FROM for a drawing, or null. It was a
+  // boolean while the phone was the only other thing this pane could show;
+  // with a map in the cycle, "put it back" has to name what it is putting
+  // back, or pressing Set box from the map ends with the driver on a picture
+  // of their own car.
+  var lentFrom = null;
 
   function drawingMode(on) {
-    if (!on && lentScene) {
-      lentScene = false;
-      phoneView = true;
+    if (!on && lentFrom) {
+      viewMode = lentFrom;
+      lentFrom = null;
       applyViewMode();
       if (streaming) startStream();
       else refreshView();
@@ -2551,9 +3003,13 @@
     // Before this one press of Set box wrote 'scene' into the preference,
     // and neither Cancel nor a box read put the phone back: the phone was a
     // third of a cabin thumbnail until the driver found ⛶ Phone again.
-    if (on && phoneView) {
-      lentScene = true;
-      phoneView = false;
+    //
+    // The map is borrowed from for the same reason and with more force: there
+    // is no camera frame under it at all, so a box dragged there would be
+    // drawn on a street map and sent as camera-frame fractions.
+    if (on && viewMode !== 'scene') {
+      lentFrom = viewMode;
+      viewMode = 'scene';
       applyViewMode();
       if (streaming) startStream();
       else refreshView();

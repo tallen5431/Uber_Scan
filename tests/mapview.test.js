@@ -80,6 +80,32 @@ ok_('a degree of longitude at 33°N is about 58',
 eq('a point is no distance from itself',
    MV.crowMiles({ lat: 33.9, lon: -84.5 }, { lat: 33.9, lon: -84.5 }), 0);
 
+/* ---- how far out of the way a stop is -------------------------------------
+ *
+ * The driver's own question about a second offer: is the pickup on the way to
+ * where I am already going, or behind me? Three points, and the answer is what
+ * the stop adds to the trip. */
+var HERE = { lat: 33.90, lon: -84.50 };
+var AHEAD = { lat: 34.00, lon: -84.50 };          // due north, about 7 miles
+ok_('a stop on the line adds nothing',
+    Math.abs(MV.detour(HERE, { lat: 33.95, lon: -84.50 }, AHEAD)) < 0.01);
+// Half way there and half a degree east: out and back again.
+ok_('a stop off to the side adds the going and the coming back',
+    MV.detour(HERE, { lat: 33.95, lon: -84.20 }, AHEAD) > 20);
+// The case the driver is really asking about. A pickup BEHIND you costs twice
+// the distance back to it, and on a map alone that is easy to misjudge: the
+// pin looks close, and it is close — in the wrong direction.
+var BACK = MV.detour(HERE, { lat: 33.80, lon: -84.50 }, AHEAD);
+ok_('a stop behind you costs twice the distance back to it (%s)',
+    Math.abs(BACK - 2 * MV.crowMiles(HERE, { lat: 33.80, lon: -84.50 })) < 0.01);
+// Two points is not a smaller detour. It is no answer at all, and computed
+// anyway it comes out zero — which reads as "right on your way", which is the
+// most expensive thing this could get wrong.
+eq('with nowhere to be going, there is no detour to state',
+   MV.detour(HERE, AHEAD, null), null);
+eq('...nor with nothing to go by way of', MV.detour(HERE, null, AHEAD), null);
+eq('...nor with no idea where the car is', MV.detour(null, HERE, AHEAD), null);
+
 /* ---- the box drawn around where the car was ------------------------------
  *
  * Nominatim wants <left>,<top>,<right>,<bottom> — longitude first, and the

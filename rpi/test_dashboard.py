@@ -1724,6 +1724,241 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  /* --- the map mode -------------------------------------------------------
+   *
+   * The third thing the picture pane can be, and the only one that reaches the
+   * network. Two properties carry the weight here and they pull against each
+   * other.
+   *
+   * NOTHING IS LOOKED UP UNTIL THE BUTTON IS PRESSED. Some of these places are
+   * where customers live, the rig never sends them anywhere itself, and the
+   * press is the whole of the driver's consent. A page that asked on load —
+   * or on a remembered mode — would have moved that decision away from them.
+   *
+   * AND ONCE PRESSED, WHAT IS DRAWN IS THIS CARD. The pane is beside a verdict
+   * about one offer; a map left standing over the next card's numbers is the
+   * same confidently wrong answer the rest of this panel refuses.
+   *
+   * Leaflet is stubbed, so what gets drawn is observable. The geocoder is
+   * stubbed at the network layer, so the page's own asking is the real thing. */
+  // Hoisted out of the block below because two stages need it: the one that
+  // drives the map, and the one that proves a stored map mode is refused.
+  const MAPSTUB = `
+      window.__lmap = null; window.__marks = []; window.__lines = [];
+      window.__fit = null; window.__asked = [];
+      window.L = {
+        map: function (node) {
+          window.__lmap = { node: node && node.id,
+            setView: function (ll) { window.__view = ll; return this; },
+            invalidateSize: function () { window.__sized = (window.__sized || 0) + 1; },
+            removeLayer: function (g) {
+              window.__marks = window.__marks.filter(function (m) { return m.group !== g; });
+              window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
+            },
+            fitBounds: function (b) { window.__fit = b; } };
+          return window.__lmap;
+        },
+        tileLayer: function (url, o) { window.__tiles = { url: url, opts: o };
+          return { addTo: function () { return this; } }; },
+        layerGroup: function () { return { addTo: function () { return this; } }; },
+        circleMarker: function (ll, opts) {
+          var m = { ll: ll, opts: opts, group: null,
+                    bindPopup: function (h) { this.popup = h; return this; },
+                    addTo: function (g) { this.group = g; window.__marks.push(this);
+                                          return this; } };
+          return m; },
+        polyline: function (pts, opts) {
+          var l = { pts: pts, opts: opts, group: null,
+                    bindPopup: function (h) { this.popup = h; return this; },
+                    addTo: function (g) { this.group = g; window.__lines.push(this);
+                                          return this; } };
+          return l; }
+      };
+  `;
+
+  {
+    stage = 'the map mode';
+    const PLACES = {
+      "Chipotle (Barrett Pkwy)": [34.020, -84.580],
+      "Canton Rd, Marietta":     [33.980, -84.500],
+      "Powder Springs Rd":       [33.900, -84.640],
+    };
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    // The car's own position, off the newest journal row that carries one.
+    // This is the one point on the map that was MEASURED rather than looked
+    // up, and it is what the detour is measured from.
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: [
+        { id: 'old', at: 1000, lat: 34.500, lon: -84.900 },
+        { id: 'new', at: 9000, lat: 34.010, lon: -84.600 },
+        { id: 'blind', at: 9500 } ] }) }));
+    await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
+      const u = new URL(route.request().url());
+      const q = decodeURIComponent(u.searchParams.get('q') || '');
+      await page.evaluate((s) => window.__asked.push(s), q).catch(() => {});
+      const hit = PLACES[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    // An offer on the glass, and an order already in the car — which is the
+    // only arrangement where the driver's question ("is this second one mostly
+    // along the route I am going anyway") can be asked at all.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-map', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(400);
+    // BEFORE the press. Nothing may have been asked, and the pane is a
+    // picture.
+    out.mapBefore = await page.evaluate(() => ({
+      asked: window.__asked.slice(),
+      label: document.getElementById('viewMode').textContent.trim(),
+      mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
+      stored: localStorage.getItem('uberscan.liveView') }));
+    stage = 'the map mode: pressing through to it';
+    await page.click('#viewMode');            // → scene
+    await page.waitForTimeout(200);
+    // What the scene offers next, which is the whole of how a driver finds
+    // this mode at all: there is no new button in the bar to discover.
+    out.mapMid = await page.evaluate(() => ({
+      label: document.getElementById('viewMode').textContent.trim(),
+      asked: window.__asked.slice() }));
+    await page.click('#viewMode');            // → map
+    // Two lookups at a second apart, plus the journal fetch and the draw.
+    await page.waitForTimeout(4200);
+    out.mapOn = await page.evaluate(() => ({
+      asked: window.__asked.slice(),
+      label: document.getElementById('viewMode').textContent.trim(),
+      pressed: document.getElementById('viewMode').getAttribute('aria-pressed'),
+      mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
+      imgShown: getComputedStyle(document.getElementById('view')).display !== 'none',
+      node: window.__lmap && window.__lmap.node,
+      // Leaflet measures a pane of zero if it is asked before the pane is on
+      // screen, and draws one tile in the corner for the rest of the session.
+      sized: window.__sized || 0,
+      tiles: (window.__tiles || {}).url || '',
+      attribution: ((window.__tiles || {}).opts || {}).attribution || '',
+      marks: window.__marks.map(function (m) {
+        return { ll: m.ll, fill: m.opts && m.opts.fillColor,
+                 popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
+                                             .replace(/\s+/g, ' ').trim() };
+      }),
+      lines: window.__lines.map(function (l) {
+        return { pts: l.pts, colour: l.opts && l.opts.color,
+                 dashed: !!(l.opts && l.opts.dashArray) };
+      }),
+      fit: window.__fit,
+      note: document.getElementById('viewNote').textContent.trim(),
+      // The remembered view. A map mode written here would ask a public
+      // geocoder on the next page load with nobody pressing anything.
+      stored: localStorage.getItem('uberscan.liveView') }));
+    // ...and the frames stop. Thirty a second down a phone hotspot for a
+    // picture nobody can see is a cost that only shows up as a bill.
+    stage = 'the map mode: the picture stops being fetched';
+    let framesWhileMapped = 0;
+    // A real one pixel, not a byte of rubbish: a frame that fails to decode
+    // fires the error path, which reports a camera that has stopped and takes
+    // the pane down with it — so the check below on the picture coming back
+    // would have been measuring the harness.
+    await page.route('**/api/frame.*', (route) => {
+      framesWhileMapped++;
+      return route.fulfill({ status: 200, contentType: 'image/gif',
+        body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64') });
+    });
+    await page.waitForTimeout(900);
+    out.mapFrames = framesWhileMapped;
+    // A NEW card, while the map is up. The pins must follow it.
+    stage = 'the map mode: the next card';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 22.0, grossPerHour: 27.0, pay: 8.0,
+      minutes: 16.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-map-2', pay: 8.0, minutes: 16.0, billedMinutes: 16.0,
+               miles: 3.0, cost: 1.0, pickup: 'Canton Rd, Marietta',
+               dropoff: 'Chipotle (Barrett Pkwy)' } }));
+    await page.waitForTimeout(2500);
+    out.mapNext = await page.evaluate(() => ({
+      marks: window.__marks.map(function (m) {
+        return { ll: m.ll, fill: m.opts && m.opts.fillColor,
+                 popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
+                                             .replace(/\s+/g, ' ').trim() };
+      }),
+      // Both cards name the same two places, so nothing new may be asked: the
+      // answers are remembered on the device and that is what makes a map free
+      // to re-check.
+      asked: window.__asked.slice(),
+      note: document.getElementById('viewNote').textContent.trim() }));
+    // ...and back out, which also has to give the picture back.
+    stage = 'the map mode: back to the picture';
+    await page.click('#viewMode');
+    await page.waitForTimeout(400);
+    out.mapOff = await page.evaluate(() => ({
+      label: document.getElementById('viewMode').textContent.trim(),
+      mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
+      imgShown: getComputedStyle(document.getElementById('view')).display !== 'none',
+      stored: localStorage.getItem('uberscan.liveView') }));
+    await page.close();
+  }
+
+  /* --- a stored map mode, which the page must refuse to honour -------------
+   *
+   * Two guards keep the privacy gate: the mode is never WRITTEN to storage,
+   * and a stored one is never READ back. The second is the one that matters
+   * when the first is bypassed, and it can be — localStorage survives a build,
+   * so a value left by an older one, a hand edit, or a tab that died mid-write
+   * all put 'map' there without this page having agreed to it.
+   *
+   * Honoured, the panel would ask a public geocoder about places customers
+   * live on page LOAD, with nobody pressing anything. That is the exact
+   * decision the press exists to leave with the driver, and a check that only
+   * ever sees the first guard working cannot tell whether the second is there
+   * at all.
+   */
+  {
+    stage = 'a stored map mode is not honoured';
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.addInitScript(() => {
+      try { localStorage.setItem('uberscan.liveView', 'map'); } catch (e) { /* private */ }
+    });
+    let askedOnLoad = 0;
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      askedOnLoad++;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    // A card with both ends named, so there would be something to look up if
+    // the page were going to.
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-stored', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(2500);
+    out.mapStored = await page.evaluate(() => ({
+      label: document.getElementById('viewMode').textContent.trim(),
+      mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
+      imgShown: getComputedStyle(document.getElementById('view')).display !== 'none',
+      drew: (window.__marks || []).length }));
+    out.mapStored.askedOnLoad = askedOnLoad;
+    await page.close();
+  }
+
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -2772,6 +3007,142 @@ try:
         # mileage cost — so hiding the working left an empty box on screen.
         ok_('%s: ...which is the only line there is' % panel,
             not r['net']['there'] or not r['net']['shown'])
+
+    # --- the map mode -------------------------------------------------------
+    #
+    # The one mode on this panel that reaches the network, and the only place
+    # on it where a number comes off a geocoded point rather than off the card.
+    # Both of those are things this project spends a file arguing against, so
+    # both are pinned here.
+    before = got.get('mapBefore') or {}
+    # THE privacy check. Some of these places are where customers live, the rig
+    # never sends them anywhere itself, and the press is the whole of the
+    # driver's consent. A page that looked them up on load would have taken
+    # that decision away without anybody noticing it had one.
+    eq('nothing is looked up before the button is pressed',
+       len(before.get('asked') or []), 0)
+    ok_('...and the pane is a picture until then', not before.get('mapShown'))
+
+    # How a driver finds this mode at all: there is no new button in the bar
+    # to discover. The bar holds six and ▤ Offers already cost ▣ Set box its
+    # slot in the fullest state, so the map is a third position on a control
+    # that was already there — and the label is the only thing that says so.
+    mid = got.get('mapMid') or {}
+    ok_('the picture pane offers the scene first (%r)' % before.get('label'),
+        'Scene' in (before.get('label') or ''))
+    ok_('...and the scene offers the map next (%r)' % mid.get('label'),
+        'Map' in (mid.get('label') or ''))
+    eq('...with still nothing looked up on the way there',
+       len(mid.get('asked') or []), 0)
+
+    on = got.get('mapOn') or {}
+    ok_('...and once there the pane is a map', on.get('mapShown'))
+    # Both at once is the failure a swap exists to avoid: two dense images over
+    # each other in a 269px pane make neither readable, and the picture's whole
+    # job is letting the figures be checked against what the card said.
+    ok_('...instead of the picture, not over it', not on.get('imgShown'))
+    eq('...drawn into the pane and not somewhere else', on.get('node'), 'liveMap')
+    # A Leaflet map made while its pane is display:none measures a box of zero
+    # and draws one tile in the corner for the rest of the session.
+    ok_('...and measured once it is on screen (%r)' % on.get('sized'),
+        (on.get('sized') or 0) >= 1)
+    ok_('...off OpenStreetMap', 'openstreetmap' in (on.get('tiles') or ''))
+    # These tiles are given away on the condition that it is shown, and a panel
+    # being small is not an exemption.
+    ok_('...with the attribution those tiles are given away on the condition of',
+        'OpenStreetMap' in (on.get('attribution') or ''))
+    # The mode itself is deliberately NOT remembered: a stored map mode would
+    # ask a public geocoder on the next page load with nobody pressing
+    # anything, which is the same fault as asking on load.
+    eq('the map is not written into the remembered view', on.get('stored'), 'scene')
+
+    asked = on.get('asked') or []
+    # Three places: this card's two ends and where the order in the car is
+    # going. The third is what the driver's question is ABOUT — "would it be
+    # mostly along the route I am going anyways".
+    eq('the press asks about this card and the order in the car (%r)' % (asked,),
+       len(asked), 3)
+    ok_('...including where the held order ends',
+        any('Powder Springs' in q for q in asked))
+
+    marks = on.get('marks') or []
+    fills = [m.get('fill') for m in marks]
+    eq('four things are on the map', len(marks), 4)
+    # The car first, because every other mark here is a guess and this one is
+    # not: it is the rig's own GPS fix off the newest journal row. A pickup pin
+    # a long way from it is a pin to distrust whatever the geocoder said.
+    ok_('the car is one of them, from the rig\'s own position (%r)' % (fills,),
+        '#7aa2f7' in fills)
+    _car = [m for m in marks if m.get('fill') == '#7aa2f7']
+    ok_('...taken off the NEWEST row that carries one, not the first (%r)'
+        % (_car and _car[0].get('ll'),),
+        _car and abs(float(_car[0]['ll'][0]) - 34.010) < 0.001)
+    ok_('...and the pickup is drawn in the pickup colour', '#17c964' in fills)
+    ok_('...and both dropoffs in the dropoff colour',
+        len([f for f in fills if f == '#f5a524']) == 2)
+    ok_('each says which of the four it is (%r)'
+        % ([m.get('popup') for m in marks],),
+        any('order in your car' in (m.get('popup') or '') for m in marks)
+        and any('pick this one up' in (m.get('popup') or '') for m in marks))
+
+    lines = on.get('lines') or []
+    eq('four runs are drawn between them', len(lines), 4)
+    # Dashed is the same distinction the map page draws: a dashed line is miles
+    # nobody pays for. Two of these are — getting to the new pickup, and
+    # getting from it back to where the car was already going.
+    eq('...two of them empty, two of them paid',
+       len([l for l in lines if l.get('dashed')]), 2)
+    ok_('...and the view is fitted to all of it', len(on.get('fit') or []) == 4)
+
+    # THE figure, and the reason this mode exists. The driver's words: "if it
+    # makes sense to pickup the second offer since it would be mostly along the
+    # route I am going anyways."
+    note = on.get('note') or ''
+    ok_('the map says how far out of the way the pickup is (%r)' % note,
+        re.search(r'\d+\.\d mi out of your way', note) or 'on your way' in note)
+    # Said in the same breath, because a driver acting on this is acting on
+    # three geocoded points. Nothing on this panel may present a looked-up
+    # number as a measured one.
+    ok_('...and that it is a straight line and not a road', 'not roads' in note)
+
+    # Thirty frames a second down a phone hotspot, for a picture nobody can
+    # see, is a cost that only shows up as a bill.
+    eq('the camera stops being fetched while the map is up', got.get('mapFrames'), 0)
+
+    # A map left standing over the next card's numbers is the same confidently
+    # wrong answer the rest of this panel refuses.
+    nxtMap = got.get('mapNext') or {}
+    eq('a new card redraws the map rather than leaving the last one up',
+       len(nxtMap.get('marks') or []), 4)
+    # Both cards name the same three places, so nothing new may be asked: the
+    # answers are remembered on the device, which is what makes re-checking a
+    # map free and keeps the geocoder unbothered.
+    eq('...without asking the geocoder anything it already knew',
+       len(nxtMap.get('asked') or []), 3)
+
+    # Two guards keep the privacy gate and only one of them is exercised by the
+    # press: the mode is never written to storage, and a stored one is never
+    # read back. localStorage survives a build, so a value left by an older
+    # one — or a hand edit, or a tab that died mid-write — puts 'map' there
+    # without this page having agreed to it. Honoured, the panel asks a public
+    # geocoder about places customers live on LOAD, with nobody pressing
+    # anything, which is the whole of what the press exists to decide.
+    stored = got.get('mapStored') or {}
+    eq('a stored map mode looks nothing up on load',
+       stored.get('askedOnLoad'), 0)
+    ok_('...and the pane opens on the picture, not the map',
+        stored.get('imgShown') and not stored.get('mapShown'))
+    eq('...with nothing drawn on a map nobody asked for', stored.get('drew'), 0)
+    ok_('...and the button offers the scene, as on any other load (%r)'
+        % stored.get('label'), 'Scene' in (stored.get('label') or ''))
+
+    off = got.get('mapOff') or {}
+    # Round to the start: the label offers the scene again, which is what it
+    # says when the pane is showing the phone.
+    ok_('the cycle comes back to the picture (%r)' % off.get('label'),
+        'Scene' in (off.get('label') or ''))
+    ok_('...with the map put away', not off.get('mapShown'))
+    ok_('...and the picture back', off.get('imgShown'))
 
 finally:
     proc.terminate()
