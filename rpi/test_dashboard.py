@@ -1782,6 +1782,10 @@ const framed = (page) => page.waitForFunction(
       "Chipotle (Barrett Pkwy)": [34.020, -84.580],
       "Canton Rd, Marietta":     [33.980, -84.500],
       "Powder Springs Rd":       [33.900, -84.640],
+      // The reader is looking at a photograph of somebody's phone. What comes
+      // back is whatever the OCR made of it, and these popups are the one
+      // place on this page that builds markup from a string it did not write.
+      "<b>Kroger</b> & Co \"Deli\"":  [34.030, -84.560],
     };
     const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                               .then((c) => c.newPage());
@@ -1952,6 +1956,20 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(1800);
     out.mapNoPickup = await page.evaluate(
       () => document.getElementById('viewNote').textContent.trim());
+
+    stage = 'the map mode: a place name the reader made up';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
+      minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-map-5', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
+               miles: 3.0, cost: 1.0, pickup: '<b>Kroger</b> & Co "Deli"',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(2600);
+    // The RAW popup, tags and all — the checks elsewhere strip markup before
+    // looking, which is exactly what would hide this.
+    out.mapRawPopups = await page.evaluate(
+      () => (window.__marks || []).map(function (m) { return String(m.popup || ''); }));
 
     // ...and back out, which also has to give the picture back.
     stage = 'the map mode: back to the picture';
@@ -3193,6 +3211,13 @@ try:
         % ([m.get('popup') for m in marks],),
         any('order in your car' in (m.get('popup') or '') for m in marks)
         and any('pick this one up' in (m.get('popup') or '') for m in marks))
+    # ...and WHAT it is. In map mode the verdict pane is not on the glass, so
+    # these popups are the only place the names appear at all — "pick this one
+    # up" over an unnamed dot is a map that cannot be checked against the card
+    # the driver is looking at on the phone.
+    ok_('...and names the place the card gave',
+        any('Chipotle (Barrett Pkwy)' in (m.get('popup') or '') for m in marks)
+        and any('Powder Springs Rd' in (m.get('popup') or '') for m in marks))
 
     lines = on.get('lines') or []
     eq('four runs are drawn between them', len(lines), 4)
@@ -3296,6 +3321,19 @@ try:
     ok_('...and a card that names no pickup blames the card, not the lookup '
         '(%r)' % noPick,
         'does not say where to collect it' in noPick)
+
+    # The one place on this page that builds markup from a string it did not
+    # write, and the string is whatever the reader made of a photograph of
+    # somebody's phone. Everything else here goes through textContent.
+    raw = got.get('mapRawPopups') or []
+    _kroger = [p for p in raw if 'Kroger' in p]
+    ok_('a place name the reader made up is escaped, not injected (%r)'
+        % (_kroger[:1],),
+        _kroger and '&lt;b&gt;Kroger&lt;/b&gt;' in _kroger[0])
+    ok_('...so no tag of its own reaches the popup',
+        _kroger and '<b>Kroger</b>' not in _kroger[0])
+    ok_('...and its quotes and ampersand come through as text',
+        _kroger and '&amp;' in _kroger[0] and '&quot;Deli&quot;' in _kroger[0])
 
     off = got.get('mapOff') or {}
     # Round to the start: the label offers the scene again, which is what it

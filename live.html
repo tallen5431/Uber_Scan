@@ -2771,20 +2771,36 @@
 
   /* One dot, sized and coloured for a panel read at arm's length through a
      windscreen. Bigger than the map page's, which is read at a desk. */
-  function mapDot(at, colour, label, ring) {
+  /* The only markup this page builds from text it did not write. Everything
+     else here goes through textContent, deliberately — and the names below
+     come off OCR of a photograph of somebody's phone, which is about as
+     untrusted as a string gets. */
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  function mapDot(at, colour, label, name, ring) {
     return L.circleMarker([at.lat, at.lon], {
       radius: ring ? 11 : 9, weight: 3, color: '#0b0d10',
       fillColor: colour, fillOpacity: ring ? 0.35 : 1
-    }).bindPopup('<b>' + label + '</b>');
+    }).bindPopup('<b>' + esc(label) + '</b>'
+                 // What the CARD called it. In map mode the verdict pane is
+                 // not on the glass, so these popups are the only place the
+                 // names appear at all — and "pick this one up" over an
+                 // unnamed dot is a map a driver cannot check against the card
+                 // they are looking at on the phone.
+                 + (name ? '<br>' + esc(name) : ''));
   }
 
   function drawMap(want, found, here) {
     if (mapLayer) theMap.removeLayer(mapLayer);
     mapLayer = L.layerGroup().addTo(theMap);
     var bounds = [];
-    function put(at, colour, label, ring) {
+    function put(at, colour, label, name, ring) {
       if (!at) return;
-      mapDot(at, colour, label, ring).addTo(mapLayer);
+      mapDot(at, colour, label, name, ring).addTo(mapLayer);
       bounds.push([at.lat, at.lon]);
     }
 
@@ -2795,10 +2811,10 @@
     // The car first, because every other mark here is a guess and this one is
     // not. A pickup pin a long way from it is a pin to distrust whatever the
     // geocoder said, and the driver can see that in one look.
-    put(here, '#7aa2f7', 'where you were', true);
-    put(held, '#f5a524', 'where the order in your car is going');
-    put(pick, '#17c964', 'pick this one up');
-    put(drop, '#f5a524', 'and drop it here');
+    put(here, '#7aa2f7', 'where you were', null, true);
+    put(held, '#f5a524', 'where the order in your car is going', want.held);
+    put(pick, '#17c964', 'pick this one up', want.pickup);
+    put(drop, '#f5a524', 'and drop it here', want.dropoff);
 
     // The run already committed to, and the run this card would add. Dashed
     // for the detour, solid for the job, which is the same distinction the map
@@ -2825,7 +2841,11 @@
     if (bounds.length > 1) theMap.fitBounds(bounds, { padding: [34, 34] });
     else if (bounds.length) theMap.setView(bounds[0], 13);
 
-    mapSay(mapLine(want, found, here, pick, drop, held));
+    // `drop` is deliberately not passed. The detour is car -> pickup -> where
+    // the order in the car is going, because that order HAS to be delivered;
+    // where the new job ends after that is a further guess, and a parameter
+    // nothing reads is a parameter that will one day be read by mistake.
+    mapSay(mapLine(want, found, here, pick, held));
   }
 
   /* The one line of words under the map, and the only figure this mode
@@ -2833,7 +2853,7 @@
      on my way, or behind me — and it says in the same breath that it is a
      straight line and not a road, because a driver acting on it is acting on
      three geocoded points. */
-  function mapLine(want, found, here, pick, drop, held) {
+  function mapLine(want, found, here, pick, held) {
     /* Why a place has no pin, in the three kinds this project keeps apart
        everywhere else — because only one of them is about the rig's reading.
        An empty answer is stored as null; a lookup that could not be MADE is
