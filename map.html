@@ -408,12 +408,34 @@
           + (run.unplaced ? ' — ' + run.unplaced + ' have no usable pin' : ''));
       return;
     }
-    var empty = run.hops.reduce(function (sum, h) { return sum + h.miles; }, 0);
-    var stacks = run.hops.filter(function (h) { return h.stacked; }).length;
+    /* Only the hops that really were empty are counted as empty.
+       The headline and the popups were answering the same question two ways: a
+       stacked hop's popup says in as many words that "this line is not an
+       empty run", while the total above it was folding that hop's miles into
+       "miles nobody paid for". Inflated exactly on the shifts where the driver
+       stacked well, which is the reading this whole toggle exists to support.
+       The same goes for a hop with a job missing inside it — the car did not
+       go straight from one of those ends to the other, so its straight line is
+       not a distance anybody drove.
+       The flags were already right on every hop; only the arithmetic over them
+       was wrong. */
+    function total(of) {
+      return of.reduce(function (sum, h) { return sum + h.miles; }, 0);
+    }
+    var solo = run.hops.filter(function (h) { return !h.stacked && !h.skipped; });
+    var stacked = run.hops.filter(function (h) { return h.stacked && !h.skipped; });
+    var over = run.hops.filter(function (h) { return h.skipped; });
     say(run.hops.length + ' hop' + (run.hops.length === 1 ? '' : 's')
         + ' between ' + run.taken + ' jobs you took · '
-        + empty.toFixed(1) + ' straight-line miles nobody paid for'
-        + (stacks ? ' · ' + stacks + ' of them stacked' : '')
+        + total(solo).toFixed(1) + ' straight-line miles nobody paid for'
+        + (stacked.length
+           ? ' · ' + total(stacked).toFixed(1) + ' mi across ' + stacked.length
+             + ' stacked pair' + (stacked.length === 1 ? '' : 's')
+             + ', which you did not drive empty' : '')
+        + (over.length
+           ? ' · ' + total(over).toFixed(1) + ' mi across ' + over.length
+             + ' hop' + (over.length === 1 ? '' : 's')
+             + ' with a job missing inside' : '')
         + (run.unplaced ? ' · ' + run.unplaced + ' taken jobs have no pin and '
                         + 'were stepped over' : ''));
   }

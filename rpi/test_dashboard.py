@@ -1796,10 +1796,15 @@ const framed = (page) => page.waitForFunction(
     // up, and it is what the detour is measured from.
     await page.route('**/api/journal*', (route) => route.fulfill({
       status: 200, contentType: 'application/json',
+      // Stamped against the real clock, because the panel now judges the
+      // anchor by its AGE: a fix the phone stopped updating an hour ago is not
+      // a vaguer answer, it is a claim about a journey nobody is on. Epoch
+      // timestamps made every fix here 497156 hours old, which the gate
+      // correctly refused — the fixture was the thing that was wrong.
       body: JSON.stringify({ offers: [
-        { id: 'old', at: 1000, lat: 34.500, lon: -84.900 },
-        { id: 'new', at: 9000, lat: 34.010, lon: -84.600 },
-        { id: 'blind', at: 9500 } ] }) }));
+        { id: 'old', at: Date.now() - 3600000, lat: 34.500, lon: -84.900 },
+        { id: 'new', at: Date.now() - 45000, lat: 34.010, lon: -84.600, gpsAge: 1.2 },
+        { id: 'blind', at: Date.now() - 20000 } ] }) }));
     await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
@@ -1971,6 +1976,55 @@ const framed = (page) => page.waitForFunction(
     out.mapRawPopups = await page.evaluate(
       () => (window.__marks || []).map(function (m) { return String(m.popup || ''); }));
 
+    /* A card that names nowhere, arriving while the map is up. The previous
+       card's pins must come DOWN — this is the commonest card there is, 129 of
+       the driver's own 272, so the path that draws nothing is the path that was
+       leaving a green "pick this one up" dot and a drawn route from an offer
+       that is no longer on screen, under the new card's numbers. */
+    stage = 'the map mode: a card that names nowhere, after one that did';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 21.0, grossPerHour: 25.0, pay: 7.0,
+      minutes: 15.0, miles: 2.0, cost: 0.7, target: 25, band: 15, holding: null,
+      offer: { id: 'o-map-6', pay: 7.0, minutes: 15.0, billedMinutes: 15.0,
+               miles: 2.0, cost: 0.7 } }));
+    await page.waitForTimeout(900);
+    out.mapWentBlank = await page.evaluate(() => ({
+      marks: (window.__marks || []).length,
+      lines: (window.__lines || []).length,
+      note: document.getElementById('viewNote').textContent.trim() }));
+
+    /* ...and BACK to the map on the same card. Leaving is three presses round
+       the cycle, and on the way out sawAFrame rewrites this row to "camera
+       view · inset is what the reader sees". Coming back returns early — there
+       is nothing to redraw — so without re-stating the line the pins sit on
+       the glass under a caption for a picture, and the one figure this mode
+       exists to produce is gone with nothing saying so. */
+    stage = 'the map mode: round the cycle and back in';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-map-7', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(2600);
+    out.mapBeforeRound = await page.evaluate(
+      () => document.getElementById('viewNote').textContent.trim());
+    await page.click('#viewMode');          // map -> phone
+    await page.waitForTimeout(250);
+    await page.click('#viewMode');          // phone -> scene
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { window.__fit = null; });
+    await page.click('#viewMode');          // scene -> map again
+    await page.waitForTimeout(700);
+    out.mapRoundTrip = await page.evaluate(() => ({
+      note: document.getElementById('viewNote').textContent.trim(),
+      marks: (window.__marks || []).length,
+      // A driver who nudged the map with the mouse and lost the pins had no
+      // control anywhere that brought them back. This button is now that
+      // control, so coming back has to re-fit.
+      refit: !!window.__fit }));
+
     // ...and back out, which also has to give the picture back.
     stage = 'the map mode: back to the picture';
     await page.click('#viewMode');
@@ -1980,6 +2034,63 @@ const framed = (page) => page.waitForFunction(
       mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
       imgShown: getComputedStyle(document.getElementById('view')).display !== 'none',
       stored: localStorage.getItem('uberscan.liveView') }));
+    await page.close();
+  }
+
+  /* --- an anchor that stopped moving --------------------------------------
+   *
+   * rpi/gps.py states this as a certainty rather than a risk: the app on the
+   * phone runs on a timer — the one it was written against showed "Runtime
+   * Left 4:48" — so it WILL stop mid-shift. The newest row carrying a position
+   * then stops moving while the car does not, and the detour is measured from
+   * wherever the car was when it stopped.
+   *
+   * That does not make the figure vaguer. "+3.2 mi out of your way" and "this
+   * pickup is on your way" are opposite instructions, and which one appears
+   * turns on the anchor — so a stale fix flips the words, not just the digits.
+   */
+  {
+    stage = 'an anchor that stopped moving';
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: [
+        // Two hours old, which is a phone whose GPS app timed out after the
+        // first hour of a shift.
+        { id: 'stale', at: Date.now() - 7200000, lat: 34.010, lon: -84.600 } ] }) }));
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      const u = new URL(route.request().url());
+      const q = decodeURIComponent(u.searchParams.get('q') || '');
+      const known = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                      'Canton Rd, Marietta': [33.980, -84.500],
+                      'Powder Springs Rd': [33.900, -84.640] }[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(known ? [{ lat: String(known[0]), lon: String(known[1]),
+                                        display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-stale', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(300);
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await page.waitForTimeout(4200);
+    out.mapStaleFix = await page.evaluate(() => ({
+      note: document.getElementById('viewNote').textContent.trim(),
+      // The pins are still drawn — the places are real and worth seeing. It is
+      // the FIGURE that is withheld, not the map.
+      marks: (window.__marks || []).length,
+      popups: (window.__marks || []).map(function (m) { return String(m.popup || ''); }) }));
     await page.close();
   }
 
@@ -3252,6 +3363,24 @@ try:
         'no camera view' not in (onerr.get('note') or ''))
     eq('...and the pins stay where they were', onerr.get('marks'), 4)
 
+    # An anchor that stopped moving. rpi/gps.py says the phone's GPS app runs on
+    # a timer and WILL stop mid-shift, so this is the ordinary failure and not a
+    # corner. "+3.2 mi out of your way" and "this pickup is on your way" are
+    # opposite instructions and which one appears turns on where the car is, so
+    # a stale fix flips the words rather than merely blurring the digits.
+    stale = got.get('mapStaleFix') or {}
+    ok_('a two-hour-old fix states no detour at all (%r)' % stale.get('note'),
+        'out of your way' not in (stale.get('note') or '')
+        and 'on your way' not in (stale.get('note') or ''))
+    ok_('...and says how old the position is, rather than going quiet',
+        'old' in (stale.get('note') or '') and 'h' in (stale.get('note') or ''))
+    # The places are real and worth seeing; it is the FIGURE that is withheld.
+    eq('...while still drawing the places', stale.get('marks'), 4)
+    ok_('...and the car pin says how old it is (%r)'
+        % ([p for p in (stale.get('popups') or []) if 'where you were' in p][:1],),
+        any('a fix' in p and 'old' in p
+            for p in (stale.get('popups') or []) if 'where you were' in p))
+
     # Thirty frames a second down a phone hotspot, for a picture nobody can
     # see, is a cost that only shows up as a bill.
     eq('the camera stops being fetched while the map is up', got.get('mapFrames'), 0)
@@ -3334,6 +3463,33 @@ try:
         _kroger and '<b>Kroger</b>' not in _kroger[0])
     ok_('...and its quotes and ampersand come through as text',
         _kroger and '&amp;' in _kroger[0] and '&quot;Deli&quot;' in _kroger[0])
+
+    # Leaving the map is three presses round the cycle, and on the way out
+    # sawAFrame rewrites this row to "camera view · inset is what the reader
+    # sees". Coming back on the same card returns early — there is nothing to
+    # redraw — so the line has to be re-stated or the pins sit under a caption
+    # for a picture, with the mode's one figure gone and nothing saying so.
+    round_ = got.get('mapRoundTrip') or {}
+    was = got.get('mapBeforeRound') or ''
+    ok_('the line is back after a round trip through the picture (%r)'
+        % round_.get('note'), round_.get('note') == was and bool(was))
+    ok_('...and is not the camera\'s caption',
+        'camera view' not in (round_.get('note') or ''))
+    eq('...with the pins still on the glass', round_.get('marks'), 4)
+    # A driver who nudged the map with the mouse and lost the pins had no
+    # control anywhere that brought them back; this button is now that control.
+    ok_('...and the view is fitted to them again', round_.get('refit'))
+
+    # A card that names nowhere, arriving while the map is up. 129 of this
+    # driver's own 272 cards are this, so the path that draws nothing is the
+    # path that was leaving the LAST card's pins on the glass under this card's
+    # numbers — a green "pick this one up" over an offer no longer on screen.
+    blank = got.get('mapWentBlank') or {}
+    eq('a card that names nowhere takes the last card\'s pins down',
+       blank.get('marks'), 0)
+    eq('...and its lines with them', blank.get('lines'), 0)
+    ok_('...saying so rather than leaving the last line up (%r)'
+        % blank.get('note'), 'names nowhere' in (blank.get('note') or ''))
 
     off = got.get('mapOff') or {}
     # Round to the start: the label offers the scene again, which is what it

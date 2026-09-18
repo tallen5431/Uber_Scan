@@ -2627,7 +2627,16 @@
   // it the one point here that can contradict a pin.
   var carFix = null, carAsked = 0;
 
+  /* The words under the map, and the last of them that described what is
+     drawn. `lastLine` is not simply the last thing said: "looking up 3
+     places…" describes a map that is not there yet, and re-stating it on a
+     drawn map would be a second way of saying nothing. Only mapDrew writes it. */
+  var lastLine = '';
+  var lastBounds = null;
+
   function mapSay(text) { viewNote.textContent = text; }
+
+  function mapDrew(text) { lastLine = text; mapSay(text); }
 
   /* The places this offer and the order in the car are about. Kept in one
      place because the KEY is built from it too, and a key that disagreed with
@@ -2648,6 +2657,16 @@
      were not. The rig stamps every row with its own GPS fix — see rpi/gps.py —
      so the newest row that carries one is where the car was when the last card
      came up, which on a working shift is minutes old. */
+  /* How old a fix may be before it stops being where the car IS.
+     rpi/gps.py states the failure as a certainty rather than a risk: the app on
+     the phone runs on a timer, so it WILL stop mid-shift, and the newest row
+     that carries a position then stops moving while the car does not. Past
+     this, the anchor is history and the detour measured from it is a claim
+     about a journey nobody is on. */
+  var FIX_STALE_MS = 20 * 60000;
+  // ...and the point past which it is not worth mentioning that it is old.
+  var FIX_AGEING_MS = 4 * 60000;
+
   function askCar() {
     var now = Date.now();
     if (carFix && now - carAsked < 120000) return Promise.resolve(carFix);
@@ -2660,12 +2679,37 @@
         rows.forEach(function (row) {
           var at = MV.fixOf(row);
           if (!at) return;
-          if (!best || (row.at || 0) >= best.at) best = { at: row.at || 0, where: at };
+          if (!best || (row.at || 0) >= best.at) {
+            // The row's stamp AND how stale the fix already was when the row
+            // was written — rpi/journal.py keeps `gpsAge` for exactly this, and
+            // both were being thrown away here. A position twenty seconds old
+            // is half a mile at fifty miles an hour, and this one anchors the
+            // only figure the mode produces.
+            best = { at: row.at || 0, where: at,
+                     wasOld: (typeof row.gpsAge === 'number' ? row.gpsAge : 0) * 1000 };
+          }
         });
-        carFix = best ? best.where : null;
+        carFix = best ? { lat: best.where.lat, lon: best.where.lon,
+                          age: Math.max(0, now - best.at) + best.wasOld } : null;
         return carFix;
       })
       .catch(function () { return carFix; });
+  }
+
+  /* How old the anchor is NOW, rather than when it was fetched. askCar holds
+     its answer for two minutes, so reading the stored age straight back would
+     under-report by up to that much — and the whole point of carrying it is
+     that it is the number nobody was checking. */
+  function fixAge() {
+    if (!carFix || typeof carFix.age !== 'number') return null;
+    return carFix.age + Math.max(0, Date.now() - carAsked);
+  }
+
+  function spellAge(ms) {
+    var mins = Math.round(ms / 60000);
+    if (mins < 60) return mins + ' min';
+    var hrs = Math.round(mins / 6) / 10;
+    return hrs + 'h';
   }
 
   async function showMap() {
@@ -2680,14 +2724,46 @@
     var want = mapWants();
     var key = want.names.join('|');
     if (mapBusy) return;
-    if (mapFor === key && theMap) return;
+    if (mapFor === key && theMap) {
+      /* Nothing to redraw — but something to SAY. Leaving the map is three
+         presses round the cycle, and on the way out sawAFrame rewrites this
+         row to "camera view · inset is what the reader sees". Coming back on
+         the same card used to return here before any mapSay, so the pins were
+         still on the glass under a caption for a picture: the one figure this
+         mode exists to produce, gone, with nothing saying so, in the 15px row
+         the panel spends on it.
+
+         The view is re-fitted for the same reason. A driver who nudged the
+         map with the mouse and lost the pins had no control anywhere that
+         brought them back — this button is now that control. */
+      mapSay(lastLine);
+      theMap.invalidateSize();
+      if (lastBounds && lastBounds.length > 1) {
+        theMap.fitBounds(lastBounds, { padding: [34, 34] });
+      } else if (lastBounds && lastBounds.length) {
+        theMap.setView(lastBounds[0], 13);
+      }
+      return;
+    }
     mapFor = key;
 
     if (!want.names.length) {
+      // The last card's pins must not stay on the glass under this card's
+      // numbers. This is the COMMONEST card there is — 129 of the driver's own
+      // 272 name no dropoff — so the path that draws nothing is the path that
+      // was leaving a green "pick this one up" dot and a drawn route from an
+      // offer that is no longer on screen.
+      clearMap();
       // Short on purpose. This line is a row of the panel, and at 15px a
       // sentence that explains itself fully runs to three of them — which it
       // takes off the map, on the one screen with a single row to spend.
-      mapSay('this card names nowhere yet — ⌖ Dropoff reads it off your phone');
+      // mapDrew, not mapSay: "there is nothing to draw" describes what is on
+      // the glass as truly as a detour does, and it is what coming back to
+      // this same card has to be told again. Left as mapSay, re-entry would
+      // restate the LAST card's detour over an empty map.
+      mapDrew(onRecord
+        ? 'this card names nowhere yet — ⌖ Dropoff reads it off your phone'
+        : 'no card read yet — nothing to put on a map');
       return;
     }
 
@@ -2794,6 +2870,14 @@
                  + (name ? '<br>' + esc(name) : ''));
   }
 
+  /* Take the pins down without drawing new ones. Its own function because two
+     paths need it and neither of them reaches drawMap: a card that names
+     nowhere, and a map that could not be loaded at all. */
+  function clearMap() {
+    if (theMap && mapLayer) { theMap.removeLayer(mapLayer); mapLayer = null; }
+    lastBounds = null;
+  }
+
   function drawMap(want, found, here) {
     if (mapLayer) theMap.removeLayer(mapLayer);
     mapLayer = L.layerGroup().addTo(theMap);
@@ -2811,7 +2895,11 @@
     // The car first, because every other mark here is a guess and this one is
     // not. A pickup pin a long way from it is a pin to distrust whatever the
     // geocoder said, and the driver can see that in one look.
-    put(here, '#7aa2f7', 'where you were', null, true);
+    // The one mark here that was MEASURED rather than looked up — and the one
+    // whose age changes what the line under the map is allowed to say.
+    var age = fixAge();
+    put(here, '#7aa2f7', 'where you were',
+        age === null ? null : 'a fix ' + spellAge(age) + ' old', true);
     put(held, '#f5a524', 'where the order in your car is going', want.held);
     put(pick, '#17c964', 'pick this one up', want.pickup);
     put(drop, '#f5a524', 'and drop it here', want.dropoff);
@@ -2840,12 +2928,15 @@
 
     if (bounds.length > 1) theMap.fitBounds(bounds, { padding: [34, 34] });
     else if (bounds.length) theMap.setView(bounds[0], 13);
+    // Kept so coming back to this same card can put both of them back — the
+    // words under the map and the view they describe.
+    lastBounds = bounds;
 
     // `drop` is deliberately not passed. The detour is car -> pickup -> where
     // the order in the car is going, because that order HAS to be delivered;
     // where the new job ends after that is a further guess, and a parameter
     // nothing reads is a parameter that will one day be read by mistake.
-    mapSay(mapLine(want, found, here, pick, held));
+    mapDrew(mapLine(want, found, here, pick, held));
   }
 
   /* The one line of words under the map, and the only figure this mode
@@ -2864,11 +2955,26 @@
     var missed = want.names.filter(function (q) { return !found[q]; });
     var dead = missed.filter(function (q) { return found[q] === undefined; });
 
-    var gap = MV.detour(here, pick, held);
+    /* The anchor's age, which decides whether there is a detour to state at
+       all. "+3.2 mi out of your way" and "this pickup is on your way" are
+       opposite instructions, and which one appears turns on where the car is —
+       so a fix that stopped updating an hour ago does not make the figure
+       vaguer, it makes it a claim about a journey nobody is on. rpi/gps.py
+       says the phone's GPS app runs on a timer and WILL stop mid-shift, so
+       this is the ordinary failure and not a corner. */
+    var age = fixAge();
+    var old = age !== null && age > FIX_STALE_MS;
+
+    var gap = old ? null : MV.detour(here, pick, held);
     if (gap !== null) {
       return (gap < 0.5 ? 'this pickup is on your way'
                         : '+' + gap.toFixed(1) + ' mi out of your way')
         + ' — straight lines, not roads'
+        // Said only once it is worth saying. A fix a minute old is what a
+        // working shift looks like and a note about it on every card is a note
+        // nobody reads by the third one.
+        + (age !== null && age > FIX_AGEING_MS
+           ? ', from where you were ' + spellAge(age) + ' ago' : '')
         + (missed.length
            ? ' · ' + missed.length + (dead.length ? ' not asked' : ' not found')
            : '');
@@ -2876,6 +2982,8 @@
 
     // No detour to state, and WHICH of these it is matters: a driver told
     // nothing assumes the rig checked and found nothing worth saying.
+    if (old) return 'the last position the rig recorded is ' + spellAge(age)
+                  + ' old, so there is nothing current to measure this against';
     if (!here) return 'no position on the recent offers, so there is nothing '
                     + 'to measure this pickup against';
     if (!want.held) return holdingNow

@@ -118,11 +118,11 @@ def free_port():
 NOW = int(time.time() * 1000)
 
 
-def offer(i, pickup, dropoff, miles, at=None, where=None):
+def offer(i, pickup, dropoff, miles, at=None, where=None, minutes=25.0):
     at = NOW - (i + 1) * 600000 if at is None else at
     row = {'id': 'o%d' % i, 'seq': 1, 'at': at,
-           'firstAt': at, 'pay': 12.0, 'minutes': 25.0,
-           'billedMinutes': 25.0, 'miles': miles, 'cost': 1.5,
+           'firstAt': at, 'pay': 12.0, 'minutes': minutes,
+           'billedMinutes': minutes, 'miles': miles, 'cost': 1.5,
            'costPerMile': 0.3, 'perHour': 28.8, 'whole': True,
            'suspect': False, 'doubt': None, 'pickup': pickup,
            'dropoff': dropoff, 'places': [p for p in (pickup, dropoff) if p],
@@ -138,14 +138,27 @@ def offer(i, pickup, dropoff, miles, at=None, where=None):
 ROWS = [
     offer(0, 'Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta', 9.0,
           where=(34.0117, -84.6105)),
-    offer(1, 'Kroger (Chastain)', 'Nowhere At All Ln, Atlantis', 6.0),
+    # Also five minutes, and also load-bearing: it makes the LAST hop a plain
+    # empty run, so the fixture carries one hop of each kind — stacked, empty,
+    # and spanning a job that could not be placed — with real miles on the two
+    # that must not be folded together.
+    offer(1, 'Kroger (Chastain)', 'Nowhere At All Ln, Atlantis', 6.0, minutes=5.0),
     # Kennesaw to Atlanta is about 25 miles as the crow flies; the card says 3.
     # One of those two pins has to be wrong, and the page has to say so.
+    # Five minutes, not twenty-five, and that is load-bearing for the chain: the
+    # next card comes up ten minutes later, so this is the one pair in the
+    # fixture that is NOT a stack. Without it every hop here is stacked and the
+    # headline's "miles nobody paid for" is honestly 0.0 — which tests nothing
+    # about the arithmetic that separates the two.
     offer(2, 'Cobb Pkwy NW, Kennesaw', 'Peachtree St NE, Atlanta', 3.0,
-          where=(34.0170, -84.6001)),
+          where=(34.0170, -84.6001), minutes=5.0),
     # ...and one the card never gave a destination for at all, which is most of
     # this driver's real traffic.
-    offer(3, 'Zaxbys', None, 5.0),
+    # Placeable nowhere — the stub has never heard of Zaxbys and the card gave
+    # no destination — and stamped to sit in time BETWEEN two jobs that can be
+    # placed. That is what makes the hop spanning it a hop the car did not
+    # drive end to end, which the headline must not count as empty miles.
+    offer(3, 'Zaxbys', None, 5.0, at=NOW - 1500000),
     # A street the reader got wrong, answered by a real street in Idaho. Nothing
     # about the answer says it is wrong — it has a name, a type and coordinates
     # like every other — and until the page weighed it against the rest of the
@@ -514,7 +527,13 @@ with open(journal, 'w') as fh:
     #   o5  neither end placeable, and newest — a taken job that cannot be
     #       drawn must still be counted, and counting it off the running tally
     #       would lose it precisely because it came last.
-    for oid in ('o0', 'o1', 'o2', 'o4', 'o5'):
+    #   o3  taken, and placeable nowhere — the stub has never heard of Zaxbys
+    #       and the card gave no destination — sitting in time BETWEEN two that
+    #       can be placed. That is the mid-chain gap: the hop that spans it did
+    #       not have the car driving straight from one of its ends to the
+    #       other, so its straight line is not a distance anybody drove and the
+    #       headline must not count it as empty miles.
+    for oid in ('o0', 'o1', 'o2', 'o3', 'o4', 'o5'):
         fh.write(json.dumps({'v': 1, 'kind': 'mark', 'at': NOW,
                              'id': oid, 'accepted': True}) + '\n')
 
@@ -823,20 +842,77 @@ try:
     # Kennesaw. The figure is the point: a chain that reached Boise would put
     # this near two thousand and the sentence around it would be unchanged.
     _miles = re.search(r'([\d.]+) straight-line miles', status3)
-    ok_('...as a figure a shift inside one metro could actually have (%r)'
-        % (_miles and _miles.group(1)),
-        _miles and 5.0 < float(_miles.group(1)) < 75.0)
-    ok_('...counting the jobs it joined', '3 hops between 5 jobs' in status3)
+    ok_('...counting the jobs it joined', '3 hops between 6 jobs' in status3)
+    # THE arithmetic. A stacked hop's own popup says in as many words that it
+    # "is not an empty run", and the total above it was folding that hop's
+    # miles into "miles nobody paid for" — the same question answered two ways
+    # on the same line, inflated exactly on the shifts where the driver stacked
+    # well, which is the reading this toggle exists to support.
+    ok_('stacked miles are reported apart from the empty ones (%r)' % status3,
+        'did not drive empty' in status3)
+    _stacked = re.search(r'([\d.]+) mi across (\d+) stacked pair', status3)
+    ok_('...as their own figure and count (%r)'
+        % (_stacked and _stacked.group(0)),
+        _stacked and int(_stacked.group(2)) >= 1)
+
+    pops = chain.get('popups') or []
+
+    # THE cross-check, and the shape of the fault it replaces: the headline and
+    # the popups were answering the same question two ways on the same line.
+    # Each popup states its own miles and says whether it was a stack or had a
+    # job missing inside it, so the headline's "nobody paid for" figure is
+    # DERIVABLE from them — and a range check on it is not, which is how the
+    # old total passed while folding in miles its own popups called not empty.
+    _hops = []
+    for _p in pops:
+        _m = re.search(r'straight line ([\d.]+) mi', _p)
+        if not _m:
+            continue
+        _hops.append((float(_m.group(1)), 'a stack' in _p,
+                      'could not be put on' in _p))
+    eq('every hop drawn states its own miles', len(_hops), len(pts))
+    # The Boise guard, moved off the headline and onto the whole chain. A hop
+    # drawn to the pin in another state would put this near two thousand, and
+    # every sentence around it would be unchanged. It is checked on the TOTAL
+    # rather than on one of the three figures, because which bucket such a hop
+    # lands in depends on flags that have nothing to do with the mistake.
+    ok_('the whole chain is a shift inside one metro, not a trip to Idaho '
+        '(%.1f mi)' % sum(m for m, _s, _x in _hops),
+        5.0 < sum(m for m, _s, _x in _hops) < 75.0)
+    _wantEmpty = sum(m for m, st, miss in _hops if not st and not miss)
+    _wantStack = sum(m for m, st, miss in _hops if st and not miss)
+    ok_('the headline counts exactly the hops its own popups call empty '
+        '(%r vs %.1f)' % (_miles and _miles.group(1), _wantEmpty),
+        _miles and abs(float(_miles.group(1)) - _wantEmpty) < 0.15)
+    ok_('...and the stacked figure counts exactly the ones they call stacks '
+        '(%r vs %.1f)' % (_stacked and _stacked.group(1), _wantStack),
+        _stacked and abs(float(_stacked.group(1)) - _wantStack) < 0.15)
+    _over = re.search(r'([\d.]+) mi across (\d+) hop.? with a job missing', status3)
+    _wantOver = sum(m for m, st, miss in _hops if miss)
+    ok_('...and the third figure counts exactly the ones with a job missing '
+        'inside (%r vs %.1f)' % (_over and _over.group(1), _wantOver),
+        _over and abs(float(_over.group(1)) - _wantOver) < 0.15)
+    # ...and the fixture really does carry one hop of each kind, or all three
+    # checks above would pass with the arithmetic put back the way it was.
+    ok_('the shift contains a stacked hop, an empty one, and one with a job '
+        'missing (%r)' % (_hops,),
+        any(st and not miss for _m, st, miss in _hops)
+        and any(not st and not miss for _m, st, miss in _hops)
+        and any(miss for _m, st, miss in _hops))
+    # ...and so is a hop the car did not drive end to end, because a job it
+    # could not place is sitting inside it.
+    _over = re.search(r'([\d.]+) mi across (\d+) hop.? with a job missing', status3)
+    ok_('...and a hop with a job missing inside it is not counted as empty either (%r)'
+        % (_over and _over.group(0)), bool(_over))
     # A taken job that could not be put anywhere is not quietly dropped. It is
     # the newest of the five, which is exactly the one a running tally loses.
-    ok_('...and saying a taken job was stepped over (%r)' % status3,
-        '1 taken jobs have no pin' in status3)
+    ok_('...and saying the taken jobs it could not place were stepped over (%r)'
+        % status3, '2 taken jobs have no pin' in status3)
 
     # What a hop SAYS is half of what it is for. A driver reading these is
     # deciding whether the second offer was worth taking, and the two facts
     # that answer that are how far apart the ends were and whether the next
     # card came up while the last job was still running.
-    pops = chain.get('popups') or []
     ok_('a hop says where it left and where it arrived (%r)' % (pops[:1],),
         pops and any('Peachtree' in p and 'Chastain' in p for p in pops))
     ok_('...how far that was with nobody in the car',
@@ -845,12 +921,14 @@ try:
     # would be a measurement invented out of two unrelated timestamps.
     ok_('...and says which clock that is, rather than implying drive time',
         pops and all('between the two offers coming up' in p for p in pops))
-    # Every one of these cards states twenty-five minutes and they are ten to
-    # twenty minutes apart, so all three are stacks — the case where the line
-    # is NOT an empty run, and saying nothing about it would let a driver read
-    # a second pickup on the way as a dead run across the metro.
+    # A second offer that came up mid-job is the case where the line is NOT an
+    # empty run, and saying nothing about it would let a driver read a second
+    # pickup on the way as a dead run across the metro. Not all of them: the
+    # five-minute card above is deliberately over before the next one arrives.
     ok_('...and a second offer that came up mid-job is called a stack',
-        pops and all('a stack' in p for p in pops))
+        pops and any('a stack' in p for p in pops))
+    ok_('...while one that came up after the last job was due to end is not',
+        pops and any('a stack' not in p for p in pops))
 
     eq('turning it off takes the dashes away', (got.get('chainOff') or {}).get('lines'),
        (got.get('chainOff') or {}).get('was'))
