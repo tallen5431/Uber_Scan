@@ -737,12 +737,37 @@
   });
 
   function bind(id, key, parse, min, max) {
-    document.getElementById(id).addEventListener('input', function (e) {
+    var field = document.getElementById(id);
+    field.addEventListener('input', function (e) {
       var v = parse(e.target.value);
-      settings[key] = isFinite(v) ? Math.min(max, Math.max(min, v)) : DEFAULTS[key];
+      // A blank box is a box being retyped, not a request for the default:
+      // backspacing 40 to nothing stored 25 at once, and a driver interrupted
+      // there had a target they never chose. The previous value stands until a
+      // number replaces it.
+      //
+      // This is ui.js's rule, and ui.js is not a different page's opinion - the
+      // keypad binds these same five keys against this same stored object
+      // ('uberscan.settings.v1', scan.js:12 and ui.js:9). Two answers to one
+      // question, and only one of them had been thought about. Measured on
+      // "$12.40 24 min (6.6 mi) trip" with a 33c/mile cost: at the driver's own
+      // $40 line the card is a PASS at $25.56/hr, and backspacing the target
+      // box substituted the $25 default and turned the same card into an
+      // ACCEPT - then saved it, so the line they never chose was still there
+      // for the next card. Blanking the COST box is quieter and worse: the
+      // deduction is dropped, $41.99/hr reads $50.45/hr, and `uncosted` stays
+      // false so the "this rate is a ceiling" notice never appears.
+      //
+      // DEFAULTS still backs load(), which is the job it should have had: a
+      // first run and a corrupt store, not a keystroke.
+      if (!isFinite(v)) return;
+      settings[key] = Math.min(max, Math.max(min, v));
       save();
       if (lastResult) render(0);
     });
+    // ...and what was kept goes back into the box when the driver leaves it, so
+    // a value clamped to the range (60 in a band that stops at 50) and a blank
+    // both show the number that is actually in force.
+    field.addEventListener('change', function () { field.value = settings[key]; });
   }
   bind('setTarget', 'target', parseFloat, 0, 1000);
   bind('setBand', 'band', parseFloat, 0, 50);
@@ -754,6 +779,27 @@
     settings.fullFrame = e.target.checked;
     el.reticle.classList.toggle('full', settings.fullFrame);
     applyBox();
+    // ...and the note on the glass says which of the two states it is in now.
+    //
+    // setAdjusting() writes that sentence only at the instant adjust mode is
+    // ENTERED (`if (on)`), and this handler is the one thing that can make it
+    // false afterwards. So the note went stale in both directions, and the
+    // second is the one that matters:
+    //
+    //   box on, tick whole-frame   note still says "drag the box onto the
+    //                              card" over a box whose drag handler returns
+    //                              immediately — annoying, and visibly inert.
+    //   whole-frame on, UNTICK it  note still says "the box is not used" while
+    //                              sourceRect() has just started cropping
+    //                              every read to it. The rig is told the crop
+    //                              is off while the crop is deciding whether
+    //                              anything is read at all.
+    //
+    // `setAdjusting(adjusting())` re-states the mode it is already in: a no-op
+    // when the sheet was opened from the normal screen, and a rewrite of the
+    // sentence when it was opened from inside adjust mode. It is the only route
+    // — setAdjusting has exactly one other caller, the ▣ button.
+    setAdjusting(adjusting());
     save();
     if (worker) applyPsm();
   });

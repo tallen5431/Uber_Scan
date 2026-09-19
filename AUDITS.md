@@ -35,6 +35,56 @@ file.
 the last frame of the batch whether or not it carried a payout. `read_the_money`
 now picks the newest frame that states one and folds the rest in. `123fa02`.
 
+### The phone's scanner
+
+**A blank settings box stored the default, and saved it.** `bind()` in
+`scan.js` answered a half-typed field with `DEFAULTS[key]`, while `ui.js` —
+which binds the *same five keys against the same stored object*,
+`uberscan.settings.v1` — answers it by keeping what is there, with a comment
+saying why. Two answers to one question and only one of them thought about.
+Measured on "$12.40 24 min (6.6 mi) trip" at 33c/mile: at the driver's own $40
+line the card is a PASS, and backspacing the target box turned it into an
+ACCEPT and left $25 in the store, so the line they never chose was still there
+for the next card. A blanked *cost* box is quieter and worse — the deduction is
+simply dropped, $41.99/hr reads $50.45/hr, and `uncosted` stays false so the
+"this rate is a ceiling" notice never appears. `scan.js` now ships `ui.js`'s
+rule; `DEFAULTS` backs `load()` only, which is the job it should have had.
+
+**The phone wrote the journal's `text` column under a different rule from the
+rig.** `rpi/journal.py` stores the reading the reader gave — line breaks and
+all — capped at `TEXT_KEPT = 600`. `journal-client.js` stored the *flattened*
+form with no cap, into the same column of the same append-only file.
+Flattening is irreversible and `journal.html` renders that column inside a
+`<pre>`, so rig rows showed the card and phone rows showed one run-on line;
+`server.js`'s CSV says of it "It is what the reader read, line breaks and all",
+which was false for every phone row. Measured: a frame whose crop took in the
+screen behind the card ran to 2,639 characters, of which the rig stores 600 and
+the phone stored all of them. Re-parsing either form gives identical results in
+every field but `rawText` itself, so storing raw costs nothing. `TEXT_KEPT` is
+now a second copy of one number — normally refused here, but the two ends
+cannot import from each other and the alternative was no cap at all;
+`rpi/test_lint.py` holds them in step.
+
+**`row.cardMinutes` was the `minutes` expression character for character.** No
+input could make the two differ, `journal.html` contains no occurrence of it,
+and the comment above it said `journal.html` printed "one or the other off
+this" — it reads `fromDeadline`. `rpi/journal.py` folds `cardMinutes` into
+`minutes` and writes no such key, so the two writers of one file disagreed
+about its shape. Removed from the stored row. **On the READING payload the
+distinction is real and must stay** — `scan_pi.emit()` sends both as different
+claims and they diverge on every deadline card. That half of the filed finding
+is refuted; see Settled.
+
+**The box note went stale in both directions, and the worse one was unfiled.**
+`setAdjusting()` writes its sentence only at the instant adjust mode is
+entered, and the whole-frame checkbox is the one control that can falsify it
+afterwards. Ticking it left "drag the box onto the card" over a box whose drag
+handler returns immediately — annoying and visibly inert. **Unticking** it left
+"the box is not used" standing while `sourceRect()` had just started cropping
+every read to that box: the driver is told the crop is off while the crop
+decides whether anything is read at all. One line, `setAdjusting(adjusting())`
+in the change handler.
+
 ### The backup
 
 **Three ways the rig reported a healthy backup it did not have.** A row stamped
@@ -200,6 +250,31 @@ cannot fail.
 
 ### The reader
 
+**`cardMinutes` on the READING payload is not a duplicate of `minutes`.** It
+was filed as one. `scan_pi.emit()` sends `minutes` (the card's own figure),
+`cardMinutes` (the minutes the verdict was made over, which on a delivery card
+is time-until-deadline) and `billedMinutes` (with the driver's pad and shopping
+allowance added) — three different claims, and the first two diverge on every
+deadline card. Merging them would put a stated duration and a deadline
+countdown under one name on the one screen that has to tell them apart. The
+duplicate that *was* real lived in `journal-client.js` and is fixed; see Done.
+
+**A glare frame IS an episode boundary, if you only model it.** The one-line
+fix under Done is right, but the sequence that shows the fault is narrow and
+easy to get wrong. A payout-free read is only miscounted **before the card has
+landed** — once a reading is on disk the `same_card` guard recognises the
+payout and hides it. Measured against the real loop, not a model of it:
+
+| glare on | cards on disk | saw | kept |
+|---|---|---|---|
+| nothing | 1 | 1 | 1 |
+| read 3 only (after landing) | 1 | 1 | 1 |
+| read 2 only (before landing) | 1 | **2** | 1 |
+| reads 2, 4, 6 | 1 | **4** | 1 |
+
+A simulation that leaves out `same_card` reports an overcount everywhere and is
+wrong about which sequences matter. Drive `rpi/test_loop.py`'s `run()` instead.
+
 **Do not gate `accumulate.QUIET` on the window's reading being whole.** The
 *observation* behind it is correct and worth knowing: `QUIET = 2.0` is justified
 at the top of `rpi/accumulate.py` as "four times the resample cadence", but that
@@ -267,6 +342,27 @@ three-hour-block filter would make the map answer a question *before* a shift
 rather than only after one — on the parked desk page, where the six-control panel
 bar does not bind.
 
+**The phone's unsent queue only ever grows, and fails silently when it is
+full.** `uberscan.unsent.v1` is shortened only by a flush that lands, and on a
+phone with no rig reachable — a documented mode, since the README offers GitHub
+Pages, where the ingest POST 404s — nothing ever prunes it. Measured: about
+156 KB per 200-offer shift, roughly 5,000 rows to fill a 5 MB localStorage. At
+that point `save()` catches the QuotaExceededError and swallows it, `keep()`
+hands back a row that was not stored, and `scan.js` has already set `recorded`,
+so the card is gone and the page still paints its verdict. `journal-client.js`
+opens by saying nothing here "loses anything when [the network] is absent",
+which is exactly the case in which it does.
+
+The cure needs care and is not what it first looks like: `record()` is called
+on the **lock transition**, not per frame, so simply withholding `recorded`
+does not retry the card — it waits for three empty reads to drop the lock. And
+`save()` failing means storage-off (private mode, blocked site data) at least
+as often as storage-full, so a message naming either one is wrong half the
+time. The honest shape is: have `save()` report success, keep `recorded` so the
+card is not re-entered, say something true on a bounded hold, and give
+`scan.html` the queue count `ui.js` already gives the keypad. Do the README in
+the same commit if a cap is ever added, or the cap becomes a false claim there.
+
 **The panel's caption row has a stated budget that one sentence in ten keeps.**
 `live.html` writes the rule down — short, because the line is a row of the panel
 — and then emits nine sentences up to 125 characters. Either cap the row and let
@@ -283,7 +379,8 @@ the map keep its height, or rewrite the nine.
 | `map.html` layout, on every panel, for the first time | Four faults on the first run. Fix in `d829bb9`. |
 | The pin badge said "jobs" and counted offers | `4d0accc`. It says offers, and the popup keeps taken / passed on / never marked apart. |
 | The offer log's map sheet named a colour that was not drawn | Fix in this commit: it names the pin that is there, the end that is missing, and which of the three kinds of missing it is. |
-| The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | 29 hunted, 16 survived checking, 13 refuted. The worst is recorded below; the rest are being worked through, and what has landed so far is listed under Done. |
+| The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | 29 hunted, 16 survived checking, 13 refuted. The worst is recorded below; what has landed is under Done. |
+| The last five of those, re-checked one agent apiece and then attacked by two more | All five real, one reframed (`cardMinutes`), two proposed cures refuted with measurements. Four fixed; the fifth — the phone's unsent queue — is under Open with the reasoning its cure needs. |
 
 ### The worst fault this sweep found
 

@@ -423,6 +423,126 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
              headline: (document.getElementById('perHour') || {}).textContent || '' };
   });
 
+  // The note on the glass says which mode the box is actually in, after the
+  // checkbox that decides it has been flipped.
+  out.boxNote = await page.evaluate(() => {
+    var note = function () {
+      var n = document.getElementById('adjustNote');
+      return { text: (n.textContent || '').replace(/\s+/g, ' ').trim(),
+               shown: !n.hidden };
+    };
+    var setFull = function (on) {
+      var f = document.getElementById('setFullFrame');
+      f.checked = on;
+      f.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    var btn = document.getElementById('btnBox');
+    var adjusting = function () {
+      return document.body.classList.contains('adjusting');
+    };
+    setFull(false);
+    if (!adjusting()) btn.click();          // into adjust mode, box in use
+    var boxMode = note();
+    setFull(true);                          // ...the box stops being read
+    var afterTick = note();
+    setFull(false);                         // ...and starts again
+    var afterUntick = note();
+    var stillAdjusting = adjusting();
+    var labelWhileOn = btn.textContent.trim();
+    btn.click();                            // out of adjust mode
+    // Flipping the checkbox outside adjust mode must not switch the note on.
+    setFull(true);
+    var idleShown = note().shown;
+    var idleLabel = btn.textContent.trim();
+    setFull(false);
+    return { boxMode: boxMode, afterTick: afterTick, afterUntick: afterUntick,
+             stillAdjusting: stillAdjusting, labelWhileOn: labelWhileOn,
+             idleShown: idleShown, idleLabel: idleLabel };
+  });
+
+  // What the phone stores in the journal's `text` column, against what the rig
+  // stores in the same column of the same file.
+  out.rowText = await page.evaluate(() => {
+    var card = '$8.83\n23 min (4.6 mi) total\nPickup\nPapa Johns (Kennesaw)\n'
+             + 'Cobb Pkwy NW, Acworth';
+    var settings = { target: 25, band: 15, costPerMile: 0.30 };
+    var parsed = OfferParser.parse(card);
+    var rate = OfferParser.rate(parsed, settings);
+    var row = JournalClient.row(parsed, rate, settings,
+                                { browser: true, prefix: 'q' });
+    // A frame whose crop took in the screen behind the card: the case the cap
+    // is for, and the one where an uncapped column ran to two thousand chars.
+    var spill = OfferParser.parse(card + ' '
+                                  + 'Uber Eats Home Account Earnings '.repeat(80));
+    var spillRow = JournalClient.row(
+      spill, OfferParser.rate(spill, settings), settings,
+      { browser: true, prefix: 'q' });
+    // The keypad hands row() a bare {pay, minutes, miles} with no text at all.
+    var typed = JournalClient.row({ pay: 10, minutes: 20, miles: 5 },
+                                  { perHour: 30, state: 'go' }, settings,
+                                  { browser: true, prefix: 'k' });
+    // Re-parsing what is stored must give back what was parsed, or the stored
+    // form is lossy in a way that matters.
+    var back = OfferParser.parse(row.text);
+    return {
+      newlines: (row.text.match(/\n/g) || []).length,
+      rawNewlines: (parsed.rawText.match(/\n/g) || []).length,
+      flatNewlines: (parsed.text.match(/\n/g) || []).length,
+      reparsePay: back.pay, reparseMiles: back.miles, parsedPay: parsed.pay,
+      spillRead: spill.rawText.length, spillStored: spillRow.text.length,
+      typedText: typed.text === undefined ? 'undefined' : String(typed.text),
+      hasCardMinutes: 'cardMinutes' in row,
+      rowMinutes: row.minutes,
+    };
+  });
+
+  // A settings box being retyped is not a request for the default.
+  //
+  // Driven through the page's own input handler and read back off the STORED
+  // object, because the fault is that the substituted value was saved: a driver
+  // interrupted mid-backspace went back to driving against a line they never
+  // chose, and it was still there for the next card.
+  out.blankBox = await page.evaluate(() => {
+    var parsed = OfferParser.parse('$12.40 24 min (6.6 mi) trip');
+    var blank = OfferParser.parse('');
+    for (var i = 0; i < 4; i++) window.__scan.consider(blank);
+    window.__scan.consider(parsed);
+    window.__scan.consider(parsed);
+    var stored = function () {
+      return JSON.parse(localStorage.getItem('uberscan.settings.v1') || '{}');
+    };
+    var type = function (id, v) {
+      var f = document.getElementById(id);
+      f.value = v;
+      f.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    // The verdict WORD, without the trailing "?" the label adds while the card
+    // is not locked. Whether this fixture locks is not what is being measured
+    // here and pinning it would make the check fragile about something else.
+    var label = function () {
+      return (document.getElementById('verdictLabel').textContent || '')
+        .replace(/\s*\?$/, '').trim();
+    };
+    type('setCost', '0.33');
+    type('setTarget', '40');
+    var chosen = { target: stored().target, label: label() };
+    type('setTarget', '');
+    var blanked = { target: stored().target, label: label() };
+    // ...and leaving the box puts the number actually in force back into it,
+    // so the screen and the store cannot disagree about what the line is.
+    var f = document.getElementById('setTarget');
+    f.dispatchEvent(new Event('change', { bubbles: true }));
+    var shown = f.value;
+    // A real number still lands, or the guard would have turned the box off.
+    type('setTarget', '25');
+    var retyped = { target: stored().target, label: label() };
+    // The quieter half: a blanked COST box dropped the deduction entirely.
+    type('setCost', '');
+    var costBlank = stored().costPerMile;
+    return { chosen: chosen, blanked: blanked, shown: shown,
+             retyped: retyped, costBlank: costBlank };
+  });
+
   // The row the phone writes, built from the REAL parser and the REAL verdict
   // rather than from a literal beside it.
   //
@@ -985,6 +1105,120 @@ try:
     # into the journal with figures that do not produce its own rate. The
     # suite could not see it because the fixture beside it hands row() a
     # hand-written `rate`, which is the drift this project keeps finding.
+    # --- the note about the box, after the box stops being read -------------
+    #
+    # setAdjusting() writes that sentence only at the instant adjust mode is
+    # entered, and the whole-frame checkbox is the one control that can make it
+    # false afterwards. Both directions went stale; the second is the one that
+    # matters. "The box is not used" left standing while sourceRect() has just
+    # started cropping every read to it tells the driver the crop is off while
+    # the crop is deciding whether anything is read at all.
+    bn = got.get('boxNote') or {}
+    ok_('the box note was driven through the checkbox', bool(bn))
+    if bn:
+        box, tick, untick = (bn.get('boxMode') or {}, bn.get('afterTick') or {},
+                             bn.get('afterUntick') or {})
+        ok_('adjust mode with the box in use says to drag it (%r)'
+            % (box.get('text') or '')[:60], 'Drag the box' in (box.get('text') or ''))
+        ok_('...and the note is on the glass', box.get('shown'))
+        ok_('ticking whole-frame says the box is not used (%r)'
+            % (tick.get('text') or '')[:60],
+            'not used' in (tick.get('text') or ''))
+        no_('...and stops telling the driver to drag it',
+            'Drag the box' in (tick.get('text') or ''))
+        # The half the original report missed, and the dangerous one.
+        ok_('unticking it says to drag the box again (%r)'
+            % (untick.get('text') or '')[:60],
+            'Drag the box' in (untick.get('text') or ''))
+        no_('...and stops saying the box is not used while it is being read',
+            'not used' in (untick.get('text') or ''))
+        # Re-stating the mode must not leave it: the note is rewritten, not the
+        # mode toggled. A fix that flipped adjust mode off would pass both
+        # checks above and make the ▣ button do the opposite of its label.
+        ok_('...without leaving adjust mode', bn.get('stillAdjusting'))
+        eq('...and the button still offers the way out',
+           bn.get('labelWhileOn'), '▣ Done')
+        # ...and flipping the checkbox from the normal screen must not put an
+        # adjust-mode note on a page that is not adjusting.
+        no_('flipping it outside adjust mode shows no note', bn.get('idleShown'))
+        eq('...and leaves the button alone', bn.get('idleLabel'), '▣ Box')
+
+    # --- one column of one file, written under two rules --------------------
+    #
+    # rpi/journal.py stores the reading the reader gave — line breaks and all —
+    # capped at TEXT_KEPT. journal-client.js stored the FLATTENED form with no
+    # cap, into the same column of the same append-only file. Flattening is
+    # irreversible and journal.html renders this column inside a <pre>, so rig
+    # rows showed the card and phone rows showed one run-on line; server.js's
+    # CSV says of the column "It is what the reader read, line breaks and all".
+    rt = got.get('rowText') or {}
+    ok_('the stored reading was measured', bool(rt))
+    if rt:
+        # The two forms really do differ, or nothing below means anything.
+        eq('the reader gives line structure', rt.get('rawNewlines'), 4)
+        eq('...and flattening destroys it', rt.get('flatNewlines'), 0)
+        eq('the phone stores the form that keeps it', rt.get('newlines'), 4)
+        # Lossless: what is stored still parses to what was read. Keeping raw
+        # would not be worth much if it cost the row its own numbers.
+        eq('...and what is stored still parses back to the same card',
+           rt.get('reparsePay'), rt.get('parsedPay'))
+        eq('...distance included', rt.get('reparseMiles'), 4.6)
+        # The cap, on the frame it exists for.
+        ok_('a reading that spilled onto the screen behind the card is long (%r)'
+            % rt.get('spillRead'), (rt.get('spillRead') or 0) > 1500)
+        eq('...and is capped where the rig caps it', rt.get('spillStored'), 600)
+        # The keypad hands row() no text at all and must still write no column.
+        eq('a typed offer still stores no reading', rt.get('typedText'), 'undefined')
+        # The dead twin, removed in the same change: `cardMinutes` was the
+        # `minutes` expression character for character, so no input could make
+        # the two differ, and the comment over it named journal.html as printing
+        # "one or the other off this" — journal.html has no occurrence of it.
+        # rpi/journal.py folds cardMinutes into `minutes` and writes no such key.
+        eq('the stored row does not carry a second copy of its own minutes',
+           rt.get('hasCardMinutes'), False)
+        eq('...having already chosen between them', rt.get('rowMinutes'), 23)
+
+    # --- a box being retyped is not a request for the default ---------------
+    #
+    # `bind()` here answered a blank box with `DEFAULTS[key]` and SAVED it,
+    # while ui.js - which binds these same five keys against this same stored
+    # object, 'uberscan.settings.v1' - answers it by keeping what is there, with
+    # a comment saying why. Two answers to one question, and only one of them
+    # had been thought about.
+    #
+    # A driver edits these at the wheel, so a half-typed box is the normal state
+    # and not an edge case. Measured on this card: at their own $40 line it is a
+    # PASS, and a backspace turned it into an ACCEPT and left $25 in the store.
+    bb = got.get('blankBox') or {}
+    ok_('the blanked-settings-box case was driven', bool(bb))
+    if bb:
+        chosen, blanked, retyped = (bb.get('chosen') or {}, bb.get('blanked') or {},
+                                    bb.get('retyped') or {})
+        # First, that the card really is a PASS at the line the driver chose -
+        # otherwise the flip below proves nothing.
+        eq('at the line the driver set, this card is a PASS', chosen.get('label'), 'PASS')
+        eq('...against the target they typed', chosen.get('target'), 40)
+        # The fault, both halves: the verdict must not move, and the line they
+        # never chose must not reach the store.
+        eq('backspacing the target box does not change the verdict',
+           blanked.get('label'), 'PASS')
+        eq('...nor quietly store a line the driver never chose',
+           blanked.get('target'), 40)
+        # ...and the box shows what is actually in force when they leave it, so
+        # an empty box cannot read as "no target set".
+        eq('leaving the box puts the number in force back into it',
+           str(bb.get('shown')), '40')
+        # The guard must not turn the box off: a real number still lands, and
+        # here it lands hard enough to flip the verdict the other way.
+        eq('a number typed into the box still lands', retyped.get('target'), 25)
+        eq('...and the verdict follows it', retyped.get('label'), 'ACCEPT')
+        # The quieter half. A blanked cost box dropped the deduction: on
+        # "$18.50 22 min (9.4 mi)" at 33c/mile that is $41.99/hr reading
+        # $50.45/hr, with `uncosted` still false so the "this rate is a ceiling"
+        # notice never appears to say a cost was missing.
+        eq('...and a blanked cost box does not drop the running cost',
+           bb.get('costBlank'), 0.33)
+
     ra = got.get('rowAgrees') or {}
     ok_('the row was built from the real parser', bool(ra))
     if ra:

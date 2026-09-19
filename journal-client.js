@@ -20,6 +20,23 @@ var JournalClient = (function () {
 
   var KEY = 'uberscan.unsent.v1';
 
+  /* How much of a reading is kept, matching rpi/journal.py's TEXT_KEPT.
+   *
+   * The second copy of a number, which is normally the thing this project
+   * refuses — but the two ends cannot import from each other and the
+   * alternative is no cap at all on this end, which is what was here. The
+   * original and the twenty lines of reasoning behind the value are at
+   * rpi/journal.py:707-725; in short, 220 was tried and 99 of 309 cards sat
+   * exactly on it, cut off at the end where the pickup, the dropoff and the
+   * second leg live. rpi/test_lint.py holds the two in step.
+   *
+   * Inert on an ordinary card: over the 152-card corpus the stored text runs
+   * to a median of 63 characters and a maximum of 240. It is there for the
+   * frame whose crop takes in the screen behind the card, where a reading can
+   * run to two thousand characters — and where, uncapped, the phone wrote 1,998
+   * of them into a row the rig would have written 600 of. */
+  var TEXT_KEPT = 600;
+
   /* The Pi's `_round`, in the language the phone is written in.
    *
    * Kept to the same two places for money and one for minutes as
@@ -92,9 +109,26 @@ var JournalClient = (function () {
              : (parsed.miles > 0 ? parsed.miles : null),
       // Which of the two the minutes above are, so a reader months later can
       // tell a stated duration from the time left on a deadline. journal.html
-      // prints one or the other off this.
-      cardMinutes: (typeof rate.cardMinutes === 'number') ? rate.cardMinutes
-                                                          : parsed.minutes,
+      // prints its "Time from" line off this.
+      //
+      // `cardMinutes` used to sit here as well, and this comment sat over it
+      // saying journal.html printed one or the other off it. journal.html
+      // contains no occurrence of `cardMinutes` at all — it reads
+      // `fromDeadline`, which is what the sentence is actually about — and the
+      // key's expression was character-for-character the `minutes` expression
+      // eight lines up, so no input could ever make the two differ. A second
+      // answer to a question nothing asked, under a comment naming a reader
+      // that does not exist.
+      //
+      // It also made the two writers of one append-only file disagree about
+      // the row's shape: rpi/journal.py folds cardMinutes INTO `minutes` (see
+      // the "minutes the verdict was actually made over" comment there) and
+      // writes no such key.
+      //
+      // On the READING payload the distinction is real and must stay —
+      // scan_pi.emit() sends `minutes` and `cardMinutes` as different claims,
+      // and they diverge on every deadline card. This is the stored row, which
+      // has already chosen between them one line up.
       fromDeadline: !!rate.fromDeadline,
       items: parsed.items || null,
       shop: parsed.shop ? true : null,
@@ -120,7 +154,34 @@ var JournalClient = (function () {
       // there is no second rule to drift.
       pickup: parsed.pickup || undefined,
       dropoff: parsed.dropoff || undefined,
-      text: parsed.text || undefined,
+      // What the reader read, with its line breaks, the way the rig writes it.
+      //
+      // This was `parsed.text` — the FLATTENED form, and uncapped. Three
+      // separate things wrong with one expression, all of them the same shape
+      // as the drift the comment below this one describes.
+      //
+      // `rawText` first, because flattening is irreversible and throws away
+      // which line each figure was on. offer-parser.js keeps `rawText` beside
+      // `text` deliberately and says so; rpi/journal.py:886 stores it for the
+      // same reason, recorded there as "the last two parser fixes had to
+      // rediscover [line structure] from punctuation because it had been
+      // discarded before anything could look at it". Measured on one card:
+      // rawText carries 4 newlines, `text` carries 0, and journal.html renders
+      // this column inside a <pre> — the one element whose whole job is to keep
+      // them. So rig rows showed the card and phone rows showed one run-on
+      // line, in the same file, on the same page. server.js's CSV says of this
+      // column "It is what the reader read, line breaks and all", which was
+      // false for every phone row.
+      //
+      // Safe to change: re-parsing either form gives identical results in every
+      // field but `rawText` itself, measured across the corpus, so nothing
+      // computed from a stored row moves. Ingest de-duplicates on id and seq
+      // (server.js key()), not on content, so an already-stored row cannot come
+      // back looking new.
+      //
+      // ...and capped, because the phone's scanner exists for the nights the
+      // rig cannot read and its rows are the ones with no second copy.
+      text: (parsed.rawText || parsed.text || '').slice(0, TEXT_KEPT) || undefined,
       // Rounded, because rpi/journal.py rounds. The same field, written by the
       // same project, into the same file, under two rules — and the second rule
       // was simply absent rather than different, which is the shape that drifts

@@ -2310,8 +2310,36 @@ def main():
         # split one card across two windows — seen in the first, kept in the
         # second — which costs nothing, because both totals are added up over
         # the whole range before anyone divides them.
+        #
+        # `is not None` because a read that found no payout is not a card
+        # boundary, and treating it as one is the very thing the paragraph
+        # forty lines up forbids: "nothing here is cleared by a read that came
+        # back empty ... one glare frame during the resample burst would re-arm
+        # the gate". It re-armed the gate. accumulate.add() returns the frame
+        # untouched and with no episode on it when there is no payout to key on
+        # (see its first guard), and `None != seen_episode` is true, so the
+        # glare frame opened a new card.
+        #
+        # The `same_card` guard below hid it for most of a card's life, which is
+        # why it lasted: once a reading has LANDED, a later re-read carries the
+        # same payout and is recognised. The window it does not cover is the one
+        # before the card lands — a card is read, read again to agree, and only
+        # then written — and a glare frame inside that window is an ordinary
+        # event on a rig whose reads take 1.8s and whose verify beat is 2.5s.
+        #
+        # Measured against the real loop, one card, glare on reads 2, 4 and 6:
+        #
+        #   before   1 card on disk, saw 4, kept 1
+        #   after    1 card on disk, saw 1, kept 1
+        #
+        # `saw - kept` is what the offers page turns into "3 times the scanner
+        # picked a payout off the screen and never managed to record it - 75% of
+        # the 4 it saw. So at least that many offers are missing from everything
+        # above." About one card that is sitting in the journal. A figure whose
+        # whole job is to say how much the file is missing, reporting misses
+        # against a file that is complete.
         episode = parsed.get('episode')
-        if episode != seen_episode:
+        if episode is not None and episode != seen_episode:
             seen_episode = episode
             seen_pay = False
             seen_kept = False

@@ -281,6 +281,56 @@ eq('...counted as one card seen (%r)' % [(x['saw'], x['kept']) for x in seen],
    sum(x['saw'] for x in seen), 1)
 eq('...and as one recorded', sum(x['kept'] for x in seen), 1)
 
+# --- a glare frame is not a card either --------------------------------------
+#
+# The case above is a MISREAD payout - "$1605" for "$16.05" - which `same_card`
+# recognises by its impossibility. This is the other shape: a read that finds no
+# payout at all, which is what glare, a hand across the phone, or a notification
+# banner actually produces. It carries no episode, and the seen-gate treated
+# that absence as the start of a new card.
+#
+# Timed to land BEFORE the card is written, which is the whole of the exposure.
+# Once a reading has landed, `same_card` matches the payout and hides this; a
+# card is read, read again to agree, and only then written, and on a rig whose
+# reads take 1.8s and whose verify beat is 2.5s a glare frame inside that
+# window is an ordinary event rather than a contrived one.
+GLARE = 'Uber  ...  '
+
+r = run(lambda n, k: GLARE if n in (2, 4, 6) else WHOLE, extra_argv=['--no-parallel'],
+        seconds=24.0, health_every=3.0,
+        until=lambda rows, ann, calls: sum(1 for x in rows if x.get('kind') == 'seen') >= 2
+        and calls >= 10)
+seen = [x for x in r['rows'] if x.get('kind') == 'seen']
+offers = [x for x in r['rows'] if not x.get('kind')]
+ok_('the health tally was written for the glare run', bool(seen))
+eq('one card on disk through three glare frames',
+   len(set(x['id'] for x in offers)), 1)
+# Was 4. The offers page turns saw - kept into "3 times the scanner picked a
+# payout off the screen and never managed to record it - 75% of the 4 it saw.
+# So at least that many offers are missing from everything above" - about one
+# card that is in the file.
+eq('...counted as one card seen (%r)' % [(x['saw'], x['kept']) for x in seen],
+   sum(x['saw'] for x in seen), 1)
+eq('...and as one recorded', sum(x['kept'] for x in seen), 1)
+eq('...so the page is told nothing went missing',
+   sum(x['saw'] for x in seen) - sum(x['kept'] for x in seen), 0)
+
+# The control that keeps the gate honest: a genuinely different card still
+# opens a new count. A fix that simply stopped re-arming would pass everything
+# above and silently merge every card in a shift into one.
+SECOND = ('$9.40 4 min (1.4 mi) away Barrett Pkwy, Kennesaw '
+          '15 min (5.2 mi) trip 900 Oak Ln, Marietta, GA 30060')
+r2 = run(lambda n, k: WHOLE if n < 4 else SECOND, extra_argv=['--no-parallel'],
+         seconds=24.0, health_every=3.0,
+         until=lambda rows, ann, calls: sum(1 for x in rows if x.get('kind') == 'seen') >= 2
+         and calls >= 10)
+seen2 = [x for x in r2['rows'] if x.get('kind') == 'seen']
+offers2 = [x for x in r2['rows'] if not x.get('kind')]
+eq('two different cards are two cards on disk',
+   len(set(x['id'] for x in offers2)), 2)
+eq('...and two cards seen', sum(x['saw'] for x in seen2), 2)
+eq('...and two recorded', sum(x['kept'] for x in seen2), 2)
+
 # --- a read that never returns stops the heartbeat ---------------------------
 # Twelve seconds: a heartbeat every four would leave the last one under four
 # seconds old; a rig that went quiet at 1.5s leaves it about twelve.

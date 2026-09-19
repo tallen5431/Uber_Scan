@@ -289,6 +289,31 @@ for _name in ('MAX_PLACE', 'MAX_PLACES', 'SANE_RATE', 'SANE_MPH', 'MAX_MPH',
            % (_j.group(1), _p.group(1)),
            float(_j.group(1)), float(_p.group(1)))
 
+# ...and the same for the one number the PHONE has to keep in step with the
+# rig: how much of a reading is stored. journal-client.js and rpi/journal.py
+# write the same column of the same append-only file, and the phone's copy was
+# not a different number but no number at all — so a frame whose crop took in
+# the screen behind the card stored 600 characters from the rig and 1,998 from
+# the phone. A second copy of a constant is normally what this project refuses;
+# these two ends cannot import from each other, so the copy is held here
+# instead.
+_jc = open(os.path.join(ROOT, 'journal-client.js')).read()
+_jt = re.search(r'\bvar\s+TEXT_KEPT\s*=\s*([0-9]+)\s*;', _jc)
+_pt = re.search(r'(?m)^TEXT_KEPT\s*=\s*([0-9]+)\s*$', open(
+    os.path.join(ROOT, 'rpi', 'journal.py')).read())
+ok_('TEXT_KEPT is a named constant in the browser journal client', _jt is not None)
+ok_('...and in the rig\'s', _pt is not None)
+if _jt and _pt:
+    eq('...and the two agree about it (js %s, py %s)' % (_jt.group(1), _pt.group(1)),
+       int(_jt.group(1)), int(_pt.group(1)))
+# Both ends store the reading the reader gave, not the flattened form. The
+# phone stored `parsed.text` — flattening is irreversible, and journal.html
+# renders this column in a <pre> whose whole job is the line breaks it threw
+# away.
+ok_('the browser row keeps the raw reading, not the flattened one',
+    'parsed.rawText || parsed.text' in _jc)
+ok_('...and caps it', 'slice(0, TEXT_KEPT)' in _jc)
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is
