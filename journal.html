@@ -2942,7 +2942,21 @@
            ? ' — which cannot be right, so one of these pins is wrong.'
            : '.'));
     } else if (names.length > 1) {
-      sheetSay('only one end could be found. Green is the pickup, amber the dropoff.');
+      /* One end drawn, and the sheet used to name BOTH colours for it — "Green
+         is the pickup, amber the dropoff" over a map with one pin on it, so a
+         driver looking for the amber one went on looking. It also never said
+         which end was missing or why, while the branch twenty lines above
+         splits that question three ways for the case where NOTHING placed.
+         The same three answers apply to one end as to two, and only one of
+         them is about the rig's reading. */
+      var gone = names.filter(function (q) { return !found[q]; })[0];
+      var drawn = names.filter(function (q) { return !!found[q]; })[0];
+      sheetSay(esc(drawn) + ' is the ' + (drawn === r.pickup ? 'green' : 'amber')
+        + ' pin. ' + esc(gone) + ' '
+        + (found[gone] === null
+           ? 'could not be found — usually a misread address.'
+           : 'could not be asked about — no network, or it was busy. Nothing '
+             + 'is stored for it, so pressing again will retry.'));
     } else {
       sheetSay(found[names[0]].name || '');
     }

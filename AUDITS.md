@@ -126,10 +126,6 @@ Where `milesUncertain` is set there is no yardstick at all, so the pair should b
 marked unjudged rather than accused; where `milesCorrected` is set the popup
 should say the card's figure was corrected.
 
-**The offer log's map sheet names a colour that is not on the map** when only one
-end places, and never says which end failed or why. The three-way split
-(found / not found / could not be asked) is already written a few lines above it.
-
 **The geocode cache does not sync to the NUC.** It is the one thing the owner
 asked to sync that does not: `remember()` goes to real lengths to merge across
 two *tabs* and does nothing across two *machines*, while the journal syncs both
@@ -160,7 +156,8 @@ the map keep its height, or rewrite the nine.
 | `map.html`, `live.html` map mode, the offer log's map sheet, `map-view.js` | 25 proposals, 14 survived checking, 11 refuted. Fixes in `06a6dd8`, `ebc80df`, `f5cfb96`, `c98f6fb`. |
 | `readJournal` / `latestPerOffer` / every consumer of a journal read | 43 consumer claims mapped and verified. Fix in `d864163`. |
 | `map.html` layout, on every panel, for the first time | Four faults on the first run. Fix in `d829bb9`. |
-| The pin badge said "jobs" and counted offers | Fix in this commit: it says offers, and the popup keeps taken / passed on / never marked apart. |
+| The pin badge said "jobs" and counted offers | `4d0accc`. It says offers, and the popup keeps taken / passed on / never marked apart. |
+| The offer log's map sheet named a colour that was not drawn | Fix in this commit: it names the pin that is there, the end that is missing, and which of the three kinds of missing it is. |
 | The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | **In flight at the time of writing — not yet recorded here.** |
 
 Two facts about the rig that keep coming up and are worth not re-deriving, both

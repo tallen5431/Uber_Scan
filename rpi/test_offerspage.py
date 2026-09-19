@@ -797,6 +797,20 @@ const TEXT = (sel) => {
       await tap('r2', 'dropoff');
       await page.waitForTimeout(2600);
       out[name].lost = await page.evaluate(sheet);
+      // ...and the shape in between, which is the commonest of the three: one
+      // end on the map and one that could not be placed. r2's pickup is real
+      // and its dropoff is a street nothing has heard of. The sheet used to
+      // name BOTH colours here — "Green is the pickup, amber the dropoff" —
+      // over a map with one pin on it, and never said which end was missing or
+      // why, while the branch for "nothing placed" splits that three ways.
+      await tap('r2', 'dropoff');
+      await page.waitForTimeout(250);
+      // The stub's pin list accumulates across taps, so it is cleared here:
+      // what this case is about is how many pins THIS draw put down.
+      await page.evaluate(() => { window.__pins = []; });
+      await tap('r2', 'both');
+      await page.waitForTimeout(3600);
+      out[name].halfPlaced = await page.evaluate(sheet);
     }
     if (name === 'took six') {
       // A mark, made on an opened row a long way down the list: the row
@@ -1676,6 +1690,25 @@ try:
     # map that is still loading.
     ok_('an unplaceable address says so rather than showing nothing (%r)'
         % _m['lost']['note'], 'found nothing' in _m['lost']['note'])
+
+    # One end on the map and one that could not be placed — the commonest of
+    # the three shapes, and the one the sheet described worst. It named BOTH
+    # colours over a map with one pin on it, so a driver looking for the amber
+    # one went on looking, and it never said which end was missing or why.
+    _half = _m['halfPlaced']
+    eq('one end placed draws one pin', _half['pins'], 1)
+    ok_('...and the caption names the pin that is actually there (%r)'
+        % _half['note'], 'Chastain' in _half['note'])
+    ok_('...by the colour it was actually drawn in', 'green pin' in _half['note'])
+    no_('...and does not name a colour that is not on the map',
+        'amber' in _half['note'])
+    # Which end is missing, and which of the three kinds of missing it is —
+    # only one of them is about the rig's reading, and the other two are about
+    # the network. The page splits this three ways when NOTHING places; it said
+    # nothing at all when one end did.
+    ok_('...naming the end that is missing', 'Zzqx' in _half['note'])
+    ok_('...and why, in the words that blame the reading rather than the link',
+        'misread' in _half['note'])
 
     _one = [c for c in got['took six']['caveats'] if 'running cost' in c]
     ok_('a window written by one device gets the plain sentence (%r)'
