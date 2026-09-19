@@ -100,6 +100,33 @@ of your way" on the driving panel.)*
 The proposal manufactures a confidently wrong number and proposes a check that
 cannot fail.
 
+### The reader
+
+**Do not gate `accumulate.QUIET` on the window's reading being whole.** The
+*observation* behind it is correct and worth knowing: `QUIET = 2.0` is justified
+at the top of `rpi/accumulate.py` as "four times the resample cadence", but that
+arithmetic is against `RESAMPLE_EVERY`, which is how often the loop *asks* for a
+frame. The reader is single-slot and `rpi/scan_pi.py` measures a read at
+`READ_SECONDS` 1.85 median, 3.7 at p90 — so the real gap between two readings of
+one card routinely exceeds the threshold, and the verify beat (2.5 s backing off
+to 6.0 s) always does.
+
+The proposed cure is still wrong, and the suite says so. Gating on the window
+being whole (`held_total or len(self.legs) >= 2`) makes the window never settle
+on a **single-leg** card — "$12.99 Guaranteed (incl. tips) 7.7 mi + 28 min",
+which is the commonest shape this driver sees — so a genuinely different card
+with the same payout arriving six seconds later is merged into the one before
+it. Tried: `...and so is one that replaces it straight away` drops from 2
+episodes to 1. An audit that claimed to have verified this cure named a method
+(`_merged_view`) that does not exist, so it cannot have run what it described.
+
+The exposure is also narrower than it first looks. `quiet` is already tested
+*last*, after every leg has failed to line up, so a re-read of the same card
+that arrives late does not reach it — only a frame in which **no** leg lines up
+does. If this is ever revisited, the thing to change is the constant's
+calibration against the measured read time, not a wholeness gate, and the two
+replacement cases in `rpi/test_accumulate.py` are the ones that decide it.
+
 **Per-place correction of a bad geocode was proposed twice and refused twice**
 in its stated form — a button on the page the driver is not on, whose remedy
 cannot change its own output. The *problem* is real and is listed under Open
