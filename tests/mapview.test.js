@@ -220,6 +220,40 @@ eq('a place with no answer is not a stray',
    Object.keys(MV.straysAmong({ a: { lat: 33.9, lon: -84.5 }, b: null })).length, 0);
 eq('nothing found, nothing stray', Object.keys(MV.straysAmong({})).length, 0);
 
+/* ---- the same accusation, against a point that was measured ---------------
+ *
+ * straysAmong votes among the pins and needs a shift's worth to vote with. The
+ * panel's map has two or three places, where the middle IS the midpoint of the
+ * pair being judged — so it had no stray test at all, and a misread street
+ * answered two states away was drawn, framed, and used as one end of the "out
+ * of your way" figure. farFrom asks a different question: how far is this pin
+ * from where the car actually WAS, which is measured rather than looked up. */
+var CAR = { lat: 33.90, lon: -84.50 };
+var FAR = MV.farFrom(CAR, FOUND);
+eq('only the pin in another state is called wrong', Object.keys(FAR).length, 1);
+ok_('...and it is named, with how far out it is', FAR['Daffodll Ln'] > 500);
+// The case straysAmong cannot do at all, and it fails in the worse of the two
+// possible ways. With two places its median is their midpoint, so BOTH come out
+// equally far and both are accused — the good pin condemned alongside the bad
+// one, on a pane that has exactly this many places.
+var PAIR = { 'Chipotle': FOUND['Chipotle'], 'Daffodll Ln': FOUND['Daffodll Ln'] };
+eq('the vote accuses both ends of a pair when one is wrong',
+   Object.keys(MV.straysAmong(PAIR)).length, 2);
+eq('...where the measured anchor accuses only the one that is',
+   Object.keys(MV.farFrom(CAR, PAIR)).length, 1);
+ok_('...and names it', !!MV.farFrom(CAR, PAIR)['Daffodll Ln']);
+// A long job is not a bad lookup. The threshold is the same generous one the
+// shift map uses, so what this catches is another state and not another county.
+eq('a forty-mile job is not called wrong',
+   Object.keys(MV.farFrom(CAR, { a: { lat: 34.5, lon: -84.5 } })).length, 0);
+// No anchor, no accusation. A rig whose rows carry no position knows nothing
+// new about these places, and guessing on thinner evidence is how a right pin
+// gets called wrong.
+eq('with no position the page accuses nothing',
+   Object.keys(MV.farFrom(null, FOUND)).length, 0);
+eq('...and a place with no answer is not accused either',
+   Object.keys(MV.farFrom(CAR, { a: null })).length, 0);
+
 /* ---- judging a job once both ends are placed -----------------------------
  *
  * The `impossible` test is the one place in this project where a geocoded

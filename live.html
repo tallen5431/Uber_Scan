@@ -2879,6 +2879,16 @@
   }
 
   function drawMap(want, found, here) {
+    /* Which of these pins cannot be where it says it is.
+       A geocoder handed a misread street answers with a real street somewhere,
+       at the same confidence as a right one, and this pane has two or three
+       places — far too few for the whole-shift test, which takes the middle of
+       the pins and would here be the midpoint of the two it is judging. The
+       car's own GPS fix is the one point on this map that was measured rather
+       than looked up, so the accusation is made against that. No fix, no
+       accusation. */
+    var wrong = MV.farFrom(here, found);
+
     if (mapLayer) theMap.removeLayer(mapLayer);
     mapLayer = L.layerGroup().addTo(theMap);
     var bounds = [];
@@ -2900,9 +2910,24 @@
     var age = fixAge();
     put(here, '#7aa2f7', 'where you were',
         age === null ? null : 'a fix ' + spellAge(age) + ' old', true);
-    put(held, '#f5a524', 'where the order in your car is going', want.held);
-    put(pick, '#17c964', 'pick this one up', want.pickup);
-    put(drop, '#f5a524', 'and drop it here', want.dropoff);
+    /* Red beats both roles, the same rule the whole-shift map keeps: whether a
+       wrong coordinate was a pickup or a dropoff is not the thing to notice
+       about it. Drawn rather than hidden, because a pin quietly dropped is the
+       driver wondering where their dropoff went. */
+    function colourFor(name, role) {
+      return wrong[name] ? '#f31260' : role;
+    }
+    function sayFor(name, said) {
+      return wrong[name]
+        ? said + ' — ' + Math.round(wrong[name]) + ' mi from you, so this pin is wrong'
+        : said;
+    }
+    put(held, colourFor(want.held, '#f5a524'),
+        sayFor(want.held, 'where the order in your car is going'), want.held);
+    put(pick, colourFor(want.pickup, '#17c964'),
+        sayFor(want.pickup, 'pick this one up'), want.pickup);
+    put(drop, colourFor(want.dropoff, '#f5a524'),
+        sayFor(want.dropoff, 'and drop it here'), want.dropoff);
 
     // The run already committed to, and the run this card would add. Dashed
     // for the detour, solid for the job, which is the same distinction the map
@@ -2936,7 +2961,7 @@
     // the order in the car is going, because that order HAS to be delivered;
     // where the new job ends after that is a further guess, and a parameter
     // nothing reads is a parameter that will one day be read by mistake.
-    mapDrew(mapLine(want, found, here, pick, held));
+    mapDrew(mapLine(want, found, here, pick, held, wrong));
   }
 
   /* The one line of words under the map, and the only figure this mode
@@ -2944,7 +2969,7 @@
      on my way, or behind me — and it says in the same breath that it is a
      straight line and not a road, because a driver acting on it is acting on
      three geocoded points. */
-  function mapLine(want, found, here, pick, held) {
+  function mapLine(want, found, here, pick, held, wrong) {
     /* Why a place has no pin, in the three kinds this project keeps apart
        everywhere else — because only one of them is about the rig's reading.
        An empty answer is stored as null; a lookup that could not be MADE is
@@ -2965,7 +2990,17 @@
     var age = fixAge();
     var old = age !== null && age > FIX_STALE_MS;
 
-    var gap = old ? null : MV.detour(here, pick, held);
+    /* A pin the page can see is wrong may not be one end of a figure the driver
+       acts on. That is the header of map-view.js in one sentence: a coordinate
+       invented from a misread street, turned into a distance, turned into a
+       number on the panel, is the exact failure this project refuses. The pins
+       are still drawn and still marked — seeing them is how the driver knows
+       what happened — but the arithmetic stops. */
+    wrong = wrong || {};
+    var badEnd = (want.pickup && wrong[want.pickup]) ? want.pickup
+               : (want.held && wrong[want.held]) ? want.held : null;
+
+    var gap = (old || badEnd) ? null : MV.detour(here, pick, held);
     if (gap !== null) {
       return (gap < 0.5 ? 'this pickup is on your way'
                         : '+' + gap.toFixed(1) + ' mi out of your way')
@@ -2984,6 +3019,9 @@
     // nothing assumes the rig checked and found nothing worth saying.
     if (old) return 'the last position the rig recorded is ' + spellAge(age)
                   + ' old, so there is nothing current to measure this against';
+    if (badEnd) return esc(badEnd) + ' came back ' + Math.round(wrong[badEnd])
+                     + ' mi from where you are — a misread name, almost '
+                     + 'certainly, so there is no distance worth quoting';
     if (!here) return 'no position on the recent offers, so there is nothing '
                     + 'to measure this pickup against';
     if (!want.held) return holdingNow

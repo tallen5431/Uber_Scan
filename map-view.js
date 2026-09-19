@@ -244,6 +244,37 @@
     return strays;
   }
 
+  /* The same accusation, made against a point that was MEASURED.
+   *
+   * straysAmong takes the middle of the pins and asks which are far from it,
+   * which works on a whole shift and cannot work on two or three places: with a
+   * pickup and a dropoff the middle IS the midpoint, both ends come out equally
+   * far, and it accuses whichever it likes. The panel's map has exactly that
+   * many places, so it had no stray test at all — a misread street answered by
+   * a real one two states away was drawn, framed, and then used as one end of
+   * the "out of your way" figure.
+   *
+   * What the panel has that a whole-shift map does not is an anchor that is not
+   * a guess: the car's own GPS fix off the journal row. Distance from THAT is
+   * a claim about one lookup rather than a vote among lookups, and it is the
+   * same argument map.html already makes for drawing the trail — the measured
+   * thing is the only one that can contradict a pin without being the same kind
+   * of thing as the pin.
+   *
+   * No anchor, no accusation. A rig whose rows carry no position knows nothing
+   * new about these places and must not start guessing on thinner evidence. */
+  function farFrom(anchor, found, miles) {
+    var far = miles || FAR_MILES;
+    var out = {};
+    if (!anchor) return out;
+    Object.keys(found || {}).forEach(function (q) {
+      if (!found[q]) return;
+      var away = crowMiles(anchor, found[q]);
+      if (away > far) out[q] = away;
+    });
+    return out;
+  }
+
   /* Every place the loaded offers name, once each, in the order first seen. */
   function placesIn(offers) {
     var wanted = [];
@@ -758,7 +789,7 @@
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
            detour: detour, fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
-           straysAmong: straysAmong, placesIn: placesIn, jobsIn: jobsIn,
+           straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,

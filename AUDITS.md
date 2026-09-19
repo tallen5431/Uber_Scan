@@ -88,10 +88,13 @@ rather than the half-mile cut-off). It would put a second geocoded number on the
 panel for the driver to act on, which the header of `map-view.js` forbids.
 
 **Do not run `straysAmong` against the median of two points** on `live.html`.
-With a pickup and a dropoff the median *is* the midpoint and both ends come out
-equally far, so it accuses whichever pin it likes. If this is ever wanted, it
-must be measured against the car's own GPS fix, which is the one point on that
-map that was not looked up.
+With a pickup and a dropoff the median *is* the midpoint, so both ends come out
+equally far and **both are accused** — the good pin condemned beside the bad one.
+Measured, not reasoned: `straysAmong` on such a pair returns 2. This is why
+`MV.farFrom` exists and is anchored on the car's measured GPS fix instead; see
+`map-view.js`. *(Done — the panel now marks the wrong pin and withholds the
+figure. Before it, a misread street answered in Idaho produced "+3619.4 mi out
+of your way" on the driving panel.)*
 
 **Do not re-draw a stacked hop out of the dropoff the car had not reached.**
 The proposal manufactures a confidently wrong number and proposes a check that

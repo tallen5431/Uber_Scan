@@ -1786,6 +1786,9 @@ const framed = (page) => page.waitForFunction(
       // back is whatever the OCR made of it, and these popups are the one
       // place on this page that builds markup from a string it did not write.
       "<b>Kroger</b> & Co \"Deli\"":  [34.030, -84.560],
+      // Eighteen hundred miles away, and answered as confidently as the rest.
+      // This is what a geocoder handed a misread street really does.
+      "W Boise Ave":             [43.615, -116.202],
     };
     const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                               .then((c) => c.newPage());
@@ -1961,6 +1964,32 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(1800);
     out.mapNoPickup = await page.evaluate(
       () => document.getElementById('viewNote').textContent.trim());
+
+    /* A pickup the geocoder answered two states away. Nothing about that answer
+       says it is wrong — it has a name, a type and coordinates like any other —
+       and the pane has too few places for the whole-shift vote, which with two
+       points is their own midpoint and accuses both. The car's measured fix is
+       what settles it.
+
+       The pin is still DRAWN, in the colour that says it cannot be right, and
+       the figure the mode exists to produce is withheld: a coordinate invented
+       from a misread street, turned into a distance, turned into a number on
+       the panel, is the exact failure map-view.js's header refuses. */
+    stage = 'the map mode: a pickup two states away';
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 26.0, grossPerHour: 31.0, pay: 11.0,
+      minutes: 19.0, miles: 3.5, cost: 1.1, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-stray', pay: 11.0, minutes: 19.0, billedMinutes: 19.0,
+               miles: 3.5, cost: 1.1, pickup: 'W Boise Ave',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(2600);
+    out.mapStray = await page.evaluate(() => ({
+      note: document.getElementById('viewNote').textContent.trim(),
+      marks: (window.__marks || []).length,
+      reds: (window.__marks || []).filter(function (m) {
+        return m.opts && m.opts.fillColor === '#f31260'; }).length,
+      popups: (window.__marks || []).map(function (m) { return String(m.popup || ''); }) }));
 
     stage = 'the map mode: a place name the reader made up';
     await page.evaluate(() => window.__es.push({
@@ -3490,6 +3519,24 @@ try:
     eq('...and its lines with them', blank.get('lines'), 0)
     ok_('...saying so rather than leaving the last line up (%r)'
         % blank.get('note'), 'names nowhere' in (blank.get('note') or ''))
+
+    # A pickup the geocoder answered two states away. The pane has too few
+    # places for the whole-shift vote — with two points that vote is their own
+    # midpoint and accuses both ends — so the accusation is made against the
+    # car's measured fix instead.
+    stray = got.get('mapStray') or {}
+    ok_('a pin eighteen hundred miles away is still drawn, not dropped (%r)'
+        % stray.get('marks'), (stray.get('marks') or 0) >= 3)
+    eq('...in the colour that says it cannot be right', stray.get('reds'), 1)
+    ok_('...saying how far from you it landed',
+        any('mi from you' in p and 'wrong' in p for p in (stray.get('popups') or [])))
+    # THE point. A number built off a pin the page can see is wrong is the exact
+    # failure map-view.js's header refuses.
+    note = stray.get('note') or ''
+    ok_('...and no detour is quoted off it (%r)' % note,
+        'out of your way' not in note and 'on your way' not in note)
+    ok_('...with the reason named rather than a blank line',
+        'misread' in note)
 
     off = got.get('mapOff') or {}
     # Round to the start: the label offers the scene again, which is what it
