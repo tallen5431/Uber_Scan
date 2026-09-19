@@ -1126,6 +1126,26 @@ try:
         'BLOB' in keep[0])
     ok_('...which is a different cache from the shell', shells[0] != blobs[0])
 
+    # Every page this server serves is in the shell. map.html was the one that
+    # was not, and the fallback below answered for it with index.html — so
+    # offline, "Map check" opened the ride calculator under the map's own URL.
+    # Asserted against the directory rather than a hand-written list, so a page
+    # added later has to be thought about rather than quietly left out.
+    listed = [l for l in worker_src.splitlines()
+              if l.strip().startswith("'") and l.strip().rstrip(',').endswith("'")]
+    shelled = ' '.join(listed)
+    for page in sorted(f for f in os.listdir(ROOT) if f.endswith('.html')):
+        ok_('the shell holds %s' % page, ("'" + page + "'") in shelled)
+
+    # ...and the app shell answers for the app's own entry and nothing else. A
+    # navigation this build has never heard of gets an honest refusal, not a
+    # page pretending to be the one that was asked for. The worker already
+    # refuses the identical substitution for scripts, in as many words.
+    ok_('an uncached navigation is not answered with the app shell',
+        "path === '' || path === 'index.html'" in worker_src)
+    ok_('...and says so rather than failing blank',
+        'not in the offline copy' in worker_src)
+
     # --- the browser sizes its picture the way the Pi does ------------------
     # This is the rule that broke, and it broke by drifting from the Pi's. Both
     # are now the same two numbers, so the check is that they still agree.

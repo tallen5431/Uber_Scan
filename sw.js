@@ -23,7 +23,7 @@
  * install would not have put it back: a phone with no signal would have lost
  * the scanner entirely, in the name of shipping a scanner fix.
  */
-var SHELL = 'uberscan-shell-v50';
+var SHELL = 'uberscan-shell-v51';   // v51: map.html joined the shell
 
 /* Bumped only when the vendored engine itself changes, which is rare and
  * deliberate. Held apart from the shell so that shipping app code never costs
@@ -50,6 +50,14 @@ var ASSETS = [
   // not happen is the offers page itself failing to open in a car park
   // because one of its scripts was missing from the shell.
   'map-view.js',
+  // ...and the page that file was split out of. It was the only .html this
+  // server serves that was not in the shell, and the navigate fallback below
+  // used to answer for it with index.html — so offline, "Map check" opened the
+  // ride calculator under the map's own URL, which is a page lying about which
+  // page it is. The map itself needs the network for tiles and lookups and
+  // says so; opening at all is a different question, and the answer to it was
+  // the wrong page rather than an honest one.
+  'map.html',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
@@ -150,8 +158,29 @@ self.addEventListener('fetch', function (e) {
         // handing back index.html in place of a script is a stranger failure
         // than not answering at all.
         if (hit) return hit;
-        return e.request.mode === 'navigate'
-          ? caches.match('index.html') : Response.error();
+        if (e.request.mode !== 'navigate') return Response.error();
+        /* The app shell answers for the app's own entry, and for nothing else.
+           This used to hand index.html to ANY uncached navigation, so a page
+           this build had never heard of — or one simply missing from the list
+           above, which map.html was — opened as the ride calculator under
+           somebody else's URL, with the address bar and the content disagreeing
+           and nothing saying which was right.
+           The line above refuses the identical substitution for scripts, in as
+           many words: "handing back index.html in place of a script is a
+           stranger failure than not answering at all". A document is no
+           different; it is only easier to mistake for the real thing. */
+        var path = new URL(e.request.url).pathname.replace(/^\/+/, '');
+        if (path === '' || path === 'index.html') return caches.match('index.html');
+        return new Response(
+          '<!doctype html><meta charset="utf-8">'
+          + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+          + '<title>Offline</title>'
+          + '<body style="font:16px/1.5 system-ui;margin:2rem;background:#0b0f14;color:#e6edf3">'
+          + '<h1 style="font-size:20px">No network, and this page is not saved</h1>'
+          + '<p>' + path.replace(/[&<>"]/g, '') + ' is not in the offline copy, '
+          + 'so there is nothing to show you rather than something wrong.</p>'
+          + '<p><a style="color:#7aa2f7" href="./">Open the app</a></p>',
+          { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
       });
       return hit || fresh;
     })

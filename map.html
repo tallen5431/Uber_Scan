@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Uber Scan — map check</title>
+<!-- The same chrome as every other page here. This one had none of it: no
+     icon, no home-screen icon, no theme colour, so the browser painted its own
+     bar a different shade around this page alone and a driver who saved it to
+     the home screen got a blank square. It was the only page the layout suite
+     had never seen, which is how all three went unnoticed. -->
+<meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
 <!-- Leaflet, for the map itself. Loaded from a CDN rather than vendored
      because this page is the one thing here that cannot work offline anyway:
@@ -12,7 +21,15 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   body { padding: 0; }
-  #app { display: grid; grid-template-rows: auto auto 1fr; height: 100dvh;
+  /* FOUR rows, for four children: the header, the bar, the privacy notice and
+     the map. It declared three, so the notice took the flexible row and the
+     map — the thing the page is — got an implicit auto one and collapsed to
+     whatever its sidebar happened to need. Measured before this: the map pane
+     was 82px tall at 800x480 and 64px at 1280x800, under a static block of
+     warning text 222px and 560px tall respectively. The page had never been
+     measured by the layout suite, which is how a map page shipped with almost
+     no map on it. */
+  #app { display: grid; grid-template-rows: auto auto auto 1fr; height: 100dvh;
          max-width: none; padding: 0; gap: 0; }
   header { padding: 10px 14px; border-bottom: 1px solid var(--line); }
   h1 { font-size: 18px; margin: 0 0 2px; }
@@ -43,8 +60,18 @@
   }
   .split { display: grid; grid-template-columns: minmax(0, 1fr) 340px;
            min-height: 0; }
-  @media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); }
-                              #side { max-height: 40dvh; } }
+  /* Stacked, the map takes the room and the sidebar takes a share of what is
+     left — `minmax(0, 1fr)` on the first row rather than `auto`, or the map
+     collapses to nothing and the list gets the lot. The 40dvh cap on the
+     sidebar is measured against the VIEWPORT, so on a short screen it asked for
+     more than the row it sits in had, and the overflow came out of the page
+     rather than out of the list. */
+  @media (max-width: 760px) {
+    .split { grid-template-columns: minmax(0, 1fr);
+             grid-template-rows: minmax(0, 1fr) auto; }
+    #side { border-left: 0; border-top: 1px solid var(--line);
+            max-height: 40dvh; min-height: 0; }
+  }
   #map { min-height: 0; background: var(--panel-2); }
   #side { border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px;
           font-size: 13px; }
@@ -67,6 +94,63 @@
              margin: 8px 14px; font-size: 12px; line-height: 1.5; }
   .leaflet-container { background: var(--panel-2); }
   .pin-label { font: 700 11px system-ui, sans-serif; }
+
+  /* A line of prose has a width past which it stops being readable. This page
+     lifts the shared cap so the map can use the whole panel, and the sentences
+     went with it — measured at 940px, around a hundred characters a line, on a
+     1280x800 panel. The map keeps the width; the words do not. */
+  .sub, .warnbox, .note { max-width: 78ch; }
+
+  /* Read from the driving seat, which is roughly twice as far from the glass as
+     a hand is from a phone. Every other page in this project is held to a 15px
+     floor on a panel with the room for it; this one was held to nothing,
+     because it was the one page no layout check had ever opened, and it ran to
+     11px. A driver pulls over to check a map — they do not go and find a
+     laptop. The 3.5" hat is excluded on purpose and for the same reason the
+     keypad is: at 320px tall, raising this pushes the controls off the bottom,
+     and a control out of reach is worse than a label leaned in for. */
+  /* Height, not orientation. Every other landscape query in this project
+     switches the LAYOUT across the screen and they all fire at the same point
+     on purpose — see the rule in rpi/test_layout.py, and the 1280x800 panel it
+     was written after. This one is about whether the screen can AFFORD bigger
+     text, which is a question about height and is the same question on a phone
+     held upright. */
+  @media (min-height: 400px) {
+    .sub, .bar label, .note, .warnbox, .row .why, #side, #side h2 { font-size: 15px; }
+    .tag { font-size: 14px; }
+    button, .bar input, .bar select { font-size: 15px; }
+    h1 { font-size: 20px; }
+  }
+
+  /* The 3.5" hat, where the fixed furniture came to 342px of a 320px screen —
+     a header, three rows of wrapped controls and a consent notice, with the map
+     itself pushed off the bottom. The notice may not go: it is what makes
+     sending somebody's address a decision rather than a surprise. So everything
+     around it gives way instead, and the map keeps what is left. */
+  /* On a panel the map gets the room, and the sentence explaining what the page
+     is gives it up. Measured at 800x480 with the readable type above: header
+     98px, bar 138, notice 108, and 121px left for the map — on the page whose
+     entire subject is the map. The explanation is worth reading once and is
+     furniture afterwards; the heading and the notice between them already say
+     what this page does and what pressing Place will send. A screen with the
+     height to spare keeps it: at 1280x800 the map has 483px and nothing needs
+     to give way.
+     The way back is never hidden. A page whose only exit is the browser's own
+     back button is the dead end that link was added to fix. */
+  @media (max-height: 620px) { header .sub:first-of-type { display: none; } }
+
+  @media (max-height: 380px) {
+    header { padding: 5px 10px; }
+    h1 { font-size: 15px; margin: 0; }
+    .bar { padding: 5px 10px; gap: 5px; }
+    .bar input[type="text"] { width: 96px; }
+    /* 12px, which is the floor even here: the hat cannot afford the panel's
+       15px, and it is still read by somebody who has pulled over. Below that
+       the notice stops being something a driver actually reads, and an unread
+       consent notice is not consent. */
+    .warnbox { margin: 5px 10px; padding: 5px 8px; font-size: 12px;
+               line-height: 1.35; }
+  }
 </style>
 </head>
 <body data-page="map">

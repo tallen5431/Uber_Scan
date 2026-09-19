@@ -44,7 +44,13 @@ import time
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PAGES = ['index.html', 'live.html', 'journal.html', 'scan.html']
+# map.html is here too. It was the only page this server serves that no layout
+# check had ever seen, on any panel — including the 3.5" hat, where its bar
+# carries six controls and two text boxes and its sidebar is a second column.
+# A map needs the network for tiles and lookups and says so when it has none;
+# whether the page FITS is a different question, and the answer to it was
+# unmeasured.
+PAGES = ['index.html', 'live.html', 'journal.html', 'scan.html', 'map.html']
 
 # The panels this thing actually gets bolted to, plus a phone for comparison.
 PANELS = [
@@ -541,6 +547,17 @@ const FRAMES = JSON.parse(framesJson);
           measure: measure, measureIn: measureIn,
           rowSkew: rowSkew, rowSkewIn: rowSkewIn,
           layers: layers,
+          // What share of the glass the thing the page is FOR actually gets.
+          // A page can fit, scroll neither way, keep every font above the floor
+          // and still be useless, because its furniture ate the subject: the
+          // map page declared three grid rows for four children and the map —
+          // the whole point of it — came out 82px tall at 800x480 under a
+          // 222px block of warning text. Every other check on this page passed
+          // while that was true.
+          subject: (function () {
+            var el = document.getElementById('map');
+            return el ? el.getBoundingClientRect().height : null;
+          })(),
         };
       });
       // The day-of-week chart, on the range it exists for. The page lands on
@@ -1040,7 +1057,17 @@ try:
             # sideways is one where the driver cannot find the controls.
             eq('%s at %s does not scroll sideways' % (name, panel),
                r['scrollW'] <= r['clientW'] + 1, True)
-            if name not in SCROLLS:
+            # map.html fits every panel with the room for it, and scrolls on
+            # the 3.5" hat alone. 320px of glass has to carry a header, eight
+            # controls that wrap to three rows, and a consent notice that may
+            # not be hidden — it is what makes sending somebody's address a
+            # decision rather than a surprise. What is left for the map is
+            # about forty pixels, and a forty-pixel map is not a map. Scrolling
+            # is the honest answer there, the same one the offer log gives
+            # everywhere; the panels a driver actually bolts this to are still
+            # held to the glass.
+            may_scroll = name in SCROLLS or (name == 'map.html' and h < 400)
+            if not may_scroll:
                 eq('%s at %s fits the glass' % (name, panel),
                    r['scrollH'] <= r['clientH'] + 1, True)
 
@@ -1300,6 +1327,18 @@ try:
                     ok_('...and is no shorter than the scene view was boxed '
                         'at %s (%.0fpx, was %.0f)' % (panel, phone['h'], phone['was']),
                         phone['h'] >= phone['was'])
+
+            # ...and the subject of the page gets a usable share of it. A page
+            # that fits, scrolls neither way and keeps its type above the floor
+            # can still be useless if its furniture ate the thing it is for.
+            # A quarter is deliberately generous — it is a floor against
+            # collapse, not a layout opinion. Measured after the grid was fixed:
+            # 32% at 800x480 and 60% at 1280x800; before it, 17% and 8%.
+            if name == 'map.html' and r.get('subject') is not None and h >= 400:
+                share = r['subject'] / float(r['clientH'])
+                ok_('map.html at %s gives the map itself a usable share of the '
+                    'glass (%.0f%%, %.0fpx)' % (panel, share * 100, r['subject']),
+                    share >= 0.25)
 
             # A line of prose has a width past which it stops being readable.
             # Widening the across-the-screen breakpoint to all of landscape put
