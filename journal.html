@@ -1405,7 +1405,16 @@
           + 'coincidences.';
       } else {
         el.adviceLead.innerHTML =
-          '<b>' + a.offers + '</b> offer' + (a.offers === 1 ? '' : 's') + ' over <b>'
+          '<b>' + a.offers + '</b> offer' + (a.offers === 1 ? '' : 's')
+          // The count is what the replay walked, and the threshold beside it is
+          // now asked of that same pile — so whenever the two disagree with the
+          // list below, say by how much rather than leaving the reader to find
+          // the gap. Same sentence the answered state prints for the same
+          // reason; see `setAside` there.
+          + (a.setAside > 0
+              ? ' (' + a.setAside + ' more fell outside any run of scanning)'
+              : '')
+          + ' over <b>'
           + (a.hours || 0).toFixed(1) + '</b> hours so far. This needs about <b>'
           + a.needOffers + '</b> across <b>' + a.needHours + '</b> hours before '
           + 'it will suggest a target — a line drawn from one afternoon gets '

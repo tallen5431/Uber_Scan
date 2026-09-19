@@ -488,6 +488,17 @@
     var costPerMile = (settings && typeof settings.costPerMile === 'number')
       ? settings.costPerMile : 0;
     var uncosted = costPerMile > 0 && (costA === 0 || costB === 0);
+    /* ...and which SIDE is gross, because `sure` below is not symmetric the way
+       `state` is.
+       `sure` is `worst >= alone`, and `alone` is the held job's own net rate.
+       A gross OFFER inflates `money`, so it inflates `worst` alone and the
+       claim can come out true when the truth is that it is not: that is the
+       direction that misleads. A gross HELD job inflates netA, which is in
+       both — but `alone` divides it by `left` where `worst` divides it by
+       `left + minB`, so the right-hand side rises faster and the claim gets
+       harder to make. That direction understates, which is the safe one and
+       costs nothing to allow. */
+    var offerGross = costPerMile > 0 && costB === 0;
 
     var maxMinutes = left + minB;              // nothing shared
     var minMinutes = Math.max(left, minB);     // the new one rides along
@@ -508,8 +519,20 @@
       alone: Math.round(alone * 100) / 100,
       // Better than finishing alone even with no route shared at all. This is
       // the claim that does not depend on the geography, so it is the only one
-      // stated without a hedge.
-      sure: worst >= alone,
+      // stated without a hedge — which is exactly why it may not be made on a
+      // figure that is a ceiling rather than a rate.
+      //
+      // `state` has been capped for this since the uncosted cap was written,
+      // and the seventeen lines above say why: `target` is a line the driver
+      // drew against net rates, and comparing the two is comparing different
+      // kinds of money. `sure` compares the same two kinds and went on saying
+      // "beats finishing alone" without a hedge, on the one clause of the stack
+      // line that the 3.5" hat has room for.
+      //
+      // Withheld only when the OFFER is the gross one. See offerGross: a gross
+      // held job pushes this the other way and understates it, which is the
+      // safe direction and not worth losing a true claim over.
+      sure: !offerGross && worst >= alone,
       // Where the two jobs END, compared as coarsely as the cards allow. This
       // is the half of the question the time arithmetic above cannot reach:
       // `maxMinutes` assumes nothing is shared and `minMinutes` assumes the
@@ -620,13 +643,59 @@
     return row.took ? row.at + row.mins * 60000 : row.at;
   }
 
+  /* ...and the latest such moment so far, which is not the same as the last
+   * row's.
+   *
+   * Asking only the PREVIOUS row when the driver was free throws the trip's
+   * length away the instant another offer is scanned during it — and offers
+   * arriving mid-trip is not an edge case, it is the normal thing: the phone
+   * keeps showing cards while the driver is carrying someone, which is exactly
+   * what replay() models when it skips everything before `busyUntil`. So the
+   * two halves of this file were reading the same rows under two different
+   * pictures of the shift.
+   *
+   * Measured, on a tagged hour-long trip with one offer glimpsed five minutes
+   * in and the next arriving at fifty-eight:
+   *
+   *   previous row only   the run splits at 58; the offer after the trip is
+   *                       left alone in a one-row run and DROPPED; and a
+   *                       silence is counted against a stretch the driver had
+   *                       already tagged — so the page asks for a tag on the
+   *                       one trip that has one.
+   *   latest so far       one run of three, nothing dropped, no silence.
+   *
+   * Without the mid-trip scan the old code got the right answer. A row being
+   * *seen* made the record worse, which is backwards.
+   *
+   * busy() below was already right — it asks every earlier ticked row whether
+   * its window covers this one, rather than only the last. So two of the three
+   * places in this file that reason about occupancy agreed, and these were the
+   * two that did not.
+   *
+   * This is deliberately a running maximum over every earlier row and not a
+   * window: rows are sorted, so an untagged row's own `at` becomes the maximum
+   * as soon as the clock passes the last trip's end, and the figure only ever
+   * reaches forward while a tagged job says the driver is still in it. The
+   * exposure that buys is a single over-long `mins` covering more silence than
+   * it should — the same trust replay() already places in the same field, and
+   * freeAgain's header explains why it is a floor. */
+  function occupancy(rows) {
+    var out = [];
+    var free = -Infinity;
+    for (var i = 0; i < rows.length; i++) {
+      free = Math.max(free, freeAgain(rows[i]));
+      out.push(free);
+    }
+    return out;
+  }
+
   function runs(rows, breakMinutes) {
     if (!rows.length) return [];
     var gap = (breakMinutes || SHOWN_AT) * 60000;
+    var free = occupancy(rows);
     var out = [[rows[0]]];
     for (var i = 1; i < rows.length; i++) {
-      var prev = rows[i - 1];
-      if (rows[i].at - freeAgain(prev) > gap) out.push([rows[i]]);
+      if (rows[i].at - free[i - 1] > gap) out.push([rows[i]]);
       else out[out.length - 1].push(rows[i]);
     }
     return out.filter(function (r) { return r.length > 1 && r[r.length - 1].at > r[0].at; });
@@ -698,6 +767,7 @@
    * another whole shift of scanning would have been. */
   function unexplained(rows, breakMinutes) {
     var gap = (breakMinutes || SHOWN_AT) * 60000;
+    var free = occupancy(rows);
     var tagged = 0, silences = 0;
     for (var i = 0; i < rows.length; i++) {
       if (rows[i].took) tagged++;
@@ -708,7 +778,12 @@
       // the case worth surfacing most, a five-minute job followed by an hour of
       // silence, and so asked for tags on everything except the stretch that
       // needed one.
-      if (rows[i].at - freeAgain(rows[i - 1]) > gap) silences++;
+      //
+      // Against the latest moment the driver was free, not the previous row's —
+      // see occupancy(). This function's whole output is a request for more
+      // tags, so counting a silence inside a trip that IS tagged is the one
+      // wrong answer it can give.
+      if (rows[i].at - free[i - 1] > gap) silences++;
     }
     return { tagged: tagged, silences: silences };
   }
@@ -778,8 +853,28 @@
     if (!shown) return shortfall;
     shortfall.hours = shown.hours;
     shortfall.runs = shown.runs;
+    /* The pile the answer is actually built from, not every row in the window.
+       Until here `offers` is rows.length, which is right for the two returns
+       above — they happen before there is a replay to have walked anything. */
+    shortfall.offers = shown.offers;
+    /* ...and the same reconciliation the ready path already makes, for the same
+       reason it makes it. The refusal names a count and a threshold in one
+       sentence, and dropping rows out of the count without saying so leaves the
+       page disagreeing with its own list underneath. Carried here too because
+       the refusal is the state this spends most of its life in. */
+    shortfall.setAside = rows.length - shown.offers;
 
-    if (rows.length < (o.enoughOffers || ENOUGH_OFFERS)) return shortfall;
+    /* ...and the gate is asked of that same pile.
+       It tested rows.length: every usable row, including the ones runs() throws
+       away with their single-offer run. The headline was corrected for exactly
+       this a few lines up — "Rows dropped with their single-offer run are not
+       evidence it used, and counting them in the headline made the answer look
+       better supported than it was" — and the gate was not brought along. So a
+       window of six rows that the replay reduced to two could pass a threshold
+       whose own comment says "below these there is not enough to say anything.
+       A recommendation drawn from one afternoon would be acted on exactly as
+       confidently as one drawn from a season." */
+    if (shown.offers < (o.enoughOffers || ENOUGH_OFFERS)) return shortfall;
     if (shown.hours < (o.enoughHours || ENOUGH_HOURS)) return shortfall;
     if (shown.best.trips < (o.enoughTrips || ENOUGH_TRIPS)) {
       shortfall.reason = 'trips';

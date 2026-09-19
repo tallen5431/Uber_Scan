@@ -16,6 +16,64 @@ reasoning lives there too and this file only points at it.
 
 ---
 
+## Done — found, fixed, and tested against being undone
+
+Listed so the same fault is not reported as news, and so the shape of the fix
+is findable. Every one of these is mutation-tested: the old behaviour is put
+back mechanically and a named check has to fail.
+
+### The reader
+
+**A frame holding two cards priced one and described the other.** `one_card()`
+bounded the legs and nothing else, so the distance, deadline, item count and
+merchant went on reading the whole frame while the payout took the largest.
+30 of this driver's 272 cards arrive on such a frame. Fixed in `ae510ce` by
+`card_span`/`only_card` in both ports; the measurement is at the foot of this
+file.
+
+**A glare frame threw away a verdict the rig already had.** `collect()` took
+the last frame of the batch whether or not it carried a payout. `read_the_money`
+now picks the newest frame that states one and folds the rest in. `123fa02`.
+
+### The backup
+
+**Three ways the rig reported a healthy backup it did not have.** A row stamped
+past the end of time ended the window for every row behind it; the journal being
+unwritable was not checked at all; and the verdict on the off-car backup was
+inverted with respect to the danger, so the check passed in exactly the case it
+exists for. `a5cbe64`, plus the `CLOCK_BELIEVABLE_UNTIL` clamp in `server.js`.
+
+### The advice
+
+**The threshold and the headline counted different piles.** `bestAt` reports
+`offers` as what the replay walked — rows dropped with their single-offer run
+are not evidence it used — and the ready gate went on testing `rows.length`. A
+window could be refused by the number it printed and admitted by a number it
+did not. Both now ask the walked pile, and the refusal carries `setAside` so
+the page can reconcile its own two counts rather than leaving a reader to find
+the gap.
+
+**`sure` was the one clause stated without a hedge, on a figure that may be a
+ceiling.** `state` has been capped for the uncosted case since it was written;
+`sure` compared the same two kinds of money and said "beats finishing alone"
+anyway — in the one clause the 3.5" hat has room for. Withheld now when the
+OFFER is the gross side, and deliberately **not** when the held job is: that
+direction understates, which is the safe one and not worth losing a true claim
+over. The asymmetry is worked out in the comment at the `offerGross` line.
+
+**Occupancy was asked of the previous row rather than of the shift.** `runs()`
+and `unexplained()` measured each gap from `freeAgain(rows[i - 1])`, so a single
+card scanned during a tagged trip threw the rest of that trip's length away.
+Measured, on a tagged hour-long trip with an offer glimpsed at five minutes and
+the next arriving at fifty-eight: the run split, the offer after the trip was
+dropped as a run of one, and a silence was counted against the one stretch that
+was tagged — so the page asked for a tag on the trip that had one. Without the
+mid-trip scan the old arithmetic was right, which is backwards: a row being
+*seen* made the record worse. `busy()` had it right all along, which is why
+`occupancy()` now exists and all three read it.
+
+---
+
 ## Settled — do not re-propose
 
 ### The journal read
@@ -185,7 +243,7 @@ the map keep its height, or rewrite the nine.
 | `map.html` layout, on every panel, for the first time | Four faults on the first run. Fix in `d829bb9`. |
 | The pin badge said "jobs" and counted offers | `4d0accc`. It says offers, and the popup keeps taken / passed on / never marked apart. |
 | The offer log's map sheet named a colour that was not drawn | Fix in this commit: it names the pin that is there, the end that is missing, and which of the three kinds of missing it is. |
-| The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | 29 findings, adversarially verified. The first is recorded below; the rest are still being worked through. |
+| The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | 29 hunted, 16 survived checking, 13 refuted. The worst is recorded below; the rest are being worked through, and what has landed so far is listed under Done. |
 
 ### The worst fault this sweep found
 

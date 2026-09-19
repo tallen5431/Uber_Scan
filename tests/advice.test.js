@@ -88,6 +88,29 @@ function offer(atMinutes, pay, minutes, cost) {
   eq('an untagged take is not guessed at',
      A.runs(around(offer(1, 30, 35)), 30).length, 2);
 
+  // A card scanned DURING a tagged trip does not cancel the rest of it. The
+  // phone goes on showing offers while the driver is carrying somebody — that
+  // is exactly what the replay models when it skips everything before
+  // `busyUntil` — so the trip's length has to be measured from the trip, not
+  // from whichever row happened to be last. Measuring from the last row alone
+  // split this run at 58, dropped the offer after the trip as a run of one,
+  // and counted a silence against the one stretch that was tagged.
+  var hour = offer(0, 30, 60); hour.accepted = true;
+  var during = A.usable([hour, offer(5, 8, 20), offer(58, 8, 20)]);
+  eq('an offer seen mid-trip does not end the trip', A.runs(during, 30).length, 1);
+  eq('...and nothing after it is thrown away', A.runs(during, 30)[0].length, 3);
+  eq('...nor is a silence counted inside a trip that was tagged',
+     A.unexplained(during, 30).silences, 0);
+  // The control: without the mid-trip scan the old arithmetic was already
+  // right. Seeing a row must not make the record worse.
+  eq('...which is the answer it gave when nothing was seen mid-trip',
+     A.runs(A.usable([hour, offer(58, 8, 20)]), 30).length, 1);
+  // Still a floor, not a licence. The trip ends at 60; a row at 95 is beyond
+  // it by more than the threshold and is a break however it is measured.
+  eq('a tagged trip still only covers its own length',
+     A.runs(A.usable([hour, offer(5, 8, 20), offer(95, 8, 20), offer(97, 8, 20)]),
+            30).length, 2);
+
   // And the replay still ignores what was actually taken. It simulates a
   // policy; what happened is the thing it is being compared against, not an
   // input to it. Here the accepted offer is the one that misses the line and
@@ -270,6 +293,42 @@ function offer(atMinutes, pay, minutes, cost) {
   for (var k = 0; k < 60; k++) sparse.push(offer(k * 5, 6, 200));
   var s = A.advise(sparse, { target: 25 });
   ok_('a handful of trips is not a finding', !s.ready);
+
+  // Forty-four rows, of which the replay walks thirty-six. The other eight are
+  // singles two hours from anything, so runs() drops each with its own
+  // one-offer run at every threshold the stability check uses — they are never
+  // evidence, at any setting.
+  //
+  // This is the case that tells the two counts apart. The headline was
+  // corrected to report the walked pile and the gate was left on the raw one,
+  // so a window could be refused by the number it printed and admitted by a
+  // number it did not. Built so the run underneath is a clean, stable,
+  // answerable market: with the gate on rows.length this comes out ready with
+  // a line of $31 on it.
+  var walked = [];
+  for (var m = 0; walked.length < 36; m += 4) {
+    if (m % 90 > 64) continue;
+    walked.push((m / 4) % 3 === 0 ? offer(m, 18, 10) : offer(m, 5, 10));
+  }
+  var lastAt = (walked[walked.length - 1].at - 1000000000000) / MIN;
+  var padded = walked.slice();
+  for (var p = 1; p <= 8; p++) padded.push(offer(lastAt + 120 * p, 18, 10));
+
+  eq('rows the replay never walked are not counted toward the threshold',
+     A.advise(padded, { target: 30 }).ready, false);
+  eq('...and the count it reports is the pile it walked',
+     A.advise(padded, { target: 30 }).offers, 36);
+  // The run on its own is the same answer, which is the point: the eight
+  // stragglers changed nothing except the number the gate used to read.
+  eq('...the stragglers having moved neither',
+     A.advise(walked, { target: 30 }).offers, 36);
+  // And the eight are accounted for rather than quietly missing. A refusal
+  // that says "36 offers so far" over a list of 44 is the gap that makes a
+  // reader distrust the rest of the page.
+  eq('...with the eight it set aside named, not dropped',
+     A.advise(padded, { target: 30 }).setAside, 8);
+  eq('...and nothing set aside when nothing was',
+     A.advise(walked, { target: 30 }).setAside, 0);
 })();
 
 /* ---- the rows a decision must not be built on ---- */
@@ -602,10 +661,31 @@ function offer(atMinutes, pay, minutes, cost) {
 
   // The claim that does not need the geography: better than just finishing,
   // even with nothing shared.
+  // A real running cost on both sides, because `cost: 0` is not a tidier
+  // fixture — it is the gross case, and this claim may not be made on it.
   ok_('a better-paying second job beats finishing alone',
-      A.stack(active(), newOffer({ pay: 40, cost: 0 }), SET, T0 + 10 * 60000).sure);
+      A.stack(active(), newOffer({ pay: 40 }), SET, T0 + 10 * 60000).sure);
   eq('...and a worse-paying one does not',
-     A.stack(active(), newOffer({ pay: 1, cost: 0 }), SET, T0 + 10 * 60000).sure, false);
+     A.stack(active(), newOffer({ pay: 1 }), SET, T0 + 10 * 60000).sure, false);
+
+  // ...and it is not made at all when the offer printed no chargeable
+  // distance. `sure` is the one clause stated without a hedge — the only one
+  // the 3.5" hat has room for — and on a gross offer it is comparing a ceiling
+  // with a net rate, which is the mixing of two kinds of money that caps
+  // `state` seventeen lines above it. A pay of 40 against a held job of 12
+  // clears by any measure; the point is that the rig will not say so.
+  eq('the unhedged claim is withheld when the offer has no cost taken off',
+     A.stack(active(), newOffer({ pay: 40, cost: 0 }), SET, T0 + 10 * 60000).sure,
+     false);
+  ok_('...and the pair is still reported, marked as a ceiling',
+      A.stack(active(), newOffer({ pay: 40, cost: 0 }), SET, T0 + 10 * 60000).uncosted);
+  // The asymmetry is deliberate. A gross HELD job inflates netA, which sits in
+  // both sides of the comparison — but `alone` divides it by the time left and
+  // `worst` by that plus the new job, so the right-hand side rises faster and
+  // the claim gets harder to make. Understating is the safe direction and
+  // costs nothing to allow.
+  ok_('...while a gross HELD job does not withhold it, because it understates',
+      A.stack(active({ cost: 0 }), newOffer({ pay: 40 }), SET, T0 + 10 * 60000).sure);
 
   // Refusals. Each of these would otherwise put a second job's time against a
   // first job's pay and call it a rate.
