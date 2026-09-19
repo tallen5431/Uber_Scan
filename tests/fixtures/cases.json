@@ -993,6 +993,27 @@
    }
   },
   {
+   "name": "...and so do the distance, the deadline and the item count",
+   "_why": "one_card bounded the LEGS and nothing else. A delivery card states no timed legs at all, so on a two-card frame it trimmed nothing and the distance, the deadline, the item count and the Pickup anchor each took the first match anywhere on the glass - while the payout took the largest. Measured in both ports on this text: $14.00 published with the OTHER card's 0.6 mi and 4 items, which is $90.85/hr green ACCEPT where the card the money came from is $9.81/hr PASS. Spoken, is_whole() so the rig stops resampling, and written to the journal with the wrong card's merchant. 30 of this driver's 272 cards come on a frame carrying two payout-sized amounts.",
+   "text": "Deliver by 6:39 PM Cherry Cricket 4 items 0.6 mi $8.00 Deliver by 7:20 PM Olive Garden 12 items 9.4 mi $14.00",
+   "expect": {
+    "pay": 14.0,
+    "miles": 9.4,
+    "items": 12,
+    "pickup": "Olive Garden"
+   }
+  },
+  {
+   "name": "...on the layout that prints the money FIRST as well as the one that prints it last",
+   "_why": "The two layouts in this corpus put their figures on opposite sides of the payout, so a span anchored on the chosen payout itself is right for one and points straight at the neighbour's fields for the other. The rule is the gap between the two NEIGHBOURING payouts, which holds exactly one payout and whichever side its own words are printed on. Without this case the span could be written the easy way and half the corpus would still pass.",
+   "text": "$41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa Johns Store 3317 $6.25 Guaranteed (incl. tips) 1.2 mi Deliver by 6:05 PM Pickup Wendys",
+   "expect": {
+    "pay": 41.11,
+    "miles": 9.8,
+    "pickup": "Papa Johns Store 3317"
+   }
+  },
+  {
    "name": "...while a BATCH, which states one payout over two legs, still owes both",
    "_why": "The boundary is the next headline, so a card that prints one payout and two pickups is untouched - which is the case the rule above must not break.",
    "text": "$36.00 Guaranteed (incl. tips) 8.3 mi + 36 min @ Retail pickup GoPuff (Drive) 12.1 mi + 40 min @ Pickup Talkin Tacos",

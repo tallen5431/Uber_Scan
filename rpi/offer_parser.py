@@ -1862,6 +1862,81 @@ def one_card(text, legs, where):
     return kept, len(kept) != len(legs)
 
 
+def card_span(where):
+    """Where the chosen card's own words are, or None if there is only one card.
+
+    THE LEGS WERE BOUNDED AND NOTHING ELSE WAS. one_card above trims the legs to
+    the chosen headline's card and every other field went on reading the whole
+    frame — the deadline, the lone distance, the item count, and the Pickup
+    anchor that names the merchant. Measured on two real card shapes printed on
+    one frame:
+
+        top card alone      $8.00   0.6 mi   4 items   ->  $50.85/hr  go
+        bottom card alone   $14.00  9.4 mi   12 items  ->   $9.81/hr  no
+        both on one frame   $14.00  0.6 mi   4 items   ->  $90.85/hr  go
+
+    The pay came off the card that was chosen and the distance off the card that
+    was not. A $9.81/hr pass published as a green $90.85/hr accept, spoken,
+    is_whole() so the rig stops resampling, and written to the journal — which
+    cannot be regenerated — carrying the wrong card's distance, deadline, item
+    count and merchant. On this driver's own export, 30 of 272 cards come on a
+    frame with two payout-sized amounts.
+
+    BETWEEN THE PAYOUTS EITHER SIDE, and that is the whole rule. It has to work
+    for both layouts in the corpus, which print their figures on opposite sides
+    of the money:
+
+        payout last   "Deliver by 6:39 PM  Cherry Cricket  4 items  0.6 mi  $8.00"
+        payout first  "$41.11 Guaranteed (incl. tips)  9.8 mi  Deliver by 7:15 PM"
+
+    A span anchored on the chosen payout itself is right for one and points at
+    the neighbour's fields for the other. The gap between the two NEIGHBOURING
+    payouts contains exactly one payout — the chosen one — and whichever side
+    its own fields are printed on, so it is right for both without having to
+    work out which platform drew the card.
+
+    The legs keep one_card's narrower rule. Legs exist only on the Uber layout,
+    which prints them after the money, so "after this payout and before the
+    next" is the honest bound for them and two corpus cases pin it.
+    """
+    if len(where) < 2:
+        return None
+    starts = [at for _v, at in where]
+    top = max(where, key=lambda pair: pair[0])[1]
+    before = [at for at in starts if at < top]
+    after = [at for at in starts if at > top]
+    return (max(before) if before else 0, min(after) if after else None)
+
+
+def only_card(text, span):
+    """`text` with everything outside the chosen card blanked out.
+
+    Blanked rather than sliced, so every index into this string is still an
+    index into the original. Several rules downstream compare positions — legs
+    against the headline, places against the leg that lent them — and a slice
+    would silently move all of them.
+
+    Newlines survive, because line shape is structure: the item count and the
+    Pickup anchor are both read off line starts, and flattening the blanked half
+    into one long line would let a pattern match across what used to be a break.
+    """
+    if not span:
+        return text
+    lo, hi = span
+    hi = len(text) if hi is None else hi
+
+    def blank(part):
+        return ''.join('\n' if ch == '\n' else ' ' for ch in part)
+
+    # The blanks BEFORE the card stay — they are what hold every index in
+    # place. The ones after are dropped, because several anchors need a real
+    # end to match against and a tail of spaces is not one: `Pickup Papa Johns
+    # Store 3317` followed by forty blanks matched nothing at all, so a card
+    # whose merchant was the last thing on it lost the merchant. Nothing after
+    # the card can move an index inside it.
+    return blank(text[:lo]) + text[lo:hi].rstrip()
+
+
 def parse(raw_text):
     text = normalize(raw_text)
     legs = find_legs(text)
@@ -1872,6 +1947,11 @@ def parse(raw_text):
     # headline, which is the whole thing this boundary rests on.
     pay = find_pay(text, _where)
     legs, _spilled = one_card(text, legs, _where)
+    # ...and the same boundary for every other field the card states. See
+    # card_span: the legs were bounded and the distance, the deadline, the item
+    # count and the merchant were not, so a frame holding two cards priced one
+    # of them and described the other.
+    mine = only_card(text, card_span(_where))
 
     totals = [l for l in legs if l['isTotal']]
     used = totals or legs
@@ -1899,7 +1979,7 @@ def parse(raw_text):
     corrected = corrected_leg
     uncertain = False
 
-    m = ITEMS.search(text)
+    m = ITEMS.search(mine)
     items = to_number(m.group(1)) if m else None
     if items is not None and not (0 <= items <= 200):
         items = None
@@ -1929,11 +2009,11 @@ def parse(raw_text):
     # ride card alone — its legs carry distances — and still refuses to hand a
     # stray number to a LABELLED leg that lost its own, because that is damage
     # and `short_a_leg` is already saying so.
-    deadline = find_deadline(text)
+    deadline = find_deadline(mine)
     travelled = [l for l in used
                  if l['miles'] is not None or l.get('labelled')]
     if miles is None and not travelled:
-        lone = LONE_MILES.search(text)
+        lone = LONE_MILES.search(mine)
         # "4, Smi ~ fast charger" is on a real card, and S reads as 5. A lone
         # distance is already the least anchored number the parser takes; one
         # spelled entirely in stand-ins is not anchored at all.
@@ -2001,7 +2081,7 @@ def parse(raw_text):
     short_a_leg = legs_short_a_distance(used, miles)
     uncertain = uncertain or short_a_leg
 
-    places = find_places(text, legs)
+    places = find_places(mine, legs)
     approach = to_pickup(used)
     return {
         'pay': pay,

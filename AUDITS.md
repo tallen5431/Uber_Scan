@@ -158,7 +158,33 @@ the map keep its height, or rewrite the nine.
 | `map.html` layout, on every panel, for the first time | Four faults on the first run. Fix in `d829bb9`. |
 | The pin badge said "jobs" and counted offers | `4d0accc`. It says offers, and the popup keeps taken / passed on / never marked apart. |
 | The offer log's map sheet named a colour that was not drawn | Fix in this commit: it names the pin that is there, the end that is missing, and which of the three kinds of missing it is. |
-| The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | **In flight at the time of writing — not yet recorded here.** |
+| The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | 29 findings, adversarially verified. The first is recorded below; the rest are still being worked through. |
+
+### The worst fault this sweep found
+
+`one_card()` bounded the **legs** and nothing else. Every other field a card
+states — the distance, the deadline, the item count, and the `Pickup` anchor
+that names the merchant — went on reading the whole frame and taking the first
+match anywhere on it, while the payout took the largest. On a frame holding two
+cards that means the rig prices one card and describes the other. Measured, in
+both ports:
+
+| | pay | miles | items | verdict |
+|---|---|---|---|---|
+| top card alone | $8.00 | 0.6 | 4 | $50.85/hr go |
+| bottom card alone | $14.00 | 9.4 | 12 | **$9.81/hr no** |
+| both on one frame | $14.00 | 0.6 | 4 | **$90.85/hr go** |
+
+A pass published as a green accept, spoken aloud, `is_whole()` so the rig stops
+resampling, and written to the append-only journal carrying the wrong card's
+distance, deadline, items and merchant. **30 of this driver's 272 cards** arrive
+on a frame with two payout-sized amounts.
+
+Fixed by `card_span`/`only_card`: the chosen card's words are the gap between
+the two *neighbouring* payouts. That span had to work for both layouts in the
+corpus, which print their figures on opposite sides of the money — anchoring on
+the chosen payout itself is right for one and points straight at the neighbour
+for the other.
 
 Two facts about the rig that keep coming up and are worth not re-deriving, both
 measured over the owner's own 272-card export:

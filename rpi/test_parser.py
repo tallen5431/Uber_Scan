@@ -264,5 +264,34 @@ eq('no legs at all is not a journey short of anything',
    P.legs_short_a_distance([]), False)
 
 
+# --- the card's own words, with every index left where it was -----------------
+#
+# only_card blanks the other card rather than slicing it out, and the blanks are
+# not decoration: find_places is handed leg positions taken from the ORIGINAL
+# text, so a string whose contents had shifted left would line those legs up
+# against the wrong words.
+#
+# No card in the corpus can prove this today. The layout that puts a payout in
+# the middle of the frame — money printed last, so the first card's words come
+# before it — is the delivery layout, and it states no timed legs; the layout
+# with legs prints its money first, which puts the span's start at zero where a
+# slice and a blanking are the same string. That correlation is a fact about two
+# apps rather than a rule either of them promised, so the contract is asserted
+# here directly instead of waiting for a card that breaks it.
+_frame = 'AAA 0.6 mi $8.00 BBB 9.4 mi $14.00'
+_span = P.card_span([(8.0, _frame.index('$8.00')), (14.0, _frame.index('$14.00'))])
+_mine = P.only_card(_frame, _span)
+eq('the chosen card keeps the text it had', _mine[_span[0]:].strip(),
+   _frame[_span[0]:].strip())
+eq('...at the offset it had', _mine.index('9.4 mi'), _frame.index('9.4 mi'))
+eq('...with the other card gone', 'AAA' in _mine, False)
+eq('...but its room kept, so nothing after it moved',
+   _mine.startswith(' ' * _span[0]), True)
+# A frame with one payout is one card, and is handed back untouched rather than
+# blanked down to whatever a span of None would mean.
+eq('one payout is one card and nothing is blanked',
+   P.only_card(_frame, P.card_span([(8.0, 4)])), _frame)
+
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)

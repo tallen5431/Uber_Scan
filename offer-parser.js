@@ -296,6 +296,65 @@
     });
   }
 
+  /* Where the chosen card's own words are, or null if there is only one card.
+   *
+   * THE LEGS WERE BOUNDED AND NOTHING ELSE WAS. oneCard above trims the legs to
+   * the chosen headline's card, and every other field went on reading the whole
+   * frame: the deadline, the lone distance, the item count, and the Pickup
+   * anchor that names the merchant. Measured on two real card shapes printed on
+   * one frame — identical in both ports:
+   *
+   *     top card alone      $8.00   0.6 mi   4 items   ->  $50.85/hr  go
+   *     bottom card alone   $14.00  9.4 mi   12 items  ->   $9.81/hr  no
+   *     both on one frame   $14.00  0.6 mi   4 items   ->  $90.85/hr  go
+   *
+   * The pay came off the card that was chosen and the distance off the card
+   * that was not. A $9.81/hr pass published as a green $90.85/hr accept.
+   *
+   * BETWEEN THE PAYOUTS EITHER SIDE. The corpus holds both layouts and they
+   * print their figures on opposite sides of the money — "…4 items 0.6 mi
+   * $8.00" against "$41.11 Guaranteed (incl. tips) 9.8 mi Deliver by…" — so a
+   * span anchored on the chosen payout is right for one and points at the
+   * neighbour for the other. The gap between the two NEIGHBOURING payouts holds
+   * exactly one payout and whichever side its own fields sit on.
+   *
+   * The legs keep oneCard's narrower rule: they exist only on the Uber layout,
+   * which prints them after the money, and two corpus cases pin it. */
+  function cardSpan(where) {
+    if (!where || where.length < 2) return null;
+    var top = where[0], i;
+    for (i = 1; i < where.length; i++) {
+      if (where[i].value > top.value) top = where[i];
+    }
+    var lo = 0, hi = null;
+    for (i = 0; i < where.length; i++) {
+      if (where[i].at < top.at && where[i].at > lo) lo = where[i].at;
+      if (where[i].at > top.at && (hi === null || where[i].at < hi)) hi = where[i].at;
+    }
+    return { lo: lo, hi: hi };
+  }
+
+  /* `text` with everything outside the chosen card blanked out.
+   *
+   * Blanked rather than sliced, so every index into this string is still an
+   * index into the original — several rules downstream compare positions, and a
+   * slice would silently move all of them. Newlines survive, because line shape
+   * is structure: the item count and the Pickup anchor are read off line
+   * starts, and flattening the blanked half would let a pattern match across
+   * what used to be a break. */
+  function onlyCard(text, span) {
+    if (!span) return text;
+    var hi = span.hi === null ? text.length : span.hi;
+    var blank = function (part) {
+      return part.replace(/[^\n]/g, ' ');
+    };
+    // The blanks BEFORE the card stay — they hold every index in place. The
+    // ones after are dropped: several anchors need a real end to match
+    // against, and a tail of spaces is not one, so a card whose merchant was
+    // the last thing on it lost the merchant.
+    return blank(text.slice(0, span.lo)) + text.slice(span.lo, hi).replace(/\s+$/, '');
+  }
+
   // Spans of a pattern that captures nothing of its own.
   function collectSpans(text, re) {
     var out = [], m;
@@ -1511,6 +1570,11 @@
     var payWhere = [];
     var pay = findPay(text, payWhere);
     legs = oneCard(legs, payWhere);
+    // ...and the same boundary for every other field the card states. See
+    // cardSpan: the legs were bounded and the distance, the deadline, the item
+    // count and the merchant were not, so a frame holding two cards priced one
+    // of them and described the other.
+    var mine = onlyCard(text, cardSpan(payWhere));
 
     var totals = legs.filter(function (l) { return l.isTotal; });
     var used = totals.length ? totals : legs;
@@ -1533,7 +1597,7 @@
     if (miles !== null) miles = Math.round(miles * 100) / 100;
     var dist = { miles: miles, corrected: correctedLeg, uncertain: false };
 
-    var itemMatch = text.match(ITEMS);
+    var itemMatch = mine.match(ITEMS);
     var items = itemMatch ? toNumber(itemMatch[1]) : null;
     if (items !== null && (items < 0 || items > 200)) items = null;
 
@@ -1563,13 +1627,13 @@
     // ride card alone — its legs carry distances — and still refuses to hand a
     // stray number to a LABELLED leg that lost its own, because that is damage
     // and legsShortADistance is already saying so.
-    var deadline = findDeadline(text);
+    var deadline = findDeadline(mine);
     var travelled = [];
     for (var t = 0; t < used.length; t++) {
       if (used[t].miles !== null || used[t].labelled) travelled.push(used[t]);
     }
     if (miles === null && !travelled.length) {
-      var lone = text.match(LONE_MILES);
+      var lone = mine.match(LONE_MILES);
       // "4, Smi ~ fast charger" is on a real card, and S reads as 5. A lone
       // distance is already the least anchored number the parser takes; one
       // spelled entirely in stand-ins is not anchored at all.
@@ -1619,7 +1683,7 @@
        The multi-leg branch does not look at miles at all. */
     dist.uncertain = dist.uncertain || legsShortADistance(used, miles);
 
-    var places = findPlaces(text, legs);
+    var places = findPlaces(mine, legs);
     var approach = toPickup(used);
     return {
       pay: pay,
