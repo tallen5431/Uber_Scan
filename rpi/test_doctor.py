@@ -38,6 +38,10 @@ def eq(name, got, want):
         print('FAIL  %s: got %r want %r' % (name, got, want))
 
 
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 def ok_(name, cond):
     eq(name, bool(cond), True)
 
@@ -192,6 +196,45 @@ ok_('...without blocking the rig', 'backed up' not in ' '.join(
 unset = run(JOURNAL=nostamp)
 ok_('a rig with no sync set up is still told how to set one up',
     any('install-sync.sh' in l for l in unset.stdout.splitlines() if 'backed up' in l))
+# ...and is NOT told it is fine. The verdict used to be `not timer`, which is
+# inverted with respect to the danger it is about: a rig with no sync at all
+# passed and a rig half-way through setting one up failed. A Pi with a camera,
+# a calibration and espeak but no copy of its journal anywhere printed "All
+# good." — about the machine whose only record of every offer it has ever read
+# is one SD card, in a vehicle.
+ok_('...and a rig with no copy of its journal is not called healthy',
+    any(l.startswith('FAIL') for l in unset.stdout.splitlines() if 'backed up' in l))
+no_('...so the report does not end by calling that rig fine',
+    'All good.' in unset.stdout)
+
+# --- reading the journal is not the question the rig depends on --------------
+#
+# Every other line asks whether the journal can be READ. On an SD card
+# remounted read-only — scan_pi.py names it outright as the classic Pi failure —
+# reading is perfect: every row comes back and nothing is torn. The rig cannot
+# record another offer for the rest of the shift, and sync.py then copies the
+# same unchanged file and stamps the backup fresh, so the line above reports a
+# healthy copy too. Two greens over a total, silent loss of the only permanent
+# record.
+#
+# A journal inside a directory that does not exist isolates it: the file is
+# simply absent, which is the ordinary first-boot case and reads as an empty
+# journal, while appending is impossible.
+_ro = run(JOURNAL='/nonexistent-dir-nobody-made/journal.jsonl')
+_ro_seen = findings(_ro.stdout)
+eq('a journal that cannot be appended to fails its own check',
+   _ro_seen.get('the journal can be written'), False)
+ok_('...even though reading it reports no trouble at all',
+    any('rows readable, none torn' in l for l in _ro.stdout.splitlines()))
+ok_('...and it blocks, because a rig that records nothing is not working slowly',
+    'blocking' in _ro.stdout)
+ok_('...naming what usually causes it',
+    'read-only' in _ro.stdout)
+ok_('...and warning that the backup will go on reporting success',
+    'reporting success' in _ro.stdout)
+# The ordinary rig is not accused by it.
+eq('a journal that can be appended to passes',
+   findings(run(JOURNAL=journal).stdout).get('the journal can be written'), True)
 
 # The next step named is the autopilot, which aims, calibrates and scans on
 # its own — not the three scripts it replaced.

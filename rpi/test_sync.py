@@ -442,6 +442,57 @@ try:
 finally:
     behind.close()
 
+# --- one row from a phone with a wrong clock ---------------------------------
+#
+# `at` on a browser row is the phone's own Date.now() (journal-client.js), so a
+# phone whose clock is wrong stamps a moment that never happened into the
+# append-only journal, where nothing can go back and edit it.
+#
+# /api/journal/newest answered with it. The sender then resumes from an hour
+# before a date in the year 5138, rows_since keeps nothing but the pre-NTP rows,
+# and every real offer from that moment on is skipped — for ever, because
+# nothing ever looks further back.
+#
+# The silence is the worst of it. The shortfall check anchors its own window to
+# the same poisoned `newest`, so both sides count the one bad row and agree;
+# the run exits 0, says "nothing new" (suppressed by --quiet in the installed
+# unit) and refreshes the .synced stamp, so doctor.py reports a backup made
+# minutes ago. The only copy of the one file that cannot be regenerated stops
+# growing while both ends report success.
+future = FarEnd()
+try:
+    poisoned = os.path.join(work, 'poisoned.jsonl')
+    good = [offer(800 + i, now - (10 - i) * 60000) for i in range(10)]
+    # 1 Jan 2100 is the ceiling this file already calls "a moment in this
+    # century"; one millisecond past it is not a position in the offers.
+    # Not named `bad`: this suite keeps its failure count in a global of that
+    # name, and a local one here makes the final tally a dict.
+    poison = offer(899, 4102444800001)
+    write(poisoned, good[:5] + [poison] + good[5:])
+
+    eq('a moment that never happened is not the resume point',
+       SY.far_end(future.base).get('newest'), 0)
+
+    argv = sys.argv
+    sys.argv = ['sync', '--to', future.base, '--journal', poisoned, '--quiet',
+                '--no-config']
+    try:
+        eq('the sync runs', SY.main(), 0)
+    finally:
+        sys.argv = argv
+    # THE check. Without the ceiling the copy holds the poison row and nothing
+    # else, and says ok.
+    copied = [r for r in lines(future.journal) if not r.get('kind')]
+    eq('...and every real offer still reaches the copy', len(copied), 11)
+
+    # ...and the anchor it leaves behind is a real moment, so the NEXT run
+    # resumes from somewhere that exists rather than from the year 5138.
+    anchor = SY.far_end(future.base).get('newest')
+    eq('the resume point is the newest offer that really happened',
+       anchor, max(r['at'] for r in good))
+finally:
+    future.close()
+
 # --- rows that cannot say which row they are ---------------------------------
 # `undefined` was the only thing refused, so `id: null` sailed through and every
 # id-less row in a batch collapsed onto one key: the first was stored and the

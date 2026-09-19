@@ -2036,6 +2036,20 @@ function readJournalNow(done) {
 // could not place. It says.
 var CLOCK_BELIEVABLE_AFTER = 1735689600000;
 
+/* ...and the other end of believable: 1 Jan 2100.
+ *
+ * A row can carry a moment that never happened. journal-client.js stamps `at`
+ * from the phone's own Date.now(), and a phone with a wrong clock — or a
+ * corrupted row — lands whatever it says in the append-only journal, which
+ * nothing can go back and edit. This file already knows it: three places clamp
+ * an incoming `since` against this exact number and call it "an epoch-ms moment
+ * in this century", and one of them was written after a row stamped 1e20 took
+ * the whole server down from inside a file callback.
+ *
+ * Named here because it was written out four times and the place that needed it
+ * most did not have it — see /api/journal/newest. */
+var CLOCK_BELIEVABLE_UNTIL = 4102444800000;
+
 // The value below which a given share of offers fall, interpolated between the
 // two straddling samples. A byte-for-byte port of journal.html's percentile()
 // on purpose: the driving screen and the offers page must not be able to print
@@ -2754,8 +2768,33 @@ function route(req, res) {
       rows.forEach(function (r) {
         if (r.kind) return;                       // a tag, not an offer
         offers++;
-        if (wantWindow && (r.at || 0) >= since) offersSince++;
-        if ((r.at || 0) > newest) newest = r.at;
+        /* A moment that never happened is not a position in the offers.
+         *
+         * This line compared `(r.at || 0)` and then assigned the RAW `r.at`,
+         * with no ceiling at either end. One row stamped 1e20 — a phone with a
+         * wrong clock, and journal-client.js takes `at` from the phone's own
+         * Date.now() — made this answer `newest: 1e20`. sync.py sets
+         * `floor = newest - 1h` from that, rows_since then keeps only rows
+         * below CLOCK_BELIEVABLE_AFTER, and every real offer from that moment
+         * on is skipped. For ever: nothing ever looks further back.
+         *
+         * And it is silent at every step. The shortfall check cannot see it —
+         * its own window is anchored to the same poisoned `newest`, so both
+         * sides count the one bad row and agree. The run exits 0, says
+         * "nothing new" (suppressed by --quiet in the installed unit) and
+         * refreshes the .synced stamp, so doctor.py reports a backup made
+         * minutes ago. The only copy of the one file that cannot be
+         * regenerated stops growing while both ends report success.
+         *
+         * Sanitised once and used for both answers, because a row that is not
+         * a moment is not inside the sender's window either — and counting it
+         * there would be the same disagreement one line down. Erring this way
+         * makes the far end look short and the sender re-send, which is the
+         * safe direction; the other way round is the one that loses rows. */
+        var at = (typeof r.at === 'number' && isFinite(r.at)
+                  && r.at <= CLOCK_BELIEVABLE_UNTIL) ? r.at : 0;
+        if (wantWindow && at >= since) offersSince++;
+        if (at > newest) newest = at;
       });
       // What this build can do, so the sender can tell "I am misconfigured"
       // from "the far end is old" without a human having to compare error

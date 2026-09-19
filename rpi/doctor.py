@@ -121,7 +121,19 @@ def main():
             # The rig cannot tell the two apart from here — there is no record
             # older than the record itself — so it says what it actually knows
             # and what makes it true, rather than picking the alarming reading.
-            check('offers backed up off the car', not timer,
+            # FALSE either way, and the two details stay exactly as they were.
+            # The verdict used to be `not timer`, which is inverted with respect
+            # to the danger it is about: a rig with NO sync at all passed, and a
+            # rig half-way through setting one up failed. So a Pi with a camera,
+            # a calibration and espeak but no copy of its journal anywhere
+            # printed "All good." — about the machine whose only record of every
+            # offer it has ever read is one SD card, in a vehicle.
+            #
+            # What the rig genuinely cannot tell apart is WHY there is no stamp,
+            # and that distinction is kept: the detail and the fix still say
+            # which of the two it is looking at. What is no longer claimed is
+            # that either of them is fine.
+            check('offers backed up off the car', False,
                   'no sync set up — see tools/install-sync.sh' if not timer
                   else 'the timer is installed, but no sync has been recorded yet',
                   '' if not timer else
@@ -176,6 +188,35 @@ def main():
                   'append-only and nothing keeps a second copy of a line. One is '
                   'what a power cut costs; this many is a card starting to fail. '
                   'Copy %s somewhere else now, then check the card.' % journal_path)
+        # ...and whether a row can still be ADDED to it, which is a different
+        # question and the one the rig actually depends on.
+        #
+        # Every line above asks whether the journal can be READ. On an SD card
+        # remounted read-only — which scan_pi.py names outright as the classic
+        # Pi failure — reading is perfect: every row comes back, nothing is
+        # torn, and this printed "N rows readable, none torn" on a rig that
+        # could not record another offer for the rest of the shift. sync.py
+        # then read the same still-readable file, found nothing new, and
+        # stamped the backup fresh, so the line above it reported a healthy
+        # copy as well. Two greens and a silent, total loss of the only
+        # permanent record.
+        #
+        # Opened for append and closed again: it creates nothing that was not
+        # there, writes no byte, and asks the filesystem the exact question the
+        # scanner will ask it in a few seconds' time.
+        try:
+            with open(journal_path, 'a'):
+                pass
+            writable, why = True, 'a row can be added'
+        except Exception as e:                                # noqa: BLE001
+            writable, why = False, 'cannot be written (%s)' % e
+        check('the journal can be written', writable, why,
+              'the rig can read every offer it has already stored and cannot '
+              'record another one. An SD card that has gone read-only is the '
+              'usual cause, and it reads perfectly until you try to write: '
+              'mount | grep " on / " will say ro. Nothing is being kept until '
+              'this is fixed, and the backup will keep reporting success '
+              'because the file it copies is unchanged.')
     except Exception as e:                                    # noqa: BLE001
         check('the journal file is whole', False, str(e))
 
