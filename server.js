@@ -1520,7 +1520,15 @@ var latestCache = null;
  * FILE ORDER IS PRESERVED. bestReading breaks a tie by taking the last row it
  * was handed, so a filter that reordered would change which reading wins.
  *
- * A floor of 0 means "All", and then there is nothing to drop. */
+ * A floor of 0 means "All", and then there is nothing to drop.
+ *
+ * WHERE THIS MAY NOT BE USED, and it has been asked twice: /api/journal/newest,
+ * /api/journal/notes and POST /api/journal/ingest must keep reading every row.
+ * Ingest is the one that cannot be argued with — its idempotence is a syncKey
+ * set built over the whole file, so a windowed set stops recognising rows it
+ * has already stored and appends them again on every sync tick. The header of
+ * readJournal above records what a short set did last time: 60 duplicate rows,
+ * `ok: true`, and a `have` that was wrong. See AUDITS.md. */
 function rowsFor(rows, floor) {
   if (!floor) return rows;
   var wanted = Object.create(null);

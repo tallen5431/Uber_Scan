@@ -166,6 +166,7 @@ it read `package.json`, and it will serve instead.
 | `tools/make_icons.py` | Regenerates the icons in `icons/` |
 | `tools/make-cert.sh` | `npm run cert` — local certificate authority for https |
 | `tools/install-sync.sh` | Puts the rig's journal on a timer to the machine at home; see the rig's README |
+| [`AUDITS.md`](AUDITS.md) | What has already been looked at: what was fixed, what is known and still open, and — the point of the file — proposals that were checked against the code and found to be wrong, so the same ground is not dug twice. Read it before starting anything that sounds like an improvement |
 
 ## Looking at a shift afterwards
 

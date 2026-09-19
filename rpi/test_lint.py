@@ -289,6 +289,44 @@ for _name in ('MAX_PLACE', 'MAX_PLACES', 'SANE_RATE', 'SANE_MPH', 'MAX_MPH',
            % (_j.group(1), _p.group(1)),
            float(_j.group(1)), float(_p.group(1)))
 
+# --- the record of what has already been looked at -------------------------
+#
+# AUDITS.md exists so the same ground is not dug twice: what was fixed, what is
+# known and still open, and — the half that actually saves the time — proposals
+# that were checked against the code and found to be wrong.
+#
+# A stale one is worse than none. It would be read as current, and the whole
+# point of it is to be believed without re-checking, so it is exactly the shape
+# of this project's fifth fault: text making a claim the code does not honour.
+# Neither check below can tell whether the PROSE is still true — nothing can —
+# but both catch the way it actually rots, which is a file being renamed or
+# added underneath it.
+_audits = open(os.path.join(ROOT, 'AUDITS.md')).read()
+_readme = open(os.path.join(ROOT, 'README.md')).read()
+
+ok_('the record of what has been audited is readable', len(_audits) > 500)
+ok_('...and the README points at it', 'AUDITS.md' in _readme)
+
+# Every path it names in backticks is a path that exists. A doc naming a file
+# that was renamed a year ago is a doc nobody trusts the rest of.
+for _named in sorted(set(re.findall(r'`([A-Za-z0-9_./-]+\.(?:js|py|html|css|md|sh))`',
+                                    _audits))):
+    ok_('AUDITS.md names a file that exists: %s' % _named,
+        os.path.exists(os.path.join(ROOT, _named)))
+
+# ...and the README's own table covers every file the repo ships at the top
+# level, so the next one added has to be written down rather than quietly left
+# out. AUDITS.md itself was missing from it until this check was written.
+# README.md is not asked to list itself. Everything else is, in whichever form
+# the table already uses — some are named in backticks and some are linked.
+_shipped = sorted(f for f in os.listdir(ROOT)
+                  if os.path.isfile(os.path.join(ROOT, f))
+                  and f.rsplit('.', 1)[-1] in ('js', 'html', 'css', 'md', 'webmanifest')
+                  and f not in ('package.json', 'package-lock.json', 'README.md'))
+for _f in _shipped:
+    ok_('the README names %s' % _f,
+        ('`%s`' % _f) in _readme or ('(%s)' % _f) in _readme)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)
