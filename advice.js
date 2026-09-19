@@ -1082,5 +1082,9 @@
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
            unexplained: unexplained, stack: stack, sameArea: sameArea, area: area,
            mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,
-           THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT };
+           // Exported because a page that prints how far the line moved has to
+           // be able to say what "settled" was allowed to mean, and a check
+           // that the wording matches has to read the same number this does.
+           THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT,
+           UNSTABLE_SPREAD: UNSTABLE_SPREAD };
 }));

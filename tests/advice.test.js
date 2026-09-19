@@ -266,6 +266,50 @@ function offer(atMinutes, pay, minutes, cost) {
   ok_('...with the line above the cheap tier', a.suggested > 5);
   ok_('...and a plateau around it, not a single point', a.high >= a.low);
   ok_('...pointing at the bottom of that plateau', a.suggested === a.low);
+  // This market is the one that earns the strong wording: the recommended line
+  // is the same number at every threshold, so the page may say so.
+  eq('...and here the line really did not move', a.spread, 0);
+})();
+
+/* ---- "held" is not "did not move" ---- */
+/* `stable` allows the recommended line to wander by UNSTABLE_SPREAD across the
+   thresholds, which is $6. The offers page printed "the same line comes out
+   however the recording is split into runs, which is why it is worth acting
+   on" over the whole of that allowance — a stronger claim than this file
+   makes, in the sentence whose job is to say why the number can be trusted.
+
+   What is checked here is that the case is REACHABLE, because if it were not
+   the wording would have been harmless and the fix pointless. It is not
+   theoretical: over a thousand synthetic markets, 104 came out answered with a
+   line that moved, 49 of them by $3 or more. The page's own version of this,
+   measured end to end, is in rpi/test_offerspage.py. */
+(function () {
+  // The same generator the offers-page fixture uses, so the two are the same
+  // market and a change to one is visible in the other.
+  // BigInt for the step, because Python's integers are exact and a double is
+  // not: s * 1103515245 runs past 2^53 on the second iteration, and the two
+  // ports then walk different markets. Found by this check disagreeing with
+  // the Python fixture it is supposed to share.
+  var rows = [], s = 73n;
+  for (var i = 0; i < 120; i++) {
+    s = (s * 1103515245n + 12345n) % 2147483648n;
+    var r = Number(s) / 2147483648;
+    var mins = 10 + Math.floor(r * 30);
+    var pay = 4 + Math.floor(r * r * 4000) / 100;
+    rows.push({ at: 1700000000000 + Math.floor((i * 8 + r * 16) * MIN),
+                pay: pay, minutes: mins, billedMinutes: mins, cost: 0,
+                suspect: 0, whole: 1, hidden: 0 });
+  }
+  var w = A.advise(rows, { target: 25 });
+  ok_('a market can be answered with a line that still moves', w.ready);
+  ok_('...by as much as the threshold allows', w.spread === 6);
+  ok_('...which is the whole allowance, not a rounding',
+      w.spread === A.UNSTABLE_SPREAD);
+  var lows = w.checkedAt.map(function (e) { return e.low; });
+  eq('...and the six cuts do not agree', JSON.stringify(lows),
+     JSON.stringify([24, 24, 30, 30, 30, 30]));
+  eq('...while the figure shown is the one at the cut the page uses',
+     w.suggested, 30);
 })();
 
 /* ---- it must refuse, far more often than it answers ---- */

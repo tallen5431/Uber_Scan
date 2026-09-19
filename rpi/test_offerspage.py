@@ -327,7 +327,46 @@ MAPPED = [
 
 # The four answers /api/journal can give. Every field here is one the server
 # actually sends — see the send() call in the /api/journal branch.
+# A market the advice answers, whose line moves as the recording is cut a
+# different way.
+#
+# `stable` is not "the line did not move" — it allows the recommended figure to
+# wander by UNSTABLE_SPREAD across the six thresholds, which is $6. This one
+# uses the whole allowance: $24 at the two shortest cuts and $30 at the other
+# four. The page printed "The same line comes out however the recording is
+# split into runs, which is why it is worth acting on" over exactly that, in
+# the sentence that tells the driver why to trust the number.
+#
+# Built from a fixed LCG rather than by hand because the case needs a hundred
+# offers with enough variety to move the plateau, and a hundred rows written
+# out would be a wall nobody could check. What matters is that the numbers do
+# not change between runs and that the market really does land in this state —
+# which the checks below assert rather than assume.
+def wobbly(seed=73, n=120, step=8.0):
+    rows, s = [], seed
+    for i in range(n):
+        s = (s * 1103515245 + 12345) % 2147483648
+        r = s / 2147483648.0
+        mins = 10 + int(r * 30)
+        pay = 4 + int(r * r * 4000) / 100.0
+        at = NOW + int((i * step + r * step * 2) * 60000)
+        rows.append({'id': 'w%d' % i, 'at': at, 'firstAt': at,
+                     'pay': pay, 'minutes': float(mins), 'miles': 6.0,
+                     'perHour': round(pay / (mins / 60.0), 2),
+                     'grossPerHour': round(pay / (mins / 60.0), 2),
+                     'cost': 0.0, 'costPerMile': 0.0, 'target': 25, 'band': 15,
+                     'legs': 2, 'whole': True, 'accepted': False})
+    return rows
+
+
+WOBBLY = wobbly()
+
 FEEDS = {
+    'a line that moves': {
+        'count': len(WOBBLY), 'total': len(WOBBLY), 'truncated': False,
+        'days': 30, 'hidden': 0,
+        'watched': {'saw': len(WOBBLY), 'kept': len(WOBBLY)},
+        'unreadable': None, 'pairs': [], 'offers': WOBBLY},
     'busy': {'count': len(BUSY_ROWS), 'total': len(BUSY_ROWS), 'truncated': False,
              'days': 7, 'hidden': 0, 'watched': {'saw': 6, 'kept': 6},
              'unreadable': None, 'pairs': [], 'offers': BUSY_ROWS},
@@ -531,6 +570,12 @@ const TEXT = (sel) => {
         .map((e) => (e.textContent || '').replace(/\s+/g, ' ').trim());
       return {
         headline: text('#headline'),
+        // The advice block. Shown for a refusal as well as an answer — a
+        // refusal says what the window is short of, which is not nothing — so
+        // the two are told apart by `working`, which only an answer fills in.
+        advice: document.getElementById('advice').hidden ? null : {
+          lead: text('#adviceLead'), working: text('#adviceWorking'),
+        },
         nothing: document.getElementById('nothing').hidden
           ? null : text('#nothing'),
         caveats: list('#caveats li'),
@@ -1070,6 +1115,35 @@ try:
         csv = r.get('csv') or ''
         ok_('%s: ...and the export points at the same window (%r)'
             % (name, csv[:60]), 'since=' in csv and 'days=7' not in csv)
+
+    # --- a line that moves may not be called a line that did not -------------
+    #
+    # `stable` lets the recommended figure wander by UNSTABLE_SPREAD across the
+    # six ways the recording is cut into runs, which is $6 — a fifth to a third
+    # of the line itself on the targets this driver sets. The page printed "The
+    # same line comes out however the recording is split into runs ... which is
+    # why it is worth acting on" over all of it, in the one sentence whose job
+    # is to say why the number can be trusted. This market uses the whole
+    # allowance: $24 at the two shortest cuts, $30 at the other four.
+    #
+    # The remedy is the wording, not the threshold. A line steady to within a
+    # few dollars over six different cuts is a real finding and refusing it
+    # would throw away the answer; claiming it never moved is the part that was
+    # not true.
+    wob = (got.get('a line that moves') or {}).get('advice') or {}
+    work = wob.get('working') or ''
+    ok_('the wobbly market gets an answer at all', bool(work))
+    ok_('...and the answer names the line (%r)' % work[-90:], '$30' in work)
+    ok_('...and does not claim it came out the same however the recording '
+        'is split', 'same line comes out' not in work)
+    ok_('...but says where it actually went', '$24' in work and '$30' in work)
+    ok_('...and by how much', '$6 spread' in work)
+    ok_('...and that the figure shown is one of the six, not their average',
+        'not an average' in work)
+    # The strong wording is not deleted, only earned. Every other feed here is
+    # too small to reach the answered state, so the case that keeps it is
+    # checked against the module in tests/advice.test.js rather than through a
+    # second hundred-row fixture.
 
     # --- net and gross may not disagree about the same offers ----------------
     #

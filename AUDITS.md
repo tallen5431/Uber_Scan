@@ -83,6 +83,24 @@ OFFER is the gross side, and deliberately **not** when the held job is: that
 direction understates, which is the safe one and not worth losing a true claim
 over. The asymmetry is worked out in the comment at the `offerGross` line.
 
+**"Held at every threshold" was printed as "the same line comes out".** The
+stability check allows the recommended figure to wander by `UNSTABLE_SPREAD`
+across the six ways the recording is cut into runs, which is $6 — a fifth to a
+third of the line itself on the targets this driver sets. The offers page
+claimed the line never moved over all of it, in the one sentence whose job is
+to say why the number can be trusted. It now says where the line actually went
+and by how much, and keeps the strong wording for the case that earns it.
+
+The threshold was deliberately **not** tightened: a line steady to within a few
+dollars over six different cuts is a real finding, and the refusal above it is
+for when it is not. The fault was the wording. The case is common — over a
+thousand synthetic markets, 104 came out answered with a line that moved, 49 of
+them by $3 or more — and the fixture that pins it is a shared generator in both
+`tests/advice.test.js` and `rpi/test_offerspage.py`, whose line is $24 at the
+two shortest cuts and $30 at the other four. If that generator is ever touched:
+Python's integers are exact and a double is not, so the JS side steps the LCG
+in `BigInt` or the two ports walk different markets.
+
 **Occupancy was asked of the previous row rather than of the shift.** `runs()`
 and `unexplained()` measured each gap from `freeAgain(rows[i - 1])`, so a single
 card scanned during a tagged trip threw the rest of that trip's length away.

@@ -1483,9 +1483,31 @@
 
     // Only ever reached when the answer held at every threshold — an unsettled
     // one is refused above rather than printed with a retraction underneath.
-    working += ' The same line comes out however the recording is split into '
-             + 'runs (checked from ' + A_MIN(a) + ' to ' + A_MAX(a)
-             + ' minutes), which is why it is worth acting on.';
+    //
+    // But "held" is not "did not move", and this sentence used to say it was.
+    // `stable` allows the recommended line to wander by UNSTABLE_SPREAD across
+    // the thresholds, which is $6 — a fifth to a third of the line itself on
+    // the targets this driver sets — and the page claimed "the same line comes
+    // out however the recording is split" over the whole of it. That is a
+    // stronger claim than the check makes, printed in the sentence that tells
+    // the driver why to act on the number.
+    //
+    // So the strong wording is kept for the case that earns it, and where the
+    // line really did move it says so and by how much. Refusing the answer
+    // instead would be the wrong correction: a line steady to within a few
+    // dollars over six different ways of cutting the recording is a finding,
+    // and the refusal above is for when it is not.
+    working += (a.spread > 0
+      ? ' Cut into runs a different way the line moves a little: it comes out '
+        + 'anywhere from <b>' + money(A_LOW(a)) + '</b> to <b>'
+        + money(A_HIGH(a)) + '</b> across the six cuts (checked from '
+        + A_MIN(a) + ' to ' + A_MAX(a) + ' minutes), a ' + money(a.spread)
+        + ' spread. Steady enough to act on — and ' + money(a.suggested)
+        + ' is what it comes to at ' + Advice.SHOWN_AT + ' minutes, which is '
+        + 'the cut every figure above uses, not an average of the six.'
+      : ' The same line comes out however the recording is split into '
+        + 'runs (checked from ' + A_MIN(a) + ' to ' + A_MAX(a)
+        + ' minutes), which is why it is worth acting on.');
 
     // Deliberately no dollars-per-hour. It depends entirely on how much of the
     // recorded time was really driving, which nothing here knows: on the data
@@ -2195,6 +2217,18 @@
   }
   function A_MAX(a) {
     return Math.max.apply(null, a.checkedAt.map(function (c) { return c.minutes; }));
+  }
+  // Where the RECOMMENDED line went across those thresholds — the bottom of
+  // the plateau at each one, which is the number this page prints. Not
+  // `a.low`/`a.high`: those are the plateau at the one threshold the figures
+  // are shown at, a different quantity that happens to have the same names.
+  // The refusal path gets these two off `advise` directly; the answered path
+  // carries the plateau there instead, so they are worked out here.
+  function A_LOW(a) {
+    return Math.min.apply(null, a.checkedAt.map(function (c) { return c.low; }));
+  }
+  function A_HIGH(a) {
+    return Math.max.apply(null, a.checkedAt.map(function (c) { return c.low; }));
   }
 
   var lastData = null;
