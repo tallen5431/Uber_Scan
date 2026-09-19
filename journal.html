@@ -460,8 +460,8 @@
   <!-- A group, named, with the pressed one announced. It was four unlabelled
        buttons whose selected state existed only as a border colour. -->
   <div class="rangebtns" id="ranges" role="group" aria-label="How far back to look">
-    <button type="button" data-days="1" aria-pressed="false">Today</button>
-    <button type="button" data-days="7" aria-pressed="true">7 days</button>
+    <button type="button" data-days="1" aria-pressed="true">Today</button>
+    <button type="button" data-days="7" aria-pressed="false">7 days</button>
     <button type="button" data-days="30" aria-pressed="false">30 days</button>
     <button type="button" data-days="0" aria-pressed="false">All</button>
   </div>
@@ -615,7 +615,11 @@
          which is the parked list, is where it belongs. A page nothing links to
          is a page nobody knows is there. -->
     <a class="linkbtn" href="map.html">⌖ Map</a>
-    <a class="linkbtn" id="csv" href="/api/journal.csv?days=7">⤓ CSV</a>
+    <!-- Rewritten by load() on every range press; this is only what it says
+         before the first one lands, and it has to agree with the button that
+         is pressed above or a driver who exports before the page settles gets
+         a week when the page says Today. -->
+    <a class="linkbtn" id="csv" href="/api/journal.csv?limit=0&days=1">⤓ CSV</a>
   </nav>
 </main>
 
@@ -658,7 +662,17 @@
     el[id] = document.getElementById(id);
   });
 
-  var days = 7;
+  /* Today, because that is what this page is opened for.
+     The driver's own words: "I mostly need to see orders I have scanned today
+     to see how the market is." A week was the old default and it is the wrong
+     question by default — a median over seven days is a fact about the month,
+     and the one being asked at the wheel is whether THIS evening is worth
+     staying out for.
+     It is also the cheapest window by a wide margin: the response is 39 KiB
+     against 279 for a week and 14.6 MB for All, and the page's own passes —
+     the day groups, the three chart passes, the pair join — are all O(offers
+     in the window). The other three ranges are one press away and unchanged. */
+  var days = 1;
 
   // When a driver's day starts, which is not when the calendar's does.
   //
@@ -2208,9 +2222,18 @@
     // against $13.95 for the rest — it is a random fifth of the log, not a
     // biased sample, and the figures it was suspected of distorting it does
     // not distort. See Advice.busy for the one pile it does distort.
+    /* One pass over `kept`, not two. Advice.usable is a filter over every row
+       in the window and it was run twice per render — here, and again for the
+       replay ladder further down — over the same `kept` for the same answer.
+       Kept in its own try: `usable` is the thing that can throw on a row this
+       build has never seen, and swallowing that into "no busy marks" is
+       different from swallowing it into "no ladder". Both still degrade on
+       their own terms below. */
+    var fit = null;
+    try { fit = Advice.usable(kept); } catch (e) { fit = null; }
     var busyBy = {};
     try {
-      busyBy = Advice.busy(Advice.usable(kept)) || {};
+      busyBy = Advice.busy(fit || []) || {};
     } catch (e) { busyBy = {}; }
     // How many ticks the window holds, which is the denominator of everything
     // the busy marking can honestly claim. See showCaveats.
@@ -2355,7 +2378,7 @@
     // could have taken. Both come back from the same call over the same set.
     var sim = null;
     try {
-      sim = Advice.replay(Advice.runs(Advice.usable(kept)), target);
+      sim = fit && Advice.replay(Advice.runs(fit), target);
     } catch (e) { sim = null; }
 
     /* Two figures that are not fractions of the same thing, and this sentence
@@ -2479,16 +2502,24 @@
     // The heading carries the day count for the same reason the time-of-day
     // chart's does: "Fridays pay $24" rests on three Fridays or on twelve.
     var WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    var week = WEEKDAYS.map(function (name) { return { name: name, rates: [] }; });
-    offers.forEach(function (r) {
-      week[dayOf(r.at).getDay()].rates.push(r.perHour);
-    });
-    week.push(week.shift());                       // Monday first, Sunday last
     var WEEK_NEEDS_DAYS = 14;
-    el.weekHead.hidden = dayCount < WEEK_NEEDS_DAYS;
+    // Asked BEFORE the bucketing, not after. This walked every offer in the
+    // window into seven piles and then threw all seven away on any window
+    // under a fortnight — which is the window this page now opens on, and the
+    // one it spends most of its life in. One condition, guarding both the work
+    // and the output it feeds, rather than the output alone.
+    var enoughDays = dayCount >= WEEK_NEEDS_DAYS;
+    var week = WEEKDAYS.map(function (name) { return { name: name, rates: [] }; });
+    if (enoughDays) {
+      offers.forEach(function (r) {
+        week[dayOf(r.at).getDay()].rates.push(r.perHour);
+      });
+    }
+    week.push(week.shift());                       // Monday first, Sunday last
+    el.weekHead.hidden = !enoughDays;
     el.weekHead.innerHTML = 'By day of week <em>· median $/hr, across '
       + dayCount + ' day' + (dayCount === 1 ? '' : 's') + '</em>';
-    el.week.innerHTML = dayCount < WEEK_NEEDS_DAYS ? '' : week.map(function (w) {
+    el.week.innerHTML = !enoughDays ? '' : week.map(function (w) {
       return bar(w.name, w.rates, full, target, band);
     }).join('');
 

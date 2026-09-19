@@ -556,6 +556,20 @@ const TEXT = (sel) => {
             d.open = was;
             return said;
           }),
+        // What the page opens on, before anybody presses anything. The driver's
+        // own words: "I mostly need to see orders I have scanned today to see
+        // how the market is." It used to open on a week, which is both the
+        // wrong question by default and the expensive one — a week's answer is
+        // 279 KiB against 39 for a day, and every pass the page makes is over
+        // the offers in the window.
+        openedOn: [].slice.call(document.querySelectorAll('#ranges button'))
+          .filter((b) => b.getAttribute('aria-pressed') === 'true')
+          .map((b) => b.getAttribute('data-days')),
+        // The first thing it ASKS for, which is the half the button cannot
+        // prove: a page that shows Today pressed while fetching a week is the
+        // same slow page with a tidier label.
+        firstAsked: ((window.__asked || []).filter(
+          (u) => String(u).indexOf('/api/journal?') === 0)[0]) || '',
         rows: document.querySelectorAll('#log details.offer').length,
         asked: window.__asked.length,
         // What the panel had said about the jobs that were worked.
@@ -1016,6 +1030,32 @@ try:
         ok_('%s was rendered' % name, got.get(name) is not None)
     if any(got.get(n) is None for n in FEEDS):
         raise SystemExit(1)
+
+    # --- what the page opens on ---------------------------------------------
+    #
+    # The driver's own words: "I mostly need to see orders I have scanned today
+    # to see how the market is." It opened on a week, which is both the wrong
+    # question by default — a median over seven days is a fact about the month,
+    # and the one being asked at the wheel is whether THIS evening is worth
+    # staying out for — and the expensive one: measured against a year-sized
+    # journal, a week is 279 KiB where a day is 39, and every pass this page
+    # makes is over the offers in the window.
+    #
+    # Both halves, because the button proves only the label. A page showing
+    # Today pressed while fetching a week is the same slow page with a tidier
+    # sticker on it.
+    for name in FEEDS:
+        r = got.get(name) or {}
+        eq('%s: the page opens on Today' % name, r.get('openedOn'), ['1'])
+        asked = r.get('firstAsked') or ''
+        # Today is not days=1: a trailing 24 hours folds last night's shift into
+        # this morning's figures, and only the browser knows when the driver's
+        # day began. baseWindow sends days=2 with an explicit 4am `since`.
+        ok_('%s: ...and asks for it, not for a week (%r)' % (name, asked[:60]),
+            'since=' in asked and 'days=7' not in asked)
+        csv = r.get('csv') or ''
+        ok_('%s: ...and the export points at the same window (%r)'
+            % (name, csv[:60]), 'since=' in csv and 'days=7' not in csv)
 
     # --- net and gross may not disagree about the same offers ----------------
     #

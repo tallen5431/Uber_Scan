@@ -210,6 +210,176 @@ try:
     eq('...and the read after them still does', get(base, '/api/journal/newest').get('have'), 5)
     eq('...as the offers page sees it', get(base, '/api/journal?days=0').get('count'), 5)
 
+    # --- and the same three on a COLD journal -------------------------------
+    #
+    # The case above is the warm tail read: the cache is already built and only
+    # the appended bytes are parsed. The expensive one is the cold read, which
+    # is what happens when systemd restarts the server mid-shift — and every
+    # reader used to do the whole job for itself: its own whole-file buffer,
+    # its own whole-file string, its own split array, its own rows.
+    #
+    # Measured on a year-sized journal: one cold read peaks at 380 MB of
+    # resident memory, three at once at 820 MB. On a Pi sharing its RAM with
+    # OpenCV and Tesseract that is the difference between working and swapping.
+    # They queue now — one reader does the work and the others get its answer.
+    #
+    # What is asserted here is the part that must not break: every caller is
+    # still answered, and answered correctly. A queue that drops a waiter, or
+    # hands one a half-built array, would be a far worse fault than the memory.
+    stop(proc)
+    proc, base = start({'SCANNER': '0'}, journal)
+    conns = [http.client.HTTPConnection('127.0.0.1', int(base.rsplit(':', 1)[1]),
+                                        timeout=10) for _ in range(3)]
+    for c in conns:
+        c.request('GET', '/api/journal?days=0')
+    cold = []
+    for c in conns:
+        cold.append(json.loads(c.getresponse().read().decode('utf-8')).get('count'))
+        c.close()
+    eq('three readers arriving together on a cold journal are all answered '
+       '(%r)' % cold, cold, [5, 5, 5])
+    eq('...and the next one still is', get(base, '/api/journal?days=0').get('count'), 5)
+
+    # --- the file rewritten under the cache ---------------------------------
+    #
+    # `cp backup journal` keeps the inode and can leave the file larger, which
+    # looks exactly like an append until the remembered last line is checked and
+    # is not there. The read then starts again from the beginning — and it has
+    # to do that WITHOUT going back through the queue it is already holding, or
+    # it would be parked behind itself and never answer. A hang here, not a
+    # wrong number, is what that mistake looks like, which is why this asserts
+    # against a timeout.
+    # DIFFERENT rows, not the same ones with more added. A rewrite whose first
+    # lines are byte-identical to what was there IS an append as far as this
+    # check can tell, and rightly so — the remembered last line is still where
+    # it was, so the tail read is correct and the retry never fires. Writing
+    # the same offers back was the first version of this fixture and it proved
+    # nothing: the retry path stayed unexecuted and a mutation that broke it
+    # passed.
+    write(journal, [offer(i + 100, NOW - i * 60000) for i in range(7)])
+    eq('a journal rewritten in place is read again from the start',
+       get(base, '/api/journal?days=0').get('count'), 7)
+    eq('...and the cache is right afterwards',
+       get(base, '/api/journal/newest').get('have'), 7)
+
+    # --- a window may not change what an offer IS ---------------------------
+    #
+    # The fold is now given only the rows a window can reach, because folding a
+    # year to answer "today" cost 182 ms on every page load during a shift —
+    # the scanner appends every few seconds and the cache is keyed on the rows
+    # array, so every new offer made the next load re-fold everything.
+    #
+    # The saving is only allowed if the ANSWER is identical, and this is where
+    # that is proved rather than asserted. Every hazard the rule was written
+    # around is in this journal at once: a card whose readings straddle the
+    # floor, a rule older than the floor that hides a card inside it, a mark
+    # older than the floor, a mark NEWER than the offer it names, a pairing
+    # older than the floor, and a row from before the rig had a clock.
+    stop(proc)
+    hz = os.path.join(work, 'hazards.jsonl')
+    DAY = 86400000
+    old_at = NOW - 40 * DAY
+    write(hz, [
+        # An offer long outside any recent window. It must not appear in the
+        # windowed answer, and its presence must not change the ones that do.
+        offer(1, old_at, pay=9.0),
+        # A rule written 40 days ago that hides a card scanned TODAY. Dropping
+        # rule rows outside the window would un-hide it — and the driver would
+        # see the test card they hid, in the figures, with nothing said.
+        {'v': 1, 'kind': 'rule', 'at': old_at,
+         'match': {'pay': 11.0, 'minutes': 20.0, 'miles': 4.0}, 'hidden': True},
+        # A mark written 40 days ago about a card scanned today.
+        {'v': 1, 'kind': 'mark', 'at': old_at, 'id': 'off3', 'accepted': True},
+        # A card read twice, seconds apart, with the floor between the two — the
+        # only shape this hazard really takes, because every reading of one card
+        # happens within seconds of the others.
+        #
+        # The EARLIER reading saw the address and the later one lost it, which
+        # is an ordinary outcome: the card scrolls, the crop moves, the second
+        # read is better on the figures and blank on the places. bestReading
+        # takes the later reading and BORROWS the address from the one it
+        # outvoted. Drop the earlier reading because it falls outside the window
+        # and the address is simply gone, from a card that is in the window.
+        #
+        # Two earlier fixtures proved nothing here. Readings that AGREE survive
+        # any split, and readings eight days apart make the winner itself fall
+        # outside the window, so the offer never appears either way.
+        offer(2, NOW - 2 * DAY - 60000, pay=14.0,
+              pickup='Chipotle (Barrett)', dropoff='Oak St',
+              places=['Chipotle (Barrett)', 'Oak St']),
+        offer(2, NOW - 2 * DAY + 60000, pay=14.0, seq=2),
+        # ...and the one the rule above hides, scanned today.
+        offer(3, NOW - 120000, pay=11.0),
+        # A row from before the rig heard from NTP. In no window by
+        # construction, and counted separately so it is never silently gone.
+        offer(4, 1000, pay=7.0),
+        # An ordinary card scanned today.
+        offer(5, NOW - 300000, pay=13.0),
+    ])
+    proc, base = start({'SCANNER': '0'}, hz)
+    since = NOW - 2 * DAY
+    wide = get(base, '/api/journal?days=0&limit=0')
+    narrow = get(base, '/api/journal?days=2&since=%d' % since)
+    by_id = lambda body: dict((o['id'], o) for o in (body.get('offers') or []))
+    W, N = by_id(wide), by_id(narrow)
+    # The window holds what it should and nothing older.
+    # off3 is inside the window and absent on purpose: the forty-day-old rule
+    # hides it, and a hidden card is in neither the list nor the figures unless
+    # asked for by name. Its absence IS the rule surviving the window.
+    eq('a windowed read returns the offers inside the window (%r)'
+       % sorted(N), sorted(N), ['off2', 'off5'])
+    ok_('...and not the one forty days back', 'off1' not in N)
+    # THE check. Every offer the window holds must be the SAME offer the
+    # unwindowed read reports — same figures, same flags, same everything.
+    for oid in sorted(N):
+        eq('...and %s is identical to the unwindowed read of it' % oid,
+           json.dumps(N[oid], sort_keys=True), json.dumps(W.get(oid), sort_keys=True))
+    # Said again on the three hazards by name, so a failure says which rule broke.
+    ok_('a rule older than the window still hides a card inside it',
+        'off3' not in N and 'off3' not in W)
+    eq('...and the window counts it hidden exactly as the whole file does',
+       narrow.get('hidden'), wide.get('hidden'))
+    ok_('...and that count is not zero, or the rule proved nothing',
+        (narrow.get('hidden') or 0) >= 1)
+    # The same card, asked for by name. A mark written forty days before the
+    # window still has to reach it.
+    shown = get(base, '/api/journal?days=2&since=%d&hidden=1' % since)
+    marked = dict((o['id'], o) for o in (shown.get('offers') or []))
+    ok_('a mark older than the window still reaches its offer',
+        (marked.get('off3') or {}).get('accepted') is True)
+    eq('a row from before the clock is still counted, not dropped in silence',
+       narrow.get('beforeClock'), 1)
+    eq('...the same count the unwindowed read gives', wide.get('beforeClock'), 1)
+    # A card read either side of the floor keeps both readings, so the vote —
+    # and therefore every figure on the card — is the window's business no more
+    # than the weather is.
+    eq('a card whose readings straddle the floor reads the same either way',
+       json.dumps(N.get('off2'), sort_keys=True),
+       json.dumps(W.get('off2'), sort_keys=True))
+    # ...carrying the address only the reading OUTSIDE the window ever saw.
+    # This is the whole of what the straddle check is for: without it the
+    # equivalence above passes on a card that lost the same thing both ways.
+    eq('...carrying the address the reading outside the window saw',
+       (N.get('off2') or {}).get('pickup'), 'Chipotle (Barrett)')
+
+    # The fold is cached per window now, and the windows have to stay apart.
+    # Asked narrow FIRST and then wide, a cache that ignored the floor would
+    # answer the wide question with the narrow fold — every offer older than
+    # the window simply gone, from the range whose whole point is that nothing
+    # is. The order is the test: above, wide was asked first and the fault
+    # would have hidden behind the handler's own filter.
+    stop(proc)
+    proc, base = start({'SCANNER': '0'}, hz)
+    get(base, '/api/journal?days=2&since=%d' % since)
+    after = get(base, '/api/journal?days=0&limit=0')
+    ok_('a narrow read first does not shrink the wide one after it (%r)'
+        % sorted(dict((o['id'], 1) for o in (after.get('offers') or []))),
+        'off1' in dict((o['id'], 1) for o in (after.get('offers') or [])))
+    eq('...and it holds every offer the file does', after.get('count'),
+       wide.get('count'))
+    stop(proc)
+    proc, base = start({'SCANNER': '0'}, journal)
+
     # --- a body split inside a character ------------------------------------
     # Stringifying each TCP segment on its own turns an 'é' whose two bytes
     # arrive in different segments into two replacement characters, and the

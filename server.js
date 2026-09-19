@@ -1488,13 +1488,74 @@ function bestReading(rows) {
 // every offers-page load and every /api/today poll after a new offer.
 var latestCache = null;
 
-function latestPerOffer(rows) {
-  if (latestCache && latestCache.rows === rows && latestCache.n === rows.length) {
-    return latestCache.out;
+/* The rows that can change an answer about offers at or after `floor`.
+ *
+ * WHY THIS EXISTS. readJournal is already incremental — it tail-reads and only
+ * parses the bytes that arrived — but the FOLD was not. latestCache is keyed on
+ * the rows array, and readJournal hands back a new array after every append, so
+ * during a shift every scanned offer made the next page load re-fold the whole
+ * journal. Measured on a year-sized one: 4 ms idle, 182 ms after a single
+ * appended row, and the scanner appends every few seconds. That is the cost the
+ * driver actually feels, and asking for "today" did not avoid a line of it.
+ *
+ * WHAT MAY BE DROPPED, and it is much less than it looks. A card may be dropped
+ * only if EVERY reading of it is older than the floor and none of them predates
+ * the clock. Everything else stays:
+ *
+ *   - every row with a `kind`, without exception. A rule written months ago
+ *     hides a card scanned today (see the rule fold below); a mark written
+ *     today changes a card scanned months ago; `seen` and `pairs` ride on the
+ *     folded array as properties and the page reads them whole. Kinds this
+ *     build has never heard of are kept too — a newer writer's rows are not
+ *     this reader's to discard.
+ *   - every reading of a card any of whose readings is in the window. Splitting
+ *     one card's readings across the floor would change bestReading's vote, and
+ *     so the pay, minutes, miles and $/hr reported for it, depending on which
+ *     range button was pressed. That is a confidently wrong number, which is
+ *     the fault this project exists to refuse.
+ *   - every row stamped before the clock was believable. A Pi boots in 1970 and
+ *     jumps when NTP arrives; those rows are in no window by construction, and
+ *     the page counts them in `beforeClock` and says so.
+ *
+ * FILE ORDER IS PRESERVED. bestReading breaks a tie by taking the last row it
+ * was handed, so a filter that reordered would change which reading wins.
+ *
+ * A floor of 0 means "All", and then there is nothing to drop. */
+function rowsFor(rows, floor) {
+  if (!floor) return rows;
+  var wanted = Object.create(null);
+  var inRange = function (r) {
+    var at = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
+    return at >= floor || at < CLOCK_BELIEVABLE_AFTER;
+  };
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r.kind && r.id && inRange(r)) wanted[r.id] = true;
   }
-  var out = latestPerOfferUncached(rows);
-  latestCache = { rows: rows, n: rows.length, out: out };
+  var out = [];
+  for (var j = 0; j < rows.length; j++) {
+    var row = rows[j];
+    if (row.kind) { out.push(row); continue; }
+    if (row.id) { if (wanted[row.id]) out.push(row); continue; }
+    if (inRange(row)) out.push(row);
+  }
   return out;
+}
+
+/* Keyed on the floor as well as the array, because rowsFor builds a new array
+   every time and a cache keyed on identity alone would never hit again. One
+   entry per floor, all thrown away together the moment the file changes: the
+   floors in play are a driving screen's `since`, a page's window and All, so
+   the map stays small on its own without a policy for trimming it. */
+function latestPerOffer(rows, floor) {
+  floor = floor || 0;
+  if (!latestCache || latestCache.rows !== rows || latestCache.n !== rows.length) {
+    latestCache = { rows: rows, n: rows.length, byFloor: Object.create(null) };
+  }
+  if (!(floor in latestCache.byFloor)) {
+    latestCache.byFloor[floor] = latestPerOfferUncached(rowsFor(rows, floor));
+  }
+  return latestCache.byFloor[floor];
 }
 
 function latestPerOfferUncached(rows) {
@@ -1589,10 +1650,25 @@ function latestPerOfferUncached(rows) {
     // and the rows readJournal hands over now live across requests.
     if (!r.id) { out.push(Object.assign({}, r)); return; }
     if (!(r.id in byId)) {
-      byId[r.id] = out.length; out.push(Object.assign({}, r)); readings[r.id] = [r]; return;
+      // The slot is claimed here and filled below, so the order of `out` is
+      // still the order the cards were first seen in the file.
+      byId[r.id] = out.length; out.push(null); readings[r.id] = [r]; return;
     }
     readings[r.id].push(r);
-    out[byId[r.id]] = Object.assign({}, bestReading(readings[r.id]));
+  });
+
+  /* The vote, once per card rather than once per reading.
+     This ran on every reading as it arrived and threw the answer away when the
+     next one came: a card read three times was voted on three times and copied
+     three times, and two of each were discarded. bestReading is O(k^2) in the
+     readings of one card, so doing it per arrival made the whole fold O(k^3)
+     for that card, and the copies were the bulk of the garbage — measured at
+     87,600 allocations to produce 43,800 offers on a year-sized journal.
+     The answer is identical: bestReading([r]) returns r for a single reading,
+     and for more it is a pure function of the whole list, which is what it is
+     handed here. */
+  Object.keys(byId).forEach(function (id) {
+    out[byId[id]] = Object.assign({}, bestReading(readings[id]));
   });
 
   out.forEach(function (o) {
@@ -1808,7 +1884,53 @@ function parseLines(text, rows, torn) {
 // outlive one request.
 var journalCache = null;
 
+/* One read at a time, however many callers ask at once.
+ *
+ * Every reader used to do the whole job for itself: its own whole-file Buffer,
+ * its own whole-file string, its own split array of one string per line, and
+ * its own parsed rows. Deliberately, and for a real reason — the comment
+ * further down explains what two readers sharing one array did to the counts —
+ * but it means the cost multiplies by the number of readers rather than being
+ * paid once.
+ *
+ * Measured on a year-sized journal: one cold read peaks at 588 MB of resident
+ * memory, three concurrent cold reads at 1414 MB. Three at once is not a
+ * hypothetical; rpi/test_server.py fires exactly that and names the callers —
+ * the driving screen's poll, the offers page and the sync's /api/journal/newest
+ * all land just after the scanner appends. On a Pi sharing its RAM with
+ * OpenCV and Tesseract, the difference is whether the rig swaps.
+ *
+ * So the readers queue instead. The winner does the work and everyone waiting
+ * gets its answer, which is the same arrangement a cache hit already has: the
+ * hit path hands `c.rows` straight to the caller, so sharing one array between
+ * readers is the existing contract, not a new one. What must not be shared is
+ * an array still being APPENDED to, and that is exactly what this prevents.
+ *
+ * A waiter that joined during the read can be one append behind. That is the
+ * same staleness as arriving a moment earlier and hitting the cache, and it
+ * errs in the safe direction for the one caller where it matters: a sync
+ * reconciling against /api/journal/newest that sees fewer rows re-sends, where
+ * one that saw more would skip. */
+var readWaiters = null;
+
 function readJournal(done) {
+  if (readWaiters) { readWaiters.push(done); return; }
+  readWaiters = [done];
+  readJournalNow(function (rows, err, torn) {
+    var waiting = readWaiters;
+    readWaiters = null;
+    waiting.forEach(function (fn) {
+      // A throw in one caller must not starve the others now that they share a
+      // read. Rethrown on its own tick so it still reaches the process the way
+      // it did when every caller had a read of its own — swallowed here, a
+      // fault in one endpoint would become silence in all of them.
+      try { fn(rows, err, torn); }
+      catch (e) { setImmediate(function () { throw e; }); }
+    });
+  });
+}
+
+function readJournalNow(done) {
   fs.stat(JOURNAL_PATH, function (statErr, st) {
     if (statErr) {
       journalCache = null;
@@ -1848,7 +1970,9 @@ function readJournal(done) {
         if (grew) {
           if (!buf.slice(0, mark.length).equals(mark)) {
             journalCache = null;
-            return readJournal(done);
+            // ...and not readJournal: this call already owns the queue, so
+            // going back through the front door would park it behind itself.
+            return readJournalNow(done);
           }
           buf = buf.slice(mark.length);
         }
@@ -1932,7 +2056,15 @@ function percentileOf(sorted, share) {
 // it keeps the median's arithmetic from being handed one if a caller ever
 // builds rows some other way.
 function shiftSummary(rows, since) {
-  var offers = latestPerOffer(rows);
+  /* Windowed for the same reason the offers page is, and by the same rule.
+     This folded the whole journal and then kept the rows at or after `since` —
+     so the driving screen, which asks about the shift in progress and nothing
+     else, paid for every offer the rig has ever read, on a poll, on the loop
+     that also feeds the camera panel.
+     `early` still counts, because rowsFor keeps every pre-clock row on purpose:
+     a Pi boots in 1970 and those rows are in no window by construction, and
+     this figure is how the driver is told they exist. */
+  var offers = latestPerOffer(rows, since);
   var early = 0;
   var window = [];
   offers.forEach(function (o) {
@@ -2954,7 +3086,14 @@ function route(req, res) {
       // one worth acting on.
       var unreadable = rows ? null : (readErr && readErr.code || 'unknown');
       rows = rows || [];
-      var offers = latestPerOffer(rows);
+      /* The window, worked out before the fold rather than after it.
+         It was computed forty lines below and used only to filter the fold's
+         OUTPUT, so a request for today folded the whole year and then threw
+         nearly all of it away. The figure is identical either way — rowsFor
+         keeps every row that can change an answer inside the window — but the
+         work is now proportional to the window the driver asked for. */
+      var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
+      var offers = latestPerOffer(rows, floor);
       // Both taken off the array before anything filters it. `filter` returns a
       // new array and these ride on the old one as properties, so a line moved
       // below the first filter would quietly become an empty list — which reads
@@ -2969,7 +3108,6 @@ function route(req, res) {
       // the window and the 3 were every hidden offer the journal has ever held.
       // A number that does not describe what is on screen is worse than no
       // number, because it is the one a driver checks their arithmetic against.
-      var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
       // Rows stamped before the rig had a clock, taken out of EVERY window and
       // counted, rather than out of three windows and left in the fourth.
       //
