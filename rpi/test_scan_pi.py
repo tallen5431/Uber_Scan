@@ -1878,11 +1878,59 @@ eq('...and carries the scanner\'s own words when there are some',
 # Which refusal it was, and that the loop sets it at all, is measured in
 # test_loop.py against the real main() — here is only the wire.
 
+# A journal that will not take writes rides the same beat, and it is the one
+# failure on this rig whose cost cannot be got back by looking again. Every
+# reading goes on arriving perfect while it happens, so a channel carried by a
+# reading would be carried by the messages that contradict it.
+eq('a beat with a working journal says nothing about it',
+   beat().get('notSaving'), None)
+eq('...and carries the whole sentence when there is one',
+   beat(not_saving='Offers are NOT being saved: read-only').get('notSaving'),
+   'Offers are NOT being saved: read-only')
+
+# ...and the sentence itself, built from the journal rather than from a flag.
+import journal as JR                                            # noqa: E402
+
+_nswork = tempfile.mkdtemp()
+
+
+class _FakeLog(object):
+    def __init__(self, journal):
+        self.journal = journal
+
+
+_good = JR.Journal(path=os.path.join(_nswork, 'fine.jsonl'))
+eq('a journal nobody has written yet is not a failing one',
+   SP.not_saving_notice(_FakeLog(_good)), None)
+_good.append({'v': JR.SCHEMA, 'id': 'a', 'seq': 1, 'at': 1})
+eq('...nor is one that just took a row',
+   SP.not_saving_notice(_FakeLog(_good)), None)
+# --no-journal is nothing being saved on purpose, so a warning about it would
+# stand for the whole shift and become furniture.
+eq('asking for no journal is not a fault to report',
+   SP.not_saving_notice(None), None)
+
+_dead = JR.Journal(path=os.path.join(_nswork, 'gone', 'j.jsonl'))
+no_('a write into nowhere does not land', _dead.append(
+    {'v': JR.SCHEMA, 'id': 'b', 'seq': 1, 'at': 2}))
+_said = SP.not_saving_notice(_FakeLog(_dead))
+ok_('...and the panel is told, in words, that offers are not being saved (%r)'
+    % _said, _said and 'NOT being saved' in _said)
+ok_('...with the reason in it, because on a Pi the errno is the diagnosis',
+    _said and 'No such file or directory' in _said)
+# The state now, not a scar: a rig whose card comes back must stop saying this
+# by itself, or the driver learns to ignore it.
+os.makedirs(os.path.dirname(_dead.path))
+ok_('a write that lands again clears it', _dead.append(
+    {'v': JR.SCHEMA, 'id': 'c', 'seq': 1, 'at': 3}))
+eq('...and the panel stops being told',
+   SP.not_saving_notice(_FakeLog(_dead)), None)
+
 # The page reads these by name off the heartbeat; a rename here is a notice
 # that silently stops appearing.
 page = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), 'live.html')).read()
-for field in ('tooBright', 'tooDim', 'refindRefused'):
+for field in ('tooBright', 'tooDim', 'refindRefused', 'notSaving'):
     ok_('live.html reads %s off the heartbeat' % field,
         'msg.%s' % field in page)
 

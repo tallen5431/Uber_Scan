@@ -177,6 +177,29 @@ class Journal:
             self._complain(e)
             return False
 
+    def failing(self):
+        """Why this journal is not working right now, or None.
+
+        `_complain` puts the reason in the log, which is the right place for it
+        and the wrong one for the only person who can act on it. The driver is
+        looking at an 800x480 panel in a moving car and has never opened
+        `journalctl`. A read-only SD card is the classic Pi failure, it is
+        completely silent, and everything above it goes on working: the rig
+        reads the card, prices it, speaks the verdict and paints a green ACCEPT
+        while the one artefact that cannot be regenerated takes none of it.
+
+        Cleared by the next append that lands, so this is the state now and not
+        a scar. A failed READ leaves it set until an append succeeds, which is
+        the right way round — an append happens within a card or two of any
+        offer, and saying so a little too long beats swallowing it.
+
+        A journal that has never been written is not failing. A missing file is
+        the normal state of a fresh rig and append() creates it; rows(), last()
+        and count() all return empty for it without complaining, so nothing
+        here fires before there is something to report.
+        """
+        return self._error
+
     def rows(self, limit=0):
         """Stored rows, oldest first. Unreadable lines are skipped, not fatal.
 

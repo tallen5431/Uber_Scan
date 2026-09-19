@@ -1250,7 +1250,30 @@ def show(frame_text, rate, parsed, ms, locked):
 ALIVE_EVERY = 4.0
 
 
-def emit_alive(too_bright=False, too_dim=False, refind_refused=None):
+def not_saving_notice(log):
+    """The panel's sentence for a journal that is refusing writes, or None.
+
+    A sentence and not a flag, for the reason `refindRefused` is one: the end
+    that knows what went wrong is this one, and the page must not be in the
+    business of guessing a driver's situation from an errno. The errno rides
+    along all the same — on a Pi, "Read-only file system" is the entire
+    diagnosis, and a driver who cannot act on it can at least repeat it.
+
+    `--no-journal` says nothing. Nothing is being saved there either, and that
+    is what the driver asked for; a warning about it would be permanent and
+    therefore furniture.
+    """
+    why = log.journal.failing() if log is not None else None
+    if not why:
+        return None
+    # Short because it competes with the verdict for a 3.5" panel, and leading
+    # with the consequence rather than the cause because the consequence is the
+    # part that is true for every errno.
+    return 'Offers are NOT being saved: %s' % why
+
+
+def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
+               not_saving=None):
     """The beat, and the conditions that have to reach the driver without one.
 
     `tooBright` rides here rather than on a reading because the state it
@@ -1265,11 +1288,22 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None):
     needs a reading to carry it would be silent in exactly the case it exists
     for. It is a sentence or None, never a flag — the reason belongs to the
     scanner, which is the only end that knows it.
+
+    `notSaving` is the third, and the one this rig had no channel for at all.
+    The journal refusing writes is the only failure here that costs something
+    which cannot be got back: a washed-out card can be re-read, a refused
+    Re-find can be pressed again, and an offer nobody wrote down is gone. It
+    rides the heartbeat rather than a reading because the whole point is that
+    the readings go on looking perfect while it happens — server.js writes its
+    own rows through a request and can answer 500, and the driver's tick
+    already reports that way, but the offers themselves are written from inside
+    this loop with nobody to answer.
     """
     print(json.dumps({'alive': True, 'at': int(time.time() * 1000),
                       'tooBright': bool(too_bright),
                       'tooDim': bool(too_dim),
-                      'refindRefused': refind_refused or None}), flush=True)
+                      'refindRefused': refind_refused or None,
+                      'notSaving': not_saving or None}), flush=True)
 
 
 def emit_reading():
@@ -2495,7 +2529,8 @@ def main():
                     last_alive = now_alive
                     emit_alive(too_bright=health.too_bright,
                                too_dim=health.too_dim,
-                               refind_refused=health.refind_notice(now_alive))
+                               refind_refused=health.refind_notice(now_alive),
+                               not_saving=not_saving_notice(offer_log))
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate

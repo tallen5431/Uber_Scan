@@ -43,6 +43,28 @@ unwritable was not checked at all; and the verdict on the off-car backup was
 inverted with respect to the danger, so the check passed in exactly the case it
 exists for. `a5cbe64`, plus the `CLOCK_BELIEVABLE_UNTIL` clamp in `server.js`.
 
+### The panel
+
+**A journal that had stopped taking writes was invisible on the glass.** A
+read-only SD card is the classic Pi failure, it is completely silent, and
+everything above it goes on working: the rig reads the card, prices it, speaks
+the verdict and paints a green ACCEPT while nothing reaches the one file that
+cannot be regenerated. The only sign was a line in a log on a headless box.
+The driver's own tick already reported its failures, because that write goes
+through a request that can answer 500 — the offers themselves are written from
+inside the scan loop with nobody to answer, so the notice now rides the
+heartbeat beside `tooBright` and `refindRefused`, and leads the note list in
+both branches of the panel.
+
+Worth knowing if this is ever touched again: with the notice and the wire both
+in place and the loop not passing it, every suite still passed and the panel
+was still silent. The check that closes that gap is in `rpi/test_loop.py`,
+against the real `main()`, and it is the only place that link can be reached.
+The panel's two branches also build their notices separately, and `render()`
+picks between them on `last.ready` — a phase message alone does not move it,
+so a check that means to measure the between-offers branch has to send a
+reading that is not ready.
+
 ### The advice
 
 **The threshold and the headline counted different piles.** `bestAt` reports

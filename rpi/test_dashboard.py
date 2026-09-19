@@ -1130,6 +1130,45 @@ const framed = (page) => page.waitForFunction(
         refindRefused: null }));
     await page.waitForTimeout(200);
     out.refind.cleared = await page.evaluate(LOOK, '#warn');
+
+    // --- and the journal refusing to take writes --------------------------
+    //
+    // The same channel, on the same page, for the failure that costs the most:
+    // the readings go on arriving perfect while nothing behind them is kept.
+    // Both branches again, because a dead journal is just as dead between
+    // offers as during one — and between offers is where this rig spends most
+    // of its time.
+    const DEAD = 'Offers are NOT being saved: [Errno 30] Read-only file system';
+    // Back to the no-reading branch first, and the way back is a reading that
+    // is not ready — render() branches on `last.ready`, so a phase message on
+    // its own leaves the page exactly where it was. The two branches build
+    // their notices separately, and measuring both from a reading measured the
+    // same one twice: it let a version through with the notice missing from
+    // the between-offers branch entirely, which is where this rig spends most
+    // of its time.
+    await page.evaluate((r) => window.__es.push(
+      Object.assign({}, r, { ready: false, state: 'empty', perHour: null })),
+      READINGS.deducted);
+    await page.evaluate(() => window.__es.push(
+      { phase: 'scanning', message: '' }));
+    await page.evaluate((m) => window.__es.push(
+      { alive: true, at: Date.now(), tooBright: true, tooDim: false,
+        refindRefused: null, notSaving: m }), DEAD);
+    await page.waitForTimeout(200);
+    out.dead = { noReading: await page.evaluate(LOOK, '#warn'),
+                 // The line that proves which branch drew this. Without it the
+                 // notice check above passes on a page still showing the last
+                 // offer, and the between-offers branch goes unmeasured.
+                 noReadingDetail: await page.evaluate(LOOK, '#detail') };
+    await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
+    await page.waitForTimeout(200);
+    out.dead.onReading = await page.evaluate(LOOK, '#warn');
+    await page.evaluate(() => window.__es.push(
+      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
+        refindRefused: null, notSaving: null }));
+    await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
+    await page.waitForTimeout(200);
+    out.dead.cleared = await page.evaluate(LOOK, '#warn');
     await page.close();
     await ctx.close();
   }
@@ -2936,6 +2975,46 @@ try:
             'no screen' in ((rf.get('onReading') or {}).get('text') or ''))
         ok_('...and goes when the scanner says the next one worked',
             'no screen' not in ((rf.get('cleared') or {}).get('text') or ''))
+
+    # --- the journal refusing to take writes ------------------------------
+    #
+    # The only failure on this page whose cost cannot be undone by looking
+    # again. A washed-out card can be re-read; an offer nobody wrote down is
+    # gone, and so is every one after it for as long as it lasts. It was
+    # completely silent up here — one line in a log on a headless box — while
+    # the panel went on painting green.
+    dd = got.get('dead') or {}
+    ok_('the dead journal was measured', bool(dd))
+    if dd:
+        between = ((dd.get('noReading') or {}).get('text') or '')
+        ok_('a dead journal reaches the glass between offers (%r)' % between[:60],
+            'NOT being saved' in between)
+        # ...and that really is the between-offers branch. Without this the
+        # check above passes on a page still showing the last offer, which is
+        # the branch the check below is for.
+        ok_('...and that is the branch with no offer on it',
+            'no offer on screen'
+            in ((dd.get('noReadingDetail') or {}).get('text') or ''))
+        ok_('...on the glass, not pushed off it',
+            (dd.get('noReading') or {}).get('shown'))
+        # Ahead of the brightness note it was sent with. That note is about the
+        # reading underneath it being poor; this is about the reading not being
+        # kept at all, and on a panel where a notice can scroll the order is
+        # which one the driver reads first.
+        ok_('...ahead of the note about the picture being poor',
+            'too bright' in between
+            and between.index('NOT being saved') < between.index('too bright'))
+        on_reading = ((dd.get('onReading') or {}).get('text') or '')
+        ok_('...and it survives an offer arriving, which is the case it is about',
+            'NOT being saved' in on_reading)
+        # Both branches order it, and both have to be asked. They are separate
+        # lists built by separate code, so an ordering checked in one says
+        # nothing whatever about the other.
+        ok_('...still ahead of the brightness note once a reading is up',
+            'too bright' in on_reading
+            and on_reading.index('NOT being saved') < on_reading.index('too bright'))
+        ok_('...and goes when the journal takes a row again',
+            'NOT being saved' not in ((dd.get('cleared') or {}).get('text') or ''))
 
     # --- the snapshot at load is a snapshot ------------------------------
     sn = got.get('snap') or {}

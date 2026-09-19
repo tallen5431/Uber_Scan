@@ -995,6 +995,22 @@
   // and the rig has not.
   var refindRefused = null;
 
+  // The journal has stopped taking writes, in the scanner's own words, or null.
+  //
+  // The only failure on this page that costs something which cannot be got
+  // back. A washed-out card can be re-read and a refused Re-find can be
+  // pressed again; an offer nobody wrote down is simply gone, and so is every
+  // one after it for as long as it lasts. A read-only SD card is the classic
+  // Pi failure and it is completely silent from up here — the rig goes on
+  // reading, pricing, speaking the verdict and painting a green ACCEPT, and
+  // the only sign was a line in a log on a headless box.
+  //
+  // The driver's own tick already reports its failures, because that write
+  // goes through a request that can answer 500. The offers do not: they are
+  // written from inside the scan loop with nobody to answer, which is why this
+  // rides the heartbeat.
+  var notSaving = null;
+
   // A card is under the reader right now. The gap this fills is the one the
   // driver actually notices: a read is about 1.8 seconds on a Pi 4 and this
   // panel spent every one of them saying WAITING FOR AN OFFER over a row of
@@ -1738,7 +1754,12 @@
       // is refused when there is nothing on the screen to find, and nothing on
       // the screen to find is precisely this branch — no reading, so the notes
       // further down never render at all.
-      var setup = [tooBright ? TOO_BRIGHT : '', tooDim ? TOO_DIM : '',
+      // `notSaving` leads here as it does below, and it has to be here at all
+      // for a reason the others only half share: between offers there is no
+      // reading to hang it off, and the journal is just as dead between offers
+      // as during one.
+      var setup = [notSaving || '', tooBright ? TOO_BRIGHT : '',
+                   tooDim ? TOO_DIM : '',
                    refindRefused || '', p.message || ''].filter(Boolean);
       el.warn.textContent = setup.join(' ');
       el.warn.hidden = !setup.length;
@@ -1904,9 +1925,15 @@
     el.working.hidden = false;
 
     var notes = [];
-    // First, because it is the only note on this screen with an action attached
-    // to it, and because the reading it is sitting on top of was taken through
-    // a washed-out card.
+    // Before the brightness notes, which used to be first. Those are about the
+    // reading underneath them being poor; this is about the reading underneath
+    // it not being kept at all, and it is the only note here whose cost cannot
+    // be undone by looking again. A washed-out card can be re-read; an offer
+    // nobody wrote down is gone.
+    if (notSaving) notes.push(notSaving);
+    // Then, because it is the note with a remedy in the driver's own hand, and
+    // because the reading it is sitting on top of was taken through a
+    // washed-out card.
     if (tooBright) notes.push(TOO_BRIGHT);
     if (tooDim) notes.push(TOO_DIM);
     // The label above has room for three words. This is where the reason goes,
@@ -2103,6 +2130,11 @@
       // often when there is no screen to find, which is exactly when no
       // reading is coming to carry the news.
       if (msg.refindRefused !== undefined) refindRefused = msg.refindRefused || null;
+      // Same channel again, and the one that most needs it: while the journal
+      // is refusing writes every reading still arrives looking perfect, so a
+      // channel that rode a reading would be carried by messages that
+      // contradict it.
+      if (msg.notSaving !== undefined) notSaving = msg.notSaving || null;
       // A new offer on the record. `tookState` resets with it — the mark
       // belongs to the offer, not to the button.
       //

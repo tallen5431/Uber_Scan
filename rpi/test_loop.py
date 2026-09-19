@@ -386,6 +386,37 @@ said = [bool(b.get('refind_refused')) for b in r['alive']]
 ok_('...and took the refusal down with it, without waiting for it to age out',
     pressed_again[0] and said and not said[-1])
 
+# --- a journal that will not take writes ------------------------------------
+#
+# The loop goes on reading, pricing and announcing while nothing is stored, and
+# until this existed the only sign was a line in a log on a headless box. The
+# sentence and the wire are checked in test_scan_pi.py; what is checked HERE is
+# the one link nothing else can reach — that the real main() asks the journal
+# and puts the answer on the beat. That link is not theoretical: with the other
+# two in place and this one missing, every test still passed and the panel was
+# still silent.
+_nowhere = os.path.join(tempfile.mkdtemp(), 'gone', 'offers.jsonl')
+_dead = run(lambda n, k: WHOLE, extra_argv=('--journal', _nowhere),
+            alive_every=0.05, seconds=10.0,
+            until=lambda rows, ann, calls: ann and calls >= 4)
+_said = [b.get('not_saving') for b in _dead['alive']]
+ok_('a journal that will not take writes reaches the beat',
+    any(s and 'NOT being saved' in s for s in _said))
+ok_('...naming the reason, because on a Pi the errno is the diagnosis',
+    any(s and 'No such file or directory' in s for s in _said))
+# The whole reason it needs its own channel: nothing else on the wire looks
+# wrong. The rig reads the card and announces the offer exactly as it would on
+# a healthy card, so a driver watching the panel sees a normal shift.
+ok_('...while the rig goes on reading and announcing as if nothing were wrong',
+    _dead['announced'])
+
+_fine = run(lambda n, k: WHOLE, alive_every=0.05, seconds=10.0,
+            until=lambda rows, ann, calls: rows and calls >= 4)
+eq('a journal that is taking rows says nothing about itself',
+   any(b.get('not_saving') for b in _fine['alive']), False)
+ok_('...having actually stored something, so that is not a silence of its own',
+    _fine['rows'])
+
 # --- the Health object's own account of a Re-find ---------------------------
 # Reachable directly, and worth reaching: the loop above can only ever show one
 # of the two answers per run, because a rig with no tracker never gets a press
