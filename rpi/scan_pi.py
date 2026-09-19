@@ -423,6 +423,33 @@ class Reader:
         self._thread.join(timeout=3.0)
 
 
+
+def read_the_money(batch):
+    """Which frame of one read to publish: the last that saw a payout.
+
+    A read hands back two frames 33ms apart. accumulate.add short-circuits on a
+    payout-free frame — it hands the parse straight back with mergedFrom 0 —
+    which the destination branch in digest() deliberately relies on. So
+    publishing the later frame whatever it said meant that when the partner
+    frame was the one that lost its payout to glare or to the crop edge, the
+    merge was bypassed for the whole read.
+
+    Measured: frame one merges to a complete reading, 23.0 min and 8.4 mi on a
+    $16.05 card; frame two is the same card with the payout gone and publishes
+    complete False, mergedFrom 0 and a rate that is not ready. The panel paints
+    grey WAITING over a verdict the rig had worked out 33 milliseconds earlier.
+
+    When NO frame in the batch has a payout the last one is chosen, exactly as
+    before: a genuinely payout-free screen — a navigation app, a dropoff
+    address — still has to digest as itself.
+    """
+    chosen = len(batch) - 1
+    for i in range(len(batch) - 1, -1, -1):
+        money = ((batch[i] or {}).get('parsed') or {}).get('pay')
+        if isinstance(money, (int, float)) and not isinstance(money, bool) \
+                and money > 0:
+            return i
+    return chosen
 def next_verify(every, was, now, card_on_screen):
     """How long to wait before looking again, and what that answer was.
 
@@ -2406,12 +2433,36 @@ def main():
             note_tally(health.report(time.time(), tracker, scanner))
             return False
         batch = done['outs']
-        # The earlier frame's reading is evidence too: the accumulator merges
-        # partial reads, and a leg lost to glare in one frame is often present
-        # in the other.
-        for earlier in batch[:-1]:
-            accumulator.add(earlier['parsed'])
-        return digest(batch[-1], done['frames'][0], done.get('at'))
+        # WHICH frame to publish: the last one that actually read the money.
+        #
+        # A read hands back two frames 33ms apart, and this published the later
+        # one whatever it said. accumulate.add short-circuits on a payout-free
+        # frame — it returns the parse untouched with mergedFrom 0 — which the
+        # destination branch below deliberately relies on. So when the partner
+        # frame was the one that lost its payout to glare or to the crop edge,
+        # which the loop counts by name, the whole merge was bypassed for that
+        # read.
+        #
+        # Measured: frame one merges to a complete reading, 23.0 min and 8.4 mi
+        # on a $16.05 card; frame two is the same card with the payout gone and
+        # publishes complete=False, mergedFrom=0, and a rate that is not ready.
+        # The panel paints grey WAITING over a verdict the rig had already
+        # worked out, 33 milliseconds earlier.
+        #
+        # Picking the frame that read the money is the same reasoning the
+        # accumulator already applies to legs. When NO frame in the batch has a
+        # payout the last one is published exactly as before, which is what the
+        # destination branch needs: a genuinely payout-free screen still
+        # digests as itself.
+        chosen = read_the_money(batch)
+        # The other frames are evidence: the accumulator merges partial reads,
+        # and a leg lost to glare in one frame is often present in the other.
+        # Every frame but the chosen one, because digest() adds that one itself
+        # and adding it twice would merge a card with a copy of itself.
+        for i, other in enumerate(batch):
+            if i != chosen:
+                accumulator.add(other['parsed'])
+        return digest(batch[chosen], done['frames'][0], done.get('at'))
 
     try:
         while True:

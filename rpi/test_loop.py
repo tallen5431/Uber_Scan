@@ -401,6 +401,52 @@ h.refind_says('no screen to find', 1000.0)
 h.refind_says(None, 1002.0)
 eq('a press that worked leaves nothing behind', h.refind_notice(1002.0), None)
 
+# --- which frame of one read gets published ----------------------------------
+#
+# A read hands back two frames 33ms apart, and the loop published the later one
+# whatever it said. accumulate.add short-circuits on a payout-free frame — it
+# hands the parse straight back with mergedFrom 0, which digest()'s destination
+# branch relies on — so when the partner frame was the one that lost its payout
+# to glare or to the crop edge, the merge was bypassed for the whole read.
+#
+# Measured on the real accumulator: '$16.05 3 min (1.1 mi) away 20 min (7.3 mi)
+# trip' merges to complete=True, 23.0 min, 8.4 mi; the same text with the payout
+# gone publishes complete=False, mergedFrom=0 and a rate that is not ready. The
+# panel paints grey WAITING over a verdict the rig had 33 milliseconds earlier.
+_paid = {'parsed': {'pay': 16.05}}
+_glared = {'parsed': {'pay': None}}
+eq('the frame that read the money is the one published',
+   SP.read_the_money([_paid, _glared]), 0)
+eq('...and it is the LAST such frame, not the first',
+   SP.read_the_money([{'parsed': {'pay': 9.0}}, _glared, {'parsed': {'pay': 11.0}}]), 2)
+eq('...still the later frame when that is the one with the money',
+   SP.read_the_money([_glared, _paid]), 1)
+# A screen with no payout on it at all is not a damaged offer card, it is a
+# navigation app or a dropoff address, and it still has to digest as itself.
+eq('a read with no payout anywhere publishes the last frame, as before',
+   SP.read_the_money([_glared, {'parsed': {}}]), 1)
+eq('...and a single-frame read is unaffected', SP.read_the_money([_glared]), 0)
+# A zero payout is not a payout, and `True` is not 1.0 however much Python
+# would like it to be.
+eq('a zero payout does not count as having read the money',
+   SP.read_the_money([{'parsed': {'pay': 0}}, _glared]), 1)
+eq('...nor does a boolean that happens to be truthy',
+   SP.read_the_money([{'parsed': {'pay': True}}, _glared]), 1)
+
+# ...and the wiring, asserted on the source and said plainly rather than
+# dressed up as a runtime test. collect() is a closure inside the scan loop:
+# reaching it means running the loop, which means a camera. What CAN be checked
+# without one is that it asks the question above instead of taking the last
+# frame regardless, and that it does not hand the chosen frame to the
+# accumulator twice — digest() adds that one itself, and a card merged with a
+# copy of itself is a different reading.
+_loop_src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              'scan_pi.py')).read()
+ok_('the loop publishes the frame that read the money',
+    'chosen = read_the_money(batch)' in _loop_src)
+ok_('...and feeds every frame but that one to the accumulator',
+    'if i != chosen:' in _loop_src)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)
 sys.exit(1 if bad else 0)
