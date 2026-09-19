@@ -385,9 +385,25 @@
                    + (out ? '<br><b>' + out.toFixed(0) + ' mi from everything else '
                           + '— this pin is almost certainly wrong</b>' : '')
                    + '<br><span class="note">' + esc(place.point.name) + '</span>'
-                   + '<br>' + place.jobs.length + (place.jobs.length === 1 ? ' job' : ' jobs')
+                   // OFFERS, not jobs. Most offers are turned down, so a pin
+                   // reading 12 on a shop the driver took two from said they
+                   // had worked there twelve times — a fact about the rig's
+                   // scanning wearing the clothes of a fact about the evening.
+                   + '<br>' + place.jobs.length
+                   + (place.jobs.length === 1 ? ' offer' : ' offers')
                    + (both ? ', as both ends'
                            : place.roles.pickup ? ', picked up here' : ', dropped here')
+                   // ...and what became of them, in the three states the data
+                   // really has. "0 taken" over offers nobody ever ticked
+                   // reads as twelve refusals, which is the same wrong
+                   // reporting one level down — so "not marked" is said as
+                   // itself and the ✓ that fills it in is named.
+                   + (place.took ? '<br><b>' + place.took + ' you took</b>' : '')
+                   + (place.passed ? '<br>' + place.passed + ' you passed on' : '')
+                   + (place.unmarked
+                      ? '<br><span class="note">' + place.unmarked
+                        + ' never marked — the ✓ on the offer log is what says '
+                        + 'you ran one</span>' : '')
                    + (pays.length ? '<br>$' + Math.min.apply(null, pays).toFixed(2)
                                     + (pays.length > 1
                                        ? '–$' + Math.max.apply(null, pays).toFixed(2) : '')
@@ -624,7 +640,8 @@
     html += '<h2>' + drawn.length + ' drawn end to end</h2>';
     html += '<div class="note">Green is the pickup, amber the dropoff, and the '
           + 'line between them is a straight line, not a route. A pin with a '
-          + 'number on it is that many jobs at the same place.</div>';
+          + 'number on it is that many OFFERS at the same place — most offers '
+          + 'are turned down, so tap one to see how many you took.</div>';
 
     // First, because it is the failure that also breaks the view for
     // everything else, and the one a person can settle at a glance.

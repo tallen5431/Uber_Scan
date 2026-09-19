@@ -297,6 +297,28 @@ var pins = MV.byPlace(MV.judge(
 eq('three jobs at one shop make one pin', pins.length, 3);
 eq('...carrying the count', pins[0].jobs.length, 3);
 eq('...and named as the card named it', pins[0].name, 'Chipotle');
+/* ...and what became of the offers at that pin.
+   `jobs` counts OFFERS, and most offers are turned down: a pin reading 12 on a
+   shop the driver took two jobs from said they had worked there twelve times,
+   in the largest glyph on the page. `accepted` is a tri-state and folding it to
+   a boolean tells a different lie — a range where nothing was ever ticked would
+   report "0 taken" of twelve, which reads as twelve refusals. */
+var TALLY = MV.byPlace(MV.judge(
+  [{ pickup: 'Chipotle', dropoff: 'Duval Ct', accepted: true },
+   { pickup: 'Chipotle', dropoff: 'Manchester Ln', accepted: false },
+   { pickup: 'Chipotle', dropoff: 'Duval Ct' }], FOUND, {}))[0];
+eq('a pin counts every offer at the place', TALLY.jobs.length, 3);
+eq('...the ones that were taken', TALLY.took, 1);
+eq('...the ones that were passed on', TALLY.passed, 1);
+// The state that matters most, because it is the commonest: a card nobody ever
+// ticked either way. Counted as a refusal it would make a driver who does not
+// use the tick look like one who turns everything down.
+eq('...and the ones nobody marked, kept apart from both', TALLY.unmarked, 1);
+eq('a range where nothing was ticked reports none taken and none refused',
+   JSON.stringify([TALLY.took, TALLY.passed].length && MV.byPlace(MV.judge(
+     [{ pickup: 'Chipotle', dropoff: 'Duval Ct' }], FOUND, {}))[0])
+     .indexOf('"took":0,"passed":0,"unmarked":1') !== -1, true);
+
 eq('a place used as both ends is one pin with both roles',
    MV.byPlace(MV.judge([{ pickup: 'Chipotle', dropoff: 'Duval Ct' },
                         { pickup: 'Duval Ct', dropoff: 'Chipotle' }], FOUND, {}))

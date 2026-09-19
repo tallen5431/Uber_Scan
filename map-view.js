@@ -338,16 +338,31 @@
    * Keyed on the place as the CARD wrote it rather than on the coordinate. Two
    * spellings the geocoder happened to resolve to the same point are two things
    * the rig read, and this exists to check what the rig read. */
+  /* ...and a tally of what those offers actually WERE.
+   *
+   * `jobs` counts offers, and most offers are turned down. A pin reading 12 on
+   * a Chipotle the driver took two jobs from says they worked there twelve
+   * times, in the largest glyph on the page. That is a fact about the rig's
+   * scanning, presented as a fact about the driver's evening.
+   *
+   * Three states, kept apart, because `accepted` is a tri-state and folding it
+   * to a boolean tells a different lie: a range where nothing was ever ticked
+   * would report "0 taken" of twelve, which reads as twelve refusals. Not
+   * marked is not the same as not taken, and the page has wording for that. */
   function byPlace(placed) {
     var seen = {}, order = [];
     function note(name, point, role, p) {
       if (!name || !point) return;
       if (!seen[name]) {
-        seen[name] = { name: name, point: point, roles: {}, jobs: [] };
+        seen[name] = { name: name, point: point, roles: {}, jobs: [],
+                       took: 0, passed: 0, unmarked: 0 };
         order.push(name);
       }
       seen[name].roles[role] = true;
       seen[name].jobs.push(p);
+      if (p.offer.accepted === true) seen[name].took += 1;
+      else if (p.offer.accepted === false) seen[name].passed += 1;
+      else seen[name].unmarked += 1;
     }
     (placed || []).forEach(function (p) {
       note(p.offer.pickup, p.from, 'pickup', p);

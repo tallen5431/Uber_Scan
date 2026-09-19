@@ -56,6 +56,10 @@ def ok_(name, cond):
     eq(name, bool(cond), True)
 
 
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
 def skip(why):
     print('%s — skipping the map checks' % why)
     sys.exit(0)
@@ -719,10 +723,29 @@ try:
     detail = placed.get('pinDetail') or []
     here = [d for d in detail if 'Cobb Pkwy NW, Kennesaw' in (d.get('popup') or '')]
     eq('a place three offers share gets one pin, not three', len(here), 1)
-    ok_('...with the number of jobs on it (%r)' % (here and here[0].get('count')),
+    ok_('...with the number of offers on it (%r)' % (here and here[0].get('count')),
         here and here[0].get('count') == '3')
+    # OFFERS, not jobs. Most offers are turned down, so a pin reading 12 on a
+    # shop the driver took two from said they had worked there twelve times —
+    # a fact about the rig's scanning, wearing the clothes of a fact about the
+    # driver's evening.
     ok_('...and the count said in the popup as well',
-        here and '3 jobs' in (here[0].get('popup') or ''))
+        here and '3 offers' in (here[0].get('popup') or ''))
+    # ...and what became of them, in the three states the data really has. Two
+    # of these three cards are ticked as taken in the fixture above; the third
+    # was never marked, and "0 taken" over an unmarked card reads as a refusal,
+    # which is the same wrong reporting one level down.
+    ok_('...with how many of them were taken (%r)'
+        % (here and (here[0].get('popup') or '')[:160]),
+        here and 'you took' in (here[0].get('popup') or ''))
+    # All three of this place's offers are ticked in the fixture above, so this
+    # says three took and nothing else. The unmarked and passed-on wordings are
+    # checked in tests/mapview.test.js, where a fixture costs nothing — here
+    # they would mean un-ticking a card the chain checks depend on.
+    ok_('...as all three of them, since all three are ticked',
+        here and '3 you took' in (here[0].get('popup') or ''))
+    no_('...and nothing is claimed about offers that were passed on',
+        here and 'passed on' in (here[0].get('popup') or ''))
 
     # --- a pin that cannot be in this shift ---------------------------------
     #

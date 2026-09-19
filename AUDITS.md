@@ -126,11 +126,6 @@ Where `milesUncertain` is set there is no yardstick at all, so the pair should b
 marked unjudged rather than accused; where `milesCorrected` is set the popup
 should say the card's figure was corrected.
 
-**`map.html`'s pin badge counts offers and the page calls them jobs**, and
-`accepted` is read by the chain and by nothing else. The badge could say
-"14 offers · 2 you took · 9 not marked" — keeping the three states apart, because
-"0 taken" over offers nobody marked is the same wrong reporting one level down.
-
 **The offer log's map sheet names a colour that is not on the map** when only one
 end places, and never says which end failed or why. The three-way split
 (found / not found / could not be asked) is already written a few lines above it.
@@ -165,6 +160,7 @@ the map keep its height, or rewrite the nine.
 | `map.html`, `live.html` map mode, the offer log's map sheet, `map-view.js` | 25 proposals, 14 survived checking, 11 refuted. Fixes in `06a6dd8`, `ebc80df`, `f5cfb96`, `c98f6fb`. |
 | `readJournal` / `latestPerOffer` / every consumer of a journal read | 43 consumer claims mapped and verified. Fix in `d864163`. |
 | `map.html` layout, on every panel, for the first time | Four faults on the first run. Fix in `d829bb9`. |
+| The pin badge said "jobs" and counted offers | Fix in this commit: it says offers, and the popup keeps taken / passed on / never marked apart. |
 | The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | **In flight at the time of writing — not yet recorded here.** |
 
 Two facts about the rig that keep coming up and are worth not re-deriving, both
