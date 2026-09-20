@@ -2800,6 +2800,11 @@
     }
 
     mapBusy = true;
+    // Whether this walk put pins on the glass without ever reaching the
+    // settled draw. Set only after Leaflet loaded and the car was drawn, so
+    // the no-signal return above still leaves `mapFor === key` and cannot
+    // start a retry.
+    var partial = false;
     try {
       mapSay('loading the map…');
       var ready = await MV.needLeaflet(document, {
@@ -2845,29 +2850,70 @@
       var here = await askCar();
       if (viewMode !== 'map' || mapFor !== key) return;
 
-      mapSay('looking up ' + want.names.length
-             + (want.names.length === 1 ? ' place…' : ' places…'));
       var found = {};
       // A box around where the car actually is, which is the whole of what
       // makes a street name answerable: handed "Cobb Pkwy" a geocoder returns
       // a real Cobb Pkwy somewhere, and this driver works one metro.
       var box = here ? MV.boxAround(here) : null;
-      await mapGeo.walk(want.names, function () { return box; }, found);
+
+      /* The car, before a single question goes out — and the last card's pins
+         down in the same call.
+         Until now nothing reached the glass until every lookup had finished.
+         Measured against the real map-view.js at a 500ms round trip, press to
+         first mark: 1.6s for a card that names no dropoff, 3.8s for three
+         fresh places, 6.0s when the box refuses all three. That is a decision
+         the driver makes in tens of seconds, spent looking at a rectangle.
+         And it was not an EMPTY rectangle, which is worse: the only teardown
+         is inside drawMap, so the previous card's four pins and its route sat
+         there the whole time, under this card's numbers. The branch above
+         refuses exactly that for a card that names nowhere — "the last card's
+         pins must not stay on the glass under this card's numbers" — and this
+         is the other branch of the same rule.
+         The car is the one mark here that was measured rather than looked up,
+         so it is the one that can be drawn at once. */
+      drawMap(want, found, here, false);
+      partial = true;
+      function landed() {
+        // Same guard as the settled draw below, and for the same reason: the
+        // driver may have been shown a different card while this was in
+        // flight, and half-drawn pins belonging to the old one are still the
+        // old one's.
+        if (viewMode !== 'map' || mapFor !== key) return;
+        drawMap(want, found, here, false);
+      }
+      await mapGeo.walk(want.names, function () { return box; }, found, landed);
       // Asked again without the box, exactly as the other two pages do it: a
       // box is a claim that the answer is within sixty miles of the car, and a
       // genuinely distant dropoff must not be lost to a feature meant to find
       // things.
       var refused = want.names.filter(function (q) { return box && !found[q]; });
-      if (refused.length) await mapGeo.walk(refused, function () { return null; }, found);
+      if (refused.length) {
+        await mapGeo.walk(refused, function () { return null; }, found, landed);
+      }
 
       // The driver has been shown a different card since these went out. The
       // pins about to be drawn would be the old one's, under the new one's
       // numbers — a confidently wrong answer, which is the one thing this
       // panel may never produce.
       if (viewMode !== 'map' || mapFor !== key) return;
-      drawMap(want, found, here);
+      drawMap(want, found, here, true);
+      partial = false;
     } finally {
       mapBusy = false;
+      /* A walk the driver walked away from leaves this card's half-drawn pins
+         under the LAST card's line, because every early return above happens
+         before the settled draw and so never reaches mapDrew. Forgetting the
+         key makes the next press redraw from the start, and that costs
+         nothing: every answer that did arrive is in the geocoder's cache, so
+         the re-run asks nobody anything.
+         Guarded on the MODE and not on `partial` alone. `mapFor` is frozen for
+         the whole walk — the busy guard returns above before it is assigned —
+         so on every non-throwing path `partial` at this point already implies
+         the mode changed. What the extra clause is for is a drawMap that
+         THROWS: nulling the key under a live map re-enters showMap at once,
+         and on a panel read while driving that is an unbounded retry.
+         Measured with a deliberate throw: 40+ re-entries and climbing. */
+      if (partial && viewMode !== 'map') mapFor = null;
       // A card that arrived while those lookups were in flight was dropped:
       // the busy guard returned before `mapFor` was touched, so nothing
       // remembered that a newer card was waiting and the map went on showing
@@ -2910,7 +2956,10 @@
     lastBounds = null;
   }
 
-  function drawMap(want, found, here) {
+  /* `settled` is false while places are still being asked about, and the tail
+     of this function is the whole of what it changes: pins and lines go up as
+     they land, and not one geocoded CLAIM is made until every answer is in. */
+  function drawMap(want, found, here, settled) {
     /* Which of these pins cannot be where it says it is.
        A geocoder handed a misread street answers with a real street somewhere,
        at the same confidence as a right one, and this pane has two or three
@@ -2954,8 +3003,23 @@
         ? said + ' — ' + Math.round(wrong[name]) + ' mi from you, so this pin is wrong'
         : said;
     }
+    /* Ringed, and that is one rule covering all four marks rather than a
+       second meaning for the same flag: SOLID is part of the offer being
+       decided, a RING is context the driver did not choose just now. The car
+       above is already drawn that way and this is the other one — where you
+       are, and where you are already committed to going.
+       Without it these two amber dots were byte-identical, both
+       {radius:9, fillOpacity:1, fillColor:'#f5a524'}, and the one comparison
+       the driver opened this map to make had to be done by clicking each dot
+       in turn with a bluetooth mouse at the wheel.
+       Red still beats the role, because the ring is orthogonal to the colour:
+       a held order whose pin cannot be right is a red ring, this card's is a
+       red disc. And where this card's dropoff IS the held order's destination,
+       mapWants already dedupes the lookup and the two land as a solid disc
+       inside a ring, which is exactly what that means. */
     put(held, colourFor(want.held, '#f5a524'),
-        sayFor(want.held, 'where the order in your car is going'), want.held);
+        sayFor(want.held, 'where the order in your car is going'), want.held,
+        true);
     put(pick, colourFor(want.pickup, '#17c964'),
         sayFor(want.pickup, 'pick this one up'), want.pickup);
     put(drop, colourFor(want.dropoff, '#f5a524'),
@@ -2988,6 +3052,23 @@
     // Kept so coming back to this same card can put both of them back — the
     // words under the map and the view they describe.
     lastBounds = bounds;
+
+    if (!settled) {
+      /* Progress, and nothing that reads as a verdict.
+         mapSay and never mapDrew: `lastLine` is what DESCRIBES a drawn map,
+         and coming back to this card later must not be told "2 of 3" about a
+         map that finished ten minutes ago.
+         And never mapLine. A place still in flight and a place the geocoder
+         answered nothing for are the SAME empty slot in `found` — only this
+         branch can tell them apart. "not found" printed over a street nobody
+         has asked about yet is a pin that never arrived reading as a pin that
+         arrived somewhere wrong, which is the one thing this panel may never
+         produce. So no detour, no "N mi from you", no count of what is
+         missing, until every answer is in. */
+      var placed = want.names.filter(function (q) { return !!found[q]; }).length;
+      mapSay('placing ' + placed + ' of ' + want.names.length + ' — still asking');
+      return;
+    }
 
     // `drop` is deliberately not passed. The detour is car -> pickup -> where
     // the order in the car is going, because that order HAS to be delivered;

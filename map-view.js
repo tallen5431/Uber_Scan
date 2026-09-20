@@ -709,7 +709,23 @@
       into[q] = hit;
       done++;
       if (!wasKnown) left--;
-      if (onward && (done % 3 === 0 || done === list.length)) {
+      // Every place, not every third. How OFTEN to say something is the
+      // caller's business; this loop only knows what happened.
+      //
+      // The `% 3` was calibrated for placeAll's whole-journal list, where it
+      // is a sensible throttle. On the driving panel a decision asks about two
+      // or three places, and `done % 3 === 0 || done === list.length` then
+      // collapses to "once, at the end" — so a caller that wanted to draw each
+      // pin as it landed was handed the whole set at once and could not.
+      // Measured on the panel's own shapes: callbacks were [[2701ms, 3]] and
+      // [[1602ms, 2]]; without the throttle they are [[502,1],[1603,2],
+      // [2704,3],[3805,'wide']].
+      //
+      // Cost to placeAll, the only other caller: its `say` is one textContent
+      // write, now once per second or so of paced waiting instead of once per
+      // three, and N writes in one await-chain on a fully cached walk
+      // (measured: 3 writes, 0ms, for 3 cached places).
+      if (onward) {
         onward({ done: done, total: list.length, left: left,
                  seconds: Math.ceil(left * this.gap / 1000) });
       }

@@ -1910,7 +1910,13 @@ const framed = (page) => page.waitForFunction(
       tiles: (window.__tiles || {}).url || '',
       attribution: ((window.__tiles || {}).opts || {}).attribution || '',
       marks: window.__marks.map(function (m) {
+        // Radius and opacity as well as colour: two of these pins are the same
+        // colour by design — the held order's destination and this card's —
+        // and until they were read back here nothing could see that they were
+        // otherwise identical.
         return { ll: m.ll, fill: m.opts && m.opts.fillColor,
+                 radius: m.opts && m.opts.radius,
+                 op: m.opts && m.opts.fillOpacity,
                  popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
                                              .replace(/\s+/g, ' ').trim() };
       }),
@@ -1968,6 +1974,8 @@ const framed = (page) => page.waitForFunction(
     out.mapNext = await page.evaluate(() => ({
       marks: window.__marks.map(function (m) {
         return { ll: m.ll, fill: m.opts && m.opts.fillColor,
+                 radius: m.opts && m.opts.radius,
+                 op: m.opts && m.opts.fillOpacity,
                  popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
                                              .replace(/\s+/g, ' ').trim() };
       }),
@@ -1989,6 +1997,26 @@ const framed = (page) => page.waitForFunction(
       offer: { id: 'o-map-3', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
                miles: 3.0, cost: 1.0, pickup: 'Unfindable Rd, Atlantis',
                dropoff: 'Canton Rd, Marietta' } }));
+    // The LAST card's pins must not sit under this card's numbers while these
+    // lookups run. o-map-2's pickup was Canton Rd, drawn green; o-map-3 has no
+    // placeable pickup of its own, so any green pin on the glass from here on
+    // belongs to the card before it. The only teardown used to be inside the
+    // settled draw, so that pin stood for the whole walk — and on a card with
+    // three fresh places that is six seconds of the previous offer's route
+    // under this offer's figures.
+    //
+    // Given a short deadline on purpose: this is a question about what is on
+    // the glass EARLY, and a check that waits long enough always passes.
+    out.mapStale = await page.evaluate(`(async () => {
+      var until = Date.now() + 900;
+      while (Date.now() < until) {
+        var m = window.__marks || [];
+        if (m.length && !m.some(function (x) {
+              return x.opts && x.opts.fillColor === '#17c964'; })) return true;
+        await new Promise(function (r) { setTimeout(r, 40); });
+      }
+      return false;
+    })()`)
     await page.waitForTimeout(2600);
     out.mapUnplaceable = await page.evaluate(
       () => document.getElementById('viewNote').textContent.trim());
@@ -3426,6 +3454,26 @@ try:
     ok_('...and the pickup is drawn in the pickup colour', '#17c964' in fills)
     ok_('...and both dropoffs in the dropoff colour',
         len([f for f in fills if f == '#f5a524']) == 2)
+    # ...and the two of them are not the same dot. They were: both
+    # {radius: 9, fillOpacity: 1, fillColor: '#f5a524'}, byte for byte, so the
+    # one comparison this map exists to let the driver make — where the order
+    # in my car ends against where this one ends — could only be made by
+    # clicking each dot in turn with a bluetooth mouse at the wheel.
+    #
+    # One rule covers all four marks: SOLID is part of the offer being decided,
+    # a RING is context the driver did not choose just now. The car is already
+    # drawn that way; the held order's destination is the other one.
+    _amber = [m for m in marks if m.get('fill') == '#f5a524']
+    ok_('...and the two amber pins can be told apart without clicking (%r)'
+        % ([(m.get('radius'), m.get('op')) for m in _amber],),
+        len(_amber) == 2
+        and (_amber[0].get('radius'), _amber[0].get('op'))
+            != (_amber[1].get('radius'), _amber[1].get('op')))
+    _ringed = [m for m in _amber if m.get('radius') == 11]
+    ok_('...with the ring on the order already in the car',
+        len(_ringed) == 1 and 'order in your car' in (_ringed[0].get('popup') or ''))
+    ok_('...and the same ring on the car, so it is one rule and not two',
+        _car and _car[0].get('radius') == 11 and _car[0].get('op') == 0.35)
     ok_('each says which of the four it is (%r)'
         % ([m.get('popup') for m in marks],),
         any('order in your car' in (m.get('popup') or '') for m in marks)
@@ -3549,6 +3597,15 @@ try:
     # reading. Folding them into one sentence is the fault the offers page and
     # the map page were both split for; this line is the third place that has
     # to keep them apart.
+    # The previous card's pins came down before this card's went up, rather
+    # than at the end of a walk that takes seconds. Measured against the real
+    # map-view.js at a 500ms round trip, press to first mark used to be 1.6s
+    # for a card naming no dropoff, 3.8s for three fresh places and 6.0s when
+    # the box refuses all three — and every one of those seconds showed the
+    # LAST offer's route under this offer's numbers.
+    ok_('the last card\'s pins are down before this card\'s lookups finish',
+        got.get('mapStale') is True)
+
     unplaceable = got.get('mapUnplaceable') or ''
     ok_('a pickup the geocoder cannot find says so (%r)' % unplaceable,
         'found nothing for the pickup' in unplaceable)

@@ -415,6 +415,62 @@ below; it is the proposed cure that was wrong.
 
 ---
 
+## Measured on a real week — 1,166 offers, 13–20 Sep 2026
+
+The numbers above this line came from a 272-card export. This is a bigger and
+newer one, and it moves several of them. Where the two disagree, this wins.
+
+**The rig reads well.** 97.9% whole, 0.8% suspect, one impossible reading in
+1,166 and it was caught (`doubt`, `suspect`, `milesUncertain` all set). Reads
+run 1.80s median, 2.80s p90, 5.4s max. Consecutive duplicate rows are 0.6%, so
+the accumulator's identity rule is holding. Nothing here needs fixing.
+
+**The line is right.** `Advice.advise` over the whole week: ready, stable,
+spread $0 — $20 at every one of the six thresholds, plateau $20–$25, over 27.9
+hours and 9 runs. The driver's $25 is inside that plateau and the difference is
+−0.6%, so the target does not want changing.
+
+**Almost everything is a pass.** 935 of 1,166 are PASS, 116 warn, 106 go, and
+31 were ticked as taken. Median offer $14.56/hr against a $25 line.
+
+**`toPickupMinutes` is null on all 1,166.** It is not that the split is absent
+from the cards — 110 of them state it plainly, e.g. "$26.04 / 8 min (3.2 mi) /
+Ector Chase NW…, Kennesaw / 39 mins (25.1 mi) / Hale St NE…, Atlanta", where the
+first leg is the drive to the pickup and the second is the trip. `to_pickup()`
+requires a leg matching `APPROACH_TAIL = /\baway\b/`, and **the word "away"
+appears on 0 of the 1,166 texts** — against 29 of the 152 corpus fixtures, where
+the approach is extracted on 24. Uber's current card states the split
+positionally instead of labelling it. So a feature with tests, a CSV column and
+a consumer in `tools/measure_places.js` produces nothing on a week of driving.
+
+Do NOT cure this by taking the first leg: on those 110 cards the first leg is
+the shorter one only 62% of the time, so size is not the signal. The layout is —
+leg, pickup place, leg, dropoff place — and `find_places` already knows where
+those places sit. Any fix is a parser change across both ports and the shared
+corpus, which is why it is written down here rather than done in passing.
+
+**The dropoff carries a fragment of the pickup on 8.3% of cards.** 48 of the 580
+dropoffs hold an unmatched `)`:
+
+    pickup  'Hooters (Old 41 Hwy NW & N l Roberts Rd)'
+    dropoff 'Roberts Rd) Georgia State Route 5 N &!-575 N, Cobb County'
+
+A merchant name wrapping across lines is being cut in the wrong place, and the
+tail is prepended to the dropoff. That string then goes to a geocoder, so this
+is one of the sources of the stray pins on `map.html`.
+
+**No deadline cards at all.** `fromDeadline` and `deliverBy` are 0 of 1,166, and
+`items` is filled on 4.2%. This driver is on Uber, whose cards state a duration.
+The deadline path is not dead code — the corpus has such cards — but it has
+never fired for them, so a claim that it matters "on every delivery card" should
+not be repeated without saying whose.
+
+**No row carries a GPS position.** `map.html` says "none carry a position", and
+that is what makes every lookup on that page an unboxed one. See the Open entry
+below.
+
+---
+
 ## Open — known, checked, not done
 
 None of these are bugs on the road today. They are things worth doing that
@@ -485,6 +541,34 @@ before anything is built.
 are already listed and already tappable — and all it can do is throw the whole
 cache away. (The cure proposed by the audit was refused; see Settled. The
 button at least *works* now — see Done.)
+
+**A heat map of $/hr by area, asked for and worth doing — after the two entries
+above it.** The driver's words: "visualize the $/hr in different areas around
+Atlanta ... helpful for predicting where my time would be best spent."
+
+The data supports it. 1,107 of 1,166 offers name a pickup, and a pickup is a
+merchant or an intersection — the geocodable end. Median offer is $14.56/hr with
+a p25–p75 of $10.63–$19.80, so there is real spread to colour by.
+
+It is blocked on the two entries above, and not incidentally:
+
+- Every place is currently asked **unboxed**, so a chunk of the answers are
+  thousands of miles out. A heat map drawn over those is a heat map of nothing.
+- The geocodes are not kept anywhere durable, and at 1,325 distinct places
+  against a one-a-second limit a full re-place is **about 24 minutes**. A view
+  that has to pay that to open will not be opened.
+
+Two things to get right when it is built, both about honesty rather than code:
+
+- It is a map of what was **offered** there, not what was **earned** there. 935
+  of 1,166 offers were passed. The heading has to say so, or it reads as income.
+- The pickup is where the job STARTS, not where the driver WAS when the card
+  arrived. Those differ, and with no row carrying a position the second is not
+  knowable at all. "Where the good offers start" is the honest title; "where to
+  sit and wait" is a claim this data cannot make.
+
+Median, not mean, per cell — the payout distribution has a long right tail and
+one $41 offer would light up a square the driver has never worked.
 
 **No map can be asked about a time.** `journal.html` already buckets every offer
 by hour and by weekday; `map.html` has only a day count. A weekday plus
