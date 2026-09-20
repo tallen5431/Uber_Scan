@@ -2101,6 +2101,20 @@ function readJournalNow(done) {
 // day window, so a shift figure has to either lie about them or say how many it
 // could not place. It says.
 var CLOCK_BELIEVABLE_AFTER = 1735689600000;
+/* ...overridable, for one reason: the branch that asks whether THIS machine's
+ * clock is set is otherwise unreachable from a test, because a suite cannot
+ * move the system clock. That branch is not decoration — without it, a ceiling
+ * taken off an unset clock answers `newest: 0` and loses more than the fault it
+ * guards. An unreachable guard is how this session found a stuck outline going
+ * unreported for a whole shift, so this one gets a seam.
+ *
+ * Same shape as SCREENING_MS and HOLD_GRACE_MS. Validated, and the default is
+ * untouched: a value that is not a positive number is ignored rather than
+ * believed, because a typo here would silently move what counts as a moment. */
+var _clockAfterEnv = Number(process.env.CLOCK_BELIEVABLE_AFTER);
+if (isFinite(_clockAfterEnv) && _clockAfterEnv > 0) {
+  CLOCK_BELIEVABLE_AFTER = _clockAfterEnv;
+}
 
 /* ...and the other end of believable: 1 Jan 2100.
  *
@@ -2115,6 +2129,42 @@ var CLOCK_BELIEVABLE_AFTER = 1735689600000;
  * Named here because it was written out four times and the place that needed it
  * most did not have it — see /api/journal/newest. */
 var CLOCK_BELIEVABLE_UNTIL = 4102444800000;
+
+/* ...and how far ahead of THIS machine's own clock a row may be stamped.
+ *
+ * The ceiling above refuses the year 5138, which is what a corrupted row looks
+ * like. It does not refuse what a WRONG CLOCK looks like, and that is the
+ * common case: journal-client.js stamps `at` from the phone's own Date.now(),
+ * so a phone a month fast lands a row a month ahead — comfortably inside this
+ * century, comfortably past 1 Jan 2100's reach.
+ *
+ * That one row stops the backup. /api/journal/newest answers with it, sync.py
+ * sets `floor = newest - 1h`, and from that tick no real offer is ever at or
+ * above the floor again. Measured against the real server: a rig journal of 40
+ * offers plus one row stamped now+45 days, then six ordinary ticks with five
+ * offers appended before each — rig 71 rows, copy 41, 30 missing, exit 0,
+ * .synced stamp refreshed, doctor green. Every row written after the poison
+ * landed, and silent at every step, which is exactly the failure the paragraph
+ * at /api/journal/newest already describes for the 1e20 case. The ceiling added
+ * for that one was set too far out to catch this one. */
+var CLOCK_AHEAD_SLACK = 24 * 60 * 60 * 1000;
+
+/* The newest moment a row may claim, asked of this machine's own clock.
+ *
+ * Guarded on whether that clock is worth asking. This same file runs on the Pi,
+ * which has no RTC and boots in 1970 until NTP arrives — CLOCK_BELIEVABLE_AFTER
+ * above exists for exactly that. A ceiling taken off an unset clock would put
+ * EVERY row above it and answer `newest: 0`, which loses far more than the
+ * fault being fixed: measured on a 1,225-row journal, 606 offers silently
+ * dropped in the default configuration with no poison row present at all.
+ *
+ * So when the clock cannot be trusted, fall back to the fixed ceiling. That is
+ * no better than today and no worse, and today does not lose anything here. */
+function futureCeiling() {
+  return Date.now() >= CLOCK_BELIEVABLE_AFTER
+    ? Math.min(CLOCK_BELIEVABLE_UNTIL, Date.now() + CLOCK_AHEAD_SLACK)
+    : CLOCK_BELIEVABLE_UNTIL;
+}
 
 // The value below which a given share of offers fall, interpolated between the
 // two straddling samples. A byte-for-byte port of journal.html's percentile()
@@ -2977,6 +3027,11 @@ function route(req, res) {
       // to this copy's own newest row so both edges are the same instant.
       var since = Number((url.parse(req.url, true).query || {}).since);
       var wantWindow = isFinite(since) && since > 0;
+      // Worked out once per request rather than per row: it is a fact about
+      // this machine's clock, not about the row, and asking Date.now() forty
+      // thousand times inside a fold would also let the ceiling drift while
+      // the fold is running.
+      var ceiling = futureCeiling();
       var newest = 0, offers = 0, offersSince = 0;
       rows.forEach(function (r) {
         if (r.kind) return;                       // a tag, not an offer
@@ -3005,7 +3060,7 @@ function route(req, res) {
          * makes the far end look short and the sender re-send, which is the
          * safe direction; the other way round is the one that loses rows. */
         var at = (typeof r.at === 'number' && isFinite(r.at)
-                  && r.at <= CLOCK_BELIEVABLE_UNTIL) ? r.at : 0;
+                  && r.at <= ceiling) ? r.at : 0;
         if (wantWindow && at >= since) offersSince++;
         if (at > newest) newest = at;
       });

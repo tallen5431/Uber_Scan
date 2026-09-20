@@ -1402,6 +1402,74 @@ finally:
     stop(_hproc)
     shutil.rmtree(_hole_dir, ignore_errors=True)
 
+# --- a row from the future must not stop the backup ---------------------------
+#
+# sync.py resumes from `newest - 1h`. One row stamped ahead of real time makes
+# that floor a moment no real offer ever reaches, so from that tick on every
+# offer is silently skipped — for ever, because nothing looks further back. It
+# is silent at every step: the shortfall check anchors its own window to the
+# same poisoned `newest` so both sides agree, the run exits 0, and the .synced
+# stamp is refreshed, so doctor reports a backup made minutes ago.
+#
+# A ceiling was added for this and set at 1 Jan 2100, which catches a corrupted
+# row and does NOT catch the common case: journal-client.js stamps `at` from the
+# phone's own Date.now(), so a phone a month fast lands a row a month ahead and
+# sails under a ceiling seventy years out.
+_fdir = tempfile.mkdtemp()
+_fjournal = os.path.join(_fdir, 'j.jsonl')
+_fnow = int(time.time() * 1000)
+with open(_fjournal, 'w') as _fh:
+    for _i in range(40):
+        _fh.write(json.dumps({'v': 1, 'id': 'f%d' % _i, 'seq': 1,
+                              'at': _fnow - (40 - _i) * 600000,
+                              'pay': 10.0, 'minutes': 20.0}) + '\n')
+    _fh.write(json.dumps({'v': 1, 'id': 'fpoison', 'seq': 1,
+                          'at': _fnow + 45 * 86400000,
+                          'pay': 9.0, 'minutes': 20.0}) + '\n')
+
+_fproc, _fbase = start({'SCANNER': '0'}, _fjournal)
+try:
+    _n = get(_fbase, '/api/journal/newest')
+    ok_('a row stamped a month ahead is not taken as the newest offer '
+        '(%.1f days out)' % ((_n['newest'] - _fnow) / 86400000.0),
+        _n['newest'] <= _fnow + 86400000)
+    ok_('...the real last offer is', abs(_n['newest'] - (_fnow - 600000)) < 120000)
+    # Not DROPPED, only not believed. The row is on disk and the sender still
+    # has to be told the far end holds it, or it would be sent again for ever.
+    eq('...and the row itself is still counted as held', _n['have'], 41)
+    # Counted as an OFFER too, which is the figure the sender compares against
+    # its own to notice a gap and repair it. Under-counting here is the safe
+    # direction — the sender re-sends — but it is still a number two machines
+    # reconcile on, and a number nothing pins is a number free to drift the
+    # other way.
+    eq('...and counted among the offers the copy holds', _n['offers'], 41)
+finally:
+    stop(_fproc)
+
+# ...and the guard that makes that safe on a machine whose own clock is not set.
+#
+# The ceiling is taken off Date.now(), and this same file runs on the Pi, which
+# has no RTC and boots in 1970 until NTP arrives. A ceiling off an unset clock
+# would put EVERY row above it and answer `newest: 0` — which loses far more
+# than the fault being fixed, and in the default configuration with no poison
+# row present at all. The clock boundary is overridable so this branch can be
+# reached; moving it past today is what "this machine cannot vouch for its own
+# clock" looks like.
+_uproc, _ubase = start({'SCANNER': '0',
+                        'CLOCK_BELIEVABLE_AFTER': '4102444800000'}, _fjournal)
+try:
+    _u = get(_ubase, '/api/journal/newest')
+    no_('a machine that cannot vouch for its clock does not answer newest 0',
+        _u['newest'] == 0)
+    # It falls back to the fixed ceiling, so the poison row wins again — which
+    # is exactly today's behaviour and is the point: no better, and no worse.
+    ok_('...it falls back to the fixed ceiling rather than to nothing',
+        _u['newest'] > _fnow)
+    eq('...and still holds every row', _u['have'], 41)
+finally:
+    stop(_uproc)
+    shutil.rmtree(_fdir, ignore_errors=True)
+
 # --- places the browser looked up, kept where they outlive the browser --------
 #
 # The map page's geocode cache was localStorage and nothing else, so it belonged

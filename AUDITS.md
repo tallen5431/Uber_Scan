@@ -175,6 +175,41 @@ every read to that box: the driver is told the crop is off while the crop
 decides whether anything is read at all. One line, `setAdjusting(adjusting())`
 in the change handler.
 
+### The keypad
+
+**The keypad keeps a private shadow of a queue it shares with the phone
+scanner, so its count goes permanently wrong.** `ui.js` stores a per-row `sent`
+boolean, and the only thing that can ever set it true is this page's own flush.
+The queue it shadows — `uberscan.unsent.v1` — is shared with `scan.js`, which
+empties it on every lock and on page open. So: log an offer with the rig out of
+reach, tap 📷 Camera once the rig is back, come back to the keypad. The row is
+in the journal; the keypad still says "kept here only", across reloads, for
+ever. Then it becomes a wrong number — the toast counts every row with
+`sent === false`, so it inflates monotonically. Measured: **"3 kept on this
+phone — the rig did not answer"** with exactly one row genuinely on the queue.
+
+The direction is conservative, and the cost is that the page's only report of
+whether the irreplaceable record is complete saturates and stops meaning
+anything. `JournalClient.pending(id)` already answers this correctly, is
+exported, and has zero callers repo-wide.
+
+Not built: attacked, and the proposed cure has a correctness regression in the
+dangerous direction. Reconciling on "absent from the queue" also marks a row
+sent that `keep()` never stored because storage was refused — the storage-off
+case under Open. It needs a `queued` flag recorded at `keep()` time so that row
+is never reconciled and goes on saying "kept here only", which is true.
+
+### The service worker
+
+**The background refresh is fired and forgotten.** Both cache writes happen
+outside the fetch event's lifetime, so the line that makes "the entry replaced"
+true was never guaranteed to run. Real but small: a lost refresh costs one more
+stale load, and the next open with a live worker replaces the entry. The
+three-line fix (`e.waitUntil(fresh)` inside the `caches.match` callback) is
+correct; the severity claims around it were not — it is not "fails every time
+on a bad link", and the trigger is the browser process being killed under
+memory pressure, not swiping away from the app.
+
 ### The aiming
 
 **A guard against a stuck outline was written, commented, and placed one line
@@ -208,6 +243,32 @@ calibration" for the whole shift while the crop is on a rectangle that is not
 the card. Every number downstream is then read off the wrong pixels.
 
 ### The backup
+
+**A row from the future stopped the backup dead, and the first fix for it was
+set too far out.** `rpi/sync.py` resumes from `newest - 1h`, so one row stamped
+ahead of real time makes that floor a moment no real offer ever reaches, and
+every offer from that tick on is silently skipped — for ever, because nothing
+looks further back. Silent at every step: the shortfall check anchors its own
+window to the same poisoned `newest` so both sides agree, the run exits 0, the
+`.synced` stamp is refreshed, and doctor reports a backup made minutes ago.
+
+`CLOCK_BELIEVABLE_UNTIL` was added earlier in this session for exactly this and
+set at 1 Jan 2100 — which catches the corrupted `1e20` row it was written for
+and does **not** catch the common case. `journal-client.js` stamps `at` from the
+phone's own `Date.now()`, so a phone a month fast lands a row a month ahead,
+seventy years under the ceiling. Measured against the real server: `newest`
+came back 45 days in the future. Now bounded by this machine's own clock plus a
+day.
+
+**And the guard on that is not decoration.** The ceiling is taken off
+`Date.now()`, and this same file runs on a Pi with no RTC that boots in 1970
+until NTP arrives. A ceiling off an unset clock puts every row above it and
+answers `newest: 0` — measured by the attacker at **606 of 1,225 offers lost**,
+silently, in the default configuration with no poison row present. So when the
+clock cannot be vouched for it falls back to the fixed ceiling: no better than
+before, and no worse. `CLOCK_BELIEVABLE_AFTER` is overridable by env solely so
+that branch is reachable from a test — this session has already found one
+unreachable guard costing a whole shift.
 
 **Three ways the rig reported a healthy backup it did not have.** A row stamped
 past the end of time ended the window for every row behind it; the journal being
