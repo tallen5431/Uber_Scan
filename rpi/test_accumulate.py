@@ -1087,7 +1087,7 @@ eq('a real long trip is not folded away by one slipped point',
 # one.
 _RIDE = ('UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw '
          '23 min (8.4 mi) trip Celebration Blvd, Acworth')
-_LOST = ('UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
+_LOST = ('UberX $12.45 5 min (1.2 mi) '
          '23 min (8.4 mi) trip Celebration Blvd, Acworth')
 
 acc = OfferAccumulator()

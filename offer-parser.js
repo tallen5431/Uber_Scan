@@ -1104,9 +1104,15 @@
     return (places && places.length) ? places[0] : null;
   }
 
-  function findPlaces(text, legs) {
-    var out = [];
-    function keep(value) {
+  /* `whose`, when an array is passed, is filled beside the return value with
+     the leg each place was found against - an index into `legs`, or null for
+     one found against the Pickup or Deliver-by label. Same shape as findPay's
+     `_where` and for the same reason: the caller that needs to know where a
+     place sat gets this pass's own answer rather than a second search that
+     could disagree with it. See laidOutApproach, the rule it feeds. */
+  function findPlaces(text, legs, whose) {
+    var out = [], foundOn = [];
+    function keep(value, leg) {
       value = trimPlace(value);
       if (value.length < 3 || value.length > MAX_PLACE) return;
       if (closesWhatItNeverOpened(value)) return;
@@ -1115,6 +1121,7 @@
         if (out[i].toLowerCase() === value.toLowerCase()) return;
       }
       out.push(value);
+      foundOn.push(leg === undefined ? null : leg);
     }
 
     PICKUP_ALL.lastIndex = 0;
@@ -1158,9 +1165,9 @@
         // is still exactly where the driver goes first.
         var pair = piece.match(PLACE_MERCHANT);
         if (pair) {
-          keep(pair[1]);
+          keep(pair[1], j);
           var drop = endsAtTown(trimPlace(pair[2]));
-          if (looksLikeAPlace(drop)) keep(drop);
+          if (looksLikeAPlace(drop)) keep(drop, j);
           continue;
         }
         // Too long to store whole, and the reason it is too long is that it
@@ -1209,14 +1216,18 @@
             // The merchant is kept unasked for the same reason the bracketed
             // branch keeps it: "Smash Hit Burgers" names no street and no
             // town, and it is still where the driver goes first.
-            if (shop) keep(shop);
-            keep(dest);
+            if (shop) keep(shop, j);
+            keep(dest, j);
             continue;
           }
         }
         piece = endsAtTown(piece);
-        if (looksLikeAPlace(piece)) keep(piece);
+        if (looksLikeAPlace(piece)) keep(piece, j);
       }
+    }
+    if (whose) {
+      whose.length = 0;
+      for (var w = 0; w < foundOn.length && w < MAX_PLACES; w++) whose.push(foundOn[w]);
     }
     return out.slice(0, MAX_PLACES);
   }
@@ -1408,8 +1419,12 @@
      Refuses in three cases rather than guessing, because every one of them
      would produce a wrong distance rather than no distance: fewer than two
      legs, where a lone "away" would let a caller work out a trip of zero; no
-     leg labelled away, which is most delivery cards; and more than one leg
-     claiming to be the approach, which is damage.
+     leg the card named as the approach, which is most delivery cards; and more
+     than one leg claiming to be the approach, which is damage.
+
+     A card names its approach leg with the word "away" or by where it printed
+     the pickup - see laidOutApproach, which sets the same flag off the layout
+     so this stays the only rule that decides.
 
      Returns the leg, or null. The caller subtracts. */
   function toPickup(legs) {
@@ -1418,6 +1433,55 @@
       return leg && leg.isApproach && !leg.isTotal;
     });
     return approach.length === 1 ? approach[0] : null;
+  }
+
+  /* Which leg the card's LAYOUT calls the drive to the pickup, or null.
+
+     APPROACH_TAIL is a word list and this driver's cards stopped using the
+     word. Measured on a real week of 1,166 offers: "away" appears on 0 of
+     them, while 110 print the split plainly -
+
+         $26.04
+         8 min (3.2 mi)                                <- the drive TO the pickup
+         Ector Chase NW & Ector Overlook NW, Kennesaw  <- the pickup
+         39 mins (25.1 mi)                             <- the trip
+         Hale St NE & Inman Village Pkwy NE, Atlanta   <- the dropoff
+
+     The card's own statement is the ORDER: a leg, the place it arrives at, a
+     leg, the place THAT one arrives at. So a leg followed by the pickup's name
+     is the drive to the pickup, said positionally instead of in words.
+
+     Not by size. On those cards the first leg is the shorter one on 62 of the
+     100 that state both distances, so taking the smaller would be a guess
+     dressed as a reading, and every fourth one would be wrong.
+
+     Refuses wherever the layout is not that, because toPickup's rule is that a
+     wrong split is worse than no split: anything but two legs; a leg the card
+     called a `total`, which is the whole journey in one line and is also what
+     a frame holding two delivery cards looks like; a card that named only one
+     end, which is 10 of the week's 104 two-leg cards; and a pickup not sitting
+     against the FIRST leg or a dropoff not against the second, which is the
+     other 5 of those 10 - they print a place before any leg at all, a layout
+     this rule cannot read and must not pretend to. */
+  function laidOutApproach(legs, places, whose, pickup, dropoff) {
+    if (!legs || legs.length !== 2) return null;
+    if (legs[0].isTotal || legs[1].isTotal) return null;
+    /* A card that already LABELLED a leg is not skipped here, and the case that
+       decides it is a card whose word and whose layout name DIFFERENT legs.
+       Skipping, the word would win and the trip would be published as the drive
+       to the pickup. Marking both, toPickup sees two legs claiming to be the
+       approach and refuses - the rule it already keeps for damage, and a
+       contradiction between the two things a card says about itself is exactly
+       that. Where the two agree, this marks a flag that is already set. */
+    /* Load-bearing, and the two ports fail DIFFERENTLY without it: Python
+       raises `ValueError: None is not in list` from places.index below, while
+       this one returns null harmlessly because indexOf(null) is -1 and
+       whose[-1] is undefined. So no shared-corpus case can catch its removal -
+       only rpi/test_parser.py can, and this sentence is the record of why. */
+    if (!pickup || !dropoff) return null;
+    if (whose[places.indexOf(pickup)] !== 0) return null;
+    if (whose[places.indexOf(dropoff)] !== 1) return null;
+    return 0;
   }
 
   function isWhole(parsed) {
@@ -1781,7 +1845,21 @@
        The multi-leg branch does not look at miles at all. */
     dist.uncertain = dist.uncertain || legsShortADistance(used, miles);
 
-    var places = findPlaces(mine, legs);
+    var whose = [];
+    var places = findPlaces(mine, legs, whose);
+    var pickup = findPickup(places);
+    var dropoff = findDropoff(places, text);
+    /* The card can name its approach leg in words or by where it printed the
+       pickup, and this is the second one. Written onto the leg rather than
+       handed to toPickup, so the one rule that decides keeps deciding and so
+       the flag travels: `legDetail` carries it to the accumulator, which ORs it
+       across the window exactly as it already ORs a lost "away". A frame whose
+       crop cut off the dropoff must not un-say a split a clearer frame read. */
+    var laidOut = laidOutApproach(legs, places, whose, pickup, dropoff);
+    /* In place, because `used` is these same objects whenever this fires - the
+       rule refuses every card with a `total` leg, and `used` is only ever a
+       different list when there is one. */
+    if (laidOut !== null) legs[laidOut].isApproach = true;
     var approach = toPickup(used);
     return {
       pay: pay,
@@ -1797,8 +1875,8 @@
       // The two ends, named. `places` is what the card said; these say which of
       // them is which, so a second offer can be judged against the one already
       // in the car. See findDropoff, which is the half that decides.
-      pickup: findPickup(places),
-      dropoff: findDropoff(places, text),
+      pickup: pickup,
+      dropoff: dropoff,
       // A full street address, which an offer card almost never shows - Uber
       // does not say where a delivery ends until it has been accepted. Here so
       // the screen AFTER the accept can go through the same pipeline.

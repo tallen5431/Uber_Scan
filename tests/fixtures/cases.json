@@ -2964,6 +2964,51 @@
    "name": "a total beside an away leg is the total, and a total is not split",
    "text": "UberX $12.45 5 min (1.2 mi) away 28 min (9.6 mi) total",
    "expect": null
+  },
+  {
+   "name": "the card states the split by where it prints the pickup, not by the word",
+   "text": "$26.04 8 min (3.2 mi) Ector Chase NW & Ector Overlook NW, Kennesaw 39 mins (25.1 mi) Hale St NE & Inman Village Pkwy NE, Atlanta",
+   "expect": [8, 3.2]
+  },
+  {
+   "name": "...and the approach is the longer leg as often as not, so size is not the signal",
+   "text": "$9.03 19 min (7.5 mi) Cobb Pkwy S & Springvalley Dr SE, Marietta 14 mins (5.4 mi) Bell Dr SE & Spring Rd SE, Smyrna",
+   "expect": [19, 7.5]
+  },
+  {
+   "name": "a card that named only one end does not say which leg that name belongs to",
+   "text": "$18.01 Dallas Hwy SW, Marietta 21 mins (10.7 mi) Anderson Mill Rd & Weavers White Ln, Austell 15 min (5.9 mi)",
+   "expect": null
+  },
+  {
+   "name": "...nor does one whose crop cut the dropoff off the bottom",
+   "text": "$26.04 8 min (3.2 mi) Ector Chase NW & Ector Overlook NW, Kennesaw 39 mins (25.1 mi)",
+   "expect": null
+  },
+  {
+   "name": "both ends read off the FIRST leg is a merchant and its own street, not a journey",
+   "text": "$8.70 5 min (1.2 mi) Rick's Hotwings (Kennesaw) Hidden Forest Ct, Marietta 23 mins (8.4 mi)",
+   "expect": null
+  },
+  {
+   "name": "a merchant named by the Pickup label sits against no leg at all",
+   "text": "$8.70 Pickup Zaxbys (2 orders) 5 min (1.2 mi) 23 mins (8.4 mi) Celebration Blvd, Acworth",
+   "expect": null
+  },
+  {
+   "name": "two total legs is two delivery cards on one frame, not one card's split",
+   "text": "15 min (5.4 mi) total Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta $11.06 25 min (8.1 mi) total American Deli (Marietta, GA) Big Shanty Rd, Marietta",
+   "expect": null
+  },
+  {
+   "name": "a card whose word and whose layout name different legs is damage",
+   "text": "UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw 23 min (8.4 mi) away Celebration Blvd, Acworth",
+   "expect": null
+  },
+  {
+   "name": "a third leg is a stop this shape cannot place",
+   "text": "$20.00 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw 23 mins (8.4 mi) Celebration Blvd, Acworth 9 min (3.0 mi)",
+   "expect": null
   }
  ]
 ,

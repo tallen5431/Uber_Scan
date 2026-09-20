@@ -813,8 +813,11 @@ def to_pickup(legs):
 
       - fewer than two legs. A lone "away" leg is a card that has not finished
         arriving; reporting it would let a caller work out a trip of zero.
-      - no leg labelled away, which is most delivery cards: they state one
-        "total" and never say how much of it is the drive to the restaurant.
+      - no leg the card named as the approach, which is most delivery cards:
+        they state one "total" and never say how much of it is the drive to
+        the restaurant. The card may name it with the word "away" or by where
+        it printed the pickup - see laid_out_approach, which sets the same
+        flag off the layout so this rule stays the only one that decides.
       - more than one leg claiming to be the approach, which is damage.
 
     Returns the leg, or None. The caller subtracts.
@@ -826,6 +829,76 @@ def to_pickup(legs):
     if len(approach) != 1:
         return None
     return approach[0]
+
+
+def laid_out_approach(legs, places, whose, pickup, dropoff):
+    """Which leg the card's LAYOUT calls the drive to the pickup, or None.
+
+    APPROACH_TAIL is a word list and this driver's cards stopped using the
+    word. Measured on a real week of 1,166 offers: "away" appears on 0 of
+    them, while 110 print the split plainly -
+
+        $26.04
+        8 min (3.2 mi)                                <- the drive TO the pickup
+        Ector Chase NW & Ector Overlook NW, Kennesaw  <- the pickup
+        39 mins (25.1 mi)                             <- the trip
+        Hale St NE & Inman Village Pkwy NE, Atlanta   <- the dropoff
+
+    The card's own statement is the ORDER: a leg, the place it arrives at, a
+    leg, the place THAT one arrives at. So a leg followed by the pickup's name
+    is the drive to the pickup, said positionally instead of in words.
+
+    Not by size. On those cards the first leg is the shorter one on 62 of the
+    100 that state both distances, so taking the smaller one would be a guess
+    dressed as a reading, and every fourth one would be wrong.
+
+    Refuses wherever the layout is not that, because to_pickup's rule is that a
+    wrong split is worse than no split:
+
+      - anything but two legs. A third leg is a stop this shape cannot place,
+        and one leg states no split at all.
+      - a leg the card called a `total`, which is the whole journey in one
+        line and cannot be the approach to itself. It is also what a frame
+        holding two delivery cards looks like: on the real week, one such frame
+        put two `total` legs and both ends of two different jobs on one
+        reading, and this clause is what refuses it.
+      - a card that named only one end. 10 of the week's 104 two-leg cards
+        read a place off one leg and nothing off the other - a crop that cut
+        the bottom off, or a place the reader could not call a place - and
+        there is no way to tell which leg the surviving name belongs to.
+      - the pickup not sitting against the FIRST leg, or the dropoff not
+        against the second. 5 of those 10 print a place before any leg at all,
+        which is a layout this rule cannot read and must not pretend to.
+
+    `whose` is find_places' own record of which leg each place came off, so
+    this asks that pass's answer rather than searching the text again - the
+    strings have been trimmed by then and a second search would sometimes not
+    find them, which is a refusal that looks like a reading.
+    """
+    if legs is None or len(legs) != 2:
+        return None
+    if legs[0].get('isTotal') or legs[1].get('isTotal'):
+        return None
+    # A card that already LABELLED a leg is not skipped here, and the case that
+    # decides it is a card whose word and whose layout name DIFFERENT legs.
+    # Skipping, the word would win and the trip would be published as the drive
+    # to the pickup. Marking both, to_pickup sees two legs claiming to be the
+    # approach and refuses - which is the rule it already keeps for damage, and
+    # a contradiction between the two things a card says about itself is
+    # exactly that. Where the two agree, this marks a flag that is already set.
+    # Load-bearing, and the two ports fail DIFFERENTLY without it, which is
+    # why it is a clause and not an accident: Python raises `ValueError: None
+    # is not in list` from places.index below, while JavaScript returns null
+    # harmlessly because indexOf(null) is -1 and whose[-1] is undefined. So no
+    # shared-corpus case can catch its removal - only the Python suite can, and
+    # this sentence is the record of why.
+    if pickup is None or dropoff is None:
+        return None
+    if whose[places.index(pickup)] != 0:
+        return None
+    if whose[places.index(dropoff)] != 1:
+        return None
+    return 0
 
 
 def is_complete(pay, minutes, deliver_by=None):
@@ -1748,8 +1821,15 @@ def find_pickup(places):
     return (places or [None])[0]
 
 
-def find_places(text, legs):
+def find_places(text, legs, whose=None):
     """Where the job goes, as the card writes it. Never invented.
+
+    `whose`, when a list is passed, is filled beside the return value with the
+    leg each place was found against - an index into `legs`, or None for one
+    found against the Pickup or Deliver-by label. Same shape as find_pay's
+    `_where` and for the same reason: the caller that needs to know where a
+    place sat gets this pass's own answer rather than a second search that
+    could disagree with it. See laid_out_approach, which is the rule it feeds.
 
     Two anchors only. What follows "Pickup" on a delivery card is the merchant;
     what follows a leg's distance on a ride card is the address for that leg.
@@ -1758,8 +1838,9 @@ def find_places(text, legs):
     cannot be searched by where an offer went.
     """
     out = []
+    found_on = []
 
-    def keep(value):
+    def keep(value, leg=None):
         value = trim_place(value)
         if len(value) < 3 or len(value) > MAX_PLACE:
             return
@@ -1769,6 +1850,7 @@ def find_places(text, legs):
             return
         if value.lower() not in [v.lower() for v in out]:
             out.append(value)
+            found_on.append(leg)
 
     for m in PICKUP.finditer(text):
         if PICKUP_NOT_A_LABEL.search(text[max(0, m.start() - 14):m.start()]):
@@ -1833,10 +1915,10 @@ def find_places(text, legs):
             # The bracketed branch is the card vouching for it.
             pair = PLACE_MERCHANT.match(piece)
             if pair:
-                keep(pair.group(1))
+                keep(pair.group(1), i)
                 drop = ends_at_town(trim_place(pair.group(2)))
                 if looks_like_a_place(drop):
-                    keep(drop)
+                    keep(drop, i)
                 continue
             # Too long to store whole, and the reason it is too long is that
             # it holds BOTH ends of the job with no bracket between them.
@@ -1894,13 +1976,15 @@ def find_places(text, legs):
                     # street and no town, and it is still where the driver
                     # goes first.
                     if shop:
-                        keep(shop)
-                    keep(drop)
+                        keep(shop, i)
+                    keep(drop, i)
                     continue
             piece = ends_at_town(piece)
             if looks_like_a_place(piece):
-                keep(piece)
+                keep(piece, i)
 
+    if whose is not None:
+        whose[:] = found_on[:MAX_PLACES]
     return out[:MAX_PLACES]
 
 
@@ -2166,7 +2250,23 @@ def parse(raw_text):
     short_a_leg = legs_short_a_distance(used, miles)
     uncertain = uncertain or short_a_leg
 
-    places = find_places(mine, legs)
+    _whose = []
+    places = find_places(mine, legs, _whose)
+    pickup = find_pickup(places)
+    dropoff = find_dropoff(places, text)
+    # The card can name its approach leg in words or by where it printed the
+    # pickup, and this is the second one. Written onto the leg rather than
+    # handed to to_pickup, so that the one rule that decides keeps deciding and
+    # so that the flag travels: `legDetail` carries it to the accumulator, which
+    # ORs it across the window exactly as it already ORs a lost "away" - see
+    # the comment on `slot['isApproach']` there. A frame whose crop cut off the
+    # dropoff must not un-say a split a clearer frame already read.
+    _laid_out = laid_out_approach(legs, places, _whose, pickup, dropoff)
+    if _laid_out is not None:
+        # In place, because `used` is these same dicts whenever this fires -
+        # the clause above refuses every card with a `total` leg, and `used` is
+        # only ever a different list when there is one.
+        legs[_laid_out]['isApproach'] = True
     approach = to_pickup(used)
     return {
         'pay': pay,
@@ -2183,8 +2283,8 @@ def parse(raw_text):
         # journal and the offers page show; these say which of them is which,
         # so a second offer can be judged against the one already in the car.
         # See find_dropoff, which is the half that decides.
-        'pickup': find_pickup(places),
-        'dropoff': find_dropoff(places, text),
+        'pickup': pickup,
+        'dropoff': dropoff,
         # A full street address, which an offer card almost never shows — Uber
         # does not say where a delivery ends until it has been accepted. This is
         # here so the screen AFTER the accept can be read by the same pipeline.

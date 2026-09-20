@@ -123,6 +123,33 @@ for c in cases.get('until', []):
     eq('minutes left / ' + c['name'],
        None if got is None else int(got), c['expect'])
 
+# --- a total leg is never the approach, whatever the layout says -----------
+#
+# laid_out_approach reads the card's ORDER — a leg, the place it arrives at, a
+# leg, the place THAT one arrives at — and a frame holding two delivery cards
+# has exactly that shape while meaning something else entirely. Both legs say
+# `total`, which is the whole journey in one line and cannot be the approach to
+# itself, and the four places are two jobs' worth of ends rather than one job's.
+#
+# Hand-written rather than a corpus case, and that is not a preference. The
+# clause's only observable effect is on `legDetail[].isApproach` — `to_pickup`
+# refuses this card either way — and the shared `parse` runner compares with
+# `got === want` on the JavaScript side, which is false for every list. So a
+# corpus case naming a list passes here and fails there. tests/parser.test.js
+# carries the mirror of this check for the same reason; rpi/test_lint.py holds
+# the two texts in step.
+#
+# Measured before it was written: with the clause removed, this is the only
+# shape in the 1,166-offer week or the 303-case corpus whose reading moves, and
+# nothing anywhere failed. It was a branch no check could reach.
+_TWO_CARDS = ('15 min (5.4 mi) total Little Caesars (3372 Canton Rd) '
+              'Barrington Overlook, Marietta $11.06 25 min (8.1 mi) total '
+              'American Deli (Marietta, GA) Big Shanty Rd, Marietta')
+_two = P.parse(_TWO_CARDS)
+eq('a total leg is never marked the approach, whatever the layout says',
+   [l['isApproach'] for l in _two['legDetail']], [False, False])
+eq('...and no split is published off it', _two['toPickupMinutes'], None)
+
 # --- a rate has to be able to explain itself ------------------------------
 # Working $7.09 over 34 minutes by hand gives $12.51/hr. The screen said
 # $10.61 and gave no hint that $1.08 of running costs came off first, so the

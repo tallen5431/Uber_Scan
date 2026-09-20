@@ -151,6 +151,24 @@ class OfferAccumulator:
         # the cap was written for (a misread duration inventing a leg lands in
         # the same kind as its neighbours and is outvoted there) while no longer
         # refusing a card the frames only ever saw in halves.
+        #
+        # THE WIDENING THAT CAME WITH THE LAYOUT RULE, written down because it
+        # is real and this week does not exercise it. Two caps mean the
+        # window's effective total is max_approach + max_other, which can sit
+        # ABOVE the most legs any single frame actually read. While
+        # `isApproach` came only from the word `away`, and this driver's cards
+        # print it on 0 of 1,166, max_approach was always 0 and the sum was one
+        # cap. offer_parser.laid_out_approach now sets the same flag off the
+        # card's LAYOUT, so it is 1 on the cards that state a split.
+        #
+        # Measured by replaying this accumulator over the real frame sequences
+        # of all 1,166 offers: on 7 windows the caps go (0, 2) -> (1, 2), so the
+        # effective total rises from 2 to 3. On all 7 the window still holds
+        # exactly 2 slots and no frame ever read more than 2 legs, so nothing
+        # is let through and the merged reading moves only in toPickupMinutes
+        # and toPickupMiles. The exposure is a FUTURE window where a misread
+        # opens a third slot: the old cap would have trimmed it, this one will
+        # not. Nothing on this week's data distinguishes the two.
         self.max_approach = 0
         self.max_other = 0
         self.corrected = False

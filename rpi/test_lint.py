@@ -314,6 +314,45 @@ ok_('the browser row keeps the raw reading, not the flattened one',
     'parsed.rawText || parsed.text' in _jc)
 ok_('...and caps it', 'slice(0, TEXT_KEPT)' in _jc)
 
+# --- the two hand-written approach checks stay in step ---------------------
+#
+# laid_out_approach's `isTotal` refusal shows only in `legDetail[].isApproach`,
+# and the shared corpus cannot carry it: tests/corpus.test.js compares a `parse`
+# expectation with `got === want`, which is false for every list, so a case
+# naming one passes on the Python side and fails on the JavaScript side. The
+# check therefore lives twice, hand-written, once in each port's own suite --
+# and two copies of a check drift exactly the way two copies of a constant do.
+# What is held here is the CARD, because the card is the whole test: change it
+# in one place and the other port is checking a different shape.
+_tp = open(os.path.join(ROOT, 'rpi', 'test_parser.py')).read()
+_tj = open(os.path.join(ROOT, 'tests', 'parser.test.js')).read()
+_card = 'Little Caesars (3372 Canton Rd)'
+ok_('the two-delivery-card check exists on the Python side',
+    'a total leg is never marked the approach' in _tp)
+ok_('...and on the JavaScript side',
+    'a total leg is never marked the approach' in _tj)
+ok_('...and both use the same card (python)', _card in _tp)
+ok_('...and both use the same card (javascript)', _card in _tj)
+
+# --- the shared corpus cannot compare a list in `parse` or `rate` ----------
+#
+# tests/corpus.test.js's eq() is `got === want` outside the numeric case, so a
+# `parse` or `rate` expectation holding a list or an object is true in Python
+# and false in JavaScript for every input -- a case that cannot pass on one
+# port and cannot fail on the other, which is two of this project's fault
+# classes at once. The `places`, `ends` and `toPickup` sections have their own
+# runners with sameList, and those are the sections a list belongs in.
+# One check, not one per expectation: this is a single invariant about the
+# corpus, and 560 green lines saying so would bury the rest of this file.
+_cases = json.loads(open(os.path.join(ROOT, 'tests', 'fixtures', 'cases.json')).read())
+_listy = ['%s / %s / %s' % (_sec, _c['name'][:40], _k)
+          for _sec in ('parse', 'rate')
+          for _c in _cases.get(_sec, [])
+          for _k, _v in _c['expect'].items()
+          if isinstance(_v, (list, dict))]
+eq('every `parse` and `rate` expectation is a scalar both runners compare',
+   _listy, [])
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is

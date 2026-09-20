@@ -73,6 +73,52 @@ rather than anything this change introduced. Left alone deliberately: see Open.
 the 48-a-week from growing. The 69 poisoned strings already written are there
 for good, and `places.json` holds a geocode for some of them.
 
+**The card stated the drive to the pickup and the parser could only read the
+word for it.** `to_pickup()` requires a leg matching `APPROACH_TAIL =
+/\baway\b/`, and the word appears on **0 of the owner's 1,166 offers** — so a
+feature with tests, a CSV column and a consumer in `tools/measure_places.js`
+produced nothing on a week of driving. The split is not absent from the cards:
+110 print it as a LAYOUT — a leg, the place it arrives at, a leg, the place
+THAT one arrives at — and `find_places` already walks the legs in order and
+knows which one each place sat against. It threw the index away at the
+`return`. `find_places(text, legs, whose)` now fills it in, the same shape
+`find_pay(text, _where)` already uses so the two answers cannot disagree, and
+`laid_out_approach` reads the order and sets the same flag `away` would have
+set — so `to_pickup` stays the one rule that decides, and the flag travels to
+the accumulator, which ORs it across the window exactly as it already ORs a
+lost "away".
+
+*Not by size.* On the two-leg cards the first leg is the shorter one only 62%
+of the time, so taking the smaller would be a guess dressed as a reading and
+every fourth one would be wrong. That mutation fails five named corpus checks.
+
+*Measured through the REAL accumulator over the REAL frame sequences of all
+1,166 offers.* **103 rows gain a split (8.8%), and the only fields that move on
+any of them are `toPickupMinutes` and `toPickupMiles` — 0 rows where anything
+the panel shows moves.** 0 disagreements between the Python and JavaScript
+ports, before or after, over every field. The approach is a median 35% of the
+card's stated miles. `tools/measure_places.js legs()` goes from 0 exact samples
+to **41 of its 47 samples at town grain (87%) and 58 of 64 at town+quadrant
+(91%)** — run here against the merged rows, not quoted.
+
+*The `isTotal` refusal was a branch no check could reach.* Its only observable
+effect is on `legDetail[].isApproach` — `to_pickup` refuses those cards either
+way — and the shared corpus cannot carry it, because `tests/corpus.test.js`
+compares a `parse` expectation with `got === want`, which is false for every
+list. So it is hand-written twice, once per port, and `rpi/test_lint.py` holds
+the two cards in step and now also refuses any `parse` or `rate` expectation
+that is a list, since such a case passes in Python and fails in JavaScript for
+every input.
+
+*The cap widened, and this week does not exercise it.* `_within_caps` keeps a
+cap per kind, so the window's effective total is `max_approach + max_other`.
+While `isApproach` came only from the word, `max_approach` was always 0 and the
+sum was one cap. Replaying the real frames: on **7 windows** the caps go
+(0, 2) → (1, 2), so the effective total rises from 2 to 3. On all 7 the window
+still holds exactly 2 slots and no frame read more than 2 legs, so nothing is
+let through. The exposure is a future window where a misread opens a third
+slot. Written into `rpi/accumulate.py` beside `self.max_approach`.
+
 ### The order in the car
 
 **A destination scanned while SCREENING lost its provenance the moment the card
@@ -633,6 +679,7 @@ the shorter one only 62% of the time, so size is not the signal. The layout is �
 leg, pickup place, leg, dropoff place — and `find_places` already knows where
 those places sit. Any fix is a parser change across both ports and the shared
 corpus, which is why it is written down here rather than done in passing.
+**Done** — `laid_out_approach` reads exactly that; see "The reader" under Done.
 
 **The dropoff carries a fragment of the pickup on 8.3% of cards.** 48 of the 580
 dropoffs hold an unmatched `)`:
@@ -699,6 +746,24 @@ are the corrections both attackers converged on, and they are not optional:
 The thing the driver came to compare has to be told apart by clicking each dot.
 `mapDot` already takes a `ring` flag that carries the right meaning. Same job as
 the entry above; do them together.
+
+**`check_distance` is asked of the card and never of a leg, so one absurd leg
+passes inside a believable card.** Found while measuring the approach split.
+Row 659 of the owner's week prints `1 min (3.8 mi)` — 228 mph — and the card as
+a whole reads 12.4 mi over 17 min, 43.8 mph, which is sane. So nothing flags
+it: `suspect` is 0, `doubt` is empty and `milesUncertain` is false.
+`recover_decimal` does run per leg, but only to put back a lost decimal in the
+MILES; the rule that sets `uncertain` above `UNREADABLE_MPH` runs on the summed
+card alone. The approach split now publishes that leg as `toPickupMinutes: 1.0`
+— 1 of the 103 it fires on, about 1%.
+
+Not bundled into the split, deliberately, and the reason is the third fault
+class: `to_pickup()` is "the one rule that decides", and a speed guard added to
+`laid_out_approach` would answer the same question in a second place while
+leaving the word-labelled cards — which the corpus HAS, 29 of 152 — unguarded.
+The guard belongs in `to_pickup`, where it would move corpus cases and needs
+its own pass. The miles on such a leg are usually the good half; it is the
+minutes that misread, so refusing outright is not obviously right either.
 
 **A card with one readable place calls it the pickup, whichever end it is.**
 Exposed, not caused, by the bracket fix above: once the garbage half is refused

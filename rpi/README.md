@@ -3001,18 +3001,37 @@ draw a map. Measured on that file rather than argued about:
 | offers | 103 |
 | cards printing `Customer dropoff` and no address | 48 |
 | legs on the card | one on 91 of them |
-| `toPickupMinutes` / `toPickupMiles` filled in | **0** |
+| `toPickupMinutes` / `toPickupMiles` filled in | **0** (see below — the parser could not read the layout yet) |
 | dropoffs the parser recorded | 57 |
 | ...that were the pickup again | **35** |
 
 Three things follow, and the first two are corrections rather than opinions.
 
-**The approach split does not exist on these cards.** 91 of the 103 state one
+**The approach split does not exist on these cards — half right, and the
+wrong half is the half that stopped anyone looking.** 91 of the 103 state one
 leg — `2.9 mi • 21min`, or `43 min (8.9 mi) total` — and never separate the
-drive to the restaurant from the drive to the customer. The field added for it
-is correctly null on every row here. It fills in on ride cards, which this
-driver is now being shown far fewer of, so anything built on subtracting the
-approach would be building on almost no data.
+drive to the restaurant from the drive to the customer. That much holds. What
+followed from it did not: "anything built on subtracting the approach would be
+building on almost no data" was read as settled for months, and it was measured
+on 103 cards.
+
+On the owner's full week of 1,166 the field was null on **every single row**,
+and the reason was not that the cards do not state the split. It is that the
+parser could only read it as the WORD `away`, which appears on **0 of 1,166**.
+110 of them print the split plainly, as a layout:
+
+    $26.04
+    8 min (3.2 mi)                                 <- the drive TO the pickup
+    Ector Chase NW & Ector Overlook NW, Kennesaw   <- the pickup
+    39 mins (25.1 mi)                              <- the trip
+    Hale St NE & Inman Village Pkwy NE, Atlanta    <- the dropoff
+
+`laid_out_approach` reads that order and sets the same flag `away` would have
+set, so `to_pickup` stays the only rule that decides. It fires on **103 of the
+1,166** once the accumulator has folded the frames — 8.8%, where the approach
+is a median 35% of the card's stated miles. Not by size: on the two-leg cards
+the first leg is the shorter one only 62% of the time, so taking the smaller
+would be a guess dressed as a reading and every fourth one would be wrong.
 
 **The parser was inventing destinations.** Of 57 dropoffs recorded, 35 were the
 restaurant the driver was collecting from, recorded as where the customer lives

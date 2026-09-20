@@ -18,6 +18,27 @@ function check(name, text, want) {
   if (want.items !== undefined) eq(name + ' / items', p.items, want.items);
 }
 
+/* ---- a total leg is never the approach, whatever the layout says ---- */
+/* The mirror of rpi/test_parser.py's check of the same name. laidOutApproach
+   reads the card's ORDER, and a frame holding two delivery cards has that exact
+   shape while meaning something else: both legs say `total`, which is the whole
+   journey in one line and cannot be the approach to itself.
+
+   Here rather than in the shared corpus because the clause's only observable
+   effect is on legDetail[].isApproach, and the corpus's parse runner compares
+   with `got === want`, which is false for every list. Measured: with the clause
+   removed this is the only shape in the owner's 1,166-offer week or the 303-case
+   corpus whose reading moves, and nothing anywhere failed. */
+var _twoCards = P.parse(
+  '15 min (5.4 mi) total Little Caesars (3372 Canton Rd) ' +
+  'Barrington Overlook, Marietta $11.06 25 min (8.1 mi) total ' +
+  'American Deli (Marietta, GA) Big Shanty Rd, Marietta');
+eq('a total leg is never marked the approach / leg 0',
+   _twoCards.legDetail[0].isApproach, false);
+eq('a total leg is never marked the approach / leg 1',
+   _twoCards.legDetail[1].isApproach, false);
+eq('...and no split is published off it', _twoCards.toPickupMinutes, null);
+
 /* ---- the real card from the driver's screenshot ---- */
 
 check('shop & deliver (verbatim)',
