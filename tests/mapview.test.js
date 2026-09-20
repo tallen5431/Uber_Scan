@@ -625,6 +625,57 @@ function gaps(sent) {
   ok_('...and the second page need not ask about the first page place',
       P2.geo.knows('Kroger', null));
 
+  /* ...and a page still open does not put back what Forget threw away.
+   *
+   * The same two-page fact from the other side, and the one that cost the
+   * driver something rather than costing work. `map.html`'s "Forget lookups"
+   * is the only control that can throw away a bad geocode — a misread street
+   * answered in Idaho, which the map page lists as a stray and which nothing
+   * else can correct. Writing the whole in-memory copy back meant the panel in
+   * the car, still open, restored its entire history on the next place it
+   * looked up. The button emptied the device and the next answer undid it.
+   *
+   * Staged in that order deliberately: the panel is built and fills up first,
+   * the desk page presses Forget after, and then the panel answers one more
+   * place, because that is the sequence a driver produces. */
+  var P3 = fakeGeo({ 'Chipotle': { lat: 33.7, lon: -84.3 },
+                     'Wingstop': { lat: 33.6, lon: -84.2 } }, { store: shared });
+  await P3.geo.lookup('Chipotle', null);
+  // P3 was built after the other two answered, so it holds their places in
+  // memory as well as its own — which is exactly the page that did the damage.
+  ok_('the still-open page holds the earlier places in memory',
+      P3.geo.knows('Kroger', null) && P3.geo.knows('Zaxbys', null));
+  P2.geo.forget();
+  ok_('Forget empties the device',
+      Object.keys(JSON.parse(device.blob)).length === 0);
+  await P3.geo.lookup('Wingstop', null);
+  var after = JSON.parse(device.blob);
+  no_('...and an answer that follows it does not restore the forgotten places',
+      Object.prototype.hasOwnProperty.call(after, 'Kroger')
+      || Object.prototype.hasOwnProperty.call(after, 'Zaxbys'));
+  ok_('...while the answer itself is kept',
+      Object.prototype.hasOwnProperty.call(after, 'Wingstop'));
+  no_('...so a page opened next does not believe them again',
+      new MV.Geocoder({ store: shared }).knows('Kroger', null));
+
+  /* A store that refuses every write still accumulates for the session.
+   *
+   * Site data blocked, or a full quota. The write throws, and the throw is
+   * what stops this page adopting a device snapshot the write never reached —
+   * so the answers it has paid for stay in memory. Adopting before writing
+   * would drop each one as the next arrived, and a second press would re-ask
+   * every place at the one-a-second rate. Nothing else in this file measures
+   * the order those two lines are in. */
+  var refuses = { get: function () { return '{}'; },
+                  set: function () { throw new Error('quota'); },
+                  clear: function () {} };
+  var stuck = new MV.Geocoder({ store: refuses });
+  stuck.remember('A', { lat: 1, lon: 1 });
+  stuck.remember('B', { lat: 2, lon: 2 });
+  stuck.remember('C', { lat: 3, lon: 3 });
+  ok_('a page whose store refuses writes still knows what it asked earlier',
+      stuck.knows('A', null) && stuck.knows('B', null));
+
 
   /* A dead network does not stop the walk — and is not remembered as an
    * answer about the place.

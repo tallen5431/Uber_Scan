@@ -580,10 +580,30 @@
       var onDevice = {};
       try { onDevice = JSON.parse(this.store.get() || '{}') || {}; }
       catch (e) { onDevice = {}; }
-      var mine = this.cache;
-      Object.keys(mine).forEach(function (k) { onDevice[k] = mine[k]; });
-      this.cache = onDevice;
+      // The ONE key just answered, not every key this page happens to hold.
+      //
+      // Writing back the whole in-memory cache made any still-open page undo
+      // "Forget lookups" on the next place it looked up. Measured: a panel with
+      // five answers in memory, the desk page presses Forget and the device
+      // empties, the panel answers one more place and all five are back on the
+      // device — and a page opened after that believes them again. Which is the
+      // one button that can throw away a bad geocode, defeated by the page the
+      // driver has open in the car.
+      //
+      // The merge it was for still happens, because `onDevice` was just re-read
+      // and is adopted below: this page still GETS the other page's work. What
+      // it no longer does is push its own history back over a device that has
+      // deliberately moved on.
+      onDevice[key] = value;
+      // Written first, adopted second, and the order is the whole of it. If the
+      // store refuses — site data blocked, or a full quota — the throw skips
+      // the line below and this page keeps the answers it has accumulated in
+      // memory for the rest of the session. Adopting first would replace them
+      // with a device snapshot that the write then failed to update, so every
+      // answer would be dropped as soon as the next one arrived and a second
+      // press would re-ask every place at a second apiece.
       this.store.set(JSON.stringify(onDevice));
+      this.cache = onDevice;
     } catch (e) { /* full, or private mode */ }
   };
 

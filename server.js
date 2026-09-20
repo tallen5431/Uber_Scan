@@ -2417,6 +2417,33 @@ function route(req, res) {
               // block are ordinary, two dropoffs twenty miles apart is the
               // trap, and only the second is worth refusing over.
               dropoff: scanner.offer.dropoff || null,
+              // ...and whether that destination came off the CARD or off a scan
+              // of the driver's screen. Carried, because it was being dropped
+              // here and the loss was permanent.
+              //
+              // The ⌖ Dropoff button works before the accept as well as after:
+              // an offer card usually prints "Customer dropoff" and no address
+              // — 129 of this driver's 272 cards name no destination at all —
+              // so tapping the address open while SCREENING is the ordinary
+              // way to find out where a job goes before taking it. That path
+              // sets `dropoffScanned` on the card (see the screening branch
+              // above); this object copied `dropoff` and left the flag behind,
+              // so the order went into the car with a scanned address wearing
+              // a card-read label.
+              //
+              // It is not a display detail. recordPairing writes
+              // `scanned: !!held.dropoffScanned` into the append-only journal,
+              // and the header above it says that field IS the difference the
+              // button exists to make — "whether the destination came off the
+              // card or off a scan of the screen after the accept". Every pair
+              // judged against an order screened this way recorded the wrong
+              // answer to the one question it was there to answer, and a
+              // journal row cannot be corrected later.
+              //
+              // Measured against the real server, screening press then accept:
+              // the card reads `dropoffScanned: true` and the held order read
+              // `false`, with the address itself identical.
+              dropoffScanned: !!scanner.offer.dropoffScanned,
               pickup: scanner.offer.pickup || null,
               // Whether this reading was one the rig would state a verdict
               // about. A doubted order in the car makes every pair judged

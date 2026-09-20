@@ -502,6 +502,80 @@ try:
     eq('...and putting down still says there was nothing to put down',
        post(base, '/api/delivered').get('wasHolding'), False)
 
+    # ...and the other order of the same two acts, which nothing covered.
+    #
+    # The block above scans the destination AFTER the accept. But the ⌖ button
+    # works before it too, and that is the ordinary use: an offer card usually
+    # prints "Customer dropoff" and no address — 129 of this driver's 272 cards
+    # name no destination — so tapping it open while SCREENING is how a driver
+    # finds out where a job goes before taking it. The card carried
+    # `dropoffScanned`; the object built when it went into the car copied the
+    # address and left the flag behind.
+    #
+    # Not a display detail: recordPairing writes `scanned` into the append-only
+    # journal off this field, and the header above it says that field IS the
+    # difference the button exists to make. Every pair judged against an order
+    # screened this way recorded the wrong answer to the one question it was
+    # there to answer, and a journal row cannot be corrected afterwards.
+    post(base, '/api/delivered')
+    ok_('a card to screen reaches the record',
+        put_offer({'id': 'scr-1', 'pay': 14.0, 'minutes': 25.0,
+                   'billedMinutes': 25.0, 'miles': 6.0, 'cost': 1.8,
+                   'perHour': 29.3}))
+    post(base, '/api/dropoff')          # pressed with nothing in the car yet
+    # A tag of its own: the fake scanner only speaks when this file's
+    # CONTENTS change, so reusing 'held' here would silence the press the
+    # block below makes.
+    put_dropoff('screened')
+    for _ in range(60):
+        on = get(base, '/api/status').get('offer') or {}
+        if on.get('dropoff'):
+            break
+        time.sleep(0.1)
+    on = get(base, '/api/status').get('offer') or {}
+    eq('the destination goes onto the card being screened',
+       on.get('dropoff'), '1234 Daffodil Ln, Powder Springs, GA 30127')
+    eq('...marked as scanned, because it was', on.get('dropoffScanned'), True)
+
+    post(base, '/api/offers/mark', {'id': 'scr-1', 'accepted': True})
+    time.sleep(0.4)
+    held = get(base, '/api/status').get('holding') or {}
+    eq('...and the address travels into the car with the order',
+       held.get('dropoff'), '1234 Daffodil Ln, Powder Springs, GA 30127')
+    eq('...still marked as scanned rather than read off the card',
+       held.get('dropoffScanned'), True)
+
+    # ...and into the journal, which is the half that cannot be corrected.
+    # `scanned` is checked below on a card-derived dropoff and comes out False;
+    # until this ran, nothing exercised the True side at all, so the field was
+    # pinned in one direction and could have been a constant.
+    ok_('an offer arrives while the screened order is in the car',
+        put_offer({'id': 'paired-scr', 'pay': 9.0, 'minutes': 20.0,
+                   'billedMinutes': 20.0, 'miles': 4.0, 'cost': 1.2,
+                   'perHour': 23.4, 'dropoff': 'Chastain Rd NW, Kennesaw',
+                   'pickup': 'Wingstop (Acworth)'}))
+    time.sleep(0.8)
+    _scr = []
+    for _line in open(journal):
+        _line = _line.strip()
+        if not _line:
+            continue
+        try:
+            _r = json.loads(_line)
+        except Exception:
+            continue
+        if _r.get('kind') == 'pair' and _r.get('id') == 'paired-scr':
+            _scr.append(_r)
+    eq('the pairing against it is written down once', len(_scr), 1)
+    if _scr:
+        eq('...recording that the held order\'s destination was scanned',
+           (_scr[0].get('held') or {}).get('scanned'), True)
+        eq('...and the address it scanned',
+           (_scr[0].get('held') or {}).get('dropoff'),
+           '1234 Daffodil Ln, Powder Springs, GA 30127')
+    post(base, '/api/delivered')
+
+
     # ...and with an order in the car it goes onto it.
     ok_('an offer to carry reaches the record',
         put_offer({'id': 'nav-4', 'pay': 14.0, 'minutes': 25.0,

@@ -35,6 +35,49 @@ file.
 the last frame of the batch whether or not it carried a payout. `read_the_money`
 now picks the newest frame that states one and folds the rest in. `123fa02`.
 
+### The order in the car
+
+**A destination scanned while SCREENING lost its provenance the moment the card
+went in the car.** The ⌖ Dropoff button works before the accept as well as
+after, and before is the ordinary use — an offer card usually prints "Customer
+dropoff" and no address, so tapping it open is how a driver finds out where a
+job goes *before* taking it. The card carried `dropoffScanned`; the object built
+when it was accepted copied the address and left the flag behind.
+
+Not a display detail. `recordPairing` writes `scanned` into the append-only
+journal off that field, and the header above it says that field *is* "the
+difference the ⌖ Dropoff button exists to make". So every pair judged against an
+order screened this way recorded the wrong answer to the one question it was
+there to answer, and a journal row cannot be corrected afterwards. Measured
+against the real server: the card read `dropoffScanned: true`, the held order
+read `false`, the address identical.
+
+**A wider guard here was proposed and refused.** The same sweep suggested
+refusing an unprompted address whenever a rival card had been read recently, on
+the theory that a screening tap could be misfiled onto the held job. Measured,
+the guard discards the *held job's own* destination on the ordinary busy-shift
+sequence and the loss is permanent and silent. The hazard it defends against
+also cannot occur on an ordinary screening tap: `rpi/scan_pi.py` already refuses
+every address off a frame carrying a payout or a merchant. If it is ever
+revisited, settle it with the `addressAsOffer` / `streetNoAddress` counters the
+reader already keeps, not with a guard.
+
+### The maps, again
+
+**"Forget lookups" was undone by any page left open.** `remember()` wrote the
+page's *whole in-memory cache* back to the device on every answer, so the panel
+in the car restored its entire history the next time it looked anything up.
+Measured: five answers in memory, the desk page presses Forget and the device
+empties, the panel answers one more place and all five are back — including the
+bad geocode the button exists to remove — and a page opened afterwards believes
+them again. It now writes the one key it just answered.
+
+The ordering of the two lines under it is the fix, not incidental: the write
+happens first and the device snapshot is adopted only if it landed, so a page
+whose storage refuses writes keeps what it has paid for in memory. Adopting
+first would drop each answer as the next arrived and make a second press re-ask
+every place at a second apiece. `tests/mapview.test.js` pins both directions.
+
 ### The phone's scanner
 
 **A blank settings box stored the default, and saved it.** `bind()` in
@@ -217,6 +260,24 @@ few seconds after `listen` rather than running it inline.
 
 ### The maps
 
+**Do not sync the geocode cache to the NUC.** This was listed under Open as
+"the one thing the owner asked to sync that does not". That premise is wrong:
+the owner asked for *data* to sync, and this is a third party's answer to a
+question the browser can ask again at 1.1s apiece. The payoff is already
+measured in `advice.js` — "971 place sightings hold 814 distinct places: a
+cache built from three days of driving covers 11% of the next day's.
+Restaurants repeat; customers do not." Against 11%, a sync costs three things:
+
+- **It routes around `keepPlaces: false`.** The cache key *is* the place name,
+  so a driver who turned place-keeping off would have customer addresses
+  travelling between machines anyway, by a door nobody thought about.
+- **There is no timestamp to break a tie.** Two machines that answered the same
+  string differently have no rule for which wins, and nothing would notice.
+- **It is regenerable.** It is the one file here that can be rebuilt by asking
+  again, which is the opposite of the journal's situation.
+
+The *merge* the entry pointed at had a real bug, and that is fixed — see Done.
+
 **The map is not two presses from the phone by accident.** The cycle is
 Phone → Scene → Map → Phone on one control, because the bottom bar holds six and
 a seventh sheds one. A proposal to reorder or shortcut it misread what the code
@@ -312,29 +373,48 @@ below; it is the proposed cure that was wrong.
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
 
-**The live map draws nothing until every lookup finishes.** At one geocoder
-request a second that is several seconds of empty rectangle during a decision
-measured in tens of seconds. Drawing the car first, then each place as it lands,
-would put something useful on the glass immediately.
+**The live map draws nothing until every lookup finishes** — and it leaves the
+LAST card's pins up while it waits, which is worse than an empty rectangle.
+Measured against the real `map-view.js` at a 500ms round trip, time from the
+press to the first mark on the glass: 1.6s for a card that names no dropoff
+(129 of 272), 3.8s for three fresh places, 6.0s when all three are refused by
+the box. Drawing the car first and each place as it lands puts a mark up at
+~0ms.
+
+The design has been worked out and attacked twice; if it is picked up, these
+are the corrections both attackers converged on, and they are not optional:
+
+- The `finally` clause must be `if (partial && viewMode !== 'map') mapFor =
+  null;`. With `partial` alone, a `drawMap` that throws nulls the key under a
+  live map and re-enters — measured at 40+ re-entries and climbing, on a panel
+  read while driving.
+- Interim draws must call `mapSay` and never `mapDrew`/`mapLine`, or the
+  previous card's detour figure is restated over this card's half-drawn bounds.
+  That is a confidently wrong number on the panel.
+- Ring **this card's** dropoff, not the held one. The pair under the line are
+  car → pickup → where the order in the car is going; where *this* job ends is
+  the further guess the detour already refuses to include, and a faint ring is
+  what that is.
+- The checks have to be able to fail: a stale-pin check that times out today, a
+  radius/opacity assertion that can see the ring, and one for the `partial`
+  line. Assertions that stay green either way are what this project calls a
+  check that cannot fail.
 
 **The two dropoff pins are pixel-identical** — the held order's and this card's.
 The thing the driver came to compare has to be told apart by clicking each dot.
-`mapDot` already takes a `ring` flag that carries the right meaning.
+`mapDot` already takes a `ring` flag that carries the right meaning. Same job as
+the entry above; do them together.
 
 **`judge()`'s "this cannot be right" uses a distance the rig already distrusted.**
 Where `milesUncertain` is set there is no yardstick at all, so the pair should be
 marked unjudged rather than accused; where `milesCorrected` is set the popup
 should say the card's figure was corrected.
 
-**The geocode cache does not sync to the NUC.** It is the one thing the owner
-asked to sync that does not: `remember()` goes to real lengths to merge across
-two *tabs* and does nothing across two *machines*, while the journal syncs both
-ways.
-
 **A wrong remembered lookup can only be fixed by wiping every good one.**
 `map.html` is the one surface that can *identify* a bad geocode — the stray rows
 are already listed and already tappable — and all it can do is throw the whole
-cache away. (The cure proposed by the audit was refused; see Settled.)
+cache away. (The cure proposed by the audit was refused; see Settled. The
+button at least *works* now — see Done.)
 
 **No map can be asked about a time.** `journal.html` already buckets every offer
 by hour and by weekday; `map.html` has only a day count. A weekday plus
@@ -356,12 +436,30 @@ which is exactly the case in which it does.
 The cure needs care and is not what it first looks like: `record()` is called
 on the **lock transition**, not per frame, so simply withholding `recorded`
 does not retry the card — it waits for three empty reads to drop the lock. And
-`save()` failing means storage-off (private mode, blocked site data) at least
-as often as storage-full, so a message naming either one is wrong half the
-time. The honest shape is: have `save()` report success, keep `recorded` so the
-card is not re-entered, say something true on a bounded hold, and give
-`scan.html` the queue count `ui.js` already gives the keypad. Do the README in
-the same commit if a cap is ever added, or the cap becomes a false claim there.
+`save()` failing means storage-off at least as often as storage-full, so a
+message naming either one is wrong much of the time. The honest shape is: have
+`save()` report success, hold refused rows in an in-page list, keep `recorded`
+so the card is not re-entered, say something true on the glass, and give
+`scan.html` the queue count `ui.js` already gives the keypad.
+
+Worked out and attacked twice since. What the attacks added:
+
+- **The quota is months away; the storage-off half is immediate.** Measured at
+  525–1,222 bytes a row, the quota is 3,000–7,600 rows — 15 to 38 shifts with
+  no rig ever reachable. But a browser told not to keep site data loses rows
+  *today*, with the rig up and answering, while three places on screen say the
+  offer was kept. Neither `file://` nor a private window reaches this; the
+  reachable setting is "block all cookies". Do not name private mode.
+- **Do not name a cause on screen.** Say what is true of the phone and what
+  follows: the row is not saved on this phone and goes if the page closes.
+- **Count rows that are not in flight**, or the note flickers once per card in
+  the configuration where nothing is wrong.
+- **`rpi/test_keypad.py`'s storage-off block cannot currently fail**: the
+  `page.reload()` wipes the `localStorage` override set just above it. Fix that
+  with `addInitScript` in the same commit, or the new checks inherit a harness
+  that proves nothing.
+- If a cap ever lands, `README.md`'s promise to keep every offer on the phone
+  moves in the same commit or the cap becomes a false claim there.
 
 **The panel's caption row has a stated budget that one sentence in ten keeps.**
 `live.html` writes the rule down — short, because the line is a row of the panel
@@ -381,6 +479,7 @@ the map keep its height, or rewrite the nine.
 | The offer log's map sheet named a colour that was not drawn | Fix in this commit: it names the pin that is there, the end that is missing, and which of the three kinds of missing it is. |
 | The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | 29 hunted, 16 survived checking, 13 refuted. The worst is recorded below; what has landed is under Done. |
 | The last five of those, re-checked one agent apiece and then attacked by two more | All five real, one reframed (`cardMinutes`), two proposed cures refuted with measurements. Four fixed; the fifth — the phone's unsent queue — is under Open with the reasoning its cure needs. |
+| The top Open items and `server.js`, which had never been swept as a unit | Two shipped (the screened dropoff's provenance, "Forget lookups"); one Open entry refuted outright and moved to Settled (syncing the geocode cache); two designs survived attack and are under Open with their corrections (the live map's draw order, the phone's unsent queue). |
 
 ### The worst fault this sweep found
 
