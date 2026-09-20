@@ -14,7 +14,11 @@ The **reading** does, when the rig is the one serving this page. A card the
 scanner locks on is handed to the rig's journal the same way a typed offer is,
 so the offers page can count it — the figures, the places the card named, and
 the text the reader saw. See `journal-client.js`. Served from anywhere else it
-has no rig to hand anything to and keeps everything on the phone.
+has no rig to hand anything to and keeps the reading on the phone until one
+answers — the most recent 1,000 of them, which is about six days of heavy
+scanning with no rig ever in reach. Past that the oldest come off and the
+status line says how many and back to when; it says so too if the browser
+refuses to store a row at all.
 
 ## It needs HTTPS
 

@@ -107,9 +107,15 @@ var JournalClient = (function () {
    * `dropped` is deliberate: rows shed at the ceiling above, oldest first,
    * with `through` the time of the newest one shed, so a page can name the
    * moment the record now starts at rather than just a number. `lost` is the
-   * store refusing a row outright — private mode, or an origin full of
-   * something else — and is the row the driver was looking at when it
-   * happened.
+   * store refusing a row outright, and is the row the driver was looking at
+   * when it happened.
+   *
+   * That refusal is nearer than the ceiling is. The ceiling is weeks of
+   * driving away; a browser told to block site data refuses the very first
+   * row, today, with the rig up and answering. Neither `file://` nor a
+   * private window reaches it — both of those have a working localStorage —
+   * so nothing here or on the glass names a cause. It says what is true of
+   * this phone and lets the driver find out why.
    *
    * In memory only, on purpose: the case this reports is a store that will not
    * take a write, and a counter written to that same store would be the first
@@ -301,9 +307,9 @@ var JournalClient = (function () {
 
      Nothing here reports a save that fails AFTER a send, in flush below. That
      write is strictly smaller than what the store already holds, so a store
-     that takes the one takes the other; private mode refuses both, and there
-     the queue is empty and there is nothing to report. A check that cannot
-     fail is not a check. */
+     that takes the one takes the other. A store that refuses everything
+     refuses both, and there the queue is empty and there is nothing to
+     report. A check that cannot fail is not a check. */
   function keep(r) {
     var q = load();
     q.push(r);

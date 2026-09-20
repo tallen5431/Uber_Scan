@@ -470,20 +470,38 @@ const [base] = process.argv.slice(2);
   await page.unroute('**/api/journal/ingest');
 
   // --- storage that will not answer ----------------------------------------
-  // Private mode, a full quota, a browser with site data blocked. The page has
-  // to open and add up an offer either way; only remembering it is optional.
-  await page.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
-  await page.evaluate(() => {
+  // A browser told to block site data. The page has to open and add up an
+  // offer either way; only remembering it is optional.
+  //
+  // This block proved nothing for as long as it has existed. The override was
+  // installed with page.evaluate and then a page.reload() ran underneath it —
+  // and a reload is a new realm, so the property defined on the old window
+  // went with it. Every check below has been running against a perfectly
+  // ordinary localStorage. addInitScript runs before each document instead,
+  // so the override is there for the load itself, which is the moment that
+  // matters: loadSettings, loadHistory and restoreDraft all read at import.
+  //
+  // `stillOff` is reported for the same reason: it is the one thing that says
+  // the harness is doing what its name claims, and it is what was missing.
+  await page.addInitScript(() => {
     const boom = () => { throw new Error('storage is off'); };
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
-      value: { getItem: boom, setItem: boom, removeItem: boom, clear: boom },
+      get: () => ({ getItem: boom, setItem: boom, removeItem: boom, clear: boom }),
     });
   });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(250);
+  out.storageReallyOff = await page.evaluate(() => {
+    try { localStorage.getItem('x'); return false; } catch (e) { return true; }
+  });
   await type(['clear', '3', '0', 'next', '6', '0']);
   out.withoutStorage = await screen();
+  out.withoutStorageLogged = await (async () => {
+    await page.click('[data-key="log"]');
+    await page.waitForTimeout(300);
+    return page.evaluate(() => (document.getElementById('toast') || {}).textContent || '');
+  })();
 
   await browser.close();
   console.log(JSON.stringify(out));
@@ -698,11 +716,21 @@ eq('...and the fields are cleared for the next one',
 eq('the log is capped rather than growing without end', got.get('capped'), 100)
 
 # --- storage that will not answer ------------------------------------------
-# Private mode, a full quota, a browser with site data blocked. Remembering is
-# optional; adding up the offer in front of the driver is not.
+# A browser told to block site data. Remembering is optional; adding up the
+# offer in front of the driver is not.
+#
+# The first check is the harness checking itself, and it is the one that was
+# missing: the override used to be wiped by a page.reload() immediately after
+# it was set, so everything below ran against ordinary storage and could not
+# fail. See the comment in the driver.
 without = got.get('withoutStorage') or {}
+eq('the storage really is off for this block', got.get('storageReallyOff'), True)
 eq('the keypad still works with no storage at all', without.get('perHour'), '$30.0')
 eq('...and no page error was thrown', got.get('thrown'), [])
+# LOG is the press that reaches journal-client, whose keep() now returns null
+# rather than a row when nothing can be stored. It still has to log.
+ok_('...and LOG still logs (%r)' % (got.get('withoutStorageLogged') or '')[:40],
+    'Logged' in (got.get('withoutStorageLogged') or ''))
 
 # --- a typed offer reaches the journal --------------------------------------
 #

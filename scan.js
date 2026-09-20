@@ -515,13 +515,20 @@
    * refused a row, when the ceiling shed some, or when offers are piling up
    * against a rig that is not answering — the last being the one the driver
    * can still act on, which is the whole point of showing it before either of
-   * the other two can happen. */
+   * the other two can happen.
+   *
+   * No cause is named, deliberately. A store that refuses a write is a
+   * browser told to block site data at least as often as it is a store that
+   * is full, and a sentence naming either one is wrong much of the time — so
+   * this says what is true of the phone and what follows from it, which is
+   * all a driver can act on anyway. `live.html`'s `notSaving` reads the same
+   * way about the rig's disk. */
   function queueNote() {
     if (!window.JournalClient || !JournalClient.trouble) return '';
     var t = JournalClient.trouble();
     if (t && t.lost) {
       return 'NOT SAVING — ' + t.lost + (t.lost === 1 ? ' offer' : ' offers')
-             + ' this phone would not store';
+             + ' went nowhere, this phone will not keep them';
     }
     if (t && t.dropped) {
       return 'dropped ' + t.dropped + (t.dropped === 1 ? ' oldest offer' : ' oldest offers')

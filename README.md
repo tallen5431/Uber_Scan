@@ -72,7 +72,14 @@ tracking. The one thing it talks to is the rig: served by the rig's own server,
 **LOG** also hands the offer to the rig's journal so the offers page can count
 it, and says so in the history when that did not get through. Served from
 anywhere else (GitHub Pages, a file), it asks once whether a rig is there,
-hears nothing, and keeps every offer on the phone.
+hears nothing, and keeps the offer on the phone until one answers.
+
+The phone holds the most recent 1,000 of those — about six days of heavy
+scanning with no rig ever reachable, and roughly a third of what a browser
+gives one site. Past that the oldest come off, and the scanner's status line
+says how many and back to when. It says so too when the browser will not store
+a row at all, which is a setting rather than a full disk and happens on the
+first offer rather than the thousandth.
 
 ## The math
 

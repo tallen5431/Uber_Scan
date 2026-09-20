@@ -240,6 +240,21 @@ in the change handler.
 
 ### The keypad
 
+**The "storage that will not answer" block was never run with storage off.**
+`rpi/test_keypad.py` installed a throwing `localStorage` with `page.evaluate`
+and then ran `page.reload()` underneath it — and a reload is a new realm, so
+the property defined on the old `window` went with it. Every check in that
+block had been running against a perfectly ordinary store since it was
+written. Proved rather than asserted: with `ui.js`'s settings guard removed —
+a change that makes the keypad show `--` instead of `$30.0` and throw on load
+— the old harness passed all 92 checks. `addInitScript` runs before each
+document instead, which is the moment that matters, because `loadSettings`,
+`loadHistory` and `restoreDraft` all read at import. The block now reports
+`storageReallyOff` as its first check, so the harness says whether it is doing
+what its name claims, and the same mutation now fails three checks. This is
+the project's sixth fault class — a check that cannot fail — found in the one
+place that is meant to catch the others.
+
 **The keypad keeps a private shadow of a queue it shares with the phone
 scanner, so its count goes permanently wrong.** `ui.js` stores a per-row `sent`
 boolean, and the only thing that can ever set it true is this page's own flush.
@@ -731,23 +746,81 @@ are already listed and already tappable — and all it can do is throw the whole
 cache away. (The cure proposed by the audit was refused; see Settled. The
 button at least *works* now — see Done.)
 
-**A heat map of $/hr by area, asked for and worth doing — after the two entries
-above it.** The driver's words: "visualize the $/hr in different areas around
-Atlanta ... helpful for predicting where my time would be best spent."
+**A heat map of $/hr by area, asked for, designed, and refuted on the data.**
+The driver's words: "visualize the $/hr in different areas around Atlanta ...
+helpful for predicting where my time would be best spent."
 
-The data supports it. 1,107 of 1,166 offers name a pickup, and a pickup is a
-merchant or an intersection — the geocodable end. Median offer is $14.56/hr with
-a p25–p75 of $10.63–$19.80, so there is real spread to colour by.
+The two things that blocked it are shipped: `map-view.js`'s `localityOf` boxes
+the geocoder to the driver's own towns, and `GET`/`POST /api/places` keeps the
+answers on the NucBox so the 24-minute re-place is paid once. A full design was
+then written and attacked by two independent reviewers. **Both refuted it, on
+the same fault, and every number below was reproduced at least twice.**
 
-It is blocked on the two entries above, and not incidentally:
+*The fault that decides it.* The design set a minimum of 12 offers a cell,
+calibrated against "how often does the median of 12 land outside the middle 80%
+of the week" — about 4-5%, which sounds fine. But the map does not paint at
+those edges; it paints at fixed band boundaries. Re-scored against the boundary
+that is actually drawn, a cell with **no area effect whatever** takes the wrong
+colour **21-25% of the time at n=12** — roughly two miscoloured cells on an
+eight-cell map, with only one map in ten coming out clean. A confidently wrong
+number on the glass, which is this project's worst fault class, and it was
+invisible because the floor and the scale were tuned separately. Whatever is
+built, **those two must be derived together and the table for that exact pair
+must sit in the comment.** Moving the top edge to $19.50 takes it to 7.0% at
+n=12; keeping the edge means a floor of 30-60, which this week supports in
+zero cells.
 
-- Every place is currently asked **unboxed**, so a chunk of the answers are
-  thousands of miles out. A heat map drawn over those is a heat map of nothing.
-- The geocodes are not kept anywhere durable, and at 1,325 distinct places
-  against a one-a-second limit a full re-place is **about 24 minutes**. A view
-  that has to pay that to open will not be opened.
+*There is no signal below town scale.* Kruskal-Wallis over distinct places,
+n>=5: H=25.46 against a shuffled p95 of ~31.8, p~0.22 — reproduced to the
+decimal by two reviewers independently. Over towns it is strong (H~65 against
+p95~17), and it collapses the moment Atlanta is removed (p~0.14-0.48). **The
+finest distinction this week supports is Atlanta against the northwest
+suburbs.** A grid finer than that draws a difference the data cannot measure.
 
-Two things to get right when it is built, both about honesty rather than code:
+*And a third of the week cannot be placed at all.* A bare merchant name is
+geocodable but not locatable — a geocoder answers "McDonald's" as confidently
+as it answers an intersection, and it is not the branch the card meant. 462 of
+1,107 named pickups are a bare brand with no street or number, 68 of those
+strings repeating across 293 offers. Nothing catches it: `judge()`'s
+`impossible` needs a second pin and 90% of them have none, `straysAmong`'s
+FAR_MILES is 75 and Atlanta-to-Kennesaw is 24. Excluding them leaves ~422
+offers (36%) — and **that third is not a random third**: pickups naming a
+street pay a median $15.97 against $14.08 for the rest, gap $1.89,
+permutation p=0.0001. The map's population earns ~$2/hr more than the week it
+would claim to summarise.
+
+*The area effect is partly a time effect, and this is the one that would give
+bad advice.* Measured here with the repo's own `Advice.area`, local hours:
+
+| local | n | median | | town | n | median |
+|---|---|---|---|---|---|---|
+| 14:00-17:00 | 254 | $13.54 | | atlanta | 101 | $20.07 |
+| 17:00-20:00 | 198 | $13.66 | | kennesaw | 71 | $15.51 |
+| 20:00-23:00 | 382 | $13.98 | | marietta | 95 | $14.42 |
+| **23:00-02:00** | 220 | **$17.74** | | acworth | 38 | $13.84 |
+| **02:00-05:00** | 112 | **$16.73** | | powder springs | 19 | $12.24 |
+
+Atlanta is **71% of town-labelled offers between 23:00 and 02:00 and 0-4%
+between 14:00 and 20:00**. Its raw $5.58/hr advantage falls to **$3.91 within
+the same hours of the day**. So about a third of "Atlanta pays more" is really
+"late night pays more", and a map showing area without time tells the driver to
+drive to Atlanta at 4pm — which this week says is worth about $14. **Any
+version of this feature carries the hour or it is answering the wrong
+question**, which makes the time-filter entry below a precondition rather than
+a companion.
+
+*The cheaper thing to try first.* A **town table** needs no geocoder, no new
+map pane, no ninth control on a bar `rpi/test_layout.py` already calls "eight
+controls that wrap to three rows", and no 24-minute wait: `Advice.area()`
+already labels 475 of 1,166 rows with a town read off the driver's own cards,
+and `tools/measure_places.js`'s `keyOf(place, 'town')` already groups by it.
+Eight buckets at n>=12 covering 436 offers — **more than the heat map's 422** —
+labelled with words the driver reads rather than a coordinate. Crossed with the
+five hour blocks above it answers "where and when", which is the actual
+question, and every cell of it is checkable by eye.
+
+Two things to get right whatever is built, both about honesty rather than code,
+and both still true:
 
 - It is a map of what was **offered** there, not what was **earned** there. 935
   of 1,166 offers were passed. The heading has to say so, or it reads as income.
@@ -756,53 +829,15 @@ Two things to get right when it is built, both about honesty rather than code:
   knowable at all. "Where the good offers start" is the honest title; "where to
   sit and wait" is a claim this data cannot make.
 
-Median, not mean, per cell — the payout distribution has a long right tail and
-one $41 offer would light up a square the driver has never worked.
-
+Median, not mean, per cell — and the reason is stronger than it used to say
+here: the tail is a $185.46 card, not a $41 one, and the mean's false-hot rate
+never recovers (3.2% at n=30 and 0.7% still at n=60, against the median's 0.4%
+by n=30).
 **No map can be asked about a time.** `journal.html` already buckets every offer
 by hour and by weekday; `map.html` has only a day count. A weekday plus
 three-hour-block filter would make the map answer a question *before* a shift
 rather than only after one — on the parked desk page, where the six-control panel
 bar does not bind.
-
-**The phone's unsent queue only ever grows, and fails silently when it is
-full.** `uberscan.unsent.v1` is shortened only by a flush that lands, and on a
-phone with no rig reachable — a documented mode, since the README offers GitHub
-Pages, where the ingest POST 404s — nothing ever prunes it. Measured: about
-156 KB per 200-offer shift, roughly 5,000 rows to fill a 5 MB localStorage. At
-that point `save()` catches the QuotaExceededError and swallows it, `keep()`
-hands back a row that was not stored, and `scan.js` has already set `recorded`,
-so the card is gone and the page still paints its verdict. `journal-client.js`
-opens by saying nothing here "loses anything when [the network] is absent",
-which is exactly the case in which it does.
-
-The cure needs care and is not what it first looks like: `record()` is called
-on the **lock transition**, not per frame, so simply withholding `recorded`
-does not retry the card — it waits for three empty reads to drop the lock. And
-`save()` failing means storage-off at least as often as storage-full, so a
-message naming either one is wrong much of the time. The honest shape is: have
-`save()` report success, hold refused rows in an in-page list, keep `recorded`
-so the card is not re-entered, say something true on the glass, and give
-`scan.html` the queue count `ui.js` already gives the keypad.
-
-Worked out and attacked twice since. What the attacks added:
-
-- **The quota is months away; the storage-off half is immediate.** Measured at
-  525–1,222 bytes a row, the quota is 3,000–7,600 rows — 15 to 38 shifts with
-  no rig ever reachable. But a browser told not to keep site data loses rows
-  *today*, with the rig up and answering, while three places on screen say the
-  offer was kept. Neither `file://` nor a private window reaches this; the
-  reachable setting is "block all cookies". Do not name private mode.
-- **Do not name a cause on screen.** Say what is true of the phone and what
-  follows: the row is not saved on this phone and goes if the page closes.
-- **Count rows that are not in flight**, or the note flickers once per card in
-  the configuration where nothing is wrong.
-- **`rpi/test_keypad.py`'s storage-off block cannot currently fail**: the
-  `page.reload()` wipes the `localStorage` override set just above it. Fix that
-  with `addInitScript` in the same commit, or the new checks inherit a harness
-  that proves nothing.
-- If a cap ever lands, `README.md`'s promise to keep every offer on the phone
-  moves in the same commit or the cap becomes a false claim there.
 
 **The panel's caption row has a stated budget that one sentence in ten keeps.**
 `live.html` writes the rule down — short, because the line is a row of the panel

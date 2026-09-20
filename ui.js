@@ -493,7 +493,11 @@
     try { return localStorage.getItem(RIG_KEY) === '1'; } catch (e) { return false; }
   }
   function rememberRig() {
-    try { localStorage.setItem(RIG_KEY, '1'); } catch (e) { /* private mode */ }
+    // Swallowed on purpose, and the only place here that still does. This is
+    // a hint about whether a rig has ever answered, used to decide whether to
+    // mention one; a browser that will not store it costs the driver a line
+    // of text, not an offer. The queue's own writes are the ones that report.
+    try { localStorage.setItem(RIG_KEY, '1'); } catch (e) { /* site data off */ }
   }
 
   function flushUnsent() {
