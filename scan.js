@@ -525,20 +525,35 @@
    * way about the rig's disk. */
   function queueNote() {
     if (!window.JournalClient || !JournalClient.trouble) return '';
+    var said = [];
     var t = JournalClient.trouble();
+    // What has already been lost, which is permanent and therefore stated as
+    // a fact with no advice attached. `trouble()` never clears — rows that
+    // went nowhere do not come back when the rig does — so any advice here
+    // would still be on the glass long after it stopped being true. The first
+    // version of this line ended "the queue is full, find the rig", and the
+    // queue is not full once the rig answers.
     if (t && t.lost) {
-      return 'NOT SAVING — ' + t.lost + (t.lost === 1 ? ' offer' : ' offers')
-             + ' went nowhere, this phone will not keep them';
+      said.push('NOT SAVING — ' + t.lost + (t.lost === 1 ? ' offer' : ' offers')
+                + ' went nowhere, this phone will not keep them');
     }
     if (t && t.dropped) {
-      return 'dropped ' + t.dropped + (t.dropped === 1 ? ' oldest offer' : ' oldest offers')
-             + ' — the queue is full, find the rig';
+      said.push(t.dropped + (t.dropped === 1 ? ' older offer' : ' older offers')
+                + ' dropped, not in the journal');
     }
+    // ...and what is true NOW, which is the only part a driver can act on.
+    //
+    // Added to the line rather than returned instead of it. These used to be
+    // three early returns in this order, so a window that had dropped anything
+    // — which means the rig had been out of reach long enough to fill a
+    // thousand-row queue — showed the permanent loss and hid the live backlog
+    // behind it, for the rest of the page's life. The one line worth reading
+    // was the one that could never appear.
     var n = JournalClient.waiting();
     if (n && JournalClient.reachable() === false) {
-      return n + (n === 1 ? ' offer' : ' offers') + ' waiting — the rig has not answered';
+      said.push(n + (n === 1 ? ' offer' : ' offers') + ' waiting — the rig has not answered');
     }
-    return '';
+    return said.join(' · ');
   }
 
   // The card that went to the journal is still in front of the camera. Any

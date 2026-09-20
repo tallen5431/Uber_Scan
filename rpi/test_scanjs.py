@@ -478,6 +478,48 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     };
   });
 
+  // The status line once rows have been lost AND the rig is out of reach,
+  // which is the state a long outage actually produces: the ceiling only bites
+  // after the rig has been away long enough to fill a thousand-row queue.
+  //
+  // The three clauses were early returns in that order, so the permanent loss
+  // hid the live backlog for the rest of the page's life — and the backlog is
+  // the only one of the three a driver can act on. The dropped line also ended
+  // "the queue is full, find the rig", which stays on the glass after the rig
+  // answers and the queue drains, because trouble() never clears.
+  //
+  // Driven through the page's own render, not a hook: `consider` is the loop's
+  // own path and the status line is what the driver reads.
+  await page.route('**/api/journal/ingest',
+                   r => r.fulfill({ status: 503, contentType: 'text/plain', body: 'down' }));
+  out.lossAndBacklog = await page.evaluate(async (src) => {
+    // The rig unreachable, the honest way: a flush that the stub refuses.
+    // reachable() is module state in journal-client and there is no back door
+    // to it, which is the point — this is the same call the page makes.
+    JournalClient.keep(JournalClient.row(
+      { pay: 41.11, minutes: 20, miles: 5, legs: 2, complete: true },
+      { ready: true, state: 'no', perHour: 123.3, grossPerHour: 125,
+        perMile: 8.2, cost: 1.75, minutes: 20 },
+      { target: 25, band: 15, costPerMile: 0.35 },
+      { browser: true, prefix: 'lb' }));
+    await JournalClient.flush();
+    // A read is what renders the status line — `consider` is the loop's
+    // agreement path and deliberately does not paint. This is the page's own
+    // render, not a hook that writes the line directly.
+    // status() gives a one-shot message a 2500ms hold and suppresses the
+    // routine line for that long — an earlier block in this probe fails a read
+    // on purpose, and its message was still holding the line here. Waited out
+    // BEFORE the render, because a render during the hold paints nothing and
+    // the line then reads as this block's answer when it is the last block's.
+    await new Promise(r => setTimeout(r, 2700));
+    await window.__scan.readImage(src);
+    return { line: document.getElementById('statusline').textContent,
+             trouble: JSON.stringify(JournalClient.trouble()),
+             reachable: JournalClient.reachable(),
+             waiting: JournalClient.waiting() };
+  }, whole);
+  await page.unroute('**/api/journal/ingest');
+
   // A rate that is only a ceiling, on the screen that had nothing to say
   // about it. rate() caps the verdict at CLOSE CALL when a cost per mile is
   // set and the card states no chargeable distance — and live.html and the
@@ -1172,6 +1214,30 @@ try:
         # as a drop would put a number on screen for rows that are still on
         # the disk — a confidently wrong one, which is the first fault class.
         eq('...and not also counted as dropped', qf.get('droppedUnchanged'), True)
+
+    # --- the loss and the live backlog share one line ---------------------
+    #
+    # The ceiling only bites after the rig has been out of reach long enough to
+    # fill a thousand-row queue, so "rows were dropped" and "the rig is not
+    # answering" are the SAME moment, not alternatives. The three clauses were
+    # early returns in that order, which meant the permanent loss hid the live
+    # backlog for the rest of the page's life — and the backlog is the only one
+    # of the three a driver can act on.
+    lb = got.get('lossAndBacklog') or {}
+    ok_('the queue really is in trouble for this block (%s)' % lb.get('trouble'),
+        lb.get('trouble') not in (None, 'null'))
+    eq('...and the rig really is out of reach', lb.get('reachable'), False)
+    ok_('...with rows actually waiting (%s)' % lb.get('waiting'), (lb.get('waiting') or 0) > 0)
+    ok_('the line names what was lost (%r)' % (lb.get('line') or '')[:80],
+        'not in the journal' in (lb.get('line') or '')
+        or 'NOT SAVING' in (lb.get('line') or ''))
+    ok_('...and still names the backlog, which is the part that can be acted on',
+        'has not answered' in (lb.get('line') or ''))
+    # An instruction that stops being true the moment the rig answers, on a
+    # line that never clears, is this project's fifth fault class.
+    ok_('...and gives no advice that goes stale when the rig comes back',
+        'find the rig' not in (lb.get('line') or '')
+        and 'queue is full' not in (lb.get('line') or ''))
 
     # --- a rate that is only a ceiling, said in words ---------------------
     #

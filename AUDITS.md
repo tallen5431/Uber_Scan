@@ -310,6 +310,23 @@ like one that is merely waiting. The backlog itself is named too — "N offers
 waiting — the rig has not answered" — which is the only one of the three a
 driver can still act on, and it appears long before either ceiling.
 
+**...and the line that reported it gave advice that went stale, and hid the one
+part a driver could act on.** Found by re-reading the commit above with the
+same lens it was written with. `queueNote` was three early returns in
+severity order, and `trouble()` never clears — rows that went nowhere do not
+come back when the rig does. So the dropped line, which ended "the queue is
+full, find the rig", stayed on the glass after the rig answered and the queue
+drained (the fifth fault class), and because it returned early it **masked**
+the live backlog for the rest of the page's life. Those two are the same
+moment, not alternatives: the ceiling only bites after the rig has been out of
+reach long enough to fill a thousand-row queue, so the state that produces a
+drop is exactly the state where "N waiting — the rig has not answered" is the
+line worth reading. Now the permanent facts are stated as facts with no advice
+attached, and the actionable line is added to them rather than returned instead
+of them. Checked through the page's own render on the real status line, and the
+three mutations — the stale advice back, only the first clause shown, the
+backlog clause silenced — each fail a named check.
+
 **The box note went stale in both directions, and the worse one was unfiled.**
 `setAdjusting()` writes its sentence only at the instant adjust mode is
 entered, and the whole-frame checkbox is the one control that can falsify it
