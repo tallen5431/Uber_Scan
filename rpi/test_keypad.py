@@ -425,6 +425,35 @@ const [base] = process.argv.slice(2);
   out.paddedList = await histText();
   await page.click('[data-close="historySheet"]');
 
+  // --- a phone that will not store the queue ---------------------------------
+  //
+  // journal-client's keep() now hands back null rather than pretending, and
+  // this page read `.id` straight off it. Inside logOffer, where nothing
+  // catches: the press did nothing at all — no history entry, no buzz, no
+  // toast, the typed figures still sitting on the keys — on a phone that has
+  // run out of room, which is exactly when this page gets used. The entry has
+  // to survive, and it has to say that the list is now the only copy of it.
+  await open({ [SETTINGS]: SEEDED, [DRAFT]: null, [HISTORY]: null });
+  await page.evaluate(() => {
+    const real = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (k, v) => {
+      if (k === 'uberscan.unsent.v1') {
+        const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
+      }
+      return real(k, v);
+    };
+  });
+  await type(['1', '8', 'next', '3', '0', 'log']);
+  await page.waitForTimeout(400);
+  out.unstoredToast = await page.evaluate(
+    () => (document.getElementById('toast') || {}).textContent || '');
+  out.unstoredHistory = await page.evaluate(
+    k => JSON.parse(localStorage.getItem(k) || '[]'), HISTORY);
+  await page.click('#openHistory');
+  await page.waitForTimeout(150);
+  out.unstoredList = await histText();
+  await page.click('[data-close="historySheet"]');
+
   // --- a phone that has never had a rig --------------------------------------
   // Served from a static host there is no rig, and every LOG used to end in
   // "kept on this phone — the rig did not answer", about a machine that was
@@ -700,6 +729,23 @@ ok_('with the rig out of reach the entry says so (%r)' % (got.get('keptToast') o
 ph = got.get('paddedHistory') or {}
 eq('the history row carries the minutes as typed, pad aside', ph.get('minutes'), 23)
 ok_('...and lists them (%r)' % (got.get('paddedList') or '')[:50], '23 min' in (got.get('paddedList') or ''))
+# A phone that will not store the queue. keep() returns null there, and
+# reading `.id` off it threw inside logOffer, where nothing catches: LOG did
+# nothing at all. `thrown` above is empty for the whole run, which is half of
+# this; the other half is that the offer survives and says what it is.
+uh = got.get('unstoredHistory') or []
+ok_('LOG still logs when the browser will not store the queue (%r)'
+    % (got.get('unstoredToast') or ''), 'Logged' in (got.get('unstoredToast') or ''))
+eq('...keeping the entry', len(uh), 1)
+eq('...with no row id, because there is no row', uh and uh[0].get('rowId'), None)
+ok_('...and the list says the journal has not got it (%r)'
+    % (got.get('unstoredList') or '')[:60],
+    'not in the journal' in (got.get('unstoredList') or ''))
+# Told apart from an entry that is merely waiting: that one goes with the next
+# LOG, this one is not waiting for anything and the hundred-entry list is the
+# only copy there is.
+ok_('...rather than reading as one that is merely waiting',
+    'kept here only' not in (got.get('unstoredList') or ''))
 rl = got.get('rigless') or {}
 ok_('a phone that has never had a rig is not told the rig did not answer (%r)' % rl.get('toast'),
     'did not answer' not in (rl.get('toast') or '') and 'Logged' in (rl.get('toast') or ''))

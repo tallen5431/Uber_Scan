@@ -495,8 +495,43 @@
       return;
     }
     recorded = { pay: parsed.pay, at: now };
-    JournalClient.keep(JournalClient.row(parsed, r, settings, { browser: true, prefix: 'p' }));
+    // Null when this browser would not take the row. Nothing to do about it
+    // here — there is nowhere else to put it — but `recorded` must not be left
+    // claiming the card went to the journal, or a second lock on the same card
+    // inside ninety seconds would be skipped as a duplicate of a row that does
+    // not exist. Cleared, the next lock tries again, which is the only retry
+    // this page has. `queueNote` below is what says so on screen.
+    var kept = JournalClient.keep(
+      JournalClient.row(parsed, r, settings, { browser: true, prefix: 'p' }));
+    if (!kept) recorded = null;
     JournalClient.flush();
+  }
+
+  /* What the journal queue has to say, led in front of the routine status
+   * line, the way the rig leads its notes with `notSaving`.
+   *
+   * Silent on an ordinary night, which is most of them: a row is kept, a
+   * flush takes it, and there is nothing to report. It speaks when the store
+   * refused a row, when the ceiling shed some, or when offers are piling up
+   * against a rig that is not answering — the last being the one the driver
+   * can still act on, which is the whole point of showing it before either of
+   * the other two can happen. */
+  function queueNote() {
+    if (!window.JournalClient || !JournalClient.trouble) return '';
+    var t = JournalClient.trouble();
+    if (t && t.lost) {
+      return 'NOT SAVING — ' + t.lost + (t.lost === 1 ? ' offer' : ' offers')
+             + ' this phone would not store';
+    }
+    if (t && t.dropped) {
+      return 'dropped ' + t.dropped + (t.dropped === 1 ? ' oldest offer' : ' oldest offers')
+             + ' — the queue is full, find the rig';
+    }
+    var n = JournalClient.waiting();
+    if (n && JournalClient.reachable() === false) {
+      return n + (n === 1 ? ' offer' : ' offers') + ' waiting — the rig has not answered';
+    }
+    return '';
   }
 
   // The card that went to the journal is still in front of the camera. Any
@@ -655,7 +690,9 @@
     el.warn.textContent = notes.join(' ');
     el.warn.hidden = !notes.length;
 
-    status(ms + 'ms · ' + (locked ? 'confirmed' : (r.ready ? 'confirming…' : 'searching…')) +
+    var queue = queueNote();
+    status((queue ? queue + ' · ' : '') +
+      ms + 'ms · ' + (locked ? 'confirmed' : (r.ready ? 'confirming…' : 'searching…')) +
       (settings.fullFrame ? ' · whole frame' : ' · in box'));
   }
 

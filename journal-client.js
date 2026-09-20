@@ -12,7 +12,17 @@
  * reached a server; and one flush through /api/journal/ingest, the door the
  * sync uses, which stores a row once however often it is sent. An app on a
  * phone with no rig near it is the normal case for both pages, and nothing
- * here waits on the network or loses anything when it is absent.
+ * here waits on the network when it is absent.
+ *
+ * It used to say "or loses anything", and that was a claim the code did not
+ * honour. The queue had no ceiling of its own and `save` swallowed every
+ * storage failure, so the queue grew until the browser refused it and then
+ * every further offer vanished — `keep` still handed the caller back a row,
+ * `pending` still said the row was not waiting, and the phone buzzed for a
+ * card that had gone nowhere. Both ends of that are fixed below: there is a
+ * ceiling, chosen from the owner's own week rather than picked, and when a row
+ * cannot be kept the caller is told so rather than reassured. What the pages
+ * do with being told is theirs; what is no longer possible is not being told.
  *
  * Browser only, like ui.js and scan.js: served, never run under Node. */
 var JournalClient = (function () {
@@ -68,8 +78,67 @@ var JournalClient = (function () {
     } catch (e) { return []; }
   }
 
+  /* How many rows may wait here.
+   *
+   * There was no ceiling, which is only sane if the store has none either, and
+   * it has: localStorage is about 5MB an origin and charges for UTF-16, so
+   * roughly 2.6 million characters — shared with the map page's geocode cache,
+   * the keypad's own hundred-entry list and the settings, all on this origin.
+   *
+   * Measured on the owner's real week — 1,166 offers, 13-20 Sep 2026, put
+   * through row() one at a time — a stored row is 831 bytes of JSON at the
+   * mean and 987 at the ninetieth. So the old, uncapped queue met its ceiling
+   * at about 3,100 rows, and met it the way this project's second fault class
+   * describes: everything after that disappeared with nothing saying so.
+   * (Ingest's own MAX_SYNC_BODY of 8MB is a further ceiling at about 10,100
+   * rows, and is never reached, because the browser's refusal comes first.
+   * Worth knowing before anyone raises one of the two on its own.)
+   *
+   * A thousand is 811KiB serialised, about 1.6MB once the store doubles it —
+   * a third of the budget, which leaves the cache and the rest their share.
+   * In offers it is six days of the owner's heaviest scanning with a rig that
+   * is never once reachable, on the page that exists for the night the rig
+   * cannot read. Nothing real gets near it; the ceiling is a backstop, and the
+   * point of having one is that the backstop says what it did. */
+  var QUEUE_CAP = 1000;
+
+  /* What the queue could not do, for the pages to say out loud.
+   *
+   * `dropped` is deliberate: rows shed at the ceiling above, oldest first,
+   * with `through` the time of the newest one shed, so a page can name the
+   * moment the record now starts at rather than just a number. `lost` is the
+   * store refusing a row outright — private mode, or an origin full of
+   * something else — and is the row the driver was looking at when it
+   * happened.
+   *
+   * In memory only, on purpose: the case this reports is a store that will not
+   * take a write, and a counter written to that same store would be the first
+   * thing to go. The page is open in front of the driver when it matters. */
+  var shed = 0, shedThrough = 0, refused = 0;
+
+  /* Whether the last flush reached a server: null until one has been tried.
+   *
+   * This is what makes a backlog readable. A row waiting because the flush it
+   * started is still in the air is Tuesday; the same row waiting because the
+   * rig did not answer is the thing worth a word on screen, and the count
+   * alone cannot tell them apart. */
+  var landed = null;
+
+  /* The queue's length without parsing the queue to find out.
+   *
+   * scan.js asks on every rendered frame, and load() at the ceiling is 811KiB
+   * of JSON.parse — per frame, on a phone, on the path that has to keep up
+   * with the camera. Counted once on the first ask and kept in step by the two
+   * places that write, both of which already hold the array. A second tab
+   * writing underneath this one would leave it stale; that is a page refresh
+   * away from right and is not what the number is for. */
+  var count = null;
+
   function save(q) {
-    try { localStorage.setItem(KEY, JSON.stringify(q)); } catch (e) {}
+    // Reports rather than swallows. Everything above depends on this being
+    // the truth about whether the write landed.
+    try { localStorage.setItem(KEY, JSON.stringify(q)); return true; }
+    catch (e) { return false; }
   }
 
   /* An offer as the journal would have written it.
@@ -212,12 +281,58 @@ var JournalClient = (function () {
     return out;
   }
 
-  /* Remember a row until a server has it. */
+  /* Remember a row until a server has it. Returns the row, or null if this
+     browser would not take it — which the caller has to look at, because the
+     only other thing that knows is the driver, and only if a page says so.
+
+     The ceiling sheds from the front, so what survives is the most recent
+     QUEUE_CAP offers. Two reasons for that direction rather than refusing the
+     new one: the recent rows are the ones the offers page's medians and the
+     shift advice are actually about, and an offer disappearing from the record
+     while the driver watches it be judged is the worse surprise of the two.
+     Either way it is counted and said.
+
+     A store that refuses the write sheds nothing. `save` not landing means the
+     queue on disk is exactly as it was, so the rows are all still there and
+     only the row in hand is lost — the honest account of what happened, and it
+     keeps the promise the header makes about rows that did reach the queue.
+     Shedding to make room would trade a stretch of the record that cannot be
+     rebuilt for one more row, in a situation the driver has to act on anyway.
+
+     Nothing here reports a save that fails AFTER a send, in flush below. That
+     write is strictly smaller than what the store already holds, so a store
+     that takes the one takes the other; private mode refuses both, and there
+     the queue is empty and there is nothing to report. A check that cannot
+     fail is not a check. */
   function keep(r) {
     var q = load();
     q.push(r);
-    save(q);
+    var over = [];
+    while (q.length > QUEUE_CAP) over.push(q.shift());
+    if (!save(q)) { refused++; return null; }
+    count = q.length;
+    for (var i = 0; i < over.length; i++) {
+      shed++;
+      var at = over[i] && over[i].at;
+      if (typeof at === 'number' && isFinite(at) && at > shedThrough) shedThrough = at;
+    }
     return r;
+  }
+
+  /* How many rows are waiting for a server. */
+  function waiting() {
+    if (count === null) count = load().length;
+    return count;
+  }
+
+  /* Whether the last flush reached a server. Null until one has been tried. */
+  function reachable() { return landed; }
+
+  /* What the queue could not do, or null when it has done everything asked of
+     it — so a page can lead with this and say nothing on an ordinary night. */
+  function trouble() {
+    if (!shed && !refused) return null;
+    return { lost: refused, dropped: shed, through: shedThrough || null };
   }
 
   function pending(id) {
@@ -246,10 +361,13 @@ var JournalClient = (function () {
         var ids = q.map(function (r) { return r.id; });
         // Only what was sent comes off the queue: a row kept while this was
         // in flight is still there for the flight below.
-        save(load().filter(function (r) { return ids.indexOf(r.id) === -1; }));
+        var left = load().filter(function (r) { return ids.indexOf(r.id) === -1; });
+        save(left);
+        count = left.length;
+        landed = true;
         return { ok: true, sent: ids };
       })
-      .catch(function () { return { ok: false, sent: [] }; })
+      .catch(function () { landed = false; return { ok: false, sent: [] }; })
       .then(function (result) {
         flying = null;
         // A row kept while that was in flight used to wait for the next
@@ -269,5 +387,7 @@ var JournalClient = (function () {
     return flying;
   }
 
-  return { row: row, keep: keep, pending: pending, flush: flush, KEY: KEY };
+  return { row: row, keep: keep, pending: pending, flush: flush, KEY: KEY,
+           waiting: waiting, reachable: reachable, trouble: trouble,
+           QUEUE_CAP: QUEUE_CAP };
 })();

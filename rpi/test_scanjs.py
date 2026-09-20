@@ -236,12 +236,26 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   out.recorded.whileDown = await journal();
   out.recorded.queued = await page.evaluate(
     () => JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length);
+  // ...and the driver is told. One more read of the SAME card, which records
+  // nothing — the ninety-second window makes it the same offer — purely to
+  // get a render out of the page, because the status line is written per read
+  // and the flush above had not answered yet when the last one ran.
+  await page.evaluate(async s => { await window.__scan.readImage(s); }, shop);
+  out.recorded.downStatus = await page.evaluate(
+    () => document.getElementById('statusline').textContent);
   await page.unroute('**/api/journal/ingest');
   await page.evaluate(async s => { await window.__scan.readImage(s); }, whole);
   await page.waitForTimeout(600);
   out.recorded.afterBack = await journal();
   out.recorded.queuedAfter = await page.evaluate(
     () => JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length);
+  // ...and the line goes quiet again, which matters as much as its appearing:
+  // a warning that stays up after the thing it warns about is over is a
+  // warning nobody reads the next time. A duplicate read again, for a render
+  // that happens after the flush above has actually answered.
+  await page.evaluate(async s => { await window.__scan.readImage(s); }, whole);
+  out.recorded.backStatus = await page.evaluate(
+    () => document.getElementById('statusline').textContent);
   // The same payout after the window has passed is an offer of its own.
   await page.evaluate(async s => {
     window.__scan.ageRecord(91000);
@@ -389,6 +403,79 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     return { ok: answer.ok, sentA: answer.sent.includes(a.id),
              sentB: answer.sent.includes(b.id),
              left: JSON.parse(localStorage.getItem('uberscan.unsent.v1') || '[]').length };
+  });
+
+  // The two ends of a queue that has run out of room.
+  //
+  // It had no ceiling of its own and swallowed every storage failure, so on
+  // the owner's own week — 1,166 offers put through row() one at a time, 831
+  // bytes each at the mean — it met the browser's 5MB at about 3,100 rows and
+  // then lost every further offer in silence: keep() handed the row back, the
+  // phone buzzed, and nothing was stored. Driven here at a tenth of the real
+  // scale, because the shape is what is being checked and 3,100 rows of
+  // JSON.stringify per keep is a minute of the suite for the same answer.
+  out.queueFull = await page.evaluate(() => {
+    const KEY = 'uberscan.unsent.v1';
+    const parsed = { pay: 11.25, minutes: 20, miles: 5, legs: 1, complete: true };
+    const rate = { ready: true, state: 'no', perHour: 33.75, grossPerHour: 35,
+                   perMile: 2.25, cost: 1.75, minutes: 20 };
+    const settings = { target: 25, band: 15, costPerMile: 0.35 };
+    const mk = () => JournalClient.keep(
+      JournalClient.row(parsed, rate, settings, { browser: true, prefix: 'q' }));
+    const stored = () => JSON.parse(localStorage.getItem(KEY) || '[]');
+
+    // Seeded to exactly the ceiling rather than scanned to it. Every row
+    // carries an `at`, because what the ceiling sheds and what it says about
+    // it are both being checked.
+    const cap = JournalClient.QUEUE_CAP;
+    // Checked before it is used as a loop bound. A ceiling that is not a
+    // countable number is the fault this block is about, and finding it out by
+    // seeding rows until the suite times out tells nobody which line to look
+    // at — mutating QUEUE_CAP to Infinity did exactly that.
+    if (!(typeof cap === 'number' && isFinite(cap) && cap > 0 && cap < 100000)) {
+      return { cap: String(cap), capUsable: false };
+    }
+    const seed = [];
+    for (let i = 0; i < cap; i++) seed.push({ id: 's' + i, at: 5000 + i });
+    localStorage.setItem(KEY, JSON.stringify(seed));
+
+    const over = mk();
+    const afterCap = stored();
+    const capTrouble = JournalClient.trouble();
+
+    // A store that refuses outright: private mode, or an origin full of
+    // something else. The queue must come through it untouched — the rows
+    // already in it are the ones that cannot be rebuilt — and the row in hand
+    // must come back as the null it is.
+    const real = localStorage.setItem.bind(localStorage);
+    let refused, afterRefusal, refusedTrouble;
+    try {
+      localStorage.setItem = (k, v) => {
+        if (k === KEY) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return real(k, v);
+      };
+      refused = mk();
+      afterRefusal = stored();
+      refusedTrouble = JournalClient.trouble();
+    } finally {
+      localStorage.setItem = real;
+    }
+
+    localStorage.removeItem(KEY);
+    return {
+      cap: cap,
+      capUsable: true,
+      keptOverCap: !!over,
+      heldAtCap: afterCap.length,
+      oldestKept: afterCap[0] && afterCap[0].at,
+      dropped: capTrouble && capTrouble.dropped,
+      through: capTrouble && capTrouble.through,
+      refusedIsNull: refused === null,
+      heldAfterRefusal: afterRefusal.length,
+      lost: refusedTrouble && refusedTrouble.lost,
+      droppedUnchanged: refusedTrouble && capTrouble
+                        && refusedTrouble.dropped === capTrouble.dropped
+    };
   });
 
   // A rate that is only a ceiling, on the screen that had nothing to say
@@ -987,8 +1074,19 @@ try:
     eq('a fragment writes nothing', len(rec.get('afterFragment') or []) - before, 1)
     eq('with the rig out of reach nothing arrives', len(rec.get('whileDown') or []) - before, 1)
     eq('...and the row is kept', rec.get('queued'), 1)
+    # Kept and said. A backlog against a rig that is not answering is the one
+    # state a driver can still act on — before the ceiling, and long before
+    # the browser starts refusing rows — so it is the one the screen names.
+    # Nothing said it before: the page showed the verdict, buzzed, and looked
+    # exactly as it does when every row is landing.
+    ok_('...and the screen says the rig has not answered (%r)'
+        % (rec.get('downStatus') or '')[:60],
+        'waiting' in (rec.get('downStatus') or '')
+        and 'has not answered' in (rec.get('downStatus') or ''))
     eq('...and goes with the next lock, both of them', len(rec.get('afterBack') or []) - before, 3)
     eq('...leaving nothing kept', rec.get('queuedAfter'), 0)
+    ok_('...and the screen stops saying it (%r)' % (rec.get('backStatus') or '')[:60],
+        'waiting' not in (rec.get('backStatus') or ''))
     eq('the same payout ninety seconds after the last sight of it is a new offer',
        len(rec.get('afterAged') or []) - before, 4)
     relock = got.get('relock') or {}
@@ -1039,6 +1137,41 @@ try:
     ok_('...the answer naming the first', mid.get('sentA'))
     ok_('...and the one kept while the first was in flight', mid.get('sentB'))
     eq('...leaving nothing kept', mid.get('left'), 0)
+
+    # --- a queue that has run out of room ---------------------------------
+    #
+    # Measured against the owner's real week before any of this was written:
+    # 4,664 offers (four passes of the 1,166) put to the old keep() at
+    # Chrome's 5MB, charged in UTF-16 as it charges it. It said yes to all
+    # 4,664. Three thousand two hundred and sixty-five landed. One thousand
+    # three hundred and ninety-nine went nowhere, with keep() returning the
+    # row every time, and from row 3,266 onward EVERY offer was lost — not
+    # occasionally, permanently, until a rig answered. That is the second
+    # fault class exactly: something disappearing with nothing saying so.
+    qf = got.get('queueFull') or {}
+    ok_('the full queue was exercised', bool(qf))
+    eq('the ceiling is a number rows can be counted against (%r)' % qf.get('cap'),
+       qf.get('capUsable'), True)
+    if qf.get('capUsable'):
+        eq('a row past the ceiling is still kept', qf.get('keptOverCap'), True)
+        eq('...and the queue stays at the ceiling', qf.get('heldAtCap'), qf.get('cap'))
+        # From the front, so what survives is the most recent: the rows the
+        # offers page's medians and the shift advice are about.
+        eq('...having shed the oldest', qf.get('dropped'), 1)
+        eq('...and named the moment the record now starts at',
+           qf.get('through'), 5000)
+        eq('...which is one before the oldest still held',
+           qf.get('oldestKept'), 5001)
+        # The other end: a store that will not take the write at all.
+        eq('a row the browser refuses comes back as null, not as a row',
+           qf.get('refusedIsNull'), True)
+        eq('...leaving every row already queued exactly where it was',
+           qf.get('heldAfterRefusal'), qf.get('cap'))
+        eq('...counted as lost', qf.get('lost'), 1)
+        # A refused write shed nothing, because it never landed. Counting it
+        # as a drop would put a number on screen for rows that are still on
+        # the disk — a confidently wrong one, which is the first fault class.
+        eq('...and not also counted as dropped', qf.get('droppedUnchanged'), True)
 
     # --- a rate that is only a ceiling, said in words ---------------------
     #

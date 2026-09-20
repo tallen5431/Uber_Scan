@@ -441,9 +441,20 @@
       sent: false
     };
     if (window.JournalClient) {
-      logged.rowId = JournalClient.keep(JournalClient.row(
+      // keep() hands back null when this browser will not store the row, and
+      // reading `.id` off that threw inside logOffer — where the throw is not
+      // caught, so the press did nothing at all: no history entry, no buzz, no
+      // toast, and the typed figures still on the keys. A phone that has run
+      // out of room for the queue is exactly when this page is being used.
+      var kept = JournalClient.keep(JournalClient.row(
         { pay: r.pay, minutes: r.typedMinutes, miles: r.miles },
-        r, settings, { typed: true, prefix: 'k' })).id;
+        r, settings, { typed: true, prefix: 'k' }));
+      logged.rowId = kept ? kept.id : null;
+      // Told apart from an entry that simply has not been sent yet: that one
+      // is waiting for a rig and will go, this one is not waiting for
+      // anything. Without the flag both read as a row with no `rowId`, which
+      // the history shows nothing at all about.
+      logged.unstored = !kept;
     }
     history.unshift(logged);
     if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
@@ -539,8 +550,12 @@
           (h.miles > 0 ? ' · ' + round1(h.miles) + ' mi' : '') +
           // Only the entries that have NOT reached the rig say anything: a
           // list of a hundred rows each saying "on the rig" is a list nobody
-          // reads, and the one that is not is the one that matters.
-          (h.rowId && h.sent === false ? ' · <em>kept here only</em>' : '') +
+          // reads, and the one that is not is the one that matters. An entry
+          // this phone would not even queue says something stronger, because
+          // it is not waiting for anything: the list is the only copy, and the
+          // list is capped at a hundred.
+          (h.unstored ? ' · <em>not in the journal</em>'
+                      : (h.rowId && h.sent === false ? ' · <em>kept here only</em>' : '')) +
         '</span>' +
         '<span class="when">' + ago(h.t) + '</span>' +
       '</li>';
