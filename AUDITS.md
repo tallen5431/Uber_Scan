@@ -135,6 +135,17 @@ one frame saw goes **7 → 0**, and the merged reading still moves only in
 frame ordering — the running-maximum mutation is caught only by the one with
 the glare frame FIRST — and the halves case the per-kind split exists for.
 
+*And the cure had an unbounded list in it.* `frame_slots`, which the recompute
+walks, kept one entry per FRAME — and a window does not roll over while the
+card is still being read, because `stale` is measured from the last add. At
+`RESAMPLE_EVERY` (0.5s) that is two entries a second for as long as the driver
+looks at the card. Measured on one ordinary two-leg card: a minute on screen
+gives 120 entries, ten minutes 1,200, an hour **7,200 — of which exactly one
+is distinct**, every time, because the frames of a card land in the same slots.
+Unbounded memory and an unbounded loop, per frame, on the Pi that is also
+relaying the live picture. A set is exact here, since a maximum over a multiset
+is the maximum over its set, and it holds one entry after an hour.
+
 *A pickup-wait line sits exactly where the approach goes.* The card prints
 `Avg. wait time at pickup: 3 min` first, above the merchant, which is the
 layout slot the drive to the pickup occupies — so it was published as the

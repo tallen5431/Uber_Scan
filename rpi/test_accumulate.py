@@ -1129,6 +1129,32 @@ for _order in (['UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw',
        % ('approach' if 'away' in _order[0] else 'trip'),
        (_m['minutes'], _m['miles'], _m['legs']), (28.0, 9.6, 2))
 
+# --- a card left on screen does not grow the window without bound ----------
+#
+# `stale` is measured from the LAST add, so a window does not roll over while
+# the card is still being read — the comment on it says "a card stays one
+# offer for as long as it is on screen". Anything kept per FRAME therefore
+# grows for as long as the driver looks at the card, at RESAMPLE_EVERY (0.5s)
+# that is two a second, and this runs on the Pi that is also relaying the live
+# picture to the panel.
+#
+# frame_slots was added for the cap recompute above and was a list. Measured on
+# one ordinary two-leg card: a minute on screen gave 120 entries, ten minutes
+# 1,200, an hour 7,200 — and exactly one of them distinct, every time, because
+# the frames of a card land in the same slots. A set is exact here, because a
+# maximum over a multiset is the maximum over its set.
+_STEADY = ('UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
+           '23 min (8.4 mi) Celebration Blvd, Acworth')
+acc = OfferAccumulator()
+_parsed = P.parse(_STEADY)
+_t = 5000.0
+for _ in range(400):          # 200 seconds of one card at the resample cadence
+    acc.add(_parsed, now=_t)
+    _t += 0.5
+ok_('four hundred frames of one card keep one entry per distinct slot set (%d)'
+    % len(acc.frame_slots), len(acc.frame_slots) <= 4)
+eq('...and the window is still the same two legs', len(acc.legs), 2)
+
 # --- the drive to the pickup survives the frame that loses the word ---------
 #
 # The journal is written from the MERGED reading, so a split the window has

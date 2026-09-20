@@ -186,14 +186,27 @@ class OfferAccumulator:
         # if anyone touches this.
         self.max_approach = 0
         self.max_other = 0
-        # Which slots each frame of this window put a leg in, so the two caps
-        # above can be recomputed from the slot kinds as they stand NOW rather
-        # than as they stood when that frame arrived. A window often learns
+        # Which slots the frames of this window put their legs in, so the two
+        # caps above can be recomputed from the slot kinds as they stand NOW
+        # rather than as they stood when a frame arrived. A window often learns
         # which leg is the approach from its SECOND frame, and a maximum taken
         # once, at the time, keeps the first frame's wrong answer for good.
-        # One entry per frame, each a set of distinct slot indices, because
-        # _slot_for refuses a slot another leg of the same frame already took.
-        self.frame_slots = []
+        # Each entry is a set of distinct slot indices, because _slot_for
+        # refuses a slot another leg of the same frame already took.
+        #
+        # A SET of those, not a list, and that is not tidiness either. A window
+        # does not go stale while the card is still being read — `stale` is
+        # measured from the last add, and the comment on it says so: "a card
+        # stays one offer for as long as it is on screen". At RESAMPLE_EVERY
+        # (0.5s) a list grows two entries a second for as long as the driver
+        # looks at the card. Measured on one ordinary two-leg card: a minute on
+        # screen gives 120 entries, ten minutes 1,200, an hour 7,200 — and
+        # exactly ONE of them is distinct, every time, because the frames of a
+        # card land in the same slots. So the list was unbounded memory and an
+        # unbounded loop, run per frame on the Pi that is also relaying the
+        # live picture to the panel. Deduplicating is exact: a maximum over a
+        # multiset is the maximum over its set.
+        self.frame_slots = set()
         self.corrected = False
         # Whether any frame's distance token printed a decimal point. ORed like
         # `hasTotal` and for the same reason: one frame reading the point is
@@ -572,9 +585,10 @@ class OfferAccumulator:
         # not fire the layout rule, reports (0, 2), and that 2 is the other
         # kind's ceiling for the rest of the window even after the second frame
         # settles it. Four of the owner's 1,166 windows sat in exactly that
-        # state. Slots are at most MAX_PLACES-ish and frames at most
-        # SCANS_PER_OFFER, so this is a handful of comparisons.
-        self.frame_slots.append(frozenset(taken))
+        # state. Bounded by the number of DISTINCT slot combinations the
+        # frames produced, which is one on an ordinary card, so this is a
+        # handful of comparisons however long the card sits on screen.
+        self.frame_slots.add(frozenset(taken))
         self.max_approach = 0
         self.max_other = 0
         for _touched in self.frame_slots:
