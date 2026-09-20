@@ -52,15 +52,30 @@ there to answer, and a journal row cannot be corrected afterwards. Measured
 against the real server: the card read `dropoffScanned: true`, the held order
 read `false`, the address identical.
 
-**A wider guard here was proposed and refused.** The same sweep suggested
+**A wider guard here was proposed and refused, twice.** The sweep suggested
 refusing an unprompted address whenever a rival card had been read recently, on
 the theory that a screening tap could be misfiled onto the held job. Measured,
 the guard discards the *held job's own* destination on the ordinary busy-shift
-sequence and the loss is permanent and silent. The hazard it defends against
-also cannot occur on an ordinary screening tap: `rpi/scan_pi.py` already refuses
-every address off a frame carrying a payout or a merchant. If it is ever
-revisited, settle it with the `addressAsOffer` / `streetNoAddress` counters the
-reader already keeps, not with a guard.
+sequence. The hazard it defends against also cannot occur on an ordinary
+screening tap: `rpi/scan_pi.py` already refuses every address off a frame
+carrying a payout or a merchant.
+
+**Why that loss is permanent, which is the part worth not re-deriving.** It is
+not bounded by the two-minute screening window, as the proposal assumed.
+`dropoff_said` has exactly two assignments in `rpi/scan_pi.py` — `None` at loop
+start, and the line it is set to on emit — and the comment above it says so
+itself: "never cleared — there is no moment in this loop that means a new job
+began". So a held job's own address refused once by such a guard is never
+volunteered again for that delivery. The only rescue is a ⌖ press, because the
+suppression is `not asked`. The guard would trade a class-1 fault for a class-2
+one on a path whose firing rate nobody has measured.
+
+If it is ever revisited, settle it with the `addressAsOffer` /
+`streetNoAddress` counters the reader already keeps rather than with a guard —
+but note their limit: they measure the FRAME, not the attribution. Neither says
+how often an unprompted address arrived while an order was carried *and* a
+different card was on the slot, which is the exact population of this fault.
+That measurement needs no behaviour change and should come first.
 
 ### The maps, again
 
@@ -409,6 +424,28 @@ the entry above; do them together.
 Where `milesUncertain` is set there is no yardstick at all, so the pair should be
 marked unjudged rather than accused; where `milesCorrected` is set the popup
 should say the card's figure was corrected.
+
+**While an order with a known destination is in the car, the ⌖ button cannot
+serve the card being screened at all.** The owner's stated habit is to tap the
+customer dropoff open to read the address *while screening* a DoorDash offer.
+Measured against the real server, carrying a job whose end is already on
+record and a different card on the slot:
+
+| the driver | what happens |
+|---|---|
+| taps the address open, no press | discarded — the empty `else if (carrying)` branch. The screened card gets nothing, and nothing says so. |
+| taps it open and presses ⌖ | the address lands on the **held** job, replacing the destination it already had. |
+
+So one route silently does nothing and the other quietly rewrites where the
+order in the car is going — which feeds `MV.detour` and the "+N mi out of your
+way" figure on the panel. The screening branch below is unreachable whenever
+anything is carried.
+
+Deliberately not fixed here, because the fix is the same ambiguity the refused
+guard above is about: an address seen while carrying one job and screening
+another may belong to either, and the rig cannot tell from the frame. The
+measurement named under Settled is the thing to take first — it sizes both this
+and the guard, and it changes no behaviour.
 
 **A wrong remembered lookup can only be fixed by wiping every good one.**
 `map.html` is the one surface that can *identify* a bad geocode — the stray rows
