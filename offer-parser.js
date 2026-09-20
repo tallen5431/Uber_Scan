@@ -1466,6 +1466,12 @@
   function laidOutApproach(legs, places, whose, pickup, dropoff) {
     if (!legs || legs.length !== 2) return null;
     if (legs[0].isTotal || legs[1].isTotal) return null;
+    /* Both lines have to be legs of the journey. The card prints a pickup-wait
+       line in exactly the place the drive to the pickup goes — first, above the
+       merchant — so without this `Avg. wait time at pickup: 3 min` was
+       published as the approach, three minutes and no distance at all. Same
+       question, same answer, one implementation: see legTravels. */
+    if (!legTravels(legs[0]) || !legTravels(legs[1])) return null;
     /* A card that already LABELLED a leg is not skipped here, and the case that
        decides it is a card whose word and whose layout name DIFFERENT legs.
        Skipping, the word would win and the trip would be published as the drive
@@ -1647,6 +1653,24 @@
      consulted only for the single-leg case. null or undefined means the reading
      has no distance at all - which is also the default, so a caller that
      forgets to say lands on doubt rather than on a number nobody checked. */
+
+  /* Whether this line is a leg of the journey or furniture beside it.
+
+     A leg is part of the journey if it states a distance, if the card labelled
+     it one, or if a distance is printed beside it that did not read. A
+     minutes-only token with none of those is a wait line, a promo chip or an
+     ETA badge — `Avg. wait time at pickup: 3 min` — and reading it as a leg
+     switched the mileage cost off on a third of every offer read.
+
+     Asked in two places and written once. legsShortADistance has always needed
+     it; laidOutApproach needs the same question answered the same way, because
+     the card's LAYOUT puts that wait line exactly where the drive to the pickup
+     goes — first, above the merchant — so a card printing one had its wait
+     published as the approach. The Python twin is `leg_travels`. */
+  function legTravels(leg) {
+    return (leg.miles !== null && leg.miles !== undefined)
+      || !!leg.labelled || !!leg.lostMiles;
+  }
   function legsShortADistance(legs, miles) {
     var list = [], i;
     for (i = 0; i < (legs || []).length; i++) if (legs[i]) list.push(legs[i]);
@@ -1687,8 +1711,7 @@
     // leg from the set counted here. See LEG_LOST_MILES.
     var travel = [];
     for (i = 0; i < list.length; i++) {
-      if (list[i].miles !== null && list[i].miles !== undefined) travel.push(list[i]);
-      else if (list[i].labelled || list[i].lostMiles) travel.push(list[i]);
+      if (legTravels(list[i])) travel.push(list[i]);
     }
     if (travel.length < 2) return false;
     for (i = 0; i < travel.length; i++) {

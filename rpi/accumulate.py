@@ -152,25 +152,48 @@ class OfferAccumulator:
         # the same kind as its neighbours and is outvoted there) while no longer
         # refusing a card the frames only ever saw in halves.
         #
-        # THE WIDENING THAT CAME WITH THE LAYOUT RULE, written down because it
-        # is real and this week does not exercise it. Two caps mean the
-        # window's effective total is max_approach + max_other, which can sit
-        # ABOVE the most legs any single frame actually read. While
-        # `isApproach` came only from the word `away`, and this driver's cards
-        # print it on 0 of 1,166, max_approach was always 0 and the sum was one
-        # cap. offer_parser.laid_out_approach now sets the same flag off the
-        # card's LAYOUT, so it is 1 on the cards that state a split.
+        # THE WIDENING THE LAYOUT RULE BROUGHT, and how it is closed. This
+        # paragraph first said "this week does not exercise it", which was
+        # true of the week and false about the risk, and the correction is
+        # left standing because the wrong version is the tempting one.
         #
-        # Measured by replaying this accumulator over the real frame sequences
-        # of all 1,166 offers: on 7 windows the caps go (0, 2) -> (1, 2), so the
-        # effective total rises from 2 to 3. On all 7 the window still holds
-        # exactly 2 slots and no frame ever read more than 2 legs, so nothing
-        # is let through and the merged reading moves only in toPickupMinutes
-        # and toPickupMiles. The exposure is a FUTURE window where a misread
-        # opens a third slot: the old cap would have trimmed it, this one will
-        # not. Nothing on this week's data distinguishes the two.
+        # Two caps mean the window's effective total is max_approach +
+        # max_other, which can sit ABOVE the most legs any single frame read.
+        # While `isApproach` came only from the word `away` — printed on 0 of
+        # this driver's 1,166 cards — max_approach was always 0 and the sum was
+        # one cap. offer_parser.laid_out_approach sets the same flag off the
+        # card's LAYOUT, so it is 1 on the cards that state a split, and a
+        # frame whose crop cut off the dropoff makes that rule refuse: that
+        # frame then reports BOTH its legs as the other kind and raises the
+        # other kind's ceiling for the whole window.
+        #
+        # Reachable with three ordinary frames, not a future hypothetical. Two
+        # clean readings of a $12.45 ride card and one that lost the dropoff
+        # merged to 57.0 min / 13.0 mi on a card that is 28.0 / 9.6 — $19.5/hr
+        # published as $8.3/hr, `complete`, not uncertain, nothing on the glass
+        # saying why.
+        #
+        # Closed two ways, both needed. The kinds are counted by the SLOT each
+        # leg landed in rather than by the flag its frame carried, so the glare
+        # frame's first leg counts as the approach the window already knows it
+        # is; and the caps are RECOMPUTED over every frame instead of raised as
+        # a running maximum, because a window often learns which leg is the
+        # approach from its second frame and a maximum taken once keeps the
+        # first frame's answer for good. Replaying all 1,166 real windows, the
+        # count whose caps sum above the most legs one frame saw goes 7 -> 0.
+        # rpi/test_accumulate.py checks every frame ordering, and the halves
+        # case the per-kind split exists for, which is the thing to run first
+        # if anyone touches this.
         self.max_approach = 0
         self.max_other = 0
+        # Which slots each frame of this window put a leg in, so the two caps
+        # above can be recomputed from the slot kinds as they stand NOW rather
+        # than as they stood when that frame arrived. A window often learns
+        # which leg is the approach from its SECOND frame, and a maximum taken
+        # once, at the time, keeps the first frame's wrong answer for good.
+        # One entry per frame, each a set of distinct slot indices, because
+        # _slot_for refuses a slot another leg of the same frame already took.
+        self.frame_slots = []
         self.corrected = False
         # Whether any frame's distance token printed a decimal point. ORed like
         # `hasTotal` and for the same reason: one frame reading the point is
@@ -432,12 +455,10 @@ class OfferAccumulator:
         self.samples += 1
         self.last_add = now
 
-        # Per kind, for the reason in `self.max_approach`. Without any cap a
-        # misread *duration* invents a leg the same way a misread distance used
-        # to, and nothing outvotes it because it sits in a slot of its own.
-        _approach_here = sum(1 for l in detail if l.get('isApproach'))
-        self.max_approach = max(self.max_approach, _approach_here)
-        self.max_other = max(self.max_other, len(detail) - _approach_here)
+        # The per-kind caps are taken AFTER the slot loop below, not here. See
+        # the note beside `self.max_approach`: counting a frame's own flags
+        # lets one frame that failed to recognise the approach inflate the
+        # other kind's cap, and a glare frame is exactly such a frame.
         self.corrected = self.corrected or bool(parsed.get('milesCorrected'))
         self.had_decimal = self.had_decimal or bool(parsed.get('milesHadDecimal'))
         if parsed.get('miles') is not None and not any(
@@ -520,6 +541,46 @@ class OfferAccumulator:
             # frames disagree about, and it is right here for the same reason:
             # this is one frame's claim about damage, not a fact about the card.
             slot['lostSeen'] += 1 if leg.get('lostMiles') else 0
+
+        # Now the per-kind caps, counted by the SLOT each leg landed in rather
+        # than by the flag the frame itself carried.
+        #
+        # This is not tidying. Counting the frame's own flags means a frame
+        # that did not recognise the approach reports every one of its legs as
+        # the other kind, and `max_other` is a maximum, so that one frame
+        # raises the other kind's ceiling for the whole window. A glare frame
+        # is precisely such a frame: laid_out_approach refuses a card whose
+        # dropoff was cut off, so its first leg comes back unflagged even
+        # though the window already knows what that leg is.
+        #
+        # Measured on three ordinary frames — two clean readings of a $12.45
+        # ride card and one that lost the dropoff — the window went to caps
+        # (1, 2), kept three slots, and merged to 57.0 min / 13.0 mi on a card
+        # that is 28.0 / 9.6. $19.5/hr published as $8.3/hr, complete and not
+        # uncertain, with nothing on the glass saying why. Counted by slot the
+        # same three frames give (1, 1): the glare frame's first leg lands in
+        # the slot already marked the approach, its 29-minute leg is outvoted
+        # 2 to 1, and the card reads 28.0 / 9.6.
+        #
+        # The halves case the per-kind split was written for still works, and
+        # that is the thing to check before touching this: one frame reading
+        # only the approach and another reading only the trip give (1, 0) then
+        # (1, 1), so both survive.
+        # Recomputed over EVERY frame, not raised by this one. A maximum that
+        # only ever grows keeps the answer a frame gave before the window knew
+        # what it was looking at: the first frame of a two-leg card often does
+        # not fire the layout rule, reports (0, 2), and that 2 is the other
+        # kind's ceiling for the rest of the window even after the second frame
+        # settles it. Four of the owner's 1,166 windows sat in exactly that
+        # state. Slots are at most MAX_PLACES-ish and frames at most
+        # SCANS_PER_OFFER, so this is a handful of comparisons.
+        self.frame_slots.append(frozenset(taken))
+        self.max_approach = 0
+        self.max_other = 0
+        for _touched in self.frame_slots:
+            _here = sum(1 for i in _touched if self.legs[i].get('isApproach'))
+            self.max_approach = max(self.max_approach, _here)
+            self.max_other = max(self.max_other, len(_touched) - _here)
 
         if parsed.get('items') is not None:
             self.items.append(parsed['items'])

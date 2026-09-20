@@ -110,14 +110,39 @@ the two cards in step and now also refuses any `parse` or `rate` expectation
 that is a list, since such a case passes in Python and fails in JavaScript for
 every input.
 
-*The cap widened, and this week does not exercise it.* `_within_caps` keeps a
-cap per kind, so the window's effective total is `max_approach + max_other`.
-While `isApproach` came only from the word, `max_approach` was always 0 and the
-sum was one cap. Replaying the real frames: on **7 windows** the caps go
-(0, 2) → (1, 2), so the effective total rises from 2 to 3. On all 7 the window
-still holds exactly 2 slots and no frame read more than 2 legs, so nothing is
-let through. The exposure is a future window where a misread opens a third
-slot. Written into `rpi/accumulate.py` beside `self.max_approach`.
+*The cap widened, and the first account of it here was wrong.* `_within_caps`
+keeps a cap per kind, so the window's effective total is `max_approach +
+max_other`. While `isApproach` came only from the word, `max_approach` was
+always 0 and the sum was one cap. This entry first said the widening was real
+but that "this week does not exercise it" — true of the week, and false about
+the risk. A code review of the commit found it reachable with **three ordinary
+frames**: two clean readings of a $12.45 ride card and one that lost the
+dropoff merged to **57.0 min / 13.0 mi on a card that is 28.0 / 9.6**, so
+**$19.5/hr published as $8.3/hr**, `complete`, not uncertain, with nothing on
+the glass saying why. The worst thing this project can do, introduced by the
+commit that read the layout.
+
+Closed two ways, both needed. The kinds are counted by the **slot** each leg
+landed in rather than by the flag its frame carried — a frame whose crop cut
+off the dropoff makes `laid_out_approach` refuse, so it reported both its legs
+as the other kind and raised that kind's ceiling for the whole window. And the
+caps are **recomputed over every frame** instead of raised as a running
+maximum, because a window often learns which leg is the approach from its
+second frame and a maximum taken once keeps the first frame's answer for good.
+Replaying all 1,166 real windows, the count whose caps sum above the most legs
+one frame saw goes **7 → 0**, and the merged reading still moves only in
+`toPickupMinutes` and `toPickupMiles`. `rpi/test_accumulate.py` checks every
+frame ordering — the running-maximum mutation is caught only by the one with
+the glare frame FIRST — and the halves case the per-kind split exists for.
+
+*A pickup-wait line sits exactly where the approach goes.* The card prints
+`Avg. wait time at pickup: 3 min` first, above the merchant, which is the
+layout slot the drive to the pickup occupies — so it was published as the
+approach: three minutes, no distance, nothing marked uncertain.
+`legs_short_a_distance` already had the test for "a line that travels", inline;
+it is now `leg_travels`/`legTravels`, written once and asked by both, because
+two copies of that rule is the third fault class. A `toPickup` corpus case
+pins it in both ports.
 
 ### The order in the car
 

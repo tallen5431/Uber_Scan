@@ -1077,6 +1077,58 @@ for _i, _t in enumerate([_REAL, _REAL, _SLIP]):
 eq('a real long trip is not folded away by one slipped point',
    _m['miles'], 24.0)
 
+# --- a frame that did not recognise the approach must not raise the cap -----
+#
+# _within_caps keeps a cap per KIND, so the window's effective total is
+# max_approach + max_other. While isApproach came only from the word `away` —
+# which this driver's cards print on 0 of 1,166 — max_approach was always 0 and
+# the sum was one cap. Reading the approach off the card's LAYOUT made it 1 on
+# the cards that state a split, and a frame whose crop cut off the dropoff
+# makes laid_out_approach refuse, so that frame reports BOTH its legs as the
+# other kind and raises the other kind's ceiling for the whole window.
+#
+# Two clean readings of an ordinary ride card and one that lost the dropoff:
+# the window kept three slots and merged to 57.0 min / 13.0 mi on a card that
+# is 28.0 / 9.6 — $19.5/hr published as $8.3/hr, complete, not uncertain, with
+# nothing on the glass saying why. The worst thing this project can do.
+#
+# The cure is to count the kinds by the SLOT each leg landed in, and to
+# recompute over every frame rather than raise a running maximum: a window
+# often learns which leg is the approach from its second frame, and a maximum
+# taken once keeps the first frame's answer for good. Checked in every order,
+# because order-independence is exactly what the recompute buys.
+_CLEAN = ('UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
+          '23 min (8.4 mi) Celebration Blvd, Acworth')
+_GLARE = ('UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
+          '29 min (3.4 mi)')
+for _order in ([_CLEAN, _CLEAN, _GLARE], [_GLARE, _CLEAN, _CLEAN],
+               [_CLEAN, _GLARE, _CLEAN]):
+    _acc = OfferAccumulator()
+    _m = None
+    for _i, _f in enumerate(_order):
+        _m = _acc.add(P.parse(_f), now=1000.0 + _i)
+    _where = ['glare' if _f is _GLARE else 'clean' for _f in _order]
+    eq('a glare frame does not double the card (%s)' % ','.join(_where),
+       (_m['minutes'], _m['miles'], _m['legs']), (28.0, 9.6, 2))
+    eq('...and the split it states is still published (%s)' % ','.join(_where),
+       (_m['toPickupMinutes'], _m['toPickupMiles']), (5.0, 1.2))
+
+# ...and the halves case the per-kind cap was written for still works, in both
+# orders. This is the check to run first if anyone touches the caps: one frame
+# reading only the approach and another reading only the trip must keep both,
+# and a single total cap would drop one of them.
+for _order in (['UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw',
+                'UberX $12.45 23 min (8.4 mi) trip Celebration Blvd, Acworth'],
+               ['UberX $12.45 23 min (8.4 mi) trip Celebration Blvd, Acworth',
+                'UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw']):
+    _acc = OfferAccumulator()
+    _m = None
+    for _i, _f in enumerate(_order):
+        _m = _acc.add(P.parse(_f), now=2000.0 + _i)
+    eq('a card no frame read whole keeps both its legs (%s first)'
+       % ('approach' if 'away' in _order[0] else 'trip'),
+       (_m['minutes'], _m['miles'], _m['legs']), (28.0, 9.6, 2))
+
 # --- the drive to the pickup survives the frame that loses the word ---------
 #
 # The journal is written from the MERGED reading, so a split the window has

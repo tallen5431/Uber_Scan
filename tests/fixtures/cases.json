@@ -2926,6 +2926,11 @@
  "_toPickup_comment": "How much of a card's stated journey is the drive to the pickup rather than the job. `expect` is [minutes, miles], or null where the card did not split it. The journal has always kept the TOTAL, which is the right figure to judge an offer on and the wrong one to measure geography with: it moves with wherever the car happened to be. Refusing is the common answer and the important one - a delivery card states one total, and a zero here would become a confident wrong distance between two jobs.",
  "toPickup": [
   {
+   "name": "a pickup-wait line sits where the approach goes and is not one",
+   "text": "$11.06\nAvg. wait time at pickup: 3 min\nLittle Caesars (3372 Canton Rd)\n25 min (8.1 mi)\nBarrington Overlook, Marietta",
+   "expect": null
+  },
+  {
    "name": "a ride card splits the drive to the rider from the trip",
    "text": "UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw 23 min (8.4 mi) trip Celebration Blvd, Acworth Accept",
    "expect": [5, 1.2]

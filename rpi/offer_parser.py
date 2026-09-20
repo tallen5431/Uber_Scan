@@ -879,6 +879,13 @@ def laid_out_approach(legs, places, whose, pickup, dropoff):
         return None
     if legs[0].get('isTotal') or legs[1].get('isTotal'):
         return None
+    # Both lines have to be legs of the journey. The card prints a pickup-wait
+    # line in exactly the place the drive to the pickup goes — first, above the
+    # merchant — so without this `Avg. wait time at pickup: 3 min` was
+    # published as the approach, three minutes and no distance at all. Same
+    # question, same answer, one implementation: see leg_travels.
+    if not leg_travels(legs[0]) or not leg_travels(legs[1]):
+        return None
     # A card that already LABELLED a leg is not skipped here, and the case that
     # decides it is a card whose word and whose layout name DIFFERENT legs.
     # Skipping, the word would win and the trip would be published as the drive
@@ -1132,6 +1139,26 @@ def most_of_the_journey_missing(parsed):
     return lost > held
 
 
+def leg_travels(leg):
+    """Whether this line is a leg of the journey or furniture beside it.
+
+    A leg is part of the journey if it states a distance, if the card labelled
+    it one, or if a distance is printed beside it that did not read. A
+    minutes-only token with none of those is a wait line, a promo chip or an
+    ETA badge — `Avg. wait time at pickup: 3 min` — and reading it as a leg
+    switched the mileage cost off on a third of every offer read.
+
+    Asked in two places and written once. legs_short_a_distance has always
+    needed it; laid_out_approach needs the same question answered the same way,
+    because the card's LAYOUT puts that wait line exactly where the drive to
+    the pickup goes — first, above the merchant — so a card printing one had
+    its wait published as the approach: 3 minutes, no distance, and nothing
+    marked uncertain.
+    """
+    return (leg.get('miles') is not None or bool(leg.get('labelled'))
+            or bool(leg.get('lostMiles')))
+
+
 def legs_short_a_distance(legs, miles=None):
     """True when a journey is missing a distance one of its legs should carry.
 
@@ -1210,9 +1237,7 @@ def legs_short_a_distance(legs, miles=None):
     # the label words are ride-card vocabulary this driver's cards do not print,
     # so damage that removed a leg's distance also removed the leg from the set
     # counted here, and the count fell below two. See LEG_LOST_MILES.
-    travel = [l for l in legs
-              if l.get('miles') is not None or l.get('labelled')
-              or l.get('lostMiles')]
+    travel = [l for l in legs if leg_travels(l)]
     if len(travel) < 2:
         return False
     return any(l.get('miles') is None for l in travel)
