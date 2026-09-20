@@ -394,6 +394,58 @@ ok_('...while the calibration itself is untouched',
 ok_('...so wander still reports the distance from it (%.1f)'
     % tr.status()['wander'], tr.status()['wander'] > 20.0)
 
+# ...and an intermittent detector cannot hide any of that.
+#
+# The miss branch cleared the stall clocks on EVERY blank check, so one check
+# finding nothing inside the five-second window silenced the report and one
+# inside the thirty-second window cancelled the un-sticking. The comment in
+# that branch already said this must not happen and the guard under it was
+# unreachable — `_forget_stall()` two lines up had already nulled the clock it
+# tests. Deleting that guard's body outright left all 138 checks passing, which
+# is what an unreachable branch looks like.
+#
+# A blank check is the ordinary case, not a contrived one: a hand reaching to
+# tap Accept, a frame caught mid-redraw, a screen washed out in daylight — and
+# that last one is the very state the "outline stuck" message blames.
+_blank = frame_with_phone(430, 200, size=(4, 4))    # too small for the detector
+
+
+def _stuck_by(blank_every, seconds=90.0, step=0.5):
+    """When a frozen outline is reported, with one blank check every so often."""
+    t = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+    now = 0.0
+    while now < seconds:
+        now += step
+        blank = blank_every and (now % blank_every) < step
+        t.update(_blank if blank else reseated, now=now)
+        if t.status()['stalled']:
+            return now
+    return None
+
+
+# The control: with nothing blanking it, this is the existing behaviour.
+eq('a frozen outline is reported after STALL_VISIBLE', _stuck_by(None), 5.5)
+# Was NEVER for both of these — four minutes of scanning through a crop that is
+# not the card, with `stalled` false, `lost` false and `wander` 0.0 the whole
+# time, so the health line read "corners held, 0px from calibration".
+eq('...and one blank check every five seconds does not hide it',
+   _stuck_by(5.0), 5.5)
+eq('...nor one every two', _stuck_by(2.0), 5.5)
+
+# The other half of the same rule, and the reason the guard is a guard: a
+# screen that really has gone DOES clear the clocks, because then there is
+# nothing for the corners to be off. LOST_AFTER consecutive misses is this
+# project's existing answer to "really gone".
+_gone = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+settle(_gone, reseated, 6, step=T.STALL_VISIBLE / 2.0)
+ok_('a frozen outline is reported while the screen is there',
+    _gone.status()['stalled'])
+for _i in range(T.LOST_AFTER + 1):
+    _gone.update(_blank, now=40.0 + _i)
+ok_('...and stops being reported once the screen is genuinely gone',
+    not _gone.status()['stalled'])
+ok_('...which is said as lost instead', _gone.status()['lost'])
+
 # It must not fire in place of the ordinary path, which is far quicker.
 tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
 settle(tr, frame_with_phone(430, 200), 14, step=0.5)

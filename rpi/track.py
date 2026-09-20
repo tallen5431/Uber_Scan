@@ -278,14 +278,50 @@ class QuadTracker:
             self._centre_agreeing = 0
             self._centre_candidate = None
             self._disputed_since = None
-            self._forget_stall()
             # One check finding nothing is not evidence that the corners are
             # right — it is no evidence at all, and clearing the clock on it let
             # an intermittent detector hide a stuck outline the same way an
             # alternating one did. A screen that is genuinely gone does clear
             # it, because then there is nothing for the corners to be off.
+            #
+            # That paragraph was already here and the code did the opposite of
+            # it. `_forget_stall()` was called unconditionally on the line
+            # above, and it nulls `_off_since` itself — so the guard below could
+            # never do anything, and a single blank check reset both the stall
+            # report and the recovery anchor. Proved rather than argued: with
+            # the guard's body deleted outright, all 138 tracker checks still
+            # passed, which is what an unreachable branch looks like.
+            #
+            # What it cost, driving the real tracker against the real detector
+            # on the re-seated-phone frame this suite already uses — the phone
+            # put back a quarter further away, so `same_size` refuses the real
+            # screen for ever and the corners freeze:
+            #
+            #   blank check every    said "corners stuck" at
+            #   never                5.5s
+            #   30s                  5.5s
+            #   10s                  5.5s
+            #    5s                  NEVER
+            #    2s                  NEVER
+            #
+            # A blank check is not exotic. The detector answers None whenever
+            # the bright blob drops under `min_area_frac`, fails UPRIGHT, or
+            # fills the frame — a hand reaching to tap Accept, a transition
+            # frame as the card redraws, a screen washed out in daylight. That
+            # last one is the state the "outline stuck" message itself blames,
+            # so the condition that sticks the corners is the condition that
+            # blanks the detector. Meanwhile `misses` is back to 0 on the next
+            # hit, so `lost` is false and the corners never move, so `drift` and
+            # `wander` are 0.0 — the health line prints "corners held, 0px from
+            # calibration" for the whole shift while the crop is on a rectangle
+            # that is not the card.
+            #
+            # LOST_AFTER is the project's existing answer to "the screen is
+            # really gone", and `_forget_stall()` clears all three fields
+            # together, so the guard does the clearing and the unreachable
+            # assignment goes.
             if self.misses >= LOST_AFTER:
-                self._off_since = None
+                self._forget_stall()
             return False
         candidate = candidate * self.scale
 

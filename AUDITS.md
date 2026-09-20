@@ -175,6 +175,38 @@ every read to that box: the driver is told the crop is off while the crop
 decides whether anything is read at all. One line, `setAdjusting(adjusting())`
 in the change handler.
 
+### The aiming
+
+**A guard against a stuck outline was written, commented, and placed one line
+too late — so it never ran.** `rpi/track.py`'s miss branch called
+`_forget_stall()` unconditionally, and that nulls `_off_since` itself, so the
+`if self.misses >= LOST_AFTER` guard under it could never do anything. The
+comment above the guard already described the behaviour it was meant to have.
+Proved rather than argued: with the guard's body deleted outright, all 138
+tracker checks still passed.
+
+What it cost, driving the real tracker against the real detector on the
+re-seated-phone frame the suite already uses — the phone put back a quarter
+further away, so `same_size` refuses the real screen for ever and the corners
+freeze:
+
+| one blank check every | reported "corners stuck" at |
+|---|---|
+| never | 5.5s |
+| 30s | 5.5s |
+| 10s | 5.5s |
+| **5s** | **never** |
+| **2s** | **never** |
+
+A blank check is the ordinary case: a hand reaching to tap Accept, a frame
+caught mid-redraw, a screen washed out in daylight — and that last one is the
+very state the "outline stuck" message blames, so the condition that sticks the
+corners is the condition that blanks the detector. Meanwhile `misses` returns to
+0 on the next hit, so `lost` stays false and the corners never move, so `drift`
+and `wander` are 0.0: the health line prints "corners held, 0px from
+calibration" for the whole shift while the crop is on a rectangle that is not
+the card. Every number downstream is then read off the wrong pixels.
+
 ### The backup
 
 **Three ways the rig reported a healthy backup it did not have.** A row stamped
