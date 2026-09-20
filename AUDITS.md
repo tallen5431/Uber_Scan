@@ -258,6 +258,43 @@ which sizes the Open entry below about the ⌖ button.
 
 ### The maps, again
 
+**The live map drew nothing until every lookup finished, and left the LAST
+card's pins up while it waited.** Measured against the real `map-view.js` at a
+500ms round trip, press to first mark: 1.6s for a card naming no dropoff, 3.8s
+for three fresh places, 6.0s when the box refuses all three. The car goes down
+first at ~0ms and each place as it lands. Fixed in `8d986d1`, together with the
+companion entry — the held order's pin and this card's were byte-identical,
+both `{radius: 9, fillOpacity: 1, fillColor: '#f5a524'}`, so the one comparison
+the driver opened the map to make had to be done by clicking each dot with a
+bluetooth mouse at the wheel.
+
+*This entry sat under Open for three commits after it shipped*, which is the
+fifth fault class in the ledger whose job is to prevent it — and it cost a
+later pass an agent, which re-derived a built feature before noticing. Checked
+against the source rather than the commit message: `live.html:2916` has the
+`finally` clause, `map-view.js:773` has `if (onward)` with the throttle gone,
+`live.html:3020` has the ring.
+
+*One of the four "not optional" corrections was wrong, and the code is right.*
+It said to ring THIS card's dropoff rather than the held one. What shipped
+rings the held one, under a rule that covers all four marks instead: **solid is
+part of the offer being decided, a ring is context the driver did not choose
+just now** — so the car is ringed too. AUDITS' version needs a second meaning
+for the same flag and leaves the car, the only measured point on the map,
+outside both readings. Two checks pin the shipped rule, including "...and the
+same ring on the car, so it is one rule and not two".
+
+*Still open inside it*: whether the `finally` should read `if (partial &&
+viewMode !== 'map')` or drop the `partial` term. A later pass argues the
+`partial` term is itself a fault — a press landing inside `askCar` leaves this
+card's key set with nothing drawn for it, so returning to the map restates the
+previous card's detour over the previous card's pins. That is raised and being
+attacked; it is NOT settled and nothing has been changed for it. It is also
+the one correction of the four that no check covers: reverting the early car
+draw, the `% 3` throttle, or both at once leaves all 553 dashboard checks
+green.
+
+
 **"Forget lookups" was undone by any page left open.** `remember()` wrote the
 page's *whole in-memory cache* back to the device on every answer, so the panel
 in the car restored its entire history the next time it looked anything up.
@@ -794,38 +831,6 @@ position on rows at all is a separate question nobody has asked yet.
 
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
-
-**The live map draws nothing until every lookup finishes** — and it leaves the
-LAST card's pins up while it waits, which is worse than an empty rectangle.
-Measured against the real `map-view.js` at a 500ms round trip, time from the
-press to the first mark on the glass: 1.6s for a card that names no dropoff
-(129 of 272), 3.8s for three fresh places, 6.0s when all three are refused by
-the box. Drawing the car first and each place as it lands puts a mark up at
-~0ms.
-
-The design has been worked out and attacked twice; if it is picked up, these
-are the corrections both attackers converged on, and they are not optional:
-
-- The `finally` clause must be `if (partial && viewMode !== 'map') mapFor =
-  null;`. With `partial` alone, a `drawMap` that throws nulls the key under a
-  live map and re-enters — measured at 40+ re-entries and climbing, on a panel
-  read while driving.
-- Interim draws must call `mapSay` and never `mapDrew`/`mapLine`, or the
-  previous card's detour figure is restated over this card's half-drawn bounds.
-  That is a confidently wrong number on the panel.
-- Ring **this card's** dropoff, not the held one. The pair under the line are
-  car → pickup → where the order in the car is going; where *this* job ends is
-  the further guess the detour already refuses to include, and a faint ring is
-  what that is.
-- The checks have to be able to fail: a stale-pin check that times out today, a
-  radius/opacity assertion that can see the ring, and one for the `partial`
-  line. Assertions that stay green either way are what this project calls a
-  check that cannot fail.
-
-**The two dropoff pins are pixel-identical** — the held order's and this card's.
-The thing the driver came to compare has to be told apart by clicking each dot.
-`mapDot` already takes a `ring` flag that carries the right meaning. Same job as
-the entry above; do them together.
 
 **`check_distance` is asked of the card and never of a leg, so one absurd leg
 passes inside a believable card.** Found while measuring the approach split.
