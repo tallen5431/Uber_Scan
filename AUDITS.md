@@ -70,12 +70,44 @@ volunteered again for that delivery. The only rescue is a ⌖ press, because the
 suppression is `not asked`. The guard would trade a class-1 fault for a class-2
 one on a path whose firing rate nobody has measured.
 
-If it is ever revisited, settle it with the `addressAsOffer` /
-`streetNoAddress` counters the reader already keeps rather than with a guard —
-but note their limit: they measure the FRAME, not the attribution. Neither says
-how often an unprompted address arrived while an order was carried *and* a
-different card was on the slot, which is the exact population of this fault.
-That measurement needs no behaviour change and should come first.
+**That measurement is now being taken.** The reader's `addressAsOffer` /
+`streetNoAddress` counters could never settle it: they measure the FRAME — was
+there a payout on it, a street with no address — and the question is about
+ATTRIBUTION, which only `server.js` can see, because only it knows what is in
+the car and what is on the slot at the same moment.
+
+So `server.js` writes one `kind: 'sighting'` row per unprompted address that
+arrives while an order is carried. It changes no behaviour. The row carries the
+held order's id, the id of the card on the slot if it is recent enough to be
+what the driver is looking at (`screeningCard`, else null), and whether the
+address was filed. **No address is on the row** — it is a tally, not a record
+of where anybody lives, and the journal syncs to a second machine.
+
+Cheap by construction: the reader emits an address only off a frame with no
+payout and no merchant, and suppresses a repeat of a line it has already said,
+so this is roughly once per distinct address seen rather than once per frame.
+
+After a few real shifts, read it with:
+
+    node -e '
+    var fs = require("fs");
+    var s = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean)
+      .map(function (l) { try { return JSON.parse(l); } catch (e) { return null; } })
+      .filter(function (r) { return r && r.kind === "sighting"; });
+    var rival = s.filter(function (r) { return r.slot && r.slot !== r.held; });
+    console.log("unprompted addresses seen with an order in the car:", s.length);
+    console.log("  ...with a different card on the slot:", rival.length);
+    console.log("  ...filed onto the held order:",
+                rival.filter(function (r) { return r.kept; }).length);
+    console.log("  ...discarded:",
+                rival.filter(function (r) { return !r.kept; }).length);
+    ' rpi/journal.jsonl
+
+`slot !== held` with `kept` true is the population the guard would have been
+for: a screening tap that may have been filed onto the wrong job. If that count
+is near zero the guard must never be written. `kept` false is the other half —
+the tap discarded because the held order already knew where it was going —
+which sizes the Open entry below about the ⌖ button.
 
 ### The maps, again
 
@@ -444,8 +476,9 @@ anything is carried.
 Deliberately not fixed here, because the fix is the same ambiguity the refused
 guard above is about: an address seen while carrying one job and screening
 another may belong to either, and the rig cannot tell from the frame. The
-measurement named under Settled is the thing to take first — it sizes both this
-and the guard, and it changes no behaviour.
+`kind: 'sighting'` rows described under Settled are now counting it: the `kept:
+false` half of that tally is this entry's population, and it should be read
+before anything is built.
 
 **A wrong remembered lookup can only be fixed by wiping every good one.**
 `map.html` is the one surface that can *identify* a bad geocode — the stray rows

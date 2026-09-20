@@ -126,6 +126,12 @@ DROP = os.path.join(work, 'drop')
 # that has gone silent, which is exactly what this file cannot otherwise stage.
 QUIET = os.path.join(work, 'quiet')
 
+# How long the server treats a card on the slot as the one in front of the
+# driver. The real default is two minutes; this suite runs with a short one so
+# that "the card went stale" is a state a check can reach. Every other check
+# here acts within about half a second of putting a card on the slot.
+SCREENING_MS = 4000
+
 # The card the second reading is of, put through the real parser, the real
 # rate() and the real emit(). $9.00 over 20 minutes is $27/hr gross and
 # $21.60 net at 30c a mile, against a $25 target - deliberately BELOW the line,
@@ -192,6 +198,29 @@ eq('...with the line the server stores', DROP_PAYLOAD['dropoff'].get('line'),
 eq('...and the reading it must not be confused with carries a string',
    isinstance(READ_PAYLOAD['dropoff'], str), True)
 
+# ...and the same address the way the rig reports one NOBODY ASKED FOR.
+#
+# The scanner reports an address off any screen that has one and no payout, not
+# only inside the window a ⌖ press opens — the driver taps the dropoff pin to
+# read it, which is a screen change the motion gate already sees. server.js
+# treats the two as different claims, and until this existed the whole
+# unprompted half of that code was unreachable from here: every dropoff this
+# file could stage carried `asked: true`.
+#
+# Through the real emit_dropoff, like the prompted one, so `asked: false` is the
+# field the scanner actually sends rather than one invented beside it.
+_buf, _was = io.StringIO(), sys.stdout
+sys.stdout = _buf
+try:
+    _SP.emit_dropoff(dict(_ADDRESS), ms={'total': 900}, asked=False)
+finally:
+    sys.stdout = _was
+UNPROMPTED_PAYLOAD = json.loads(_buf.getvalue().strip())
+eq('the rig can report a destination nobody asked about',
+   UNPROMPTED_PAYLOAD['dropoff'].get('asked'), False)
+eq('...and a press is still marked as one',
+   DROP_PAYLOAD['dropoff'].get('asked'), True)
+
 # The other shape of reading, and the one the stack line went silent on.
 #
 # Uber and DoorDash both state a DEADLINE and no duration, so `minutes` is null
@@ -222,6 +251,7 @@ with open(fake, 'w') as fh:
         'LATE = %r\n'
         'READ = %r\n'
         'DROPPED = %r\n'
+        'UNPROMPTED = %r\n'
         'sent = dropped = None\n'
         'while True:\n'
         '    try:\n'
@@ -237,12 +267,17 @@ with open(fake, 'w') as fh:
         '        ask = ""\n'
         '    if ask and ask != dropped:\n'
         '        dropped = ask\n'
-        '        print(json.dumps(DROPPED), flush=True)\n'
+        # Which of the two claims this one is, chosen by the tag the test
+        # wrote. The tag already had to change for the scanner to speak at
+        # all — see put_dropoff — so it costs nothing to let it say what
+        # kind of sighting this is as well.
+        '        print(json.dumps(UNPROMPTED if ask.startswith("un")\n'
+        '                         else DROPPED), flush=True)\n'
         '    if not os.path.exists(QUIET):\n'
         '        print(json.dumps(LATE if os.path.exists(DEADLINE) else READ), flush=True)\n'
         '    time.sleep(0.2)\n'
         % (QUEUE, DROP, QUIET, DEADLINE, DEADLINE_PAYLOAD,
-           READ_PAYLOAD, DROP_PAYLOAD))
+           READ_PAYLOAD, DROP_PAYLOAD, UNPROMPTED_PAYLOAD))
 
 
 def put_dropoff(tag):
@@ -289,6 +324,13 @@ proc = subprocess.Popen(
              # minutes of overrun - far longer than this suite lives - so this
              # changes nothing except making the one case reachable.
              HOLD_GRACE_MS='0',
+             # Short enough that a card can be left to go stale inside a test
+             # rather than two minutes from now, and long enough that every
+             # other check here — which acts within a second of putting a card
+             # on the slot — is nowhere near it. Without this the recency gate
+             # on the sighting tally cannot be reached at all, and a version
+             # that recorded any card on the slot, however old, would pass.
+             SCREENING_MS=str(SCREENING_MS),
              SCANNER='1', SCANNER_CMD='python3', SCANNER_ARGS=fake),
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 base = 'http://127.0.0.1:%d' % port
@@ -314,6 +356,36 @@ def stream_read(timeout=8.0, live=False):
             body.close()
             return msg
     body.close()
+    return None
+
+
+def dropoff_on_stream(trigger, timeout=6.0):
+    """What the panel is TOLD about a destination, if anything.
+
+    The listener is opened before the trigger fires, because a broadcast is not
+    replayed: a test that connects afterwards sees nothing and cannot tell that
+    apart from a server that said nothing.
+
+    Filtered on the dropoff being an OBJECT. A reading carries `dropoff` as a
+    plain string — a cross-street off the card — and the destination message
+    carries the parsed address, which is the same distinction the server tells
+    the two apart by.
+    """
+    body = urllib.request.urlopen(
+        urllib.request.Request(base + '/api/events'), timeout=timeout)
+    try:
+        trigger()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            line = body.readline().decode('utf-8', 'replace').strip()
+            if not line.startswith('data: '):
+                continue
+            msg = json.loads(line[6:])
+            d = msg.get('dropoff')
+            if isinstance(d, dict) and d.get('line'):
+                return d
+    finally:
+        body.close()
     return None
 
 
@@ -616,6 +688,153 @@ try:
     eq('...and a stream of card-derived dropoffs does not overwrite it',
        held.get('dropoff'), '1234 Daffodil Ln, Powder Springs, GA 30127')
     eq('...nor un-mark it as scanned', held.get('dropoffScanned'), True)
+
+    # A press writes no tally row. The `kind: 'sighting'` rows below count
+    # UNPROMPTED addresses only — a press is the driver answering the question
+    # themselves, and counting it would inflate the very rate the tally exists
+    # to measure. Asserted here, where a press has just happened, rather than
+    # left to the block below where it would be an absence proving nothing.
+    def sightings():
+        out = []
+        for ln in open(journal):
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except Exception:
+                continue
+            if r.get('kind') == 'sighting':
+                out.append(r)
+        return out
+
+    eq('a destination the driver pressed for is not counted as a sighting',
+       len(sightings()), 0)
+    post(base, '/api/delivered')
+
+    # --- how often an unprompted address lands with a rival card on the slot --
+    #
+    # The one measurement that decides whether the guard AUDITS.md refuses
+    # twice should ever be written. The reader's own counters cannot answer it:
+    # `addressAsOffer` and `streetNoAddress` describe the FRAME, and this is a
+    # question about ATTRIBUTION — what was in the car and what was on the slot
+    # — which only the server knows. It changes no behaviour.
+    #
+    # Half one: carrying a job that has no end yet, a DIFFERENT card on the
+    # slot, and an address nobody asked about. The address goes onto the held
+    # job, and it may or may not belong there. `slot != held` with `kept` true
+    # is exactly that population.
+    ok_('an order with no end reaches the record',
+        put_offer({'id': 'sg-held', 'pay': 12.0, 'minutes': 30.0,
+                   'billedMinutes': 30.0, 'miles': 8.0, 'cost': 2.4,
+                   'perHour': 19.2}))
+    post(base, '/api/offers/mark', {'id': 'sg-held', 'accepted': True})
+    ok_('...and a different card is being screened',
+        put_offer({'id': 'sg-rival', 'pay': 9.0, 'minutes': 20.0,
+                   'billedMinutes': 20.0, 'miles': 4.0, 'cost': 1.2,
+                   'perHour': 23.4}))
+    put_dropoff('unprompted-one')          # 'un...' -> asked: false
+    time.sleep(1.2)
+    rows = sightings()
+    eq('an unprompted address arriving with an order in the car is counted',
+       len(rows), 1)
+    if rows:
+        r0 = rows[0]
+        eq('...naming the order it was carried against', r0.get('held'), 'sg-held')
+        eq('...and the card the driver was actually looking at',
+           r0.get('slot'), 'sg-rival')
+        eq('...and that it was filed onto the held order', r0.get('kept'), True)
+        # The whole point of the row: the two ids differ, so this sighting is
+        # one the refused guard would have been about.
+        ok_('...so the count can tell a rival card from the held one',
+            r0.get('slot') != r0.get('held'))
+        # A tally, not a record of where anybody lives — and the journal syncs
+        # to a second machine.
+        eq('...without carrying the address itself',
+           'dropoff' in r0 or 'line' in r0, False)
+    post(base, '/api/delivered')
+
+    # Half two: carrying a job that already knows where it ends. The address is
+    # discarded — nothing is filed, nothing is said — which is its own Open
+    # entry, and it needs counting for the same reason.
+    ok_('an order that already knows its end reaches the record',
+        put_offer({'id': 'sg-held2', 'pay': 12.0, 'minutes': 30.0,
+                   'billedMinutes': 30.0, 'miles': 8.0, 'cost': 2.4,
+                   'perHour': 19.2, 'dropoff': 'Oak Ln, Marietta'}))
+    post(base, '/api/offers/mark', {'id': 'sg-held2', 'accepted': True})
+    ok_('...and a different card is being screened',
+        put_offer({'id': 'sg-rival2', 'pay': 9.0, 'minutes': 20.0,
+                   'billedMinutes': 20.0, 'miles': 4.0, 'cost': 1.2,
+                   'perHour': 23.4}))
+    put_dropoff('unprompted-two')
+    time.sleep(1.2)
+    rows = sightings()
+    eq('a discarded sighting is counted too', len(rows), 2)
+    if len(rows) > 1:
+        r1 = rows[1]
+        eq('...saying nothing was filed', r1.get('kept'), False)
+        eq('...against the order that already had an end', r1.get('held'), 'sg-held2')
+        eq('...with the rival card named', r1.get('slot'), 'sg-rival2')
+    held = get(base, '/api/status').get('holding') or {}
+    eq('...and the held order keeps the end it already had',
+       held.get('dropoff'), 'Oak Ln, Marietta')
+    post(base, '/api/delivered')
+
+    # The control. With nothing in the car there is no attribution question to
+    # ask, so there is nothing to count — and a tally that fired here would
+    # report a rate against a population that does not exist.
+    ok_('a card on the slot with nothing in the car',
+        put_offer({'id': 'sg-alone', 'pay': 9.0, 'minutes': 20.0,
+                   'billedMinutes': 20.0, 'miles': 4.0, 'cost': 1.2,
+                   'perHour': 23.4}))
+    # Read off the STREAM, not off /api/status, and that is the check rather
+    # than a flourish. `carrying` is null here, so a tally that forgot to ask
+    # whether anything is in the car reads `carrying.id` on null and throws —
+    # and the throw lands in the handler that parses the scanner's stdout,
+    # which treats the whole line as a log line. The address is already on
+    # `scanner.offer` by then, so /api/status still looks right; what silently
+    # stops happening is broadcast(), and the driving screen never hears it.
+    said = dropoff_on_stream(lambda: put_dropoff('unprompted-three'))
+    eq('the panel is still told about an address with nothing in the car',
+       (said or {}).get('line'), '1234 Daffodil Ln, Powder Springs, GA 30127')
+    eq('an unprompted address with nothing in the car is not counted',
+       len(sightings()), 2)
+    # ...and it still lands on the card being screened, which is the branch
+    # that was always meant to have it. A tally must not change what it counts.
+    on = get(base, '/api/status').get('offer') or {}
+    eq('...and still lands on the card being screened',
+       on.get('dropoff'), '1234 Daffodil Ln, Powder Springs, GA 30127')
+
+    # ...and a card that went stale on the slot is not "what the driver was
+    # looking at". `screeningCard` is the gate; without it a card read minutes
+    # ago is recorded as the rival, and every one of those inflates exactly the
+    # count this tally exists to produce — a guard argued from it would be
+    # argued from taps that never happened.
+    post(base, '/api/delivered')
+    ok_('an order goes in the car',
+        put_offer({'id': 'sg-held3', 'pay': 12.0, 'minutes': 30.0,
+                   'billedMinutes': 30.0, 'miles': 8.0, 'cost': 2.4,
+                   'perHour': 19.2}))
+    post(base, '/api/offers/mark', {'id': 'sg-held3', 'accepted': True})
+    ok_('...and a different card is read, then left to go stale',
+        put_offer({'id': 'sg-stale', 'pay': 9.0, 'minutes': 20.0,
+                   'billedMinutes': 20.0, 'miles': 4.0, 'cost': 1.2,
+                   'perHour': 23.4}))
+    time.sleep((SCREENING_MS / 1000.0) + 0.6)
+    put_dropoff('unprompted-four')
+    time.sleep(1.2)
+    rows = sightings()
+    eq('the stale sighting is still counted', len(rows), 3)
+    if len(rows) > 2:
+        r2 = rows[2]
+        eq('...against the order in the car', r2.get('held'), 'sg-held3')
+        eq('...naming no card on the slot, because none is recent enough',
+           r2.get('slot'), None)
+        # Which is a different answer from "the held card was on the slot", and
+        # the count has to be able to tell those apart — one is not a rival tap
+        # and the other is not a tap at all.
+        ok_('...so it is not counted as a rival tap',
+            not (r2.get('slot') and r2.get('slot') != r2.get('held')))
     post(base, '/api/delivered')
 
     # --- an order that ran out of time, asked four different ways ------------

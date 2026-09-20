@@ -562,6 +562,72 @@ function startScanner() {
           // A press still shows what was read even when nothing could be
           // attached to it, which is the case the paragraph above is about and
           // is deliberately unchanged.
+          // One tally row per unprompted address that arrives while an order is
+          // in the car. It changes nothing and is here to answer one question.
+          //
+          // AUDITS.md refuses a guard on this path twice — refusing an
+          // unprompted address whenever a rival card had been read recently —
+          // because measured, it discards the HELD job's own destination, and
+          // permanently: `dropoff_said` in rpi/scan_pi.py is set on emit and
+          // never cleared, so an address refused once is never volunteered
+          // again for that delivery. The refusal is right, but it was argued
+          // from a firing rate nobody has measured, and that is the wrong way
+          // to leave it.
+          //
+          // The counters the reader already keeps cannot answer it.
+          // `addressAsOffer` and `streetNoAddress` describe the FRAME — was
+          // there a payout on it, was there a street with no address. The
+          // question here is about ATTRIBUTION, and only this process knows
+          // both halves of it: what is in the car, and what is on the slot.
+          //
+          // So: whether an order was carried (this row exists at all), which
+          // one, which card the driver was actually looking at, and what was
+          // done with the address. `slot !== held` on a row whose `kept` is
+          // true is a screening tap that may have been filed onto the wrong
+          // job — the population the guard would have been for. `kept` false
+          // is the other half, the tap that was discarded because the held
+          // order already knew where it was going, which is its own Open entry.
+          //
+          // NO ADDRESS ON THIS ROW, deliberately. It is a tally, not a record
+          // of where anybody lives, and the journal syncs to a second machine.
+          // Two ids and a boolean answer the question; the street does not.
+          //
+          // Cheap by construction: the reader emits an address only off a frame
+          // with no payout and no merchant on it, and suppresses a repeat of a
+          // line it has already said, so this is roughly once per distinct
+          // address seen rather than once per frame.
+          //
+          // `id` is stamped from the clock the way the reader's `seen` rows
+          // are, and carries the same caveat: two in one millisecond would be
+          // one key to the sync and one of them would be dropped. The reader
+          // cannot produce two distinct addresses that close together.
+          //
+          // A kind this build invented is safe on both the fold and the sync:
+          // the fold skips kinds it does not know ("something newer than this
+          // reader") and syncKey carries an unknown kind across on its id and
+          // seq, which is what the pair rows' own comment there is about.
+          if (!wasAsked && carrying) {
+            var sightedAt = Date.now();
+            var onSlot = screeningCard(sightedAt);
+            appendLines(JSON.stringify({
+              v: 1, kind: 'sighting', at: sightedAt,
+              id: 'sighting-' + sightedAt, seq: 1,
+              held: carrying.id || null,
+              // Null when the slot holds nothing recent enough to be what the
+              // driver is looking at — which is a different answer from "the
+              // same card", and the count needs to tell those apart.
+              slot: onSlot ? onSlot.id : null,
+              kept: !!kept
+            }) + '\n', function (err) {
+              // Said out loud like every other write on this path. A tally that
+              // silently stopped being written would be read months later as a
+              // rate of zero, which is the one wrong answer it can give.
+              if (err) {
+                console.error('journal: could not record a dropoff sighting: '
+                              + err.message);
+              }
+            });
+          }
           if (!wasAsked && !kept) { delete read.dropoff; }
           //
           // `scanner.dropoff` and `scanner.dropoffAt` were kept here for that
