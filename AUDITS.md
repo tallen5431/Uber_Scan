@@ -146,7 +146,7 @@ Unbounded memory and an unbounded loop, per frame, on the Pi that is also
 relaying the live picture. A set is exact here, since a maximum over a multiset
 is the maximum over its set, and it holds one entry after an hour.
 
-*A pickup-wait line sits exactly where the approach goes.* The card prints
+*A pickup-wait line sits exactly where the approach goes — twice.* The card prints
 `Avg. wait time at pickup: 3 min` first, above the merchant, which is the
 layout slot the drive to the pickup occupies — so it was published as the
 approach: three minutes, no distance, nothing marked uncertain.
@@ -154,6 +154,33 @@ approach: three minutes, no distance, nothing marked uncertain.
 it is now `leg_travels`/`legTravels`, written once and asked by both, because
 two copies of that rule is the third fault class. A `toPickup` corpus case
 pins it in both ports.
+
+That was not enough, and a second review found why. `leg_travels` accepts a
+leg on `lostMiles` — a distance printed beside it that did not read — which is
+right where it asks whether a card is MISSING a distance and wrong where a
+number gets published off the answer. One frame whose merchant name fails to
+read leaves the tail after `3 min` beginning with the bracket of the line
+below, `LEG_LOST_MILES` fires, and the wait line looks like a leg. The
+accumulator ORs `isApproach` across the window, so **one such frame in five
+stamps the whole card**: measured on [clean, damaged, clean, clean, clean],
+the merged row carried `toPickupMinutes: 3.0` for a card stating no split at
+all, and that is what the journal writes and `tools/measure_places.js` reads as
+geography. `rpi/accumulate.py` already refuses to trust one frame's
+`lostMiles` — it counts `lostSeen` and votes, and says why. So
+`laid_out_approach` now requires the leg it PUBLISHES to state its distance,
+which is stricter than `leg_travels` on purpose. It costs 2 of the 93 firing
+cards and both were already useless: a split with no distance gives a null
+`toPickupMiles`, the one field `legs()` needs, and it marks such a sample
+`exact: false`.
+
+*And the loss line's present tense outlived what it described.* The `dropped`
+clause was cured of exactly this and the `lost` clause beside it was left
+alone: `refused` is monotonic, so "this phone will not keep them" stayed on
+the glass after the rig answered, the flush drained the queue and every
+`keep()` landed again. A full store is a recoverable state, not a permanent
+one. `trouble()` now carries `refusing`, the last `keep()`'s own answer, which
+clears — the present-tense warning is shown only while it is present tense,
+and the count of what has already gone is stated as the past fact it is.
 
 ### The order in the car
 

@@ -461,10 +461,15 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
       localStorage.setItem = real;
     }
 
+    // ...and the store comes back, which it does the moment the queue drains.
+    const kept = mk();
+    const recovered = JournalClient.trouble();
+
     localStorage.removeItem(KEY);
     return {
       cap: cap,
       capUsable: true,
+      keptAfterRecovery: !!kept,
       keptOverCap: !!over,
       heldAtCap: afterCap.length,
       oldestKept: afterCap[0] && afterCap[0].at,
@@ -473,6 +478,12 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
       refusedIsNull: refused === null,
       heldAfterRefusal: afterRefusal.length,
       lost: refusedTrouble && refusedTrouble.lost,
+      // A full store is not a permanent condition: the rig answers, the
+      // flush drains the queue, and the next row lands. So the PRESENT-tense
+      // warning has to clear while the count of what was lost does not.
+      refusingWhileRefused: !!(refusedTrouble && refusedTrouble.refusing),
+      refusingAfterRecovery: !!(recovered && recovered.refusing),
+      lostAfterRecovery: recovered && recovered.lost,
       droppedUnchanged: refusedTrouble && capTrouble
                         && refusedTrouble.dropped === capTrouble.dropped
     };
@@ -1214,6 +1225,18 @@ try:
         # as a drop would put a number on screen for rows that are still on
         # the disk — a confidently wrong one, which is the first fault class.
         eq('...and not also counted as dropped', qf.get('droppedUnchanged'), True)
+        # A full store is not permanent. The count of what was lost is; the
+        # warning that it is happening is not, and a present-tense claim that
+        # outlives the thing it describes is the fifth fault class — the same
+        # one the "find the rig" advice on this line already had.
+        eq('the refusal is reported while it is happening',
+           qf.get('refusingWhileRefused'), True)
+        eq('...the next row lands once the store takes writes again',
+           qf.get('keptAfterRecovery'), True)
+        eq('...so the present-tense warning clears',
+           qf.get('refusingAfterRecovery'), False)
+        eq('...while the count of what was lost does not',
+           qf.get('lostAfterRecovery'), 1)
 
     # --- the loss and the live backlog share one line ---------------------
     #

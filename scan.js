@@ -533,9 +533,19 @@
     // would still be on the glass long after it stopped being true. The first
     // version of this line ended "the queue is full, find the rig", and the
     // queue is not full once the rig answers.
-    if (t && t.lost) {
-      said.push('NOT SAVING — ' + t.lost + (t.lost === 1 ? ' offer' : ' offers')
-                + ' went nowhere, this phone will not keep them');
+    // Present tense only while it is present tense. A store that refused a row
+    // is not refusing for ever — the rig answers, the flush drains the queue,
+    // and the next row lands — so "this phone will not keep them" was a claim
+    // that outlived the thing it described, which is the same fault as the
+    // "find the rig" advice below it and was left in place when that went.
+    // `refusing` is the last keep()'s answer and clears; `lost` is the count
+    // of what has already gone and never does.
+    if (t && t.refusing) {
+      said.push('NOT SAVING — this phone is refusing offers ('
+                + t.lost + ' gone so far)');
+    } else if (t && t.lost) {
+      said.push(t.lost + (t.lost === 1 ? ' offer' : ' offers')
+                + ' went nowhere, not in the journal');
     }
     if (t && t.dropped) {
       said.push(t.dropped + (t.dropped === 1 ? ' older offer' : ' older offers')

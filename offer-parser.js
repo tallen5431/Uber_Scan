@@ -1468,10 +1468,22 @@
     if (legs[0].isTotal || legs[1].isTotal) return null;
     /* Both lines have to be legs of the journey. The card prints a pickup-wait
        line in exactly the place the drive to the pickup goes — first, above the
-       merchant — so without this `Avg. wait time at pickup: 3 min` was
-       published as the approach, three minutes and no distance at all. Same
+       merchant — so without this, `Avg. wait time at pickup: 3 min` was
+       published as the approach: three minutes and no distance at all. Same
        question, same answer, one implementation: see legTravels. */
     if (!legTravels(legs[0]) || !legTravels(legs[1])) return null;
+    /* ...and the leg being PUBLISHED has to state its distance, which is
+       stricter than legTravels on purpose. legTravels accepts a leg whose
+       distance was printed but did not read, which is right where it asks
+       whether a card is missing a distance and wrong here, where a number gets
+       published off the answer. One frame whose merchant name fails to read
+       leaves the tail after `3 min` beginning with the bracket below it, so
+       the wait line acquires lostMiles and becomes the approach — and the Pi's
+       accumulator ORs isApproach across the window, so one such frame in five
+       stamps the card. Costs 2 of this driver's 93 firing cards, both of which
+       gave a null toPickupMiles and were therefore useless to the only
+       consumer. See the Python twin for the measurement. */
+    if (legs[0].miles === null || legs[0].miles === undefined) return null;
     /* A card that already LABELLED a leg is not skipped here, and the case that
        decides it is a card whose word and whose layout name DIFFERENT legs.
        Skipping, the word would win and the trip would be published as the drive
@@ -1649,11 +1661,6 @@
     return lost > held;
   }
 
-  /* `miles` is the distance the READING ended up with, from any source, and is
-     consulted only for the single-leg case. null or undefined means the reading
-     has no distance at all - which is also the default, so a caller that
-     forgets to say lands on doubt rather than on a number nobody checked. */
-
   /* Whether this line is a leg of the journey or furniture beside it.
 
      A leg is part of the journey if it states a distance, if the card labelled
@@ -1671,6 +1678,11 @@
     return (leg.miles !== null && leg.miles !== undefined)
       || !!leg.labelled || !!leg.lostMiles;
   }
+  /* `miles` is the distance the READING ended up with, from any source, and is
+     consulted only for the single-leg case. null or undefined means the reading
+     has no distance at all - which is also the default, so a caller that
+     forgets to say lands on doubt rather than on a number nobody checked. */
+
   function legsShortADistance(legs, miles) {
     var list = [], i;
     for (i = 0; i < (legs || []).length; i++) if (legs[i]) list.push(legs[i]);

@@ -122,6 +122,14 @@ var JournalClient = (function () {
    * thing to go. The page is open in front of the driver when it matters. */
   var shed = 0, shedThrough = 0, refused = 0;
 
+  /* Whether the LAST row offered was refused, as opposed to how many have ever
+     been. The two are different questions and only one of them clears.
+     A full store is not a permanent condition: the rig answers, the flush
+     drains 811KiB, and the next keep() lands. `refused` is a count of what was
+     lost and stays true for ever; this says whether it is still happening, so
+     a page can put a present-tense warning on the glass only while it is. */
+  var refusing = false;
+
   /* Whether the last flush reached a server: null until one has been tried.
    *
    * This is what makes a backlog readable. A row waiting because the flush it
@@ -315,7 +323,8 @@ var JournalClient = (function () {
     q.push(r);
     var over = [];
     while (q.length > QUEUE_CAP) over.push(q.shift());
-    if (!save(q)) { refused++; return null; }
+    if (!save(q)) { refused++; refusing = true; return null; }
+    refusing = false;
     count = q.length;
     for (var i = 0; i < over.length; i++) {
       shed++;
@@ -338,7 +347,8 @@ var JournalClient = (function () {
      it — so a page can lead with this and say nothing on an ordinary night. */
   function trouble() {
     if (!shed && !refused) return null;
-    return { lost: refused, dropped: shed, through: shedThrough || null };
+    return { lost: refused, dropped: shed, through: shedThrough || null,
+             refusing: refusing };
   }
 
   function pending(id) {

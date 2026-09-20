@@ -1129,6 +1129,32 @@ for _order in (['UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw',
        % ('approach' if 'away' in _order[0] else 'trip'),
        (_m['minutes'], _m['miles'], _m['legs']), (28.0, 9.6, 2))
 
+# --- one damaged frame must not stamp an approach on the whole window ------
+#
+# isApproach is ORed across the window on purpose: a frame that loses the word
+# `away` to glare must not un-say a split a clearer frame already read. The
+# same OR is what makes a FALSE approach permanent, and the layout rule gave
+# it a new way in. One frame whose merchant name fails to read leaves the tail
+# after a pickup-wait line beginning with the bracket of the line below, so
+# LEG_LOST_MILES fires and the wait line looks like a leg.
+#
+# Measured before the guard: [clean, damaged, clean, clean, clean] merged to
+# toPickupMinutes 3.0 on a card that states no split at all, and that is what
+# rpi/journal.py writes and tools/measure_places.js reads as geography. The
+# cure is in laid_out_approach, which now requires the leg it publishes to
+# STATE its distance rather than merely to look like a leg — this file already
+# refuses to trust one frame's `lostMiles`, and says why beside `lostSeen`.
+_WAIT_OK = ('$11.06 Avg. wait time at pickup: 3 min Little Caesars (3372 Canton Rd) '
+            '25 min (8.1 mi) Barrington Overlook, Marietta')
+_WAIT_BAD = ('$11.06 Avg. wait time at pickup: 3 min (3372 Canton Rd) '
+             '25 min (8.1 mi) Barrington Overlook, Marietta')
+acc = OfferAccumulator()
+_m = None
+for _i, _f in enumerate([_WAIT_OK, _WAIT_BAD, _WAIT_OK, _WAIT_OK, _WAIT_OK]):
+    _m = acc.add(P.parse(_f), now=6000.0 + _i)
+eq('one damaged frame does not publish a wait line as the approach',
+   (_m['toPickupMinutes'], _m['toPickupMiles']), (None, None))
+
 # --- a card left on screen does not grow the window without bound ----------
 #
 # `stale` is measured from the LAST add, so a window does not roll over while
