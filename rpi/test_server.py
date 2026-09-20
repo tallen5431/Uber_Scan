@@ -1402,6 +1402,68 @@ finally:
     stop(_hproc)
     shutil.rmtree(_hole_dir, ignore_errors=True)
 
+# --- places the browser looked up, kept where they outlive the browser --------
+#
+# The map page's geocode cache was localStorage and nothing else, so it belonged
+# to whichever browser did the placing: check the map on the laptop and again on
+# the phone and that is two full runs, and clearing site data loses the lot.
+# Measured on the owner's own week, 1,325 distinct places at one a second is
+# about 24 minutes to rebuild.
+#
+# The rig still never geocodes. This stores an answer the BROWSER already has.
+_pdir = tempfile.mkdtemp()
+_pjournal = os.path.join(_pdir, 'j.jsonl')
+open(_pjournal, 'w').close()
+_pproc, _pbase = start({'SCANNER': '0'}, _pjournal)
+try:
+    # A box that has never been told anything is an empty cache, not a fault.
+    _empty = get(_pbase, '/api/places')
+    eq('a server with no places file answers an empty set', _empty['places'], {})
+    eq('...and says so rather than erroring', _empty['ok'], True)
+
+    _code, _said = post(_pbase, '/api/places', {
+        'Chipotle, Marietta': {'lat': 34.02, 'lon': -84.58},
+        # null is "asked, nothing there", and it is worth keeping: it is what
+        # stops the next run paying a second to ask again.
+        'Nowhere St': None})
+    eq('places sent by the browser are accepted', _code, 200)
+    eq('...and counted', _said['added'], 2)
+    _back = get(_pbase, '/api/places')['places']
+    eq('...and come back on the next load', _back['Chipotle, Marietta'],
+       {'lat': 34.02, 'lon': -84.58})
+    ok_('...including the empty answer', 'Nowhere St' in _back and _back['Nowhere St'] is None)
+    ok_('...and they are on disk beside the journal',
+        os.path.exists(os.path.join(_pdir, 'places.json')))
+
+    # MERGED, never written over. Two browsers place different days of the same
+    # journal; a POST that replaced the file would have whichever finished last
+    # throw the other's work away.
+    _code2, _said2 = post(_pbase, '/api/places', {'Zaxbys, Kennesaw': {'lat': 34.03, 'lon': -84.61}})
+    eq('a second browser adds without replacing', _said2['added'], 1)
+    _both = get(_pbase, '/api/places')['places']
+    eq('...and both are held', sorted(_both.keys()),
+       ['Chipotle, Marietta', 'Nowhere St', 'Zaxbys, Kennesaw'])
+
+    # "Could not ask" is not an answer and must not be stored: one dead spot on
+    # I-75 would otherwise become a permanent "this street does not exist".
+    _code3, _said3 = post(_pbase, '/api/places', {'Asked But Nobody Home': 'nope'})
+    eq('a value that is not a coordinate is refused', _said3['added'], 0)
+    no_('...and does not reach the file',
+        'Asked But Nobody Home' in get(_pbase, '/api/places')['places'])
+    _code4, _said4 = post(_pbase, '/api/places', [1, 2, 3])
+    eq('a body that is not a set of places is refused', _code4, 400)
+
+    # A cache file that will not parse is a silent re-run of all 24 minutes.
+    with open(os.path.join(_pdir, 'places.json'), 'w') as _fh:
+        _fh.write('{ not json')
+    _torn = get(_pbase, '/api/places')
+    eq('an unreadable places file reads as empty', _torn['places'], {})
+    ok_('...and says why, rather than looking like a fresh box',
+        'did not parse' in (_torn.get('unreadable') or ''))
+finally:
+    stop(_pproc)
+    shutil.rmtree(_pdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

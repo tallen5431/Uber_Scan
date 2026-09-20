@@ -2721,6 +2721,126 @@ function route(req, res) {
   // the driver's own target and running costs. None of it is irreplaceable the
   // way the journal is — it can all be measured again — but re-aiming a camera
   // and re-deriving an exposure at the roadside is an afternoon nobody wants,
+  /* Places the BROWSER has looked up, kept where they outlive the browser.
+   *
+   * The map page's geocode cache lived in localStorage and nowhere else, so it
+   * belonged to whichever browser did the placing. Check the map on the laptop
+   * and again on the phone and that is two full runs; clear site data and it is
+   * gone. Measured on the owner's own week: 1,325 distinct places at the
+   * one-a-second rate limit is about 24 minutes to rebuild. "It can always be
+   * looked up again" is true and is not the same as cheap.
+   *
+   * THE RIG STILL NEVER GEOCODES. This stores an answer the browser already
+   * has; nothing here asks anybody anything. That rule is about who talks to
+   * the geocoder, and it is unchanged.
+   *
+   * Kept in its own file and deliberately NOT in the journal. Ingest's
+   * idempotence is a syncKey set built over the whole journal, and the journal
+   * is the one artefact that cannot be regenerated — a cache that can be
+   * regenerated has no business sharing a file with it.
+   *
+   * The place NAMES are already on any machine running this: they are the
+   * `pickup` and `dropoff` on every journal row, and the journal already syncs.
+   * What this adds is a latitude and a longitude for a string that is here
+   * anyway, which is why it is stored beside the journal on whichever host the
+   * driver points the page at — the NUC, if that is where they do map checks.
+   */
+  if (req.url.split('?')[0] === '/api/places') {
+    var placesPath = path.join(path.dirname(JOURNAL_PATH), 'places.json');
+    var placesReply = function (code, body) {
+      send(res, code, JSON.stringify(body),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    };
+    if (req.method === 'GET') {
+      return fs.readFile(placesPath, 'utf8', function (readErr, text) {
+        // A file that is not there yet is an empty cache, not a fault: the
+        // first map check on a fresh box is the ordinary way this starts.
+        if (readErr) {
+          return placesReply(200, { ok: true, places: {},
+                                    stored: readErr.code === 'ENOENT' ? 0 : null });
+        }
+        var held;
+        try { held = JSON.parse(text); } catch (e) { held = null; }
+        if (!held || typeof held !== 'object' || Array.isArray(held)) {
+          // Said rather than swallowed. A cache file that will not parse is a
+          // silent re-run of all 24 minutes, and the driver would be told
+          // nothing about why.
+          return placesReply(200, { ok: true, places: {}, stored: 0,
+                                    unreadable: 'places.json did not parse' });
+        }
+        placesReply(200, { ok: true, places: held,
+                           stored: Object.keys(held).length });
+      });
+    }
+    if (req.method === 'POST') {
+      return readBody(req, MAX_SYNC_BODY, function (err, text) {
+        if (err) return placesReply(400, { ok: false, error: err.message });
+        var sent;
+        try { sent = JSON.parse(text); } catch (e) { sent = null; }
+        if (!sent || typeof sent !== 'object' || Array.isArray(sent)) {
+          return placesReply(400, { ok: false, error: 'not a set of places' });
+        }
+        // MERGED, never written over. Two browsers place different days of the
+        // same journal, and a POST that replaced the file would have whichever
+        // finished last throw the other's work away — the same fault the map
+        // page's own remember() was fixed for.
+        fs.readFile(placesPath, 'utf8', function (readErr, before) {
+          var held = {};
+          if (!readErr) {
+            try { held = JSON.parse(before) || {}; } catch (e) { held = {}; }
+            if (typeof held !== 'object' || Array.isArray(held)) held = {};
+          }
+          var added = 0;
+          Object.keys(sent).forEach(function (k) {
+            var v = sent[k];
+            // A coordinate, or null for "asked, nothing there" — which is worth
+            // keeping, because it is what stops the next run asking again. What
+            // is NOT kept is undefined, "could not ask": storing that would
+            // turn one dead spot on I-75 into a permanent answer.
+            var ok = v === null
+              || (v && typeof v === 'object'
+                  && typeof v.lat === 'number' && isFinite(v.lat)
+                  && typeof v.lon === 'number' && isFinite(v.lon));
+            if (!ok) return;
+            if (!Object.prototype.hasOwnProperty.call(held, k)) added++;
+            held[k] = v;
+          });
+          if (!added) {
+            return placesReply(200, { ok: true, added: 0,
+                                      stored: Object.keys(held).length });
+          }
+          var body = JSON.stringify(held) + '\n';
+          var tmp = placesPath + '.part';
+          withDirectory(placesPath, function (dirErr) {
+            if (dirErr) {
+              console.error('places: ' + dirErr.message);
+              return placesReply(500, { ok: false, error: dirErr.message });
+            }
+            fs.writeFile(tmp, body, function (writeErr) {
+              if (writeErr) {
+                fs.unlink(tmp, function () {});
+                console.error('places: ' + writeErr.message);
+                return placesReply(500, { ok: false, error: writeErr.message });
+              }
+              // Renamed rather than written in place, the same way the config
+              // backup is: a half-written cache that will not parse costs the
+              // whole 24 minutes back.
+              fs.rename(tmp, placesPath, function (renameErr) {
+                if (renameErr) {
+                  fs.unlink(tmp, function () {});
+                  console.error('places: ' + renameErr.message);
+                  return placesReply(500, { ok: false, error: 'could not save' });
+                }
+                placesReply(200, { ok: true, added: added,
+                                   stored: Object.keys(held).length });
+              });
+            });
+          });
+        });
+      });
+    }
+  }
+
   // and it is small enough that there is no reason not to keep a copy.
   //
   // Stored beside the journal rather than over this machine's own config: the

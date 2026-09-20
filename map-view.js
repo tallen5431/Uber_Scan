@@ -131,6 +131,51 @@
    * metro and refuse it. A place whose own rows are silent about where they
    * were is a place this page knows nothing new about, and it is asked exactly
    * the way it was asked before any of this existed. */
+  /* The town this window's cards keep naming, or null.
+   *
+   * What a place is asked WITH when nothing can box it. `anchorFor` above
+   * answers null for every place on a journal whose rows carry no position —
+   * which, measured on the owner's own week, is all 1,166 of them — and a place
+   * with no box and no hint is asked of a world-wide geocoder as a bare string.
+   * Handed "McDonald's" that way it returns a real McDonald's, confidently,
+   * 4,801 miles away. 50.3% of this driver's distinct places have no comma in
+   * them at all, so there is nothing in the string itself to locate them by.
+   *
+   * The cards already know the answer. Across that week the place names carry a
+   * trailing town 517 times — Atlanta 119, Marietta 85, Kennesaw 68, Acworth
+   * 40 — and every one of them is the same metro. So this is not a guess about
+   * geography: it is reading back the town the rig already parsed off the
+   * driver's own cards.
+   *
+   * Counted over DISTINCT place strings rather than over offers, so one
+   * restaurant the driver is sent to forty times does not decide where the
+   * whole window is searched.
+   *
+   * Requires a lowercase letter in the chunk, which is what keeps OCR wreckage
+   * out: "ies, LAS" is one of the strings that actually produced a stray pin,
+   * and "LAS" is not a town. */
+  function localityOf(offers) {
+    var seen = {}, tally = {};
+    (offers || []).forEach(function (o) {
+      ['pickup', 'dropoff'].forEach(function (k) {
+        var v = (o && o[k] ? String(o[k]) : '').trim();
+        if (!v || seen[v]) return;
+        seen[v] = true;
+        var parts = v.split(',');
+        if (parts.length < 2) return;
+        var tail = parts[parts.length - 1].trim();
+        if (!/^[A-Z][A-Za-z .'-]{2,24}$/.test(tail)) return;
+        if (!/[a-z]/.test(tail)) return;
+        tally[tail] = (tally[tail] || 0) + 1;
+      });
+    });
+    var best = null;
+    Object.keys(tally).forEach(function (t) {
+      if (!best || tally[t] > tally[best]) best = t;
+    });
+    return best;
+  }
+
   function anchorFor(offers, place) {
     var seen = [];
     (offers || []).forEach(function (o) {
@@ -840,6 +885,7 @@
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
            detour: detour, fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
+           localityOf: localityOf,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,

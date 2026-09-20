@@ -196,6 +196,60 @@ eq('a place whose own rows are silent gets no anchor',
 eq('...and a place nothing names gets none either',
    MV.anchorFor(ROWS, 'Nowhere'), null);
 
+/* ---- the town to search near, when nothing can be boxed ----------------
+ *
+ * On the owner's own week not one of 1,166 rows carried a position, so
+ * `anchorFor` answered null for every place and every lookup went out as a
+ * bare string to a world-wide geocoder. Half of this driver's distinct places
+ * have no comma in them at all — "McDonald's", "Burger King", "Papa Johns
+ * Pizza" — and handed one of those a geocoder returns a real one, confidently,
+ * four thousand miles away. That is where the map's "nowhere near the rest"
+ * list comes from.
+ *
+ * The cards already carry the answer, so this reads it back rather than
+ * guessing at geography. */
+var TOWNS = [
+  { pickup: 'Chipotle (Barrett Pkwy), Marietta', dropoff: 'Oak Ln, Marietta' },
+  { pickup: 'Zaxbys, Kennesaw', dropoff: 'Ring Rd NW, Marietta' },
+  { pickup: 'McDonalds', dropoff: 'Cobb Pkwy, Marietta' },
+  { pickup: 'Wendys', dropoff: 'Barrett Pkwy, Kennesaw' }
+];
+eq('the town the cards keep naming is what a bare name is searched near',
+   MV.localityOf(TOWNS), 'Marietta');
+// Counted over DISTINCT place strings, not over offers: one restaurant the
+// driver is sent to forty times must not decide where the window is searched.
+var REPEATED = [
+  { pickup: 'Chipotle, Kennesaw' }, { pickup: 'Chipotle, Kennesaw' },
+  { pickup: 'Chipotle, Kennesaw' }, { pickup: 'Chipotle, Kennesaw' },
+  { pickup: 'A St, Marietta' }, { pickup: 'B St, Marietta' }
+];
+eq('...counted once per distinct place, not once per offer',
+   MV.localityOf(REPEATED), 'Marietta');
+// OCR wreckage is not a town. "ies, LAS" is one of the strings that really did
+// produce a stray pin, and a hint taken off it would send the whole window to
+// Nevada.
+eq('a shouted OCR fragment is not taken for a town',
+   MV.localityOf([{ pickup: 'ies, LAS' }, { dropoff: 'x, LAS' }]), null);
+eq('...nor is a number', MV.localityOf([{ pickup: 'Store, 414' }]), null);
+// A suite number reads as a town to anything that only asks "does it have a
+// lowercase letter in it". The driver's own cards carry plenty — "ALDI (860
+// Cobb Pl Blvd NW Ste 400)" — and a window searched near "Ste 400" is a window
+// searched nowhere.
+eq('a suite number is not a town',
+   MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'x, Ste 400' }]), null);
+eq('...nor is a tail that starts small',
+   MV.localityOf([{ pickup: 'x, total House' }, { dropoff: 'y, total House' }]), null);
+// ...and a real town still wins against a cardful of those, rather than the
+// guard quietly rejecting everything.
+eq('...while a real town among them still wins',
+   MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'y, Smyrna' }]), 'Smyrna');
+// Nothing to go on is answered as nothing, so the page leaves the box empty
+// and says so rather than inventing a metro.
+eq('places with no town in them give no hint',
+   MV.localityOf([{ pickup: 'McDonalds' }, { dropoff: 'Wendys' }]), null);
+eq('...and no offers at all give none', MV.localityOf([]), null);
+eq('...and neither does nothing', MV.localityOf(null), null);
+
 /* ---- a pin that cannot be in this shift --------------------------------- */
 var FOUND = {
   'Chipotle': { lat: 33.90, lon: -84.50 },

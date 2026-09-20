@@ -307,21 +307,35 @@ few seconds after `listen` rather than running it inline.
 
 ### The maps
 
-**Do not sync the geocode cache to the NUC.** This was listed under Open as
-"the one thing the owner asked to sync that does not". That premise is wrong:
-the owner asked for *data* to sync, and this is a third party's answer to a
-question the browser can ask again at 1.1s apiece. The payoff is already
-measured in `advice.js` — "971 place sightings hold 814 distinct places: a
-cache built from three days of driving covers 11% of the next day's.
-Restaurants repeat; customers do not." Against 11%, a sync costs three things:
+**The geocode cache IS worth keeping — this entry was wrong, and is corrected
+here rather than deleted.** It argued that the cache should not be kept on a
+server because it is "regenerable", leaning on `advice.js`'s measurement that a
+cache built from three days covers 11% of the next day's places. Two things
+were wrong with that:
 
-- **It routes around `keepPlaces: false`.** The cache key *is* the place name,
-  so a driver who turned place-keeping off would have customer addresses
-  travelling between machines anyway, by a door nobody thought about.
-- **There is no timestamp to break a tie.** Two machines that answered the same
-  string differently have no rule for which wins, and nothing would notice.
-- **It is regenerable.** It is the one file here that can be rebuilt by asking
-  again, which is the opposite of the journal's situation.
+- **Regenerable is not the same as cheap.** Measured on the owner's real week,
+  1,325 distinct places at the one-a-second rate limit is about **24 minutes**
+  to rebuild. The 11% figure is about a *later day's* places; it says nothing
+  about re-placing the days you already placed, which is what actually happens
+  when the cache is lost.
+- **It was localStorage and nothing else**, so it belonged to whichever browser
+  did the placing. Laptop then phone is two full runs, and clearing site data
+  loses it.
+
+The privacy objection was wrong too. The cache key *is* the place name — and
+those names are already on any machine running this, because `pickup` and
+`dropoff` are fields on every journal row and the journal already syncs. What a
+cache adds is a latitude and longitude for a string that is there anyway.
+
+So: `GET`/`POST /api/places`, stored in its own file beside the journal. Done.
+**Deliberately not in the journal**: ingest's idempotence is a syncKey set over
+the whole file, and something regenerable has no business sharing a file with
+the one artefact that is not. And the rig still never geocodes — this stores an
+answer the browser already holds; nothing on this side asks anybody anything.
+
+Still true from the original entry, and still the reason there is no
+newest-wins rule: two machines that answered the same string differently have
+no way to choose, so the first answer stands until "Forget lookups".
 
 The *merge* the entry pointed at had a real bug, and that is fixed — see Done.
 
@@ -465,9 +479,14 @@ The deadline path is not dead code — the corpus has such cards — but it has
 never fired for them, so a claim that it matters "on every delivery card" should
 not be repeated without saying whose.
 
-**No row carries a GPS position.** `map.html` says "none carry a position", and
-that is what makes every lookup on that page an unboxed one. See the Open entry
-below.
+**No row carries a GPS position.** `map.html` says "none carry a position", so
+`anchorFor` answers null for every place and nothing can be boxed. Combined with
+a `near` field that held a *placeholder* rather than a value, every one of the
+1,325 distinct places went to a world-wide geocoder as a bare string — and 47
+came back "nowhere near the rest", up to 7,627 miles out: Papa Johns Pizza,
+McDonald's, Burger King, Wendy's. Fixed by `localityOf`, which reads the town
+back off the driver's own cards. Whether the rig's GPS should be recording a
+position on rows at all is a separate question nobody has asked yet.
 
 ---
 

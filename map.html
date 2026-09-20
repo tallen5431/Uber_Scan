@@ -244,11 +244,56 @@
   /* One geocoder for the page, so the one-a-second rule is a property of the
      page and not of whichever loop happens to be running. */
   var CACHE_KEY = 'uberscan.geocode.v1';
+  /* Answers that have not reached the server yet, and the timer that sends
+     them. Batched rather than one POST per place: the walk answers at one a
+     second for minutes on end, and a request per answer would be a request per
+     second alongside the geocoding. */
+  /* What this server already holds, so the same answer is not sent back to it
+     on every write. Filled by loadPlaces; empty until then, which costs one
+     redundant POST of whatever the device already knew. */
+  var onServer = {};
+  var unsent = {}, sending = null;
+  function pushPlaces() {
+    sending = null;
+    var batch = unsent;
+    unsent = {};
+    if (!Object.keys(batch).length) return;
+    fetch('/api/places', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(batch)
+    }).then(function (r) { return r.json(); }).then(function (body) {
+      if (!body || !body.ok) throw new Error((body && body.error) || 'refused');
+    }).catch(function (e) {
+      // Put them back and say so. These are minutes of rate-limited looking-up
+      // and a failure that only reached the console would read, next time, as
+      // the cache simply not having them.
+      Object.keys(batch).forEach(function (k) { unsent[k] = batch[k]; });
+      say('looked up, but could not save to this server ('
+          + (e && e.message || e) + ') — they are still on this device');
+    });
+  }
   var geo = new MV.Geocoder({
     hint: function () { return el.hint.value; },
     store: {
       get: function () { return localStorage.getItem(CACHE_KEY); },
-      set: function (s) { localStorage.setItem(CACHE_KEY, s); },
+      set: function (s) {
+        localStorage.setItem(CACHE_KEY, s);
+        // What changed since the last write, worked out here rather than
+        // handed down: the Geocoder's store is a string in and a string out,
+        // and widening that interface for one caller would put a second rule
+        // about what a cache IS into a file that has one.
+        var now = {};
+        try { now = JSON.parse(s) || {}; } catch (e) { now = {}; }
+        Object.keys(now).forEach(function (k) {
+          if (!Object.prototype.hasOwnProperty.call(onServer, k)) {
+            unsent[k] = now[k];
+            onServer[k] = now[k];
+          }
+        });
+        if (!sending && Object.keys(unsent).length) {
+          sending = setTimeout(pushPlaces, 2000);
+        }
+      },
       clear: function () { localStorage.removeItem(CACHE_KEY); }
     }
   });
@@ -258,10 +303,47 @@
    * Straight off /api/journal, which is the same list the offers page reads,
    * so anything wrong here is wrong there too rather than being an artefact of
    * this page. */
+  /* Everything this server has been told about a place, merged into whatever
+     this device already knew.
+     Merged and not replaced, in that direction, for the reason the Geocoder's
+     own remember() merges: this browser may hold answers that have not reached
+     the server, and a load that overwrote them would throw away exactly the
+     work a failed POST was holding on to. */
+  function loadPlaces() {
+    return fetch('/api/places').then(function (r) { return r.json(); })
+      .then(function (body) {
+        if (!body || !body.ok) return 0;
+        var held = body.places || {};
+        onServer = held;
+        var mine = {};
+        try { mine = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') || {}; }
+        catch (e) { mine = {}; }
+        var gained = 0;
+        Object.keys(held).forEach(function (k) {
+          if (!Object.prototype.hasOwnProperty.call(mine, k)) {
+            mine[k] = held[k];
+            gained++;
+          }
+        });
+        if (gained) {
+          try { localStorage.setItem(CACHE_KEY, JSON.stringify(mine)); }
+          catch (e) { /* full, or site data blocked: the server copy stands */ }
+          geo.cache = mine;
+        }
+        return gained;
+      })
+      .catch(function () {
+        // An older server has no such endpoint, and this page still works
+        // exactly as it did — the device's own cache is untouched.
+        return 0;
+      });
+  }
+
   function load() {
     var days = Math.max(1, Math.min(365, Number(el.days.value) || 7));
     say('loading…');
     el.place.disabled = true;
+    loadPlaces();
     fetch('/api/journal?days=' + days + '&limit=5000')
       .then(function (r) { return r.json(); })
       .then(function (body) {
@@ -289,10 +371,31 @@
           ? ' · newest ' + offers.length + ' of ' + body.total
             + ' — narrow the days to see the rest'
           : '';
+        /* Fill the "near" box, if the driver has not.
+         *
+         * It held a PLACEHOLDER — grey "Georgia, USA" — which reads as a value
+         * and is not one. With no fix on any row nothing can be boxed either,
+         * so every place went to a world-wide geocoder as a bare string, and
+         * "McDonald's" comes back as a real McDonald's 4,801 miles away. On one
+         * real week that produced 47 pins "nowhere near the rest".
+         *
+         * The town comes off the driver's own cards — see localityOf — and it
+         * goes in as a real, visible, editable value rather than a default
+         * hidden in the code, because the next thing the driver does with this
+         * page is judge whether the rig is right and they cannot judge a hint
+         * they cannot see.
+         *
+         * Only when the box is empty: a driver who typed something meant it. */
+        var town = MV.localityOf(offers);
+        var filled = '';
+        if (town && !el.hint.value.trim()) {
+          el.hint.value = town;
+          filled = ' · searching near ' + town + ', off your own cards';
+        }
         say(offers.length + ' offers · ' + withEnds.length + ' name somewhere · '
             + mappable.length + ' name both ends'
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
-                            : ' · none carry a position') + short);
+                            : ' · none carry a position') + filled + short);
         el.place.disabled = withEnds.length === 0;
         render([], {}, {});
       })
