@@ -35,6 +35,44 @@ file.
 the last frame of the batch whether or not it carried a payout. `read_the_money`
 now picks the newest frame that states one and folds the rest in. `123fa02`.
 
+**The card's own border was read as a divider, so a merchant was cut in half
+and its tail welded onto the destination.** A branch address is bracketed and
+wraps across two lines; the crop takes the card's border with it and the reader
+returns it as a pipe at the head of the continuation line. `find_places` split
+on the first pipe unconditionally, so `Hooters (Old 41 Hwy NW & N | Roberts
+Rd)` became a pickup of `Hooters (Old 41 Hwy NW & N` and a dropoff beginning
+`Roberts Rd)`. Measured on the owner's week — **48 of 580 stored dropoffs
+(8.3%) and 21 of 1,107 pickups carry an unmatched `)`**, and on 41 of the 48
+the text before the stray bracket is a substring of that same card's own
+pickup, so it is the merchant's name and not a coincidence of shape. Three
+changes, mirrored in both ports: `_divider_bar` ignores a pipe standing between
+a `(` and its `)`; `_cut_at_tail` replaces `PLACE_TAIL.split(...)[0]`, which
+cannot tell a border from a divider because split does not say where the match
+was; and `_closes_what_it_never_opened` refuses a place carrying half a bracket
+outright, because nothing can say where the seam was. Re-parsing all 1,166 real
+texts: **poisoned places 51 → 0, dropoffs named 476 → 500**, pickups unchanged
+at 1,080, and **0 disagreements between the Python and JavaScript ports before
+or after**. The bracket must CLOSE — without that clause a `(` the camera made
+out of sludge disarms the stopper for the rest of the line — and the refusal is
+one-directional: making it symmetrical costs 29 of the 500 dropoffs and 8 of
+the 1,080 pickups, all clean addresses. Four cases in the shared corpus's
+`places` section; every clause dies to a mutation, including the one that
+passes before and after, which exists so nobody reads this as "a pipe never
+divides".
+
+*The cost, stated rather than buried.* Seven rows lose their dropoff. Four of
+the seven had a poisoned one (`'Hedgeway Cir & Hedgeway Ct ,) tt Kennesaw'`)
+and are the fault being fixed. On the other three — rows 2, 434 and 822 of the
+export — the *old pickup* was the garbage (`'Rd)'`, `'Parkway NW, STE 100)'`),
+the real address is still read and still stored in `places`, and it is now
+labelled the pickup because it is the only place on the card. A destination
+recorded as a pickup is wrong, and it is `find_dropoff`'s rule for a lone place
+rather than anything this change introduced. Left alone deliberately: see Open.
+
+*Rows already in the journal are not repaired by this and cannot be.* It stops
+the 48-a-week from growing. The 69 poisoned strings already written are there
+for good, and `places.json` holds a geocode for some of them.
+
 ### The order in the car
 
 **A destination scanned while SCREENING lost its provenance the moment the card
@@ -164,6 +202,31 @@ about its shape. Removed from the stored row. **On the READING payload the
 distinction is real and must stay** — `scan_pi.emit()` sends both as different
 claims and they diverge on every deadline card. That half of the filed finding
 is refuted; see Settled.
+
+**The unsent queue had no ceiling and swallowed every storage failure, so
+offers stopped being saved and the phone went on buzzing.** `journal-client.js`
+saved the queue with `try { localStorage.setItem(...) } catch (e) {}` and
+`keep()` handed the row back regardless, so the caller could not tell a row
+that was kept from one that was not. `scan.js` buzzed and showed the verdict
+either way; `ui.js` read `.id` off the return and **threw inside `logOffer`**,
+where nothing catches — so on the keypad the press did nothing at all: no
+history entry, no buzz, no toast, the typed figures still on the keys.
+Measured against the owner's own week rather than argued: a stored row is 831
+bytes of JSON at the mean and 987 at the ninetieth (1,166 offers put through
+`row()` one at a time), so at Chrome's 5MB — charged in UTF-16, as it charges
+it — four passes of that week put 4,664 offers to `keep()`, it said yes to all
+4,664, **3,265 landed and 1,399 went nowhere**, and from row 3,266 onward every
+offer was lost, permanently, until a rig answered. Now: a `QUEUE_CAP` of 1,000
+— six days of that week's heaviest scanning with a rig never once reachable —
+shedding oldest-first and counting what it shed and through what time; `save()`
+reports instead of swallowing; a refused write sheds *nothing*, because it
+never landed, so the rows already queued are exactly where they were and only
+the row in hand is lost. `keep()` returns null for that row, `scan.js` leads
+its status line with it the way `live.html` leads its notes with `notSaving`,
+and the keypad marks the entry "not in the journal" rather than letting it read
+like one that is merely waiting. The backlog itself is named too — "N offers
+waiting — the rig has not answered" — which is the only one of the three a
+driver can still act on, and it appears long before either ceiling.
 
 **The box note went stale in both directions, and the worse one was unfiled.**
 `setAdjusting()` writes its sentence only at the instant adjust mode is
@@ -564,7 +627,9 @@ dropoffs hold an unmatched `)`:
 
 A merchant name wrapping across lines is being cut in the wrong place, and the
 tail is prepended to the dropoff. That string then goes to a geocoder, so this
-is one of the sources of the stray pins on `map.html`.
+is one of the sources of the stray pins on `map.html`. **Fixed** — the card's
+own border was being read as a divider; see "The reader" under Done. The rows
+already written keep their poisoned strings.
 
 **No deadline cards at all.** `fromDeadline` and `deliverBy` are 0 of 1,166, and
 `items` is filled on 4.2%. This driver is on Uber, whose cards state a duration.
@@ -619,6 +684,18 @@ are the corrections both attackers converged on, and they are not optional:
 The thing the driver came to compare has to be told apart by clicking each dot.
 `mapDot` already takes a `ring` flag that carries the right meaning. Same job as
 the entry above; do them together.
+
+**A card with one readable place calls it the pickup, whichever end it is.**
+Exposed, not caused, by the bracket fix above: once the garbage half is refused
+the card often has exactly one place left, and on rows 2, 434 and 822 of the
+owner's week that one place is the *destination* — `'Brookstone Walk NW &
+Downington Trl NW, Acworth'` — now recorded as where the job started. The
+string is read and stored either way; only the label is wrong. Fixing it means
+changing how `find_pickup`/`find_dropoff` choose the two ends out of the merged
+list, which is `MAX_PLACES` and the last-entry rule and a blast radius of its
+own, so it was deliberately not bundled with a parser fix that had to be shown
+to move nothing else. Three rows of 1,166 today; it will matter more to the
+heat map below than it does to the panel.
 
 **`judge()`'s "this cannot be right" uses a distance the rig already distrusted.**
 Where `milesUncertain` is set there is no yardstick at all, so the pair should be

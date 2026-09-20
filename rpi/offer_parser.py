@@ -1269,6 +1269,89 @@ def merge_place(places, value):
     return places
 
 
+def _inside_a_bracket(value, at):
+    """Is `at` inside a bracket the card opened and closes again?
+
+    A merchant's branch address is bracketed and wraps across two lines. The
+    crop takes the card's own border with it, and the border comes back from
+    the reader as a pipe at the head of the continuation line — so a pipe
+    standing between a `(` and its `)` is the frame's edge, not a divider
+    between two places. Splitting there cuts the merchant in half and welds
+    its tail onto whatever follows, which is the whole fault this answers.
+
+    The bracket has to CLOSE, and that clause is load-bearing rather than
+    caution: an unclosed `(` is as often one the camera made out of sludge,
+    and without the clause one of those switches the pipe stopper off for the
+    rest of the line. Measured on a real frame of this driver's —
+    `22min(@smi total a / Asian Garden a / . | I Elderberry Dr NW & ...` —
+    the loose version stores `'(@smi total a Asian Garden'` as a place.
+    """
+    if value.count('(', 0, at) <= value.count(')', 0, at):
+        return False
+    return value.find(')', at) >= 0
+
+
+def _cut_at_tail(value):
+    """Cut a place at the first stopper, with the card's border marks removed.
+
+    `PLACE_TAIL.split(value)[0]` was what this replaced, and it cannot tell a
+    border from a divider, because split does not know where the match was.
+    """
+    out, at = [], 0
+    for m in PLACE_TAIL.finditer(value):
+        if m.group(0) == '|' and _inside_a_bracket(value, m.start()):
+            out.append(value[at:m.start()])
+            at = m.end()
+            continue
+        return ''.join(out) + value[at:m.start()]
+    return ''.join(out) + value[at:]
+
+
+def _divider_bar(value):
+    """The first pipe that divides two places, or -1.
+
+    The pipe split below it stays exactly as it was for every card that has a
+    real divider — it was added for a disagreement between the phone and the
+    rig on 21 of 309 cards, and this must not undo it.
+    """
+    at = value.find('|')
+    while at >= 0:
+        if not _inside_a_bracket(value, at):
+            return at
+        at = value.find('|', at + 1)
+    return -1
+
+
+def _closes_what_it_never_opened(value):
+    """A `)` with nothing opening it: half of one field welded onto another.
+
+    Nothing here can say where the seam was, so the place is refused rather
+    than repaired. Repairing it — cutting everything up to the stray `)` — was
+    tried and measured on this driver's week: the stray sits past position 20
+    on 7 of them, where it is icon-row sludge rather than a seam, and
+    `'McDuffie Cir & Stanley Dr, . . Douglasville s ED) 5-10 bags'` becomes
+    `'5-10 bags'`. A name invented out of a bad reading is the thing this
+    parser refuses everywhere else.
+
+    ONE DIRECTION ONLY, and this is the line a reader will want to
+    symmetrise. An unmatched `(` is the ordinary end of the 130-character leg
+    window landing inside a merchant's bracket, and refusing those costs 29 of
+    the 500 dropoffs and 8 of the 1,080 pickups this parser reads off the
+    owner's 1,166-offer week — clean addresses, every one: 'Lakefield Ct &
+    Lakefield Walk, Marietta', 'Scenic Mountain Dr SE, Acworth'. Measured, by
+    making it symmetrical and counting. Do not.
+    """
+    depth = 0
+    for ch in value:
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            if depth == 0:
+                return True
+            depth -= 1
+    return False
+
+
 def trim_place(value):
     """One address, with the card's furniture taken off both ends.
 
@@ -1300,7 +1383,7 @@ def trim_place(value):
             break
         parts = shorter
 
-    parts = PLACE_TAIL.split(' '.join(parts))[0].split()
+    parts = _cut_at_tail(' '.join(parts)).split()
     while parts and scrap(parts[-1], PLACE_TRAIL_KEEP):
         parts.pop()
     return ' '.join(parts).strip(' .,-;:|')
@@ -1680,6 +1763,8 @@ def find_places(text, legs):
         value = trim_place(value)
         if len(value) < 3 or len(value) > MAX_PLACE:
             return
+        if _closes_what_it_never_opened(value):
+            return
         if not re.search(r'[A-Za-z]{2}', value):
             return
         if value.lower() not in [v.lower() for v in out]:
@@ -1736,7 +1821,7 @@ def find_places(text, legs):
         # case reached it, because a pipe is what a camera makes of a line and
         # no hand-written fixture had one.
         pieces = [tail]
-        bar = tail.find('|')
+        bar = _divider_bar(tail)
         if bar >= 0 and looks_like_a_place(trim_place(tail[bar + 1:])):
             pieces = [tail[:bar], tail[bar + 1:]]
         for piece in pieces:

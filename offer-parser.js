@@ -732,6 +732,103 @@
      Shiloh Rd Nw)" — so taking the closing one off leaves a dangling open
      bracket and a name that reads as truncated, and the two ports would store
      the same merchant under two different strings. */
+  /* Is `at` inside a bracket the card opened and closes again?
+   *
+   * A merchant's branch address is bracketed and wraps across two lines; the
+   * crop takes the card's own border with it and the border comes back as a
+   * pipe at the head of the continuation line. So a pipe between a `(` and its
+   * `)` is the frame's edge, not a divider between two places. The bracket has
+   * to CLOSE: an unclosed one is as often a `(` the camera made out of sludge,
+   * and that must not switch the stopper off for the rest of the string.
+   * Measured on a real frame of this driver's — `22min(@smi total a / Asian
+   * Garden a / . | I Elderberry Dr NW & ...` — the loose version stores
+   * `'(@smi total a Asian Garden'` as a place. The Python twin is
+   * rpi/offer_parser.py's `_inside_a_bracket`. */
+  function insideABracket(value, at) {
+    var open = 0, close = 0, i;
+    for (i = 0; i < at; i++) {
+      if (value.charAt(i) === '(') open++;
+      else if (value.charAt(i) === ')') close++;
+    }
+    return open > close && value.indexOf(')', at) >= 0;
+  }
+
+  /* Cut a place at the first stopper, with the card's border marks removed.
+   *
+   * `split(PLACE_TAIL)[0]` was what this replaced, and it cannot tell a
+   * border from a divider, because split does not say where the match was.
+   *
+   * The flags come off PLACE_TAIL rather than being written out again: it is
+   * one regex, and a second statement of its flag set is a second place to
+   * get it wrong. (The corpus does catch the drift — dropping the `i` fails
+   * three `places` cases — so this is hygiene, not a hole.) The `g` already
+   * there is taken off first: `new RegExp(source, 'gg')` throws, and this
+   * runs at parse time on every page, so PLACE_TAIL gaining a `g` one day
+   * would be a blank screen rather than a wrong place. */
+  function cutAtTail(value) {
+    var flags = PLACE_TAIL.flags.replace(/g/g, '') + 'g';
+    var re = new RegExp(PLACE_TAIL.source, flags), out = '', at = 0, m;
+    while ((m = re.exec(value)) !== null) {
+      if (m[0] === '|' && insideABracket(value, m.index)) {
+        out += value.slice(at, m.index);
+        at = m.index + m[0].length;
+        re.lastIndex = at;
+        continue;
+      }
+      return out + value.slice(at, m.index);
+    }
+    return out + value.slice(at);
+  }
+
+  /* The first pipe that divides two places, or -1.
+   *
+   * The pipe split this feeds stays exactly as it was for every card with a
+   * real divider — it was added for a disagreement between the phone and the
+   * rig on 21 of 309 cards, and this must not undo it. */
+  function dividerBar(value) {
+    var at = value.indexOf('|');
+    while (at >= 0) {
+      if (!insideABracket(value, at)) return at;
+      at = value.indexOf('|', at + 1);
+    }
+    return -1;
+  }
+
+  /* A `)` with nothing opening it: half of one field welded onto another.
+   *
+   * Nothing here can say where the seam was, so the place is refused rather
+   * than repaired. Repairing it — cutting everything up to the stray `)` —
+   * was tried and measured on this driver's week: the stray sits past
+   * position 20 on 7 of them, where it is icon-row sludge rather than a seam,
+   * and `'McDuffie Cir & Stanley Dr, . . Douglasville s ED) 5-10 bags'`
+   * becomes `'5-10 bags'`.
+   *
+   * ONE DIRECTION ONLY, and this is the line a reader will want to
+   * symmetrise. An unmatched `(` is the ordinary end of the 130-character leg
+   * window landing inside a merchant's bracket, and refusing those costs 29
+   * of the 500 dropoffs and 8 of the 1,080 pickups this parser reads off the
+   * owner's 1,166-offer week — clean addresses, every one: 'Lakefield Ct &
+   * Lakefield Walk, Marietta', 'Scenic Mountain Dr SE, Acworth'. Measured, by
+   * making it symmetrical and counting. Do not.
+   *
+   * It took a `mark` argument so it could be asked about `(` too, and no
+   * caller in either port ever passed one: the whole reversed-string half was
+   * a branch no input could reach, standing there as an invitation to do the
+   * thing the paragraph above says not to. The Python twin is
+   * rpi/offer_parser.py's `_closes_what_it_never_opened`. */
+  function closesWhatItNeverOpened(value) {
+    var depth = 0, i, ch;
+    for (i = 0; i < value.length; i++) {
+      ch = value.charAt(i);
+      if (ch === '(') depth++;
+      else if (ch === ')') {
+        if (depth === 0) return true;
+        depth--;
+      }
+    }
+    return false;
+  }
+
   function trimPlace(value) {
     function scrap(token, keep) {
       var core = String(token).replace(PLACE_EDGE, '');
@@ -751,7 +848,7 @@
       if (shorter.join(' ') === parts.join(' ')) break;
       parts = shorter;
     }
-    parts = parts.join(' ').split(PLACE_TAIL)[0].split(/\s+/).filter(Boolean);
+    parts = cutAtTail(parts.join(' ')).split(/\s+/).filter(Boolean);
     while (parts.length && scrap(parts[parts.length - 1], PLACE_TRAIL_KEEP)) parts.pop();
     return parts.join(' ').replace(/^[\s.,\-;:|]+|[\s.,\-;:|]+$/g, '');
   }
@@ -1012,6 +1109,7 @@
     function keep(value) {
       value = trimPlace(value);
       if (value.length < 3 || value.length > MAX_PLACE) return;
+      if (closesWhatItNeverOpened(value)) return;
       if (!/[A-Za-z]{2}/.test(value)) return;
       for (var i = 0; i < out.length; i++) {
         if (out[i].toLowerCase() === value.toLowerCase()) return;
@@ -1048,7 +1146,7 @@
       // stored — `1 min ~ 4 . mins | . = | i oO < * ~~ agama ae ae; i Old
       // Mountain Rd NW, Kennesaw` passes on the address buried at the end of it
       // and then goes into the journal sludge and all.
-      var pieces = [tail], bar = tail.indexOf('|');
+      var pieces = [tail], bar = dividerBar(tail);
       if (bar >= 0 && looksLikeAPlace(trimPlace(tail.slice(bar + 1)))) {
         pieces = [tail.slice(0, bar), tail.slice(bar + 1)];
       }
