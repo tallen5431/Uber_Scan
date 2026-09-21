@@ -718,9 +718,20 @@ function offer(atMinutes, pay, minutes, cost) {
   // with a net rate, which is the mixing of two kinds of money that caps
   // `state` seventeen lines above it. A pay of 40 against a held job of 12
   // clears by any measure; the point is that the rig will not say so.
+  //
+  // NULL, not false. Withheld and answered-no were the same value here, and a
+  // reader cannot undo that: the offers page printed `sure ? yes : 'no — the
+  // worst end is below finishing alone'` and so announced the opposite of the
+  // truth on every withheld pair. This case is one — pay 40 against a held 12
+  // clears comfortably — so `false` here would be a wrong answer, not a
+  // missing one.
   eq('the unhedged claim is withheld when the offer has no cost taken off',
      A.stack(active(), newOffer({ pay: 40, cost: 0 }), SET, T0 + 10 * 60000).sure,
-     false);
+     null);
+  ok_('...and withheld is a different value from answered-no, or no reader '
+      + 'downstream can tell them apart',
+      A.stack(active(), newOffer({ pay: 40, cost: 0 }), SET, T0 + 10 * 60000).sure
+      !== A.stack(active(), newOffer({ pay: 1 }), SET, T0 + 10 * 60000).sure);
   ok_('...and the pair is still reported, marked as a ceiling',
       A.stack(active(), newOffer({ pay: 40, cost: 0 }), SET, T0 + 10 * 60000).uncosted);
   // The asymmetry is deliberate. A gross HELD job inflates netA, which sits in

@@ -1816,9 +1816,25 @@
             : null)
       // The one claim in the whole answer that does not depend on geography,
       // and therefore the only one worth stating without a hedge.
+      // Three answers, because the record has three. `sure` is null where the
+      // panel declined to make the claim at all: the offer card printed no
+      // distance, so the pair's rate is a ceiling and `alone` is a net rate,
+      // and the two are different kinds of money. That was printed here as
+      // "no — the worst end is below finishing alone", which is not a hedge
+      // and not a silence but the OPPOSITE of what was withheld: on the
+      // (held, gross-offer) pairs drawable from the owner's week the claim is
+      // true 77.4% of the time. See advice.js, where the withholding is
+      // decided and now said.
+      //
+      // Rows written before that distinction reached the record carry `false`
+      // for both, and nothing can tell them apart afterwards — the comparison
+      // this rests on is not in the file. They read as the no.
       + row('Beats finishing what you have', s
-            ? (s.sure ? 'yes, even sharing no road at all'
-                      : 'no — the worst end is below finishing alone') : null)
+            ? (s.sure === true ? 'yes, even sharing no road at all'
+               : s.sure === false ? 'no — the worst end is below finishing alone'
+               : 'not said — this card printed no distance, so the pair’s '
+                 + 'rate above is a ceiling and there is nothing to hold '
+                 + 'against the job already in the car') : null)
       + row('Where they end', s
             ? (ends || 'the cards did not print enough to say') : null)
       + '</dl><h3>What you did</h3>'
@@ -2506,9 +2522,23 @@
     // row: the 1e20 stamp CLOCK_BELIEVABLE_UNTIL was added for. The server
     // filters the low end of that range and not the high one.
     var noHour = 0;
+    // ...and the same verdict, kept, for the chart below this one.
+    //
+    // A stamp no clock can read has no hour AND no weekday, and that is one
+    // fact, decided once, rather than two tests that can drift apart. The
+    // day-of-week pass below used to walk `offers` itself and index its array
+    // with `dayOf(r.at).getDay()` — NaN on such a row, `week[NaN]` undefined,
+    // and the push threw. Inside a .then(), so the TypeError went to load()'s
+    // .catch() and the page painted "Cannot reach the scanner" over a journal
+    // the server had read perfectly and answered 200 with: headline, both
+    // charts, the week chart, "What you took", the whole offer log and every
+    // caveat line gone, with nothing in the console. The same guard was
+    // written for this pass and never given to the one 70 lines below it.
+    var placed = [];
     offers.forEach(function (r) {
       var b = Advice.blockOf(r.at);
       if (b === null) { noHour += 1; return; }
+      placed.push(r);
       blocks[b].rates.push(r.perHour);
       daysSeen[dayKey(r.at)] = true;
     });
@@ -2545,10 +2575,31 @@
       { name: 'Shop', rates: [] },
       { name: 'Not stated', rates: [] }
     ];
+    //
+    // The rule was `r.shop ? Shop : r.legs >= 2 ? Rides
+    //                     : (typeof r.shop === 'boolean' || r.items) ? Shop
+    //                     : Not stated`, and it did the opposite of the
+    // paragraph above it. The `typeof` clause is unreachable: it needs r.shop
+    // falsy AND a boolean, i.e. exactly `false`, and no writer can produce
+    // that — rpi/journal.py writes `True if parsed.get('shop') else None`,
+    // journal-client.js writes `parsed.shop ? true : null`, and the parser
+    // itself only ever emits True or None. Measured over the owner's week:
+    // 1,133 rows carry no shop field and 33 carry a truthy one; none carries
+    // a false one. So the clause that actually decided it was `r.items` —
+    // exactly the "fact about the OCR" the paragraph refuses to split on, and
+    // rate()'s own comment records DoorDash printing "4 items" on a restaurant
+    // pickup nobody shops for.
+    //
+    // On the replayed week the shipped rule gave Rides 109 / Shop 49 (median
+    // $12.42) / Not stated 982, and 26 of those 49 — 53% of the bar — were
+    // single-leg cards the card never called a shop order. Splitting on the
+    // chip alone gives Rides 109 / Shop 23 ($11.05) / Not stated 1,008: a bar
+    // that is what its label says, over a median $1.37 lower than the one the
+    // page was printing.
     offers.forEach(function (r) {
       var which = r.shop ? 1
         : (r.legs >= 2 ? 0                 // two legs is a ride card's shape
-           : (typeof r.shop === 'boolean' || r.items ? 1 : 2));
+           : 2);                           // no chip read: genuinely unstated
       kinds[which].rates.push(r.perHour);
     });
     kinds = kinds.filter(function (k) { return k.rates.length; });
@@ -2584,14 +2635,23 @@
     var enoughDays = dayCount >= WEEK_NEEDS_DAYS;
     var week = WEEKDAYS.map(function (name) { return { name: name, rates: [] }; });
     if (enoughDays) {
-      offers.forEach(function (r) {
+      // `placed`, not `offers`: the rows the pass above could put an hour on,
+      // which are exactly the rows this one can put a weekday on. See the
+      // comment there — walking `offers` here threw on a stamp past the end of
+      // time and took the whole page with it.
+      placed.forEach(function (r) {
         week[dayOf(r.at).getDay()].rates.push(r.perHour);
       });
     }
     week.push(week.shift());                       // Monday first, Sunday last
     el.weekHead.hidden = !enoughDays;
     el.weekHead.innerHTML = 'By day of week <em>· median $/hr, across '
-      + dayCount + ' day' + (dayCount === 1 ? '' : 's') + '</em>';
+      + dayCount + ' day' + (dayCount === 1 ? '' : 's')
+      // Said here as well as over the chart above, because the rows left out
+      // are the same rows and a reader of this chart should not have to have
+      // read the other heading to know it is short.
+      + (noHour ? ', ' + noHour + ' with an unreadable time left out' : '')
+      + '</em>';
     el.week.innerHTML = !enoughDays ? '' : week.map(function (w) {
       return bar(w.name, w.rates, full, target, band);
     }).join('');
@@ -2611,7 +2671,21 @@
              pairedBy: pairedBy, data: data };
     renderList();
 
-    showCaveats(data, setAside, newest, ticks, kept);
+    // `offers`, not `kept`: the rows the figures above are actually made of.
+    //
+    // This handed over `kept`, which is every row in the window including the
+    // ones the note directly above it has just said were "left out of the
+    // figures above" — so the sentence about running costs described a
+    // different population from the one it is about, and counted the excluded
+    // rows into its own denominator. On the replayed week that is 26 of 1,166.
+    //
+    // Not only the count. A set-aside row is the likeliest one to carry a
+    // different cost per mile, because the keypad and the phone write zero
+    // where the rig writes $0.30 — so a window whose counted rows are all net
+    // and whose one doubtful row came off the keypad printed "the figures
+    // above mix what offers paid before the car with what they paid after
+    // it" over figures that mix nothing at all.
+    showCaveats(data, setAside, newest, ticks, offers);
 
     // Said rather than only drawn. Everything above this point is a redraw
     // with no event a screen reader can notice.
@@ -2796,6 +2870,17 @@
         showPairs([]);
         el.blockScale.innerHTML = '';
         el.findNote.hidden = true;
+        // The three figures the page exists for, which this did not clear.
+        //
+        // They are the largest text on the screen and the only thing above the
+        // fold, so a failed range press left "$14 · $22 · $31 /hr" standing in
+        // full size over "Cannot reach the scanner" — last window's answer,
+        // unlabelled, to a question the driver has since asked differently.
+        // The headline underneath them was blanked from the first version of
+        // this handler; these were missed because they are written in a
+        // different place from it (see the empty-window path, which has always
+        // set all three to '--').
+        el.p25.textContent = el.p50.textContent = el.p75.textContent = '--';
         el.headline.textContent = '';
         el.blocks.innerHTML = el.kinds.innerHTML = el.log.innerHTML = '';
         el.blocksHead.hidden = el.kindsHead.hidden = el.weekHead.hidden = true;

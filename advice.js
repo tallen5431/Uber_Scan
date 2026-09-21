@@ -602,7 +602,21 @@
       // Withheld only when the OFFER is the gross one. See offerGross: a gross
       // held job pushes this the other way and understates it, which is the
       // safe direction and not worth losing a true claim over.
-      sure: !offerGross && worst >= alone,
+      //
+      // THREE VALUES, not two. Withheld is `null`; `false` means the claim was
+      // made and is no. They were the same value here, and a reader cannot
+      // undo that: the offers page printed `sure ? yes : "no — the worst end
+      // is below finishing alone"` and so announced the OPPOSITE of the truth
+      // on every withheld pair. Of the (held, gross-offer) pairs that can be
+      // drawn from the owner's own week, 77.4% have worst >= alone, so the
+      // printed "no" is false about three times in four.
+      //
+      // Null and not a separate field because there is one question here and
+      // one answer to it, and "not asked" is one of the answers. Every reader
+      // that tests it for truth — live.html's ' · beats finishing alone', the
+      // panel's own line — keeps behaving exactly as before, because null is
+      // falsy and saying nothing is what withheld means to them.
+      sure: offerGross ? null : worst >= alone,
       // Where the two jobs END, compared as coarsely as the cards allow. This
       // is the half of the question the time arithmetic above cannot reach:
       // `maxMinutes` assumes nothing is shared and `minMinutes` assumes the

@@ -1037,7 +1037,15 @@ function recordPairing(offer, now, reading) {
                  // it a capped CLOSE CALL and a genuine one are the same row
                  // in the record, and they are not the same call.
                  uncosted: !!s.uncosted,
-                 state: s.state, sure: !!s.sure, ends: s.ends || null } : null,
+                 // Three-valued, and `!!` flattened it to two. `null` is the
+                 // claim WITHHELD — the offer card printed no distance, so
+                 // the pair's rate is a ceiling and cannot be held against
+                 // the job in the car — and `false` is the claim made and
+                 // answered no. Coerced together, the record could not tell
+                 // the offers page which it was, and the page printed the no.
+                 state: s.state,
+                 sure: s.sure === null ? null : !!s.sure,
+                 ends: s.ends || null } : null,
     // False when this row was written with no reading to take the driver's
     // target from, so the state above is not what was on the panel. Absent
     // from rows written before this existed, which is the same unknown.

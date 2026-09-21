@@ -1455,6 +1455,100 @@ picks between them on `last.ready` — a phase message alone does not move it,
 so a check that means to measure the between-offers branch has to send a
 reading that is not ready.
 
+### The offers page
+
+**A pairing's withheld claim was printed as its opposite.** "Beats finishing
+what you have" is the one clause of a stacking answer stated flat, because it
+is the only one that does not depend on the geography. `Advice.stack` returns
+`sure` for it and that field had three meanings in two values: the claim made
+and yes, the claim made and no, and the claim **withheld** because the offer
+card printed no chargeable distance, so the pair's rate is a ceiling while the
+rate it would be held against is net. `journal.html` read it as `sure ? 'yes,
+even sharing no road at all' : 'no — the worst end is below finishing alone'`,
+so every withheld pairing was told the opposite of what had been withheld. Of
+the (held, gross-offer) pairs drawable from the owner's own week, **77.4% have
+`worst >= alone`** — the printed "no" is false about three times in four.
+
+`sure` is now `null` where the claim is withheld and the page has three
+branches, the third naming the ceiling. Null and not a second field because
+there is one question here and "not asked" is one of its answers; every reader
+that tests it for truth — `live.html`'s ` · beats finishing alone`, the panel's
+own line — keeps behaving as before, null being falsy. `server.js` recorded it
+as `!!s.sure`, which flattened the three back to two on the way to disk, and
+now stores the null. Rows written before this carry `false` for both and
+nothing can separate them afterwards: the comparison it rests on is not in the
+file. The check that pins it is three pairings in one feed, and it fails if any
+two of them read alike.
+
+**One row with a stamp no clock can read collapsed the whole page into "Cannot
+reach the scanner".** The by-time-of-day pass has had a guard for such a row
+since a card arrived stamped `1e20` — `Advice.blockOf` returns null and the row
+is counted, not dropped. The day-of-week pass 70 lines below it never got one:
+it walked `offers` itself and indexed `week[dayOf(r.at).getDay()]`, which is
+`week[NaN]`, which is `undefined`, and the push threw. `render()` runs inside a
+`.then()`, so the TypeError went to `load()`'s `.catch()` and the page painted
+a positive claim about the network over a journal the server had read perfectly
+and answered 200 with: headline, both charts, the week chart, "What you took",
+the whole offer log and every caveat line gone, and **nothing in the console** —
+no `pageerror`, no `unhandledrejection`.
+
+It needs 14 or more distinct days in the window as well as the corrupt stamp,
+which is why no fixture reached it: the existing `no clock` feed is four rows
+three hours apart, so `enoughDays` is false and the pass never ran. Both passes
+now read one list — the pass above keeps the rows it could place and the one
+below walks those — so the readable/unreadable verdict is made once rather than
+in two places that can drift. The count is named on both headings. The new feed
+is the clean three-week one plus the poison row, and it must produce **the same
+seven bars with the same medians and counts**, which is what makes it a check on
+the row being skipped rather than on the page merely surviving.
+
+**A failed range press left the three biggest figures on the page standing.**
+The page is read over Tailscale from a machine in a car, so any range button can
+land while the link is down. The handler for that clears the log, the charts,
+the pairings, the search sentence, the headline and every caveat — and did not
+touch `p25`, `p50` and `p75`, which are the largest type on the page and the
+only thing above the fold. So the previous window's answer stood in full size
+under "Cannot reach the scanner", unlabelled, to a question the driver had since
+asked differently. The empty-window path has always set all three to `--`; this
+handler was written separately and did not. The check presses a range button
+with the next fetch rejected, and reads the figures before the press as its
+control.
+
+**The running-cost note counted the rows the page had just said it left out.**
+`showCaveats` was handed `kept` — every row in the window — and its last note
+describes the rows the FIGURES are made of. The note directly above it says how
+many readings were "left out of the figures above", so the two sentences
+disagreed by exactly that number: **26 of 1,166** on the owner's own week.
+
+Not only the count. A set-aside row is the likeliest one to carry a different
+cost per mile, because the keypad and the phone write zero where the rig writes
+$0.30 — so a window of four net rates with one doubtful keypad row in it printed
+"the figures above mix what offers paid before the car with what they paid after
+it" over figures that mix nothing at all. It now gets `offers`. The fixture is
+four counted rows at $0.30 and two set-aside at nothing, and on the old code it
+produces that exact sentence.
+
+**The Shop bar was half cards the card never called shop orders.** The chart is
+meant to split on what the card called itself, and the paragraph above it says
+so at length — "an item count is a fact about the OCR". The rule underneath was
+`r.shop ? Shop : r.legs >= 2 ? Rides : (typeof r.shop === 'boolean' || r.items)
+? Shop : Not stated`, and its `typeof` clause is unreachable: it needs `r.shop`
+falsy AND a boolean, i.e. exactly `false`, which no writer can produce —
+`rpi/journal.py` writes `True if parsed.get('shop') else None`,
+`journal-client.js` writes `parsed.shop ? true : null`, and the parser emits
+only `True` or `None`. Measured over the week: 1,133 rows with no shop field, 33
+with a truthy one, **none with a false one**. So the clause that actually
+decided it was `r.items`, the one thing the paragraph refuses to split on, and
+`rate()`'s own comment records DoorDash printing "4 items" on a restaurant
+pickup nobody shops for.
+
+Measured on the replayed week: the shipped rule gave Rides 109 / Shop 49 (median
+$12.42) / Not stated 982, and 26 of those 49 — **53% of the bar** — were
+single-leg cards never called shop orders. That 49 is the same 4.2% of rows the
+week's `items` figure counts, which is the cross-check that it was the item
+count deciding. On the chip alone it is Rides 109 / Shop 23 ($11.05) / Not
+stated 1,008. The dead clause is deleted and `r.items` with it.
+
 ### The advice
 
 **The threshold and the headline counted different piles.** `bestAt` reports
@@ -1542,8 +1636,13 @@ still a cap. `days` must stay an honest span.
 
 **Do not merge the three chart passes** over `offers` in `journal.html`. Each is
 cheap and each is readable; merging saves a few ms on *All* and costs clarity.
-The one exception was the day-of-week pass, which was discarded outright and is
-now guarded.
+The day-of-week pass is the one that does not walk `offers`: it walks the rows
+the by-time-of-day pass could place, because a stamp with no readable hour has
+no readable weekday either and that is one verdict, not two. `enoughDays` in
+front of it is a COST guard and nothing else — it stops a fortnight's bucketing
+being thrown away on a short window, and for a while this entry described it as
+though it guarded the pass against bad input. It does not; see "One row with a
+stamp no clock can read" under Done for what that cost.
 
 **Do not narrow `Advice.busy` or the day grouping to the 300 rendered rows.**
 The busy chip and its note describe the whole window, so a join over a sample

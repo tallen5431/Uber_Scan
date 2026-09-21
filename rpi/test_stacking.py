@@ -991,6 +991,47 @@ try:
         # every time would look like data and be none.
         eq('...and the geography verdict it drew', st.get('ends'), 'elsewhere')
 
+    # --- the one clause the record flattened on its way to disk -------------
+    #
+    # `sure` — "beats finishing what you have" — has three values and the row
+    # stored `!!s.sure`, which is two. Null is the claim WITHHELD, because the
+    # offer card printed no chargeable distance and so the pair's rate is a
+    # ceiling while the rate it would be held against is net; false is the
+    # claim made and answered no. Coerced together, the offers page could not
+    # tell which it was looking at and printed the no — the opposite of what
+    # had been withheld.
+    #
+    # $40 over 20 minutes against $12 over 30 already in the car is a pairing
+    # that clears by any measure, so `false` here is a wrong answer and not a
+    # missing one. `cost: 0` with a running cost configured is what a card
+    # printing no distance leaves behind.
+    ok_('a third offer arrives, this one with no distance the rig can charge',
+        put_offer({'id': 'paired-9', 'pay': 40.0, 'minutes': 20.0,
+                   'billedMinutes': 20.0, 'cost': 0.0,
+                   'perHour': 120.0, 'dropoff': 'Chastain Rd NW, Kennesaw'}))
+    time.sleep(0.8)
+    _gross = []
+    for line in open(journal):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            _r = json.loads(line)
+        except Exception:
+            continue
+        if _r.get('kind') == 'pair' and _r.get('id') == 'paired-9':
+            _gross.append(_r)
+    eq('...and is written down once', len(_gross), 1)
+    if _gross:
+        _gs = _gross[0].get('stack') or {}
+        eq('...marked as a ceiling rather than a rate', _gs.get('uncosted'), True)
+        # `is None`, not falsy: False would pass a truthiness test and is the
+        # exact value this check exists to refuse.
+        ok_('...with the unhedged claim recorded as withheld, not as a no '
+            '(%r)' % (_gs.get('sure'),), _gs.get('sure') is None)
+        ok_('...on a pair that would have cleared it, so a no would be wrong',
+            (_gs.get('worst') or 0) > 0)
+
     # It must not be mistaken for an offer by anything that walks this file.
     eq('a pairing is not counted as an offer',
        [r.get('id') for r in rows

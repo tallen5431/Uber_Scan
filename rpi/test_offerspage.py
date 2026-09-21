@@ -89,7 +89,8 @@ NOW = 1700000000000
 # $120.00.
 def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
           places=None, hidden=False, suspect=False, text=None, per_mile=0.33,
-          pickup=None, dropoff=None, scanned=False):
+          pickup=None, dropoff=None, scanned=False, shop=False, items=None,
+          legs=None):
     row = {
         'id': 'r%d' % i, 'at': NOW - i * 600000, 'firstAt': NOW - i * 600000,
         'pay': pay, 'minutes': minutes, 'miles': 6.0,
@@ -122,6 +123,17 @@ def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
         row['dropoff'] = dropoff
     if scanned:
         row['dropoffScanned'] = True
+    # What the card called itself, and what the OCR happened to read off it.
+    # Two different facts, written the way the two writers write them: the shop
+    # chip is True or absent (rpi/journal.py writes `True if ... else None`,
+    # journal-client.js writes `parsed.shop ? true : null`, and the parser
+    # emits only True or None), and the item count is a number or absent.
+    if shop:
+        row['shop'] = True
+    if legs is not None:
+        row['legs'] = legs
+    if items is not None:
+        row['items'] = items
     return row
 
 
@@ -229,6 +241,28 @@ for _k in range(3):
     _bad['at'] = _bad['firstAt'] = _wed['at'] + (_k + 1) * 600000
     WEEKS.append(_bad)
 
+# The same three weeks with one row stamped past the end of time.
+#
+# NO_CLOCK above holds such a row too, and cannot reach this: its four
+# readable rows are three hours apart, so the window is one day, `enoughDays`
+# is false and the day-of-week pass never runs. The two conditions — a
+# fortnight of days AND a stamp no clock can read — were never in one feed,
+# and the pass that needs both walked `offers` and indexed `week` with
+# `dayOf(at).getDay()`, which is NaN. `week[NaN]` is undefined, the push threw
+# inside a .then(), and load()'s .catch() painted "Cannot reach the scanner"
+# over a journal the server had read perfectly: headline, both charts, the
+# week chart, "What you took", the whole log and every caveat line gone, with
+# nothing in the console.
+#
+# WEEKS itself is left clean on purpose — it is the control for "a window with
+# no such row says nothing about one", and every bar of it is asserted below.
+# This feed must produce the same seven bars, which is what makes it a check
+# on the row being SKIPPED rather than on the page merely surviving.
+WEEKS_NO_CLOCK = [dict(r) for r in WEEKS]
+_wk_poison = offer(160, pay=20.0, state='go')
+_wk_poison['at'] = _wk_poison['firstAt'] = 1e20
+WEEKS_NO_CLOCK.append(_wk_poison)
+
 # ...and a ticked job with offers inside its stated minutes, one of which was
 # itself ticked. `offer(i)` is spaced ten minutes apart and counts BACKWARDS
 # from NOW, so a 30-minute job at index 5 covers indices 4, 3 and 2.
@@ -264,6 +298,26 @@ PAIR = {
 # clears. What the row CAN still be asked is the pair's own figures.
 UNJUDGED = dict(PAIR, id='r1', at=NOW - 600000)
 UNJUDGED.pop('judged')
+
+# The pair whose unhedged claim the panel declined to make.
+#
+# `sure` has three values and the page had two branches: `sure ? 'yes, even
+# sharing no road at all' : 'no — the worst end is below finishing alone'`.
+# Null is WITHHELD — the offer card printed no chargeable distance, so the
+# pair's rate is a ceiling and `alone` is a net rate, and the two are
+# different kinds of money — and it was printed as the no, which is not a
+# hedge but the opposite of what was withheld. Of the (held, gross-offer)
+# pairs drawable from the owner's own week, 77.4% have worst >= alone.
+#
+# `uncosted` is true here and on nothing else in this feed, which is what
+# makes it the ceiling case rather than a second copy of PAIR.
+WITHHELD = dict(PAIR, id='r2', at=NOW - 900000,
+                stack=dict(PAIR['stack'], sure=None, uncosted=True))
+# ...and the one that really is a no, which is how the branch above is told
+# apart from a page that simply stopped answering. Costed on both sides, so
+# nothing about it is a ceiling.
+SAID_NO = dict(PAIR, id='r3', at=NOW - 1200000,
+               stack=dict(PAIR['stack'], sure=False, worst=9.0, state='no'))
 
 # Dots and rankings. The newest row was judged at a lower target than the
 # rest, so re-judging a row against "today's" target would colour it
@@ -309,6 +363,51 @@ FEW_RUNS = _runs(3)
 MIXED_COST = ([offer(i, cost=1.80, per_mile=0.30, state='go') for i in range(4)]
               + [offer(4 + i, cost=0.0, per_mile=0.0, state='go')
                  for i in range(3)])
+
+# ...and the shape that made the sentence count the rows it had just excluded.
+#
+# Four counted rows, every one of them net at $0.30/mi, and two SET ASIDE rows
+# off the keypad at nothing. The note directly above this one says those two
+# are "left out of the figures above" — and this one was handed the whole
+# window rather than the counted part, so it described four net rates as "4 of
+# these 6 ... so the figures above mix what offers paid before the car with
+# what they paid after it". The figures above mix nothing: they are four net
+# rates. The denominator was wrong by the set-aside count on every window that
+# had one (26 of 1,166 on the owner's own week), and here the conclusion is
+# wrong too, which is what makes this the fixture rather than MIXED_COST.
+ASIDE_COST = ([offer(i, cost=1.80, per_mile=0.30, state='go') for i in range(4)]
+              + [offer(4 + i, cost=0.0, per_mile=0.0, state='go', suspect=True)
+                 for i in range(2)])
+
+# Rides, shop orders, and the cards that said neither.
+#
+# The three bars are meant to split on what the CARD called itself. The rule
+# shipped was `r.shop ? Shop : r.legs >= 2 ? Rides
+#                    : (typeof r.shop === 'boolean' || r.items) ? Shop
+#                    : Not stated`, and its `typeof` clause is unreachable —
+# it needs r.shop falsy AND a boolean, i.e. exactly `false`, which no writer
+# can produce (measured over the owner's week: 1,133 rows with no shop field,
+# 33 with a truthy one, none with a false one). So what actually decided it
+# was `r.items`: a fact about the OCR, and the one thing the comment above the
+# chart says it is not splitting on. rate()'s own comment records DoorDash
+# printing "4 items" on a restaurant pickup nobody shops for.
+#
+# Measured on the replayed week: the shipped rule gave Shop 49 rows at a
+# median of $12.42, 26 of them — 53% of the bar — single-leg cards never
+# called shop orders. On the chip alone it is 23 rows at $11.05.
+#
+# Here: two real shop cards at $24/hr, two two-leg rides at $36/hr, and two
+# single-leg cards carrying an item count and no chip, at $60/hr. The rates
+# are far enough apart that a bar holding the wrong pile cannot land on the
+# right median.
+KINDS = [
+    offer(0, pay=10.0, state='go', shop=True, items=12, legs=1),
+    offer(1, pay=10.0, state='go', shop=True, items=8, legs=1),
+    offer(2, pay=14.0, state='go', legs=2),
+    offer(3, pay=14.0, state='go', legs=2),
+    offer(4, pay=22.0, state='go', items=4, legs=1),
+    offer(5, pay=22.0, state='go', items=4, legs=1),
+]
 
 # Cards that named where they went, which is what the map sheet is for.
 #
@@ -392,6 +491,13 @@ FEEDS = {
     'took six': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
                  'hidden': 0, 'watched': {'saw': 14, 'kept': 12},
                  'unreadable': None, 'pairs': [PAIR, UNJUDGED], 'offers': TOOK_SIX},
+    # The three answers `sure` has, in one window. Its own feed rather than
+    # more rows on 'took six', whose tally of what the panel said is asserted
+    # row by row and would be measuring two things at once.
+    'stack claim': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
+                    'hidden': 0, 'watched': {'saw': 12, 'kept': 12},
+                    'unreadable': None,
+                    'pairs': [PAIR, WITHHELD, SAID_NO], 'offers': TOOK_SIX},
     'verdicts': {'count': len(VERDICTS), 'total': len(VERDICTS),
                  'truncated': False, 'days': 7, 'hidden': 1,
                  'watched': {'saw': 8, 'kept': 8},
@@ -435,6 +541,13 @@ FEEDS = {
                    'truncated': False, 'days': 7, 'hidden': 0,
                    'watched': {'saw': 7, 'kept': 7},
                    'unreadable': None, 'pairs': [], 'offers': MIXED_COST},
+    'kinds': {'count': len(KINDS), 'total': len(KINDS), 'truncated': False,
+              'days': 7, 'hidden': 0, 'watched': {'saw': 6, 'kept': 6},
+              'unreadable': None, 'pairs': [], 'offers': KINDS},
+    'aside cost': {'count': len(ASIDE_COST), 'total': len(ASIDE_COST),
+                   'truncated': False, 'days': 7, 'hidden': 0,
+                   'watched': {'saw': 6, 'kept': 6},
+                   'unreadable': None, 'pairs': [], 'offers': ASIDE_COST},
     # A window whose last row is stamped past the end of time.
     #
     # `new Date(1e20).getHours()` is NaN, `Math.floor(NaN / 3)` is NaN, and
@@ -452,6 +565,11 @@ FEEDS = {
     'weeks': {'count': len(WEEKS), 'total': len(WEEKS), 'truncated': False,
               'days': 30, 'hidden': 0, 'watched': {'saw': 21, 'kept': 21},
               'unreadable': None, 'pairs': [], 'offers': WEEKS},
+    'weeks no clock': {'count': len(WEEKS_NO_CLOCK), 'total': len(WEEKS_NO_CLOCK),
+                       'truncated': False, 'days': 30, 'hidden': 0,
+                       'watched': {'saw': 22, 'kept': 22},
+                       'unreadable': None, 'pairs': [],
+                       'offers': WEEKS_NO_CLOCK},
     'searchable': {'count': len(SEARCHABLE), 'total': len(SEARCHABLE),
                    'truncated': False, 'days': 7, 'hidden': 0,
                    'watched': {'saw': 8, 'kept': 8},
@@ -537,10 +655,20 @@ const STUB = (feed) => `
                 addTo: function () { window.__pins.push(this); return this; } };
       return m; }
   };
+  // A load that fails, once, on demand. The page has two ways of showing
+  // nothing — an empty window and an unreachable server — and only the first
+  // of them is reachable by handing it a feed. Set this and press a range
+  // button and the next /api/journal goes the way a Tailscale link does when
+  // the car drives out of range.
+  window.__failNext = false;
   const REAL = window.fetch;
   window.fetch = function (url, opts) {
     window.__asked.push(String(url));
     if (String(url).indexOf('/api/journal') === 0) {
+      if (window.__failNext) {
+        window.__failNext = false;
+        return Promise.reject(new TypeError('Failed to fetch'));
+      }
       return Promise.resolve({
         ok: true, status: 200,
         json: () => Promise.resolve(${JSON.stringify(feed)}),
@@ -665,6 +793,20 @@ const TEXT = (sel) => {
         // Drawn AFTER the time-of-day pass in the same render, which is why
         // it is read: a throw in that pass took this with it, silently.
         kinds: document.querySelectorAll('#kinds .block').length,
+        // ...and what each of those bars actually holds, because "three bars
+        // were drawn" says nothing about which cards went into which. The
+        // Shop bar used to take any single-leg card carrying an item count,
+        // which is a fact about the OCR and not about the card.
+        kindBars: [].slice.call(document.querySelectorAll('#kinds .block'))
+          .map(function (b) {
+            return { label: b.querySelector('.label').textContent.trim(),
+                     amount: b.querySelector('.amount').textContent.trim(),
+                     n: b.querySelector('.n').textContent.trim() };
+          }),
+        // The three largest figures on the page, above the fold.
+        figures: ['p25', 'p50', 'p75'].map(function (id) {
+          return document.getElementById(id).textContent.trim();
+        }),
         week: [].slice.call(document.querySelectorAll('#week .block'))
           .map(function (b) {
             return { label: b.querySelector('.label').textContent.trim(),
@@ -764,6 +906,28 @@ const TEXT = (sel) => {
       }
       out[name].findKeyboard = await page.evaluate(() =>
         document.getElementById('find').getAttribute('inputmode'));
+      /* ...and what is left on screen when a range press cannot be answered.
+       *
+       * The commonest failure this page has: it is read over Tailscale, from a
+       * machine in a car, and any range button can land while the link is
+       * down. The handler clears the log, the charts, the pairings and the
+       * caveats and paints "Cannot reach the scanner" — and left the three
+       * $/hr figures standing above it, in the largest type on the page, with
+       * nothing marking them as the previous window's answer.
+       */
+      stage = name + ' — a range press that fails';
+      await page.evaluate(() => { window.__failNext = true; });
+      await page.click('#ranges button[data-days="7"]');
+      await page.waitForTimeout(600);
+      out[name].afterFailedLoad = await page.evaluate(() => ({
+        nothing: document.getElementById('nothing').hidden ? null
+          : (document.getElementById('nothing').textContent || '')
+              .replace(/\s+/g, ' ').trim(),
+        headline: (document.getElementById('headline').textContent || '').trim(),
+        figures: ['p25', 'p50', 'p75'].map(
+          (id) => document.getElementById(id).textContent.trim()),
+        rows: document.querySelectorAll('#log details.offer').length,
+      }));
     }
     if (name === 'leg') {
       out[name].detail = await page.evaluate(() => {
@@ -1413,6 +1577,41 @@ try:
         eq('...and staying away when there are none: %s' % name,
            got[name]['pairsHead'], None)
 
+    # --- the one claim on a pairing that is made without a hedge -------------
+    #
+    # "Beats finishing what you have" is the half of the stacking answer that
+    # does not depend on geography, so it is the only clause stated flat — and
+    # it has three values, not two. `sure` false is the claim made and
+    # answered no; `sure` null is the claim WITHHELD, because the offer card
+    # printed no chargeable distance and so the pair's rate is a ceiling while
+    # the rate it would be held against is net. The page had two branches and
+    # printed the withheld case as "no — the worst end is below finishing
+    # alone", which is the opposite of what was withheld: on the (held,
+    # gross-offer) pairs drawable from the owner's own week, 77.4% have
+    # worst >= alone.
+    #
+    # Read off the rows rather than a tally, because the wrong sentence is on
+    # the row. All three must be distinguishable or the fix is not a fix: a
+    # page that printed nothing for the withheld case would pass a check that
+    # only looked for the absence of the no.
+    _claims = got['stack claim']['pairSaid'] or []
+    eq('the three pairings are listed', len(_claims), 3)
+    _yes = [t for t in _claims if 'yes, even sharing no road at all' in t]
+    _no = [t for t in _claims if 'the worst end is below finishing alone' in t]
+    _held = [t for t in _claims if 'not said' in t]
+    eq('a costed pair that clears says so flat', len(_yes), 1)
+    eq('...a costed pair that does not is told it does not', len(_no), 1)
+    eq('...and the pair whose offer printed no distance gets neither',
+       len(_held), 1)
+    _held_said = _held[0][_held[0].find('not said'):][:120] if _held else ''
+    ok_('...but is told why, rather than left silent (%r)' % _held_said,
+        'ceiling' in _held_said)
+    # The three are three different rows. Without this, one row carrying all
+    # three phrases would satisfy every count above.
+    eq('...and they are three different pairings',
+       len(set([_yes[0] if _yes else 'a', _no[0] if _no else 'b',
+                _held[0] if _held else 'c'])), 3)
+
     # --- what was taken, against what the panel had said about it ------------
     #
     # Read in one direction only. Every row behind these bars is ticked, so the
@@ -1578,6 +1777,63 @@ try:
     no_('a window with no such row says nothing about one (%r)'
         % (got['weeks']['blocksHead'] or ''),
         'unreadable time' in (got['weeks']['blocksHead'] or ''))
+
+    # --- ...and the chart below that one, which never got the same guard ----
+    #
+    # The day-of-week pass walked `offers` itself and indexed its array with
+    # `dayOf(r.at).getDay()`. That is NaN on a stamp past the end of time,
+    # `week[NaN]` is undefined, and the push threw — inside a .then(), so the
+    # TypeError went to load()'s .catch() and the page painted "Cannot reach
+    # the scanner" over a journal the server had read perfectly and answered
+    # 200 with. Nothing reached the console. It needs a fortnight of days AND
+    # a corrupt stamp, and no feed here held both: 'no clock' is one day, so
+    # `enoughDays` is false and the pass never ran.
+    wknc = got['weeks no clock']
+    eq('a fortnight of days and a stamp no clock can read still renders',
+       wknc['nothing'], None)
+    ok_('...with the headline still on it (%r)' % (wknc['headline'] or '')[:60],
+        wknc['headline'])
+    ok_('...and the day-of-week chart drawn', wknc['weekHead'] is not None)
+    # The same seven bars as the clean window, with the same medians and the
+    # same counts. This is the half that says the row was SKIPPED rather than
+    # that the page merely survived: fold it into a bucket and Sunday reads 4,
+    # or its rate lands on whichever weekday `week[NaN]` happened to become.
+    eq('...over exactly the bars the clean window has',
+       wknc['week'], wk['week'])
+    # ...and the offers below, which the .catch() also blanked.
+    eq('...and the log is still there',
+       len(wknc['days']) > 0 and wknc['rows'] > 0, True)
+    # Said, not dropped quietly — the same sentence the chart above it carries,
+    # because a reader of this chart should not have to have read that heading.
+    ok_('...and the row it left out is named on this chart too (%r)'
+        % (wknc['weekHead'] or ''),
+        '1 with an unreadable time left out' in (wknc['weekHead'] or ''))
+    no_('...while the clean window says nothing about one (%r)'
+        % (wk['weekHead'] or ''),
+        'unreadable time' in (wk['weekHead'] or ''))
+
+    # --- rides against shop orders, split on what the card said -------------
+    #
+    # The bar labelled Shop took any single-leg card carrying an item count,
+    # which is a fact about the OCR rather than about the card — and the
+    # paragraph over the chart says in as many words that it does not do that.
+    # On the owner's week that made 26 of the Shop bar's 49 rows cards nobody
+    # ever shopped for, and moved its median $1.37.
+    kb = {b['label']: b for b in (got['kinds']['kindBars'] or [])}
+    eq('the three kinds are drawn', sorted(kb), ['Not stated', 'Rides', 'Shop'])
+    eq('...Shop holds the cards that said so, and only those',
+       kb.get('Shop', {}).get('n'), '2')
+    eq('...at their own median, not one dragged by cards from another pile',
+       kb.get('Shop', {}).get('amount'), '$24')
+    eq('...Rides holds the two-leg cards', kb.get('Rides', {}).get('n'), '2')
+    eq('...at theirs', kb.get('Rides', {}).get('amount'), '$36')
+    # An item count on a single-leg card is not a shop chip. These two are
+    # what the old rule put under Shop, and where they belong is the bar for
+    # cards that did not say — the one the paragraph above the chart was
+    # written to defend.
+    eq('...and a single-leg card with an item count and no chip is unstated',
+       kb.get('Not stated', {}).get('n'), '2')
+    eq('...at its own median too', kb.get('Not stated', {}).get('amount'), '$60')
 
     # --- which offers to list, and in what order ---------------------------
     #
@@ -1765,6 +2021,27 @@ try:
     # not — which is the original bug back, wearing the new wording.
     eq('...and makes exactly one claim about them',
        len([c for c in _mix if 'running cost' in c]), 1)
+    # ...and it describes the rows the figures are made of, not the window.
+    #
+    # This was handed `kept` — every row, including the ones the note directly
+    # above it has just said were "left out of the figures above". So the
+    # denominator counted the excluded rows (26 of 1,166 on the owner's own
+    # week), and where a set-aside row came off the keypad at no running cost
+    # the sentence announced a mixing the figures do not have: four net rates
+    # described as "4 of these 6 ... so the figures above mix what offers paid
+    # before the car with what they paid after it".
+    _as = got['aside cost']['caveats']
+    _asr = [c for c in _as if 'running cost' in c]
+    ok_('the set-aside rows are named as left out (%r)'
+        % ' | '.join(c[:50] for c in _as)[:120],
+        any('2 readings left out of the figures above' in c for c in _as))
+    eq('...and exactly one sentence describes the running costs', len(_asr), 1)
+    eq('...describing the four rows the figures are made of, and only those',
+       _asr and _asr[0], 'Rates are after $0.30/mi of running costs.')
+    no_('...rather than counting the excluded rows into its own denominator',
+        any('6' in c for c in _asr))
+    no_('...or calling four net rates a mixture',
+        any('mix what offers paid before the car' in c for c in _asr))
     # ...and the same sentence may not appear over a window where every row
     # was written by the same thing, or the check above passes on a page that
     # cries mixture at everything.
@@ -1892,6 +2169,32 @@ try:
         '3 mi' in (_unj['note'] or ''))
     ok_('...while still giving the straight line it measured',
         'straight line' in (_unj['note'] or ''))
+
+    # --- a range press that cannot be answered ------------------------------
+    #
+    # The commonest failure this page has: it is read over Tailscale from a
+    # machine in a car, and any range button can land while the link is down.
+    # The handler clears the log, the charts, the pairings, the headline and
+    # the caveats and paints "Cannot reach the scanner" — and left the three
+    # $/hr figures standing above all of it, in the largest type on the page,
+    # last window's answer to a question the driver has since asked
+    # differently, with nothing marking it stale. The empty-window path has
+    # always set all three to '--'; this one was written separately and did
+    # not.
+    _fail = got['dots']['afterFailedLoad']
+    ok_('a failed range press says the scanner cannot be reached (%r)'
+        % (_fail['nothing'] or '')[:60],
+        'Cannot reach the scanner' in (_fail['nothing'] or ''))
+    eq('...and the three big figures are cleared with everything else',
+       _fail['figures'], ['--', '--', '--'])
+    eq('...as the headline already was', _fail['headline'], '')
+    eq('...and the log with it', _fail['rows'], 0)
+    # The control: the same three figures were real before the press, so the
+    # check above is about the failure and not about a page that never fills
+    # them in.
+    no_('...having been real figures a moment earlier (%r)'
+        % ' '.join(got['dots']['figures']),
+        any(f == '--' for f in got['dots']['figures']))
 
     _one = [c for c in got['took six']['caveats'] if 'running cost' in c]
     ok_('a window written by one device gets the plain sentence (%r)'
