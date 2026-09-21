@@ -366,7 +366,9 @@ Two comments were re-measured rather than decremented: `map.html`'s "header
 98px, bar 138, notice 108, 121px left for the map" is now header 64, bar 137,
 notice 108, map 156 — the header and map figures had been stale for a while
 and `bar 138` was the one still true, which this change moved. And the bar
-carries nine controls now, not eight.
+carries eight now, not seven: two text boxes, the new select, and five
+buttons. `rpi/test_layout.py` calls that "six controls and two text boxes",
+which was one over when it was written and is exact now.
 
 **`judge()` accused two pins on a distance the reader would not finish or
 vouch for — and printed the rig's own repair of that distance as "card said".**
@@ -1084,100 +1086,33 @@ The guard belongs in `to_pickup`, where it would move corpus cases and needs
 its own pass. The miles on such a leg are usually the good half; it is the
 minutes that misread, so refusing outright is not obviously right either.
 
-**`check_distance` is asked of the card and never of a leg, so one absurd leg
-passes inside a believable card.** Found while measuring the approach split.
-Row 659 of the owner's week prints `1 min (3.8 mi)` — 228 mph — and the card as
-a whole reads 12.4 mi over 17 min, 43.8 mph, which is sane. So nothing flags
-it: `suspect` is 0, `doubt` is empty and `milesUncertain` is false.
-`recover_decimal` does run per leg, but only to put back a lost decimal in the
-MILES; the rule that sets `uncertain` above `UNREADABLE_MPH` runs on the summed
-card alone. The approach split now publishes that leg as `toPickupMinutes: 1.0`
-— 1 of the 103 it fires on, about 1%.
+**A card with one readable place calls it the pickup, and 474 of 1,166 rows
+rest on that.** Where the card's own layout names the end, the rig now follows
+it: that is `place_ends`, shipped with the two-ends fix recorded under Done. It
+settles 4 of the 478 one-place rows in the owner's week — three pickups and row
+1149's dropoff — and leaves the other 474, **40.7% of the week**, labelled by
+position alone, because `find_pickup` takes `places[0]` and nothing said which
+end it was.
 
-Not bundled into the split, deliberately, and the reason is the third fault
-class: `to_pickup()` is "the one rule that decides", and a speed guard added to
-`laid_out_approach` would answer the same question in a second place while
-leaving the word-labelled cards — which the corpus HAS, 29 of 152 — unguarded.
-The guard belongs in `to_pickup`, where it would move corpus cases and needs
-its own pass. The miles on such a leg are usually the good half; it is the
-minutes that misread, so refusing outright is not obviously right either.
+Most of those are right for a reason position does not supply. 410 of the 474
+(86.5%) are a bare merchant name — `Zaxbys`, `Carrabba's Italian Grill` — and
+for a delivery the merchant IS where the job starts. The population that is
+genuinely a coin flip is the 64 street-shaped ones, **5.5% of the week**:
+`Canton Rd, Marietta` is as plausible an end as a start, and the card did not
+say which.
 
-**A branch is dead only with respect to its callers**, and that one grew a
-second.
+*The evidence this entry used to give was wrong, and the correction is already
+in Done.* It named rows 2, 434 and 822 as one-place cards recording a
+destination as a pickup. They do not: all three come out right on the rig,
+because the merged reading is a union across the window and another frame read
+the merchant with its bracket closed. That claim was measured with `parse()` on
+one stored text, which describes the PARSER and not the RIG. Every number above
+is a replay of the real accumulator over the real frames.
 
-**`check_distance` is asked of the card and never of a leg, so one absurd leg
-passes inside a believable card.** Found while measuring the approach split.
-Row 659 of the owner's week prints `1 min (3.8 mi)` — 228 mph — and the card as
-a whole reads 12.4 mi over 17 min, 43.8 mph, which is sane. So nothing flags
-it: `suspect` is 0, `doubt` is empty and `milesUncertain` is false.
-`recover_decimal` does run per leg, but only to put back a lost decimal in the
-MILES; the rule that sets `uncertain` above `UNREADABLE_MPH` runs on the summed
-card alone. The approach split now publishes that leg as `toPickupMinutes: 1.0`
-— 1 of the 103 it fires on, about 1%.
-
-Not bundled into the split, deliberately, and the reason is the third fault
-class: `to_pickup()` is "the one rule that decides", and a speed guard added to
-`laid_out_approach` would answer the same question in a second place while
-leaving the word-labelled cards — which the corpus HAS, 29 of 152 — unguarded.
-The guard belongs in `to_pickup`, where it would move corpus cases and needs
-its own pass. The miles on such a leg are usually the good half; it is the
-minutes that misread, so refusing outright is not obviously right either.
-
-**The two ends of a job are taken off the two ends of a list that is in the
-order the FRAMES arrived, not the order of the journey.** `merged['places']` is
-appended as each frame contributes, `find_pickup` takes `places[0]` and
-`find_dropoff` takes the last — so a window whose later frame supplies the
-pickup records it after the dropoff, and the ends come out swapped.
-
-Verified here against the merged rows, not a single-frame parse. Row 18 of the
-week prints, in this order: `min (46 mi)` / `Cobb Pkwy NW, Acworth` /
-`24 mins (10.6 mi)` / `Canton Rd, Marietta`. The card's own layout makes
-Acworth the pickup. The rig recorded **pickup `Canton Rd, Marietta`, dropoff
-`Cobb Pkwy NW, Acworth`** — the two ends the wrong way round, about ten miles
-apart. Row 307 is the other shape: `places` holds two readings of the same
-street with the real destination, `Burnap St & Rose Ln, Marietta`, sitting
-between them and dropped, so the job starts and ends at one place.
-
-This is not only a label. `live.html` publishes "+N mi out of your way" off
-this card's `pickup`, and `advice.js` decides stacking off `dropoff`;
-`straysAmong`/`badEnd` only fire for a geocode far from the car, so a real
-street ten miles from the right one passes silently. A later pass measures 9
-of 1,166 rows where the merged label contradicts the card's layout, in three
-shapes — ends swapped, the destination replaced by a second reading of the
-pickup's own street, and one place that is the far end. That pass has been
-attacked twice and both attackers said ship with corrections; it is written
-down here rather than done in passing because it changes how both ends are
-chosen and every card goes through it.
-
-**`check_distance` is asked of the card and never of a leg, so one absurd leg
-passes inside a believable card.** Found while measuring the approach split.
-Row 659 of the owner's week prints `1 min (3.8 mi)` — 228 mph — and the card as
-a whole reads 12.4 mi over 17 min, 43.8 mph, which is sane. So nothing flags
-it: `suspect` is 0, `doubt` is empty and `milesUncertain` is false.
-`recover_decimal` does run per leg, but only to put back a lost decimal in the
-MILES; the rule that sets `uncertain` above `UNREADABLE_MPH` runs on the summed
-card alone. The approach split now publishes that leg as `toPickupMinutes: 1.0`
-— 1 of the 103 it fires on, about 1%.
-
-Not bundled into the split, deliberately, and the reason is the third fault
-class: `to_pickup()` is "the one rule that decides", and a speed guard added to
-`laid_out_approach` would answer the same question in a second place while
-leaving the word-labelled cards — which the corpus HAS, 29 of 152 — unguarded.
-The guard belongs in `to_pickup`, where it would move corpus cases and needs
-its own pass. The miles on such a leg are usually the good half; it is the
-minutes that misread, so refusing outright is not obviously right either.
-
-**A card with one readable place calls it the pickup, whichever end it is.**
-Exposed, not caused, by the bracket fix above: once the garbage half is refused
-the card often has exactly one place left, and on rows 2, 434 and 822 of the
-owner's week that one place is the *destination* — `'Brookstone Walk NW &
-Downington Trl NW, Acworth'` — now recorded as where the job started. The
-string is read and stored either way; only the label is wrong. Fixing it means
-changing how `find_pickup`/`find_dropoff` choose the two ends out of the merged
-list, which is `MAX_PLACES` and the last-entry rule and a blast radius of its
-own, so it was deliberately not bundled with a parser fix that had to be shown
-to move nothing else. Three rows of 1,166 today; it will matter more to the
-heat map below than it does to the panel.
+Still not bundled with the two-ends fix, and for a sharper reason than before:
+what would actually move these 64 rows is a merchant test — something that
+knows `Zaxbys` is a shop and `Canton Rd` is not. `PLACE_IS_A_SHOP` is not that
+test. It wants a trailing bracket, and it finds one on 10 of the 474.
 
 **While an order with a known destination is in the car, the ⌖ button cannot
 serve the card being screened at all.** The owner's stated habit is to tap the
@@ -1268,12 +1203,13 @@ the same hours of the day**. So about a third of "Atlanta pays more" is really
 "late night pays more", and a map showing area without time tells the driver to
 drive to Atlanta at 4pm — which this week says is worth about $14. **Any
 version of this feature carries the hour or it is answering the wrong
-question**, which makes the time-filter entry below a precondition rather than
-a companion.
+question**, which made the time filter a precondition rather than a companion.
+That precondition is now met: the `when` box ships, eight three-hour blocks of
+it, and Settled says why it carries no weekday term.
 
 *The cheaper thing to try first.* A **town table** needs no geocoder, no new
-map pane, no ninth control on a bar `rpi/test_layout.py` already calls "eight
-controls that wrap to three rows", and no 24-minute wait: `Advice.area()`
+map pane, no ninth control on a bar that already carries eight and wraps on
+the 3.5" hat, and no 24-minute wait: `Advice.area()`
 already labels 475 of 1,166 rows with a town read off the driver's own cards,
 and `tools/measure_places.js`'s `keyOf(place, 'town')` already groups by it.
 Eight buckets at n>=12 covering 436 offers — **more than the heat map's 422** —
@@ -1295,6 +1231,7 @@ Median, not mean, per cell — and the reason is stronger than it used to say
 here: the tail is a $185.46 card, not a $41 one, and the mean's false-hot rate
 never recovers (3.2% at n=30 and 0.7% still at n=60, against the median's 0.4%
 by n=30).
+
 ---
 
 ## What has been swept, and when

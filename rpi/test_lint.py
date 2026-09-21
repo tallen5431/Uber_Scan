@@ -391,6 +391,45 @@ for _f in _shipped:
     ok_('the README names %s' % _f,
         ('`%s`' % _f) in _readme or ('(%s)' % _f) in _readme)
 
+# ...and nothing in it is said twice. Both shapes below are real, and both came
+# out of the scripts that move an entry from Open into Done once it is fixed:
+# the lift left the original behind — four copies of one entry before anything
+# noticed — and once stranded an entry's closing sentence in Open as a heading
+# with no body under it. Neither check can tell whether the prose is true, and
+# nothing can, but this rot has a shape and the shape is checkable. Both failed
+# the file as committed, which is the only reason to believe either.
+
+# A bold run of four words or more is a claim, not emphasis. `**not**`,
+# `**never**` and `**Done**` repeat freely and are meant to; a sentence is not
+# emphasis and has no business appearing twice.
+_claims = {}
+for _bold in re.findall(r'\*\*(.+?)\*\*', _audits, re.S):
+    _bold = re.sub(r'\s+', ' ', _bold).strip()
+    if len(_bold.split()) >= 4:
+        _claims[_bold] = _claims.get(_bold, 0) + 1
+_twice = sorted(_c[:60] for _c, _n in _claims.items() if _n > 1)
+ok_('AUDITS.md makes each claim once, not %s' % (_twice[:2] or 'twice'),
+    not _twice)
+
+# ...and no two entries open alike. This is the half the rule above cannot see:
+# an entry that was moved and then EDITED is not a duplicate string. Open said
+# "The two ends of a job ARE taken off the two ends of a list..." while Done
+# said "...WERE taken off...", so the ledger called one bug fixed and
+# outstanding at the same time, which is worse than either alone. 64 headings
+# today and no other pair comes within 20 characters, so the threshold is not
+# cut to fit the one case that prompted it.
+_heads = []
+for _sec in re.split(r'^## ', _audits, flags=re.M)[1:]:
+    for _para in re.split(r'\n\s*\n', _sec):
+        _lead = re.match(r'\*\*(.+?)\*\*', _para.strip(), re.S)
+        if _lead:
+            _heads.append(re.sub(r'\s+', ' ', _lead.group(1)).strip())
+_alike = sorted(set(_a[:60] for _i, _a in enumerate(_heads)
+                    for _b in _heads[_i + 1:]
+                    if _a[:20].lower() == _b[:20].lower()))
+ok_('AUDITS.md keeps each entry in one section, not %s' % (_alike[:2] or 'two'),
+    not _alike)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)
