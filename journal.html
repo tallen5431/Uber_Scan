@@ -717,6 +717,24 @@
   // text an OCR engine read off a photograph of a phone, which is the first
   // free-form string to reach innerHTML here — and a card that happens to
   // contain a '<' should change the colour of nothing.
+  /* The two ends of an offer, in the order the journey runs.
+
+     MV.ends is the rule; this is where this page asks it, so the log row, the
+     detail row and the detail SHEET cannot drift apart — and they had. The
+     sheet already drew `[pickup, dropoff]` while the two rows joined `places`
+     with an arrow, and `places` is the accumulator's union in the order the
+     FRAMES arrived, which is not a journey. One page, two answers to "which
+     end is which", a few hundred lines apart.
+
+     window.MapView read here rather than closed over, because this runs from
+     the first render and the page's own `MV` is assigned much further down.
+     Without map-view.js at all it draws the list, which is what it drew
+     before. */
+  function whereOf(r) {
+    var mv = window.MapView;
+    return mv ? mv.ends(r) : ((r && r.places) || []).filter(Boolean);
+  }
+
   function esc(text) {
     return String(text === null || text === undefined ? '' : text)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -1025,8 +1043,8 @@
       // Where it went, on the row rather than only inside it. This is what
       // turns the log from a list of figures into something a driver can read
       // down and recognise.
-      + ((r.places && r.places.length)
-         ? '<em>' + esc(r.places.join(' → ')) + '</em>' : '')
+      + (whereOf(r).length
+         ? '<em>' + esc(whereOf(r).join(' → ')) + '</em>' : '')
       + '</span>'
       + (r.accepted ? '<span class="took" title="you took this">\u2713</span>' : '')
       + (r.hidden ? '<span class="tag">hidden</span>' : '')
@@ -1130,8 +1148,8 @@
       + row('Your target', typeof r.target === 'number'
             ? money(r.target, 0) + '/hr' + (typeof r.band === 'number'
               ? ', amber within ' + r.band + '%' : '') : null)
-      + ((r.places && r.places.length)
-         ? row('Where', esc(r.places.join(' \u2192 '))) : '')
+      + (whereOf(r).length
+         ? row('Where', esc(whereOf(r).join(' \u2192 '))) : '')
       // An address the driver revealed on their phone and had the rig read,
       // rather than one the card printed.
       //
@@ -2861,6 +2879,10 @@
     if (!MV) {
       el.sheet.hidden = false;
       document.body.classList.add('sheeted');
+      // NOT whereOf: the sheet draws the two points it is about to map,
+      // whichever way each was learned, so a dropoff read off the phone
+      // belongs here. whereOf answers what the CARD printed. Different
+      // questions, and see MV.ends for why they must not share a rule.
       el.sheetWhere.textContent = [r.pickup, r.dropoff].filter(Boolean).join('  →  ');
       sheetSay('map-view.js did not load, so there is no map here. The link '
                + 'beside this still opens one.');
@@ -2877,6 +2899,8 @@
     if (sheetFor === id + '/' + end && !el.sheet.hidden) { shutSheet(); return; }
     sheetFor = id + '/' + end;
 
+    // The ends as points to map, not as what the card printed — see the note
+    // on the other sheetWhere above.
     var want = end === 'pickup' ? [r.pickup]
              : end === 'dropoff' ? [r.dropoff]
              : [r.pickup, r.dropoff];

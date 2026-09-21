@@ -965,6 +965,39 @@ function gaps(sent) {
   eq('...of nothing', empty.couldDraw, 0);
   eq('...with no strays', Object.keys(empty.strays).length, 0);
 
+  /* --- the two ends, in the order the journey runs -----------------------
+   *
+   * Three surfaces drew them out of `places` joined with an arrow — the
+   * driving panel's address row and the offers page's log and detail rows —
+   * and `places` is the accumulator's union in the order the FRAMES arrived.
+   * The two-ends fix gave `pickup` and `dropoff` that order and deliberately
+   * left the list alone, so the arrow went on claiming one the list has not
+   * got. Measured over the owner's week: 12 of 1,166 readings drew it
+   * backwards, and 182 drew a three- or four-stop chain for a two-ended job.
+   *
+   * The offers page's own detail SHEET already drew [pickup, dropoff], so one
+   * page answered this two ways a few hundred lines apart. */
+  eq('the two ends come back in journey order, not arrival order',
+     MV.ends({ pickup: 'Happy Hawg BBQ (Hiram)', dropoff: 'Tibbitts Rd, Dallas',
+               places: ['Tibbitts Rd, Dallas', 'Happy Hawg BBQ (Hiram)'] }).join(' -> '),
+     'Happy Hawg BBQ (Hiram) -> Tibbitts Rd, Dallas');
+  eq('...and a union of four readings is still a job with two ends',
+     MV.ends({ pickup: 'A', dropoff: 'B', places: ['B', 'A', 'B ', 'A,'] }).length, 2);
+  /* It REORDERS what the card printed and never adds to it. A dropoff the
+     driver revealed on their phone is not in `places`, and the offers page
+     keeps it in a row of its own under its own label for a stated reason —
+     folding it into "Where" would hide that a card printing "Customer
+     dropoff" now has an address at all. */
+  eq('an end the card never printed is not folded into what it printed',
+     MV.ends({ pickup: 'A', dropoff: 'read off the phone',
+               places: ['A'] }).join('|'), 'A');
+  eq('...and a row the card gave no names for draws nothing',
+     MV.ends({ pickup: 'A', dropoff: 'B' }).length, 0);
+  eq('...and with neither end known the list is all the card gave',
+     MV.ends({ places: ['X', 'Y'] }).join('|'), 'X|Y');
+  eq('...a row with nothing on it draws nothing', MV.ends({}).length, 0);
+  eq('...and neither does no row at all', MV.ends(null).length, 0);
+
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' map-view checks passed');
   process.exit(fail ? 1 : 0);

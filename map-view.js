@@ -449,6 +449,44 @@
    * two sidebar sections that list these pairs, and the offer log's map sheet.
    * The first pass at this reached two of the four; the accusation row and the
    * withheld row still put the rig's repaired figure in the card's mouth. */
+  /* The two ends of one offer, in the order the journey runs.
+
+     Three surfaces were drawing them out of `places` joined with an arrow —
+     live.html's address row, the offers page's log row, and its detail row —
+     and `places` is the accumulator's union in the order the FRAMES arrived,
+     which is not journey order. The two-ends fix gave `pickup` and `dropoff`
+     that order and deliberately left the list alone, so the arrow kept
+     claiming one the list does not have. The offers page's own detail SHEET
+     already drew `[pickup, dropoff]`, so that one page answered "which end is
+     which" two ways at once, a few hundred lines apart.
+
+     Measured through the real accumulator over the owner's week: 12 of 1,166
+     readings drew the arrow backwards — `Happy Hawg BBQ (Hiram)` as the
+     destination of a delivery that starts there — and 182 drew a three- or
+     four-stop chain for a job with two ends, because the union holds every
+     reading of every name.
+
+     REORDERS what the card printed; it never adds to it. Both ends have to be
+     in `places` for the pair to be used, and where they are not the list comes
+     back untouched. That is not fussiness — the offers page keeps a dropoff
+     the DRIVER revealed on their phone in a row of its own, under its own
+     label, and says why: "folding it into Where would hide that a card
+     printing 'Customer dropoff' now has an address at all." A rule that
+     returned `[pickup, dropoff]` whatever their source would do exactly that
+     folding, and quietly put a phone reading in the card's mouth.
+
+     So the sheet at the bottom of that page does NOT ask this. It wants the
+     two points to draw a map between, whichever way each was learned, which
+     is a different question with a different right answer. */
+  function ends(row) {
+    if (!row) return [];
+    var have = (row.places || []).filter(Boolean);
+    var pu = row.pickup, dr = row.dropoff;
+    if (pu && dr && pu !== dr
+        && have.indexOf(pu) !== -1 && have.indexOf(dr) !== -1) return [pu, dr];
+    return have;
+  }
+
   function statedBy(p) {
     if (!p || p.stated === null) return '';
     // "a lost decimal put back" would say THIS figure is the repair, and the
@@ -1001,7 +1039,7 @@
            detour: detour, fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
            localityOf: localityOf,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
-           judge: judge, statedBy: statedBy, unchecked: unchecked,
+           judge: judge, statedBy: statedBy, unchecked: unchecked, ends: ends,
            byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,

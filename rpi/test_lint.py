@@ -353,6 +353,36 @@ _listy = ['%s / %s / %s' % (_sec, _c['name'][:40], _k)
 eq('every `parse` and `rate` expectation is a scalar both runners compare',
    _listy, [])
 
+# --- one rule for which end of a job is which -------------------------------
+#
+# `places` is the accumulator's union of every name every frame read, in the
+# order the FRAMES arrived. Joining it with an arrow draws a journey out of
+# arrival order. The two-ends fix gave `pickup` and `dropoff` the real order
+# and deliberately left the list alone, so three surfaces went on claiming one
+# the list has not got: the driving panel's address row and the offers page's
+# log and detail rows — while the SAME page's detail sheet already drew
+# `[pickup, dropoff]`. Measured over the owner's week: 12 of 1,166 readings
+# drew the arrow backwards and 182 drew a three- or four-stop chain for a job
+# with two ends.
+#
+# MV.ends is the one rule now. This check is not about the arrow character: it
+# is that no page works the answer out for itself again, which is how the four
+# copies drifted in the first place.
+for _page in ('live.html', 'journal.html'):
+    _src = open(os.path.join(ROOT, _page), encoding='utf-8').read()
+    for _shape in ('places.join', 'places && r.places.length'):
+        ok_('%s asks MV.ends rather than reading `places` itself (%s)'
+            % (_page, _shape), _shape not in _src)
+# ...and the page asks it rather than working the answer out again. The sheet
+# on the offers page is the one place that legitimately builds its own pair —
+# it draws two points to map, whichever way each end was learned, where "Where"
+# is what the CARD printed — so this checks the rule is ASKED, not that the
+# pair never appears.
+ok_('journal.html asks the shared rule for the two ends',
+    'mv.ends(' in open(os.path.join(ROOT, 'journal.html'), encoding='utf-8').read())
+ok_('live.html asks it too',
+    'MV.ends(' in open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read())
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is

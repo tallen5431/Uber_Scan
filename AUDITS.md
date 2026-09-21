@@ -24,6 +24,51 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**The address line drew the two ends in the order the FRAMES arrived, on the
+one screen that is read while driving.** `places` is the accumulator's union of
+every name every frame read, appended as the frames arrive. The two-ends fix
+gave `pickup` and `dropoff` the journey order and deliberately left that list
+alone — so three surfaces went on joining the list with an arrow and claiming
+an order it has not got: `live.html`'s address row and the offers page's log
+row and detail row. Measured through the real accumulator over the owner's
+week: **12 of 1,166 readings drew the arrow backwards** — `Happy Hawg BBQ
+(Hiram)` shown as the destination of a delivery that starts there — and **182
+drew a three- or four-stop chain for a job with two ends**, because the union
+holds every reading of every name.
+
+*The same page already answered it the other way.* The offers page's detail
+SHEET drew `[pickup, dropoff]`, a few hundred lines from the log row that drew
+the union. And on the panel, `live.html`'s map mode pinned `pickup` as the
+start while its own address row above printed the reverse — ten miles and two
+towns apart, on one card, at one moment.
+
+*One rule, in `map-view.js` beside `judge`, `statedBy` and `unchecked`, which
+were centralised for this reason.* `MV.ends` REORDERS what the card printed
+and never adds to it: both ends must be in `places` or the list comes back
+untouched. 12 of the 12 backwards rows come out right and 164 of the 182
+chains come down to two ends; **0 rows lose a where-line**.
+
+*The "never adds" half is the part worth writing down, because the first
+version of this got it wrong.* Returning `[pickup, dropoff]` outright folds in
+a dropoff the DRIVER revealed on their phone — which the offers page keeps in
+a row of its own, under its own label, and says why two lines above the code
+that would have done the folding: "folding it into Where would hide that a
+card printing 'Customer dropoff' now has an address at all". A rule that put a
+phone reading in the card's mouth would have been a new fault of exactly the
+class this entry is about.
+
+*So the sheet does not ask this rule, and that is not an oversight.* It draws
+the two points it is about to map, whichever way each end was learned; "Where"
+is what the card printed. Different questions, different right answers, and
+both now say so where they sit. The lint added with this change asks that each
+page ASKS the shared rule, rather than forbidding the pair from ever appearing
+— which was what the first version of the check did, and it failed on the
+sheet for being right.
+
+Six checks on `MV.ends` and two in the lint; five mutations die, including the
+one that stops checking whether the card named an end at all.
+
+
 **A distance no frame ever read was counted into a card, and it silenced the
 doubt every frame had raised.** A leg claims a slot when EITHER its duration or
 its distance agrees — right, and argued at `_slot_for`. What was never decided

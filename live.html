@@ -1080,7 +1080,9 @@
   // One line, ellipsised. An address can be sixty characters and this panel is
   // read at arm's length in a moving car: a second line of small grey text
   // costs the headline room it needs more. Two places are joined with an arrow,
-  // the same way the offers page writes them, so the two screens read alike.
+  // the same way the offers page writes them, so the two screens read alike —
+  // and since both now ask MV.ends for them, that is one rule rather than a
+  // resemblance two files have to keep up by hand.
   function showPlaces(list) {
     var where = (list || []).filter(function (p) { return !!p; });
     el.places.textContent = where.join(' \u2192 ');
@@ -1956,7 +1958,10 @@
                  '<span><i>less</i> ' + money(r.cost, 2) + ' <i>car costs</i></span>'
                  + ' <span><i>=</i> <b>' + rate(r.perHour) + '/hr</b> <i>net</i></span>']);
     }
-    showPlaces(r.places);
+    // The two ends, not the union: `places` is in the order the frames
+    // arrived. See MV.ends, which the offers page asks too. Without MV this
+    // page still draws the list, which is what it always drew.
+    showPlaces(MV ? MV.ends(r) : r.places);
     // Sent by the server, which is where the order in the car is known. A page
     // works it out for nobody: several may be open and each would answer
     // slightly differently as its own clock drifted.
