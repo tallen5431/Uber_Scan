@@ -827,7 +827,7 @@ def recover_decimal(minutes, miles, had_decimal):
     if miles / (minutes / 60.0) <= MAX_MPH:
         return miles, False
     recovered = miles / 10.0
-    if 0.5 <= recovered / (minutes / 60.0) <= MAX_MPH:
+    if recovered / (minutes / 60.0) <= MAX_MPH:
         return recovered, True
     return miles, False
 
@@ -1435,7 +1435,7 @@ def check_distance(minutes, miles, had_decimal):
 
     # A missing decimal is the likeliest cause, and only when the reading did
     # not have one. Recovering it must be visible, never silent.
-    if not had_decimal and 0.5 <= mph / 10.0 <= MAX_MPH:
+    if not had_decimal and mph / 10.0 <= MAX_MPH:
         return miles / 10.0, True, False
     # Nothing to recover, so the only question left is whether this is a fast
     # trip or a broken number — and those get different answers. See
@@ -2377,9 +2377,14 @@ def only_card(text, span):
     against the headline, places against the leg that lent them — and a slice
     would silently move all of them.
 
-    Newlines survive, because line shape is structure: the item count and the
-    Pickup anchor are both read off line starts, and flattening the blanked half
-    into one long line would let a pattern match across what used to be a break.
+    Blanked to spaces and nothing else. This used to keep newlines, on the
+    stated grounds that "line shape is structure: the item count and the Pickup
+    anchor are both read off line starts". Both halves of that were false.
+    parse() is the only caller and hands in normalize(raw_text), whose
+    whitespace rule has already collapsed every newline to a space — so there
+    was never a newline here to keep — and neither ITEMS nor PICKUP is anchored
+    to a line start: they use \b and $, and nothing in this file compiles with
+    re.M. Measured over 5,805 real and corpus texts, the arm was taken 0 times.
     """
     if not span:
         return text
@@ -2387,7 +2392,7 @@ def only_card(text, span):
     hi = len(text) if hi is None else hi
 
     def blank(part):
-        return ''.join('\n' if ch == '\n' else ' ' for ch in part)
+        return ' ' * len(part)
 
     # The blanks BEFORE the card stay — they are what hold every index in
     # place. The ones after are dropped, because several anchors need a real

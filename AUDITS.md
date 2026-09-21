@@ -24,6 +24,36 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**Two pieces of the parser that read as protection and provided none, deleted
+rather than documented.** This project's fourth fault class is a branch no
+input can reach, and its rule for one is to delete it. Both of these were in
+both ports.
+
+  - **`only_card` kept newlines that `normalize()` had already destroyed.**
+    The blanking helper was `'\n' if ch == '\n' else ' '`, under a docstring
+    that justified it: "line shape is structure: the item count and the Pickup
+    anchor are both read off line starts". Both halves are false. `parse()` is
+    the only caller and hands in `normalize(raw_text)`, whose whitespace rule
+    has already collapsed every newline to a space — there was never a newline
+    here to keep — and neither `ITEMS` nor `PICKUP` is anchored to a line
+    start: they use `\b` and `$`, and nothing in the file compiles with
+    `re.M`. The test that exercises it passes a frame with no newline in it
+    either.
+  - **A 0.5 mph floor on decimal recovery, at four sites.** `check_distance`
+    reaches its recovery clause only after `mph <= MAX_MPH` has returned, so
+    `mph` is above 55 whenever the clause runs and `mph / 10` is above 5.5 —
+    the floor cannot be the thing that decides. `recover_decimal` has the
+    identical shape, and so do both JavaScript twins. Searched exhaustively
+    over every whole minute to 600 and every tenth of a mile to 400: **0
+    inputs where the floor is what refuses.** Both docstrings described a
+    two-sided range and only the upper half was ever live.
+
+*Nothing moves.* The two ports pass unchanged, and a replay of the real week
+through the accumulator moves **no field on any of the 1,166 offers**. Five
+mutations confirm what remains is load-bearing: each surviving upper bound
+dies, at all four sites, and so does blanking at all.
+
+
 **The address line drew the two ends in the order the FRAMES arrived, on the
 one screen that is read while driving.** `places` is the accumulator's union of
 every name every frame read, appended as the frames arrive. The two-ends fix

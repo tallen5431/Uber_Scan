@@ -338,15 +338,18 @@
    *
    * Blanked rather than sliced, so every index into this string is still an
    * index into the original — several rules downstream compare positions, and a
-   * slice would silently move all of them. Newlines survive, because line shape
-   * is structure: the item count and the Pickup anchor are read off line
-   * starts, and flattening the blanked half would let a pattern match across
-   * what used to be a break. */
+   * slice would silently move all of them.
+   *
+   * Blanked to spaces and nothing else. This used to keep newlines, on the
+   * stated grounds that the item count and the Pickup anchor are read off line
+   * starts. Both halves were false — parse() is the only caller and hands in
+   * normalize(raw_text), which has already collapsed every newline to a space,
+   * and neither ITEMS nor PICKUP is line-anchored. See the Python port. */
   function onlyCard(text, span) {
     if (!span) return text;
     var hi = span.hi === null ? text.length : span.hi;
     var blank = function (part) {
-      return part.replace(/[^\n]/g, ' ');
+      return new Array(part.length + 1).join(' ');
     };
     // The blanks BEFORE the card stay — they hold every index in place. The
     // ones after are dropped: several anchors need a real end to match
@@ -1444,7 +1447,7 @@
     if (miles / (minutes / 60) <= MAX_MPH) return { miles: miles, corrected: false };
     var recovered = miles / 10;
     var mph = recovered / (minutes / 60);
-    if (mph >= 0.5 && mph <= MAX_MPH) return { miles: recovered, corrected: true };
+    if (mph <= MAX_MPH) return { miles: recovered, corrected: true };
     return { miles: miles, corrected: false };
   }
 
@@ -1895,7 +1898,7 @@
 
     // A missing decimal is the likeliest cause, and only when the reading did
     // not have one to begin with. Recovering it must be visible, never silent.
-    if (!hadDecimal && (mph / 10) <= MAX_MPH && (mph / 10) >= 0.5) {
+    if (!hadDecimal && (mph / 10) <= MAX_MPH) {
       return { miles: miles / 10, corrected: true, uncertain: false };
     }
     // Nothing to recover, so the only question left is whether this is a fast
