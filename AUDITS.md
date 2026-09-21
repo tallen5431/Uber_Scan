@@ -1225,6 +1225,41 @@ exists for. `a5cbe64`, plus the `CLOCK_BELIEVABLE_UNTIL` clamp in `server.js`.
 
 ### The panel
 
+**Numbers in the documentation that nothing counted, and had drifted.** Both
+of these are the fifth fault class, in the two files that describe this
+project rather than run it.
+
+  - **The caption table was miscounted in its own suite, twice.**
+    `rpi/test_layout.py` said "only two entries" declare a tail the 3.5" hat
+    may ellipsise; **three** do. The third is `the figure at its longest,
+    nothing found`, whose tail is `" · 1 not found"` — added deliberately
+    because "not found" and "not asked" are not interchangeable, and then left
+    out of the record of what the clamp eats. The same file said the row "can
+    say twenty things" where it can say twenty-one. The entry above this one
+    repeated the first of those, naming two of the three tails.
+
+    Corrected, and the suite now ASSERTS both numbers rather than describing
+    them, so the next entry cannot be added without that paragraph being read
+    again. Both assertions die when the old figures are put back.
+
+  - **The two suite tables were stale in 24 of 36 rows and disagreed with each
+    other.** Measured against a real run: `tests/corpus.test.js` was 720 in
+    `rpi/README.md` and 681 in `SCANNING.md` against **793**;
+    `rpi/test_layout.py` said 429 against 795; `rpi/test_server.py` said 48
+    against 157; `rpi/test_lint.py` said 59. And `rpi/test_gps.py`, 89 checks,
+    was in **neither document** — a whole suite with no row anywhere.
+
+    The counts cannot be checked without running everything, which is what
+    `tools/test.sh` is for. What can be checked is that no suite is missing
+    from the list, which is the half that goes wrong in silence: a suite is
+    added, nobody writes the row, and nothing ever says so. One check per
+    suite file now, 37 of them.
+
+*That guard caught its own author within the minute.* Adding those 37 checks
+took `rpi/test_lint.py` from 156 to 193 and made the row just corrected for it
+stale again — which is the whole argument for the table above in one move.
+
+
 **Two notes on the driving screen that described a moment long past, one of
 them masking the note that was about now.**
 
@@ -1291,9 +1326,12 @@ restated as rows and enforced in CSS — `-webkit-line-clamp: 2` on a dashboard
 panel, `3` on the hat, both derived from the detour line's own rendered height
 on each panel rather than chosen. The map's floor goes from 301px/104px to
 334px/154px; 104px was below the suite's own floor for "a map rather than a
-texture". Two lines are still ellipsised on the hat and both lose only a
-trailing clause: `" not asked"` off the detour's tally, and the tail of
-`", so no distance"` off the misread-name line.
+texture". Three lines declare a trailing clause the hat may eat, and
+that is all any of them loses: `" · 1 not asked"` and `" · 1 not found"` off
+the detour's tally, and `", so no distance"` off the misread-name line. (This
+said "two lines" and named two of the three; `rpi/test_layout.py`'s own
+comment said the same, and both were corrected once the table was counted.
+The suite now asserts the two numbers rather than describing them.)
 
 *And the line printed `&amp;` where the `&` should be, on 39.2% of places.*
 `mapSay` assigns `textContent`, which needs no HTML escaping, and the caption

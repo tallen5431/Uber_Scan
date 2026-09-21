@@ -435,6 +435,28 @@ ok_('...and the shared corpus asks that function rather than restating it',
     'P.round2(' in open(os.path.join(ROOT, 'tests/corpus.test.js'),
                         encoding='utf-8').read())
 
+# --- every suite is in the README's list of them -----------------------------
+#
+# rpi/README.md lists each suite with the number of checks it runs, and
+# SCANNING.md lists four of them again. Measured against a real run, 24 of the
+# 36 rows were stale and the two documents disagreed with each other:
+# corpus.test.js was 720 in one and 681 in the other against 793 actual,
+# test_layout.py said 429 against 795, test_lint.py said 59 against its own
+# real figure. And rpi/test_gps.py was in neither, so a whole suite had no
+# entry at all.
+#
+# The counts cannot be checked here without running everything, which is what
+# tools/test.sh is for. What CAN be checked is that no suite is missing from
+# the list, which is the half that goes wrong silently - a new suite is added,
+# nobody writes the row, and nothing ever says so.
+_readme_rpi = open(os.path.join(ROOT, 'rpi/README.md'), encoding='utf-8').read()
+for _suite in sorted(f for f in os.listdir(os.path.join(ROOT, 'rpi'))
+                     if f.startswith('test_') and f.endswith('.py')):
+    ok_("rpi/README.md lists %s" % _suite, _suite in _readme_rpi)
+for _suite in sorted(f for f in os.listdir(os.path.join(ROOT, 'tests'))
+                     if f.endswith('.test.js')):
+    ok_("rpi/README.md lists tests/%s" % _suite, _suite in _readme_rpi)
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is

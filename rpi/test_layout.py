@@ -498,16 +498,33 @@ CAPTION_LINES = [
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. Only two entries have one, and both are the same judgement: the
-# count of places with no pin, and the consequence of a pin that is plainly
-# wrong, are the ends of their sentences precisely so that they are what a
-# clamp eats. Everything before them is a figure or a hedge on one.
+# ellipsise. THREE entries have one, and they are two judgements: the count of
+# places with no pin, whose tail is ` · 1 not asked` or ` · 1 not found`
+# depending on which it was, and the consequence of a pin that is plainly
+# wrong, whose tail is `, so no distance`. Each is the end of its sentence
+# precisely so that it is what a clamp eats; everything before it is a figure
+# or a hedge on one.
+#
+# This comment said "only two entries" while three had a third field, and the
+# ledger repeated it. The third is `the figure at its longest, nothing found`,
+# added deliberately because "not found" and "not asked" are not
+# interchangeable, and then left out of the record of what the clamp eats. The
+# two assertions under the table are there so the next entry cannot be added
+# without this paragraph being read again.
 # Which rows actually DECLARED what may be cut. The normalisation below fills
 # the rest in with the whole sentence, and linting those is two assertions that
 # cannot fail: `_text.startswith(_text)` and `_drop == ''` are true of every
 # string. Only the declared ones are worth checking, and they are the only ones
 # the clamp can shorten.
 _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
+# Counted here because the prose around this table states both numbers, and
+# both had drifted: the paragraph above said two declared tails where there
+# are three, and the comment at the foot of the file said the row can say
+# twenty things where it can say twenty-one. A number in a comment that
+# nothing counts is a number that rots; these fail rather than rot.
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 21)
+eq('...and three of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 3)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
@@ -1571,8 +1588,8 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say twenty things, so all twenty are put
-                # in it and measured. Three rules, and they are not the same
+                # occupant and it can say twenty-one things, so all
+                # twenty-one are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
                 #   the cap    — no sentence may take more rows than the clamp
