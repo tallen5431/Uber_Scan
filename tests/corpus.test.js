@@ -42,7 +42,10 @@ function value(v) {
 });
 
 (cases.coerce && cases.coerce.round2 ? cases.coerce.round2 : []).forEach(function (c) {
-  eq('round2 / ' + c.name, Math.round(value(c.in) * 100) / 100, c.expect);
+  // P.round2, not the expression again: written out here it was a third
+  // copy of a rule offer-parser.js had two of, and changing either of
+  // those left these nine cases passing.
+  eq('round2 / ' + c.name, P.round2(value(c.in)), c.expect);
 });
 
 (cases.coerce ? cases.coerce.doubt : []).forEach(function (c) {

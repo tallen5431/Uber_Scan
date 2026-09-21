@@ -1049,6 +1049,27 @@ try:
     # evidence and shows up as nothing at all.
     import csv as _csv
     import io as _io
+    # A row that really carries frames, so the round-trip at the foot of this
+    # block has something to round-trip.
+    #
+    # Written straight into the journal, because the readings this suite feeds
+    # are a scanner replay and need not have reached it - which the comment
+    # down there already hedged. The outcome was not flaky though: the loop
+    # found zero rows with a `scans` column on EVERY run, so the one check that
+    # asks whether a real exported row parses back had never executed once.
+    #
+    # The frame text holds a PIPE, which is the whole point of the column's
+    # form: the card's icon row and its dividers both arrive as pipes, and
+    # joining frames with " | " split 19% of its own rows mid-frame.
+    with open(journal, 'a') as _fh:
+        _fh.write(json.dumps({
+            'v': 1, 'id': 'scanned-1', 'seq': 1,
+            'at': int(time.time() * 1000) - 1000,
+            'firstAt': int(time.time() * 1000) - 1000,
+            'pay': 9.0, 'minutes': 20.0, 'miles': 4.0, 'perHour': 27.0,
+            'scans': ['$9.00 | 20 min (4.0 mi) trip',
+                      '$9.00 20 min (4.0 mi) trip'],
+        }) + '\n')
     body = urllib.request.urlopen(base + '/api/journal.csv', timeout=10)
     text = body.read().decode('utf-8')
     reader = _csv.reader(_io.StringIO(text))
@@ -1082,7 +1103,8 @@ try:
         "v.join(k === 'scans' ? ' | ' : '; ')" not in server_src)
     ok_('...and writes them as JSON, which cannot collide with their content',
         "k === 'scans' ? JSON.stringify(v)" in server_src)
-    # ...and any row that did land round-trips.
+    # ...and the row that carries them round-trips.
+    _round_tripped = 0
     for row in _csv.DictReader(_io.StringIO(text)):
         raw = row.get('scans') or ''
         if not raw.strip():
@@ -1093,7 +1115,16 @@ try:
             frames = None
         ok_('a row of scans parses back into whole frames',
             isinstance(frames, list) and all(isinstance(f, str) for f in frames))
+        # The pipe is why the column is JSON rather than a join, so it is the
+        # thing the round-trip has to carry.
+        ok_('...with the pipe that is inside a frame still inside it',
+            isinstance(frames, list) and any('|' in f for f in frames))
+        _round_tripped += 1
         break
+    # ...and the loop above ran at all. It did not. Zero rows on every run is
+    # not a flaky check, it is a check that cannot fail - which is this
+    # project's sixth fault, sitting in its own suite.
+    eq('a row with frames in it reached the export at all', _round_tripped, 1)
 
     # --- the delivery card, which had no second-job line at all --------------
     #

@@ -345,6 +345,29 @@
    * starts. Both halves were false — parse() is the only caller and hands in
    * normalize(raw_text), which has already collapsed every newline to a space,
    * and neither ITEMS nor PICKUP is line-anchored. See the Python port. */
+  /* Two decimal places, rounded the way Math.round rounds.
+
+     Written down rather than left inline because the Python port has a
+     round2() whose whole docstring is "rounded the way the JavaScript
+     rounds" - Python's own round() takes a half to the nearest EVEN digit,
+     2.675 to 2.67, where this gives 2.68 - and the shared corpus has nine
+     cases pinning the agreement.
+
+     Those nine were checking an expression written in the test file. The
+     Python side called P.round2, a real call into the module under test; the
+     JavaScript side did the hundredths arithmetic itself inside
+     tests/corpus.test.js, which was a THIRD copy of a rule this file had two
+     of. Either of those two could have been changed with all nine still
+     passing. Same reason `setting` is exported: a rule nothing can reach from
+     a test is a rule that drifts unseen.
+
+     rpi/test_lint.py counts the copies, because an inlined one behaves
+     identically until the day it does not - which is a thing no mutation can
+     show. */
+  function round2(v) {
+    return Math.round(v * 100) / 100;
+  }
+
   function onlyCard(text, span) {
     if (!span) return text;
     var hi = span.hi === null ? text.length : span.hi;
@@ -1948,7 +1971,7 @@
     // 9.600000000000001, and that went into the journal, into the CSV export
     // and into anything reading either. Rounded here rather than at each
     // display, so the stored number and the shown number are the same number.
-    if (miles !== null) miles = Math.round(miles * 100) / 100;
+    if (miles !== null) miles = round2(miles);
     var dist = { miles: miles, corrected: correctedLeg, uncertain: false };
 
     var itemMatch = mine.match(ITEMS);
@@ -2002,7 +2025,7 @@
       if (lone && (/\d/.test(lone[1]) || LONE_DECIMAL.test(lone[1]))) {
         var v = toNumber(lone[1]);
         if (v !== null && v > 0 && v <= 500) {
-          miles = Math.round(v * 100) / 100;
+          miles = round2(v);
           hadDecimal = LONE_DECIMAL.test(lone[1]);
         }
       }
@@ -2482,7 +2505,8 @@
   // drifted, and nothing could see that because it was not reachable from a
   // test.
   return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
-           setting: setting, doubt: doubt, DEFAULT_SETTINGS: DEFAULT_SETTINGS,
+           setting: setting, doubt: doubt, round2: round2,
+           DEFAULT_SETTINGS: DEFAULT_SETTINGS,
            findDeadline: findDeadline, minutesUntil: minutesUntil,
            findPlaces: findPlaces, trimPlace: trimPlace,
            findPickup: findPickup, findDropoff: findDropoff,

@@ -412,6 +412,29 @@ ok_('...and neither keeps a copy of the test beside the one it asks',
 ok_('...and `impossible` is read only by the section that is about it',
     _map_html.count('p.impossible') == 1)
 
+# --- one rule for rounding to two places --------------------------------
+#
+# rpi/offer_parser.py has round2(), whose docstring is "rounded the way the
+# JavaScript rounds" - Python's own round() takes a half to the nearest EVEN
+# digit, 2.675 to 2.67, where Math.round gives 2.68 - and the shared corpus
+# has nine cases pinning that agreement.
+#
+# Those nine were checking an expression WRITTEN IN THE TEST FILE. The Python
+# runner called P.round2, a real call into the module under test; the
+# JavaScript runner evaluated `Math.round(value * 100) / 100` itself, a third
+# copy of a rule offer-parser.js had two of. Either of those two could have
+# been changed with all nine still passing.
+#
+# The rule is offer-parser.js's round2 now. This asks that nobody writes it
+# out beside the one they could call - the check the mutation could not make,
+# since an inlined copy behaves identically until the day it does not.
+_op_js = open(os.path.join(ROOT, 'offer-parser.js'), encoding='utf-8').read()
+ok_('offer-parser.js rounds to two places in one place',
+    len(re.findall(r'Math\.round\([^)]*\* 100\)\s*/\s*100', _op_js)) == 1)
+ok_('...and the shared corpus asks that function rather than restating it',
+    'P.round2(' in open(os.path.join(ROOT, 'tests/corpus.test.js'),
+                        encoding='utf-8').read())
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is

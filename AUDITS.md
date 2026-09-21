@@ -24,6 +24,50 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**Two checks that could not fail, one of which had never executed at all.**
+The sixth fault class, found inside this project's own suites.
+
+  - **A round-trip over the CSV export ran zero times, on every run.**
+    `rpi/test_stacking.py` fetches `/api/journal.csv`, loops for a row with a
+    `scans` column and asserts the frames parse back. The fixture's readings
+    are a scanner replay and none of them carries that column, so the loop
+    body was never entered. The comment above it hedged — "need not have
+    reached the journal by the time the export is fetched" — but the outcome
+    was not flaky, it was **0 of 0 on every run**.
+
+    Fixed in two halves, because either alone leaves it able to die again: a
+    row carrying real frames is written into the journal, and the loop now
+    COUNTS what it found and fails if that is nothing. The frame text holds a
+    pipe, which is the whole reason the column is JSON rather than a join —
+    the card's icon row and its dividers both arrive as pipes, and joining
+    frames with `" | "` once split 19% of its own rows mid-frame.
+
+  - **The corpus's nine `round2` cases never reached the JavaScript.**
+    `round2` exists because Python's `round()` takes a half to the nearest
+    EVEN digit — 2.675 to 2.67 — where `Math.round` gives 2.68, and the two
+    ports must not store a distance that differs in the second decimal. The
+    Python runner called `P.round2`, a real call into the module under test.
+    The JavaScript runner did the hundredths arithmetic itself, in the test
+    file — a third copy of a rule `offer-parser.js` had two of, inline, at two
+    call sites. **Either of those two could have been changed with all nine
+    cases still passing.**
+
+    `round2` is written once in the JavaScript now, called at both sites and
+    exported — the same reason `setting` is exported, which that file already
+    says: a rule nothing can reach from a test is a rule that drifts unseen.
+
+*One guard here is a lint check rather than a mutation, and the reason is
+worth keeping.* An inlined copy of the rounding behaves identically to the
+call, so no mutation can show the difference — it is not wrong until the day
+someone changes one and not the other. `rpi/test_lint.py` counts the copies
+instead. Writing that check also caught a quoted example of the expression
+inside a comment, which the count included; the comment is worded without the
+code now, rather than the check weakened to ignore it.
+
+Four mutations, each dying to a named check. Stacking 158 to 161, lint 152 to
+154.
+
+
 **Two pieces of the parser that read as protection and provided none, deleted
 rather than documented.** This project's fourth fault class is a branch no
 input can reach, and its rule for one is to delete it. Both of these were in
