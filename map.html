@@ -722,7 +722,26 @@
         return o.at > lo && o.at < hi && !drawn[o.id];
       });
       h.hidden = inside.filter(function (o) { return !inBlock(o); }).length;
-      h.unwalked = inside.length - h.hidden;
+      // ...and the fourth way, which is not one the driver can do anything
+      // about: a taken job whose card named NEITHER end. MV.jobsIn gates on
+      // `pickup || dropoff`, so such a row is never in `placedNow` and never
+      // in `drawn`, however many times the walk runs. Counted as `unwalked` it
+      // printed "not in the last lookup - press Place them on a map", an
+      // instruction that cannot be followed and a line that can never clear.
+      //
+      // The same defect the nag under the `when` box had, found the same way
+      // and fixed the same way: count against what could be placed, not
+      // against everything. 62 of the owner's 1,166 rows name neither end, and
+      // 4 of his 31 taken jobs do.
+      //
+      // Still counted, and still says the car did not go straight from one end
+      // to the other, because that part is true. What it stops saying is that
+      // pressing a button will mend it.
+      var here = inside.filter(function (o) { return inBlock(o); });
+      h.unwalked = here.filter(function (o) {
+        return !!(o.pickup || o.dropoff);
+      }).length;
+      h.nowhere = here.length - h.unwalked;
     });
     return run;
   }
@@ -778,7 +797,14 @@
                + (h.unwalked === 1 ? '' : 's') + ' you took in between '
                + (h.unwalked === 1 ? 'was' : 'were') + ' not in the last '
                + 'lookup, so the car did not go straight from one of these to '
-               + 'the other — press \u201cPlace them on a map\u201d</span>' : ''))
+               + 'the other — press \u201cPlace them on a map\u201d</span>' : '')
+          // ...and the one no button can mend, said without asking for one.
+          + (h.nowhere
+             ? '<br><span class="note">' + h.nowhere + ' job'
+               + (h.nowhere === 1 ? '' : 's') + ' you took in between named '
+               + 'nowhere on the card, so ' + (h.nowhere === 1 ? 'it' : 'they')
+               + ' cannot be put on a map at all — the car did not go '
+               + 'straight from one of these to the other</span>' : ''))
         .addTo(order);
     });
     return run;
@@ -831,7 +857,11 @@
     // A hop with a job inside it is not a distance anybody drove, and it does
     // not matter to that whether the job is missing because it had no pin or
     // because the `when` box is hiding it. One bucket, two wordings.
-    var broken = function (h) { return h.skipped || h.hidden || h.unwalked; };
+    // `nowhere` counts too: a hop with a taken job inside it is not a
+    // straight drive, whether or not the card said where that job went.
+    var broken = function (h) {
+      return h.skipped || h.hidden || h.unwalked || h.nowhere;
+    };
     var solo = run.hops.filter(function (h) { return !h.stacked && !broken(h); });
     var stacked = run.hops.filter(function (h) { return h.stacked && !broken(h); });
     var over = run.hops.filter(broken);

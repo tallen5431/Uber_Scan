@@ -1484,6 +1484,14 @@ const STUB = `
   out.allChain = await look();
   out.allChainStatus = await page.evaluate(
     () => document.getElementById('status').textContent || '');
+  // What each hop says about the taken jobs inside it. o66 named neither end,
+  // so no press of Place can ever put it on the map - the caption must say
+  // the car did not go straight, and must not ask for a button.
+  out.allChainHops = await page.evaluate(() =>
+    window.__lines.map(function (l) {
+      return String(l.popup || '').replace(/<[^>]*>/g, ' ')
+                                  .replace(/\s+/g, ' ').trim();
+    }).filter(Boolean));
 
   // Where the car was, on, so the block below is picked with it showing —
   // which is the state in which a stale dot would actually be seen.
@@ -1555,7 +1563,11 @@ journal2 = os.path.join(work2, 'journal.jsonl')
 with open(journal2, 'w') as fh:
     for row in WHEN_ROWS:
         fh.write(json.dumps(row) + '\n')
-    for oid in ('o60', 'o61', 'o62'):
+    # o66 names NEITHER end and sits between o61 and o62 in time, so the hop
+    # between them contains a taken job that can never be placed. Without it
+    # marked taken, the chain's fourth failure - "press Place them on a map"
+    # for a card that named nowhere - has no input that reaches it.
+    for oid in ('o60', 'o61', 'o62', 'o66'):
         fh.write(json.dumps({'v': 1, 'kind': 'mark', 'at': int(WBASE),
                              'id': oid, 'accepted': True}) + '\n')
 
@@ -1705,6 +1717,35 @@ try:
     # the second fault class, and it is the same fault the narrow direction was
     # fixed for, ninety degrees away — the driver only ever exercises the
     # narrow one.
+    # --- a taken job the card named nowhere --------------------------------
+    #
+    # MV.jobsIn gates on `pickup || dropoff`, so such a row is never placed
+    # however many times the walk runs. Counted as "not in the last lookup" it
+    # printed "press Place them on a map" - an instruction that cannot be
+    # followed and a line that can never clear. 62 of the owner's 1,166 rows
+    # name neither end and 4 of his 31 taken jobs do. The same defect the nag
+    # under the box had, fixed the same way: count against what could be
+    # placed, not against everything.
+    _hops = w.get('allChainHops') or []
+    _joined = ' || '.join(_hops)
+    ok_('a hop says a taken job inside it named nowhere (%r)' % _joined[:150],
+        'named nowhere' in _joined)
+    no_('...and does not ask for a press that cannot place it',
+        any('named nowhere' in _h and 'press' in _h.lower() for _h in _hops))
+    ok_('...and still says the car did not go straight from one to the other',
+        any('named nowhere' in _h and 'did not go straight' in _h
+            for _h in _hops))
+    # ...and the headline has to agree with the popup. A hop holding a taken
+    # job is not a distance anybody drove, so its miles belong in the
+    # "job missing inside" bucket and not in "straight-line miles nobody paid
+    # for" - which is the figure this whole toggle exists to report. At
+    # "any time" nothing is hidden and everything placeable has been placed,
+    # so o66's hop is the only broken one: drop `nowhere` from that test and
+    # the clause below disappears entirely.
+    _ac = w.get('allChainStatus') or ''
+    ok_('the headline counts that hop as one with a job missing inside (%r)'
+        % _ac[:150], 'with a job missing inside' in _ac)
+
     _wd = w.get('widenedStatus') or ''
     ok_('the chain says a hop spans a job it never looked up (%r)' % _wd[:130],
         'missing inside' in _wd)

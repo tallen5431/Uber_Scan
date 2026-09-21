@@ -634,6 +634,35 @@ which sizes the Open entry below about the ⌖ button.
 
 ### The maps, again
 
+**The chain told the driver to press a button that cannot place the job it
+was about.** `chainRun` counts the taken jobs sitting inside a hop that are
+not drawn. `MV.jobsIn` gates on `pickup || dropoff`, so a taken job whose card
+named NEITHER end is never in `placedNow` and never in `drawn`, however many
+times the walk runs. Counted as "not in the last lookup" it printed **press
+"Place them on a map"** — an instruction that cannot be followed, on a line
+that can never clear. 62 of the owner's 1,166 rows name neither end and **4 of
+his 31 taken jobs** do.
+
+This is the same defect the nag under the `when` box had, recorded above, and
+it is fixed the same way: count against what COULD be placed rather than
+against everything. The hop still says the car did not go straight from one
+end to the other, because that is true; it stops claiming a button will mend
+it.
+
+*The headline had to move with the popup, and that is the half a first pass
+would have missed.* `broken()` decides whether a hop's miles go into
+"straight-line miles nobody paid for" — the figure this whole toggle exists to
+report — or into the "job missing inside" bucket. Left out of it, a hop
+holding an unplaceable taken job counted as a distance nobody drove, inflating
+the one number a driver reads as real. The first three mutations passed with
+that still wrong, because the checks only read the popup text; a fourth check
+pins the headline, and at "any time" that hop is the only broken one, so
+dropping `nowhere` makes the clause vanish outright rather than shift a
+decimal.
+
+Four checks, four mutations, each dying to a named one. Map 166 to 170.
+
+
 **"Forget lookups" threw nothing away, and said it had.** The button cleared
 the browser's copy of the geocode cache and printed "remembered lookups thrown
 away". Every answer this page has ever produced is POSTed to `/api/places`,
@@ -722,8 +751,9 @@ against 3.9-9.5 for a block.
 it landed, all reachable by the flow it advertises.* The nag under the box
 counted `missing` against every offer while `placed` can only hold offers that
 named somewhere, so a complete walk still read "N not yet" for ever and
-pressing Place could not move it — 58 of the owner's 1,166 rows name neither
-end. And widening the box **without pressing Place again** left the window
+pressing Place could not move it — 62 of the owner's 1,166 rows name neither
+end. (That figure said 58 when it was written and was wrong then, not made
+stale since: replayed at three of today's revisions it is 62 at every one.) And widening the box **without pressing Place again** left the window
 spanning jobs the last walk never looked up: `hidden` means "the box is hiding
 it", which is false at "any time", so the chain reported "0.0 straight-line
 miles nobody paid for" over a hop with a taken job inside it, and denied taken
