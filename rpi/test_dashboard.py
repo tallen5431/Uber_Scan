@@ -1169,6 +1169,36 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
     await page.waitForTimeout(200);
     out.dead.cleared = await page.evaluate(LOOK, '#warn');
+
+    // The setup narration, sent as the rig really sends it. autopilot.py's
+    // last word before it execs into the scanner is
+    // {phase:'scanning', message:'starting scanner'}, and scan_pi.py emits no
+    // phase at all — so `phase` was stuck on that message for the whole shift
+    // and the between-offers branch appended it to the notice strip every
+    // time. Every existing check here pushed message:'' and so could not see
+    // it.
+    await page.evaluate(() => window.__es.push(
+      { phase: 'scanning', message: 'starting scanner' }));
+    await page.evaluate(() => window.__es.push(
+      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
+        refindRefused: null, notSaving: null }));
+    await page.evaluate((r) => window.__es.push(
+      Object.assign({}, r, { ready: false, state: 'empty', perHour: null })),
+      READINGS.deducted);
+    await page.waitForTimeout(200);
+    out.dead.afterSetup = await page.evaluate(LOOK, '#warn');
+
+    // A lifetime counter is not a now-state. QuadTracker.jumps counts every
+    // re-lock since the process started and is reset nowhere, so one re-lock
+    // put "re-locked on the phone" on the detail line for the rest of the
+    // shift — and, sitting mid else-if between two live states, it meant the
+    // drift note below it could never be shown again.
+    await page.evaluate((r) => window.__es.push(Object.assign({}, r, {
+      track: { lost: false, jumps: 3, drift: 41.0, misses: 0 } })),
+      READINGS.deducted);
+    await page.waitForTimeout(200);
+    out.dead.oldRelock = await page.evaluate(LOOK, '#detail .diag');
+
     await page.close();
     await ctx.close();
   }
@@ -3255,6 +3285,14 @@ try:
         ok_('...ahead of the note about the picture being poor',
             'too bright' in between
             and between.index('NOT being saved') < between.index('too bright'))
+        after_setup = ((dd.get('afterSetup') or {}).get('text') or '')
+        ok_('the setup narration is not still on the strip between offers (%r)'
+            % after_setup[:60], 'starting scanner' not in after_setup)
+        old_relock = ((dd.get('oldRelock') or {}).get('text') or '')
+        ok_('a re-lock earlier in the shift is not reported as now (%r)'
+            % old_relock[:60], 're-locked' not in old_relock)
+        ok_('...and the drift it used to mask is shown instead',
+            '41px' in old_relock)
         on_reading = ((dd.get('onReading') or {}).get('text') or '')
         ok_('...and it survives an offer arriving, which is the case it is about',
             'NOT being saved' in on_reading)

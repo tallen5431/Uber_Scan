@@ -1119,6 +1119,50 @@ exists for. `a5cbe64`, plus the `CLOCK_BELIEVABLE_UNTIL` clamp in `server.js`.
 
 ### The panel
 
+**Two notes on the driving screen that described a moment long past, one of
+them masking the note that was about now.**
+
+  - **The notice strip read "starting scanner" between every pair of offers,
+    all shift.** `phase` is set from any message carrying a `phase` key and
+    never cleared. `rpi/autopilot.py`'s last word before it `execv`s into the
+    scanner is `{phase: 'scanning', message: 'starting scanner'}`, and
+    `rpi/scan_pi.py` emits **no phase at all** — so that message was the last
+    one there would ever be, and the between-offers branch appends
+    `p.message` to the strip unconditionally. That branch is where this rig
+    spends most of its time, as the dashboard suite's own comment says.
+
+    A phase is a moment, not a state, so the spent one is dropped when the
+    scanner itself speaks — the thing it was narrating has happened. Only
+    `scanning`: `error` and `aim` are states a driver has to act on and must
+    outlive a heartbeat. The headline does not move, because
+    `PHASE_LABEL.scanning` is `WAITING FOR AN OFFER` and so is the fallback
+    when there is no phase at all.
+
+  - **`trackNote` printed a lifetime counter in the present tense.**
+    `QuadTracker.jumps` counts every re-lock since the process started and is
+    reset nowhere — not even by `start_over`, the ⟳ Re-find path, which
+    clears `misses`, `_off_since`, `agreeing` and `_candidate` and leaves this
+    alone. So one re-lock at any point put "re-locked on the phone" on the
+    detail line for the rest of the shift. The rig's own health log carries
+    the same number correctly labelled, "re-locked %dx since start".
+
+    **The cost was the note underneath it.** The three clauses are an
+    `else if` chain with the lifetime count sitting between two LIVE states,
+    so after the first re-lock the drift note could never be shown again.
+    Saying a true thing about the past in the present tense cost the one note
+    here that is about now.
+
+    Not replaced with a recent-re-lock note, because nothing measures one:
+    `status()` publishes `jumps`, `moves`, `misses` and `rebaselines`, and
+    every one of them counts since start.
+
+*Why the suite could not see either.* Every phase check in
+`rpi/test_dashboard.py` pushed `message: ''`. The probe added here sends the
+message the rig actually sends, and reads the strip from the between-offers
+branch. Three mutations die: the spent phase kept, the wrong phase cleared,
+and the `jumps` note put back. 565 checks to 568.
+
+
 **The panel's caption row had a budget written where nothing could enforce it,
 and it was not a budget that could be kept.** `live.html` states the rule at
 the `mapDrew` call — "this line is a row of the panel, and at 15px a sentence

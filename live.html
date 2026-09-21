@@ -2086,7 +2086,21 @@
     var bits = [];
     var t = r.track;
     if (t && t.lost) bits.push('screen not visible');
-    else if (t && t.jumps) bits.push('re-locked on the phone');
+    // `t.jumps` used to sit here, printing 're-locked on the phone'. It is a
+    // LIFETIME count — QuadTracker.jumps is incremented on every re-lock and
+    // reset nowhere, not even by start_over, the ⟳ Re-find path — so one
+    // re-lock at any point in a shift put that note on every reading after it,
+    // and between offers too. The rig's own health log already carries the
+    // same number correctly labelled, 're-locked %dx since start'.
+    //
+    // Worse, it sat in the middle of an else-if chain between two LIVE states,
+    // so after the first re-lock the drift note below could never appear
+    // again. Saying a true thing in the present tense about the past cost the
+    // one note here that is about now.
+    //
+    // Not replaced with a recent-re-lock note, because nothing measures one:
+    // status() publishes jumps, moves, misses and rebaselines, and every one
+    // of them counts since start.
     else if (t && t.drift >= 25) bits.push('tracking ' + Math.round(t.drift) + 'px');
     return bits.length ? ' · ' + bits.join(' · ') : '';
   }
@@ -2244,6 +2258,20 @@
         readAt = msg.replay ? Date.now() - age(msg.ageMs) : Date.now();
       }
       if (msg.phase) phase = msg;
+      // ...and a phase is a MOMENT, not a state. `scanning` is autopilot
+      // saying it is about to exec into the scanner, and it is the last phase
+      // anything ever emits — rpi/scan_pi.py sends none at all. So `phase`
+      // stayed on that message for the whole shift, and the between-offers
+      // branch appends `p.message` to the notice strip unconditionally: the
+      // strip read "starting scanner" between every pair of offers, which is
+      // where this rig spends most of its time.
+      //
+      // Cleared when the scanner itself speaks, because that is the thing the
+      // message was narrating and it has now happened. Only for `scanning`:
+      // `error` and `aim` are states a driver has to act on and outlive any
+      // heartbeat. The headline does not move — PHASE_LABEL.scanning is
+      // 'WAITING FOR AN OFFER' and so is the fallback when there is no phase.
+      else if (phase && phase.phase === 'scanning') phase = null;
       if (msg.ready !== undefined) last = msg;
       // Every reading carries whether an order is being held, because the
       // server's own clock can end one — see holding() — with nothing pressed
