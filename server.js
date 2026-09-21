@@ -2896,6 +2896,43 @@ function route(req, res) {
                            stored: Object.keys(held).length });
       });
     }
+    // ...and thrown away, which is the one control that can remove a bad
+    // answer from this rig at all.
+    //
+    // Without this, map.html's "Forget lookups" cleared the BROWSER's copy and
+    // said "remembered lookups thrown away" — and the next press of Load
+    // copied every one of them back off this server, because loadPlaces() GETs
+    // the whole set and load() is also what runs when the page opens. The
+    // button undid itself, silently, on the first thing anyone presses after
+    // it.
+    //
+    // Whole-file and not per key. Correcting ONE place was proposed twice and
+    // refused twice — see AUDITS — and this is not that: it is the wholesale
+    // wipe the page already offered and could not deliver.
+    if (req.method === 'DELETE') {
+      return fs.readFile(placesPath, 'utf8', function (readErr, text) {
+        var had = 0;
+        if (!readErr) {
+          try {
+            var held = JSON.parse(text);
+            if (held && typeof held === 'object' && !Array.isArray(held)) {
+              had = Object.keys(held).length;
+            }
+          } catch (e) { had = 0; }
+        }
+        fs.unlink(placesPath, function (rmErr) {
+          // Already absent is the state this asks for, not a failure to reach
+          // it. Anything else is said rather than swallowed: a button that
+          // reports success over a file it could not remove is the fault this
+          // endpoint exists to end.
+          if (rmErr && rmErr.code !== 'ENOENT') {
+            console.error('places: ' + rmErr.message);
+            return placesReply(500, { ok: false, error: rmErr.code });
+          }
+          placesReply(200, { ok: true, removed: had });
+        });
+      });
+    }
     if (req.method === 'POST') {
       return readBody(req, MAX_SYNC_BODY, function (err, text) {
         if (err) return placesReply(400, { ok: false, error: err.message });

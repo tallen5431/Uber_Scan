@@ -537,6 +537,32 @@ const KNOWN = {
     newQuestions: window.__asked.length - n,
   }), before);
 
+  /* --- Forget lookups, and whether it forgets anything ------------------
+   *
+   * The button cleared the BROWSER's copy and said "remembered lookups thrown
+   * away". Every answer this page produces is POSTed to /api/places,
+   * loadPlaces() GETs the whole set back, and load() runs on the next press of
+   * Load AND when the page opens - so the one control that can remove a bad
+   * geocode undid itself on the first thing anyone pressed after it.
+   *
+   * LAST, deliberately: it empties the cache every stage above depends on.
+   * Put after `place` it moved "a second run re-asks only what it could not
+   * ask the first time" from 1 question to 3 - the check reading an emptied
+   * cache rather than a fault in the page. */
+  stage = 'forget';
+  out.forget = { before: Object.keys(
+    (await (await fetch(base + '/api/places')).json()).places || {}).length };
+  await page.click('#forget');
+  await page.waitForFunction(
+    () => /thrown away|only/.test(document.getElementById('status').textContent),
+    null, { timeout: 15000 }).catch(() => {});
+  out.forget.said = await page.evaluate(
+    () => document.getElementById('status').textContent.trim());
+  out.forget.after = Object.keys(
+    (await (await fetch(base + '/api/places')).json()).places || {}).length;
+  out.forget.here = await page.evaluate(() => Object.keys(JSON.parse(
+    localStorage.getItem('uberscan.geocode.v1') || '{}')).length);
+
   console.log(JSON.stringify(out));
   await browser.close();
 })().catch((e) => { console.log(JSON.stringify(
@@ -643,6 +669,21 @@ try:
 
     on_load = got.get('onLoad') or {}
     placed = got.get('placed') or {}
+
+    # --- the one control that can remove a bad geocode ---------------------
+    #
+    # It cleared the browser's copy and said "remembered lookups thrown away".
+    # Every answer this page produces is POSTed to /api/places, loadPlaces()
+    # GETs the whole set back, and load() runs on the next press of Load AND
+    # when the page opens - so the button undid itself on the first thing
+    # anyone pressed after it, silently, and a driver watching a bad pin come
+    # back had no way to know why.
+    forget = got.get('forget') or {}
+    ok_('the placing filled the server cache first', (forget.get('before') or 0) > 0)
+    eq('...and Forget lookups empties it there too', forget.get('after'), 0)
+    eq('...and on the device', forget.get('here'), 0)
+    ok_('...and says it reached the server, not just this browser (%r)'
+        % (forget.get('said') or '')[:70], 'server' in (forget.get('said') or ''))
 
     # --- nothing is asked until the driver asks ----------------------------
     #

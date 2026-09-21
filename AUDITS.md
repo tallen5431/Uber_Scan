@@ -634,6 +634,38 @@ which sizes the Open entry below about the ⌖ button.
 
 ### The maps, again
 
+**"Forget lookups" threw nothing away, and said it had.** The button cleared
+the browser's copy of the geocode cache and printed "remembered lookups thrown
+away". Every answer this page has ever produced is POSTed to `/api/places`,
+`loadPlaces()` GETs the whole set back, and `load()` is what runs on the next
+press of Load **and when the page opens** — so every lookup came straight
+back, on the first thing anyone pressed afterwards. The one control that can
+remove a bad geocode removed nothing, and the page said otherwise.
+
+*Not the cure that was refused.* Per-place correction was proposed twice and
+refused twice, and this is not it: it is the wholesale wipe the page already
+offered and could not deliver. `DELETE /api/places` removes the file and says
+how many it held; already-absent is the state it asks for, not a failure.
+
+*And the words now match in both directions.* On success the page says it
+reached the server and how many went. When the DELETE fails it says "cleared
+on this device only — the server still has them, and the next Load will bring
+them back", which is the sentence a driver actually needs, instead of
+reporting a success it did not have.
+
+Five mutations die: the endpoint removed, the count faked, a reply sent
+without removing anything, the page not asking the server, and the words no
+longer saying where. Server checks 151 to 157, map 162 to 166.
+
+*Two of the three problems finding this cost were mine, and are worth the
+line.* The first probe cleared the cache in the middle of the driver and moved
+"a second run re-asks only what it could not ask the first time" from 1
+question to 3 — the check reading an emptied cache, not a fault in the page;
+it runs last now, with the reason beside it. The second waited a fixed 800ms
+for the DELETE and read the server before the fetch had finished, which looks
+exactly like the fix not working.
+
+
 **"Drawn end to end" was two different numbers on one screen, and the status
 line counted an accusation as a success.** `map.html` draws a pair whose
 pickup or dropoff landed nowhere near the rest of the shift as a **red dashed
@@ -1582,8 +1614,14 @@ before anything is built.
 **A wrong remembered lookup can only be fixed by wiping every good one.**
 `map.html` is the one surface that can *identify* a bad geocode — the stray rows
 are already listed and already tappable — and all it can do is throw the whole
-cache away. (The cure proposed by the audit was refused; see Settled. The
-button at least *works* now — see Done.)
+cache away. The cure proposed by the audit was refused; see Settled.
+
+*This entry used to end "the button at least works now", and that was wrong
+twice over.* It cleared only the browser's copy while the server kept every
+answer and handed them back on the next press of Load, so it threw nothing
+away at all — see Done. It does now, and the entry above is what is left after
+that: wiping every good lookup to remove one bad one is still the only remedy
+this page has.
 
 **A heat map of $/hr by area, asked for, designed, and refuted on the data.**
 The driver's words: "visualize the $/hr in different areas around Atlanta ...

@@ -1142,7 +1142,28 @@
   });
   el.forget.addEventListener('click', function () {
     geo.forget();
-    say('remembered lookups thrown away');
+    // The server's copy as well, or this button undoes itself. Every answer
+    // the page has ever produced is POSTed to /api/places, loadPlaces() GETs
+    // the whole set back, and load() is what runs on the next press of Load
+    // AND when the page opens — so clearing only this device threw nothing
+    // away at all. The words said one thing and the button did another, on
+    // the one control that can remove a bad geocode.
+    fetch('/api/places', { method: 'DELETE' })
+      .then(function (r) { return r.json(); })
+      .then(function (body) {
+        if (!body || !body.ok) throw new Error(body && body.error || 'refused');
+        onServer = {};
+        say('remembered lookups thrown away, here and on the server ('
+            + (body.removed || 0) + ')');
+      })
+      .catch(function () {
+        // Said rather than swallowed, and this is the sentence that matters:
+        // this device's copy IS gone, the server's is not, and the next Load
+        // will bring them back. A driver who is not told that presses Load and
+        // watches the bad pin return with no idea why.
+        say('cleared on this device only — the server still has them, and the '
+            + 'next Load will bring them back');
+      });
   });
 
   ensureMap();

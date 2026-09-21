@@ -156,6 +156,15 @@ def post(base, path, body):
         return e.code, json.loads(e.read().decode('utf-8') or '{}')
 
 
+def delete(base, path):
+    req = urllib.request.Request(base + path, method='DELETE')
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read().decode('utf-8') or '{}')
+
+
 def offer(i, at, **extra):
     row = {'v': 1, 'id': 'off%d' % i, 'seq': 1, 'at': at, 'firstAt': at,
            'pay': 10.0 + i, 'minutes': 20.0, 'miles': 4.0, 'perHour': 30.0,
@@ -1597,6 +1606,28 @@ try:
     eq('an unreadable places file reads as empty', _torn['places'], {})
     ok_('...and says why, rather than looking like a fresh box',
         'did not parse' in (_torn.get('unreadable') or ''))
+
+    # --- and thrown away, which is what makes the page's button true --------
+    #
+    # map.html's "Forget lookups" cleared the browser's copy and said
+    # "remembered lookups thrown away". Every answer the page ever produced is
+    # POSTed here, loadPlaces() GETs the whole set back, and load() runs on the
+    # next press of Load AND when the page opens — so the button undid itself
+    # on the first thing anyone pressed after it, and the one control that can
+    # remove a bad geocode removed nothing.
+    post(_pbase, '/api/places', {'Bad Lookup, Nowhere': {'lat': 41.9, 'lon': -87.6},
+                                 'Good One, Kennesaw': {'lat': 34.03, 'lon': -84.61}})
+    eq('the two lookups are on the server to begin with',
+       len(get(_pbase, '/api/places')['places']), 2)
+    _dcode, _dsaid = delete(_pbase, '/api/places')
+    eq('the server lets them be thrown away', _dcode, 200)
+    eq('...and says how many it had', _dsaid.get('removed'), 2)
+    eq('...and the next page to ask gets none of them back',
+       get(_pbase, '/api/places')['places'], {})
+    # Pressing it twice is not an error: already gone is the state it asks for.
+    _dcode2, _dsaid2 = delete(_pbase, '/api/places')
+    eq('throwing away an empty cache is not a failure', _dcode2, 200)
+    eq('...and reports nothing removed', _dsaid2.get('removed'), 0)
 finally:
     stop(_pproc)
     shutil.rmtree(_pdir, ignore_errors=True)
