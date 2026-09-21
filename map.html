@@ -128,9 +128,12 @@
      sending somebody's address a decision rather than a surprise. So everything
      around it gives way instead, and the map keeps what is left. */
   /* On a panel the map gets the room, and the sentence explaining what the page
-     is gives it up. Measured at 800x480 with the readable type above: header
-     98px, bar 138, notice 108, and 121px left for the map — on the page whose
-     entire subject is the map. The explanation is worth reading once and is
+     is gives it up. Re-measured at 800x480 on the real page with the `when`
+     box in the bar: header 64px, bar 137, notice 108, and 156 left for the
+     map — on the page whose entire subject is the map. The header and map
+     figures here had been stale for a while; `bar 138` was the one still true
+     and the `when` box moved it, which is why the whole line was re-taken
+     rather than decremented. The explanation is worth reading once and is
      furniture afterwards; the heading and the notice between them already say
      what this page does and what pressing Place will send. A screen with the
      height to spare keeps it: at 1280x800 the map has 483px and nothing needs
@@ -174,6 +177,19 @@
   <div class="bar">
     <label>days <input type="number" id="days" value="7" min="1" max="365"></label>
     <label>near <input type="text" id="hint" placeholder="Georgia, USA"></label>
+    <!-- WHEN, and only when. There is no weekday box beside this one and that
+         is a measurement rather than an omission: `days` defaults to 7, a
+         168-hour window holds each weekday-and-block exactly once, and on the
+         owner's real week all thirteen occupied cells of that grid came off a
+         single calendar date apiece. A box offering "Fri" would be a date
+         picker wearing a habit's clothes, and three of its seven options
+         (Mon, Wed, Thu) return an empty map on that week. Making "Fri" mean
+         Fridays needs a month, and at a month this journal is 5,354 offers
+         against the 5,000 this page asks for — so the server drops the oldest,
+         which are exactly the extra Fridays. The number of separate days
+         behind the answer is printed instead, which is the claim the driver
+         actually needs checked. -->
+    <label>when <select id="block"><option value="">any time</option></select></label>
     <button id="load">Load offers</button>
     <button id="place" class="go" disabled>Place them on a map</button>
     <!-- Where the car actually was, which needs no geocoder and no network:
@@ -208,17 +224,29 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- For Advice.BLOCK_NAMES and Advice.blockOf alone: the three-hour edges the
+     offer log's "By time of day" chart is drawn on. The `when` box below cuts
+     the same week at the same eight places, and a page that kept its own copy
+     of them would answer the same question differently the first time either
+     moved. Same origin, already in the service worker's shell, and already
+     loaded by every other page here. -->
+<script src="advice.js"></script>
 <script src="map-view.js"></script>
 <script>
 (function () {
   'use strict';
 
   var el = {};
-  ['days', 'hint', 'load', 'place', 'forget', 'trail', 'chain', 'status', 'map',
-   'side', 'sideEmpty', 'sideBody'].forEach(function (id) { el[id] = document.getElementById(id); });
+  ['days', 'hint', 'block', 'load', 'place', 'forget', 'trail', 'chain', 'status',
+   'map', 'side', 'sideEmpty', 'sideBody'].forEach(function (id) { el[id] = document.getElementById(id); });
 
   var offers = [];
   var map = null, layer = null, trail = null, order = null;
+  /* The whole answer the last press produced, over whatever set was shown at
+     the time. Kept so that narrowing the `when` box is instant and costs no
+     lookups: the places are already answered, and re-walking them to draw a
+     subset would be minutes of rate-limited asking for a filter. */
+  var lastRun = null;
   // What the last run judged, kept so the order-you-drove toggle can be turned
   // on and off without geocoding the range again.
   var placedNow = [];
@@ -240,6 +268,53 @@
   var FAR_MILES = MV.FAR_MILES;
 
   function say(text) { el.status.textContent = text; }
+
+  /* --- when ---------------------------------------------------------------
+   *
+   * The edges and the names are Advice.BLOCK_NAMES, which the offer log's "By
+   * time of day" chart is also drawn on. This page had no way to ask the map a
+   * question about a time at all, and the map answers a different question at
+   * different hours: on the owner's real week, of the pickups this rig can put
+   * a town to, Atlanta is 78% of them between midnight and 3am and 3% between
+   * 3 and 6pm, where the map is Kennesaw, Marietta, Dallas and Acworth. The
+   * median goes $18.26 against $13.52 across the same cut. A map of the whole
+   * week shows both piles at once and reads as one place. */
+  Advice.BLOCK_NAMES.forEach(function (name, i) {
+    var opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = name;
+    el.block.appendChild(opt);
+  });
+
+  /* A row whose stamp no clock can read has no block, so it is in no named
+     one — and it is still in "any time", which is where it was before this box
+     existed. Advice.blockOf answers null for it rather than NaN; see the note
+     there. */
+  function inBlock(o) {
+    var want = el.block.value;
+    if (want === '') return true;
+    return String(Advice.blockOf(o && o.at)) === want;
+  }
+
+  function shown() { return offers.filter(inBlock); }
+
+  /* The sentence that stops a block being read as a habit.
+   *
+   * "9pm–12 pays well" is a different claim depending on whether it rests on
+   * three evenings or one, and on the owner's week both cases are in the same
+   * eight-way box: the three busiest blocks each pool three separate evenings,
+   * and 3–6am is 33 offers all belonging to one night. The offer log prints
+   * the same figure over its chart for the same reason. It is said in words
+   * rather than left as a number because the one-day case is the one that
+   * misleads. */
+  function whenNote(sub) {
+    if (el.block.value === '') return '';
+    var days = Advice.daysIn(sub);
+    return ' · ' + Advice.BLOCK_NAMES[Number(el.block.value)] + ' only, and '
+      + (days === 0 ? 'no day in this window has any'
+         : days === 1 ? 'all of it is one day — that is a day, not a habit'
+         : days + ' separate days of it are in this window');
+  }
 
   /* One geocoder for the page, so the one-a-second rule is a property of the
      page and not of whichever loop happens to be running. */
@@ -349,14 +424,17 @@
       .then(function (body) {
         if (body && body.unreadable) throw new Error('the journal could not be read (' + body.unreadable + ')');
         offers = (body && body.offers) || [];
-        var withEnds = offers.filter(function (o) { return o.pickup || o.dropoff; });
-        var mappable = offers.filter(function (o) { return o.pickup && o.dropoff; });
+        // A fresh window; nothing in the old answer describes it.
+        lastRun = null;
+        var sub = shown();
+        var withEnds = sub.filter(function (o) { return o.pickup || o.dropoff; });
+        var mappable = sub.filter(function (o) { return o.pickup && o.dropoff; });
         // How many rows can say where the car was, which is what decides
         // whether a place gets searched near the driver or searched blind.
         // Counted rather than averaged: the middle of every fix in the range
         // was computed here for a while and read by nothing — a place whose
         // own rows are silent gets no anchor on purpose, see anchorFor.
-        var fixes = offers.map(MV.fixOf).filter(Boolean);
+        var fixes = sub.map(MV.fixOf).filter(Boolean);
         // ...and whether this is the whole window or the newest part of it.
         //
         // The request asks for 5000 and the days box goes to 365. Past the cap
@@ -386,18 +464,23 @@
          * they cannot see.
          *
          * Only when the box is empty: a driver who typed something meant it. */
+        // The whole window and not the filtered set: the hint says which metro
+        // to search in, which is a fact about the driver rather than about the
+        // hour, and a block with two offers in it would box the geocoder on
+        // two cards.
         var town = MV.localityOf(offers);
         var filled = '';
         if (town && !el.hint.value.trim()) {
           el.hint.value = town;
           filled = ' · searching near ' + town + ', off your own cards';
         }
-        say(offers.length + ' offers · ' + withEnds.length + ' name somewhere · '
+        say(sub.length + ' offers · ' + withEnds.length + ' name somewhere · '
             + mappable.length + ' name both ends'
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
-                            : ' · none carry a position') + filled + short);
+                            : ' · none carry a position')
+            + whenNote(sub) + filled + short);
         el.place.disabled = withEnds.length === 0;
-        render([], {}, {});
+        redraw();
       })
       .catch(function (e) { say('could not load: ' + (e && e.message || e)); });
   }
@@ -416,9 +499,14 @@
     el.place.disabled = true;
     el.load.disabled = true;
     try {
-      var run = await MV.placeAll(offers, geo, say);
-      render(run.placed, run.strays, run.found);
-      say(run.done);
+      // The filtered set, not the window. Narrowing before the walk is the
+      // only part of this filter that SAVES anything: it is one lookup a
+      // second, and on the owner's week the whole window is 1,325 distinct
+      // places — about twenty-four minutes — where 9pm–12 alone is 383.
+      var sub = shown();
+      lastRun = await MV.placeAll(sub, geo, say);
+      redraw();
+      say(lastRun.done + whenNote(sub));
     } finally {
       // In a finally, because a lookup that throws must not leave the page
       // with both its buttons dead and no way to try again. The old version
@@ -429,7 +517,57 @@
     }
   }
 
-  /* --- drawing ------------------------------------------------------------- */
+  /* --- drawing -------------------------------------------------------------
+   *
+   * What is on the glass is the last run, cut to the block the `when` box is
+   * on. Cut and never recomputed, and that is the whole of the care needed
+   * here: MV.straysAmong measures each pin against the middle of everything
+   * placed, so re-running it over a narrower pile would move the middle and
+   * could newly accuse a pin that the full evening exonerated. A map that
+   * calls a good pin wrong because a filter was moved is the same fault as the
+   * two-point median in map-view.js's header — an accusation manufactured by
+   * the arithmetic rather than found in the data. Accusations are inherited,
+   * never invented. */
+  function view() {
+    if (!lastRun) return { placed: [], strays: {}, found: {} };
+    var keep = lastRun.placed.filter(function (p) { return inBlock(p.offer); });
+    var wanted = {};
+    keep.forEach(function (p) {
+      if (p.offer.pickup) wanted[p.offer.pickup] = true;
+      if (p.offer.dropoff) wanted[p.offer.dropoff] = true;
+    });
+    var strays = {};
+    Object.keys(lastRun.strays || {}).forEach(function (name) {
+      if (wanted[name]) strays[name] = lastRun.strays[name];
+    });
+    return { placed: keep, strays: strays, found: lastRun.found };
+  }
+
+  function redraw() {
+    var v = view();
+    render(v.placed, v.strays, v.found);
+  }
+
+  /* Moving the box does not geocode. It cannot: the answer already on the page
+     was walked at one lookup a second and the places in it are answered. What
+     it CAN do is show a block the last press never walked — pick 9pm–12,
+     press Place, then widen to any time — and drawing that quietly would be a
+     map claiming to be the window while showing a third of it. So the count
+     that is drawn and the count that is there are both said. */
+  function blockChanged() {
+    var sub = shown();
+    var v = view();
+    var withEnds = sub.filter(function (o) { return o.pickup || o.dropoff; });
+    el.place.disabled = withEnds.length === 0;
+    render(v.placed, v.strays, v.found);
+    var missing = withEnds.length - v.placed.length;
+    say(sub.length + ' offer' + (sub.length === 1 ? '' : 's') + ' here · '
+        + v.placed.length + ' already looked up'
+        + (missing > 0
+           ? ' · ' + missing + ' not yet — press “Place them on a map”'
+           : '')
+        + whenNote(sub));
+  }
 
   function ensureMap() {
     if (map) return true;
@@ -557,11 +695,41 @@
    * empty run between one job ending and the next beginning, which is the
    * thing a driver is actually judging when they ask whether a second offer
    * was worth taking. */
+  /* MV.chain, plus the one thing only this page can know: which taken jobs the
+     `when` box is hiding.
+     MV.chain is handed the offers on the glass, so a job the filter removed is
+     not in `taken` and cannot raise `skipped` — and `skipped` is silent at
+     zero, so a hop would assert by omission that the car went straight from
+     one end to the other. Measured on the owner's real week: filtered to
+     9pm–12, the hop from Friday 22:48 to Saturday 21:26 has SEVEN taken jobs
+     inside it, and across the five live blocks six hops do this. The straight
+     violet line between two of that driver's jobs is the one thing on this
+     page they would read as a distance they actually drove.
+     Counted off `offers`, which is the whole window and stays the whole window
+     for exactly this. */
+  function chainRun() {
+    var run = MV.chain(placedNow);
+    var taken = offers.filter(function (o) {
+      return o.accepted && typeof o.at === 'number' && isFinite(o.at);
+    });
+    var drawn = {};
+    placedNow.forEach(function (p) { drawn[p.offer.id] = true; });
+    run.hops.forEach(function (h) {
+      var lo = h.a.offer.at, hi = h.b.offer.at;
+      var inside = taken.filter(function (o) {
+        return o.at > lo && o.at < hi && !drawn[o.id];
+      });
+      h.hidden = inside.filter(function (o) { return !inBlock(o); }).length;
+      h.unwalked = inside.length - h.hidden;
+    });
+    return run;
+  }
+
   function drawChain() {
     if (!map) return;
     if (order) { map.removeLayer(order); order = null; }
     if (el.chain.getAttribute('aria-pressed') !== 'true') return;
-    var run = MV.chain(placedNow);
+    var run = chainRun();
     order = L.layerGroup().addTo(map);
     run.hops.forEach(function (h) {
       L.polyline([[h.from.lat, h.from.lon], [h.to.lat, h.to.lon]], {
@@ -590,7 +758,25 @@
              ? '<br><span class="note">' + h.skipped + ' job'
                + (h.skipped === 1 ? '' : 's') + ' in between could not be put on '
                + 'the map, so the car did not go straight from one of these to '
-               + 'the other</span>' : ''))
+               + 'the other</span>' : '')
+          // Said as its own thing, because the remedy is different: this one
+          // is undone by moving the `when` box back to "any time", and the
+          // one above is not undone by anything the driver can do.
+          + (h.hidden
+             ? '<br><span class="note">' + h.hidden + ' job'
+               + (h.hidden === 1 ? '' : 's') + ' you took in between '
+               + (h.hidden === 1 ? 'is' : 'are') + ' outside the time you '
+               + 'picked, so the car did not go straight from one of these to '
+               + 'the other</span>' : '')
+          // ...and the third way a job goes missing from a hop, which only
+          // exists because the box can be moved AFTER a walk: the last press
+          // never looked this stretch up, so the job is on no pin at all.
+          + (h.unwalked
+             ? '<br><span class="note">' + h.unwalked + ' job'
+               + (h.unwalked === 1 ? '' : 's') + ' you took in between '
+               + (h.unwalked === 1 ? 'was' : 'were') + ' not in the last '
+               + 'lookup, so the car did not go straight from one of these to '
+               + 'the other — press \u201cPlace them on a map\u201d</span>' : ''))
         .addTo(order);
     });
     return run;
@@ -605,10 +791,20 @@
   /* The headline is the total, not the count. "Nine hops" is trivia; "you drove
      thirty-one miles nobody paid you for" is the reason to look at this. */
   function chainNote() {
-    var run = MV.chain(placedNow);
+    var run = chainRun();
     if (!run.taken) {
-      say('nothing in this range is ticked as taken, so there is no order to '
-          + 'draw — the ✓ on the offer log is what marks a job you ran');
+      // Two different nothings, and saying the first when it is the second
+      // denies a job the driver did run. The box can be moved onto a block
+      // the last press never walked, and then every taken job in it is on no
+      // pin — which is not the same as nothing being ticked.
+      var ticked = shown().filter(function (o) { return o.accepted; }).length;
+      say(ticked
+          ? ticked + ' job' + (ticked === 1 ? '' : 's') + ' here '
+            + (ticked === 1 ? 'is' : 'are') + ' ticked as taken, but '
+            + (ticked === 1 ? 'it has' : 'they have') + ' no pin yet — press '
+            + '\u201cPlace them on a map\u201d'
+          : 'nothing in this range is ticked as taken, so there is no order to '
+            + 'draw — the ✓ on the offer log is what marks a job you ran');
       return;
     }
     if (!run.hops.length) {
@@ -630,9 +826,13 @@
     function total(of) {
       return of.reduce(function (sum, h) { return sum + h.miles; }, 0);
     }
-    var solo = run.hops.filter(function (h) { return !h.stacked && !h.skipped; });
-    var stacked = run.hops.filter(function (h) { return h.stacked && !h.skipped; });
-    var over = run.hops.filter(function (h) { return h.skipped; });
+    // A hop with a job inside it is not a distance anybody drove, and it does
+    // not matter to that whether the job is missing because it had no pin or
+    // because the `when` box is hiding it. One bucket, two wordings.
+    var broken = function (h) { return h.skipped || h.hidden || h.unwalked; };
+    var solo = run.hops.filter(function (h) { return !h.stacked && !broken(h); });
+    var stacked = run.hops.filter(function (h) { return h.stacked && !broken(h); });
+    var over = run.hops.filter(broken);
     say(run.hops.length + ' hop' + (run.hops.length === 1 ? '' : 's')
         + ' between ' + run.taken + ' jobs you took · '
         + total(solo).toFixed(1) + ' straight-line miles nobody paid for'
@@ -643,7 +843,11 @@
         + (over.length
            ? ' · ' + total(over).toFixed(1) + ' mi across ' + over.length
              + ' hop' + (over.length === 1 ? '' : 's')
-             + ' with a job missing inside' : '')
+             + ' with a job missing inside'
+             + (over.filter(function (h) { return h.hidden; }).length
+                ? ' — some of them missing only because of the time you picked'
+                : '')
+           : '')
         + (run.unplaced ? ' · ' + run.unplaced + ' taken jobs have no pin and '
                         + 'were stepped over' : ''));
   }
@@ -669,7 +873,10 @@
     if (!map) return;
     if (trail) { map.removeLayer(trail); trail = null; }
     if (el.trail.getAttribute('aria-pressed') !== 'true') return;
-    var fixes = offers.map(function (o) {
+    // The block's own positions. A whole week of dots under a three-hour map
+    // is the previous card's pins left standing under this one's, which this
+    // project already refuses on the driving panel.
+    var fixes = shown().map(function (o) {
       var at = MV.fixOf(o);
       return at ? { at: at, offer: o } : null;
     }).filter(Boolean);
@@ -698,11 +905,12 @@
   }
 
   function trailNote() {
-    var fixes = offers.filter(function (o) { return !!MV.fixOf(o); }).length;
+    var sub = shown();
+    var fixes = sub.filter(function (o) { return !!MV.fixOf(o); }).length;
     if (el.trail.getAttribute('aria-pressed') !== 'true') return;
     say(fixes + ' position' + (fixes === 1 ? '' : 's') + ' the rig recorded'
-        + (fixes < offers.length
-           ? ' — ' + (offers.length - fixes) + ' of these offers carry none'
+        + (fixes < sub.length
+           ? ' — ' + (sub.length - fixes) + ' of these offers carry none'
            : '')
         + (fixes ? '. A pin far from every one of these is a pin to distrust.'
                  : '. Nothing here knows where the car was.'));
@@ -736,7 +944,7 @@
     el.sideBody.hidden = false;
     strays = strays || {};
 
-    var noEnd = offers.filter(function (o) { return !o.dropoff; });
+    var noEnd = shown().filter(function (o) { return !o.dropoff; });
     var lost = placed.filter(function (p) { return (p.offer.pickup && !p.from) || (p.offer.dropoff && !p.to); });
     var wrong = placed.filter(function (p) { return p.impossible; });
     // Two pins, a figure, and no way to hold one against the other. These used
@@ -913,6 +1121,7 @@
     one.openPopup();
   });
 
+  el.block.addEventListener('change', blockChanged);
   el.load.addEventListener('click', load);
   el.place.addEventListener('click', function () { placeAll(); });
   el.trail.addEventListener('click', function () {

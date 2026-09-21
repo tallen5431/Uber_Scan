@@ -176,6 +176,17 @@ SEARCHABLE = [
           text='Deliver by 7:42 PM\n$30.00 <total>\n20 min\nChattanooga TN'),
 ]
 
+# Four ordinary offers and one the rig stamped past the end of time. The four
+# are three hours apart so they fall in four different blocks of the
+# by-time-of-day chart, which is what makes "the chart still drew" a claim
+# about the chart rather than about one bar.
+NO_CLOCK = [offer(200 + i, pay=12.0 + i, state='go') for i in range(4)] + [
+    offer(209, pay=20.0, state='go'),
+]
+for _i in range(4):
+    NO_CLOCK[_i]['at'] = NO_CLOCK[_i]['firstAt'] = NOW - _i * 3 * 3600000
+NO_CLOCK[4]['at'] = NO_CLOCK[4]['firstAt'] = 1e20
+
 # Typed into the box on the page, in this order, against SEARCHABLE.
 QUERIES = ['chattanooga', 'soddy', 'dalton', 'nowhere at all']
 
@@ -424,6 +435,20 @@ FEEDS = {
                    'truncated': False, 'days': 7, 'hidden': 0,
                    'watched': {'saw': 7, 'kept': 7},
                    'unreadable': None, 'pairs': [], 'offers': MIXED_COST},
+    # A window whose last row is stamped past the end of time.
+    #
+    # `new Date(1e20).getHours()` is NaN, `Math.floor(NaN / 3)` is NaN, and
+    # indexing an eight-element array with NaN gives undefined — so the push
+    # threw INSIDE the by-time-of-day pass and the three charts drawn after it
+    # never ran either, on a page that had already painted its figures and so
+    # looked as though it had worked. This is not a shape invented for a test:
+    # CLOCK_BELIEVABLE_UNTIL exists in server.js because a row arrived stamped
+    # 1e20, and the server filters the LOW end of the believable range (a Pi
+    # with no RTC boots in 1970) and lets the high end through to the page.
+    'no clock': {'count': len(NO_CLOCK), 'total': len(NO_CLOCK),
+                 'truncated': False, 'days': 7, 'hidden': 0,
+                 'watched': {'saw': len(NO_CLOCK), 'kept': len(NO_CLOCK)},
+                 'unreadable': None, 'pairs': [], 'offers': NO_CLOCK},
     'weeks': {'count': len(WEEKS), 'total': len(WEEKS), 'truncated': False,
               'days': 30, 'hidden': 0, 'watched': {'saw': 21, 'kept': 21},
               'unreadable': None, 'pairs': [], 'offers': WEEKS},
@@ -630,6 +655,16 @@ const TEXT = (sel) => {
           ? null : text('#tookHead'),
         weekHead: document.getElementById('weekHead').hidden
           ? null : text('#weekHead'),
+        blocksHead: document.getElementById('blocksHead').hidden
+          ? null : text('#blocksHead'),
+        blocks: [].slice.call(document.querySelectorAll('#blocks .block'))
+          .map(function (b) {
+            return { label: b.querySelector('.label').textContent.trim(),
+                     n: b.querySelector('.n').textContent.trim() };
+          }),
+        // Drawn AFTER the time-of-day pass in the same render, which is why
+        // it is read: a throw in that pass took this with it, silently.
+        kinds: document.querySelectorAll('#kinds .block').length,
         week: [].slice.call(document.querySelectorAll('#week .block'))
           .map(function (b) {
             return { label: b.querySelector('.label').textContent.trim(),
@@ -1505,6 +1540,44 @@ try:
            got[name]['weekHead'], None)
     eq('...with no bars drawn behind the hidden heading',
        got['verdicts']['week'], [])
+
+    # --- a row no clock can read does not take the charts with it ----------
+    #
+    # The by-time-of-day pass indexed its eight-element block array with
+    # `Math.floor(new Date(at).getHours() / 3)`, which is NaN for a stamp past
+    # 8.64e15 — so the push threw, and everything drawn after it in the same
+    # render never ran. That includes the two charts below it and the day
+    # headers, on a page whose figures had already painted, so the failure
+    # looked like a page with fewer charts rather than like a page that broke.
+    # CLOCK_BELIEVABLE_UNTIL in server.js exists because such a row really
+    # arrived; the server drops the LOW end of that range and not the high.
+    nc = got['no clock']
+    ok_('a row stamped past the end of time still draws the time-of-day chart '
+        '(%r)' % (nc['blocksHead'] or '')[:70], nc['blocksHead'] is not None)
+    # All eight bars, which is the half that says the chart DREW rather than
+    # that the heading was merely unhidden.
+    eq('...with all eight blocks on it', len(nc['blocks']), 8)
+    # Four ordinary rows, three hours apart, so four different bars carry one
+    # each and the unreadable row carries none. Counting them is what makes
+    # this a check on the pass rather than on the exception handler: put the
+    # old `blocks[Math.floor(hour / 3)]` back and these are 0.
+    eq('...and the four readable rows are on four separate bars',
+       sorted(b['n'] for b in nc['blocks']), ['0', '0', '0', '0', '1', '1', '1', '1'])
+    # And the one that could not be placed is SAID, not dropped quietly. A row
+    # vanishing from a figure with nothing naming it is this project's second
+    # fault class, and "it threw" and "it was skipped" look the same from here
+    # without this.
+    ok_('...and the row that has no time is named rather than dropped quietly '
+        '(%r)' % (nc['blocksHead'] or ''),
+        '1 with an unreadable time left out' in (nc['blocksHead'] or ''))
+    # ...and the charts that are drawn AFTER it in the same pass, which are
+    # what the throw really cost.
+    ok_('...and the charts below it were drawn too', nc['kinds'])
+    # The ordinary window says nothing about unreadable times, or the clause
+    # above is a sentence the page always prints.
+    no_('a window with no such row says nothing about one (%r)'
+        % (got['weeks']['blocksHead'] or ''),
+        'unreadable time' in (got['weeks']['blocksHead'] or ''))
 
     # --- which offers to list, and in what order ---------------------------
     #

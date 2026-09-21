@@ -740,11 +740,12 @@
     return sorted[low] + (sorted[high] - sorted[low]) * (pos - low);
   }
 
-  // Three-hour blocks. Eight rows fit a phone without scrolling and each one
-  // holds enough offers to mean something; twenty-four hourly rows would be
-  // mostly empty and mostly noise.
-  var BLOCK_NAMES = ['12–3am', '3–6am', '6–9am', '9am–12', '12–3pm',
-                     '3–6pm', '6–9pm', '9pm–12'];
+  // Three-hour blocks. The names and the edges are Advice.BLOCK_NAMES /
+  // Advice.blockOf, because map.html's time filter cuts the same week at the
+  // same eight places and a second copy here is a second answer to one
+  // question. The reasoning for eight rather than twenty-four moved there with
+  // them.
+  var BLOCK_NAMES = Advice.BLOCK_NAMES;
 
   var unitTags = document.querySelectorAll('.stats .unit');
 
@@ -2479,9 +2480,18 @@
       return { name: name, rates: [] };
     });
     var daysSeen = {};
+    // A row whose stamp no clock can read gets no block and is counted rather
+    // than dropped. Before this, `Math.floor(NaN / 3)` indexed the array with
+    // NaN and the push threw — inside the chart pass, so the three charts
+    // below this one never drew either, on a page that had rendered its
+    // figures a moment earlier and so looked fine. The journal has held such a
+    // row: the 1e20 stamp CLOCK_BELIEVABLE_UNTIL was added for. The server
+    // filters the low end of that range and not the high one.
+    var noHour = 0;
     offers.forEach(function (r) {
-      var hour = new Date(r.at).getHours();
-      blocks[Math.floor(hour / 3)].rates.push(r.perHour);
+      var b = Advice.blockOf(r.at);
+      if (b === null) { noHour += 1; return; }
+      blocks[b].rates.push(r.perHour);
       daysSeen[dayKey(r.at)] = true;
     });
     // How many days are behind each bar. "Evenings pay $22" is a different
@@ -2490,7 +2500,9 @@
     var dayCount = Object.keys(daysSeen).length;
     el.blocksHead.hidden = false;
     el.blocksHead.innerHTML = 'By time of day <em>· median $/hr, across '
-      + dayCount + ' day' + (dayCount === 1 ? '' : 's') + '</em>';
+      + dayCount + ' day' + (dayCount === 1 ? '' : 's')
+      + (noHour ? ', ' + noHour + ' with an unreadable time left out' : '')
+      + '</em>';
     // A fixed scale at twice the target puts the target itself at the halfway
     // point of every bar, so the line being judged against is the same line in
     // every row instead of moving with whatever the best block happened to be.

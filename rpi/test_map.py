@@ -1198,6 +1198,595 @@ finally:
         server.kill()
     shutil.rmtree(work, ignore_errors=True)
 
+# ---------------------------------------------------------------------------
+# The `when` box: asking the map about a time.
+# ---------------------------------------------------------------------------
+#
+# Its own journal and its own server, because every count above is pinned to
+# the fixture above and a row added there to make two blocks would move a
+# hundred of them.
+#
+# WHY THERE IS NO WEEKDAY BOX BESIDE IT, measured on the owner's real week and
+# recorded here so it is not proposed again: `days` defaults to 7, a 168-hour
+# window holds each weekday-and-block exactly once, and all thirteen occupied
+# cells of that grid came off a single calendar date apiece. A "Fri" option
+# would be a date picker wearing a habit's clothes. What the box says instead
+# is how many separate days are behind the answer, which is the claim that
+# actually needs checking — and that is what is checked here.
+
+BLOCK_MS = 3 * 3600000
+
+
+def _block_base():
+    """The start of the 3-hour block before the current one, local time.
+
+    Computed rather than hard-coded so these rows fall in known blocks
+    whatever hour the suite is run at, and in the past whatever hour that is.
+    The page reads local hours off the browser's clock, which is this
+    machine's clock, so Python and the page agree by construction.
+    """
+    now = time.localtime()
+    start = time.mktime((now.tm_year, now.tm_mon, now.tm_mday,
+                         (now.tm_hour // 3) * 3, 0, 0, 0, 0, -1)) * 1000
+    return start - BLOCK_MS
+
+
+WBASE = _block_base()
+
+# Three taken jobs, arranged so that filtering to one block leaves a hop with a
+# taken job inside it that the filter — and only the filter — is hiding.
+# Within one day that cannot happen: a block is a contiguous stretch of clock,
+# so nothing can fall between two of its own rows. Across two days it can, and
+# does, six times on the owner's real week.
+#
+#   wa1  yesterday, in block A      shown when block A is picked
+#   wb1  today, in block B          HIDDEN when block A is picked
+#   wa2  today, in block A          shown when block A is picked
+#
+# So the hop wa1 -> wa2 has a job the driver took sitting inside it, and
+# MV.chain cannot know: it is handed the offers on the glass, so wb1 is not in
+# `taken` and cannot raise `skipped`, which is silent at zero. The violet line
+# between two of this driver's own jobs is the one mark on the page that would
+# be read as a distance they actually drove.
+WHEN_ROWS = [
+    offer(60, 'Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta', 9.0,
+          at=int(WBASE - 86400000 + 600000)),
+    # Block B, and the only row that names Acworth — so picking block A takes
+    # a PIN off the map and not only a row out of a count. A fixture whose
+    # blocks share all their places would pass a filter that changed the
+    # sentence and drew the same map.
+    # ...and it carries a position, where o62 in block A does not. Where the
+    # car WAS is the one thing on this page that is measured rather than
+    # looked up, and a whole window of those dots left standing under a
+    # three-hour map is the previous card's pins left up under this one's —
+    # which this project already refuses on the driving panel.
+    offer(61, 'Acworth Due West Rd NW', 'Peachtree St NE, Atlanta', 12.0,
+          at=int(WBASE - 2 * 3600000), where=(34.066, -84.677)),
+    offer(62, 'Cobb Pkwy NW, Kennesaw', 'Peachtree St NE, Atlanta', 20.0,
+          at=int(WBASE + 40 * 60000), where=(34.023, -84.615)),
+    # A third row in block A, on the SAME day as o62, so the figure the box
+    # prints is a count of days and not of rows: three offers, two days.
+    # ...and it names no destination, which is the shape most of this driver's
+    # real traffic has — 129 of 272 on the older export — so the sidebar's
+    # "with no dropoff at all" heading has something to count inside a block.
+    offer(63, 'Canton Rd, Marietta', None, 4.0,
+          at=int(WBASE + 10 * 60000)),
+    # ...and a SECOND one with no destination, in block B. Without it the
+    # window and the block hold the same number of them and a count over the
+    # wrong one of the two reads correctly by coincidence — which is how a
+    # check that cannot fail gets written.
+    offer(64, 'Acworth Due West Rd NW', None, 3.0,
+          at=int(WBASE - 90 * 60000)),
+    # A misread street the geocoder answers in Idaho, in block B. The stray
+    # list is an ACCUSATION against a lookup, and the box has to carry the
+    # accusations that belong to what it is showing and no others: a block
+    # that drew no Idaho pin must not head its sidebar "1 nowhere near the
+    # rest".
+    offer(65, 'W Boise Ave', None, 2.0, at=int(WBASE - 150 * 60000)),
+    # A row that names NEITHER end, in block A. 58 of the owner's 1,166 do,
+    # and without one here the nag under the box counts against every offer
+    # while `placed` can only ever hold the ones that named somewhere — so it
+    # says "1 not yet" after a complete walk, for ever, and pressing Place
+    # cannot move it. Every other row in this fixture has a pickup, which made
+    # that difference structurally zero and the check unwritable.
+    offer(66, None, None, 5.0, at=int(WBASE + 25 * 60000)),
+]
+
+WHEN_DRIVER = r'''
+const { chromium } = require('playwright');
+const base = process.argv[2];
+const KNOWN = {
+  kennesaw: [34.023, -84.615], marietta: [33.952, -84.549],
+  atlanta: [33.749, -84.388], chastain: [34.010, -84.580],
+  acworth: [34.066, -84.677],
+  // Eighteen hundred miles away, answered as confidently as the rest. This is
+  // what a geocoder handed a misread street really does, and it is what the
+  // stray list is for.
+  boise: [43.615, -116.202],
+};
+const STUB = `
+  window.__pins = []; window.__lines = []; window.__dots = [];
+  window.L = {
+    map: function () { return { setView: function () { return this; },
+      removeLayer: function (g) {
+        window.__pins = window.__pins.filter(function (p) { return p.group !== g; });
+        window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
+        window.__dots = window.__dots.filter(function (d) { return d.group !== g; });
+      },
+      addLayer: function () {}, fitBounds: function () {} }; },
+    tileLayer: function () { return { addTo: function () { return this; } }; },
+    layerGroup: function () { return { addTo: function () { return this; } }; },
+    circleMarker: function (ll) {
+      var m = { ll: ll, group: null, bindPopup: function () { return this; },
+                addTo: function (g) { this.group = g; window.__dots.push(m); return m; } };
+      return m; },
+    divIcon: function (o) { return o; },
+    marker: function (ll, opts) {
+      var m = { ll: ll, group: null, bindPopup: function (h) { this.popup = h; return this; },
+                addTo: function (g) { this.group = g; window.__pins.push(this); return this; },
+                getLatLng: function () { return this.ll; },
+                openPopup: function () { return this; } };
+      return m; },
+    polyline: function (pts, opts) {
+      var l = { pts: pts, opts: opts, group: null,
+                bindPopup: function (h) { this.popup = h; return this; },
+                addTo: function (g) { this.group = g; window.__lines.push(l); return l; } };
+      return l; }
+  };
+`;
+
+(async () => {
+  let browser;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; }
+    catch (e) { /* try the next */ }
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  let stage = 'start';
+  setTimeout(() => { console.log(JSON.stringify({ __hung: stage })); process.exit(2); },
+             180000).unref();
+
+  const page = await browser.newContext({ viewport: { width: 1200, height: 820 } })
+    .then((c) => c.newPage());
+  await page.addInitScript(STUB);
+  // Counted here rather than in the page. A page.evaluate from inside a route
+  // handler runs while the page is blocked on the very request being handled,
+  // which is a deadlock waiting to be discovered by somebody debugging
+  // something else.
+  let asked = 0;
+  await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
+    const q = decodeURIComponent(new URL(route.request().url())
+      .searchParams.get('q') || '').toLowerCase();
+    asked += 1;
+    // Most specific first, and that is not tidiness. The page appends the
+    // `near` hint to every query — it fills it from the driver's own cards —
+    // so a misread street asked "W Boise Ave, Marietta" contains the name of
+    // a town this stub knows, and a first-match-wins stub answers it in
+    // Marietta. The pin the stray list exists to catch would then land in
+    // Georgia with the rest and the check on it would pass by not running.
+    const key = ['boise', 'chastain', 'acworth', 'kennesaw', 'atlanta',
+                 'marietta'].filter((k) => q.indexOf(k) >= 0)[0];
+    await route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify(key
+        ? [{ lat: String(KNOWN[key][0]), lon: String(KNOWN[key][1]), display_name: key }]
+        : []) });
+  });
+  await page.route('**/tile.openstreetmap.org/**', (r) => r.fulfill({ status: 200, body: '' }));
+  await page.route('**/unpkg.com/**', (r) => r.fulfill({ status: 200, body: '' }));
+
+  const out = {};
+  stage = 'load';
+  await page.goto(base + '/map.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.waitForFunction(
+    () => !/loading/.test(document.getElementById('status').textContent || ''),
+    null, { timeout: 30000 });
+
+  // The lookup count travels with every reading, because "moving the box
+  // asked nothing" is only a claim if the two counts came from the same kind
+  // of measurement at both ends.
+  const look = async () => Object.assign(await page.evaluate(() => ({
+    status: document.getElementById('status').textContent || '',
+    pins: window.__pins.length,
+    lines: window.__lines.map(function (l) { return l.popup || ''; }),
+    dots: window.__dots.length,
+    // The sidebar's headings, which are counts over the offers the page is
+    // SHOWING. Each one is a sentence a driver reads as being about the map
+    // in front of them.
+    heads: [].slice.call(document.querySelectorAll('#sideBody h2'))
+      .map(function (h) { return (h.textContent || '').trim(); }),
+  })), { asked: asked });
+
+  out.box = await page.evaluate(() => {
+    const sel = document.getElementById('block');
+    return sel ? { options: [].slice.call(sel.options).map((o) => o.textContent),
+                   value: sel.value } : null;
+  });
+
+  // THE saving, and it only exists before anything is cached: a walk is one
+  // question a second and the owner's week is 1,325 distinct places, about
+  // twenty-four minutes. Picking a block first is what turns that into the
+  // 3.9 to 9.5 minutes each of that week's live blocks costs.
+  stage = 'a block, placed first';
+  await page.selectOption('#block', String(process.env.BLOCK_A));
+  await page.waitForTimeout(250);
+  await page.click('#place');
+  await page.waitForFunction(
+    () => /drawn end to end/.test(document.getElementById('status').textContent || ''),
+    null, { timeout: 60000 });
+  out.blockFirst = await look();
+  await page.selectOption('#block', '');
+  await page.waitForTimeout(250);
+
+  // Widened WITHOUT pressing Place again: the window now spans jobs the last
+  // walk never looked up. The chain has to say so rather than report 0.0 miles
+  // over them or deny they were taken.
+  stage = 'widened without re-placing';
+  await page.click('#chain');
+  await page.waitForTimeout(300);
+  out.widened = await look();
+  out.widenedStatus = await page.evaluate(
+    () => document.getElementById('status').textContent || '');
+  out.widenedHops = await page.evaluate(() =>
+    [].slice.call(document.querySelectorAll('.leaflet-popup-content'))
+      .map((n) => (n.textContent || '').trim()));
+  await page.click('#chain');
+  await page.waitForTimeout(200);
+
+  stage = 'any time, placed';
+  await page.click('#place');
+  await page.waitForFunction(
+    () => /drawn end to end/.test(document.getElementById('status').textContent || ''),
+    null, { timeout: 60000 });
+  out.all = await look();
+  await page.click('#chain');
+  await page.waitForTimeout(300);
+  out.allChain = await look();
+  out.allChainStatus = await page.evaluate(
+    () => document.getElementById('status').textContent || '');
+
+  // Where the car was, on, so the block below is picked with it showing —
+  // which is the state in which a stale dot would actually be seen.
+  stage = 'the trail';
+  await page.click('#trail');
+  await page.waitForTimeout(300);
+  out.allTrail = await look();
+
+  stage = 'block A';
+  await page.selectOption('#block', String(process.env.BLOCK_A));
+  await page.waitForTimeout(400);
+  out.blockA = await look();
+
+  // ...and what the trail SAYS about itself under the filter, which is a
+  // different line from the dots it draws and was wrong while they were right.
+  await page.click('#trail');
+  await page.waitForTimeout(150);
+  await page.click('#trail');
+  await page.waitForTimeout(250);
+  out.blockATrail = await look();
+
+  // The chain's own headline under the filter. It is got by pressing the
+  // toggle, the way it is got at any other time: moving the `when` box says
+  // what the box did — including how many separate days are behind the answer,
+  // which is the one sentence on this page that must not be crowded out — and
+  // does not restate a figure the driver did not just ask for.
+  await page.click('#chain');
+  await page.waitForTimeout(150);
+  await page.click('#chain');
+  await page.waitForTimeout(300);
+  out.blockAChain = await look();
+
+  stage = 'block B';
+  await page.selectOption('#block', String(process.env.BLOCK_B));
+  await page.waitForTimeout(400);
+  out.blockB = await look();
+
+  stage = 'an empty block';
+  await page.selectOption('#block', String(process.env.BLOCK_EMPTY));
+  await page.waitForTimeout(400);
+  out.blockEmpty = await look();
+
+  stage = 'back to any time';
+  await page.selectOption('#block', '');
+  await page.waitForTimeout(400);
+  out.backToAll = await look();
+
+  // Pressing Load with a block already picked. The box is not reset by a
+  // load, so the counts the page reports after one have to be the block's.
+  stage = 'reload under a block';
+  await page.selectOption('#block', String(process.env.BLOCK_A));
+  await page.waitForTimeout(250);
+  await page.click('#load');
+  await page.waitForFunction(
+    () => !/loading/.test(document.getElementById('status').textContent || ''),
+    null, { timeout: 30000 });
+  await page.waitForTimeout(300);
+  out.reloaded = await look();
+  await page.selectOption('#block', '');
+  await page.waitForTimeout(250);
+
+  console.log(JSON.stringify(out));
+  await browser.close();
+})().catch((e) => { console.log(JSON.stringify({ __crashed: String((e && e.stack) || e) })); });
+'''
+
+work2 = tempfile.mkdtemp()
+journal2 = os.path.join(work2, 'journal.jsonl')
+with open(journal2, 'w') as fh:
+    for row in WHEN_ROWS:
+        fh.write(json.dumps(row) + '\n')
+    for oid in ('o60', 'o61', 'o62'):
+        fh.write(json.dumps({'v': 1, 'kind': 'mark', 'at': int(WBASE),
+                             'id': oid, 'accepted': True}) + '\n')
+
+port2 = free_port()
+server2 = subprocess.Popen(
+    ['node', os.path.join(ROOT, 'server.js')],
+    env=dict(os.environ, SCANNER='0', PORT=str(port2), JOURNAL=journal2),
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+base2 = 'http://127.0.0.1:%d' % port2
+
+_hour = time.localtime(WBASE / 1000).tm_hour
+BLOCK_A = _hour // 3
+BLOCK_B = (_hour - 2) // 3 if (_hour - 2) >= 0 else ((_hour - 2) % 24) // 3
+# A block with nothing in it, which must exist for the empty case to be
+# reachable: four rows cannot fill eight blocks.
+BLOCK_EMPTY = [b for b in range(8) if b not in (BLOCK_A, BLOCK_B)][0]
+
+try:
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(base2 + '/api/status', timeout=1).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+    else:
+        raise RuntimeError('the second server never came up')
+
+    driver2 = os.path.join(work2, 'whendrive.js')
+    open(driver2, 'w').write(WHEN_DRIVER)
+    proc2 = subprocess.run(
+        ['node', driver2, base2],
+        env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                 BLOCK_A=str(BLOCK_A), BLOCK_B=str(BLOCK_B),
+                 BLOCK_EMPTY=str(BLOCK_EMPTY),
+                 PW_EXES=json.dumps([
+                     os.environ.get('CHROMIUM', ''),
+                     '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+                 ])),
+        capture_output=True, text=True, timeout=600)
+    line2 = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
+    try:
+        w = json.loads(line2)
+    except Exception:
+        crashed(proc2.stderr)
+    if w.get('__crashed'):
+        crashed(w['__crashed'])
+    if w.get('__hung'):
+        hung(w['__hung'])
+    if w.get('skip'):
+        skip(w['skip'])
+
+    # --- the box itself ----------------------------------------------------
+    box = w.get('box')
+    ok_('the map can be asked about a time at all', box is not None)
+    if box:
+        eq('...with the eight blocks the offer log draws its chart on, '
+           'and "any time"', len(box['options']), 9)
+        # The NAMES, from Advice.BLOCK_NAMES, because this box and that chart
+        # cut the same week and a page keeping its own copy of eight edges is
+        # where two answers to one question come from.
+        eq('...named exactly as the offer log names them',
+           box['options'][1:],
+           ['12\u20133am', '3\u20136am', '6\u20139am', '9am\u201312',
+            '12\u20133pm', '3\u20136pm', '6\u20139pm', '9pm\u201312'])
+        eq('...and it opens on any time, so the page is what it was',
+           box['value'], '')
+
+    # --- it reaches the map, not only the status line ----------------------
+    allv, a, b = w.get('all') or {}, w.get('blockA') or {}, w.get('blockB') or {}
+    ok_('the whole window draws pins (%r)' % allv.get('pins'), allv.get('pins', 0) >= 4)
+    ok_('...and picking a block draws fewer (%r vs %r)'
+        % (a.get('pins'), allv.get('pins')),
+        0 < a.get('pins', 0) < allv.get('pins', 0))
+    eq('...and going back to any time puts them all back',
+       (w.get('backToAll') or {}).get('pins'), allv.get('pins'))
+
+    # --- how many separate days are behind the answer ----------------------
+    #
+    # THE check on this feature. Two blocks, two offers each on the owner's
+    # scale, and the difference between them is the whole claim: one rests on
+    # two separate days and one rests on one, and a map that showed them
+    # identically would let a single evening be read as a habit. On the real
+    # week the three busiest blocks pool three evenings each and 3–6am is 33
+    # offers all belonging to one night.
+    ok_('a block spanning two days says so (%r)' % (a.get('status') or '')[:110],
+        'separate days of it are in this window' in (a.get('status') or ''))
+    # Two, over THREE offers, which is what makes it a count of days.
+    ok_('...and says how many (%r)' % (a.get('status') or '')[:110],
+        '2 separate days' in (a.get('status') or ''))
+    ok_('...over more offers than that, or it is counting rows (%r)'
+        % (a.get('status') or '')[:40], (a.get('status') or '').startswith('4 offers'))
+    # ...and the nag under the box does NOT ask for a lookup that cannot
+    # happen. `missing` counted against every offer while `placed` can only
+    # hold the ones that named somewhere, so o66 — which names neither end,
+    # the shape 58 of the owner's 1,166 rows have — read as "1 not yet" after
+    # a COMPLETE walk, for ever, and pressing Place could not move it.
+    no_('a complete walk leaves nothing "not yet" (%r)'
+        % (a.get('status') or '')[:70], 'not yet' in (a.get('status') or ''))
+    ok_('...while still counting what it did look up (%r)'
+        % (a.get('status') or '')[:70],
+        'already looked up' in (a.get('status') or ''))
+    ok_('a block that is really one day says THAT, in words (%r)'
+        % (b.get('status') or '')[:110],
+        'that is a day, not a habit' in (b.get('status') or ''))
+    # ...and the two wordings are not both always printed.
+    no_('...and the two-day block does not also call itself one day',
+        'not a habit' in (a.get('status') or ''))
+    no_('...and the one-day block does not claim separate days',
+        'separate days' in (b.get('status') or ''))
+    ok_('...and each names the block it is talking about (%r)'
+        % (a.get('status') or '')[:60], ' only, and ' in (a.get('status') or ''))
+
+    # A block with nothing in it says so rather than drawing an empty map in
+    # silence, which is this project's second fault class.
+    e = w.get('blockEmpty') or {}
+    eq('an empty block draws nothing', e.get('pins'), 0)
+    ok_('...and says there is nothing there (%r)' % (e.get('status') or '')[:90],
+        'no day in this window has any' in (e.get('status') or ''))
+
+    # --- the walk itself is narrowed, which is the only thing this saves ---
+    #
+    # The box is a filter on a page whose expensive act is a rate-limited walk
+    # over every distinct place in the window: 1,325 of them on the owner's
+    # real week, about twenty-four minutes at GAP_MS. Picking the block first
+    # is what makes that 3.9 to 9.5 minutes for each of the five blocks that
+    # week actually has offers in. A page that drew the block but walked the
+    # window would look identical and cost the same as no filter at all.
+    bf = w.get('blockFirst') or {}
+    ok_('placing with a block picked walks only that block (%r asked, then %r '
+        'for the whole window)' % (bf.get('asked'), allv.get('asked')),
+        (bf.get('asked') or 0) > 0
+        and (bf.get('asked') or 0) < (allv.get('asked') or 0))
+
+    # --- Load, with the box already on a block -----------------------------
+    #
+    # The box survives a load — it is a question about the journal, not about
+    # one fetch — so every figure the page prints after one is a figure about
+    # the block. This is the sentence the driver reads first.
+    # --- the window widened without walking it again ------------------------
+    #
+    # Picking a block BEFORE the first press is the flow this feature
+    # advertises — it cuts the first walk from 24 minutes to a few. Widening
+    # afterwards then leaves the window spanning jobs the last walk never
+    # looked up, and `hidden` is defined as "the box is hiding it", which is
+    # false at "any time". So the chain said "0.0 straight-line miles nobody
+    # paid for" over a hop with a taken job inside it and nothing else. That is
+    # the second fault class, and it is the same fault the narrow direction was
+    # fixed for, ninety degrees away — the driver only ever exercises the
+    # narrow one.
+    _wd = w.get('widenedStatus') or ''
+    ok_('the chain says a hop spans a job it never looked up (%r)' % _wd[:130],
+        'missing inside' in _wd)
+    ok_('...rather than reporting the hop as empty road',
+        '0.0 straight-line miles nobody paid for' not in _wd
+        or 'missing inside' in _wd)
+
+    rl = (w.get('reloaded') or {}).get('status') or ''
+    ok_('loading with a block picked counts the block (%r)' % rl[:100],
+        rl.startswith('4 offers · '))
+    ok_('...and still says how many days are behind it (%r)' % rl[:110],
+        '2 separate days of it are in this window' in rl)
+
+    # --- an accusation belongs to what is on the glass ---------------------
+    #
+    # A stray is this page accusing a LOOKUP of being wrong, and the list is
+    # tappable so the driver can go and judge it. Carrying the window's
+    # accusations into a block that drew none of them would head the sidebar
+    # "1 nowhere near the rest" over a map with nothing wrong on it.
+    heads = ' | '.join(a.get('heads') or [])
+    allHeads = ' | '.join(allv.get('heads') or [])
+    ok_('the whole window accuses the Idaho lookup (%r)' % allHeads[:70],
+        '1 nowhere near the rest' in allHeads)
+    ok_('...and a block that drew none of it accuses nothing (%r)' % heads[:70],
+        '0 nowhere near the rest' in heads)
+
+    # --- where the car was follows the box too -----------------------------
+    #
+    # These dots are the one thing on this page that is MEASURED rather than
+    # looked up, and they are the only thing that can contradict a pin without
+    # being the same kind of thing as the pin. A whole window of them left
+    # standing under a three-hour map is the last card's pins left up under
+    # this one's, which the driving panel already refuses.
+    at = w.get('allTrail') or {}
+    eq('the whole window shows every position the rig recorded', at.get('dots'), 2)
+    eq('...and a block shows only the ones inside it', a.get('dots'), 1)
+    eq('...and going back to any time brings the other one back',
+       (w.get('backToAll') or {}).get('dots'), 2)
+
+    # ...and the sentence the trail writes about itself, which is not the same
+    # thing as the dots it drew. "2 positions the rig recorded — 2 of these
+    # offers carry none" over a map showing one of them is a figure that does
+    # not describe what is on screen, which this page has already been fixed
+    # for once: see the truncation notice in load().
+    tn = (w.get('blockATrail') or {}).get('status') or ''
+    ok_('the trail counts the positions in the block, not in the window (%r)'
+        % tn[:90], tn.startswith('1 position '))
+    # Three, not two, since o66 joined block A: it names neither end and
+    # carries no position, which is the shape that made the nag's count
+    # checkable at all.
+    ok_('...and says how many of THESE offers carry none (%r)' % tn[:90],
+        '3 of these offers carry none' in tn)
+
+    # ...and so does the sidebar's own count of cards that named no
+    # destination. Most of this driver's traffic is that shape, so it is the
+    # heading a reader checks the map against.
+    ok_('the sidebar counts the cards with no dropoff inside the block (%r)'
+        % heads[-60:], '2 with no dropoff at all' in heads)
+
+    # --- the chain across a job the filter is hiding -----------------------
+    #
+    # MV.chain is handed the offers on the glass, so a taken job the box
+    # removed is not in `taken` and cannot raise `skipped` — and `skipped` is
+    # silent at zero, so the hop would assert by omission that the car went
+    # straight from one end to the other. Six hops on the owner's real week do
+    # exactly this, one of them with seven taken jobs inside it.
+    hidden = [t for t in (a.get('lines') or []) if 'outside the time you picked' in t]
+    ok_('a hop over a job the box is hiding says so (%d of %d lines)'
+        % (len(hidden), len(a.get('lines') or [])), len(hidden) == 1)
+    ok_('...naming how many, and that the driver took it (%r)'
+        % (hidden[0][-170:] if hidden else None),
+        hidden and '1 job you took in between is outside' in hidden[0])
+    # ...and it is not a sentence the page always prints, or it says nothing.
+    no_('...and no hop says it when no block is picked',
+        any('outside the time you picked' in t
+            for t in ((w.get('allChain') or {}).get('lines') or [])))
+    # The headline has to agree with the popups, which is the arithmetic this
+    # page already got wrong once for stacked hops: a hop with a job inside it
+    # is not a distance anybody drove, whichever reason it is missing for.
+    ac = (w.get('blockAChain') or {}).get('status') or ''
+    ok_('...and the headline counts it as a hop with a job missing inside '
+        '(%r)' % ac[:170],
+        'with a job missing inside' in ac
+        and 'missing only because of the time you picked' in ac)
+    # ...which means it is NOT in the empty-miles figure. That arithmetic was
+    # wrong here once already, for stacked hops, and the fix was to count only
+    # the hops that really were empty.
+    ok_('...and not in the miles nobody paid for (%r)' % ac[:170],
+        '0.0 straight-line miles nobody paid for' in ac)
+
+    # --- and moving the box does not start another walk --------------------
+    #
+    # The walk is one question a second and the owner's week is 1,325 distinct
+    # places, about twenty-four minutes. A box that re-entered it would be
+    # unusable — and it would turn the page's two buttons off while it ran,
+    # on a page somebody opened to look at a map.
+    #
+    # Counting the GEOCODER'S questions cannot say this and was tried first:
+    # the cache answers a second walk over the same places without asking
+    # anybody anything, so a count of questions stays put whether the walk
+    # happened or not. That is a check that cannot fail, which is this
+    # project's sixth fault class, so it is not the check. What a walk cannot
+    # hide is its own report — it ends by writing "N of M drawn end to end"
+    # over the status line — so the box's own sentence surviving there is the
+    # thing that says no walk ran.
+    for label, got_ in (('a block', a), ('an empty one', e),
+                        ('and any time again', w.get('backToAll') or {})):
+        st = got_.get('status') or ''
+        ok_('moving the box to %s starts no second walk (%r)' % (label, st[:60]),
+            'offers here' in st or 'offer here' in st)
+        no_('...and does not restate a run over it (%r)' % st[:60],
+            'drawn end to end' in st)
+    ok_('...over a page that really did walk (%r)' % (allv.get('asked'),),
+        (allv.get('asked') or 0) >= 4)
+
+finally:
+    server2.terminate()
+    try:
+        server2.wait(timeout=5)
+    except Exception:
+        server2.kill()
+    shutil.rmtree(work2, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d map checks passed' % ok)
 sys.exit(1 if bad else 0)

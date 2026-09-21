@@ -1193,6 +1193,73 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   }
 })();
 
+/* --- which part of the day a row belongs to -------------------------------
+ *
+ * The offer log's "By time of day" chart and map.html's `when` box are cut on
+ * these, and they are here rather than in either page because two copies of
+ * eight edges is two answers to one question. Everything below is about the
+ * two ways that goes wrong: an edge that moves, and a stamp no clock can read.
+ */
+(function () {
+  eq('the day is cut into eight blocks', A.BLOCK_NAMES.length, 8);
+  // Every name pinned, because these are read by a driver off a chart and off
+  // a select, and a block called "3–6pm" that holds 6pm is a chart that lies
+  // quietly. A length check alone would pass with all eight named "night".
+  eq('...and they are named for the hours they hold',
+     A.BLOCK_NAMES.join('|'),
+     '12–3am|3–6am|6–9am|9am–12|12–3pm|3–6pm|6–9pm|9pm–12');
+
+  // Local hours, off the reading device's own clock — the same rule the offer
+  // log's dayOf uses, and the only rule available, since no journal row
+  // carries a timezone. Built with the local Date constructor deliberately:
+  // an ISO string with a Z would test UTC and pass wherever this ran.
+  function at(h, m) { var d = new Date(2026, 8, 18, h, m || 0, 0); return d.getTime(); }
+
+  eq('midnight opens the first block', A.blockOf(at(0, 0)), 0);
+  // Both sides of one edge, which is the only way an off-by-one is visible:
+  // a rule shifted by an hour puts 14:59 and 15:00 in the same block.
+  eq('...and 2:59pm is still the afternoon block', A.blockOf(at(14, 59)), 4);
+  eq('...and 3:00pm opens the next one', A.blockOf(at(15, 0)), 5);
+  eq('...and 11:59pm is still the last one', A.blockOf(at(23, 59)), 7);
+
+  // The branch the offer log used to die on. `new Date(1e20).getHours()` is
+  // NaN, `Math.floor(NaN / 3)` is NaN, and indexing an eight-element array
+  // with NaN gives undefined — so the push threw inside the chart pass and
+  // took the charts below it down with it. The journal has held such a row:
+  // CLOCK_BELIEVABLE_UNTIL in server.js exists because one arrived stamped
+  // 1e20, and the server filters the LOW end of that range, not the high one.
+  eq('a stamp past the end of time has no block rather than a NaN one',
+     A.blockOf(1e20), null);
+  eq('...and so does the largest date there is, plus one',
+     A.blockOf(8.64e15 + 1), null);
+  eq('...and so does something that is not a time at all',
+     A.blockOf('a Tuesday'), null);
+  // ...and the guard has not swallowed the ordinary case with them.
+  eq('...while the largest date there IS still has one',
+     A.blockOf(8.64e15), 0);
+
+  /* How many separate days a pile of rows came off.
+   *
+   * The whole hazard of a by-the-hour view: "9pm–12 pays $14.43" reads as a
+   * habit and may be one evening. On the owner's real week the three busiest
+   * blocks rest on three separate evenings each and 3–6am rests on one, and
+   * nothing but this count tells those two apart. */
+  eq('three rows in one evening are one day',
+     A.daysIn([{ at: at(20, 0) }, { at: at(21, 0) }, { at: at(23, 30) }]), 1);
+  // Forty minutes apart and a different day, which is the case a duration
+  // would get wrong and a calendar date gets right.
+  eq('...and either side of midnight is two',
+     A.daysIn([{ at: at(23, 40) }, { at: at(24, 20) }]), 2);
+  // A week later is the same weekday and the same hour, and it is not the
+  // same day — the case a key built from the hour alone would fold into one.
+  eq('...and the same hour a week later is two',
+     A.daysIn([{ at: at(20, 0) }, { at: at(20, 0) + 7 * 24 * 60 * MIN }]), 2);
+  eq('nothing came off no days', A.daysIn([]), 0);
+  eq('...and so does nothing at all', A.daysIn(null), 0);
+  eq('a row no clock can read is not a day',
+     A.daysIn([{ at: 1e20 }, { at: at(20, 0) }]), 1);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);

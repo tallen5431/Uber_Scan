@@ -330,6 +330,44 @@ which sizes the Open entry below about the ⌖ button.
 
 ### The maps, again
 
+**The map could not be asked WHEN, so it showed two different maps stacked.**
+`journal.html` already buckets every offer by hour and by weekday; `map.html`
+had only a day count. On the owner's week that meant one map of 1,166 offers
+in which the 3-6pm map (Kennesaw/Marietta/Acworth, $13.52) and the 12-3am map
+(78% Atlanta, $18.26) read as one place — and AUDITS had already measured that
+this makes about a third of "Atlanta pays more" really "late night pays more".
+
+A `when` box of the same eight three-hour blocks the offer log's chart uses.
+Picking one narrows the pins, the trail, the sidebar counts and the walk
+itself, and the status line says **how many separate days are behind the
+answer**, which is what stops one night being read as a habit. It also cuts
+the first walk: 1,325 places at 1.1s is 24.3 minutes for the whole window
+against 3.9-9.5 for a block.
+
+*Three faults were introduced by the first version of this and caught before
+it landed, all reachable by the flow it advertises.* The nag under the box
+counted `missing` against every offer while `placed` can only hold offers that
+named somewhere, so a complete walk still read "N not yet" for ever and
+pressing Place could not move it — 58 of the owner's 1,166 rows name neither
+end. And widening the box **without pressing Place again** left the window
+spanning jobs the last walk never looked up: `hidden` means "the box is hiding
+it", which is false at "any time", so the chain reported "0.0 straight-line
+miles nobody paid for" over a hop with a taken job inside it, and denied taken
+jobs outright in the block it had not walked. The second and third are the
+narrow-direction fault this feature fixed, ninety degrees away.
+
+*And their fixes had no check that could fail.* All three survived mutation
+until a fixture row naming neither end was added and the widened-but-not-
+replaced state was driven — the suite had no row without a pickup, so the
+nag's condition was structurally unreachable, and the driver always pressed
+Place again after widening. Each fix now dies to a named mutation.
+
+Two comments were re-measured rather than decremented: `map.html`'s "header
+98px, bar 138, notice 108, 121px left for the map" is now header 64, bar 137,
+notice 108, map 156 — the header and map figures had been stale for a while
+and `bar 138` was the one still true, which this change moved. And the bar
+carries nine controls now, not eight.
+
 **`judge()` accused two pins on a distance the reader would not finish or
 vouch for — and printed the rig's own repair of that distance as "card said".**
 
@@ -826,6 +864,17 @@ few seconds after `listen` rather than running it inline.
 
 ### The maps
 
+**Do not add a weekday term to the map's time filter.** It is the obvious
+next step and the data refuses it. A 168-hour window holds each weekday-and-
+block exactly once, so on the owner's week **all 13 occupied weekday x block
+cells came off a single calendar date apiece — 0 offers pooling more than one
+date**. Three of the seven weekday options are empty all week (the driver
+worked 5 dates: Sun, Tue, Fri, Sat, Sun). Blocks alone pool 4 of 6 occupied
+cells across multiple dates, covering 97.0% of the week. Weekend/weekday x
+block is the middle option and is also worse: 4 of 9 cells, 68.9%. At 30 days
+the server truncates 5,000 of 5,444 rows and the walk goes to ~100 minutes.
+The sibling page already refuses the 8x coarser version below 14 days.
+
 **The geocode cache IS worth keeping — this entry was wrong, and is corrected
 here rather than deleted.** It argued that the cache should not be kept on a
 server because it is "regenerable", leaning on `advice.js`'s measurement that a
@@ -1246,12 +1295,6 @@ Median, not mean, per cell — and the reason is stronger than it used to say
 here: the tail is a $185.46 card, not a $41 one, and the mean's false-hot rate
 never recovers (3.2% at n=30 and 0.7% still at n=60, against the median's 0.4%
 by n=30).
-**No map can be asked about a time.** `journal.html` already buckets every offer
-by hour and by weekday; `map.html` has only a day count. A weekday plus
-three-hour-block filter would make the map answer a question *before* a shift
-rather than only after one — on the parked desk page, where the six-control panel
-bar does not bind.
-
 ---
 
 ## What has been swept, and when

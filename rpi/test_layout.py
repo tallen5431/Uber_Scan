@@ -1327,11 +1327,15 @@ try:
             eq('%s at %s does not scroll sideways' % (name, panel),
                r['scrollW'] <= r['clientW'] + 1, True)
             # map.html fits every panel with the room for it, and scrolls on
-            # the 3.5" hat alone. 320px of glass has to carry a header, eight
-            # controls that wrap to three rows, and a consent notice that may
+            # the 3.5" hat alone. 320px of glass has to carry a header, NINE
+            # controls — the `when` box is the ninth — and a consent notice
+            # that may
             # not be hidden — it is what makes sending somebody's address a
-            # decision rather than a surprise. What is left for the map is
-            # about forty pixels, and a forty-pixel map is not a map. Scrolling
+            # decision rather than a surprise. Re-measured on the real page
+            # rather than decremented: at 480x320 the bar is 151px and the
+            # document scrolls to 362 against a 320px screen, both before and
+            # after the ninth control. What is left for the map is about forty
+            # pixels, and a forty-pixel map is not a map. Scrolling
             # is the honest answer there, the same one the offer log gives
             # everywhere; the panels a driver actually bolts this to are still
             # held to the glass.

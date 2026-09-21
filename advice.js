@@ -281,6 +281,76 @@
              zip: z ? z[2] : null };
   }
 
+  /* --- which part of the day a row belongs to -----------------------------
+   *
+   * The time twin of area() above, and here for the same reason: it is a fact
+   * about a row that more than one page needs, and the pages that need it must
+   * not each keep their own copy of where the edges are.
+   *
+   * Eight three-hour blocks anchored on midnight. The offer log has drawn its
+   * "By time of day" chart off exactly these since it was written; map.html
+   * now filters by them. Two copies of eight edges is two answers to "which
+   * hours does this driver work", and they drift the first time somebody
+   * decides 2am belongs with the evening — which has already happened once, in
+   * an analysis of the owner's week that cut it at 14:00/17:00/20:00/23:00/
+   * 02:00 and got different block totals for the same offers.
+   *
+   * Eight and not twenty-four, which is the offer log's reasoning moved here
+   * rather than restated: hourly rows would be mostly empty and mostly noise.
+   * On the owner's real week five of these eight carry any offers at all —
+   * 196, 33, 0, 0, 2, 361, 201, 373 — so even eight is generous.
+   *
+   * Local hours, off the reading device's own clock. That is what a driver
+   * means by "nine to midnight", it is the rule the offer log's dayOf already
+   * uses, and there is no timezone on a journal row to use instead.
+   *
+   * NOT here and deliberately: anything that reads a rate off a block. Five of
+   * eight blocks on a week is a thin enough base that "evenings pay $14" wants
+   * the number of separate evenings printed beside it, and that is what
+   * daysIn() below is for. */
+  var BLOCK_NAMES = ['12–3am', '3–6am', '6–9am', '9am–12', '12–3pm',
+                     '3–6pm', '6–9pm', '9pm–12'];
+
+  /* NULL for a stamp no clock can read, rather than an index.
+   *
+   * `new Date(8.64e15 + 1).getHours()` is NaN, `Math.floor(NaN / 3)` is NaN,
+   * and the offer log indexed its block array with it — so one corrupt row
+   * threw inside the chart pass and took the three charts below it with it.
+   * This is not hypothetical for this journal: CLOCK_BELIEVABLE_UNTIL in
+   * server.js exists because a row arrived stamped 1e20. The server filters
+   * the LOW end (CLOCK_BELIEVABLE_AFTER, for a Pi that boots in 1970) and the
+   * high end reaches the page. */
+  function blockOf(at) {
+    var hour = new Date(at).getHours();
+    if (!isFinite(hour)) return null;
+    return Math.floor(hour / 3);
+  }
+
+  /* How many separate days a pile of rows came off.
+   *
+   * The hazard in any by-the-hour view is that "9pm–12 pays $14.43" reads as a
+   * habit and may be one evening. Measured on the owner's week: the three
+   * busiest blocks rest on three separate evenings each, and 3–6am rests on
+   * one — 33 offers, all of 20 September. This count is the only thing that
+   * keeps those two apart, and the offer log already prints the same figure
+   * over its chart for the same reason.
+   *
+   * A calendar date, and the offer log's 4am shift boundary is deliberately
+   * NOT used: every block above lies inside one calendar date by construction,
+   * so one date is exactly one occurrence of that block. Folding a midnight
+   * block back into the previous evening would count two separate nights of
+   * 12–3am as one day and undercount the very thing this is for. */
+  function daysIn(rows) {
+    var seen = Object.create(null), n = 0;
+    (rows || []).forEach(function (r) {
+      var d = new Date(r && r.at);
+      if (!isFinite(d.getTime())) return;
+      var key = d.getFullYear() + '/' + d.getMonth() + '/' + d.getDate();
+      if (!(key in seen)) { seen[key] = true; n += 1; }
+    });
+    return n;
+  }
+
   /* Do these two jobs end anywhere near each other?
    *
    * Deliberately asymmetric, because the two mistakes cost different amounts. A
@@ -1081,6 +1151,9 @@
            busy: busy, freeAgain: freeAgain,
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
            unexplained: unexplained, stack: stack, sameArea: sameArea, area: area,
+           // The offer log's chart and the map's time filter ask one question
+           // and must not each keep their own eight edges.
+           BLOCK_NAMES: BLOCK_NAMES, blockOf: blockOf, daysIn: daysIn,
            mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,
            // Exported because a page that prints how far the line moved has to
            // be able to say what "settled" was allowed to mean, and a check
