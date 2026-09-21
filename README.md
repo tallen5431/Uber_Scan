@@ -232,9 +232,13 @@ So the Pi scanner keeps one line per offer it was confident about, in
   open a sheet over the bottom of this page rather than a new tab, so three
   offers checked is three taps and not three tabs with the log lost behind
   them. Green is the pickup, amber the dropoff, and the caption measures the
-  straight line between them against the distance the card itself stated — a
-  straight line cannot beat the road, so a longer one means a pin is in the
-  wrong place. Driving time with real traffic is the one thing a pin cannot
+  straight line between them against the distance the READING carries — and
+  says whose figure that is, because on nearly half of these a decimal had to
+  be put back while the card was read and the number is not the one on the
+  screen. A straight line cannot beat the road, so a longer one means a pin is
+  in the wrong place — but only where the reading vouches for the distance. A
+  reading the rig would not finish or would not trust is no yardstick, and
+  those pairs are reported as unchecked rather than accused. Driving time with real traffic is the one thing a pin cannot
   give, and the link to it is inside the sheet.
 
   Nothing is looked up until you press one of those controls. Some of these

@@ -2977,12 +2977,19 @@
     // means one of these two pins is in the wrong place — and it is the PIN
     // that is doubted here, never the card, whose figures are what every
     // number on this page is still made of.
+    //
+    // ...against the whole distance the card stated, which is not every figure
+    // a row carries. Where the reading stopped early or was flagged, the
+    // comparison is one a fraction of a journey loses whatever the pins do, so
+    // the sheet says it cannot settle this one instead of settling it wrongly.
+    // See judge() in map-view.js, which decides; this only reports.
     if (placed === 2) {
       var judged = MV.judge([r], found, {})[0];
       sheetSay(judged.crow.toFixed(1) + ' mi straight line'
-        + (judged.stated !== null ? ', card said ' + judged.stated + ' mi in total' : '')
+        + (judged.stated !== null ? ', ' + MV.statedBy(judged) : '')
         + (judged.impossible
            ? ' — which cannot be right, so one of these pins is wrong.'
+           : judged.unjudged ? ' — but ' + MV.unchecked(judged) + '.'
            : '.'));
     } else if (names.length > 1) {
       /* One end drawn, and the sheet used to name BOTH colours for it — "Green

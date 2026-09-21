@@ -330,6 +330,59 @@ which sizes the Open entry below about the ⌖ button.
 
 ### The maps, again
 
+**`judge()` accused two pins on a distance the reader would not finish or
+vouch for — and printed the rig's own repair of that distance as "card said".**
+
+*The entry that filed this named the one flag that cannot fire.* It said to
+guard on `milesUncertain`. Measured: of the 579 pairs `judge()` can draw on the
+owner's week, **2 carry `milesUncertain` and exactly 1 also states a figure** —
+and that one's distance is inflated, so `crow > stated + 0.5` can never hold.
+A guard written on that flag alone would have been a check that never fires.
+The reachable population is `whole === false` or `suspect`: **15 of the 579**,
+three of which state how much of the journey is missing (5.6 mi held of a card
+printing a 56-mi leg), so the straight line wins by construction. All three
+carry `milesUncertain: false`. `milesUncertain` stays in the rule anyway, for
+the phone's scanner, which sets it exactly rather than advisorily.
+
+*What the driver saw.* A red dashed line captioned **"This cannot be right"**
+over a pair whose two pins are both exactly where they belong, on a card whose
+distance the rig had already refused to stand behind — and the real fault, a
+leg that lost its distance, named nowhere. `judge()` now computes a named
+`yardstick`, accuses only behind it, and reports `unjudged` with the reason
+rather than silently dropping the pair, which would be the second fault class
+dressed as a fix for the first.
+
+*And the figure was quoted as the card's on 45.3% of every pair this page can
+draw.* 262 of 579 are `milesCorrected` — a decimal the reader lost and put
+back — so "card said 9.5 mi total" stood over a card printing 95. A driver
+doing the one thing the page exists for, checking the rig against the screen,
+finds a different number and concludes the page is broken. `statedBy` and
+`unchecked` are written once and asked by all four surfaces that print this.
+
+*The wording says less than the first pass wanted it to, and that is the
+correction.* "a lost decimal put back" asserts THIS figure is the repair, and
+the flag does not mean that: `rpi/accumulate.py` ORs `milesCorrected` across
+the window and its own comment calls it advisory — "if any frame needed a
+decimal put back, the distance is worth a glance". So the published figure may
+be one no frame ever divided. It now says a decimal had to be put back while
+reading this card and to check it against the screen, which is true of both the
+rig's ORed flag and the phone's exact one.
+
+*Two of the four surfaces were left behind by the first pass, and neither was
+covered.* The accusation sidebar still read "the whole distance the card
+stated" over rows whose figure the card never printed, and the withheld row
+named "its N mi" with no attribution at all — and deleting that attribution
+left all 118 map checks green. The fixture had no pair that is BOTH corrected
+and accused, which is the commoner half of that section on the real week, so
+the path could not be exercised. Both are fixed, both are pinned, and the
+count-shaped checks that broke when the fixture gained the case were rewritten
+to state the rule instead of the count.
+
+`README.md` promised "the distance the card itself stated" and "a longer one
+means a pin is in the wrong place". Both were false after this; both moved in
+the same commit, as did `map-view.js`'s own file header, which stated the
+pre-change rule inside the change that replaced it.
+
 **The live map drew nothing until every lookup finished, and left the LAST
 card's pins up while it waited.** Measured against the real `map-view.js` at a
 500ms round trip, press to first mark: 1.6s for a card naming no dropoff, 3.8s
@@ -1016,11 +1069,6 @@ list, which is `MAX_PLACES` and the last-entry rule and a blast radius of its
 own, so it was deliberately not bundled with a parser fix that had to be shown
 to move nothing else. Three rows of 1,166 today; it will matter more to the
 heat map below than it does to the panel.
-
-**`judge()`'s "this cannot be right" uses a distance the rig already distrusted.**
-Where `milesUncertain` is set there is no yardstick at all, so the pair should be
-marked unjudged rather than accused; where `milesCorrected` is set the popup
-should say the card's figure was corrected.
 
 **While an order with a known destination is in the car, the ⌖ button cannot
 serve the card being screened at all.** The owner's stated habit is to tap the

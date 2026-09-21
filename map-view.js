@@ -30,8 +30,11 @@
  * accusation against the lookup rather than a claim about the job.
  *
  * That asymmetry is the whole safety argument, and it is checked: see
- * `judge()`, where a straight line longer than the card's own stated distance
- * marks the PIN as wrong and never the card.
+ * `judge()`, where a straight line longer than the reading's own stated
+ * distance marks the PIN as wrong and never the card — and only where the
+ * reading vouches for that distance. A reading the rig would not finish or
+ * would not trust is no yardstick, so the pair is reported as unchecked
+ * instead of accused; see the yardstick note at `judge()`.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -344,7 +347,52 @@
    * wrong — never the card, never the rate, never the verdict the driver saw.
    * A version of this that trusted the pins would be the rig quietly
    * overruling what the screen actually said, which is the failure this
-   * project exists to refuse. */
+   * project exists to refuse.
+   *
+   * ...but only against a distance the rig itself stands behind. The
+   * accusation is made out of two things, and the argument above establishes
+   * only one of them: a straight line cannot beat the road, so IF the card's
+   * figure is the whole journey, a longer line means a pin is wrong. Where the
+   * reading holds a FRACTION of the journey the inequality still comes out
+   * true and means nothing at all — the straight line beat a number that was
+   * never the road. The pins are then accused of a shortfall the reader
+   * produced, in the words "This cannot be right", on the one page whose job
+   * is to say whether the rig is right about where the work happened.
+   *
+   * The row says whether it is a whole journey, in flags every consumer of
+   * the journal already reads. `whole === false` is the reader saying it did
+   * not finish — a leg that lost its distance leaves the sum short, which is exactly the shape that manufactures this accusation
+   * (offer_parser.legs_short_a_distance measured one at 1.1 miles of a card
+   * that printed 8.4). `suspect` is the reader saying the row is not to be
+   * leaned on at all.
+   *
+   * ...and `milesUncertain`, which is the flag this was first written against
+   * and is NOT covered by the other two. rpi/test_journal.py asserts as a
+   * property that every route to it also trips `suspect` or `whole === false`,
+   * and that is true of the rig — but journal-client.js writes `whole: true,
+   * suspect: false` as literals while reporting `milesUncertain` honestly off
+   * rate(). So a card read by the PHONE's scanner can reach here uncertain and
+   * otherwise spotless. Put through the real journal-client, the corpus's own
+   * damaged card `$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip` writes a row
+   * of 1.1 miles — the approach leg alone, where the card's own trip leg is
+   * 7.3 — flagged uncertain, whole and not suspect. Any two pins more than
+   * 1.6 miles apart are then accused, which is every pair on a real card.
+   *
+   * All three clauses are load-bearing and each dies to its own mutation. On
+   * the owner's week 14 of the 578 pairs that name both ends and state a
+   * distance fail this rule: one on `suspect` alone (56.6 miles over 25
+   * minutes), ten on `whole` alone, three on both — and those three say how
+   * much is missing, holding 5.6 miles of a card that printed 56, 7.9 of one
+   * that printed 24.6, and 3.9 of one that printed 273.
+   *
+   * `whole !== false` and not `whole === true`: rows written before the flag
+   * existed do not carry it, and they were only ever written when whole. Same
+   * convention as advice.js's `trustworthy`, for the same reason.
+   *
+   * The pair is not silently dropped when the yardstick fails. `unjudged` says
+   * so, and the three surfaces that draw this say it in words — an accusation
+   * withdrawn with nothing in its place is the second fault class wearing the
+   * clothes of a fix. */
   function judge(jobs, found, strays) {
     strays = strays || {};
     return (jobs || []).map(function (o) {
@@ -359,9 +407,23 @@
       var b = (o.dropoff ? found[o.dropoff] : null) || null;
       var crow = (a && b) ? crowMiles(a, b) : null;
       var stated = typeof o.miles === 'number' ? o.miles : null;
+      // A figure, and whether that figure is a YARDSTICK. See above.
+      var yardstick = stated !== null && !o.milesUncertain
+                      && o.whole !== false && !o.suspect;
       return { offer: o, from: a, to: b, crow: crow, stated: stated,
-               impossible: (crow !== null && stated !== null
+                        // Whether `stated` is the card's own figure or the rig's
+               // repair of it. check_distance divides by ten to put back a
+               // decimal the read lost, so on 328 of the owner's 1,166 offers
+               // — 262 of the 579 that name both ends — "card said 9.5 mi"
+               // was the page attributing the rig's arithmetic to the screen.
+               corrected: !!o.milesCorrected,
+               impossible: (crow !== null && yardstick
                             && crow > stated + 0.5),
+               // Placed at both ends, holding a figure, and that figure is not
+               // one a straight line can contradict. Said rather than left
+               // out: a pair that quietly stops being checked looks exactly
+               // like a pair that passed.
+               unjudged: (crow !== null && stated !== null && !yardstick),
                // How far out of the shift each end landed, when it did. Kept
                // per end rather than as one flag, because which of the two is
                // in another state is the whole of what the driver needs to
@@ -369,6 +431,58 @@
                fromStray: o.pickup ? (strays[o.pickup] || null) : null,
                toStray: o.dropoff ? (strays[o.dropoff] || null) : null };
     });
+  }
+
+  /* Where `stated` came from, in words.
+   *
+   * Three surfaces print this figure — map.html's line popup, map.html's
+   * sidebar, and the offer log's map sheet in journal.html — and all three
+   * said "card said N mi". On a corrected row the card said ten times N: the
+   * reader lost the decimal in "9.5 mi", read 95, computed a speed no car
+   * makes and divided by ten. That is a good repair and rate() is right to use
+   * it, but it is the rig's number, not the screen's, and this page exists to
+   * let a driver check the rig against the screen. A driver who goes back to
+   * the card and finds 95 has been told the page is broken.
+   *
+   * Written once and asked four times rather than worded four times, which is
+   * how one fact comes to have four answers that drift — the line popup, the
+   * two sidebar sections that list these pairs, and the offer log's map sheet.
+   * The first pass at this reached two of the four; the accusation row and the
+   * withheld row still put the rig's repaired figure in the card's mouth. */
+  function statedBy(p) {
+    if (!p || p.stated === null) return '';
+    // "a lost decimal put back" would say THIS figure is the repair, and the
+    // flag does not mean that. rpi/accumulate.py ORs milesCorrected across the
+    // window and its own comment calls it advisory — "if any frame needed a
+    // decimal put back, the distance is worth a glance" — so the published
+    // figure may be one no frame ever divided. What is true of both the rig's
+    // ORed flag and the phone's exact one is that a decimal had to be put back
+    // somewhere while this card was read, which is a reason to check the
+    // screen and not a claim about this number.
+    return p.corrected
+      ? 'read as ' + p.stated + ' mi total — a decimal had to be put back '
+        + 'while reading this card, so check it against the screen'
+      : 'card said ' + p.stated + ' mi total';
+  }
+
+  /* ...and why a pair with two pins and a figure is not being checked against
+     it, or '' when it is. The reason matters and the two are different: one is
+     a reading that stopped early, the other is a reading the rig refused. */
+  function unchecked(p) {
+    if (!p || !p.unjudged) return '';
+    // Asked first because it is the most specific: the reader is not refusing
+    // the reading, it is refusing this one figure.
+    if (p.offer.milesUncertain) {
+      return 'the rig would not trust the distance on this card, so its '
+        + p.stated + ' mi is not something a straight line can be measured '
+        + 'against';
+    }
+    return p.offer.whole === false
+      ? 'only part of this card was read, so its ' + p.stated
+        + ' mi is a fraction of the journey and nothing here can be measured '
+        + 'against it'
+      : 'the rig marked this reading suspect, so its ' + p.stated
+        + ' mi is not a distance a straight line can contradict';
   }
 
   /* --- one pin per place, not one per offer --------------------------------
@@ -887,7 +1001,8 @@
            detour: detour, fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
            localityOf: localityOf,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
-           judge: judge, byPlace: byPlace, chain: chain,
+           judge: judge, statedBy: statedBy, unchecked: unchecked,
+           byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS };

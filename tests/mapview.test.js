@@ -338,6 +338,125 @@ var noMiles = MV.judge([{ pickup: 'Chipotle', dropoff: 'Daffodll Ln' }], FOUND, 
 no_('a card with no stated distance is never called impossible',
     noMiles[0].impossible);
 
+/* ---- ...and only against a distance the rig itself stands behind ----------
+ *
+ * The accusation is made of two claims and the argument above carries only
+ * one. A straight line cannot beat the ROAD — but where the reading holds a
+ * fraction of the journey, the straight line beat a number that was never the
+ * road, and the inequality comes out true while meaning nothing. The pins are
+ * then blamed for a shortfall the READER produced, in the words "This cannot
+ * be right", on the page whose whole job is to say whether the rig is right.
+ *
+ * Chipotle to Duval Ct is about 7.2 miles here, so a card carrying 3 is
+ * accused by the old rule whatever else the row says. */
+var SHORT = { pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 3 };
+var yard = MV.judge(
+  [SHORT,
+   // The shape that manufactures this: a leg lost its distance, so the sum is
+   // a fraction of the journey and the reader said so by not calling it whole.
+   // offer_parser.legs_short_a_distance measured one at 1.1 miles of a card
+   // that printed 8.4.
+   Object.assign({}, SHORT, { whole: false }),
+   // ...and a row the reader would not vouch for at all.
+   Object.assign({}, SHORT, { suspect: true }),
+   // A row written before `whole` existed carries no such key, and those were
+   // only ever written when whole. Same convention as advice.js's trustworthy;
+   // without it this change would silently stop checking the older half of the
+   // journal.
+   Object.assign({}, SHORT, { whole: undefined })],
+  FOUND, {});
+ok_('a whole reading whose line beats its card is still accused',
+    yard[0].impossible);
+no_('...but a reading that stopped part-way through the journey is not',
+    yard[1].impossible);
+ok_('...it is marked unjudged instead, so the pair does not just vanish',
+    yard[1].unjudged);
+no_('...and a reading the rig called suspect is not accused either',
+    yard[2].impossible);
+ok_('...and is marked unjudged too', yard[2].unjudged);
+ok_('a row too old to carry `whole` is judged, not quietly excused',
+    yard[3].impossible);
+// The two are exclusive by construction, and a surface that printed both would
+// be accusing a pair in the same breath as saying it cannot be checked.
+no_('an accused pair is never also unjudged', yard[0].unjudged);
+/* ...and the flag the reader raises for the DISTANCE itself, which neither of
+   the other two covers. rpi/test_journal.py asserts as a property that every
+   route to `milesUncertain` also trips `suspect` or `whole === false` — true
+   of the rig, and journal-client.js writes both of those as literals while
+   reporting `milesUncertain` honestly off rate(). So this is the shape a card
+   read by the PHONE's scanner arrives in: put the corpus's own damaged card
+   `$16.05 3 min (1.1 mi) away 20 min (7.3 m1) trip` through the real
+   journal-client and the row is 1.1 miles of an 8.4-mile job — the approach
+   leg alone — flagged, whole and not suspect. Any two pins more than 1.6
+   miles apart are then accused, which is every pair on a real card. */
+var PHONE = Object.assign({}, SHORT,
+                          { milesUncertain: true, whole: true, suspect: false });
+var phoned = MV.judge([PHONE], FOUND, {})[0];
+no_('a distance the reader would not trust cannot accuse a pin either',
+    phoned.impossible);
+ok_('...it is marked unjudged like the other two', phoned.unjudged);
+ok_('...and named as the distance rather than the reading (' 
+    + MV.unchecked(phoned) + ')',
+    MV.unchecked(phoned).indexOf('would not trust') !== -1);
+// Two pins and no figure at all is the older, separate case above: there is
+// nothing to be unjudged ABOUT, and saying so would put a line on the majority
+// of this driver's cards for a distance they never printed.
+no_('a card that stated no distance is not reported as unchecked',
+    noMiles[0].unjudged);
+// One end placed is not a pair. Nothing is drawn between them, so there is no
+// comparison to withhold and no sentence to write about withholding it.
+no_('a job with one end is neither accused nor unjudged',
+    judged[2].impossible || judged[2].unjudged);
+
+/* ---- and what the figure beside the line actually is ---------------------
+ *
+ * check_distance divides a distance by ten to put back a decimal the read
+ * lost: "9.5 mi" read as 95, a speed no car makes, repaired. rate() is right
+ * to use the repair — but all three surfaces printed it as "card said 9.5 mi
+ * total", and the card said 95. On the owner's week that is 328 of 1,166
+ * offers, and 262 of the 579 that name both ends, so nearly half the lines
+ * this page can draw attributed the rig's arithmetic to the screen. A driver
+ * who goes back to the card to settle which pin is wrong finds 95 and
+ * concludes the page is broken. */
+var said = MV.judge(
+  [{ pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 9.5 },
+   { pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 9.5, milesCorrected: true }],
+  FOUND, {});
+eq('a figure off the card is reported as the card’s', MV.statedBy(said[0]),
+   'card said 9.5 mi total');
+no_('...and carries no correction', said[0].corrected);
+ok_('a figure the rig repaired says so', said[1].corrected);
+ok_('...in the words that do not put it in the card’s mouth ('
+    + MV.statedBy(said[1]) + ')',
+    MV.statedBy(said[1]).indexOf('card said') === -1);
+ok_('...naming what was done to it',
+    MV.statedBy(said[1]).indexOf('decimal') !== -1);
+ok_('...and still giving the figure the line is measured against',
+    MV.statedBy(said[1]).indexOf('9.5') !== -1);
+// ...but NOT claiming this figure is the repaired one. rpi/accumulate.py ORs
+// milesCorrected across the window and calls it advisory in as many words, so
+// the flag means "some frame of this card needed a decimal put back", not
+// "the card printed ten times this". A sentence that says otherwise sends a
+// driver to the screen looking for a number that is not on it.
+ok_('...without claiming the card printed ten times it ('
+    + MV.statedBy(said[1]) + ')',
+    MV.statedBy(said[1]).indexOf('put back') === -1
+    || MV.statedBy(said[1]).indexOf('had to be put back') !== -1);
+ok_('...and sending the driver to the screen rather than asserting the repair',
+    MV.statedBy(said[1]).indexOf('check it against the screen') !== -1);
+eq('a card with no distance has nothing to attribute',
+   MV.statedBy(noMiles[0]), '');
+// The two reasons a pair goes unchecked are different facts about the rig and
+// a driver deciding whether to go and look at the crop needs the right one.
+ok_('an unfinished reading says it is unfinished (' + MV.unchecked(yard[1]) + ')',
+    MV.unchecked(yard[1]).indexOf('only part of this card was read') === 0);
+ok_('...a suspect one says that instead',
+    MV.unchecked(yard[2]).indexOf('suspect') !== -1);
+ok_('...and both name the figure they are declining to use',
+    MV.unchecked(yard[1]).indexOf('3 mi') !== -1
+    && MV.unchecked(yard[2]).indexOf('3 mi') !== -1);
+eq('a pair that WAS checked gets no such sentence', MV.unchecked(yard[0]), '');
+
 /* ---- one pin per place, not one per offer -------------------------------
  *
  * Every job at the same shop resolves to the same coordinate. Keyed on the

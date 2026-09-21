@@ -122,13 +122,20 @@ def free_port():
 NOW = int(time.time() * 1000)
 
 
-def offer(i, pickup, dropoff, miles, at=None, where=None, minutes=25.0):
+def offer(i, pickup, dropoff, miles, at=None, where=None, minutes=25.0,
+          whole=True, suspect=False, corrected=False):
+    # `whole` and `suspect` are what say whether the distance beside them is a
+    # yardstick — see judge() in map-view.js. Defaulted to a clean reading,
+    # because that is what nearly every row is; the two rows below that are not
+    # exist because the page must not accuse a pin on a distance the reader
+    # itself did not finish.
     at = NOW - (i + 1) * 600000 if at is None else at
     row = {'id': 'o%d' % i, 'seq': 1, 'at': at,
            'firstAt': at, 'pay': 12.0, 'minutes': minutes,
            'billedMinutes': minutes, 'miles': miles, 'cost': 1.5,
-           'costPerMile': 0.3, 'perHour': 28.8, 'whole': True,
-           'suspect': False, 'doubt': None, 'pickup': pickup,
+           'costPerMile': 0.3, 'perHour': 28.8, 'whole': whole,
+           'milesCorrected': corrected,
+           'suspect': suspect, 'doubt': None, 'pickup': pickup,
            'dropoff': dropoff, 'places': [p for p in (pickup, dropoff) if p],
            'content': ['c%d' % i]}
     # Where the car was when the card came up, as rpi/gps.py stamps it. Absent
@@ -140,8 +147,13 @@ def offer(i, pickup, dropoff, miles, at=None, where=None, minutes=25.0):
 
 
 ROWS = [
+    # ...and its distance is the rig's repair of the card's, not the card's:
+    # the read lost the decimal in "9.0 mi", made 90, computed a speed no car
+    # makes and divided by ten. 328 of the owner's 1,166 offers are this, and
+    # every surface that printed the figure called it "card said 9 mi total"
+    # while the card said 90.
     offer(0, 'Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta', 9.0,
-          where=(34.0117, -84.6105)),
+          where=(34.0117, -84.6105), corrected=True),
     # Also five minutes, and also load-bearing: it makes the LAST hop a plain
     # empty run, so the fixture carries one hop of each kind — stacked, empty,
     # and spanning a job that could not be placed — with real miles on the two
@@ -154,8 +166,14 @@ ROWS = [
     # fixture that is NOT a stack. Without it every hop here is stacked and the
     # headline's "miles nobody paid for" is honestly 0.0 — which tests nothing
     # about the arithmetic that separates the two.
+    # ...and CORRECTED as well, which is the combination the accusation
+    # sidebar had no cover for: o0 is corrected but not accused, o2 was accused
+    # but not corrected, so the one row that prints an accusation ABOUT a
+    # repaired figure existed nowhere. 262 of the owner's 579 drawable pairs
+    # are corrected, so on the real week it is the commoner half of that
+    # section, and the note over it said "the card stated".
     offer(2, 'Cobb Pkwy NW, Kennesaw', 'Peachtree St NE, Atlanta', 3.0,
-          where=(34.0170, -84.6001), minutes=5.0),
+          where=(34.0170, -84.6001), minutes=5.0, corrected=True),
     # ...and one the card never gave a destination for at all, which is most of
     # this driver's real traffic.
     # Placeable nowhere — the stub has never heard of Zaxbys and the card gave
@@ -191,6 +209,20 @@ ROWS = [
     # every count the rest of the suite pins — it names one end, so "name both
     # ends", "drawn end to end" and the shared-pin count are all untouched.
     offer(31, None, 'Unreachable Way, Atlantis', 5.0),
+    # The accusation this page must NOT make. Marietta to Atlanta is about
+    # fifteen miles as the crow flies and the row carries three — which under
+    # the old rule is "This cannot be right, one of these pins is wrong", in
+    # red, dashed, and in the sidebar. But the reading never finished: a leg
+    # lost its distance, so three miles is a fraction of the journey and losing
+    # that comparison says nothing whatever about the two pins, which are both
+    # exactly where they should be.
+    #
+    # Both place strings are already asked about by the rows above, so this
+    # adds no question, no pin and no cache key — only a line, which is the
+    # thing under test. It is not ticked as taken either, so the chain is
+    # untouched.
+    offer(32, 'Canton Rd, Marietta', 'Peachtree St NE, Atlanta', 3.0,
+          whole=False),
 ] + [
     # Twenty-six the geocoder has never heard of, which is two past the
     # twenty-five a list shows. A list that stops there and says nothing is the
@@ -366,6 +398,13 @@ const KNOWN = {
     bounds: window.__bounds || [],
     lines: window.__lines.length,
     impossible: window.__lines.filter((l) => l.opts && l.opts.dashArray).length,
+    // What each line SAYS, which is the half of it a colour cannot carry:
+    // whether the figure beside the straight line is the card's or the rig's
+    // repair of it, and whether the pair is being accused or left alone.
+    linePopups: window.__lines.map(function (l) {
+      return String(l.popup || '').replace(/<[^>]*>/g, ' ')
+                                  .replace(/\s+/g, ' ').trim();
+    }),
     asked: window.__asked.slice(),
     boxes: window.__boxes.slice(),
     cacheKeys: Object.keys(JSON.parse(
@@ -621,9 +660,9 @@ try:
 
     # --- it reads the same list the offers page reads ----------------------
     status = on_load.get('status') or ''
-    ok_('the page counts the offers it loaded (%r)' % status, '32 offers' in status)
-    ok_('...how many name somewhere', '32 name somewhere' in status)
-    ok_('...and how many name both ends', '4 name both ends' in status)
+    ok_('the page counts the offers it loaded (%r)' % status, '33 offers' in status)
+    ok_('...how many name somewhere', '33 name somewhere' in status)
+    ok_('...and how many name both ends', '5 name both ends' in status)
     ok_('the button is live once there is something to place', on_load.get('canPlace'))
 
     # --- what it drew ------------------------------------------------------
@@ -662,6 +701,95 @@ try:
     ok_('...and explained in words (%r)' % side[:60], 'cannot be right' in side)
     ok_('...naming the reason a straight line settles it',
         'cannot beat the road' in side)
+    # ...and the accusation does not put the rig's own repair in the card's
+    # mouth. o2 is both accused and corrected, which is the commoner half of
+    # this section on the real week: 262 of 579 drawable pairs are corrected.
+    # A driver sent back to the screen to check "3 mi" against a card that
+    # printed 30 concludes the page is broken.
+    # Bounded to the section: `side` is the whole sidebar and the sections
+    # below this one legitimately say "card said" about pairs whose figure the
+    # card really did state.
+    _wrong_at = side.find('cannot be right')
+    _wrong_end = side.find('could not be checked', _wrong_at)
+    _wrong = side[_wrong_at:(_wrong_end if _wrong_end > 0 else len(side))]
+    # The blanket note must not attribute to the card at all: it stands over
+    # every row in the section, and 262 of the owner's 579 drawable pairs
+    # carry a figure the card did not print.
+    no_('the accusation’s note does not attribute the figure to the card (%r)'
+        % _wrong[:100], 'the card stated' in _wrong)
+    ok_('...saying whose figure it is instead', 'this reading carries' in _wrong)
+    # ...and the corrected pair's own row says so, while the pair whose figure
+    # the card really did state keeps the plain wording. Both are in this
+    # section, which is why a flat "no 'card said' here" would be wrong.
+    ok_('the repaired pair’s row says a decimal was put back', 'put back' in _wrong)
+    ok_('...and the pair the card really did state keeps the plain wording',
+        'card said' in _wrong)
+
+    # --- ...and only where the card's figure is a yardstick -----------------
+    #
+    # o32 is Marietta to Atlanta carrying three miles, which the rule above
+    # accuses on sight. Its reading never finished — a leg lost its distance —
+    # so those three miles are a fraction of the journey, and a straight line
+    # beating a fraction says nothing about either pin. Under the old rule this
+    # was a third red dashed line and a third row under "cannot be right".
+    _pops = placed.get('linePopups') or []
+    eq('a pair whose card figure is only part of the journey is drawn plainly',
+       len([p for p in _pops if 'only part of this card was read' in p]), 1)
+    ok_('...and is not among the lines marked impossible (%d dashed)'
+        % (placed.get('impossible') or 0),
+        (placed.get('impossible') or 0) == 2)
+    ok_('...with the accusation withheld rather than made (%r)'
+        % ([p for p in _pops if 'only part of this card was read' in p] or [''])[0][:120],
+        all('cannot be right' not in p
+            for p in _pops if 'only part of this card was read' in p))
+    ok_('...and the reason on the line itself, not only in a list',
+        any('fraction of the journey' in p for p in _pops))
+    # Withdrawn, not vanished. A pair that silently stops being checked looks
+    # exactly like a pair that was checked and passed, which is the second
+    # fault class dressed as a fix for the first.
+    ok_('...and counted in the sidebar under its own heading (%r)'
+        % side[side.find('could not be checked') - 3:][:80],
+        '1 that could not be checked' in side)
+    ok_('...saying why a fraction of a journey settles nothing',
+        'loses that comparison every time' in side)
+    ok_('...and naming the pair it is about', 'Canton Rd, Marietta' in side)
+    # ...and saying WHOSE figure the one it is not checking is. MV.unchecked
+    # phrases it "its N mi", which attributes to the card by default, and on
+    # the real week 12 of the 14 rows this section fires on carry a figure the
+    # rig repaired. Without this check the attribution can be deleted from the
+    # row and all 118 checks stay green — which is what it did.
+    _nc = side[side.find('could not be checked'):]
+    ok_('the withheld row says whose figure it is not checking (%r)' % _nc[:110],
+        'card said' in _nc or 'put back' in _nc)
+
+    # --- and whose figure the line is measured against ----------------------
+    #
+    # o0's distance is the rig's repair, not the card's: check_distance divides
+    # by ten to put back a decimal the read lost. Every surface printed that as
+    # "card said 9 mi total", and the card said 90 — on 328 of the owner's
+    # 1,166 offers, 262 of the 579 that name both ends. A driver who goes back
+    # to the card to settle which pin is wrong finds a different number and
+    # concludes the page is broken.
+    # Two of them now: o0, which is corrected and drawn plainly, and o2, which
+    # is corrected AND accused. The second is the combination the accusation
+    # sidebar had no cover for, and on the real week it is the commoner half of
+    # that section — 262 of 579 drawable pairs are corrected.
+    _fixed = [p for p in _pops if 'decimal' in p]
+    eq('every repaired distance says so rather than being quoted as the card’s'
+       ' (%r)' % (_fixed or [''])[0][:90], len(_fixed), 2)
+    ok_('...and none of them claims the card said it',
+        all('card said' not in p for p in _fixed))
+    # Each gives ITS OWN figure, not just one of them: a check that only looks
+    # at _fixed[0] passes while the other prints nothing to check against.
+    ok_('...while each still gives the figure its line was measured against',
+        all(any(f + ' mi total' in p for f in ('9', '3')) for p in _fixed)
+        and any('9 mi total' in p for p in _fixed)
+        and any('3 mi total' in p for p in _fixed))
+    # The ordinary case keeps the ordinary wording. Without this the change
+    # could have replaced one blanket claim with another.
+    ok_('...and a figure the card really did state is still the card’s (%r)'
+        % ([p for p in _pops if 'card said' in p] or [''])[0][:80],
+        any('card said' in p and 'decimal' not in p for p in _pops))
 
     ok_('a place the geocoder never found is listed rather than dropped',
         'could not find' in side)
@@ -695,7 +823,7 @@ try:
     # for a line, and counting it as a failure to draw one blames the map for
     # something the card did.
     ok_('the headline counts against the offers that could be drawn (%r)' % status2,
-        'of 4 drawn end to end' in status2)
+        'of 5 drawn end to end' in status2)
 
     # --- one request a second, and the page holding itself to it ------------
     #

@@ -323,6 +323,14 @@ MAPPED = [
     dict(offer(3, state='go', pickup='Chastain Rd NW, Kennesaw',
                dropoff='Oak Ln, Marietta', scanned=True),
          lat=34.02, lon=-84.61),
+    # The same two ends, three miles apart on the card and four and a half on
+    # the map — which the sheet used to answer with "one of these pins is
+    # wrong". This reading is `suspect`: the rig is not standing behind its own
+    # figures, so three miles is not a distance a straight line can be measured
+    # against, and losing that comparison says nothing about either pin.
+    dict(offer(4, state='no', pickup='Chastain Rd NW, Kennesaw',
+               dropoff='Oak Ln, Marietta', suspect=True),
+         miles=3.0),
 ]
 
 # The four answers /api/journal can give. Every field here is one the server
@@ -856,6 +864,16 @@ const TEXT = (sel) => {
       await tap('r2', 'both');
       await page.waitForTimeout(3600);
       out[name].halfPlaced = await page.evaluate(sheet);
+      // ...and the pair the sheet must NOT settle. r4 names the same two ends
+      // as r0, so both are already in the cache and nothing is asked again —
+      // what changes is that its reading is suspect, so the card's three miles
+      // is not a yardstick and the four and a half on the map is not evidence
+      // against either pin.
+      await tap('r2', 'both');
+      await page.waitForTimeout(250);
+      await tap('r4', 'both');
+      await page.waitForTimeout(1200);
+      out[name].unjudged = await page.evaluate(sheet);
     }
     if (name === 'took six') {
       // A mark, made on an opened row a long way down the list: the row
@@ -1716,7 +1734,7 @@ try:
        [c.split(':')[0] for c in _m['controls'] if c.startswith('r1/')],
        ['r1/pickup'])
     eq('...with one control per named end and no more',
-       len(_m['controls']), 10)
+       len(_m['controls']), 13)
 
     # An address the driver revealed on their phone, on the row it belongs to.
     #
@@ -1753,7 +1771,7 @@ try:
     ok_('...with the straight line measured against the card (%r)' % _r['note'],
         'straight line' in _r['note'] and 'card said' in _r['note'])
 
-    eq('the log is still underneath it', _m['stillThere']['rows'], 4)
+    eq('the log is still underneath it', _m['stillThere']['rows'], 5)
     ok_('...given room so its last row can still be reached',
         _m['stillThere']['padded'])
     eq('...and nothing navigated anywhere', _m['stillThere']['url'], '/journal.html')
@@ -1783,6 +1801,24 @@ try:
     ok_('...naming the end that is missing', 'Zzqx' in _half['note'])
     ok_('...and why, in the words that blame the reading rather than the link',
         'misread' in _half['note'])
+
+    # Two pins, a figure, and no way to hold one against the other. The sheet's
+    # one job is to say a straight line cannot beat the road — but r4's reading
+    # is suspect, so its three miles was never the road, and "one of these pins
+    # is wrong" would be an accusation resting on a number the rig had already
+    # refused. Both pins here are exactly where they belong.
+    _unj = _m['unjudged']
+    ok_('a pair the rig will not vouch for is drawn (%r)' % _unj['note'], _unj['open'])
+    no_('...and not accused of anything', 'pins is wrong' in (_unj['note'] or ''))
+    no_('...in the words that would have accused it',
+        'cannot be right' in (_unj['note'] or ''))
+    # Withheld, not silently dropped: a sheet that just stopped saying anything
+    # reads exactly like a pair that was checked and passed.
+    ok_('...and says why it cannot be settled', 'suspect' in (_unj['note'] or ''))
+    ok_('...naming the figure it is declining to use',
+        '3 mi' in (_unj['note'] or ''))
+    ok_('...while still giving the straight line it measured',
+        'straight line' in (_unj['note'] or ''))
 
     _one = [c for c in got['took six']['caveats'] if 'running cost' in c]
     ok_('a window written by one device gets the plain sentence (%r)'

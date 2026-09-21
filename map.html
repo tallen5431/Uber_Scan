@@ -87,8 +87,8 @@
   .tag.iffy { color: var(--warn); border-color: var(--warn); }
   /* Listed strays are the one row here that does something when tapped, so
      they have to look like it — and be big enough to hit with a thumb. */
-  .row.stray { cursor: pointer; padding: 9px 0; }
-  .row.stray:hover b { text-decoration: underline; }
+  .row.stray, .row.nocheck { cursor: pointer; padding: 9px 0; }
+  .row.stray:hover b, .row.nocheck:hover b { text-decoration: underline; }
   .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
   .warnbox { border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px;
              margin: 8px 14px; font-size: 12px; line-height: 1.5; }
@@ -530,7 +530,12 @@
         dashArray: (p.impossible || wrongEnd) ? '6 4' : null, opacity: .85
       }).bindPopup(((p.impossible || wrongEnd) ? '<b>This cannot be right</b><br>' : '')
           + 'straight line ' + p.crow.toFixed(1) + ' mi'
-          + (p.stated !== null ? ', card said ' + p.stated + ' mi total' : ''))
+          + (p.stated !== null ? ', ' + MV.statedBy(p) : '')
+          // ...and when the figure beside it is not one this line can be held
+          // against, why. Without it the pair reads as a pair that was checked
+          // and passed, which is the one thing it is not.
+          + (p.unjudged
+             ? '<br><span class="note">' + esc(MV.unchecked(p)) + '</span>' : ''))
         .addTo(layer);
     });
 
@@ -734,6 +739,11 @@
     var noEnd = offers.filter(function (o) { return !o.dropoff; });
     var lost = placed.filter(function (p) { return (p.offer.pickup && !p.from) || (p.offer.dropoff && !p.to); });
     var wrong = placed.filter(function (p) { return p.impossible; });
+    // Two pins, a figure, and no way to hold one against the other. These used
+    // to be in `wrong` — accused on a distance the reader itself had not
+    // finished or had flagged — and simply removing them would have taken the
+    // row off the page with nothing saying so.
+    var nocheck = placed.filter(function (p) { return p.unjudged; });
     var drawn = placed.filter(function (p) {
       return p.from && p.to && !p.impossible && !p.fromStray && !p.toStray;
     });
@@ -763,9 +773,14 @@
     html += andTheRest(Math.min(strayNames.length, LIST_MAX), strayNames.length);
 
     html += '<h2>' + wrong.length + ' that cannot be right</h2>';
+    // "the card stated" is wrong on 262 of the 579 pairs this page can draw:
+    // the figure is what the READING carries, and where a decimal had to be
+    // put back it is not the number on the screen. This is the third surface
+    // that printed that fact — the line popup and the offer log's sheet are
+    // the other two — and it was the one the first pass left behind.
     html += '<div class="note">The straight line came out longer than the whole '
-          + 'distance the card stated. A straight line cannot beat the road, so '
-          + 'one of the two pins is in the wrong place.</div>';
+          + 'distance this reading carries. A straight line cannot beat the '
+          + 'road, so one of the two pins is in the wrong place.</div>';
     // Tappable like a stray, and for the same reason: this row says one of two
     // pins is wrong and gives no way to look at either. Tapping fits BOTH ends
     // in the view rather than centring on one, because the question a driver
@@ -777,9 +792,43 @@
            + esc(p.offer.pickup || '?') + '</b> → '
            + esc(p.offer.dropoff || '?') + '<span class="tag bad">'
            + p.crow.toFixed(1) + ' vs ' + p.stated + ' mi</span>'
-           + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
+           // Whose figure the tag's second number is, on the row as well as in
+           // the note, because the row is what a driver reads before deciding
+           // to go and look at the card.
+           + '<div class="why">' + esc(MV.statedBy(p)) + ' · '
+           + esc(when(p.offer.at)) + '</div></div>';
     });
     html += andTheRest(Math.min(wrong.length, LIST_MAX), wrong.length);
+
+    // Only when there are any. The three headings above are permanent because
+    // a zero on each of them is a fact worth reading — no strays, nothing that
+    // cannot be right. "0 could not be checked" is not: it is the ordinary
+    // state, and a heading for it on every map would be a row of furniture
+    // over the one list a driver came here to read.
+    if (nocheck.length) {
+      html += '<h2>' + nocheck.length + ' that could not be checked</h2>';
+      html += '<div class="note">Both ends placed, and the card’s own distance '
+            + 'is not something the straight line can be measured against — '
+            + 'the rig did not finish reading these, or marked them suspect. A '
+            + 'reading holding part of a journey loses that comparison every '
+            + 'time, and losing it would say nothing about the pins. So they '
+            + 'are drawn like any other pair and left alone.</div>';
+      nocheck.slice(0, LIST_MAX).forEach(function (p) {
+        html += '<div class="row nocheck" data-place="' + esc(p.offer.pickup || '')
+             + '" data-other="' + esc(p.offer.dropoff || '') + '"><b>'
+             + esc(p.offer.pickup || '?') + '</b> → '
+             + esc(p.offer.dropoff || '?') + '<span class="tag iffy">'
+             + p.crow.toFixed(1) + ' mi, not checked</span>'
+             // Whose figure first, then why it is not being measured against
+             // — the same order the line popup and the offer log's sheet use.
+             // MV.unchecked names "its N mi", and on 12 of the 14 rows this
+             // fires on that N is the rig's repair rather than the card's.
+             + '<div class="why">' + esc(MV.statedBy(p)) + '</div>'
+             + '<div class="why">' + esc(MV.unchecked(p)) + '</div>'
+             + '<div class="why">' + esc(when(p.offer.at)) + '</div></div>';
+      });
+      html += andTheRest(Math.min(nocheck.length, LIST_MAX), nocheck.length);
+    }
 
     /* Split, because "we asked and there is no such place" and "we never got
        to ask" are different facts with different answers, and only one of them
@@ -839,8 +888,12 @@
   // A row in this list is there precisely so it can be JUDGED, and a stray
   // cannot be judged off the view it was deliberately kept out of. One tap
   // takes the map to it.
+  //
+  // `.nocheck` too, and for the stronger version of the same reason: the page
+  // has just told the driver it cannot settle that pair, so looking at it is
+  // the only thing left to do about it.
   el.sideBody.addEventListener('click', function (ev) {
-    var row = ev.target.closest ? ev.target.closest('.stray') : null;
+    var row = ev.target.closest ? ev.target.closest('.stray, .nocheck') : null;
     if (!row || !map) return;
     var mark = marks[row.getAttribute('data-place')];
     var other = marks[row.getAttribute('data-other') || ''];
