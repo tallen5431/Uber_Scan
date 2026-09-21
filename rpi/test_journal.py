@@ -979,6 +979,32 @@ eq('...and the read is not reported as having failed', _bad_log.unreadable, None
 ok_('...with the surviving rows intact',
     all(isinstance(r, dict) and r.get('pay') == 10.0 for r in _bad_rows))
 
+# ...and count() has to read it the same way, which it did not. rows() opens
+# 'rb' and decodes one line at a time with `replace`, for the reason argued
+# above. count() opened the same file with a bare open(), so the decode
+# happened strictly inside its loop, the same byte raised out of it, the
+# blanket except called _complain and it answered 0 — for a file holding a
+# year of work. Two readings of "how many rows are in this file", in one
+# class, drifting by the whole file.
+eq('...and counting the lines is not defeated by it', _bad_log.count(),
+   _still_good)
+
+# The half of it that reached the driver. _complain sets the error failing()
+# reports, which the panel prints as "Offers are NOT being saved" — the one
+# notice this project added so a driver would know the irreplaceable file had
+# died. Over one corrupt byte it fired while every write was succeeding, and
+# a later append did not clear it: the next count() raised again and set it
+# straight back, so it stood for the rest of the shift and came back on every
+# watchdog restart.
+eq('...and the panel is not told the journal has died', _bad_log.failing(),
+   None)
+_bad_log.append({'v': 3, 'id': 'b9', 'seq': 1,
+                 'at': 1_789_000_009_000, 'pay': 10.0})
+eq('...still not, once a row has been written on top of it',
+   _bad_log.failing(), None)
+eq('...and the row that was written is counted', _bad_log.count(),
+   _still_good + 1)
+
 # --- a file that cannot be read is not a file with nothing in it -------------
 #
 # The distinction the callers could not make. sync.py read an empty list as

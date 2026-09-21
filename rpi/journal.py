@@ -361,9 +361,31 @@ class Journal:
             if not os.path.exists(self.path):
                 return 0
             n = 0
-            with open(self.path) as fh:
-                for line in fh:
-                    if line.strip():
+            # Binary, like rows() — and for the same reason, which this had
+            # not been given. A bare open() decodes strictly inside the `for`,
+            # so ONE byte that is not valid UTF-8 raises out of the loop, the
+            # blanket except below catches it, and this answers 0 for a file
+            # holding a year of work. rows() already opens 'rb' and decodes per
+            # line with `replace` precisely so a bad byte costs its own line
+            # and no other; the same question was being answered two ways in
+            # one class, and the two drifted by the whole file.
+            #
+            # Counting needs no decode at all: the question is how many lines
+            # were written, and a line that will not parse was still written.
+            #
+            # What reached the driver is the part that matters. The except
+            # below calls _complain, which sets self._error, which failing()
+            # reads and the panel prints as "Offers are NOT being saved" — the
+            # one notice this project added so a driver would know the
+            # irreplaceable file had died. Over a corrupt byte it fired while
+            # every write was succeeding, and a later append did not clear it,
+            # because the next count() raised again and set it straight back.
+            # Measured on the five-row fixture test_journal.py already ships:
+            # rows() 3, count() 0, failing() set before AND after a successful
+            # append.
+            with open(self.path, 'rb') as fh:
+                for raw in fh:
+                    if raw.strip():
                         n += 1
             return n
         except Exception as e:

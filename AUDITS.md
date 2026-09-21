@@ -898,6 +898,39 @@ the card. Every number downstream is then read off the wrong pixels.
 
 ### The backup
 
+**One bad byte put "Offers are NOT being saved" on the driving screen over a
+journal that was taking every write, and it never cleared.** `rows()` opens the
+journal `'rb'` and decodes one line at a time with `replace`, so a corrupt byte
+costs its own line and no other — that is a fix this file already records.
+`count()`, ninety lines further down in the same class, opened the same file
+with a bare `open()`. The decode then happens strictly inside its loop, one
+byte that is not valid UTF-8 raises `UnicodeDecodeError` out of it, the blanket
+`except` catches it, and the answer to "how many rows are in this file" is
+**0** for a file holding a year of work. The same question, answered two ways,
+in one class, drifting by the whole file.
+
+*The half that reached the driver is worse than the count.* That `except` calls
+`_complain`, which sets the error `failing()` reports and `live.html` prints as
+**"Offers are NOT being saved"** — the one notice this project added so a
+driver would know the irreplaceable file had died. `rpi/scan_pi.py` calls `count()`
+at startup and reads `failing()` on every heartbeat, so the notice stood from
+boot, over a journal in perfect health, and led the note list.
+
+*And it did not clear on a successful append, which is what the code looked
+like it promised.* `_error` is cleared only by an append that works — but the
+next `count()` raised again and set it straight back. Measured on the five-row
+fixture `rpi/test_journal.py` already ships for the sibling bug: `rows()` 3,
+`count()` 0, `failing()` set **before and after** a row was written on top.
+The notice stood for the rest of the shift and came back on every watchdog
+restart.
+
+Fixed by reading it the way `rows()` does. Counting needs no decode at all —
+the question is how many lines were written, and a line that will not parse was
+still written — so the loop counts non-blank lines in binary and cannot raise
+on the file's contents. Four checks added to the fixture that was already
+there, and the text-mode open dies to three of them.
+
+
 **A row from the future stopped the backup dead, and the first fix for it was
 set too far out.** `rpi/sync.py` resumes from `newest - 1h`, so one row stamped
 ahead of real time makes that floor a moment no real offer ever reaches, and
