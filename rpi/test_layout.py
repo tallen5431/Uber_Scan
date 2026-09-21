@@ -384,6 +384,213 @@ for name in PAGES:
     eq('%s paints the same browser chrome as the others' % name,
        re.findall(r'name="theme-color" content="([^"]+)"', head), ['#0b0f14'])
 
+# --- the caption under the map, and the budget it has to keep ---------------
+#
+# live.html's map mode produces one figure and puts it in one row of the panel.
+# That row used to have its budget written in a comment beside a single call —
+# "short on purpose, this line is a row of the panel" — and nothing anywhere
+# enforced it, so twelve of the twenty-one forms the caption can take ran past
+# a row — off ten of its branches — and the longest ran to six, which left the
+# map 104px on the 3.5" hat: under the 120px the check further down already
+# calls a map rather than a texture. That longest one was the only sentence
+# with no length of its own, and no check had ever been given it.
+#
+# The budget is now in live.html's own <style>, as a clamp in ROWS, and it is
+# two rows on a dashboard panel and three on the hat. Both numbers are measured
+# off the detour line — the only thing this mode produces — with both of its
+# hedges: that line is two rows in the 388px column of an 800x480 panel and
+# three in the 228px column of a 480x320 one. One row was never a budget that
+# could be kept, and this file is where that is proved rather than asserted.
+#
+# Every sentence below is filled at its worst: the longest form of each
+# optional clause, and, for the one line that carries a place read off a card,
+# a name of the widest characters the font has. Widths, not lengths, decide
+# this — 32 characters of the owner's own real place names come out two rows
+# and 32 W's come out three.
+#
+# The one interpolation that is not a number is the place name on the
+# misread-pin line, and its width is not this file's to choose: live.html cuts
+# it to PLACE_SHOWN, so PLACE_SHOWN is read out of live.html and the worst case
+# is built from it. Written out here instead, the whole measurement would go on
+# passing with the cut removed — the check would be measuring its own fixture
+# rather than the page, which is this project's sixth fault class.
+live_src = open(os.path.join(ROOT, 'live.html')).read()
+_bound = re.search(r'var PLACE_SHOWN = (\d+);', live_src)
+ok_('live.html bounds the place name it puts in the map caption',
+    _bound is not None)
+# ...and the line itself has to be the thing that is bounded. `esc()` belonged
+# to the popup markup and was escaping a string on its way to textContent, so
+# 39% of this driver's own places printed `&amp;` in this row; both faults are
+# refused by the same line.
+ok_('...and the misread-name line is the line that uses it',
+    re.search(r'if \(badEnd\) return shortPlace\(badEnd\)', live_src)
+    is not None)
+WIDEST_PLACE = 'W' * (int(_bound.group(1)) if _bound else 60) + '…'
+CAPTION_LINES = [
+    ('no map-view.js',
+     'map-view.js did not load, so there is no map here.'),
+    ('a card naming nowhere',
+     'this card names nowhere yet — ⌖ Dropoff reads it off your phone'),
+    ('no card at all',
+     'no card read yet — nothing to put on a map'),
+    ('loading',
+     'loading the map…'),
+    ('no signal',
+     'no signal — the map needs it for both its code and its tiles. '
+     '⛶ Phone puts the picture back.'),
+    ('still asking',
+     'placing 2 of 3 — still asking'),
+    # The figure, in all four of the shapes it comes in. The last is the
+    # longest this mode can say: the wordier of the two verdicts, a fix old
+    # enough to be worth mentioning, and a place with no pin. `missed` cannot
+    # exceed 1 here — a detour needs the pickup and the held job both placed,
+    # so the dropoff is the only name left to be missing — and `spellAge` is
+    # six characters at most, because past twenty minutes the figure is
+    # withheld and this branch is not reached at all.
+    ('the figure',
+     '+3.2 mi out of your way — straight lines, not roads'),
+    ('the figure, on your way',
+     'this pickup is on your way — straight lines, not roads'),
+    ('the figure and its age',
+     '+3.2 mi out of your way — straight lines, not roads, from where you '
+     'were 12 min ago'),
+    ('the figure at its longest',
+     'this pickup is on your way — straight lines, not roads, from where you '
+     'were 12 min ago · 1 not asked',
+     'this pickup is on your way — straight lines, not roads, from where you '
+     'were 12 min ago'),
+    # Both words, because they are not interchangeable anywhere else in this
+    # project: "not found" is a geocoder that answered nothing and "not asked"
+    # is a lookup that could not be made. Same length, and measured anyway —
+    # the rule here is that nothing reaches this row unmeasured.
+    ('the figure at its longest, nothing found',
+     'this pickup is on your way — straight lines, not roads, from where you '
+     'were 12 min ago · 1 not found',
+     'this pickup is on your way — straight lines, not roads, from where you '
+     'were 12 min ago'),
+    ('the fix is too old',
+     'the last position the rig recorded is 1.4h old, so there is nothing '
+     'current to measure this against'),
+    ('a pin in the wrong state',
+     WIDEST_PLACE + ' is 3619 mi away — almost certainly a misread name, '
+     'so no distance',
+     WIDEST_PLACE + ' is 3619 mi away — almost certainly a misread name'),
+    ('no position at all',
+     'no position on the recent offers, so there is nothing to measure this '
+     'pickup against'),
+    ('the held job has no address',
+     'the order in your car has no address on record — ⌖ Dropoff reads it '
+     'off your phone'),
+    ('nothing in the car',
+     'nothing in the car to compare this against'),
+    ('the card says no pickup',
+     'this card does not say where to collect it'),
+    ('the geocoder was unreachable, pickup',
+     'could not reach the geocoder for the pickup — no network, or busy. '
+     'Coming back asks again.'),
+    ('the geocoder had nothing, pickup',
+     'the geocoder found nothing for the pickup — usually a misread name'),
+    ('the geocoder was unreachable, held',
+     'could not reach the geocoder for where your order is going'),
+    ('the geocoder had nothing, held',
+     'the geocoder found nothing for where your order is going'),
+]
+
+# ...and the third field, where there is one, is the part that must stay
+# READABLE on every panel — the rest being a trailing clause the 3.5" hat may
+# ellipsise. Only two entries have one, and both are the same judgement: the
+# count of places with no pin, and the consequence of a pin that is plainly
+# wrong, are the ends of their sentences precisely so that they are what a
+# clamp eats. Everything before them is a figure or a hedge on one.
+# Which rows actually DECLARED what may be cut. The normalisation below fills
+# the rest in with the whole sentence, and linting those is two assertions that
+# cannot fail: `_text.startswith(_text)` and `_drop == ''` are true of every
+# string. Only the declared ones are worth checking, and they are the only ones
+# the clamp can shorten.
+_DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
+CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
+                 for row in CAPTION_LINES]
+for _name, _text, _keep in CAPTION_LINES:
+    if _name not in _DECLARED:
+        continue
+    ok_("the caption table's %r keeps a prefix of what it says" % _name,
+        _text.startswith(_keep))
+    _drop = _text[len(_keep):]
+    ok_('...and drops only a whole clause off %r (%r)' % (_name, _drop),
+        _drop == '' or _drop.startswith(' · ') or _drop.startswith(', so '))
+
+# ...and the list above has to stay the whole list, or a tenth sentence is
+# written and measured by nothing. So the page is read for every string the
+# caption can be handed, and each one has to appear in something above.
+#
+# Two sources, because the caption has two writers. `mapLine` returns the words
+# under a drawn map and every literal in it is caption text; everywhere else
+# the words reach the row through `mapSay` or `mapDrew`, so the arguments to
+# those are taken and nothing else — the same region holds tile URLs, popup
+# markup and four hex colours, and none of those is ever in this row.
+def _literal_runs(js):
+    """The string literals in a piece of JS, with `'a' + x + 'b'` kept apart.
+
+    A run is one literal; adjacent literals joined by nothing but `+` are one
+    run, because that is how these sentences are written across source lines.
+    """
+    js = re.sub(r'/\*.*?\*/', '', js, flags=re.S)
+    js = re.sub(r'(?m)^\s*//.*$', '', js)
+    runs, held, at = [], None, 0
+    for m in re.finditer(r"'((?:[^'\\]|\\.)*)'", js):
+        lit = m.group(1).replace("\\'", "'").replace('\\\\', '\\')
+        if held is not None and re.fullmatch(r"\s*\+\s*", js[at:m.start()]):
+            held += lit
+        else:
+            if held is not None:
+                runs.append(held)
+            held = lit
+        at = m.end()
+    if held is not None:
+        runs.append(held)
+    return runs
+
+
+def caption_strings(page_src):
+    tail = page_src.index('\n  applyViewMode();')
+    body = page_src[page_src.index('  function mapLine('):tail]
+    out = list(_literal_runs(body))
+    head = page_src[page_src.index('  function mapSay(text)'):tail]
+    head = re.sub(r'/\*.*?\*/', '', head, flags=re.S)
+    for m in re.finditer(r'\bmap(?:Say|Drew)\(', head):
+        depth, i = 0, m.end() - 1
+        while i < len(head):
+            if head[i] == '(':
+                depth += 1
+            elif head[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        out += _literal_runs(head[m.end():i])
+    # Separators and units are not sentences; anything with words in it is.
+    return [r for r in out if len(r.strip()) > 4]
+
+
+# ...and one thing the strings alone cannot say: the ORDER the clamp eats from.
+# The detour line is assembled out of two optional clauses, and swapping them
+# changes no literal in this page — so every check above goes on passing while
+# the 3.5" hat starts ellipsising the age of the fix instead of the count of
+# places with no pin. One is a hedge on a distance the driver is about to act
+# on and the other is a tally; which of them is last is the whole reason the
+# cap is survivable, and it lives in the source rather than in any string.
+_detour = live_src[live_src.index("gap < 0.5 ? 'this pickup is on your way'"):
+                   live_src.index('    // No detour to state')]
+_age, _tally = _detour.find('from where you were'), _detour.find(' not asked')
+ok_('the detour line states the age of the fix ahead of the count of '
+    'unplaced pins (%d, %d)' % (_age, _tally), 0 <= _age < _tally)
+
+spoken = caption_strings(live_src)
+ok_('live.html still reads as a page with a map caption in it', len(spoken) > 15)
+said = ' ## '.join(row[1] for row in CAPTION_LINES)
+eq('every sentence the map caption can say is one this file measures',
+   sorted(set(r for r in spoken if r not in said)), [])
+
 # ---------------------------------------------------------------------------
 # Now the browser.
 # ---------------------------------------------------------------------------
@@ -400,8 +607,12 @@ if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
 
 DRIVER = r'''
 const { chromium } = require('playwright');
-const [base, panelsJson, pagesJson, framesJson] = process.argv.slice(2);
+const [base, panelsJson, pagesJson, framesJson, captionJson] = process.argv.slice(2);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
+// The caption sentences, passed in rather than written here: the Python side
+// reads them back out of live.html to check that none has been added without
+// being measured, and two copies of that list is the fault this file is for.
+const CAPTION_LINES = JSON.parse(captionJson);
 // Two pictures the shape the rig actually publishes: a landscape cabin for the
 // scene view, a portrait phone screen for the other. There is no camera on the
 // machine this runs on, so without them every measurement of the live view is a
@@ -777,6 +988,64 @@ const FRAMES = JSON.parse(framesJson);
         shown.mapOver = onMap.over;
         shown.mapNote = onMap.note;
         shown.mapNoteH = onMap.noteH;
+        // Every sentence the caption under the map can say, measured in the
+        // row it is said in.
+        //
+        // The pane is on the map here, which is the only state that row is
+        // drawn in on a dashboard panel, and what is asked of each sentence is
+        // what a screenshot would show: how many rows of the panel it took,
+        // whether the clamp cut it, what survived the cut, and what the map
+        // was left with. Character counts cannot answer any of those — two
+        // strings of the same length come out one row and two depending on
+        // where the spaces fall, and a place name of wide glyphs takes half
+        // again the width of an ordinary one.
+        shown.caption = await page.evaluate((lines) => {
+          const note = document.getElementById('viewNote');
+          const liveMap = document.getElementById('liveMap');
+          const was = note.textContent;
+          const out = {};
+          for (const pair of lines) {
+            note.textContent = pair[1];
+            const box = note.getBoundingClientRect();
+            // Row count and readable text taken off the characters themselves.
+            // `scrollHeight` says a clamp cut something; only the per-character
+            // rects say WHAT, and the rule this is here to hold is about which
+            // half of a sentence survives.
+            let visible = '', rows = 0;
+            const n = note.firstChild;
+            if (n) {
+              const rg = document.createRange();
+              const tops = {};
+              for (let i = 0; i < n.length; i++) {
+                rg.setStart(n, i);
+                rg.setEnd(n, i + 1);
+                const c = rg.getBoundingClientRect();
+                if (c.width === 0 && c.height === 0) { visible += n.data[i]; continue; }
+                if (c.bottom <= box.bottom + 1) {
+                  visible += n.data[i];
+                  tops[Math.round(c.top)] = 1;
+                }
+              }
+              rows = Object.keys(tops).length;
+            }
+            out[pair[0]] = {
+              h: Math.round(box.height), rows: rows, visible: visible,
+              clipped: note.scrollHeight > note.clientHeight + 1,
+              mapH: Math.round(liveMap.getBoundingClientRect().height),
+            };
+          }
+          note.textContent = was;
+          return out;
+        }, CAPTION_LINES);
+        // The clamp itself, not just its effect. Measuring rows proves the
+        // sentences fit TODAY; this proves the page is the thing holding them,
+        // so a stylesheet edit that drops the rule fails here rather than
+        // waiting for a sentence long enough to notice.
+        shown.captionStyle = await page.evaluate(() => {
+          const cs = getComputedStyle(document.getElementById('viewNote'));
+          return { overflow: cs.overflow,
+                   clamp: cs.getPropertyValue('-webkit-line-clamp') };
+        });
         // ...and back to the picture, which is where the driver spends the
         // shift. A cycle that cannot be completed is a driver stuck on a map.
         shown.backReachable = await page.click('#viewMode', { timeout: 5000 })
@@ -1025,7 +1294,7 @@ try:
                ]))
     proc2 = subprocess.run(
         ['node', driver, base, json.dumps(PANELS), json.dumps(PAGES),
-         json.dumps(FRAMES)],
+         json.dumps(FRAMES), json.dumps(CAPTION_LINES)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -1293,6 +1562,70 @@ try:
                         '(%.0fpx of %.0f)'
                         % (panel, phone['mapH'], phone['mapRowH']),
                         phone['mapH'] > 120)
+
+                # --- the caption's budget -------------------------------
+                #
+                # Everything above measures the ONE sentence this offline
+                # harness happens to land on. The row is the map's other
+                # occupant and it can say twenty things, so all twenty are put
+                # in it and measured. Three rules, and they are not the same
+                # rule asked three ways:
+                #
+                #   the cap    — no sentence may take more rows than the clamp
+                #                allows, which is what keeps the map's floor;
+                #   the words  — on the panels the rig ships on, the cap must
+                #                never actually bite, because a sentence cut
+                #                short is a sentence rewritten by the layout;
+                #   the order  — where it does bite, on the 3.5" hat, only a
+                #                trailing `·` clause may go. The figure, the
+                #                straight-line warning and the age of the fix
+                #                are what a driver acts on, and a hedge clipped
+                #                off a number is this project's first fault.
+                shots = phone.get('caption') or {}
+                eq('every caption sentence was measured at %s' % panel,
+                   sorted(row[0] for row in CAPTION_LINES
+                          if row[0] not in shots), [])
+                # Two rows, three on the hat — see CAPTION_LINES for where both
+                # numbers come from. Held in pixels off the row the panel
+                # actually drew rather than off a font size in the stylesheet.
+                cap = 3 if h <= 380 else 2
+                # ...and the page applies that same number. Without this, `cap`
+                # is the same question answered in two places with nothing
+                # tying them together: the suite could say 2 while the
+                # stylesheet said 4 and every check here would still pass.
+                # Landscape only, because the rule lives in a landscape query.
+                if w > h:
+                    _st = phone.get('captionStyle') or {}
+                    eq('the caption row is clipped rather than spilling at %s'
+                       % panel, _st.get('overflow'), 'hidden')
+                    eq('...and the clamp the page applies is that same cap at %s'
+                       % panel, (_st.get('clamp') or '').strip(), str(cap))
+                tall = [(row[0], shots[row[0]]['rows']) for row in CAPTION_LINES
+                        if row[0] in shots and shots[row[0]]['rows'] > cap]
+                eq('no caption sentence takes more than %d rows at %s'
+                   % (cap, panel), tall, [])
+                worst = max([shots[row[0]]['h'] for row in CAPTION_LINES
+                             if row[0] in shots] or [0])
+                floor = min([shots[row[0]]['mapH'] for row in CAPTION_LINES
+                             if row[0] in shots] or [0])
+                ok_('...so the map keeps its floor whatever is said at %s '
+                    '(caption %dpx worst, map %dpx)' % (panel, worst, floor),
+                    floor > 120)
+                cut = [row[0] for row in CAPTION_LINES
+                       if row[0] in shots and shots[row[0]]['clipped']]
+                if h > 380:
+                    ok_('...and nothing is cut short at %s (%s)'
+                        % (panel, ', '.join(cut) or 'none'), not cut)
+                for name, _text, keep in CAPTION_LINES:
+                    if name not in shots:
+                        continue
+                    # The figure and every hedge on it, readable, on every
+                    # panel. What a clamp is allowed to eat is declared in the
+                    # table above and linted there to be a whole trailing
+                    # clause; this is where it is held to.
+                    ok_('...and %r is readable as far as its last hedge at %s '
+                        '(%r)' % (name, panel, shots[name]['visible'][-28:]),
+                        shots[name]['visible'].startswith(keep))
                 # ...and the way out. A cycle that cannot be completed is worse
                 # than a toggle: the driver pressed once for a look and cannot
                 # get the picture back.

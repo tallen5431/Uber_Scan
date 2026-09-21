@@ -663,6 +663,47 @@ exists for. `a5cbe64`, plus the `CLOCK_BELIEVABLE_UNTIL` clamp in `server.js`.
 
 ### The panel
 
+**The panel's caption row had a budget written where nothing could enforce it,
+and it was not a budget that could be kept.** `live.html` states the rule at
+the `mapDrew` call — "this line is a row of the panel, and at 15px a sentence
+that explains itself fully runs to three of them" — and then emitted sentences
+that took six.
+
+*The entry that filed this was wrong twice.* It said "nine sentences up to 125
+characters". Measured by rendering each one through `rpi/test_layout.py`'s own
+machinery and counting rows off per-character client rects: **twelve forms off
+ten branches**, the longest fixed string 127 characters — and the worst line
+has no length of its own at all. `if (badEnd)` interpolates a place read off a
+card, bounded only by the parser's `MAX_PLACE` of 60, so the line runs to 171
+characters and six rendered rows. That is the case a driver actually hits: it
+is the sentence naming which pin is wrong, on the card where they are trying to
+find out.
+
+*Capped in rows, not rewritten, and the measurement decided which.* One row is
+not reachable at 480×320 for the mode's own figure line, so the budget is
+restated as rows and enforced in CSS — `-webkit-line-clamp: 2` on a dashboard
+panel, `3` on the hat, both derived from the detour line's own rendered height
+on each panel rather than chosen. The map's floor goes from 301px/104px to
+334px/154px; 104px was below the suite's own floor for "a map rather than a
+texture". Two lines are still ellipsised on the hat and both lose only a
+trailing clause: `" not asked"` off the detour's tally, and the tail of
+`", so no distance"` off the misread-name line.
+
+*And the line printed `&amp;` where the `&` should be, on 39.2% of places.*
+`mapSay` assigns `textContent`, which needs no HTML escaping, and the caption
+ran the place through `esc()` on the way. **520 of the owner's 1,325 distinct
+places contain an `&`** — "Hawthorn Dr &amp; Shady Gin, Dallas" on the glass.
+It now goes through `shortPlace`, which cuts at a space near twenty characters
+and does not escape.
+
+*36 of the 196 new checks could not fail, and that was caught before they
+landed.* The caption table filled an undeclared "what may be cut" field with
+the whole sentence, making `_text.startswith(_keep)` and `_drop == ''` true of
+every string. Only rows that declare the field are linted now: 819 → 783. And
+the clamp itself is checked rather than only its effect, so `cap` is no longer
+the same number answered in two places — the suite could have said 2 while the
+stylesheet said 4 and every row-count check would still have passed.
+
 **A journal that had stopped taking writes was invisible on the glass.** A
 read-only SD card is the classic Pi failure, it is completely silent, and
 everything above it goes on working: the rig reads the card, prices it, speaks
@@ -1210,11 +1251,6 @@ by hour and by weekday; `map.html` has only a day count. A weekday plus
 three-hour-block filter would make the map answer a question *before* a shift
 rather than only after one — on the parked desk page, where the six-control panel
 bar does not bind.
-
-**The panel's caption row has a stated budget that one sentence in ten keeps.**
-`live.html` writes the rule down — short, because the line is a row of the panel
-— and then emits nine sentences up to 125 characters. Either cap the row and let
-the map keep its height, or rewrite the nine.
 
 ---
 

@@ -251,8 +251,43 @@
        is a map they have to judge by eye alone. Bigger than the 11px above for
        the same reason everything on this panel is: it is read at arm's length,
        through a windscreen, at a glance. */
+    /* ...and it is CAPPED, in rows, because everything under it is the map.
+       The cap used to live in a comment at the mapDrew call — "short on
+       purpose, this line is a row of the panel" — and nothing enforced it.
+       Measured in this 388px column at 15px, twelve of the twenty-one forms
+       this caption can take ran past one row — ten of its branches, seven a
+       fixed string and three built round a value. The worst is not any of
+       the ones AUDITS counted: the misread-name line interpolates a place
+       read off a card, bounded only by the parser's MAX_PLACE of 60, so it
+       ran to 171 characters and FOUR rows here and SIX on the 3.5" hat,
+       where it left the map 104px — under the 120px this suite's own check
+       calls a map rather than a texture, on the only sentence no check had
+       ever been given.
+
+       Two rows, and the number is measured rather than chosen: the detour
+       line with both of its hedges — "+3.2 mi out of your way — straight
+       lines, not roads, from where you were 12 min ago" — is two rows here,
+       and that line is the only thing this mode produces. One row cannot
+       hold it, so one row was never a budget that could be kept; three rows
+       would be spending map on sentences that explain why there is no
+       figure. The hat takes three for the same reason and no other: the same
+       line is three rows in a 228px column, and a hedge clipped off a number
+       is this project's first fault class.
+
+       Clamped rather than hidden, so the ellipsis says that something was
+       cut. What it cuts is always the tail, and these lines are written
+       load-bearing end first — figure, then the straight-line warning, then
+       the age of the fix, then the count of places with no pin. */
     #viewWrap:has(#liveMap:not([hidden])) #viewNote {
-      display: block; font-size: 15px; color: var(--text); padding: 5px 0 0;
+      /* `block` first and on its own line, and it is not decoration. The rule
+         above this one is `display: none`, and a browser that does not know
+         `-webkit-box` drops that declaration and keeps the none — which would
+         take the caption off the glass entirely to save it from being two rows
+         too tall. Stated twice, the worst case is an uncapped row. */
+      display: block;
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+      overflow: hidden;
+      font-size: 15px; color: var(--text); padding: 5px 0 0;
     }
   }
 
@@ -270,6 +305,13 @@
      and so does the pay-and-time half of the raw line, which is a check against
      the card rather than a figure. */
   @media (orientation: landscape) and (max-height: 380px) {
+    /* One more row for the caption, and the reason is the figure rather than
+       the room. This column is 228px, and the detour line with its two hedges
+       is three rows in it against two at 800x480 — so a two-row cap here
+       would ellipsise ", from where you were 12 min ago" off a distance the
+       driver is about to act on. Measured, the third row costs the map
+       155px instead of 172px, and the check under it wants 120. */
+    #viewWrap:has(#liveMap:not([hidden])) #viewNote { -webkit-line-clamp: 3; }
     .working .net { display: none; }
     .working .raw span:first-child { display: none; }
     .working .raw i { font-style: normal; }
@@ -2744,6 +2786,31 @@
     return hrs + 'h';
   }
 
+  /* A place name, cut to what fits the caption's cap.
+     Every other line under the map is a fixed string this file can be read
+     for; this is the one that carries a value, and its bound is the parser's
+     MAX_PLACE of 60. At 60 it took four of the two rows the caption has.
+     20 is measured, and measured on WIDTH rather than on characters, which
+     is the trap: 32 characters of this driver's own real names came out two
+     rows, and 32 of the widest characters the font has came out three and was
+     clipped — and this branch fires precisely when a name is OCR sludge, so
+     the pathological string is the expected input, not the corner. At 20 the
+     misread-name line is two rows at 800x480 and three on the 3.5" hat, which
+     is the cap on each, for every real place in the owner's week AND for a
+     name of twenty W's. Cut on a space where there is one near the end, so
+     the driver reads whole words; the ellipsis says the rest was cut, and the
+     pin it names is marked on the map beside it either way. */
+  var PLACE_SHOWN = 20;
+
+  function shortPlace(name) {
+    var s = String(name == null ? '' : name).trim();
+    if (s.length <= PLACE_SHOWN) return s;
+    var cut = s.slice(0, PLACE_SHOWN);
+    var space = cut.lastIndexOf(' ');
+    if (space >= PLACE_SHOWN - 8) cut = cut.slice(0, space);
+    return cut.replace(/[\s,]+$/, '') + '…';
+  }
+
   async function showMap() {
     if (!MV) {
       // map-view.js is same-origin and in the service worker's shell, so this
@@ -2786,9 +2853,12 @@
       // was leaving a green "pick this one up" dot and a drawn route from an
       // offer that is no longer on screen.
       clearMap();
-      // Short on purpose. This line is a row of the panel, and at 15px a
-      // sentence that explains itself fully runs to three of them — which it
-      // takes off the map, on the one screen with a single row to spend.
+      // Short on purpose, and the budget is now stated where it can be
+      // enforced rather than here: `#viewNote` is clamped to two rendered
+      // rows on a dashboard panel and three on the 3.5" hat — see the rule in
+      // this page's own <style> for why those two numbers and not one. What
+      // the clamp cuts is the tail, so every line under it is written with
+      // the part a driver acts on first.
       // mapDrew, not mapSay: "there is nothing to draw" describes what is on
       // the glass as truly as a detour does, and it is what coming back to
       // this same card has to be told again. Left as mapSay, re-entry would
@@ -2810,8 +2880,11 @@
       // hotspot in a car has no signal several times a shift and that is the
       // ordinary case, not an error — and ⛶ Phone puts the picture back.
       if (!ready) {
-        mapSay('no signal for the map — the library and the tiles both come '
-               + 'from the network. ⛶ Phone puts the picture back.');
+        // Shortened to the cap, not to taste: at its old length this was four
+        // rows on the 3.5" hat and lost "the picture back" to the clamp, which
+        // is the half that says what to press.
+        mapSay('no signal — the map needs it for both its code and its '
+               + 'tiles. ⛶ Phone puts the picture back.');
         return;
       }
       if (viewMode !== 'map' || mapFor !== key) return;
@@ -3155,9 +3228,18 @@
     // nothing assumes the rig checked and found nothing worth saying.
     if (old) return 'the last position the rig recorded is ' + spellAge(age)
                   + ' old, so there is nothing current to measure this against';
-    if (badEnd) return esc(badEnd) + ' came back ' + Math.round(wrong[badEnd])
-                     + ' mi from where you are — a misread name, almost '
-                     + 'certainly, so there is no distance worth quoting';
+    // The only line here whose length is not in this file. `badEnd` is a place
+    // read off a card, so it is whatever the parser let through — MAX_PLACE is
+    // 60 — and 39% of this driver's own places carry an `&`. Both mattered: at
+    // 60 characters this ran to four rows at 800x480 and six on the hat, which
+    // left the map 104px, and `esc()` put `&amp;` on the glass, because this
+    // string goes to textContent and textContent does not un-escape anything.
+    // So no esc, and the name is cut to what identifies a pin the driver can
+    // also see marked on the map.
+    if (badEnd) return shortPlace(badEnd) + ' is '
+                     + Math.round(wrong[badEnd])
+                     + ' mi away — almost certainly a misread name, so no '
+                     + 'distance';
     if (!here) return 'no position on the recent offers, so there is nothing '
                     + 'to measure this pickup against';
     if (!want.held) return holdingNow
@@ -3170,8 +3252,13 @@
     // "rare" is how a wrong sentence survives a year on a panel.
     if (!want.pickup) return 'this card does not say where to collect it';
     if (!pick) return found[want.pickup] === undefined
-      ? 'could not reach the geocoder for the pickup — no network, or it was '
-        + 'busy. Nothing is stored, so switching back here asks again.'
+      // "Nothing is stored" was the mechanism and "switching back here asks
+      // again" is what a driver does about it, and the two together were three
+      // rows. The mechanism goes: it is already written at the top of this
+      // function, where `dead` is worked out, and it is not a thing the glass
+      // has to carry.
+      ? 'could not reach the geocoder for the pickup — no network, or busy. '
+        + 'Coming back asks again.'
       : 'the geocoder found nothing for the pickup — usually a misread name';
     // ...and the same for the other end of the comparison. `want.held` is
     // already known to be set by the time this is reached, so this one really
