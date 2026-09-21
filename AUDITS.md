@@ -60,14 +60,22 @@ the 1,080 pickups, all clean addresses. Four cases in the shared corpus's
 passes before and after, which exists so nobody reads this as "a pipe never
 divides".
 
-*The cost, stated rather than buried.* Seven rows lose their dropoff. Four of
-the seven had a poisoned one (`'Hedgeway Cir & Hedgeway Ct ,) tt Kennesaw'`)
-and are the fault being fixed. On the other three — rows 2, 434 and 822 of the
-export — the *old pickup* was the garbage (`'Rd)'`, `'Parkway NW, STE 100)'`),
-the real address is still read and still stored in `places`, and it is now
-labelled the pickup because it is the only place on the card. A destination
-recorded as a pickup is wrong, and it is `find_dropoff`'s rule for a lone place
-rather than anything this change introduced. Left alone deliberately: see Open.
+*The cost, stated rather than buried — and the first version of this paragraph
+was wrong.* Seven rows lose their dropoff **to a single-frame parse**. Four had
+a poisoned one (`'Hedgeway Cir & Hedgeway Ct ,) tt Kennesaw'`) and are the
+fault being fixed. The other three were named here as rows 2, 434 and 822,
+recording a destination as a pickup. **They do not.** All three come out right
+on the rig, because the rig writes the MERGED reading and `self.places` is a
+union across the window: another frame read the merchant with its bracket
+closed, so row 2 is `Culver's (2460 Kennesaw Due West x NS Rd)` →
+`Cumberland Creek Trl SW…`, and 434 and 822 likewise. The measurement behind
+the original claim was `parse()` on one stored text, which is the right
+instrument for what the PARSER does and the wrong one for what the RIG
+records. Checked by replaying the real accumulator over the real frames.
+
+The lesson is the one this session kept repaying: a single-frame number
+describes the parser, and every claim about what reaches the journal has to go
+through `OfferAccumulator` first.
 
 *Rows already in the journal are not repaired by this and cannot be.* It stops
 the 48-a-week from growing. The 69 poisoned strings already written are there
@@ -831,6 +839,50 @@ position on rows at all is a separate question nobody has asked yet.
 
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
+
+**`check_distance` is asked of the card and never of a leg, so one absurd leg
+passes inside a believable card.** Found while measuring the approach split.
+Row 659 of the owner's week prints `1 min (3.8 mi)` — 228 mph — and the card as
+a whole reads 12.4 mi over 17 min, 43.8 mph, which is sane. So nothing flags
+it: `suspect` is 0, `doubt` is empty and `milesUncertain` is false.
+`recover_decimal` does run per leg, but only to put back a lost decimal in the
+MILES; the rule that sets `uncertain` above `UNREADABLE_MPH` runs on the summed
+card alone. The approach split now publishes that leg as `toPickupMinutes: 1.0`
+— 1 of the 103 it fires on, about 1%.
+
+Not bundled into the split, deliberately, and the reason is the third fault
+class: `to_pickup()` is "the one rule that decides", and a speed guard added to
+`laid_out_approach` would answer the same question in a second place while
+leaving the word-labelled cards — which the corpus HAS, 29 of 152 — unguarded.
+The guard belongs in `to_pickup`, where it would move corpus cases and needs
+its own pass. The miles on such a leg are usually the good half; it is the
+minutes that misread, so refusing outright is not obviously right either.
+
+**The two ends of a job are taken off the two ends of a list that is in the
+order the FRAMES arrived, not the order of the journey.** `merged['places']` is
+appended as each frame contributes, `find_pickup` takes `places[0]` and
+`find_dropoff` takes the last — so a window whose later frame supplies the
+pickup records it after the dropoff, and the ends come out swapped.
+
+Verified here against the merged rows, not a single-frame parse. Row 18 of the
+week prints, in this order: `min (46 mi)` / `Cobb Pkwy NW, Acworth` /
+`24 mins (10.6 mi)` / `Canton Rd, Marietta`. The card's own layout makes
+Acworth the pickup. The rig recorded **pickup `Canton Rd, Marietta`, dropoff
+`Cobb Pkwy NW, Acworth`** — the two ends the wrong way round, about ten miles
+apart. Row 307 is the other shape: `places` holds two readings of the same
+street with the real destination, `Burnap St & Rose Ln, Marietta`, sitting
+between them and dropped, so the job starts and ends at one place.
+
+This is not only a label. `live.html` publishes "+N mi out of your way" off
+this card's `pickup`, and `advice.js` decides stacking off `dropoff`;
+`straysAmong`/`badEnd` only fire for a geocode far from the car, so a real
+street ten miles from the right one passes silently. A later pass measures 9
+of 1,166 rows where the merged label contradicts the card's layout, in three
+shapes — ends swapped, the destination replaced by a second reading of the
+pickup's own street, and one place that is the far end. That pass has been
+attacked twice and both attackers said ship with corrections; it is written
+down here rather than done in passing because it changes how both ends are
+chosen and every card goes through it.
 
 **`check_distance` is asked of the card and never of a leg, so one absurd leg
 passes inside a believable card.** Found while measuring the approach split.
