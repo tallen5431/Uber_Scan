@@ -1985,6 +1985,70 @@ var journalCache = null;
  * errs in the safe direction for the one caller where it matters: a sync
  * reconciling against /api/journal/newest that sees fewer rows re-sends, where
  * one that saw more would skip. */
+/* One ingest at a time, from the read to the append.
+ *
+ * readWaiters above serialises the READ and nothing else — and for two
+ * overlapping ingests it makes matters worse rather than better, because they
+ * SHARE one read and are therefore guaranteed to see the same pre-append
+ * journal. Each then builds its own `seen` set from those rows, finds every
+ * key in its batch absent, and appends the lot. The append-only file this
+ * project calls irreplaceable ends up holding each row twice, both ends reply
+ * `ok: true`, and `have` is wrong in the same breath.
+ *
+ * Measured against a real server: a 400-row journal, two simultaneous POSTs of
+ * the same 60 rows. Both answered `added: 60, have: 460`; the file held 520
+ * lines, 460 distinct keys, 60 stored twice.
+ *
+ * The second-order harm is the one that costs offers. sync.py's shortfall
+ * check compares ROW counts, not distinct offers, on both sides — so a copy
+ * whose rows are doubled reports about twice what it really holds, and the
+ * check cannot fire until the copy has lost more than half of everything. A
+ * real gap then hides behind the doubling for good.
+ *
+ * Two reachable routes with no contrivance: sync.py's own stderr tells the
+ * operator to run it by hand with --all, and the installed timer keeps ticking
+ * every ten minutes while they do; and a retry after a dropped connection can
+ * overlap the request it is retrying.
+ *
+ * A queue rather than a mutex flag, so a caller cannot forget to wait. */
+var ingestQueue = [];
+var ingestRunning = false;
+
+function ingestLock(run) {
+  ingestQueue.push(run);
+  if (!ingestRunning) nextIngest();
+}
+
+function nextIngest() {
+  var run = ingestQueue.shift();
+  if (!run) { ingestRunning = false; return; }
+  ingestRunning = true;
+  var done = false;
+  var release = function () {
+    // No path in the handler reaches this twice — each exit is a `return` on
+    // `fail` or `finish` and there is exactly one of them per request — so
+    // this guard does not fire today and no test can make it. It is here
+    // because of what a double release WOULD do: shift two runs off the queue
+    // and start both, which is the very fault this lock exists to stop, and a
+    // future exit path that forgot the `return` would do it silently.
+    if (done) return;
+    done = true;
+    // On its own tick, so this reply is handed to send() before the next
+    // ingest's read begins and a slow read cannot sit in front of it.
+    // Correctness does not rest on this — the append is already done by the
+    // time release is called — so it is latency, not safety.
+    setImmediate(nextIngest);
+  };
+  try {
+    run(release);
+  } catch (e) {
+    // A throw before the handler reached a reply must not strand every later
+    // upload behind a lock nobody holds. The rethrow keeps the fault visible.
+    release();
+    throw e;
+  }
+}
+
 var readWaiters = null;
 
 function readJournal(done) {
@@ -2689,8 +2753,19 @@ function route(req, res) {
                   { 'Content-Type': 'application/json; charset=utf-8' });
     }
     return readBody(req, MAX_SYNC_BODY, function (err, text) {
+      // Held from here, not from readJournal: the body is already in hand by
+      // now, so the lock covers the read-modify-write and nothing slower.
+      // Every path out of the handler below goes through `fail` or `finish`,
+      // and both release.
+      ingestLock(function (release) {
       var fail = function (why, code) {
+        release();
         send(res, code || 400, JSON.stringify({ ok: false, error: why }),
+             { 'Content-Type': 'application/json; charset=utf-8' });
+      };
+      var finish = function (body) {
+        release();
+        send(res, 200, body,
              { 'Content-Type': 'application/json; charset=utf-8' });
       };
       if (err) return fail(err.message);
@@ -2724,10 +2799,9 @@ function route(req, res) {
           fresh.push(JSON.stringify(row));
         });
         if (!fresh.length) {
-          return send(res, 200, JSON.stringify({ ok: true, added: 0,
-                                                 malformed: malformed,
-                                                 have: existing.length }),
-                      { 'Content-Type': 'application/json; charset=utf-8' });
+          return finish(JSON.stringify({ ok: true, added: 0,
+                                         malformed: malformed,
+                                         have: existing.length }));
         }
         // Appended, like the scanner does it: O_APPEND, one write, so a reader
         // part way through never sees half a row.
@@ -2755,12 +2829,12 @@ function route(req, res) {
           }
           console.log('journal ingest: +' + fresh.length + ' row(s), '
                       + (existing.length + fresh.length) + ' total');
-          send(res, 200, JSON.stringify({ ok: true, added: fresh.length,
-                                          malformed: malformed,
-                                          have: existing.length + fresh.length }),
-               { 'Content-Type': 'application/json; charset=utf-8' });
+          finish(JSON.stringify({ ok: true, added: fresh.length,
+                                  malformed: malformed,
+                                  have: existing.length + fresh.length }));
           });
         });
+      });
       });
     });
   }

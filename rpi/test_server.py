@@ -24,6 +24,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -407,6 +408,74 @@ try:
     stored = [r for r in get(base, '/api/journal?days=0').get('offers', []) if r.get('id') == 'off7']
     eq('a place name split across two segments is stored whole',
        stored[0].get('places') if stored else None, ['Café Résumé, 12 rue de l’Opéra'])
+
+    # --- two uploads in flight together -------------------------------------
+    #
+    # The handler is a read-modify-write: readJournal, build the `seen` set
+    # from what came back, append what is not in it. readWaiters serialises the
+    # READ only — and for two overlapping ingests it makes matters worse, since
+    # they share one read and are guaranteed to see the same pre-append
+    # journal. Each then finds every key in its batch absent and appends the
+    # lot, both reply ok, and the append-only file holds every row twice.
+    #
+    # Measured before the lock on a 400-row journal and two simultaneous POSTs
+    # of the same 60 rows: both answered `added: 60, have: 460`, the file held
+    # 520 lines, 460 distinct keys, 60 stored twice.
+    #
+    # It is not a contrived collision. sync.py's own stderr tells the operator
+    # to run it by hand with --all while the installed ten-minute timer keeps
+    # ticking, and a retry after a dropped connection can overlap the request
+    # it is retrying.
+    stop(proc)
+    write(journal, [offer(100 + i, NOW - 400000 + i) for i in range(20)])
+    proc, base = start({'SCANNER': '0'}, journal)
+    _batch = ('\n'.join(json.dumps(offer(200 + i, NOW - 200000 + i))
+                        for i in range(30)) + '\n').encode('utf-8')
+
+    def _push(out, at):
+        req = urllib.request.Request(base + '/api/journal/ingest', data=_batch,
+                                     headers={'Content-Type': 'application/x-ndjson'})
+        try:
+            out[at] = json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
+        except Exception as e:                     # noqa: BLE001 - reported below
+            out[at] = {'error': repr(e)}
+
+    _replies = {}
+    _threads = [threading.Thread(target=_push, args=(_replies, _n)) for _n in (0, 1)]
+    for _t in _threads:
+        _t.start()
+    for _t in _threads:
+        _t.join()
+    _lines = [l for l in open(journal, encoding='utf-8') if l.strip()]
+    _keys = {}
+    for _l in _lines:
+        _r = json.loads(_l)
+        _k = (_r.get('id'), _r.get('seq'))
+        _keys[_k] = _keys.get(_k, 0) + 1
+    eq('two uploads of one batch store each row once', len(_lines), 50)
+    eq('...and nothing is in the append-only journal twice',
+       sorted(k for k, n in _keys.items() if n > 1), [])
+    # One of them has to say it added nothing, or the pair added 60 between
+    # them and the count above is a coincidence of the de-duplication rather
+    # than of the lock.
+    eq('...and the second upload is told it added nothing',
+       sorted(r.get('added') for r in _replies.values()), [0, 30])
+    eq('...and both are told the same, correct, total',
+       sorted(set(r.get('have') for r in _replies.values())), [50])
+
+    # The lock must not be able to strand every later upload behind a request
+    # that ended early. Each of these leaves the handler by a different door.
+    for _body, _why in ((b'', 'an empty body'),
+                        (b'not json at all\n', 'a malformed line'),
+                        (_batch, 'a batch already stored')):
+        _req = urllib.request.Request(base + '/api/journal/ingest', data=_body,
+                                      headers={'Content-Type': 'application/x-ndjson'})
+        urllib.request.urlopen(_req, timeout=10).read()
+    _after = json.loads(urllib.request.urlopen(urllib.request.Request(
+        base + '/api/journal/ingest',
+        data=(json.dumps(offer(299, NOW - 100000)) + '\n').encode('utf-8'),
+        headers={'Content-Type': 'application/x-ndjson'}), timeout=10).read().decode())
+    eq('an upload still goes through after every early exit', _after.get('added'), 1)
 
     # --- rows from before the clock, counted once, the same way twice --------
     # A Pi boots in 1970 and jumps when NTP arrives. Rows read before that are

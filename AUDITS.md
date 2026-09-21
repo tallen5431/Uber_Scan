@@ -898,6 +898,47 @@ the card. Every number downstream is then read off the wrong pixels.
 
 ### The backup
 
+**Two uploads in flight together each appended the whole batch, and the
+doubling then hid a real gap from the repair that exists to find it.**
+`/api/journal/ingest` is a read-modify-write — read the journal, build the
+`seen` set of sync keys from what came back, append what is not in it — with
+nothing holding the three steps together. `readWaiters` serialises the READ
+and nothing else, and for two overlapping ingests it makes matters *worse*:
+they share one read, so they are guaranteed to see the same pre-append
+journal. Each finds every key in its batch absent and appends the lot.
+
+*Measured against a real server*, not argued: a 400-row journal, two
+simultaneous POSTs of the same 60 rows. Both answered `added: 60, have: 460`.
+The file held **520 lines, 460 distinct keys, 60 stored twice** — in the one
+file this project calls irreplaceable, with `ok: true` on both replies.
+
+*The second-order harm is the one that costs offers.* `rpi/sync.py`'s
+shortfall check compares ROW counts on both sides, not distinct offers. A copy
+whose rows are doubled therefore reports roughly twice what it holds, and the
+check cannot fire until the copy has lost more than half of everything. A
+genuine gap then sits behind the doubling indefinitely, with the ordinary tick
+printing success and `doctor` green.
+
+*And the collision needs no contriving.* `rpi/sync.py`'s own stderr tells the
+operator to run it by hand with `--all`, describing it as "safe, just slower",
+while the installed ten-minute timer keeps ticking. A retry after a dropped
+connection can also overlap the request it is retrying.
+
+Fixed with a serial queue around the read-modify-write — a queue rather than a
+flag, so a caller cannot forget to wait. Every exit from the handler now goes
+through `fail` or `finish` and both release, because the failure mode of a
+lock is worse than the bug it fixes: one stranded request would hang every
+upload after it. Each early exit was walked separately against a live server —
+an empty body, a malformed line, a batch already stored, and a journal that
+cannot be read at all — and an ordinary upload still goes through after each.
+
+Four checks in `rpi/test_server.py`, and the lock removed fails three of them
+with 80 rows where 50 belong. Two guards inside it cannot be killed by any
+test and say so in the code rather than pretending otherwise: the
+double-release guard, which no current path reaches, and the `setImmediate`,
+which buys latency and not safety.
+
+
 **One bad byte put "Offers are NOT being saved" on the driving screen over a
 journal that was taking every write, and it never cleared.** `rows()` opens the
 journal `'rb'` and decodes one line at a time with `replace`, so a corrupt byte
