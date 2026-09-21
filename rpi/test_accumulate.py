@@ -1335,6 +1335,59 @@ for _n, _t in enumerate([_END_A, _END_B]):
 eq('one frame each is not a majority, and the older rule still decides',
    _tied['dropoff'], 'Beta Dr NE, Smyrna')
 
+# --- which leg claims a slot, when two of them could ------------------------
+#
+# A leg matches a slot when EITHER field agrees, which is right and is argued
+# at _slot_for. What was not decided is what happens when two legs of one
+# frame both have a claim: the card's print order decided, and it gave the slot
+# to the weaker claim.
+#
+# Row 298 of the owner's week. One frame read the card as a single leg,
+# 5 min (1.4 mi), so the window opened one slot holding both numbers. The next
+# frames read two legs — 5 min with no distance, then 5 min (1.4 mi). The
+# distance-less leg is printed first, matched that slot on minutes alone and
+# took it, and the leg agreeing on BOTH opened a slot of its own. The one
+# distance that had been read was then counted in both: 1.4 miles became 2.8.
+#
+# The damage is not the arithmetic. legs_short_a_distance looks for a leg with
+# no miles and found none, so milesUncertain went False and is_whole True — a
+# card whose first leg's distance was never read was published as settled, at
+# $18.96/hr state `no`, and the loop stopped resampling it. What every frame
+# read is 10 minutes over 1.4 miles with one distance missing, which rate()
+# reports as a ceiling.
+_AS_ONE = '$3.20 5 min (1.4 mi) trip Barrington Overlook, Marietta'
+_AS_TWO = ('$3.20 5 min away Little Caesars (3372 Canton Rd) '
+           '5 min (1.4 mi) trip Barrington Overlook, Marietta')
+acc = OfferAccumulator()
+for _n, _t in enumerate([_AS_ONE, _AS_TWO, _AS_TWO]):
+    _slots = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+eq('the leg agreeing on both fields takes the slot, not the one printed first',
+   [(l['minutes'], l['miles']) for l in _slots['legDetail']],
+   [(5.0, 1.4), (5.0, None)])
+eq('...so the one distance that read is counted once',
+   (_slots['minutes'], _slots['miles']), (10.0, 1.4))
+ok_('...and the leg whose distance never read still says so',
+    P.legs_short_a_distance(_slots['legDetail']))
+eq('...which is what keeps the card off a settled rate',
+   (_slots['milesUncertain'], P.is_whole(_slots)), (True, False))
+
+# ...and "both" has to mean both. The same shape with a distance on the first
+# leg: the card prints 5 min (9.9 mi) then 5 min (1.4 mi), and the window
+# already holds one slot at 5 min (1.4 mi) from a frame that read the card as
+# one leg. The first-printed leg agrees with that slot on minutes ALONE, the
+# second agrees on both, and only the second belongs there — 1.4 miles read
+# twice is the same leg read twice, while 9.9 is a leg the earlier frame never
+# saw. A "both" that quietly accepted either field would hand the slot back to
+# print order and file 9.9 miles under the leg that measured 1.4.
+_FAR_FIRST = ('$3.20 5 min (9.9 mi) away Little Caesars (3372 Canton Rd) '
+              '5 min (1.4 mi) trip Barrington Overlook, Marietta')
+acc = OfferAccumulator()
+for _n, _t in enumerate([_AS_ONE, _FAR_FIRST, _FAR_FIRST]):
+    _far = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+eq('a leg agreeing on ONE field does not outrank one agreeing on two',
+   [(l['minutes'], l['miles']) for l in _far['legDetail']],
+   [(5.0, 1.4), (5.0, 9.9)])
+
 # The other direction, and the one that matters more: a card that names only
 # the shop must not acquire a destination from the merge. 48 of one shift's 103
 # cards print "Customer dropoff" and no address, and recording the restaurant

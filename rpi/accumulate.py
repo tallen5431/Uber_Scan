@@ -321,6 +321,25 @@ class OfferAccumulator:
                 return i
         return None
 
+    def _match_both(self, leg, taken):
+        """The open slot this reading agrees with on BOTH fields, or None.
+
+        _find_slot answers "is there evidence this is that leg", and either
+        field agreeing is evidence — the reasoning is at _slot_for and it is
+        right. This answers a narrower question, asked first: is there a slot
+        this leg agrees with on both, which is a stronger claim than another
+        leg's agreement on one.
+        """
+        if leg.get('miles') is None:
+            return None
+        for i, slot in enumerate(self.legs):
+            if i in taken:
+                continue
+            if leg['minutes'] in slot['minutes'] and any(
+                    abs(m - leg['miles']) <= SAME_LEG_MILES for m in slot['miles']):
+                return i
+        return None
+
     def _slot_for(self, leg, taken):
         """Find the slot this reading belongs in, or open a new one.
 
@@ -554,8 +573,50 @@ class OfferAccumulator:
         if seen and seen not in self.texts and len(self.texts) < SCANS_PER_OFFER:
             self.texts.append(seen)
 
+        # The order the legs claim their slots in, which was the card's print
+        # order and should not be. A leg agreeing with a slot on ONE field is
+        # evidence; a leg agreeing on BOTH has a better claim on it, and
+        # printing order was deciding between them.
+        #
+        # Row 298 of the owner's week is the shape. Frame 0 read the card as a
+        # single leg, 5 min (1.4 mi), so the window opened one slot holding
+        # both numbers. Frames 1 and 2 read two legs — 5 min with no distance,
+        # then 5 min (1.4 mi). The distance-less leg came first, matched that
+        # slot on minutes alone, and took it; the leg that agreed on both was
+        # pushed into a slot of its own. So the one distance that had been read
+        # was counted in BOTH slots and 1.4 miles became 2.8.
+        #
+        # Note what the fault is NOT. A merged slot carrying a distance while
+        # also flagged `lostMiles` is ordinary and right — it means some frames
+        # read this leg's distance and some missed it, which is the whole
+        # reason the window exists, and three rows of the owner's week are that
+        # shape (307, 853, 951) and are correct. Row 298 is the different
+        # thing: the 1.4 miles in that slot were never read as THAT leg's
+        # distance by any frame. They are frame 0's reading of the other leg,
+        # filed under the wrong slot.
+        #
+        # The damage is not the label. legs_short_a_distance looks for a leg
+        # with no miles, found none, so `milesUncertain` went False and
+        # is_whole True: a card whose first leg's distance was never read was
+        # published as settled, 10 min over 2.8 mi at $18.96/hr, state `no`,
+        # and the loop stopped resampling it. What every frame actually read is
+        # 10 minutes and 1.4 miles with one distance missing — which rate()
+        # reports as a ceiling, $24.00/hr with `uncosted`, state `warn`.
+        #
+        # Two passes rather than a sort: `taken` moves as slots are claimed, so
+        # a key computed up front would be stale by the time it was used.
+        _both = []
+        _rest = []
+        _claimed = set()
+        for _k, _leg in enumerate(detail):
+            _i = self._match_both(_leg, _claimed)
+            if _i is None:
+                _rest.append(_k)
+            else:
+                _both.append(_k)
+                _claimed.add(_i)
         taken = set()
-        for leg in detail:
+        for leg in (detail[_k] for _k in _both + _rest):
             index = self._slot_for(leg, taken)
             taken.add(index)
             slot = self.legs[index]

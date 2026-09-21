@@ -24,6 +24,53 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**A distance no frame ever read was counted into a card, and it silenced the
+doubt every frame had raised.** A leg claims a slot when EITHER its duration or
+its distance agrees — right, and argued at `_slot_for`. What was never decided
+is which of two legs gets the slot when both have a claim. The card's print
+order decided, and it gave the slot to the weaker claim.
+
+Row 298 is the shape. One frame read the card as a single leg, `5 min
+(1.4 mi)`, so the window opened one slot holding both numbers. The next two
+frames read two legs — `5 min` with no distance, then `5 min (1.4 mi)`. The
+distance-less leg is printed first, matched that slot on minutes alone and took
+it; the leg agreeing on BOTH was pushed into a slot of its own. The one
+distance that had been read was then counted in both slots, and 1.4 miles
+became 2.8.
+
+*The damage is not the arithmetic.* `legs_short_a_distance` looks for a leg
+with no miles, found none, so `milesUncertain` went False and `is_whole` True.
+A card whose first leg's distance was never read was published as settled — 10
+minutes over 2.8 miles, **$18.96/hr, state `no`** — and `is_whole` stopped the
+loop resampling the very card that needed another look. What every frame
+actually read is 10 minutes over 1.4 miles with one distance missing, which
+`rate()` reports as a ceiling: $24.00/hr with `uncosted`, state `warn`.
+
+*Fixed by assigning slots in two passes* — the legs that agree with an open
+slot on both fields first, then the rest in print order. Two passes rather than
+a sort key, because `taken` moves as slots are claimed and a key computed up
+front would be stale by the time it was read.
+
+*What it does to the week: one row, and three fields on it.* Only row 298
+moves, and only `miles`, `milesUncertain` and `legDetail`. Nothing else in
+1,166 offers changes.
+
+*And what was NOT a fault, which cost a measurement to establish.* The
+reporting of this counted 4 rows carrying "a leg that says its distance did not
+read while carrying one", and treated all four as damage. Three of them — rows
+307, 853 and 951 — are ordinary and correct: one leg, read six times, its
+distance caught by two frames and missed by four. A merged slot flagged
+`lostMiles` while holding a distance is exactly what a window is FOR. Row 298
+is the different thing, and the difference is not visible in the flag: its 1.4
+miles were never read as that leg's distance by any frame at all. They are
+another leg's number, filed under the wrong slot. The first version of the
+comment in the code made the same overclaim and was corrected.
+
+Four mutations, each dying to a named check: the two-pass order removed, the
+order reversed, a distance-less leg allowed to match "both", and "both"
+loosened to "either".
+
+
 **Which end a name is was still being decided by the order the FRAMES
 arrived, one layer below where that was fixed.** `place_ends` fixed the
 parser's half and this entry is the rest of it. `merged['places']` is a union
