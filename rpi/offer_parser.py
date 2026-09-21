@@ -177,6 +177,24 @@ LEG = re.compile(
 # guesses stacked, and stacked guesses are how noise becomes data.
 HAS_DIGIT = re.compile(r'\d', ASCII)
 
+# An hour unit sitting immediately in front of a leg whose hours group matched
+# NOTHING: `Thr 21min`. See find_legs, which refuses such a leg.
+#
+# `\Z` and not `$`, and the difference is not cosmetic: Python's `$` ALSO
+# matches just before a trailing newline, while JavaScript's does not. Written
+# with `$` the two ports disagree on any text handed straight to find_legs with
+# a newline between the hour word and the minutes — Python refusing a leg that
+# JavaScript keeps. parse() does not reach that case, because normalize() has
+# already turned the newlines into spaces before find_legs is called; this is
+# for the callers that have not.
+#
+# Measured on the text find_legs is actually handed, which is the normalized
+# text: the rule refuses 21 legs across the owner's 5,491 frames, every one of
+# them a `Thr`/`thr`/`1Thr` in the same card shape, and 0 of the corpus's 314
+# texts. No frame in the week puts an hour WORD in front of a minutes token for
+# any other reason, so there is nothing else for it to catch.
+HOUR_UNREAD = re.compile(r'h(?:r|rs|our|ours)\.?[ \t]*\Z', re.I | ASCII)
+
 ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 
 # --- the shape a delivery card uses instead of a duration ---------------------
@@ -685,6 +703,26 @@ def find_legs(text):
         # that did not read, not a leg with no hours; matched, it dropped
         # sixty minutes and called a ten-minute job whole.
         if m.group(2) is not None and not HAS_DIGIT.search(m.group(2)):
+            continue
+        # ...and the same leg again, when the hour's number did not read as a
+        # number AT ALL. `Thr 21min` is `1hr 21min` with the 1 read as a T, and
+        # T is deliberately not in DC — "too risky to match on", which is the
+        # right call, because a T that really is a T must not become a 1. So
+        # the hours group cannot match, the scan starts at the minutes instead,
+        # and the guard above never runs: it is gated on that group HAVING
+        # matched. Sixty minutes vanish from a leg that then looks perfectly
+        # clean — no label, no total, one leg — so is_whole calls the reading
+        # finished and doubt() sees an ordinary pay over ordinary minutes.
+        #
+        # This is the same fault the corpus case above says is closed, coming
+        # back through the half of the character space that guard cannot see.
+        #
+        # 21 frames of the owner's 5,491 state an hour this way, all of them
+        # glued (`Thr`, `thr`, `1Thr`). On 9 of the 12 rows consensus across
+        # frames repairs it; on 3 the damaged frames are the majority and all
+        # three reached the journal as `go` at 4-6x the real rate. 0 of the
+        # corpus's 314 texts have the shape at all, glued or spaced.
+        if m.group(2) is None and HOUR_UNREAD.search(text[:m.start()]):
             continue
         minutes = (to_number(m.group(2)) or 0) * 60 + mins
         if minutes <= 0 or minutes > 600:

@@ -24,6 +24,61 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**Sixty minutes vanished from a card whose hour read as a letter, and the
+ledger believed this fault already closed.** `l hr 10 min` was fixed long ago:
+the hours group takes digit lookalikes, and `find_legs` refuses a leg whose
+hour matched but carries no real digit. `DC` — the lookalike class — stops
+short of `T` on purpose, because "letters like G and T are corrected inside a
+confirmed number but are too risky to match on", which is right. The
+consequence was not seen: when OCR renders `1hr` as **`Thr`**, the hours group
+matches NOTHING, the scan starts at the minutes instead, and the guard never
+runs at all — it is gated on that group having matched. The leg then looks
+perfectly clean: no label, no total, one leg, so `is_whole` calls the reading
+finished and `doubt()` sees an ordinary pay over ordinary minutes. The rig
+stops resampling, speaks it, and files it.
+
+21 legs across the owner's 5,491 frames say an hour this way, always in one
+card shape — `3.8 mi + Thr 21min @ Pickup` — and always glued. 0 of the
+corpus's 314 texts had it, so nothing existing moves.
+
+*What it did to the journal, measured by replaying the real accumulator both
+ways.* **Two rows of 1,166 change, and they change differently:**
+
+  - **Row 736 is repaired, not merely refused.** Five of its six frames read
+    `Thr 21min`; frame 1 read `1hr21min`. The majority won, so `minutes: 21`
+    and `perHour: 42.46` are what the journal holds — against the card's real
+    1 hr 21 min, **$11.85/hr**. Refusing the five damaged votes lets the frame
+    that read it correctly win, which is exactly what "so the next frame
+    supplies it" was supposed to mean.
+  - **Row 790 has no reading at all now, and that is the right answer.** Its
+    minutes never read on any frame: two say `1hrttmin`, one says `Thr 11min`.
+    The journal holds `minutes: 11, perHour: 105.22` — a green ACCEPT at
+    **$120.27/hr** on a card of at least 71 minutes. No verdict beats that one.
+
+Rows 625, 881 and 961 carry damaged frames too and do not move: the guard
+drops their bad votes and consensus was already right without them. Row 699
+moves only on the glass — its first frame read 20 minutes and showed a green
+$61.05/hr before consensus corrected it to 80; that frame is now refused.
+
+*A first version of this fix was wrong in a way worth recording, because it is
+a shape that would recur.* The rule looks back at the text before the match for
+an hour word, anchored at the end. Written `$`, it behaves differently in the
+two ports — Python's `$` ALSO matches just before a trailing newline and
+JavaScript's does not — so Python refused a leg JavaScript kept. `\Z` is exact
+in both. It was caught by testing the boundary the rule was written to draw,
+and the comment that first explained the anchor was itself wrong: it claimed an
+hour word on the line above belongs to another line of the card, when
+`normalize()` has already turned the newlines into spaces before `find_legs`
+is ever called. The anchor still matters for callers that have not normalized;
+the reason given for it did not survive being checked.
+
+Four corpus cases, each carrying a pay so that `complete: false` is caused by
+the minutes and not by a card with no money on it — the first draft of them
+asserted a refusal that would have held whatever the parser did. Five mutations
+across both ports, each dying to a named case: the guard removed, bare `hr`
+dropped from the unit list, and the gap between unit and minutes closed up.
+
+
 **An approach leg that no other frame saw was published as a distance — and
 the entry describing this fault had the wrong row, the wrong numbers and the
 wrong cause.** Open said `check_distance` is asked of the card and never of a

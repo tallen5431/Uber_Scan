@@ -434,6 +434,21 @@
     'gi'
   );
 
+  /* An hour unit sitting immediately in front of a leg whose hours group
+     matched NOTHING: `Thr 21min`. See findLegs, which refuses such a leg.
+
+     JavaScript's `$` without the `m` flag is the end of the string and nothing
+     else. The Python port has to spell this `\Z`, because THERE `$` also
+     matches just before a trailing newline - written `$` on both sides, the
+     ports disagree on any text handed straight to findLegs with a newline
+     between the hour word and the minutes. parse() never reaches that case,
+     having normalized the newlines to spaces first.
+
+     Measured on the normalized text findLegs is actually handed: 21 legs
+     refused across the owner's 5,491 frames, every one a `Thr`/`thr`/`1Thr`,
+     and 0 of the corpus's 314 texts. */
+  var HOUR_UNREAD = /h(?:r|rs|our|ours)\.?[ \t]*$/i;
+
   var ITEMS = new RegExp('(' + DC + '{1,3})\\s*items?\\b', 'i');
 
   /* What a card calls a leg of the journey. Uber labels every one — "away",
@@ -1297,6 +1312,18 @@
       // "l hr 10 min (4.6 mi) total" read as a ten-minute job, whole, no
       // doubt, $141/hr ACCEPT. Refused, the next frame supplies it.
       if (m[2] !== undefined && m[2] !== null && !/\d/.test(String(m[2]))) continue;
+      // ...and the same leg again, when the hour's number did not read as a
+      // number AT ALL. `Thr 21min` is `1hr 21min` with the 1 read as a T, and
+      // T is deliberately not in DC - "too risky to match on", which is right,
+      // because a T that really is a T must not become a 1. So the hours group
+      // cannot match, the scan starts at the minutes, and the guard above
+      // never runs: it is gated on that group HAVING matched. Sixty minutes
+      // vanish from a leg that then looks clean, and isWhole calls the reading
+      // finished. 21 frames of the owner's 5,491 state an hour this way; on 3
+      // of 1,166 rows the damaged frames were the majority and all three were
+      // journalled as `go` at 4-6x the real rate. See the Python port.
+      if ((m[2] === undefined || m[2] === null)
+          && HOUR_UNREAD.test(text.slice(0, m.index))) continue;
       var hours = toNumber(m[2]) || 0;
       var mins = toNumber(m[3]);
       // The number has to contain a real digit. "SI min" is two guesses

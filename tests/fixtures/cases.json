@@ -1387,6 +1387,47 @@
    }
   },
   {
+   "name": "an hour whose digit is not a lookalike EITHER is still a leg that did not read",
+   "_why": "The case above closed `l hr`, where the hour group matched something with no digit in it. `Thr` is the same card with the 1 read as a T, and T is deliberately not a digit-confusable - so the hour group matches NOTHING, the scan starts at the minutes, and the guard that refuses `l hr` never runs, because it is gated on that group having matched. Sixty minutes vanish from a leg that then looks clean. 21 frames of the owner's 5,491 state an hour this way; on 3 of his 1,166 offers the damaged frames were the majority and all three were journalled as a green ACCEPT at 4-6x the real rate.",
+   "text": "$16.00 Guaranteed (incl. tips) 3.8 mi + Thr 21min @ Pickup Shake Shack",
+   "expect": {
+    "pay": 16.0,
+    "miles": 3.8,
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "...lower case, and with the hour glued to the distance, are the same leg",
+   "text": "$9.25 Guaranteed (incl. tips) 8.1 mi-1Thr 2min @ Pickup Wendy's",
+   "expect": {
+    "pay": 9.25,
+    "miles": 8.1,
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "...and a space between the unread digit and its unit does not rescue it",
+   "text": "$16.00 Guaranteed (incl. tips) 3.8 mi + T hr 21min @ Pickup Zaxbys",
+   "expect": {
+    "pay": 16.0,
+    "miles": 3.8,
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "...while the same card with the hour read is eighty-one minutes",
+   "text": "$16.00 Guaranteed (incl. tips) 3.8 mi + 1hr 21min @ Pickup Shake Shack",
+   "expect": {
+    "pay": 16.0,
+    "miles": 3.8,
+    "minutes": 81,
+    "complete": true
+   }
+  },
+  {
    "name": "a charger badge is not the trip's distance",
    "_why": "With the trip leg's bracket lost to glare, '20 min trip 4 mi from fast charger' put the badge's four miles on the trip. The away leg's distance is all the card still says.",
    "text": "$16.05 5 min (1.2 mi) away 20 min trip 4 mi from fast charger",
