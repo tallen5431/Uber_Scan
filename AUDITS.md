@@ -160,8 +160,19 @@ layout slot the drive to the pickup occupies — so it was published as the
 approach: three minutes, no distance, nothing marked uncertain.
 `legs_short_a_distance` already had the test for "a line that travels", inline;
 it is now `leg_travels`/`legTravels`, written once and asked by both, because
-two copies of that rule is the third fault class. A `toPickup` corpus case
-pins it in both ports.
+two copies of that rule is the third fault class.
+
+*"A `toPickup` corpus case pins it in both ports" is what this said, and it
+stopped being true two commits later.* Adding the stricter distance guard below
+subsumed `leg_travels` for the leg being published — a line failing
+`leg_travels` has no distance, no label and no lost distance, so it fails the
+stronger test too — and mutating the whole clause out then left all 810 python
+and 766 shared-corpus checks green. Half of it was a branch no input could
+reach and is deleted; the other half, the test on the SECOND line, is live and
+reachable (a wait line printed BETWEEN the merchant and the customer) and now
+has a case of its own. Both halves die to a named mutation. Worth recording
+because the claim was true when written and was falsified by a later commit of
+the same evening — a check does not stay pinned just because it once was.
 
 That was not enough, and a second review found why. `leg_travels` accepts a
 leg on `lostMiles` — a distance printed beside it that did not read — which is

@@ -1466,24 +1466,30 @@
   function laidOutApproach(legs, places, whose, pickup, dropoff) {
     if (!legs || legs.length !== 2) return null;
     if (legs[0].isTotal || legs[1].isTotal) return null;
-    /* Both lines have to be legs of the journey. The card prints a pickup-wait
-       line in exactly the place the drive to the pickup goes — first, above the
-       merchant — so without this, `Avg. wait time at pickup: 3 min` was
-       published as the approach: three minutes and no distance at all. Same
-       question, same answer, one implementation: see legTravels. */
-    if (!legTravels(legs[0]) || !legTravels(legs[1])) return null;
-    /* ...and the leg being PUBLISHED has to state its distance, which is
-       stricter than legTravels on purpose. legTravels accepts a leg whose
-       distance was printed but did not read, which is right where it asks
-       whether a card is missing a distance and wrong here, where a number gets
-       published off the answer. One frame whose merchant name fails to read
-       leaves the tail after `3 min` beginning with the bracket below it, so
-       the wait line acquires lostMiles and becomes the approach — and the Pi's
-       accumulator ORs isApproach across the window, so one such frame in five
-       stamps the card. Costs 2 of this driver's 93 firing cards, both of which
-       gave a null toPickupMiles and were therefore useless to the only
-       consumer. See the Python twin for the measurement. */
+    /* The leg being PUBLISHED has to state its distance.
+
+       The card prints a pickup-wait line in exactly the place the drive to the
+       pickup goes — first, above the merchant — so `Avg. wait time at pickup:
+       3 min` was published as the approach. legTravels is the project's test
+       for "is this line a leg" and was tried here first; it accepts a leg on
+       `lostMiles`, which is right where the question is whether a card is
+       MISSING a distance and wrong where a number gets published off the
+       answer. One frame whose merchant name fails to read leaves the tail
+       after `3 min` beginning with the bracket below it, so the wait line
+       looks like a leg — and the Pi's accumulator ORs isApproach across the
+       window, so one such frame in five stamps the card.
+
+       There is no legTravels call for THIS leg because a line that fails it
+       has no distance, no label and no lost distance, so it fails this
+       stronger test too — a branch no input could reach. See the Python twin
+       for the measurement. */
     if (legs[0].miles === null || legs[0].miles === undefined) return null;
+    /* The other line has to be a leg of the journey: the weaker test, and the
+       right one, because it is not being published — it is what makes the
+       shape a journey rather than one leg and some furniture. Reachable: a
+       wait line printed BETWEEN the merchant and the customer gives exactly
+       this. */
+    if (!legTravels(legs[1])) return null;
     /* A card that already LABELLED a leg is not skipped here, and the case that
        decides it is a card whose word and whose layout name DIFFERENT legs.
        Skipping, the word would win and the trip would be published as the drive

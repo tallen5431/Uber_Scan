@@ -879,35 +879,38 @@ def laid_out_approach(legs, places, whose, pickup, dropoff):
         return None
     if legs[0].get('isTotal') or legs[1].get('isTotal'):
         return None
-    # Both lines have to be legs of the journey. The card prints a pickup-wait
-    # line in exactly the place the drive to the pickup goes — first, above the
-    # merchant — so without this, `Avg. wait time at pickup: 3 min` was
-    # published as the approach: three minutes and no distance at all. Same
-    # question, same answer, one implementation: see leg_travels.
-    if not leg_travels(legs[0]) or not leg_travels(legs[1]):
-        return None
-    # ...and the leg being PUBLISHED has to state its distance, which is
-    # stricter than leg_travels on purpose.
+    # The leg being PUBLISHED has to state its distance.
     #
-    # leg_travels accepts a leg on `lostMiles` — a distance printed beside it
-    # that did not read — and that is right for legs_short_a_distance, where a
-    # leg whose distance failed is still a leg. It is wrong here, because
-    # `lostMiles` on a wait line is a real single-frame event and this rule
-    # publishes a number off it. One frame where the merchant name fails to
-    # read leaves the tail after `3 min` beginning with the bracket of the line
-    # below, LEG_LOST_MILES fires, and the wait line becomes the approach.
-    # accumulate.py ORs `isApproach` across the window, so ONE such frame in
-    # five stamps the whole card: measured on [clean, damaged, clean, clean,
-    # clean], the merged row carried toPickupMinutes 3.0 for a card that states
-    # no split at all. That file already refuses to trust `lostMiles` from one
-    # frame — it counts `lostSeen` and votes — and says why in as many words.
+    # The card prints a pickup-wait line in exactly the place the drive to the
+    # pickup goes — first, above the merchant — so `Avg. wait time at pickup:
+    # 3 min` was published as the approach: three minutes and no distance at
+    # all. leg_travels is the project's test for "is this line a leg", and it
+    # was tried here first; it accepts a leg on `lostMiles`, a distance printed
+    # beside it that did not read, which is right where the question is whether
+    # a card is MISSING a distance and wrong where a number gets published off
+    # the answer. One frame whose merchant name fails to read leaves the tail
+    # after `3 min` beginning with the bracket of the line below, LEG_LOST_MILES
+    # fires, and the wait line looks like a leg — and rpi/accumulate.py ORs
+    # `isApproach` across the window, so one such frame in five stamps the card.
     #
-    # The cost is 2 of this driver's 93 firing cards, and both were already
-    # useless: a split with no distance gives toPickupMiles null, which is the
-    # one field tools/measure_places.js legs() needs, and it marks such a
-    # sample `exact: false`. So this refuses two splits nothing could use and
-    # closes a hole that writes a wrong one into an append-only file.
+    # Costs 2 of this driver's 93 firing cards, and both were already useless:
+    # a split with no distance gives a null toPickupMiles, the one field
+    # tools/measure_places.js legs() needs, and it marks such a sample
+    # `exact: false`.
+    #
+    # This is also why there is no leg_travels call for THIS leg: a line that
+    # fails leg_travels has no distance, no label and no lost distance, so it
+    # fails this stronger test too. Asking both was a branch no input could
+    # reach, and this project deletes those.
     if legs[0].get('miles') is None:
+        return None
+    # The other line has to be a leg of the journey, which is the weaker test
+    # and the right one here: it is not being published, it is what makes the
+    # shape a journey rather than a card with one leg and some furniture. Not
+    # subsumed by the clause above, and reachable — a wait line printed BETWEEN
+    # the merchant and the customer gives exactly this, and without it that card
+    # publishes its first leg as an approach to a trip the card never stated.
+    if not leg_travels(legs[1]):
         return None
     # A card that already LABELLED a leg is not skipped here, and the case that
     # decides it is a card whose word and whose layout name DIFFERENT legs.
