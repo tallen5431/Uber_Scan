@@ -1242,6 +1242,99 @@ eq('...including the two ends, which are what everything downstream reads',
    (_lost['pickup'], _lost['dropoff']),
    ('Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth'))
 
+# --- ...and which end is which is the FRAMES' verdict, not the union's order -
+#
+# The two lines above re-derive both ends from `places`, which fixed taking
+# them off whichever frame arrived last. It left a second order problem
+# underneath: `places` is appended as the frames arrive, find_dropoff's rule is
+# "the last place the card named", and that is a true statement about ONE
+# frame's list and a guess about a union. So a name that one late frame
+# invented sat after the name every earlier frame had read, and won.
+#
+# Below: two frames read the card properly, a third arrives with the map
+# smeared and contributes a garbage name that merges as a new entry. The union
+# then ends on the garbage.
+_CLEAN = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Canton Rd) '
+          '16 min (5.2 mi) trip Barrington Overlook, Marietta')
+_SMEAR = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Canton Rd) '
+          '16 min (5.2 mi) trip Wrongway Dr NE, Smyrna')
+
+acc = OfferAccumulator()
+for _ in range(2):
+    _two = acc.add(P.parse(_CLEAN))
+_late = acc.add(P.parse(_SMEAR))
+eq('a name one late frame invented does not become the destination',
+   _late['dropoff'], 'Barrington Overlook, Marietta')
+ok_('...and the union still KEEPS it, because losing an address is the worse '
+    'failure', 'Wrongway Dr NE, Smyrna' in _late['places'])
+
+# One frame is still enough, which is the property the union exists for: with
+# nothing to outvote it there is nothing for the count to do.
+acc = OfferAccumulator()
+_only = acc.add(P.parse(_CLEAN))
+eq('one frame that read the card is still the whole answer',
+   (_only['pickup'], _only['dropoff']),
+   ('Little Caesars (3372 Canton Rd)', 'Barrington Overlook, Marietta'))
+
+# And the card's own layout outranks the count. place_ends is a union too, so
+# it can carry a statement from a frame the voters never matched — a card
+# SAYING which end a name is beats any number of frames inferring it from
+# position. Without this the vote contradicted the layout on two more starts
+# than the rule it replaced, which is the one thing it must not do.
+_LAID = ('$12.50 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
+         '23 mins (8.4 mi) Celebration Blvd, Acworth')
+acc = OfferAccumulator()
+_said = acc.add(P.parse(_LAID))
+eq('where the card states the ends, the card decides',
+   (_said['pickup'], _said['dropoff']),
+   ('Old 41 Hwy NW, Kennesaw', 'Celebration Blvd, Acworth'))
+
+# Row 18 of the owner's week, in miniature, and the reason the clause above is
+# not decoration. Seven frames read only the trip leg and its one place, so
+# each of them calls that place the pickup — it is the only one they have.
+# The eighth reads the whole card and its layout says the OTHER name is the
+# start. Seven votes to one, and the one is right: this is the row the
+# place_ends fix was written for, and a count that outranked the layout would
+# hand it straight back.
+_TRIP_ONLY = '$20.00 24 mins (10.6 mi) Canton Rd, Marietta'
+_WHOLE_CARD = ('$20.00 1 min (46 mi) away Cobb Pkwy NW, Acworth '
+               '24 mins (10.6 mi) trip Canton Rd, Marietta')
+acc = OfferAccumulator()
+for _n in range(7):
+    acc.add(P.parse(_TRIP_ONLY), now=1000.0 + _n * 0.5)
+_r18 = acc.add(P.parse(_WHOLE_CARD), now=1003.5)
+eq('seven frames guessing do not outvote the card saying it once',
+   (_r18['pickup'], _r18['dropoff']),
+   ('Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'))
+
+# ...and the other half of that clause: the layout outranks the count only
+# where it SETTLES the question. Two frames print one name at the start, three
+# print another, so the union has two names both marked "start" — which is two
+# frames disagreeing, not a card with two pickups. The old rule takes the
+# first of them, which is first only because it arrived first.
+_START_A = ('$18.40 4 min (1.0 mi) away Wrongstart Dr NE, Smyrna '
+            '16 min (5.2 mi) trip Barrington Overlook, Marietta')
+_START_B = ('$18.40 4 min (1.0 mi) away Rightstart Ave NW, Kennesaw '
+            '16 min (5.2 mi) trip Barrington Overlook, Marietta')
+acc = OfferAccumulator()
+for _n, _t in enumerate([_START_A, _START_A, _START_B, _START_B, _START_B]):
+    _two_starts = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+eq('where the layout names two starts it has settled nothing, and the count '
+   'decides', _two_starts['pickup'], 'Rightstart Ave NW, Kennesaw')
+
+# And where the count itself is split, it says nothing either: one frame each
+# is not a majority, so the old rule decides rather than the iteration order
+# of a dict.
+_END_A = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Canton Rd) '
+          '16 min (5.2 mi) trip Alpha Dr NE, Smyrna')
+_END_B = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Canton Rd) '
+          '16 min (5.2 mi) trip Beta Dr NE, Smyrna')
+acc = OfferAccumulator()
+for _n, _t in enumerate([_END_A, _END_B]):
+    _tied = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+eq('one frame each is not a majority, and the older rule still decides',
+   _tied['dropoff'], 'Beta Dr NE, Smyrna')
+
 # The other direction, and the one that matters more: a card that names only
 # the shop must not acquire a destination from the merge. 48 of one shift's 103
 # cards print "Customer dropoff" and no address, and recording the restaurant

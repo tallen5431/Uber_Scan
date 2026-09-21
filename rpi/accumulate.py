@@ -110,6 +110,23 @@ class OfferAccumulator:
         # checked. Never voted on — an address is not arithmetic and a rate is
         # not computed from it — so what one frame saw is kept.
         self.places = []
+        # How many FRAMES called each entry of that list the start, and how
+        # many called it the end — kept in step with `places` by the index
+        # merge_place returns, exactly as place_ends is.
+        #
+        # The list above is a union and cannot be voted on, for the reason
+        # written there: an address is the field a single frame loses, so one
+        # frame seeing it has to be enough. But WHICH END a name is was being
+        # decided by the union's own order, which is the order the FRAMES
+        # arrived and not the order of the journey. These two tallies are the
+        # frames' own answers — each frame's find_pickup/find_dropoff run on
+        # that frame's own list, where "the last place the card named" is a
+        # true statement — counted rather than overwritten.
+        #
+        # A single frame's vote still wins when it is the only one, so nothing
+        # the union was protecting is lost.
+        self.pickup_votes = {}
+        self.dropoff_votes = {}
         # Which end of the job the CARD printed each of those against, beside
         # them and the same length: 0 a start, 1 an end, None the card did not
         # say. See OP.place_ends for what it is read off and the nine rows of
@@ -646,6 +663,15 @@ class OfferAccumulator:
             # strings keeps both — which the offers page renders, arrow and
             # all, as a two-stop route that never happened. See OP.same_place.
             at = OP.merge_place(self.places, place)
+            # This frame's own verdict on which end this name is, counted by
+            # the same index. `place` and parsed['pickup'] are both strings out
+            # of THIS frame's own list, so comparing them is exact — the fuzzy
+            # part of the join has already happened, above, and told us where
+            # the two readings met.
+            if place == parsed.get('pickup'):
+                self.pickup_votes[at] = self.pickup_votes.get(at, 0) + 1
+            if place == parsed.get('dropoff'):
+                self.dropoff_votes[at] = self.dropoff_votes.get(at, 0) + 1
             # Kept in step with the list above by the index that merge told us
             # it used, rather than by matching the strings a second time. The
             # two readings this window is joining are by definition the ones
@@ -924,9 +950,14 @@ class OfferAccumulator:
         _raw = self.place_ends
         _ends = [e if e in (0, 1) else None for e in _raw]
         merged['placeEnds'] = _ends
-        merged['pickup'] = OP.find_pickup(merged['places'], _ends)
+        merged['pickup'] = _voted_end(
+            self.pickup_votes, merged['places'],
+            OP.find_pickup(merged['places'], _ends), _ends.count(0) == 1)
         merged['dropoff'] = (None if self.end_refused
-                             else OP.find_dropoff(merged['places'], None, _ends))
+                             else _voted_end(
+                                 self.dropoff_votes, merged['places'],
+                                 OP.find_dropoff(merged['places'], None, _ends),
+                                 _ends.count(1) == 1))
         # ...and WHY there is none, which is not the same fact and is the one
         # the driving screen needs.
         #
@@ -989,6 +1020,53 @@ class OfferAccumulator:
         # the whole reason for keeping one.
         merged['grew'] = len(used) > len(parsed.get('legDetail') or [])
         return merged
+
+
+def _voted_end(votes, places, fallback, card_spoke):
+    """The entry of `places` most frames called this end, or `fallback`.
+
+    Defined beside _consensus and deliberately not built on it: that one takes
+    the larger of two tied NUMBERS, on the argument that OCR drops digits
+    rather than adds them, and there is no larger of two addresses.
+
+    The vote only speaks when it speaks clearly. A unique winner is the answer;
+    no votes at all, or two entries tied, and the old rule decides — which is
+    find_pickup/find_dropoff over the union, narrowed by place_ends. That rule
+    is right about a single frame's list and only guesses about a union, so
+    this narrows how often it has to guess rather than replacing it.
+
+    Why a vote is safe here when the places list itself must not be voted on:
+    the list is a union because an address is the field a single frame loses,
+    and one frame seeing it has to be enough. One frame's vote is still enough
+    here — with nothing to outvote it, it is the unique winner. What the vote
+    removes is only the case where frames disagreed and the LAST one to arrive
+    won for no better reason than arriving last.
+    """
+    # The card's own layout outranks the count, but only where it SETTLES the
+    # question. place_ends is a union across the window, so it can carry a
+    # statement from a frame that read the map cleanly while the frames doing
+    # the voting never saw it — and a card saying which end a name is beats any
+    # number of frames inferring it from position. Measured: letting the vote
+    # override it contradicts the layout on 2 more starts than the rule it
+    # replaced, which is the one thing this change must not do.
+    #
+    # `card_spoke` is therefore "exactly one name is marked this end", not "any
+    # is". Two names both printed at the trip's end is two FRAMES disagreeing
+    # about what that end says, not a card naming two destinations, and the
+    # union's own order is what picks between them today — which is the fault
+    # this function exists for. Where the layout does not settle it, the count
+    # does. This is the same distinction _CONTRADICTED draws one name at a
+    # time.
+    if card_spoke:
+        return fallback
+    if not votes:
+        return fallback
+    best = max(votes.values())
+    winners = [i for i, n in votes.items() if n == best]
+    if len(winners) != 1:
+        return fallback
+    at = winners[0]
+    return places[at] if 0 <= at < len(places) else fallback
 
 
 def _consensus(values):

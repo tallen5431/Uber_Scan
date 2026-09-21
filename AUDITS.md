@@ -24,6 +24,69 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**Which end a name is was still being decided by the order the FRAMES
+arrived, one layer below where that was fixed.** `place_ends` fixed the
+parser's half and this entry is the rest of it. `merged['places']` is a union
+appended as frames contribute; `find_dropoff`'s rule is "the last place the
+card named", which is a true statement about ONE frame's list and a guess
+about a union. So a name one late frame invented sat after the name every
+earlier frame had read, and won for no better reason than arriving last.
+
+The earlier entry's "After: 1 of 1,166" is not wrong, but it measures one
+thing: rows whose merged label the card's own LAYOUT contradicts. `place_ends`
+is silent on nine cards in ten, and where it says nothing that figure has
+nothing to say either.
+
+*Measured against what the frames themselves read.* Of the 269 rows where
+every frame that named a destination named the same one, the merge published
+something else on **21**: 9 a different place entirely, 8 a dirtier reading of
+the right one, and 4 no destination at all. The journal holds, as destinations,
+`N I Fried Rice Master y vis` and `rey i e ae Wy Popeyes Louisiana Chicken
+(159 ey i Cobb Pkwy` on cards where every frame agreed on a real street. This
+is the one field the append-only journal cannot repair afterwards.
+
+*The fix counts the frames' own answers instead of re-reading the union.* Each
+frame's `find_pickup`/`find_dropoff` already ran on that frame's own list,
+where "the last place the card named" is true. `merge_place` already returns
+the index it merged to — it was given that return value so a second list could
+be kept in step, which is how `place_ends` works — so the tally is kept by the
+same index and the fuzzy half of the join is not done twice.
+
+**The union is untouched.** It exists because an address is the field a single
+frame loses, and one frame seeing it has to be enough — which it still is,
+because a lone vote is a unique winner. What the count removes is only the case
+where frames disagreed and the last to arrive won.
+
+*Two clauses decide when the count does NOT speak, and both are measured.*
+
+  - **The card's own layout outranks it, where the layout settles the
+    question.** Row 18 is why: seven frames read only the trip leg and call its
+    one place the pickup, because it is the only one they have; the eighth
+    reads the whole card and its layout says the other name is the start. Seven
+    votes to one, and the one is right. Without this clause the count
+    contradicts the card's layout on 2 more starts than the rule it replaced —
+    it would hand back the row `place_ends` was written for.
+  - **...but only where it settles it.** Two names both marked "the end" is two
+    frames disagreeing about that end, not a card with two destinations, and
+    the union's order is what picks between them today. So the gate is "the
+    card names exactly one", not "names any" — the same distinction
+    `_CONTRADICTED` draws one name at a time. A split count says nothing
+    either, and defers rather than letting a dict's iteration order decide.
+
+*What it does to the week.* 109 rows move, 30 pickups and 79 dropoffs, and
+**no other field moves at all**. Agreement with the frames' own unanimous
+verdict goes from 248 of 269 to **261**: a different place 9 to 1, lost 4 to 1,
+dirtier 8 to 6. Against the card's layout — the metric the previous fix was
+measured on — the numbers are **identical to before**, 107 starts and 101 ends
+right, 12 and 18 wrong. 0 destinations lost, 4 gained. The 6 remaining
+"dirtier" are `merge_place` keeping the longer of two readings, which is its
+own deliberate rule and not this one.
+
+Eight mutations, each dying to a named check: the layout clause removed, the
+count silenced, a tie picking arbitrarily, each gate loosened to "names any",
+each tally never counted, and the least-voted winning.
+
+
 **Sixty minutes vanished from a card whose hour read as a letter, and the
 ledger believed this fault already closed.** `l hr 10 min` was fixed long ago:
 the hours group takes digit lookalikes, and `find_legs` refuses a leg whose
