@@ -24,6 +24,53 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**The end vote published one place as BOTH ends of a job, and the entry above
+banked it as a win.** The vote shipped this morning counted every frame's own
+`pickup`/`dropoff`. A frame that read ONE name calls it the pickup because it
+is the only place it has — that is `find_pickup`'s positional default, not a
+reading — and counting those let the default outvote the frames that had
+actually distinguished the two ends.
+
+*Measured on the owner's week against the code as it stood before the vote:*
+**5 rows published a byte-identical pickup and dropoff** where 0 did before.
+`find_dropoff` forbids this outright — "where a job starts is not where it
+ends, whatever else is true" — and its own comment calls it "the commonest
+wrong answer the parser gave". Row 397 came out `Ridenour Ct` → `Ridenour Ct`
+where one frame had plainly read `Dairy Queen Grill & Chill (…)` → `Ridenour
+Ct`. Row 2 lost `Culver's` as its start. Row 480 came out REVERSED, the street
+as the pickup and `MRR's Deli (…)` as the customer's address.
+
+*And the entry above measured the wrong things.* It checked agreement with the
+frames' unanimous verdict and with the card's layout, and never asked whether
+the two published ends were the same place. Its "0 destinations lost, 4
+gained" counted four re-publications of the start as four gains.
+
+*Three rules, and each was found by a fixture the one before it could not
+distinguish.*
+
+  - **Only a frame that saw BOTH ends votes.** The root cause, and it subsumes
+    the row-18 case `card_spoke` was written for: seven frames reading one leg
+    now say nothing rather than saying it seven times.
+  - **The brackets outrank the count, as the layout does.** "A shop is what
+    the card brackets," says `find_pickup`. Row 480's subtlety is that the
+    WINDOW holds a properly bracketed merchant the voting frame did not have,
+    because the OCR closed that bracket on one frame and not another — so the
+    merged list knows better than any single frame did, which is what a union
+    is for.
+  - **A job does not end where it starts.** A count knows nothing about the
+    other end unless it is told.
+
+*Everything the original change was for survives.* Agreement with the frames'
+unanimous verdict is still 261 of 269, up from 248. Against the card's layout
+the numbers are unchanged — 107 starts and 101 ends right, 12 and 18 wrong. 0
+destinations lost. Identical ends 5 → **0**.
+
+Two of the first three fixtures written for this passed against the broken
+code, because each accidentally supplied a layout or a closed bracket that
+rescued the case. The one that pins it carries row 397's own two properties:
+no layout, and a bracket the OCR left open.
+
+
 **Two checks that could not fail, one of which had never executed at all.**
 The sixth fault class, found inside this project's own suites.
 
@@ -244,7 +291,9 @@ where frames disagreed and the last to arrive won.
 verdict goes from 248 of 269 to **261**: a different place 9 to 1, lost 4 to 1,
 dirtier 8 to 6. Against the card's layout — the metric the previous fix was
 measured on — the numbers are **identical to before**, 107 starts and 101 ends
-right, 12 and 18 wrong. 0 destinations lost, 4 gained. The 6 remaining
+right, 12 and 18 wrong. 0 destinations lost, 4 gained — and that last
+figure was wrong, in a way the entry below corrects: all four were the
+START republished as the end. The 6 remaining
 "dirtier" are `merge_place` keeping the longer of two readings, which is its
 own deliberate rule and not this one.
 

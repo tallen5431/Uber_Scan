@@ -729,9 +729,32 @@ class OfferAccumulator:
             # of THIS frame's own list, so comparing them is exact — the fuzzy
             # part of the join has already happened, above, and told us where
             # the two readings met.
-            if place == parsed.get('pickup'):
+            #
+            # ONLY FROM A FRAME THAT SAW BOTH ENDS, and this clause is the
+            # whole correctness of the vote. A frame that read one name calls
+            # it the pickup because it is the only place it has — that is
+            # find_pickup's positional default, not a reading, and counting it
+            # as evidence let the default outvote the frames that actually
+            # distinguished the two ends.
+            #
+            # Measured on the owner's week without it: 5 rows published the
+            # SAME place as both ends, which find_dropoff forbids outright —
+            # "where a job starts is not where it ends, whatever else is true",
+            # the rule it calls the commonest wrong answer the parser ever
+            # gave. Row 397 came out `Ridenour Ct` → `Ridenour Ct` where one
+            # frame had plainly read `Dairy Queen Grill & Chill (…)` → `Ridenour
+            # Ct`, and row 480 came out REVERSED, the street as the pickup and
+            # the deli as the destination. 0 of 1,166 rows did either before
+            # this vote existed.
+            #
+            # It also subsumes the row-18 case the card_spoke clause was
+            # written for: seven frames reading only the trip leg now say
+            # nothing at all rather than saying it seven times.
+            if not (parsed.get('pickup') and parsed.get('dropoff')):
+                pass
+            elif place == parsed.get('pickup'):
                 self.pickup_votes[at] = self.pickup_votes.get(at, 0) + 1
-            if place == parsed.get('dropoff'):
+            elif place == parsed.get('dropoff'):
                 self.dropoff_votes[at] = self.dropoff_votes.get(at, 0) + 1
             # Kept in step with the list above by the index that merge told us
             # it used, rather than by matching the strings a second time. The
@@ -1011,14 +1034,28 @@ class OfferAccumulator:
         _raw = self.place_ends
         _ends = [e if e in (0, 1) else None for e in _raw]
         merged['placeEnds'] = _ends
+        # The card outranks the count wherever the CARD has spoken, and it
+        # speaks two ways about the start: the layout, which place_ends reads,
+        # and the brackets, which are how a card names a shop. find_pickup's
+        # own docstring puts it as "a shop is what the card brackets".
+        #
+        # Row 480 is why the second one is here. Seven of its eight frames read
+        # one name; the eighth read both and put the street first, so the count
+        # had exactly one voter and followed it — publishing the street as the
+        # pickup and `MRR's Deli (3055 North Main Street …)` as the customer's
+        # address, on a delivery that plainly starts at the deli. One frame's
+        # ORDERING is an inference; the brackets are something the card printed.
+        _by_card = OP.find_pickup(merged['places'], _ends)
         merged['pickup'] = _voted_end(
-            self.pickup_votes, merged['places'],
-            OP.find_pickup(merged['places'], _ends), _ends.count(0) == 1)
+            self.pickup_votes, merged['places'], _by_card,
+            _ends.count(0) == 1
+            or bool(_by_card and OP.PLACE_IS_A_SHOP.search(_by_card)))
         merged['dropoff'] = (None if self.end_refused
                              else _voted_end(
                                  self.dropoff_votes, merged['places'],
                                  OP.find_dropoff(merged['places'], None, _ends),
-                                 _ends.count(1) == 1))
+                                 _ends.count(1) == 1,
+                                 not_this=merged['pickup']))
         # ...and WHY there is none, which is not the same fact and is the one
         # the driving screen needs.
         #
@@ -1083,7 +1120,7 @@ class OfferAccumulator:
         return merged
 
 
-def _voted_end(votes, places, fallback, card_spoke):
+def _voted_end(votes, places, fallback, card_spoke, not_this=None):
     """The entry of `places` most frames called this end, or `fallback`.
 
     Defined beside _consensus and deliberately not built on it: that one takes
@@ -1127,7 +1164,30 @@ def _voted_end(votes, places, fallback, card_spoke):
     if len(winners) != 1:
         return fallback
     at = winners[0]
-    return places[at] if 0 <= at < len(places) else fallback
+    won = places[at] if 0 <= at < len(places) else fallback
+    # ...and a job does not end where it starts, which find_dropoff enforces
+    # outright — "the commonest wrong answer the parser gave, and the reason a
+    # map of these rows could not be drawn". A count knows nothing about the
+    # other end, so it has to be told: two tallies with the same unique winner
+    # published one name as both ends of the journey on 5 of the owner's 1,166
+    # rows, and the fallback is asked instead. If that agrees with the start
+    # too then the card gave one name and no second end, which is None rather
+    # than a repeat.
+    if not_this is not None and won and OP.same_place(not_this, won):
+        # ...and if the older rule agrees with the start too, the card gave one
+        # name and no second end, which is None rather than a repeat.
+        #
+        # No row of the owner's 1,166 reaches this line and no test can make it:
+        # find_dropoff already refuses the start IT computed, so the two answers
+        # can only collide when the count overrode that start, and then the
+        # count has a winner and this branch is not taken. It is kept because it
+        # is reachable in principle - the two rules can pick different starts -
+        # and because what it prevents is publishing one place as both ends of a
+        # journey, which is the thing this whole clause exists to stop.
+        if fallback and OP.same_place(not_this, fallback):
+            return None
+        return fallback
+    return won
 
 
 def _consensus(values):

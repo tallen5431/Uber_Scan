@@ -1335,6 +1335,69 @@ for _n, _t in enumerate([_END_A, _END_B]):
 eq('one frame each is not a majority, and the older rule still decides',
    _tied['dropoff'], 'Beta Dr NE, Smyrna')
 
+# --- ...and a frame that saw ONE name has no opinion about which end it is --
+#
+# The three checks below are what the first version of this vote got wrong,
+# and it went to main before the shape was found. A frame that reads one name
+# calls it the pickup because it is the only place it has — that is
+# find_pickup's positional default, not a reading — and counting it as a vote
+# let the default outvote the frames that had actually distinguished the two
+# ends.
+#
+# Row 397 of the owner's week is the shape: three frames read only `Ridenour
+# Ct …`, one read `Dairy Queen Grill & Chill (…)` → `Ridenour Ct …`. Three
+# positional defaults beat the one frame that saw the journey, and both ends
+# were published as `Ridenour Ct`. 5 of 1,166 rows came out with the SAME
+# place at both ends; 0 did before the vote existed.
+#
+# The fixture carries row 397's own two properties, and both are load-bearing:
+# the card states NO layout, so place_ends cannot rescue it, and the OCR left
+# the merchant's bracket open, so find_pickup's shop rule cannot either. Two
+# earlier drafts of this check passed against the broken code because they
+# accidentally supplied one or the other.
+_ONE_END = '$14.50 22 min (5.1 mi) total Ridenour Ct NW, Kennesaw'
+_BOTH_ENDS = ('$14.50 22 min (5.1 mi) total Dairy Queen Grill (2561 Cobb Pkwy '
+              'ow recent |) Ridenour Ct NW, Kennesaw')
+acc = OfferAccumulator()
+for _n, _t in enumerate([_ONE_END, _ONE_END, _ONE_END, _BOTH_ENDS]):
+    _r397 = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+ok_('three frames that saw one name do not outvote the one that saw both',
+    (_r397['pickup'] or '').startswith('Dairy Queen'))
+eq('...and the name they all read is the END, which is where the card put it',
+   _r397['dropoff'], 'Ridenour Ct NW, Kennesaw')
+ok_('...and the two ends are not the same place',
+    _r397['pickup'] != _r397['dropoff'])
+
+# The brackets are the card speaking, the same way the layout is: "a shop is
+# what the card brackets", says find_pickup. Row 480 of the owner's week, in
+# miniature, and the shape is subtler than it looks — the WINDOW holds a
+# properly bracketed merchant that the frame doing the voting did not have,
+# because the OCR left its bracket open on that frame and closed on another.
+# So that frame's own find_pickup fell back to position, voted the street as
+# the start, and was the only voter. The merged list knows better than any one
+# frame did, which is the whole reason it is a union.
+_SHOP_ONLY = ("$8.21 Guaranteed (incl. tip) 26 min (6.6 mi) total "
+              "MRR's Deli (3055 North Main St)")
+_STREET_FIRST = ("$8.21 Guaranteed (incl. tip) 26 min (6.6 mi) total "
+                 "lroquis NW & Monrovia NW, Kennesaw ow recent |) "
+                 "MRR's Deli (3055 North Main St")
+acc = OfferAccumulator()
+for _n, _t in enumerate([_SHOP_ONLY, _SHOP_ONLY, _STREET_FIRST]):
+    _r480 = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+ok_('a bracketed shop stays the start when one frame orders it otherwise',
+    'MRR' in (_r480['pickup'] or ''))
+ok_('...and the street it displaced becomes the end, not nothing',
+    'Monrovia' in (_r480['dropoff'] or ''))
+
+# ...and whatever else is true, a job does not end where it starts. This is
+# find_dropoff's own rule — "the commonest wrong answer the parser gave" — and
+# a count knows nothing about the other end unless it is told.
+acc = OfferAccumulator()
+for _n, _t in enumerate([_BOTH_ENDS, _BOTH_ENDS]):
+    _ends2 = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+ok_('the published ends are never one place twice',
+    _ends2['pickup'] != _ends2['dropoff'])
+
 # --- which leg claims a slot, when two of them could ------------------------
 #
 # A leg matches a slot when EITHER field agrees, which is right and is argued
