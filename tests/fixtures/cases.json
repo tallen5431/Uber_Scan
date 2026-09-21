@@ -1428,6 +1428,37 @@
    }
   },
   {
+   "name": "...and the hour word itself can OCR to something that is not an hour word",
+   "_why": "Row 961 of the owner's week reads `11.5 mi + 1hr 11 min` - 71 minutes. Four of its seven frames render the hour as Thr/thr and were refused; two rendered it as `the`, matched nothing, kept their 11-minute vote and won the consensus. The rig filed 11 minutes at $49.36/hr against a target of 25 - a green ACCEPT, spoken aloud, on a job worth $7.65/hr net. `the` sits in front of a minutes token exactly twice in 5,491 real frames, both on that row.",
+   "text": "$12.50 Guaranteed (incl. tips) 11.5 mi+the 11 min @ Pickup Taco Bell",
+   "expect": {
+    "pay": 12.5,
+    "miles": 11.5,
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "...and a stray letter between the hour and its minutes is the same leg",
+   "_why": "The seventh frame of that row reads `1hrt1 min`: the hour group takes the 1 and the hr, and the stray t throws the minutes out of the match, so the leg reads ONE minute over 11.5 miles. Refusing only `the` left this frame the last one standing and moved the row from $68/hr to $750/hr - worse than the fault being fixed. The allowance is on the hour words alone, so a card saying `Another 20 min` still reads twenty.",
+   "text": "$12.50 Guaranteed (incl. tips) 11.5 mi+1hrt 1 min @ Pickup Taco Bell",
+   "expect": {
+    "pay": 12.5,
+    "miles": 11.5,
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "...but a word that merely ends in those letters is not an hour",
+   "text": "$12.50 Another 20 min (6.0 mi) trip Barrington Overlook, Marietta",
+   "expect": {
+    "pay": 12.5,
+    "minutes": 20,
+    "complete": true
+   }
+  },
+  {
    "name": "a charger badge is not the trip's distance",
    "_why": "With the trip leg's bracket lost to glare, '20 min trip 4 mi from fast charger' put the badge's four miles on the trip. The away leg's distance is all the card still says.",
    "text": "$16.05 5 min (1.2 mi) away 20 min trip 4 mi from fast charger",

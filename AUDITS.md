@@ -24,6 +24,37 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**The hour guard left the third of the three rows it was written for, and the
+ledger recorded that row as needing nothing.** The `Thr` fix refuses a leg
+whose hour word sits in front of it with no number read. Row 961's card says
+`11.5 mi + 1hr 11 min` — 71 minutes — and four of its seven frames render the
+hour as `Thr`/`thr` and were refused. **Two render it as `the`**, which is not
+an hour word, matched nothing, kept their 11-minute vote and won the
+consensus. The rig filed 11 minutes at **$49.36/hr against a target of 25** —
+a green ACCEPT, spoken aloud, on a job worth $7.65/hr net. The entry above
+listed 961 among the rows that "do not move: consensus was already right".
+
+*Widening it to `the` alone made the row worse, not better.* With those two
+frames refused the last one standing is `1hrt1 min`, where the hour group
+takes the `1` and the `hr` and the stray `t` throws the minutes out of the
+match — so the leg reads ONE minute over 11.5 miles and the row went from
+$68/hr to **$750/hr**. Caught by replaying the week rather than by the suite,
+which was green throughout.
+
+*So the allowance is for a stray letter after the hour word as well,* and it
+is on the hour words ALONE. `the[a-z]{0,2}` would swallow `another` and
+`other`; `hr[a-z]{0,2}` catches `1hrt` and nothing in the week or the corpus
+besides. Row 961 now has no reading at all, which is the honest answer when
+every frame's minutes are damaged — and the only row of 1,166 that moves.
+
+*Measured before it was written, because `the` is a common English word:*
+across the owner's 5,491 frames and the corpus's 314 texts it sits in front of
+a minutes token exactly twice, both of them row 961's, both in the same
+`<miles> mi+the <minutes> min @ Pickup` shape. Three corpus cases pin it,
+including `Another 20 min`, which still reads twenty. Five mutations die,
+including the one that lets the allowance spread to `the`.
+
+
 **The end vote published one place as BOTH ends of a job, and the entry above
 banked it as a win.** The vote shipped this morning counted every frame's own
 `pickup`/`dropoff`. A frame that read ONE name calls it the pickup because it
@@ -333,8 +364,11 @@ ways.* **Two rows of 1,166 change, and they change differently:**
     The journal holds `minutes: 11, perHour: 105.22` — a green ACCEPT at
     **$120.27/hr** on a card of at least 71 minutes. No verdict beats that one.
 
-Rows 625, 881 and 961 carry damaged frames too and do not move: the guard
-drops their bad votes and consensus was already right without them. Row 699
+Rows 625 and 881 carry damaged frames too and do not move: the guard drops
+their bad votes and consensus was already right without them. **Row 961 was
+listed here as a third and it was not one** — see the entry below, which
+repairs it. Its surviving frames were the two that lost the hour a different
+way, and it stayed in the journal at $49.36/hr on a $7.65/hr job. Row 699
 moves only on the glass — its first frame read 20 minutes and showed a green
 $61.05/hr before consensus corrected it to 80; that frame is now refused.
 
@@ -1305,8 +1339,12 @@ project rather than run it.
     suite file now, 37 of them.
 
 *That guard caught its own author within the minute.* Adding those 37 checks
-took `rpi/test_lint.py` from 156 to 193 and made the row just corrected for it
+took `rpi/test_lint.py` from 156 to 197 and made the row just corrected for it
 stale again — which is the whole argument for the table above in one move.
+(This sentence said 193, which was the count before the ledger entry beside it
+added four more backticked paths for the file-exists check to walk. The
+commit's own README row says 197. Two numbers written minutes apart, in the
+entry about numbers nothing counts.)
 
 
 **Two notes on the driving screen that described a moment long past, one of

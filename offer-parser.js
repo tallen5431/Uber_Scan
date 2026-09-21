@@ -470,10 +470,15 @@
      between the hour word and the minutes. parse() never reaches that case,
      having normalized the newlines to spaces first.
 
-     Measured on the normalized text findLegs is actually handed: 21 legs
-     refused across the owner's 5,491 frames, every one a `Thr`/`thr`/`1Thr`,
-     and 0 of the corpus's 314 texts. */
-  var HOUR_UNREAD = /h(?:r|rs|our|ours)\.?[ \t]*$/i;
+     `the` is in the list because the OCR puts it there - row 961's card reads
+     `11.5 mi + 1hr 11 min` and two of its seven frames render the hour word
+     that way, which kept an 11-minute reading and filed a 71-minute job at
+     $49.36/hr. Measured before it was added: `the` sits in front of a minutes
+     token twice in 5,491 frames, both on that row. See the Python port.
+
+     Measured on the normalized text findLegs is actually handed: 23 legs
+     refused across the owner's 5,491 frames and 0 of the corpus's 314. */
+  var HOUR_UNREAD = /(?:h(?:r|rs|our|ours)[a-z]{0,2}|the)\.?[ \t]*$/i;
 
   var ITEMS = new RegExp('(' + DC + '{1,3})\\s*items?\\b', 'i');
 

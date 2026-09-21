@@ -188,12 +188,27 @@ HAS_DIGIT = re.compile(r'\d', ASCII)
 # already turned the newlines into spaces before find_legs is called; this is
 # for the callers that have not.
 #
+# `the` is in that list because the OCR puts it there, and this was found by
+# the row the first version of this guard did NOT repair. Row 961's card reads
+# `11.5 mi + 1hr 11 min` — 71 minutes. Four of its seven frames render the hour
+# as `Thr`/`thr` and are refused; two render it as `the`, matched nothing, kept
+# their 11-minute vote and won the consensus. The rig filed 11 minutes at
+# $49.36/hr against a target of 25 — a green ACCEPT, spoken aloud, on a job
+# worth $7.65/hr net.
+#
+# It is a common English word and that is the risk, so it was measured rather
+# than assumed: across the owner's 5,491 frames and the corpus's 314 texts,
+# `the` sits in front of a minutes token exactly twice, both of them row 961's,
+# both in the same `<miles> mi+the <minutes> min @ Pickup` shape. These cards
+# are not prose. If a card ever does print "the" before a duration in earnest,
+# this refuses that leg and the next frame supplies it — the same cost the
+# clause already carries.
+#
 # Measured on the text find_legs is actually handed, which is the normalized
-# text: the rule refuses 21 legs across the owner's 5,491 frames, every one of
-# them a `Thr`/`thr`/`1Thr` in the same card shape, and 0 of the corpus's 314
-# texts. No frame in the week puts an hour WORD in front of a minutes token for
-# any other reason, so there is nothing else for it to catch.
-HOUR_UNREAD = re.compile(r'h(?:r|rs|our|ours)\.?[ \t]*\Z', re.I | ASCII)
+# text: the rule refuses 23 legs across the owner's 5,491 frames and 0 of the
+# corpus's 314 texts.
+HOUR_UNREAD = re.compile(r'(?:h(?:r|rs|our|ours)[a-z]{0,2}|the)\.?[ \t]*\Z',
+                         re.I | ASCII)
 
 ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 
