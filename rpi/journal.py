@@ -797,6 +797,24 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
     # that already had it. See OfferLog.places.
     places = (places if places is not None else parsed.get('places')) \
         if keep_places else []
+    # The reading's own record of which END the card printed each of those
+    # names against — used only when the list it describes is the list being
+    # stored. See OP.place_ends for what it fixes.
+    #
+    # The condition is the whole point and it is not caution. `places` above
+    # can be the CALLER'S list rather than the reading's: OfferLog watches a
+    # card across readings, and after a restart it restores names out of
+    # `content` while the reading starts again from none. An ends list read
+    # against the wrong entries would put the layout's answer on somebody
+    # else's name, which is worse than not having it — the fault being fixed,
+    # with a fix's confidence behind it.
+    #
+    # Element for element, not by length. The two lists are built by the same
+    # merge over the same readings, so on the owner's week they are identical
+    # on 1,164 of 1,166 offers and the two that differ differ only in which
+    # reading of one entry was kept — so the guard costs almost nothing and
+    # cannot misfile anything.
+    _ends = parsed.get('placeEnds') if places == parsed.get('places') else None
     return {
         # Rows outlive the code that wrote them. One integer buys a reader that
         # can tell a schema change from corruption.
@@ -982,7 +1000,7 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # order gets judged against the one already in the car. Derived here
         # rather than carried from the reading so that a row rebuilt from a
         # trimmed `places` list stays consistent with it. See OP.find_dropoff.
-        'pickup': OP.find_pickup(places),
+        'pickup': OP.find_pickup(places, _ends),
         # The card's TEXT goes with it. Without it the "a place the card
         # labelled Pickup is a pickup" rule cannot run, and on the commonest
         # delivery card - "@ Pickup Crumbl / Customer dropoff", which names no
@@ -991,7 +1009,7 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # so the stored row and the live reading disagreed about the same card,
         # and the stored one is what the offers page shows and what a replayed
         # stacking answer would compare.
-        'dropoff': OP.find_dropoff(places, parsed.get('text')),
+        'dropoff': OP.find_dropoff(places, parsed.get('text'), _ends),
         # A delivery deadline, as minutes since midnight, and whether the time
         # this offer was judged over came from that rather than from a stated
         # duration. Different claims about the same field, and a record that

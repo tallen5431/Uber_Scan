@@ -831,6 +831,92 @@ def to_pickup(legs):
     return approach[0]
 
 
+def two_leg_layout(legs):
+    """Whether the card printed the shape `leg, place, leg, place`.
+
+    Written once and asked by both the rules that read that shape —
+    laid_out_approach, which takes the drive to the pickup off it, and
+    place_ends, which takes which end each place is. Two copies of this
+    question is the third fault class, and they would drift: the same card has
+    to give the same answer to "is this the layout" whichever rule is asking.
+
+    The clauses and what each costs are argued at laid_out_approach, which is
+    where they were measured. In short: anything but two legs cannot be this
+    shape, and a leg the card called a `total` is the whole journey in one line
+    and cannot be half of it — which is also what a frame holding two delivery
+    cards looks like. leg_travels refuses the pickup-wait line, `Avg. wait time
+    at pickup: 3 min`, which the card prints in exactly the slot the first leg
+    occupies.
+
+    BOTH leg_travels calls are live here, and one of them looked dead an hour
+    before this function existed. laid_out_approach adds a stronger guard of
+    its own — the leg it publishes must STATE a distance — which subsumes
+    leg_travels for the FIRST leg, so while that was the only caller the first
+    call could not change an answer and was deleted as a branch no input could
+    reach. place_ends publishes no number and has no such guard, so for it that
+    call is the only thing between a wait line and being read as where the job
+    starts. A branch is dead only with respect to its callers, and this one
+    grew a second one.
+
+    The distance guard is NOT here, deliberately. It belongs to
+    laid_out_approach alone, because that rule publishes a number off the leg
+    and this one only reads an order.
+    """
+    if legs is None or len(legs) != 2:
+        return False
+    if legs[0].get('isTotal') or legs[1].get('isTotal'):
+        return False
+    return bool(leg_travels(legs[0]) and leg_travels(legs[1]))
+
+
+def place_ends(legs, places, whose):
+    """Which end of the job each place is, as the card's own ORDER states it.
+
+    Returns a list beside `places`: 0 where the card put the name against the
+    FIRST leg, which is where the job starts; 1 against the second, which is
+    where it ends; None where the card did not say. All None unless the layout
+    is the one two_leg_layout reads.
+
+    This exists because the two ends were being decided by the ORDER OF THE
+    LIST and the list is not in journey order. `places` reaching find_pickup is
+    a union across every frame of the window, appended in the order the frames
+    arrived, and find_pickup takes the first entry while find_dropoff takes the
+    last. Measured by replaying the accumulator over the owner's own week —
+    1,166 offers, 5,491 frames — that gave the wrong label on 9 of them, in
+    three shapes:
+
+      - the two ends SWAPPED (rows 18, 113, 659). A frame that read only the
+        destination arrived first, so the destination became places[0].
+      - the destination recorded as a second reading of the PICKUP (rows 213,
+        811, 812), because two readings of one street that _same_place cannot
+        join are two entries, and the last entry wins. The real destination sat
+        in the middle of the list and was dropped.
+      - one surviving place, and it the destination (rows 307, 1149), which is
+        the shape the ledger filed this under. On row 1149 all four frames read
+        `S Cobb Dr SE, Smyrna` against the second leg and nothing at all
+        against the first, and the row went to the journal saying the job
+        started there.
+
+    The layout is the card's own statement and outranks the list's order, so
+    this is consulted first by both find_pickup and find_dropoff. It is not a
+    guess about which of two places is likelier to be a shop; it is where Uber
+    printed the words.
+
+    `whose` is find_places' own record of which leg each place came off, for
+    the same reason laid_out_approach asks it rather than searching the text
+    again: the strings have been trimmed by then, and a second search would
+    sometimes not find them, which is a refusal that looks like a reading.
+    """
+    out = [None] * len(places or [])
+    if not two_leg_layout(legs):
+        return out
+    for i in range(len(out)):
+        at = whose[i] if whose is not None and i < len(whose) else None
+        if at in (0, 1):
+            out[i] = at
+    return out
+
+
 def laid_out_approach(legs, places, whose, pickup, dropoff):
     """Which leg the card's LAYOUT calls the drive to the pickup, or None.
 
@@ -875,9 +961,7 @@ def laid_out_approach(legs, places, whose, pickup, dropoff):
     strings have been trimmed by then and a second search would sometimes not
     find them, which is a refusal that looks like a reading.
     """
-    if legs is None or len(legs) != 2:
-        return None
-    if legs[0].get('isTotal') or legs[1].get('isTotal'):
+    if not two_leg_layout(legs):
         return None
     # The leg being PUBLISHED has to state its distance.
     #
@@ -898,19 +982,14 @@ def laid_out_approach(legs, places, whose, pickup, dropoff):
     # tools/measure_places.js legs() needs, and it marks such a sample
     # `exact: false`.
     #
-    # This is also why there is no leg_travels call for THIS leg: a line that
-    # fails leg_travels has no distance, no label and no lost distance, so it
-    # fails this stronger test too. Asking both was a branch no input could
-    # reach, and this project deletes those.
+    # two_leg_layout above has already asked leg_travels of both lines. For
+    # THIS leg that call cannot change the answer, because a line failing
+    # leg_travels has no distance and this guard refuses it anyway — but it is
+    # not dead, because place_ends asks the same predicate and publishes no
+    # number, so there the call is the only thing between a wait line and being
+    # read as where the job starts. It was briefly deleted while this was the
+    # only caller. See two_leg_layout.
     if legs[0].get('miles') is None:
-        return None
-    # The other line has to be a leg of the journey, which is the weaker test
-    # and the right one here: it is not being published, it is what makes the
-    # shape a journey rather than a card with one leg and some furniture. Not
-    # subsumed by the clause above, and reachable — a wait line printed BETWEEN
-    # the merchant and the customer gives exactly this, and without it that card
-    # publishes its first leg as an approach to a trip the card never stated.
-    if not leg_travels(legs[1]):
         return None
     # A card that already LABELLED a leg is not skipped here, and the case that
     # decides it is a card whose word and whose layout name DIFFERENT legs.
@@ -929,8 +1008,16 @@ def laid_out_approach(legs, places, whose, pickup, dropoff):
         return None
     if whose[places.index(pickup)] != 0:
         return None
-    if whose[places.index(dropoff)] != 1:
-        return None
+    # There is no matching clause for the DROPOFF, and its absence is the
+    # measurement. find_dropoff now narrows by the same layout, dropping every
+    # entry the card printed at the START end, so what it returns can only sit
+    # against the second leg or against no leg at all. And it cannot be the
+    # second of those: a place with no leg came off the `Pickup` anchor, and in
+    # a single-frame parse a kept place is a contiguous substring of the text
+    # it was read from, so find_dropoff's own `_labelled_pickup` skip always
+    # matches it. Instrumented over 1,166 real texts and 310 corpus ones: the
+    # clause was reached 110 times and saw `1` every time. It was a branch no
+    # input could reach, and this project deletes those.
     return 0
 
 
@@ -1383,14 +1470,22 @@ def merge_place(places, value):
 
     Keeps the longer of the two where they are the same place: a truncated read
     is the common failure, so more characters is more of the address.
+
+    Returns the INDEX the value ended up at, so a caller keeping a second list
+    beside this one can keep it in step. It used to return `places`, which both
+    callers discarded. The index matters because accumulate.py now carries
+    which end of the job each entry is, and working that out a second time from
+    the strings would be a second copy of this rule — free to disagree with it
+    on exactly the frames where the two readings are furthest apart, which is
+    where the answer is needed.
     """
     for i, seen in enumerate(places):
         if same_place(seen, value):
             if len(value) > len(seen):
                 places[i] = value
-            return places
+            return i
     places.append(value)
-    return places
+    return len(places) - 1
 
 
 def _inside_a_bracket(value, at):
@@ -1515,8 +1610,12 @@ def trim_place(value):
 
 # A name the card put a bracket after — "Kroger (Shiloh Square)", "GoPuff
 # (Drive)", "McDonald's® (Wade Green)". That is how these cards write a shop,
-# and it is the one thing that distinguishes the place a job STARTS from the
-# place it ENDS.
+# and it was described here as the one thing that distinguishes the place a
+# job STARTS from the place it ENDS. It is no longer the only thing, and row
+# 113 of the owner's week is why: the bracket got it wrong there while the
+# card's own layout got it right. See place_ends, which the two find_* scans
+# now narrow by; the bracket rule runs inside that narrowing rather than ahead
+# of it.
 PLACE_IS_A_SHOP = re.compile(r'\([^)]{2,40}\)\s*$', ASCII)
 
 
@@ -1770,12 +1869,42 @@ NOT_AN_OFFER = re.compile(
 DROPOFF_NOT_STATED = re.compile(r'custom[ea]r\s*drop\s*-?\s*off', re.IGNORECASE | ASCII)
 
 
-def find_dropoff(places, text=None):
+def _the_other_end(ends, i, mine):
+    """Whether the card put entry `i` at the end that is NOT the one asked for.
+
+    The layout NARROWS each scan; it does not replace it. Both rules below go
+    on scanning the whole list in the direction they always did, with every
+    guard they always had, and this drops the entries the card says belong to
+    the other end. Where the list order and the layout agree — which is 99% of
+    the owner's week — the answer is the one that was there before.
+
+    Two rounds of measurement forced this shape, and both were the second fault
+    class arriving inside a fix for the first:
+
+      - "take the entry the card put at this end" replaced the scan outright,
+        and swapped six pickups for a WORSE reading of the same street
+        (`Georgia State Route 3 & Green St PI NW, Atlanta` became `NW,
+        Atlanta`, `Penny Ln SE, Marietta` became `Penny Ln SE`).
+      - skipping the guards along with the scan cost row 90 its destination:
+        `Powder Springs`, a bare town the card printed at the far end, is
+        refused by _same_place against a pickup of `New Macliand Rd, Powder
+        Springs` — and that refusal is doing real work, not decoration.
+
+    `None` here means the card did not say, which is not the same as the card
+    saying "the other one", and must not be treated as it. Most entries are
+    None: only the two-leg layout speaks at all.
+    """
+    at = ends[i] if ends is not None and i < len(ends) else None
+    return at is not None and at != mine
+
+
+def find_dropoff(places, text=None, ends=None):
     """Where the job ENDS, or None when the card did not say.
 
     The driver's own description of these cards: "the drop off locations will
     always pretty much be someone's home address and not the restaurant". So
-    the dropoff is the last place the card named, unless that place is a shop —
+    the dropoff is the last place the card named, unless that place is a shop,
+    and unless the card printed it at the START end —
     and a shop is a name the card bracketed, which is the card's own grammar
     rather than a list of chains.
 
@@ -1791,8 +1920,21 @@ def find_dropoff(places, text=None):
     # The card said so itself. Nothing below can improve on that.
     if text and DROPOFF_NOT_STATED.search(text):
         return None
-    started_at = find_pickup(places)
-    for place in reversed(places or []):
+    started_at = find_pickup(places, ends)
+    for i in range(len(places or []) - 1, -1, -1):
+        place = places[i]
+        # The card printed this name against the FIRST leg, which is where the
+        # job starts. Every rule below is an inference off the STRING; this is
+        # where Uber put the words, and it outranks them. See place_ends.
+        #
+        # It is what rows 213, 811 and 812 of the owner's week needed: two
+        # readings of the pickup's own street that _same_place cannot join are
+        # two entries, the last entry wins this scan, and the destination — in
+        # the middle of the list, read cleanly on every frame — was dropped. A
+        # gap is not the same as a wrong answer, and those rows had the wrong
+        # answer written into an append-only file.
+        if _the_other_end(ends, i, 1):
+            continue
         if PLACE_IS_A_SHOP.search(place):
             continue
         # ...and a place the card LABELLED as the pickup is a pickup, bracket or
@@ -1857,19 +1999,52 @@ def _labelled_pickup(text, place):
     return bool(PICKUP_LABEL.search(text[:at]))
 
 
-def find_pickup(places):
+def find_pickup(places, ends=None):
     """Where the job STARTS, or None when the card did not say.
 
     The mirror of find_dropoff and the weaker of the two, which is the right
     weighting: the driver does not take a second order whose pickup is far away
     in the first place, so this is for showing rather than for judging. A shop
-    is what the card brackets; when nothing is bracketed the first place is the
-    pickup, because that is the order a card prints its journey in.
+    is what the card brackets.
+
+    It used to end "when nothing is bracketed the first place is the pickup,
+    because that is the order a card prints its journey in", and the stated
+    reason was the thing that was wrong. The merged list is in the order the
+    FRAMES arrived, not the order of the journey, so `places[0]` is whichever
+    end some frame happened to read first. `ends` is the card's own statement
+    of which end each name is — see place_ends — and it narrows this scan
+    rather than replacing it.
     """
-    for place in places or []:
+    # The card's layout narrows both scans below and replaces neither. Where it
+    # said nothing — every card that is not the two-leg shape, which is most of
+    # them — this reads exactly as it always did.
+    #
+    # The bracket rule is inside the narrowing rather than ahead of it, and row
+    # 113 of the owner's week is why: `Brogdon Rd & Mendi Ct, Suwanee YF Long
+    # trip (45+ min)` ends in a bracket because UBER'S OWN BADGE is bracketed,
+    # so PLACE_IS_A_SHOP called the destination a merchant and returned it out
+    # of a list whose first entry was the real pickup. The bracket rule cannot
+    # tell a badge from a branch address; the layout can, and did, on four
+    # frames of eight.
+    rest = [places[i] for i in range(len(places or []))
+            if not _the_other_end(ends, i, 0)]
+    for place in rest:
         if PLACE_IS_A_SHOP.search(place):
             return place
-    return (places or [None])[0]
+    if rest:
+        return rest[0]
+    # Every name on this card, the card printed against the SECOND leg: rows
+    # 307 and 1149 of the owner's week, where the pickup never read at all.
+    # There is no start here to give. Offering the nearest thing to one is what
+    # put `S Cobb Dr SE, Smyrna` into the append-only journal as where that job
+    # began — and nothing is lost by refusing it, because find_dropoff is about
+    # to store that same string at the end it belongs to. A gap the driver can
+    # see beats a label they cannot check.
+    #
+    # `rest` is empty only when the layout SPOKE and named every entry an end,
+    # never merely because the list is: `places or []` gives [] and `[None][0]`
+    # gave None before, which this still returns.
+    return None
 
 
 def find_places(text, legs, whose=None):
@@ -2303,8 +2478,12 @@ def parse(raw_text):
 
     _whose = []
     places = find_places(mine, legs, _whose)
-    pickup = find_pickup(places)
-    dropoff = find_dropoff(places, text)
+    # Which end of the job the card printed each name against, from this same
+    # pass's record of where they sat. Asked before the two ends, because it is
+    # what decides them when the card stated it.
+    ends = place_ends(legs, places, _whose)
+    pickup = find_pickup(places, ends)
+    dropoff = find_dropoff(places, text, ends)
     # The card can name its approach leg in words or by where it printed the
     # pickup, and this is the second one. Written onto the leg rather than
     # handed to to_pickup, so that the one rule that decides keeps deciding and
@@ -2336,6 +2515,13 @@ def parse(raw_text):
         # See find_dropoff, which is the half that decides.
         'pickup': pickup,
         'dropoff': dropoff,
+        # ...and which end the CARD said each entry of `places` was, beside it,
+        # so the accumulator can ask the same question of the merged list.
+        # Travels for the same reason `legDetail[].isApproach` travels: this
+        # frame knows where the words sat on the screen and the merged view
+        # cannot work it out afterwards, because `places` is a union across
+        # frames and the text beside it is one frame's. See place_ends.
+        'placeEnds': ends,
         # A full street address, which an offer card almost never shows — Uber
         # does not say where a delivery ends until it has been accepted. This is
         # here so the screen AFTER the accept can be read by the same pipeline.

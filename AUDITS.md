@@ -24,6 +24,59 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**The two ends of a job were taken off the two ends of a list that is in the
+order the FRAMES arrived, not the order of the journey.** `merged['places']` is
+appended as each frame contributes, `find_pickup` took `places[0]` and
+`find_dropoff` the last — so a window whose later frame supplied the pickup
+recorded it after the dropoff and the ends came out swapped.
+
+Measured by replaying the real accumulator over the real frames and asking, per
+place, which leg the CARD printed it against — the `whose` list `find_places`
+already builds. **10 of 1,166 rows had a merged label the card's own layout
+contradicts**, in three shapes: ends swapped (18, 113, 298, 659), the
+destination replaced by a second reading of the pickup's own street (213, 811,
+812), and one name that the card put at the far end (307, 1149). The tenth,
+321, is refused on purpose — its first line states minutes and no distance, so
+it is not the layout at all. Row 18 prints `min (46 mi)` / `Cobb Pkwy NW,
+Acworth` / `24 mins (10.6 mi)` / `Canton Rd, Marietta`, and the rig recorded
+the two ends the wrong way round, ten miles apart.
+
+Not only a label: `live.html` publishes "+N mi out of your way" off this card's
+`pickup`, `advice.js` decides stacking off `dropoff`, and `badEnd` only fires
+for a geocode far from the CAR, so a real street ten miles from the right one
+passed silently.
+
+The card already states which end is which — by where it prints the name — and
+`find_places` already recorded it. The fix gives that fact back rather than
+touching `MAX_PLACES` or the last-entry rule: `place_ends` reads the order,
+`parse()` emits it as `placeEnds`, the accumulator keeps it in step with
+`places` (a name two frames put at two different ends is damage, not a vote, so
+it refuses), and the two `find_*` scans are NARROWED by it — every existing
+guard still runs over what remains. `two_leg_layout` is the shared predicate
+both rules ask, so they cannot drift about what the layout is.
+
+**After: 1 of 1,166, which is the deliberate refusal.** Row 18 reads
+`Cobb Pkwy NW, Acworth → Canton Rd, Marietta`; row 307 recovers
+`Burnap St & Rose Ln, Marietta`, the destination that was being dropped from
+the middle of the list. Through the real accumulator **9 rows move and the only
+fields that move on any of them are `pickup` and `dropoff` — 0 rows where a
+field the panel shows moves**, 0 approach splits gained or lost, and 0
+disagreements between the ports over all 1,166 texts.
+
+*Two branches no input could reach were deleted with it, and one that looked
+dead was put back.* `laid_out_approach`'s dropoff clause: after the narrowing,
+`find_dropoff` can only return a place at the second leg or at no leg, and the
+second cannot happen because such a place came off the `Pickup` anchor and
+`_labelled_pickup` always matches it in a single-frame parse. Instrumented over
+1,476 real and corpus texts: reached 110 times, saw `1` every time. Deleting it
+moves 0 rows. The accumulator's `place_ends` fallback likewise — `_merged` is
+only reached after every place has been merged in. And `leg_travels(legs[0])`,
+deleted hours earlier as subsumed by the approach rule's distance guard, is
+live again: `place_ends` publishes no number and has no such guard, so there it
+is the only thing between a wait line and being read as where the job starts.
+**A branch is dead only with respect to its callers**, and that one grew a
+second.
+
 **A frame holding two cards priced one and described the other.** `one_card()`
 bounded the legs and nothing else, so the distance, deadline, item count and
 merchant went on reading the whole frame while the payout took the largest.
@@ -850,6 +903,45 @@ position on rows at all is a separate question nobody has asked yet.
 
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
+
+**`check_distance` is asked of the card and never of a leg, so one absurd leg
+passes inside a believable card.** Found while measuring the approach split.
+Row 659 of the owner's week prints `1 min (3.8 mi)` — 228 mph — and the card as
+a whole reads 12.4 mi over 17 min, 43.8 mph, which is sane. So nothing flags
+it: `suspect` is 0, `doubt` is empty and `milesUncertain` is false.
+`recover_decimal` does run per leg, but only to put back a lost decimal in the
+MILES; the rule that sets `uncertain` above `UNREADABLE_MPH` runs on the summed
+card alone. The approach split now publishes that leg as `toPickupMinutes: 1.0`
+— 1 of the 103 it fires on, about 1%.
+
+Not bundled into the split, deliberately, and the reason is the third fault
+class: `to_pickup()` is "the one rule that decides", and a speed guard added to
+`laid_out_approach` would answer the same question in a second place while
+leaving the word-labelled cards — which the corpus HAS, 29 of 152 — unguarded.
+The guard belongs in `to_pickup`, where it would move corpus cases and needs
+its own pass. The miles on such a leg are usually the good half; it is the
+minutes that misread, so refusing outright is not obviously right either.
+
+**`check_distance` is asked of the card and never of a leg, so one absurd leg
+passes inside a believable card.** Found while measuring the approach split.
+Row 659 of the owner's week prints `1 min (3.8 mi)` — 228 mph — and the card as
+a whole reads 12.4 mi over 17 min, 43.8 mph, which is sane. So nothing flags
+it: `suspect` is 0, `doubt` is empty and `milesUncertain` is false.
+`recover_decimal` does run per leg, but only to put back a lost decimal in the
+MILES; the rule that sets `uncertain` above `UNREADABLE_MPH` runs on the summed
+card alone. The approach split now publishes that leg as `toPickupMinutes: 1.0`
+— 1 of the 103 it fires on, about 1%.
+
+Not bundled into the split, deliberately, and the reason is the third fault
+class: `to_pickup()` is "the one rule that decides", and a speed guard added to
+`laid_out_approach` would answer the same question in a second place while
+leaving the word-labelled cards — which the corpus HAS, 29 of 152 — unguarded.
+The guard belongs in `to_pickup`, where it would move corpus cases and needs
+its own pass. The miles on such a leg are usually the good half; it is the
+minutes that misread, so refusing outright is not obviously right either.
+
+**A branch is dead only with respect to its callers**, and that one grew a
+second.
 
 **`check_distance` is asked of the card and never of a leg, so one absurd leg
 passes inside a believable card.** Found while measuring the approach split.

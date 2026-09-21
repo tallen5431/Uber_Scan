@@ -757,6 +757,36 @@ _trimmed = JR.row_for(
 eq('...and a row whose places were trimmed away records neither',
    (_trimmed['pickup'], _trimmed['dropoff']), (None, None))
 
+# ...and the card's own LAYOUT decides the two ends when it stated one, which
+# is the fix for a list that is in the order the FRAMES arrived rather than the
+# order of the journey. See OP.place_ends.
+_LAID_OUT = ("$14.03\n9 min (3.4 mi)\nCobb Pkwy NW, Acworth\n"
+             "21 mins (9.2 mi)\nCanton Rd, Marietta\n")
+_laid = P.parse(_LAID_OUT)
+_laid['places'] = ['Canton Rd, Marietta', 'Cobb Pkwy NW, Acworth']
+_laid['placeEnds'] = [1, 0]
+_row_laid = JR.row_for(_laid, {'ready': True, 'state': 'no'}, at=1000,
+                       places=['Canton Rd, Marietta', 'Cobb Pkwy NW, Acworth'])
+eq('the stored row does not take the first entry for the pickup',
+   _row_laid['pickup'], 'Cobb Pkwy NW, Acworth')
+eq('...nor the last for the destination',
+   _row_laid['dropoff'], 'Canton Rd, Marietta')
+
+# The guard on that, which is the one clause here a real shift can reach and a
+# corpus cannot. `places` is allowed to be the CALLER'S list rather than the
+# reading's - OfferLog watches a card across readings, and after a restart it
+# restores names out of `content` while the reading begins again from none. An
+# ends list read against the wrong entries would put the layout's answer on
+# somebody else's name, so it is used only when the two lists are the same list.
+_row_stale = JR.row_for(
+    _laid, {'ready': True, 'state': 'no'}, at=1000,
+    places=['Someone Elses St, Acworth', 'Canton Rd, Marietta',
+            'Cobb Pkwy NW, Acworth'])
+eq('a longer list than the reading describes does not borrow its ends',
+   _row_stale['pickup'], 'Someone Elses St, Acworth')
+eq('...and the older rules choose the destination for it too',
+   _row_stale['dropoff'], 'Cobb Pkwy NW, Acworth')
+
 # --- how much of the journey was getting to the work ------------------------
 #
 # The row has always held the card's TOTAL time and distance, which is the right

@@ -105,8 +105,13 @@ function sameList(a, b) {
 (cases.ends || []).forEach(function (c) {
   var pickup, dropoff;
   if (c.places) {
-    pickup = P.findPickup(c.places);
-    dropoff = P.findDropoff(c.places, c.text || null);
+    /* `ends` beside `places` is the card's own layout travelling with the
+       merged list, which is the shape the Pi's accumulator hands these two.
+       Without it a case can only reach the rules that read the STRINGS, and
+       the fault this section now pins is the list's ORDER being read as the
+       journey's. See P.placeEnds. */
+    pickup = P.findPickup(c.places, c.ends || null);
+    dropoff = P.findDropoff(c.places, c.text || null, c.ends || null);
   } else {
     var p = P.parse(c.text);
     pickup = p.pickup;

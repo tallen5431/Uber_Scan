@@ -862,9 +862,12 @@
    *
    * The driver's own description: "the drop off locations will always pretty
    * much be someone's home address and not the restaurant". So the dropoff is
-   * the last place the card named, unless that place is a shop - and a shop is
-   * a name the card bracketed, which is the card's own grammar rather than a
-   * list of chains. Over 562 cards naming any place the last is a bracketed
+   * the last place the card named, unless that place is a shop, and unless the
+   * card printed it at the START end - a shop being a name the card bracketed,
+   * which is the card's own grammar rather than a list of chains. The bracket
+   * is not the only thing that tells a start from an end any more: row 113 of
+   * the owner's week is the bracket getting it wrong while the layout gets it
+   * right. See placeEndsOf. Over 562 cards naming any place the last is a bracketed
    * shop on 9, every one a card where only the merchant read at all. */
   /* The card's own word for where a job starts. A place printed right after it
    * is a pickup however it is named - "@ Pickup Crumbl" - and brackets have
@@ -1072,11 +1075,40 @@
     return x.indexOf(y) !== -1 || y.indexOf(x) !== -1;
   }
 
-  function findDropoff(places, text) {
+  /* The place the card's layout put at `want`, or null.
+
+     Each end keeps the rule that already chose it, applied to the shorter
+     list: findPickup scans FORWARD and takes the first, findDropoff scans
+     BACKWARD and takes the last. So this narrows the candidates to the ones
+     the card put at that end and changes nothing else - where the list order
+     and the layout already agree, the answer is the one that was there before.
+
+     Taking the last at BOTH ends was written first and the owner's week
+     refused it: it swapped six pickups for a worse reading of the same street,
+     and skipping the guards along with the scan cost another row its
+     destination. See the Python twin, which carries both measurements. */
+  function theOtherEnd(ends, i, mine) {
+    var at = (ends && i < ends.length) ? ends[i] : null;
+    /* null means the card did not say, which is not the card saying "the other
+       one" and must not be read as it. Most entries are null: only the two-leg
+       layout speaks at all. */
+    return at !== null && at !== undefined && at !== mine;
+  }
+
+  function findDropoff(places, text, ends) {
     // The card said so itself. Nothing below can improve on that.
     if (text && DROPOFF_NOT_STATED.test(text)) return null;
-    var startedAt = findPickup(places);
+    var startedAt = findPickup(places, ends);
     for (var i = (places || []).length - 1; i >= 0; i--) {
+      /* The card printed this name against the FIRST leg, which is where the
+         job starts. Every rule below is an inference off the STRING; this is
+         where Uber put the words, and it outranks them. See placeEndsOf.
+
+         It is what rows 213, 811 and 812 of the owner's week needed: two
+         readings of the pickup's own street that samePlace cannot join are two
+         entries, the last entry wins this scan, and the destination - in the
+         middle of the list, read cleanly on every frame - was dropped. */
+      if (theOtherEnd(ends, i, 1)) continue;
       if (PLACE_IS_A_SHOP.test(places[i])) continue;
       // ...and a place the card LABELLED as the pickup is a pickup, bracket or
       // no bracket. 112 of the 135 dropoffs the rig could not place on a map
@@ -1097,11 +1129,34 @@
 
   /* Where it STARTS - for showing rather than judging, because the driver does
    * not take a second order whose pickup is far away in the first place. */
-  function findPickup(places) {
+  function findPickup(places, ends) {
+    /* The card's layout narrows both scans and replaces neither. Where it said
+       nothing - every card that is not the two-leg shape, which is most of
+       them - this reads exactly as it always did.
+
+       The bracket rule is inside the narrowing rather than ahead of it, and
+       row 113 of the owner's week is why: `Brogdon Rd & Mendi Ct, Suwanee YF
+       Long trip (45+ min)` ends in a bracket because UBER'S OWN BADGE is
+       bracketed, so PLACE_IS_A_SHOP called the destination a merchant and
+       returned it out of a list whose first entry was the real pickup. The
+       bracket rule cannot tell a badge from a branch address; the layout can,
+       and did, on four frames of eight. */
+    var rest = [];
     for (var i = 0; i < (places || []).length; i++) {
-      if (PLACE_IS_A_SHOP.test(places[i])) return places[i];
+      if (!theOtherEnd(ends, i, 0)) rest.push(places[i]);
     }
-    return (places && places.length) ? places[0] : null;
+    for (var j = 0; j < rest.length; j++) {
+      if (PLACE_IS_A_SHOP.test(rest[j])) return rest[j];
+    }
+    if (rest.length) return rest[0];
+    /* Every name on this card, the card printed against the SECOND leg: rows
+       307 and 1149 of the owner's week, where the pickup never read at all.
+       There is no start here to give, and nothing is lost by refusing it -
+       findDropoff is about to store that same string at the end it belongs to.
+       `rest` is empty only when the layout SPOKE and named every entry an end,
+       never merely because the list is: an empty list returned null before and
+       still does. */
+    return null;
   }
 
   /* `whose`, when an array is passed, is filled beside the return value with
@@ -1463,9 +1518,60 @@
      against the FIRST leg or a dropoff not against the second, which is the
      other 5 of those 10 - they print a place before any leg at all, a layout
      this rule cannot read and must not pretend to. */
+  /* Whether the card printed the shape `leg, place, leg, place`.
+
+     Written once and asked by both the rules that read that shape —
+     laidOutApproach, which takes the drive to the pickup off it, and
+     placeEndsOf, which takes which end each place is. Two copies of this
+     question is the third fault class, and they would drift: the same card has
+     to give the same answer to "is this the layout" whichever rule is asking.
+
+     Anything but two legs cannot be this shape; a leg the card called a
+     `total` is the whole journey in one line and cannot be half of it, which
+     is also what a frame holding two delivery cards looks like; and legTravels
+     refuses the pickup-wait line, which the card prints in exactly the slot
+     the first leg occupies.
+
+     BOTH legTravels calls are live here, and one looked dead an hour before
+     this function existed: laidOutApproach adds a stronger guard of its own —
+     the leg it publishes must STATE a distance — which subsumes legTravels for
+     the FIRST leg, so while that was the only caller the first call could not
+     change an answer and was deleted. placeEndsOf publishes no number and has
+     no such guard, so for it that call is the only thing between a wait line
+     and being read as where the job starts. A branch is dead only with respect
+     to its callers. The Python twin is `two_leg_layout`.
+
+     The distance guard is NOT here, deliberately: it belongs to
+     laidOutApproach alone, because that rule publishes a number off the leg
+     and this one only reads an order. */
+  function twoLegLayout(legs) {
+    if (!legs || legs.length !== 2) return false;
+    if (legs[0].isTotal || legs[1].isTotal) return false;
+    return !!(legTravels(legs[0]) && legTravels(legs[1]));
+  }
+
+  /* Which end of the job each place is, as the card's own ORDER states it.
+
+     Returns a list beside `places`: 0 where the card put the name against the
+     FIRST leg, which is where the job starts; 1 against the second, which is
+     where it ends; null where the card did not say. All null unless the layout
+     is the one twoLegLayout reads. The Python twin is `place_ends`, and the
+     measurement is there: the merged list is in the order the FRAMES arrived,
+     and reading it as the journey's order labelled the two ends wrongly on
+     nine of the owner's 1,166 offers, in three shapes. */
+  function placeEndsOf(legs, places, whose) {
+    var out = [];
+    for (var i = 0; i < (places || []).length; i++) out.push(null);
+    if (!twoLegLayout(legs)) return out;
+    for (var j = 0; j < out.length; j++) {
+      var at = (whose && j < whose.length) ? whose[j] : null;
+      if (at === 0 || at === 1) out[j] = at;
+    }
+    return out;
+  }
+
   function laidOutApproach(legs, places, whose, pickup, dropoff) {
-    if (!legs || legs.length !== 2) return null;
-    if (legs[0].isTotal || legs[1].isTotal) return null;
+    if (!twoLegLayout(legs)) return null;
     /* The leg being PUBLISHED has to state its distance.
 
        The card prints a pickup-wait line in exactly the place the drive to the
@@ -1479,17 +1585,12 @@
        looks like a leg — and the Pi's accumulator ORs isApproach across the
        window, so one such frame in five stamps the card.
 
-       There is no legTravels call for THIS leg because a line that fails it
-       has no distance, no label and no lost distance, so it fails this
-       stronger test too — a branch no input could reach. See the Python twin
-       for the measurement. */
+       twoLegLayout above has already asked legTravels of both lines. For THIS
+       leg that call cannot change the answer, because a line failing it has no
+       distance and this guard refuses it anyway — but it is not dead, because
+       placeEndsOf asks the same predicate and publishes no number. See the
+       Python twin for the measurement. */
     if (legs[0].miles === null || legs[0].miles === undefined) return null;
-    /* The other line has to be a leg of the journey: the weaker test, and the
-       right one, because it is not being published — it is what makes the
-       shape a journey rather than one leg and some furniture. Reachable: a
-       wait line printed BETWEEN the merchant and the customer gives exactly
-       this. */
-    if (!legTravels(legs[1])) return null;
     /* A card that already LABELLED a leg is not skipped here, and the case that
        decides it is a card whose word and whose layout name DIFFERENT legs.
        Skipping, the word would win and the trip would be published as the drive
@@ -1504,7 +1605,13 @@
        only rpi/test_parser.py can, and this sentence is the record of why. */
     if (!pickup || !dropoff) return null;
     if (whose[places.indexOf(pickup)] !== 0) return null;
-    if (whose[places.indexOf(dropoff)] !== 1) return null;
+    /* No matching clause for the DROPOFF, and its absence is the measurement:
+       findDropoff narrows by the same layout and drops every entry the card
+       printed at the START end, so what it returns sits against the second leg
+       or against no leg — and the second cannot happen, because a place with no
+       leg came off the `Pickup` anchor and findDropoff's own labelled-pickup
+       skip always matches it in a single-frame parse. Reached 110 times over
+       1,476 real and corpus texts, and saw 1 every time. See the Python twin. */
     return 0;
   }
 
@@ -1888,8 +1995,12 @@
 
     var whose = [];
     var places = findPlaces(mine, legs, whose);
-    var pickup = findPickup(places);
-    var dropoff = findDropoff(places, text);
+    /* Which end of the job the card printed each name against, from this same
+       pass's record of where they sat. Asked before the two ends, because it
+       is what decides them when the card stated it. */
+    var ends = placeEndsOf(legs, places, whose);
+    var pickup = findPickup(places, ends);
+    var dropoff = findDropoff(places, text, ends);
     /* The card can name its approach leg in words or by where it printed the
        pickup, and this is the second one. Written onto the leg rather than
        handed to toPickup, so the one rule that decides keeps deciding and so
@@ -1918,6 +2029,13 @@
       // in the car. See findDropoff, which is the half that decides.
       pickup: pickup,
       dropoff: dropoff,
+      // ...and which end the CARD said each entry of `places` was, beside it,
+      // so an accumulator can ask the same question of the merged list.
+      // Travels for the same reason `legDetail[].isApproach` travels: this
+      // frame knows where the words sat on the screen and a merged view cannot
+      // work it out afterwards, because `places` is a union across frames and
+      // the text beside it is one frame's. See placeEndsOf.
+      placeEnds: ends,
       // A full street address, which an offer card almost never shows - Uber
       // does not say where a delivery ends until it has been accepted. Here so
       // the screen AFTER the accept can go through the same pipeline.
@@ -2324,6 +2442,7 @@
            findDeadline: findDeadline, minutesUntil: minutesUntil,
            findPlaces: findPlaces, trimPlace: trimPlace,
            findPickup: findPickup, findDropoff: findDropoff,
+           placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,

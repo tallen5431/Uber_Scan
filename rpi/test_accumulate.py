@@ -1313,6 +1313,92 @@ _fresh = acc.add(P.parse(_HALF))
 eq('a new card starts without the last one\'s refusal',
    _fresh['dropoff'] is not None, True)
 
+# --- which end of the job each name is, carried across the window -----------
+#
+# The union in `self.places` is appended in the order the FRAMES arrived, and
+# the two ends were taken off its ends: first entry the pickup, last entry the
+# dropoff. That is a journey order the union does not have. Replaying the
+# owner's week through this class, 9 of 1,166 rows came out labelled wrong -
+# three with the two ends SWAPPED, three with the destination recorded as a
+# second reading of the pickup's own street, and three where the only name that
+# read was the destination and it went to the journal as where the job began.
+#
+# The card states which is which by where it prints them, find_places records
+# it, and this is the wire that carries it as far as the merged view. Nothing
+# here is a guess about the strings.
+
+# One frame whose crop lost the pickup's name and kept both legs, so the
+# DESTINATION is the only name it has and arrives first. This is row 1149 of
+# the owner's week, where four frames in a row read it that way.
+_GLARE = "$14.03\n9 min (3.4 mi)\n| ~ 1 @\n21 mins (9.2 mi)\nCanton Rd, Marietta\n"
+_CLEAR = ("$14.03\n9 min (3.4 mi)\nCobb Pkwy NW, Acworth\n"
+          "21 mins (9.2 mi)\nCanton Rd, Marietta\n")
+eq('the damaged frame has one name and the card put it at the far end',
+   [P.parse(_GLARE)['places'], P.parse(_GLARE)['placeEnds']],
+   [['Canton Rd, Marietta'], [1]])
+eq('...so on its own it names a destination and no pickup at all',
+   [P.parse(_GLARE)['pickup'], P.parse(_GLARE)['dropoff']],
+   [None, 'Canton Rd, Marietta'])
+
+acc = OfferAccumulator()
+acc.add(P.parse(_GLARE), now=100.0)
+_two = acc.add(P.parse(_CLEAR), now=100.5)
+eq('the merged list is in the order the FRAMES arrived',
+   _two['places'], ['Canton Rd, Marietta', 'Cobb Pkwy NW, Acworth'])
+eq('...and the ends the card printed travel with it',
+   _two['placeEnds'], [1, 0])
+eq('so the first entry is not taken for the pickup', _two['pickup'],
+   'Cobb Pkwy NW, Acworth')
+eq('...nor the last for the destination', _two['dropoff'], 'Canton Rd, Marietta')
+
+# ...and the order the two frames arrive in must not change the answer.
+acc = OfferAccumulator()
+acc.add(P.parse(_CLEAR), now=200.0)
+_rev = acc.add(P.parse(_GLARE), now=200.5)
+eq('the same two frames the other way round give the same two ends',
+   [_rev['pickup'], _rev['dropoff']],
+   ['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+
+# Two frames that put ONE name at two different ends. That is damage, not a
+# vote - the same rule to_pickup keeps for a card whose word and whose layout
+# name different legs - so the layout is refused for those names and the older
+# rules decide the card.
+_SWAPPED = ("$14.03\n9 min (3.4 mi)\nCanton Rd, Marietta\n"
+            "21 mins (9.2 mi)\nCobb Pkwy NW, Acworth\n")
+acc = OfferAccumulator()
+acc.add(P.parse(_CLEAR), now=300.0)
+_fought = acc.add(P.parse(_SWAPPED), now=300.5)
+eq('two frames that disagree about an end refuse the layout rather than vote',
+   _fought['placeEnds'], [None, None])
+eq('...and the card is then read by the rules that were always there',
+   [_fought['pickup'], _fought['dropoff']],
+   ['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+
+# The ends are kept in step with the list by the index merge_place returns,
+# not by matching the strings a second time - the two readings a window joins
+# are by definition the ones that do not match on sight.
+_NO_COMMA = ("$14.03\n9 min (3.4 mi)\nCobb Pkwy NW Acworth\n"
+             "21 mins (9.2 mi)\nCanton Rd, Marietta\n")
+acc = OfferAccumulator()
+acc.add(P.parse(_NO_COMMA), now=400.0)
+_comma = acc.add(P.parse(_CLEAR), now=400.5)
+eq('one address read two ways is still one entry', len(_comma['places']), 2)
+eq('...and the ends list is as long as the list it describes',
+   len(_comma['placeEnds']), len(_comma['places']))
+eq('...and the longer reading kept the end the shorter one was given',
+   [_comma['pickup'], _comma['dropoff']],
+   ['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+
+# A card that is not the two-leg layout says nothing about its ends, and the
+# older rules must read exactly as they always did.
+acc = OfferAccumulator()
+_silent = acc.add(P.parse("$14.05 Guaranteed (incl. tips)\n7.0 mi + 41min\n"
+                          "@ Pickup\nChuy's haa\n"), now=500.0)
+eq('a card outside the layout says nothing about its ends',
+   [e for e in (_silent['placeEnds'] or []) if e is not None], [])
+eq('...and is read by the rules that were always there',
+   _silent['pickup'], "Chuy's haa")
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

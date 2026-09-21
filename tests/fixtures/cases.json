@@ -3124,6 +3124,113 @@
     "Kroger (Chastain)",
     "Busbee Dr NW, Kennesaw"
    ]
+  },
+  {
+   "name": "the card printed its only name against the SECOND leg",
+   "text": "Smyrna\n\\\n/\nExclusive \u20185\n: $10.08\n*% 496 \u00a9 Verified F\nxe\n2. Rarely cancels\n12 min (6.8 mi)\nHaversack CtSW &WindageCtSW, [Uj\nMarietta Fr\n14 mins (8.1 mi)\nS Cobb Dr SE, Smyrna\nJ 4, 4 mi from fast charger |\n( x",
+   "expect": [
+    null,
+    "S Cobb Dr SE, Smyrna"
+   ]
+  },
+  {
+   "name": "...and merged across the window it is still not where the job began",
+   "places": [
+    "S Cobb Dr SE, Smyrna"
+   ],
+   "ends": [
+    1
+   ],
+   "expect": [
+    null,
+    "S Cobb Dr SE, Smyrna"
+   ]
+  },
+  {
+   "name": "the list is in the order the FRAMES arrived, not the journey's",
+   "places": [
+    "Canton Rd, Marietta",
+    "Cobb Pkwy NW, Acworth"
+   ],
+   "ends": [
+    1,
+    0
+   ],
+   "expect": [
+    "Cobb Pkwy NW, Acworth",
+    "Canton Rd, Marietta"
+   ]
+  },
+  {
+   "name": "a second reading of the pickup's own street is not the destination",
+   "places": [
+    "Armour Dr NE & Ottley Or NE, Atlanta",
+    "Peachtree St NE, Atlanta",
+    "Armour Dr NE & Ottley Dr NE. Atlanta 1stop"
+   ],
+   "ends": [
+    0,
+    1,
+    0
+   ],
+   "expect": [
+    "Armour Dr NE & Ottley Or NE, Atlanta",
+    "Peachtree St NE, Atlanta"
+   ]
+  },
+  {
+   "name": "Uber's own badge is bracketed, and a badge is not a merchant",
+   "places": [
+    "cobb pkwy nw, Acworth",
+    "Brogdon Rd & Mendi Ct, Suwanee YF Long trip (45+ min)",
+    "Brogdon Rd & Mendi Ct, Suwanee"
+   ],
+   "ends": [
+    0,
+    1,
+    1
+   ],
+   "expect": [
+    "cobb pkwy nw, Acworth",
+    "Brogdon Rd & Mendi Ct, Suwanee"
+   ]
+  },
+  {
+   "name": "...and with the layout silent the same list keeps the old answer, badge and all",
+   "places": [
+    "cobb pkwy nw, Acworth",
+    "Brogdon Rd & Mendi Ct, Suwanee YF Long trip (45+ min)",
+    "Brogdon Rd & Mendi Ct, Suwanee"
+   ],
+   "expect": [
+    "Brogdon Rd & Mendi Ct, Suwanee YF Long trip (45+ min)",
+    "cobb pkwy nw, Acworth"
+   ]
+  },
+  {
+   "name": "the layout narrows the scan and the guards still run inside it",
+   "places": [
+    "New Macliand Rd, Powder Springs",
+    "Country Walk Dr & Hickory Ln",
+    "Powder Springs"
+   ],
+   "ends": [
+    0,
+    1,
+    1
+   ],
+   "expect": [
+    "New Macliand Rd, Powder Springs",
+    "Country Walk Dr & Hickory Ln"
+   ]
+  },
+  {
+   "name": "a first line stating minutes and no distance is not the layout, whatever it cost",
+   "text": "2S Turned Off - Uberx\n$20.01\n\u00ae 4.87\n4min\nCampt stone\nHospita\n37 mins (19.2\nCapri Rdg & Top\n4, 2 mi from fast g",
+   "expect": [
+    "(19.2 Capri Rdg & Top",
+    null
+   ]
   }
  ]
 }

@@ -52,6 +52,14 @@ MAX_PLACES = OP.MAX_PLACES
 # the one that fills the card.
 SCANS_PER_OFFER = 8
 
+# One name that two frames put at two different ends of the job. Its own value
+# rather than None, because None in `place_ends` means "no frame has said yet"
+# and a later frame is allowed to fill that in — where this means "asked and
+# answered twice, differently", which no further frame may overwrite. It is
+# handed to the parser as None: the card contradicted itself, so the layout
+# says nothing about this name and the older rules decide.
+_CONTRADICTED = object()
+
 
 class OfferAccumulator:
     """Merges parsed readings of one offer. Feed it every read; use what it returns."""
@@ -102,6 +110,26 @@ class OfferAccumulator:
         # checked. Never voted on — an address is not arithmetic and a rate is
         # not computed from it — so what one frame saw is kept.
         self.places = []
+        # Which end of the job the CARD printed each of those against, beside
+        # them and the same length: 0 a start, 1 an end, None the card did not
+        # say. See OP.place_ends for what it is read off and the nine rows of
+        # the owner's week that were labelled wrong without it.
+        #
+        # This list is why `places` can be a union at all. The union is
+        # appended in the order the FRAMES arrived, and the two ends were being
+        # taken off its ends — first entry the pickup, last entry the dropoff —
+        # which is a journey order the union does not have. A frame that read
+        # only the destination, arriving first, made the destination the
+        # pickup.
+        #
+        # Voted on is the wrong shape here and a union is the wrong shape too.
+        # A card states this once and states it plainly; two frames that
+        # disagree about it are not two opinions to average, they are damage,
+        # and the rule to_pickup already keeps for a card whose word and whose
+        # layout name different legs applies unchanged: a contradiction refuses.
+        # So an entry goes None the moment two frames put it at different ends,
+        # and stays None for the window.
+        self.place_ends = []
         # Whether any frame of this card saw the card refuse to name a
         # destination — "Customer dropoff" and no address, which is 18% of the
         # cards this rig is shown.
@@ -609,14 +637,32 @@ class OfferAccumulator:
         # runs there is no text that can be said to belong to the list.
         if OP.DROPOFF_NOT_STATED.search(parsed.get('text') or ''):
             self.end_refused = True
-        for place in parsed.get('places') or []:
+        _ends = parsed.get('placeEnds') or []
+        for _i, place in enumerate(parsed.get('places') or []):
             if len(self.places) >= MAX_PLACES:
                 break
             # Not an exact match: two frames one comma apart give "Cobb Pkwy
             # NW, Acworth" and "Cobb Pkwy NW Acworth", and a union on exact
             # strings keeps both — which the offers page renders, arrow and
             # all, as a two-stop route that never happened. See OP.same_place.
-            OP.merge_place(self.places, place)
+            at = OP.merge_place(self.places, place)
+            # Kept in step with the list above by the index that merge told us
+            # it used, rather than by matching the strings a second time. The
+            # two readings this window is joining are by definition the ones
+            # that do not match on sight.
+            while len(self.place_ends) <= at:
+                self.place_ends.append(None)
+            said = _ends[_i] if _i < len(_ends) else None
+            if said is None:
+                continue
+            was = self.place_ends[at]
+            if was is None:
+                self.place_ends[at] = said
+            elif was != said:
+                # Two frames, two different ends, one name. See the comment on
+                # self.place_ends: that is damage, not a vote. Refuse for the
+                # window, and the older rules below decide this card.
+                self.place_ends[at] = _CONTRADICTED
 
         return self._merged(parsed)
 
@@ -861,9 +907,26 @@ class OfferAccumulator:
         #
         # So the refusal is carried across the window on its own, as a union
         # like the places are. See `self.end_refused`.
-        merged['pickup'] = OP.find_pickup(merged['places'])
+        #
+        # ...and the card's own statement of which of them is which travels
+        # with the list, because it is the one fact the merged view cannot
+        # re-derive: which leg a name sat against is a property of a FRAME, and
+        # by here there is no frame. The sentinel is flattened to None on the
+        # way out — a name two frames disagreed about is one the layout does
+        # not settle, and the older rules take it from there.
+        # The `or` on the line above falls back to this frame's own list when
+        # the window has none, so the ends have to fall back with it or they
+        # would describe a different list than the one they are beside.
+        # self.place_ends, with no fallback to the frame's own list: _merged is
+        # only ever reached after every one of this frame's places has been
+        # merged in, so the window's list is non-empty whenever the frame's is.
+        # The fallback was a branch no input could reach.
+        _raw = self.place_ends
+        _ends = [e if e in (0, 1) else None for e in _raw]
+        merged['placeEnds'] = _ends
+        merged['pickup'] = OP.find_pickup(merged['places'], _ends)
         merged['dropoff'] = (None if self.end_refused
-                             else OP.find_dropoff(merged['places']))
+                             else OP.find_dropoff(merged['places'], None, _ends))
         # ...and WHY there is none, which is not the same fact and is the one
         # the driving screen needs.
         #

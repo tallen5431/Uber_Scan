@@ -109,7 +109,13 @@ for c in cases.get('toPickup', []):
 # is only right relative to the pickup it is not.
 for c in cases.get('ends', []):
     if c.get('places'):
-        got = [P.find_pickup(c['places']), P.find_dropoff(c['places'], c.get('text'))]
+        # `ends` beside `places` is the card's own layout travelling with the
+        # merged list, which is the shape accumulate.py hands these two.
+        # Without it a case can only reach the rules that read the STRINGS,
+        # and the fault this section now pins is the list's ORDER being read
+        # as the journey's. See P.place_ends.
+        got = [P.find_pickup(c['places'], c.get('ends')),
+               P.find_dropoff(c['places'], c.get('text'), c.get('ends'))]
     else:
         p = P.parse(c['text'])
         got = [p['pickup'], p['dropoff']]
