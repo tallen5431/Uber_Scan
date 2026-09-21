@@ -2800,11 +2800,6 @@
     }
 
     mapBusy = true;
-    // Whether this walk put pins on the glass without ever reaching the
-    // settled draw. Set only after Leaflet loaded and the car was drawn, so
-    // the no-signal return above still leaves `mapFor === key` and cannot
-    // start a retry.
-    var partial = false;
     try {
       mapSay('loading the map…');
       var ready = await MV.needLeaflet(document, {
@@ -2872,7 +2867,6 @@
          The car is the one mark here that was measured rather than looked up,
          so it is the one that can be drawn at once. */
       drawMap(want, found, here, false);
-      partial = true;
       function landed() {
         // Same guard as the settled draw below, and for the same reason: the
         // driver may have been shown a different card while this was in
@@ -2897,23 +2891,52 @@
       // panel may never produce.
       if (viewMode !== 'map' || mapFor !== key) return;
       drawMap(want, found, here, true);
-      partial = false;
     } finally {
       mapBusy = false;
-      /* A walk the driver walked away from leaves this card's half-drawn pins
-         under the LAST card's line, because every early return above happens
-         before the settled draw and so never reaches mapDrew. Forgetting the
-         key makes the next press redraw from the start, and that costs
-         nothing: every answer that did arrive is in the geocoder's cache, so
-         the re-run asks nobody anything.
-         Guarded on the MODE and not on `partial` alone. `mapFor` is frozen for
-         the whole walk — the busy guard returns above before it is assigned —
-         so on every non-throwing path `partial` at this point already implies
-         the mode changed. What the extra clause is for is a drawMap that
-         THROWS: nulling the key under a live map re-enters showMap at once,
-         and on a panel read while driving that is an unbounded retry.
-         Measured with a deliberate throw: 40+ re-entries and climbing. */
-      if (partial && viewMode !== 'map') mapFor = null;
+      /* A walk the driver walked away from leaves this card marked as drawn
+         when nothing of it reached the glass. Every early return above happens
+         before the settled draw and so never reaches mapDrew, so coming back
+         takes the "nothing to redraw" branch and re-states `lastLine` over
+         `lastBounds` — and both of those belong to the card BEFORE this one.
+         The driver gets the last offer's detour over the last offer's pins,
+         under this offer's figures, and it never corrects itself, because the
+         key says this card is already drawn. Forgetting the key instead makes
+         the next press redraw from the start, and that costs nothing: every
+         answer that did arrive is in the geocoder's cache, so the re-run asks
+         nobody anything.
+
+         ON THE MODE, and only on the mode. A `partial` flag set after the car
+         was drawn used to stand in front of this, on the reasoning that
+         `mapFor` is frozen for the whole walk so `partial` already implied the
+         mode had changed. The implication runs ONE WAY only: `partial` true
+         here did imply the mode had changed, but the mode changing did not
+         imply `partial`, because `await askCar()` sits between taking the key
+         and putting the first mark up. On this rig that wait is paid on EVERY
+         press — no journal row carries a GPS position (see the measured-week
+         section of AUDITS.md), so `carFix` never caches — and even once rows
+         do carry one it holds for 120s, so the first press of each window
+         still pays the round trip. Measured against the real server over that
+         week's journal, 7-17ms warm and 34-174ms cold on a box 5-8x a Pi 4. A press landing inside that window
+         — ⛶ Phone to look at the card, or ▣ Set box — left the key set with
+         nothing drawn for it, and rpi/test_dashboard.py watched the previous
+         card's three pins sit there while this card's two places were never
+         asked about at all.
+
+         What must NOT be nulled is a key under a live map, and that is what
+         the mode clause is for: a drawMap that THROWS would otherwise null it
+         and the line below re-enters showMap at once, which on a panel read
+         while driving is an unbounded retry. Measured with a deliberate throw
+         in Leaflet's fitBounds: 1 draw with this clause, 5 in 6 seconds and
+         climbing under `if (partial)` alone, and the panel hangs outright if
+         the key is nulled unconditionally — the suite's own driver times out.
+         The residual is deliberate and worth stating: a drawMap that throws
+         KEEPS its key, and `lastBounds` is only assigned after `fitBounds`, so
+         on that path the card still shows the previous card's line and view.
+         Nulling there is the unbounded retry, and a stale map that stops is
+         the better of the two. After the settled draw the mode was checked one statement earlier
+         with nothing awaited in between, so a finished walk always keeps its
+         key and coming back to the same card still restores its line. */
+      if (viewMode !== 'map') mapFor = null;
       // A card that arrived while those lookups were in flight was dropped:
       // the busy guard returned before `mapFor` was touched, so nothing
       // remembered that a newer card was waiting and the map went on showing

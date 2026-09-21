@@ -409,15 +409,34 @@ for the same flag and leaves the car, the only measured point on the map,
 outside both readings. Two checks pin the shipped rule, including "...and the
 same ring on the car, so it is one rule and not two".
 
-*Still open inside it*: whether the `finally` should read `if (partial &&
-viewMode !== 'map')` or drop the `partial` term. A later pass argues the
-`partial` term is itself a fault — a press landing inside `askCar` leaves this
-card's key set with nothing drawn for it, so returning to the map restates the
-previous card's detour over the previous card's pins. That is raised and being
-attacked; it is NOT settled and nothing has been changed for it. It is also
-the one correction of the four that no check covers: reverting the early car
-draw, the `% 3` throttle, or both at once leaves all 553 dashboard checks
-green.
+*Settled, and the `partial` term was itself the fault.* The `finally` is now
+`if (viewMode !== 'map') mapFor = null;`. The old reasoning was that `mapFor`
+is frozen for the whole walk, so `partial` already implied the mode had
+changed — and **the implication runs one way only**. `partial` true did imply
+the mode had changed; the mode changing did not imply `partial`, because
+`await askCar()` sits between taking the key and putting the first mark up. On
+this rig that wait is paid on EVERY press, because no journal row carries a GPS
+position so `carFix` never caches — and even once rows do, it holds for 120s,
+so the first press of each window still pays it. A press landing in that window
+(⛶ Phone, or ▣ Set box) left the key set with **nothing drawn for that card**,
+so returning to the map restated the previous card's detour over the previous
+card's pins, under this card's figures, for good. Proved rather than argued:
+the unpatched file fails three of the new checks and reports `asked: []` — the
+new card's places were never sent to the geocoder at all.
+
+The MODE half stands and is now measured: 1 draw with the clause, 5 in 6
+seconds and climbing under `if (partial)` alone, and the panel hangs outright
+if the key is nulled unconditionally. One residual is deliberate — a `drawMap`
+that throws keeps its key, and `lastBounds` is assigned only after `fitBounds`,
+so that path still shows the previous card's line and view. A stale map that
+stops beats an unbounded retry on a panel read while driving.
+
+*Three of the four corrections had no check that could fail.* Reverting the
+early car draw, restoring `walk()`'s `% 3` throttle, or both at once each left
+all 553 dashboard checks green, and the `partial` line had no check at all. The
+stale-pin check that did ship survives a full revert, because two of that
+fixture card's three places are cached so even a throttled walk finishes in
+~20ms. Twelve checks now cover them, each dying to a named mutation.
 
 
 **"Forget lookups" was undone by any page left open.** `remember()` wrote the

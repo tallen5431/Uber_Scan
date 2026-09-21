@@ -1891,6 +1891,10 @@ const framed = (page) => page.waitForFunction(
     // "camera view · inset is what the reader sees". The geocoder is held to
     // one question a second, so that wrong caption sits on the glass for the
     // whole of the wait below.
+    // 350ms is also a DEADLINE, and the wording measured here needs it to be
+    // one: two of the three places are still in flight at this moment, and a
+    // line that makes a claim about them is making it about a question that
+    // has not been sent. A sample taken later would be reading a finished map.
     await page.waitForTimeout(350);
     out.mapWhileLoading = await page.evaluate(() => ({
       note: document.getElementById('viewNote').textContent.trim(),
@@ -2279,6 +2283,225 @@ const framed = (page) => page.waitForFunction(
       imgShown: getComputedStyle(document.getElementById('view')).display !== 'none',
       drew: (window.__marks || []).length }));
     out.mapStored.askedOnLoad = askedOnLoad;
+    await page.close();
+  }
+
+  /* --- what is on the glass before the first answer -----------------------
+   *
+   * The car is the one mark on this map that was MEASURED rather than looked
+   * up, so it is the one that can go up before a single question does. Nothing
+   * reached the glass until every lookup had finished: 1.6s for a card that
+   * names no dropoff, 3.8s for three fresh places, 6.0s when the box refuses
+   * all three — and not an empty rectangle for those seconds, the PREVIOUS
+   * card's pins, because the only teardown is inside drawMap.
+   *
+   * The geocoder answers slowly here on purpose. Everywhere else in this file
+   * it answers in a millisecond, so the first PLACE lands almost as early as
+   * the car and the two orders are indistinguishable — a check taken against
+   * that stub passes whether the car is drawn first or not.
+   */
+  {
+    stage = 'the map mode: the car goes up before the first answer';
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: [
+        { id: 'fix', at: Date.now() - 30000, lat: 34.010, lon: -84.600,
+          gpsAge: 1.0 } ] }) }));
+    await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
+      const u = new URL(route.request().url());
+      const q = decodeURIComponent(u.searchParams.get('q') || '');
+      await new Promise((r) => setTimeout(r, 1200));
+      const hit = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                    'Canton Rd, Marietta': [33.980, -84.500],
+                    'Powder Springs Rd': [33.900, -84.640] }[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: 'o-first', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(300);
+    await page.click('#viewMode');            // → scene
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');            // → map
+    // A DEADLINE, and it has to be one: the first geocoder answer is 1200ms
+    // away, so a mark on the glass now is the car and nothing else. Waiting
+    // long enough would pass either way, which is this project's sixth fault
+    // class. 500ms leaves 700ms of margin at both ends on a loaded box.
+    await page.waitForTimeout(500);
+    out.mapFirstMark = { early: await page.evaluate(
+      () => (window.__marks || []).map(function (m) {
+        return m.opts && m.opts.fillColor; })) };
+    await page.waitForTimeout(5000);
+    out.mapFirstMark.settled = await page.evaluate(
+      () => (window.__marks || []).length);
+    await page.close();
+  }
+
+  /* --- the one line in the `finally`, from both sides ----------------------
+   *
+   * `mapFor` is what says which card the pins on the glass belong to, and the
+   * finally is the only place that can forget it. Both directions are faults
+   * and they are opposite faults, which is why this is one stage.
+   *
+   * FORGET IT TOO LITTLE and a walk the driver left half way through keeps the
+   * key. Every early return in showMap happens before the settled draw, so
+   * nothing ever reaches mapDrew for that card — and coming back takes the
+   * "nothing to redraw" branch, which re-states `lastLine` and re-fits
+   * `lastBounds`. Those belong to the card BEFORE it. The driver gets the last
+   * offer's detour over the last offer's pins, under this offer's figures, and
+   * it never corrects itself, because the key says this card is already drawn.
+   *
+   * FORGET IT TOO MUCH and a drawMap that THROWS nulls the key under a live
+   * map, and the line below the guard re-enters showMap at once. Leaflet
+   * throwing mid-draw is not exotic — it is what a pane resized to zero, a
+   * removed layer or a bad coordinate does — and on a panel read while driving
+   * an unbounded retry is the whole shift.
+   *
+   * The journal answers with NO POSITION ON ANY ROW, which is this rig's real
+   * state: 0 of the owner's 1,166 offers carry one. `askCar` therefore never
+   * caches an answer and every press pays the round trip — measured against
+   * the real server.js over that week's journal at 7-17ms warm and 34-174ms
+   * cold on this box, 5-8x that on a Pi 4. Held open at 900ms here so the
+   * press lands inside it every run rather than one in ten.
+   */
+  {
+    stage = 'the map mode: a walk left half way, and a draw that throws';
+    const SEEN = {
+      'Chipotle (Barrett Pkwy)':   [34.020, -84.580],
+      'Canton Rd, Marietta':       [33.980, -84.500],
+      'Powder Springs Rd':         [33.900, -84.640],
+      'Barrett Pkwy & Cobb Pkwy':  [34.100, -84.500],
+      'Dallas Hwy, Marietta':      [33.950, -84.700],
+      'Mars Hill Rd, Acworth':     [34.070, -84.700],
+      'Villa Rica Way':            [33.870, -84.560],
+    };
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/journal*', async (route) => {
+      await new Promise((r) => setTimeout(r, 900));
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ offers: [{ id: 'nofix', at: Date.now() - 30000 }] }) });
+    });
+    // Kept on this side rather than pushed into the page, so recording a
+    // question costs nothing and cannot move the timings this stage turns on.
+    const askedHere = [];
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      const u = new URL(route.request().url());
+      const q = decodeURIComponent(u.searchParams.get('q') || '');
+      askedHere.push(q);
+      // One place the geocoder REFUSES rather than answers nothing for. A
+      // refusal is never remembered — see Geocoder.lookup — so every re-entry
+      // below pays the rate limit for it again, which is what puts a real gap
+      // between two re-entries instead of spinning them through microtasks.
+      if (q.indexOf('Flaky Rd') === 0) {
+        return route.fulfill({ status: 500, contentType: 'text/plain', body: 'no' });
+      }
+      const hit = SEEN[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    const card = (id, pickup, dropoff) => ({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      offer: { id: id, pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: pickup, dropoff: dropoff } });
+    const pins = () => page.evaluate(
+      () => (window.__marks || []).map(function (m) { return m.ll.join(','); }));
+
+    // A card that finishes, so `lastLine` and `lastBounds` hold something that
+    // belongs to it and to no later card.
+    await page.evaluate((c) => window.__es.push(c),
+                        card('o-fin-1', 'Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'));
+    await page.waitForTimeout(300);
+    await page.click('#viewMode');            // → scene
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');            // → map
+    await page.waitForTimeout(5200);
+    out.mapFinally = { settledPins: await pins() };
+
+    /* Left during `askCar`, which is the one real await between taking the key
+       and putting the first mark up. Nothing has been drawn for this card at
+       all when the driver walks away. */
+    stage = 'the map mode: left while the car was being looked up';
+    await page.evaluate((c) => window.__es.push(c),
+                        card('o-fin-2', 'Barrett Pkwy & Cobb Pkwy', 'Dallas Hwy, Marietta'));
+    await page.waitForTimeout(400);           // inside the 900ms journal fetch
+    await page.click('#viewMode');            // map → phone, mid-lookup
+    // askCar answers into a mode that has moved on, the guard under it
+    // returns, and the finally runs with nothing of this card on the glass.
+    await page.waitForTimeout(1800);
+    await page.click('#viewMode');            // phone → scene
+    await page.waitForTimeout(200);
+    await page.click('#viewMode');            // scene → map, same card
+    await page.waitForTimeout(4200);
+    out.mapFinally.leftEarly = {
+      pins: await pins(),
+      asked: askedHere.slice(),
+      note: await page.evaluate(
+        () => document.getElementById('viewNote').textContent.trim()) };
+
+    /* ...and left during the WALK, which is the case the comment in the
+       finally describes: some of this card's pins are up, none of its words
+       are. */
+    stage = 'the map mode: left while the places were being looked up';
+    await page.evaluate((c) => window.__es.push(c),
+                        card('o-fin-3', 'Mars Hill Rd, Acworth', 'Villa Rica Way'));
+    // Waited FOR rather than timed: the moment wanted is the one where some of
+    // this card is up and some of it is still out, and polling for it is what
+    // makes the press below land inside the walk on a loaded box. Empty if it
+    // never came, which fails the check rather than quietly skipping it.
+    out.mapFinally.midWalkPins = await page.evaluate(`(async () => {
+      var until = Date.now() + 2500, m = [];
+      while (Date.now() < until) {
+        m = (window.__marks || []).map(function (x) { return x.ll.join(','); });
+        if (m.length > 0 && m.length < 3) return m;
+        await new Promise(function (r) { setTimeout(r, 40); });
+      }
+      return [];
+    })()`);
+    await page.click('#viewMode');            // map → phone, mid-walk
+    await page.waitForTimeout(1900);
+    await page.click('#viewMode');
+    await page.waitForTimeout(200);
+    await page.click('#viewMode');            // back to the map, same card
+    await page.waitForTimeout(3200);
+    out.mapFinally.leftMidWalk = await pins();
+
+    /* A draw that throws, under a live map the driver has not left. The key
+       must SURVIVE this: nulling it here re-enters showMap from the line under
+       the guard, and that re-entry throws again. */
+    stage = 'the map mode: a draw that throws under a live map';
+    await page.evaluate(() => {
+      window.__drawThrew = 0;
+      window.__lmap.fitBounds = function () {
+        window.__drawThrew += 1;
+        throw new Error('Leaflet threw while drawing');
+      };
+    });
+    await page.evaluate((c) => window.__es.push(c),
+                        card('o-fin-4', 'Flaky Rd, Nowhere', 'Canton Rd, Marietta'));
+    await page.waitForTimeout(6000);
+    out.mapFinally.threw = await page.evaluate(() => window.__drawThrew || 0);
+    out.mapFinally.stillOnMap = await page.evaluate(
+      () => getComputedStyle(document.getElementById('liveMap')).display !== 'none');
     await page.close();
   }
 
@@ -3429,6 +3652,17 @@ try:
         'camera view' not in (loading.get('note') or '')
         and "phone's screen" not in (loading.get('note') or ''))
     ok_('...and the map is already the pane while it loads', loading.get('mapShown'))
+    # NOTHING geocoded is claimed while places are still in flight. A
+    # place nobody has asked about yet and a place the geocoder answered
+    # nothing for are the same empty slot in `found`, so the settled wording
+    # over a half-walked card says "could not reach the geocoder for the
+    # pickup" about a street whose question has not been sent. It is also
+    # written through mapDrew, so coming back to that card restates it.
+    ok_('...and no claim is made about a place still in flight (%r)'
+        % (loading.get('note'),),
+        'still asking' in (loading.get('note') or ''))
+    ok_('...so the dead-spot sentence is not printed over a live lookup',
+        'could not reach the geocoder' not in (loading.get('note') or ''))
 
     asked = on.get('asked') or []
     # Three places: this card's two ends and where the order in the car is
@@ -3593,6 +3827,65 @@ try:
     ok_('...and the button offers the scene, as on any other load (%r)'
         % stored.get('label'), 'Scene' in (stored.get('label') or ''))
 
+    # The car goes up before a single question is answered, because it is the
+    # one mark here that was MEASURED rather than looked up. Press to first
+    # mark used to be 1.6s for a card naming no dropoff, 3.8s for three fresh
+    # places and 6.0s when the box refused all three — spent looking at the
+    # PREVIOUS card's pins, since the only teardown is inside drawMap.
+    first = got.get('mapFirstMark') or {}
+    eq('the car is the first thing on the glass, 700ms before any answer (%r)'
+       % (first.get('early'),), first.get('early'), ['#7aa2f7'])
+    eq('...and the places follow it', first.get('settled'), 4)
+
+    # --- the one line in the `finally`, from both sides ---------------------
+    #
+    # `mapFor` says which card the pins on the glass belong to, and the finally
+    # is the only place that can forget it. Forgetting it too little leaves a
+    # card the driver walked away from mid-walk marked as already drawn, so
+    # coming back re-states the PREVIOUS card's line over the previous card's
+    # pins and never corrects itself. Forgetting it too much re-enters showMap
+    # under a live map when a draw throws, for ever.
+    fin = got.get('mapFinally') or {}
+    _settled = set(fin.get('settledPins') or [])
+    ok_('a card whose walk finishes has all three of its places on the glass '
+        '(%r)' % (sorted(_settled),), len(_settled) == 3)
+
+    early = fin.get('leftEarly') or {}
+    _early = set(early.get('pins') or [])
+    # Left during askCar — the one real await between taking the key and
+    # putting the first mark up, and on this rig it is paid on EVERY press
+    # because no journal row carries a position for it to cache.
+    ok_('a card left while the car was being looked up is drawn from the start '
+        'on the way back (%r)' % (sorted(_early),),
+        {'34.1,-84.5', '33.95,-84.7'} <= _early)
+    ok_('...and the card before it is off the glass, not restated under this '
+        'card\'s figures', '34.02,-84.58' not in _early)
+    # The name said two and the assertion checked one. Both, now: the point is
+    # that the redraw actually re-ran the lookups rather than repainting from
+    # whatever happened to be cached, and one of the two proves half of that.
+    ok_('...and BOTH its new places were actually asked about (%r)'
+        % ([q for q in (early.get('asked') or [])
+            if q in ('Barrett Pkwy & Cobb Pkwy', 'Dallas Hwy, Marietta')],),
+        {'Barrett Pkwy & Cobb Pkwy', 'Dallas Hwy, Marietta'}
+        <= set(early.get('asked') or []))
+
+    _mid = set(fin.get('midWalkPins') or [])
+    ok_('a walk still running has some of this card up and not all of it (%r)'
+        % (sorted(_mid),), 0 < len(_mid) < 3)
+    _back = set(fin.get('leftMidWalk') or [])
+    ok_('...and a card left half way through its walk is drawn from the start '
+        'on the way back (%r)' % (sorted(_back),),
+        {'34.07,-84.7', '33.87,-84.56', '33.9,-84.64'} <= _back)
+
+    # The other direction. A drawMap that throws must not null the key under a
+    # live map: the line below the guard re-enters showMap at once, and the
+    # re-entry throws again. Counted rather than asserted away, so the number
+    # is in the failure.
+    ok_('a draw that throws under a live map is not retried for ever (%r draws '
+        'in 6s)' % (fin.get('threw'),), fin.get('threw') == 1)
+    ok_('...and the map is still what is on the glass',
+        fin.get('stillOnMap') is True)
+
     # Three kinds of missing pin, and only one of them is about the rig's
     # reading. Folding them into one sentence is the fault the offers page and
     # the map page were both split for; this line is the third place that has
@@ -3603,6 +3896,17 @@ try:
     # for a card naming no dropoff, 3.8s for three fresh places and 6.0s when
     # the box refuses all three — and every one of those seconds showed the
     # LAST offer's route under this offer's numbers.
+    #
+    # HONEST ABOUT WHAT THIS ONE HOLDS. It does not die to a mechanical revert
+    # of the draw order — measured, both halves at once: the early car draw
+    # removed AND walk()'s `% 3` throttle put back, and this check still
+    # passes. The reason is the fixture rather than the property: o-map-3's
+    # other two places are already in the cache, so even a throttled walk
+    # reaches `done === list.length` in about 20ms and the teardown inside
+    # that draw takes the green pin down anyway. What actually pins the draw
+    # order is the block further down that gives the geocoder a 1200ms answer
+    # and reads the glass at a 500ms deadline; this one is kept because the
+    # property is still worth stating and it costs nothing.
     ok_('the last card\'s pins are down before this card\'s lookups finish',
         got.get('mapStale') is True)
 
