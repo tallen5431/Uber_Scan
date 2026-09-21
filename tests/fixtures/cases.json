@@ -3024,6 +3024,24 @@
    "name": "a third leg is a stop this shape cannot place",
    "text": "$20.00 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw 23 mins (8.4 mi) Celebration Blvd, Acworth 9 min (3.0 mi)",
    "expect": null
+  },
+  {
+   "name": "a leg at 74 mph is fast, not broken, and is still the approach",
+   "text": "$9.00 3 min (3.7 mi) away 20 min (6.0 mi) trip",
+   "expect": [
+    3,
+    3.7
+   ]
+  },
+  {
+   "name": "...and at 78 mph it is refused, though the card around it reads 25.8 mph and is believed",
+   "text": "$9.00 3 min (3.9 mi) away 20 min (6.0 mi) trip",
+   "expect": null
+  },
+  {
+   "name": "one frame of row 18's eight invented `1 min (46.0 mi)` and the merge kept it",
+   "text": "$9.00 1 min (46.0 mi) away 24 min (10.6 mi) trip",
+   "expect": null
   }
  ]
 ,

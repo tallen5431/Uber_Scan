@@ -1471,11 +1471,15 @@
      with an unknown approach folded into it, and the card states the split
      perfectly plainly. It was being read and thrown away.
 
-     Refuses in three cases rather than guessing, because every one of them
+     Refuses in four cases rather than guessing, because every one of them
      would produce a wrong distance rather than no distance: fewer than two
      legs, where a lone "away" would let a caller work out a trip of zero; no
-     leg the card named as the approach, which is most delivery cards; and more
-     than one leg claiming to be the approach, which is damage.
+     leg the card named as the approach, which is most delivery cards; more
+     than one leg claiming to be the approach, which is damage; and a leg whose
+     own speed is impossible. The first three are about the SHAPE of the card,
+     the fourth about the numbers on the leg that shape picked out - and
+     nothing else asks, because checkDistance runs on the summed card, where
+     one absurd leg can hide inside a believable total.
 
      A card names its approach leg with the word "away" or by where it printed
      the pickup - see laidOutApproach, which sets the same flag off the layout
@@ -1487,7 +1491,17 @@
     var approach = legs.filter(function (leg) {
       return leg && leg.isApproach && !leg.isTotal;
     });
-    return approach.length === 1 ? approach[0] : null;
+    if (approach.length !== 1) return null;
+    var leg = approach[0];
+    /* The fourth refusal, and the only one about the NUMBERS rather than the
+       shape - see the Python port for the measurement. One frame of row 18's
+       eight read `1 min (46.0 mi)` where seven saw no approach at all, and the
+       merge keeps it because isApproach is ORed so a glare frame cannot lose a
+       real leg. UNREADABLE_MPH, not MAX_MPH: the corpus holds a 60 mph leg
+       that is plausible and must survive. */
+    if (leg.minutes && leg.miles !== null && leg.miles !== undefined
+        && leg.miles / (leg.minutes / 60) > UNREADABLE_MPH) return null;
+    return leg;
   }
 
   /* Which leg the card's LAYOUT calls the drive to the pickup, or null.

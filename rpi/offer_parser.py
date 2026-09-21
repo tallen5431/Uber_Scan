@@ -808,7 +808,7 @@ def to_pickup(legs):
     that has an unknown approach folded into it, and the card states the split
     perfectly plainly. It was being read and thrown away.
 
-    Refuses in three cases rather than guessing, because every one of them
+    Refuses in four cases rather than guessing, because every one of them
     would produce a wrong distance rather than no distance:
 
       - fewer than two legs. A lone "away" leg is a card that has not finished
@@ -819,6 +819,10 @@ def to_pickup(legs):
         it printed the pickup - see laid_out_approach, which sets the same
         flag off the layout so this rule stays the only one that decides.
       - more than one leg claiming to be the approach, which is damage.
+      - a leg whose own speed is impossible. The three above are about the
+        SHAPE of the card; this one is about the numbers on the leg the shape
+        picked out, and nothing else asks. check_distance runs on the summed
+        card, where one absurd leg can hide inside a believable total.
 
     Returns the leg, or None. The caller subtracts.
     """
@@ -828,7 +832,31 @@ def to_pickup(legs):
                 if leg.get('isApproach') and not leg.get('isTotal')]
     if len(approach) != 1:
         return None
-    return approach[0]
+    leg = approach[0]
+    # The fourth refusal, and the only one about the NUMBERS rather than the
+    # shape. Row 18 of the owner's week is what it is for: one frame of eight
+    # read `1 min (46.0 mi)` where the other seven saw no approach leg at all,
+    # and the merge keeps it, because isApproach is ORed across a window so
+    # that a glare frame cannot lose a leg the card really printed. A leg no
+    # other frame saw then published `toPickupMiles: 46.0` on a job whose whole
+    # trip is 10.6 miles.
+    #
+    # UNREADABLE_MPH and not MAX_MPH, and the corpus already says why: "a
+    # plausible short leg is left alone, however fast it rounds to" is 2 min
+    # over 2.0 mi - 60 mph, and real, because leg times are whole minutes and
+    # too coarse to argue with. Above 75 there is nothing left to defend.
+    # recover_decimal has already had its turn at parse time and only ever
+    # divides by ten; 46.0 mi had its decimal and was never a candidate.
+    #
+    # Measured before it was written: 0 of the corpus's 32 approach cards and
+    # 1 of the real week's 102 move. It is sited here rather than beside
+    # check_distance because this is the one rule that decides - a guard in
+    # laid_out_approach would leave the word-labelled cards unguarded and
+    # answer the same question in a second place.
+    if leg.get('minutes') and leg.get('miles') is not None:
+        if leg['miles'] / (leg['minutes'] / 60.0) > UNREADABLE_MPH:
+            return None
+    return leg
 
 
 def two_leg_layout(legs):

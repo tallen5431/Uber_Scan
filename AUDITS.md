@@ -24,6 +24,70 @@ back mechanically and a named check has to fail.
 
 ### The reader
 
+**An approach leg that no other frame saw was published as a distance — and
+the entry describing this fault had the wrong row, the wrong numbers and the
+wrong cause.** Open said `check_distance` is asked of the card and never of a
+leg, so "one absurd leg passes inside a believable card", and gave row 659:
+`1 min (3.8 mi)`, 228 mph, inside a card reading 12.4 mi over 17 min. Replayed
+through the real accumulator over the real frames, every part of that is wrong.
+
+  - **Row 659 is not a fault at all.** It arrives on eight frames. Three read
+    the approach as `1 min`, five read `11 min`, and `_consensus` takes the
+    majority — so the rig records `toPickupMinutes: 11.0` over 3.8 mi, 21 mph,
+    which is right. The 228 mph exists only in a single-frame `parse()`, the
+    instrument this file already warns about under the bracket fix.
+  - **The card's own figures were wrong too**: 27 min and 12.4 mi, not 17.
+  - **0 cards in 1,166 hide an absurd leg inside a believable total**, which
+    is precisely the mechanism the entry claimed. 1 leg of the week's 102
+    approach legs is over `UNREADABLE_MPH`, and the card around it reads
+    135.8 mph, so `milesUncertain` was already true there.
+
+*The real fault is narrower and has a different cause.* Row 18 arrives on eight
+frames. **One** reads `1 min (46.0 mi)`; the other seven see no approach leg at
+all. `isApproach` is ORed across a window rather than voted on — deliberately,
+so a glare frame cannot lose a leg the card really printed — so a leg one frame
+in eight invented survives the merge, and the rig publishes `toPickupMiles:
+46.0` for a job whose entire trip is 10.6 miles. `milesUncertain` covers the
+total; nothing covered that number.
+
+*Nothing on the glass reads it, and that is worth writing down because the
+obvious guess is wrong.* `MV.detour` — the "+N mi out of your way" line — is
+crow-flies arithmetic over two geocoded pins and never touches these fields.
+`rpi/journal.py` records them; `tools/measure_places.js` is the only thing that
+computes from them. A wrong number in the journal, not on the panel.
+
+*Fixed by a fourth refusal in `to_pickup`*, where the docstring already
+promises to refuse rather than guess, and which is the one rule that decides —
+so word-labelled cards are covered by the same clause as laid-out ones. The
+threshold is `UNREADABLE_MPH` and not `MAX_MPH` because the corpus had already
+settled that argument in a case named "a plausible short leg is left alone,
+however fast it rounds to": 2 min over 2.0 mi is 60 mph and real, because leg
+times are whole minutes and too coarse to argue with.
+
+*The stated reason for deferring it was wrong as well.* Open said a guard here
+"would move corpus cases and needs its own pass". It moves **0 of the corpus's
+32 approach cards** and **1 of the real week's 102** — row 18, and nothing
+else. Three cases pin it: 74 mph kept, 78 mph refused inside a card that reads
+25.8 mph and is believed (the shape the old entry described, which the week
+does not contain), and row 18's own `1 min (46.0 mi)`. Five mutations across
+both ports, each dying to a named case.
+
+*What it costs, stated rather than buried.* `tools/measure_places.js` subtracts
+`toPickupMiles` from the card total to get the road between two places, and on
+row 18 the two errors were cancelling: 56.6 − 46.0 = 10.6, which is right. With
+the leg refused that sample becomes 56.6 mi and is marked inexact, so it drops
+out of `exactSpread`. One sample of the week, on a card `milesUncertain`
+already condemned, which was only ever right by coincidence and could not be
+known to be.
+
+*Not done here, and worth knowing first.* The phantom leg is still in the
+card's SUM, and `milesUncertain` on a total makes `rate()` charge no mileage at
+all — which `check_distance`'s own comment calls "the one direction that turns
+a PASS into an ACCEPT". Taking an impossible leg out of the sum is a different
+rule: it moves the verdict rather than a label, and whether a leg is phantom or
+merely mis-timed cannot be told at the sum.
+
+
 **The two ends of a job were taken off the two ends of a list that is in the
 order the FRAMES arrived, not the order of the journey.** `merged['places']` is
 appended as each frame contributes, `find_pickup` took `places[0]` and
@@ -1067,24 +1131,6 @@ position on rows at all is a separate question nobody has asked yet.
 
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
-
-**`check_distance` is asked of the card and never of a leg, so one absurd leg
-passes inside a believable card.** Found while measuring the approach split.
-Row 659 of the owner's week prints `1 min (3.8 mi)` — 228 mph — and the card as
-a whole reads 12.4 mi over 17 min, 43.8 mph, which is sane. So nothing flags
-it: `suspect` is 0, `doubt` is empty and `milesUncertain` is false.
-`recover_decimal` does run per leg, but only to put back a lost decimal in the
-MILES; the rule that sets `uncertain` above `UNREADABLE_MPH` runs on the summed
-card alone. The approach split now publishes that leg as `toPickupMinutes: 1.0`
-— 1 of the 103 it fires on, about 1%.
-
-Not bundled into the split, deliberately, and the reason is the third fault
-class: `to_pickup()` is "the one rule that decides", and a speed guard added to
-`laid_out_approach` would answer the same question in a second place while
-leaving the word-labelled cards — which the corpus HAS, 29 of 152 — unguarded.
-The guard belongs in `to_pickup`, where it would move corpus cases and needs
-its own pass. The miles on such a leg are usually the good half; it is the
-minutes that misread, so refusing outright is not obviously right either.
 
 **A card with one readable place calls it the pickup, and 474 of 1,166 rows
 rest on that.** Where the card's own layout names the end, the rig now follows
