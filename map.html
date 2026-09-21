@@ -661,12 +661,14 @@
 
     placed.forEach(function (p) {
       if (!(p.from && p.to)) return;
-      var wrongEnd = p.fromStray || p.toStray;
+      // MV.accused, not a fourth copy of the test: the status line under this
+      // map counts what is NOT accused, and the two drifted.
+      var bad = MV.accused(p);
       L.polyline([[p.from.lat, p.from.lon], [p.to.lat, p.to.lon]], {
-        color: (p.impossible || wrongEnd) ? '#f31260' : '#7aa2f7',
-        weight: (p.impossible || wrongEnd) ? 3 : 2,
-        dashArray: (p.impossible || wrongEnd) ? '6 4' : null, opacity: .85
-      }).bindPopup(((p.impossible || wrongEnd) ? '<b>This cannot be right</b><br>' : '')
+        color: bad ? '#f31260' : '#7aa2f7',
+        weight: bad ? 3 : 2,
+        dashArray: bad ? '6 4' : null, opacity: .85
+      }).bindPopup((bad ? '<b>This cannot be right</b><br>' : '')
           + 'straight line ' + p.crow.toFixed(1) + ' mi'
           + (p.stated !== null ? ', ' + MV.statedBy(p) : '')
           // ...and when the figure beside it is not one this line can be held
@@ -953,7 +955,7 @@
     // row off the page with nothing saying so.
     var nocheck = placed.filter(function (p) { return p.unjudged; });
     var drawn = placed.filter(function (p) {
-      return p.from && p.to && !p.impossible && !p.fromStray && !p.toStray;
+      return p.from && p.to && !MV.accused(p);
     });
     var strayNames = Object.keys(strays).sort(function (a, b) { return strays[b] - strays[a]; });
 

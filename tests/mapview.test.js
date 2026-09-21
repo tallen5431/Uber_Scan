@@ -998,6 +998,62 @@ function gaps(sent) {
   eq('...a row with nothing on it draws nothing', MV.ends({}).length, 0);
   eq('...and neither does no row at all', MV.ends(null).length, 0);
 
+  /* --- one rule for "this cannot be right" -------------------------------
+   *
+   * map.html draws a pair with a stray end as a RED DASHED line captioned
+   * "This cannot be right". Three places decided that separately and two
+   * disagreed: render() and the sidebar heading counted `impossible ||
+   * fromStray || toStray`, while placeAll's own `drawn` — the figure in the
+   * status line under the same map — tested only `impossible`, and so counted
+   * an accusation as a success. Same words, one screen, two numbers.
+   *
+   * `impossible` cannot cover the stray half: it needs a second pin to argue
+   * against, and a stray is a pin nowhere near the rest of the shift. */
+  ok_('a pair with an impossible distance is an accusation',
+      MV.accused({ impossible: true }));
+  ok_('...so is one whose pickup is nowhere near the shift',
+      MV.accused({ fromStray: true }));
+  ok_('...and one whose dropoff is', MV.accused({ toStray: true }));
+  ok_('a pair with none of those is a drawing', !MV.accused({}));
+  ok_('...and nothing at all accuses nobody', !MV.accused(null));
+
+  /* The figure the status line prints has to count the same thing the map
+   * draws. Two pairs, both placed at both ends, one of them with a stray
+   * pickup: the line under the map used to say both were drawn end to end
+   * while one of them was on screen in red, dashed, saying it cannot be
+   * right. */
+  var strayed = [{ from: { lat: 34, lon: -84 }, to: { lat: 34.1, lon: -84.1 },
+                   impossible: false, fromStray: true },
+                 { from: { lat: 34, lon: -84 }, to: { lat: 34.1, lon: -84.1 },
+                   impossible: false }];
+  eq('the count under the map leaves the accusations out',
+     strayed.filter(function (p) { return p.from && p.to && !MV.accused(p); }).length, 1);
+  /* ...and placeAll's own figure has to be that figure, through the whole
+   * run and not just in a filter written beside it.
+   *
+   * The card states no distance here, and that is the point: `impossible`
+   * needs a stated distance for a yardstick, so without one it cannot fire
+   * however far the pin lands. A stray end is then the ONLY thing saying the
+   * pair is wrong, and the status line's count was the one reader not asking.
+   * 15 of the owner's 579 both-ended pairs sit in exactly this state. */
+  var G = fakeGeo({ 'Chipotle': { lat: 33.90, lon: -84.50 },
+                    'Duval Ct': { lat: 33.93, lon: -84.55 },
+                    'Chicago Ave': { lat: 41.88, lon: -87.63 } });
+  var noYardstick = await MV.placeAll(
+    [{ pickup: 'Chipotle', dropoff: 'Duval Ct', lat: 33.90, lon: -84.50 },
+     { pickup: 'Chipotle', dropoff: 'Chicago Ave', lat: 33.92, lon: -84.52 }],
+    G.geo, function () {});
+  eq('a pin in another state is still a stray without a distance to check it',
+     Object.keys(noYardstick.strays).length, 1);
+  ok_('...and nothing calls that pair impossible, having nothing to argue with',
+      noYardstick.placed.every(function (p) { return !p.impossible; }));
+  eq('...so both pairs were placed at both ends',
+     noYardstick.placed.filter(function (p) { return p.from && p.to; }).length, 2);
+  eq('...and the status line still counts only the one that is not an accusation',
+     noYardstick.drawn, 1);
+  ok_('...and says so in words', /1 of 2 drawn end to end/.test(noYardstick.done));
+
+
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' map-view checks passed');
   process.exit(fail ? 1 : 0);

@@ -383,6 +383,35 @@ ok_('journal.html asks the shared rule for the two ends',
 ok_('live.html asks it too',
     'MV.ends(' in open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read())
 
+# --- ...and one rule for "this cannot be right" ------------------------------
+#
+# map.html draws a pair with a stray end as a red dashed line captioned "This
+# cannot be right". Three readers decided that separately and two disagreed:
+# render() and the sidebar's heading tested `impossible || fromStray ||
+# toStray`, while placeAll's `drawn` — the figure in the status line under the
+# same map — tested only `impossible`, so the line said a pair was drawn end to
+# end while it sat on screen in red accusing itself. MV.accused is the rule.
+#
+# Checked as "the page asks", the same way as above, because the numbers
+# themselves are covered by tests/mapview.test.js and what rots here is a
+# reader quietly growing its own copy of the test.
+_map_html = open(os.path.join(ROOT, 'map.html'), encoding='utf-8').read()
+# Both readers, named separately: one of them quietly reverting to
+# `p.impossible` while the other still asks is the shape this whole entry is
+# about, and "the file mentions MV.accused somewhere" cannot see it.
+ok_('the line map.html draws asks the shared rule',
+    'var bad = MV.accused(p);' in _map_html)
+ok_('...and so does the count in its sidebar',
+    '!MV.accused(p)' in _map_html)
+ok_('...and neither keeps a copy of the test beside the one it asks',
+    'p.fromStray || p.toStray' not in _map_html)
+# `impossible` on its own is a different question and map.html still asks it
+# once, for the section that lists the pairs whose stated distance the straight
+# line contradicts. Once — a second reader of it is a reader that stopped
+# asking MV.accused.
+ok_('...and `impossible` is read only by the section that is about it',
+    _map_html.count('p.impossible') == 1)
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is

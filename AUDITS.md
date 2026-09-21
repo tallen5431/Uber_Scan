@@ -604,6 +604,44 @@ which sizes the Open entry below about the ⌖ button.
 
 ### The maps, again
 
+**"Drawn end to end" was two different numbers on one screen, and the status
+line counted an accusation as a success.** `map.html` draws a pair whose
+pickup or dropoff landed nowhere near the rest of the shift as a **red dashed
+line captioned "This cannot be right"**. Three readers decided that
+separately. `render()` and the sidebar's heading tested `impossible ||
+fromStray || toStray`; `placeAll`'s own `drawn` — the figure printed in the
+status line under the same map — tested only `impossible`. So the line under
+the map said a pair had been drawn end to end while that pair sat on the map
+in red, dashed, accusing itself.
+
+*The stray half cannot be folded into `impossible`, and that is why the two
+rules could differ at all.* `impossible` needs a stated distance to argue
+against — a yardstick — so on a card that gives no distance it cannot fire
+however far the pin lands. A stray end is then the only thing saying the pair
+is wrong, and the status line was the one reader not asking. 15 of the owner's
+579 both-ended pairs are in that state.
+
+*One rule, `MV.accused`, beside `judge`, `statedBy`, `unchecked` and `ends` —
+the same drawer, for the same reason.* All three readers ask it, and the
+sidebar's own comment already said what the page must not do: "a map that
+quietly shows the third of the offers it managed is a map that says the rig is
+doing better than it is."
+
+*The test that matters is the one that could tell the rules apart, and the
+first one could not.* The suite already had a stray in a `placeAll` run — but
+that pair was ALSO `impossible`, so both rules agreed on it and a mutation
+putting the old test back survived. The scenario added here gives the card no
+distance at all, which is what leaves `impossible` unable to fire: both pairs
+place at both ends, neither is impossible, one has a pin in another state, and
+`drawn` is 1.
+
+Eleven checks on the rule and the run, four in `rpi/test_lint.py`, and five
+mutations die — including each of `map.html`'s two readers quietly reverting
+to `p.impossible` on its own. The lint names both readers separately rather
+than asking whether the file mentions the rule anywhere, because one reader
+reverting while the other still asks is exactly the shape of this entry.
+
+
 **The map could not be asked WHEN, so it showed two different maps stacked.**
 `journal.html` already buckets every offer by hour and by weekday; `map.html`
 had only a day count. On the owner's week that meant one map of 1,166 offers

@@ -478,6 +478,23 @@
      So the sheet at the bottom of that page does NOT ask this. It wants the
      two points to draw a map between, whichever way each was learned, which
      is a different question with a different right answer. */
+  /* Whether this pair is an accusation rather than a drawing.
+
+     map.html draws such a pair as a RED DASHED line captioned "This cannot be
+     right". Three places decided that separately and two of them disagreed:
+     render() and the sidebar's heading counted `impossible || fromStray ||
+     toStray`, while placeAll's own `drawn` — the figure in the status line
+     under the map — left the stray ends out of the test and so counted an
+     accusation as a success. Same words on one screen, "drawn end to end",
+     two different numbers behind them.
+
+     The stray half is not covered by `impossible`, which needs a second pin to
+     argue against. A stray is a pin nowhere near the rest of the shift, and
+     there are 15 such pairs in the owner's 579 both-ended ones. */
+  function accused(p) {
+    return !!(p && (p.impossible || p.fromStray || p.toStray));
+  }
+
   function ends(row) {
     if (!row) return [];
     var have = (row.places || []).filter(Boolean);
@@ -994,7 +1011,7 @@
     // with different answers.
     var couldDraw = jobs.filter(function (o) { return o.pickup && o.dropoff; }).length;
     var drawn = placed.filter(function (p) {
-      return p.from && p.to && !p.impossible;
+      return p.from && p.to && !accused(p);
     }).length;
     return { placed: placed, strays: strays, found: found, distinct: distinct,
              couldDraw: couldDraw, drawn: drawn,
@@ -1040,6 +1057,7 @@
            localityOf: localityOf,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, statedBy: statedBy, unchecked: unchecked, ends: ends,
+           accused: accused,
            byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,
