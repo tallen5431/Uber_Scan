@@ -2225,6 +2225,8 @@ by n=30).
 | The reader, the sync, the keypad, the ops scripts, `advice.js`, silent-failure paths repo-wide | 29 hunted, 16 survived checking, 13 refuted. The worst is recorded below; what has landed is under Done. |
 | The last five of those, re-checked one agent apiece and then attacked by two more | All five real, one reframed (`cardMinutes`), two proposed cures refuted with measurements. Four fixed; the fifth — the phone's unsent queue — is under Open with the reasoning its cure needs. |
 | The top Open items and `server.js`, which had never been swept as a unit | Two shipped (the screened dropoff's provenance, "Forget lookups"); one Open entry refuted outright and moved to Settled (syncing the geocode cache); two designs survived attack and are under Open with their corrections (the live map's draw order, the phone's unsent queue). |
+| Six surfaces at once — the reader's ends, the map pages, the offer log, the two ports' shared corpus, `server.js`, the docs — each finding then attacked by two lenses | 20 raised, 17 survived, 3 refuted. All 17 fixed across 16 commits, `fd4253d..55cd663`. |
+| The same six again, plus that sweep's **own** commits, which had never been read by anything but their author | 18 raised, 17 survived, 1 refuted. Two of the 17 were faults the previous sweep had introduced the same day (`_voted_end` publishing one place as both ends of a job; the hour guard leaving the third row it was written for, recorded in the ledger as needing nothing). All 17 fixed across 6 commits, `ce62ad8..a4755ac`. |
 
 ### The worst fault this sweep found
 
