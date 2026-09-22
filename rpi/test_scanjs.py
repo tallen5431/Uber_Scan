@@ -563,6 +563,39 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
              headline: (document.getElementById('perHour') || {}).textContent || '' };
   });
 
+  // The three figures under the headline, on a card whose distance rate() had
+  // to repair. The deadline is built from the browser's own clock so the card
+  // states the same eighteen minutes whenever this runs.
+  out.decimal = await page.evaluate(() => {
+    var due = new Date(Date.now() + 18 * 60000);
+    var h = due.getHours(), m = due.getMinutes();
+    var stamp = ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m
+              + ' ' + (h < 12 ? 'AM' : 'PM');
+    var card = "Decline High paying offer! Your Platinum status gave you "
+             + "priority for this offer. $41.11 Guaranteed (incl. tips) 98 mi "
+             + "Deliver by " + stamp + " Pickup Papa John's Store 3317 "
+             + "(2 orders) Customer dropoff";
+    var parsed = OfferParser.parse(card);
+    var blank = OfferParser.parse('');
+    for (var i = 0; i < 4; i++) window.__scan.consider(blank);
+    window.__scan.consider(parsed);
+    window.__scan.consider(parsed);
+    // The same nudge the ceiling case uses: a settings change re-renders from
+    // `lastResult`, so the screen being read back is the page's own render of
+    // this card rather than a hook that painted it.
+    var cost = document.getElementById('setCost');
+    cost.value = '0.30';
+    cost.dispatchEvent(new Event('input', { bubbles: true }));
+    var txt = function (id) {
+      return (document.getElementById(id).textContent || '').trim();
+    };
+    return { parsedMiles: parsed.miles, checked: parsed.milesChecked,
+             pay: txt('vPay'), min: txt('vMin'), mile: txt('vMile'),
+             warn: (document.getElementById('warn').textContent || '')
+                     .replace(/\s+/g, ' ').trim(),
+             headline: txt('perHour') };
+  });
+
   // The note on the glass says which mode the box is actually in, after the
   // checkbox that decides it has been flipped.
   out.boxNote = await page.evaluate(() => {
@@ -1285,6 +1318,37 @@ try:
         # checking one screen against the other has to find them agreeing.
         ok_('...in the same words as the driving screen',
             'No distance on the card' in (ceil.get('warn') or ''))
+
+    # --- the row that exists to be checked against the phone ---------------
+    #
+    # The MILES cell took the PARSE's distance while the rate above it, the
+    # journal row this page writes, live.html, the Pi's panel and the CSV all
+    # take the verdict's. On a card stating a deadline and no duration the
+    # parse never checks the distance at all — `milesChecked` is
+    # `minutes !== null` — so rate() is where a lost decimal is put back, and
+    # this cell printed the figure from before the repair. The corpus's own
+    # $41.11 DoorDash card with `9.8 mi` read as `98 mi` gave $127/hr ACCEPT,
+    # PAY $41.11, MIN 18, MILE 98.0, with this page's own note underneath
+    # saying a decimal had been recovered. Nothing on that screen added up.
+    dec = got.get('decimal') or {}
+    ok_('the deadline card was read', bool(dec))
+    if dec:
+        # The preconditions, stated rather than assumed: if the parse ever
+        # starts checking this card's distance itself the two figures become
+        # the same number and every check below passes for the wrong reason.
+        eq('the parse leaves this card\'s distance unchecked',
+           dec.get('checked'), False)
+        eq('...and reads it as the lost-decimal figure', dec.get('parsedMiles'), 98)
+        eq('...while the cell shows the distance the verdict used',
+           dec.get('mile'), '9.8')
+        eq('...beside the card\'s own pay', dec.get('pay'), '$41.11')
+        eq('...and the minutes the deadline left', dec.get('min'), '18')
+        # The note and the number have to agree. A screen that announces a
+        # repair and then prints the unrepaired figure is worse than one that
+        # says nothing, because the sentence tells the driver to trust it.
+        ok_('...and the note that says a decimal was recovered is on the glass '
+            '(%r)' % (dec.get('warn') or '')[:70],
+            'decimal' in (dec.get('warn') or ''))
 
     # --- two readings that disagree must not lock -------------------------
     #

@@ -637,7 +637,17 @@
       : r.state === 'doubt'
       ? ({ pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
            speed: 'CHECK THE DISTANCE',
-           rate: 'CHECK PAY AND TIME' }[r.doubt] || 'READ AGAIN')
+           rate: 'CHECK PAY AND TIME',
+           // The same two words the driving screen and the Pi's panel use for
+           // these, and for the same reasons: `leg` names the TIME, because
+           // the reading is over one leg of a two-leg card and the minutes are
+           // the drive to the rider; `screen` names no figure at all, because
+           // there is no card to check one against. Both were missing here, so
+           // a card the rig would have named came out as READ AGAIN on the
+           // phone — the screen a driver reaches for precisely when the rig is
+           // not there to be cross-checked.
+           leg: 'CHECK THE TIME',
+           screen: 'NOT AN OFFER' }[r.doubt] || 'READ AGAIN')
       : ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] + (locked ? '' : ' ?'));
 
     // The headline is withheld on a reading that cannot be true, exactly as on
@@ -674,7 +684,28 @@
     var shownMinutes = (typeof r.cardMinutes === 'number') ? r.cardMinutes
       : (p && typeof p.minutes === 'number' ? p.minutes : null);
     el.vMin.textContent = shownMinutes === null ? '--' : Math.round(shownMinutes);
-    el.vMile.textContent = p && p.miles !== null ? p.miles.toFixed(1) : '--';
+    // The distance the VERDICT was reached with, for the same reason the
+    // minutes above it are the card's: this row exists to be checked against
+    // the phone, and a row that disagrees with the number beside it is worse
+    // than no row.
+    //
+    // This took the parse's figure, and on a card stating a DEADLINE and no
+    // duration the parse never checks the distance at all — `milesChecked` is
+    // `minutes !== null` — so rate() is where a lost decimal is put back. The
+    // corpus's own $41.11 DoorDash card with `9.8 mi` read as `98 mi`, at
+    // 18:57: headline $127/hr ACCEPT, PAY $41.11, MIN 18, MILE **98.0**, and
+    // directly underneath it this screen's own note, "Recovered a decimal in
+    // the distance — check the miles." The screen announced the repair and
+    // then printed the unrepaired number, and nothing on it added up: $41.11
+    // over 18 min less $0.30/mi on 98 miles is $39/hr, not $127.
+    //
+    // Five surfaces already take the repaired figure — the journal row this
+    // page writes, live.html, the Pi's panel, the record and the CSV — and
+    // scan_pi's own comment names this fault: "taking it from parsed would put
+    // 24 miles on the panel beside a rate worked out over 2.4".
+    var shownMiles = (typeof r.miles === 'number') ? r.miles
+      : (p && typeof p.miles === 'number' ? p.miles : null);
+    el.vMile.textContent = shownMiles === null ? '--' : shownMiles.toFixed(1);
 
     // A read can warrant more than one note at once — a recovered decimal and
     // added shopping time are independent facts and both change the number.

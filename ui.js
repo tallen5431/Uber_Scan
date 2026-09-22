@@ -286,8 +286,19 @@
 
     el.verdict.className = 'verdict ' + r.state;
     el.verdictLabel.textContent = r.state === 'doubt'
+      // Four reasons, not three, and four is all a TYPED entry can reach: this
+      // screen hands rate() a dict it built itself, with no legs and no card
+      // text, so `leg` and `screen` cannot fire and naming them would be a
+      // branch no input reaches. `rate` can, and it is the one that matters
+      // most here — the only reason that catches a decimal that slipped while
+      // staying inside SANE_PAY. $11.84 typed as $118.40 is one wrong key, and
+      // over twenty minutes it is $355/hr: the pad refused it correctly and
+      // then said "CHECK THAT AGAIN" where scan.html and live.html both name
+      // the two figures. index.html includes the shared parser for exactly
+      // this refusal; the sentence the driver read did not agree with it.
       ? ({ pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
-           speed: 'CHECK THE DISTANCE' }[r.doubt] || 'CHECK THAT AGAIN')
+           speed: 'CHECK THE DISTANCE',
+           rate: 'CHECK PAY AND TIME' }[r.doubt] || 'CHECK THAT AGAIN')
       : ({
           go: 'ACCEPT',
           warn: 'CLOSE CALL',
@@ -414,9 +425,13 @@
     // list is not evidence about the reader — it is a driver's own note of
     // offers they saw, and the right answer to "$1184?" is to fix the entry.
     if (r.state === 'doubt') {
+      // The same four as the label above, in this line's own words. A refusal
+      // that names the figure and a toast that does not are two sentences
+      // about one entry, and the toast is the one the driver reads.
       toast({ pay: 'Check the pay before logging',
               time: 'Check the time before logging',
-              speed: 'Check the distance before logging' }[r.doubt]
+              speed: 'Check the distance before logging',
+              rate: 'Check the pay and the time before logging' }[r.doubt]
             || 'Check that entry before logging');
       buzz([55]);
       return;

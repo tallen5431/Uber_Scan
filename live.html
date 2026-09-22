@@ -942,7 +942,11 @@
            leg: 'Check the time, most of the trip did not read.',
            // Both figures can be sane alone and impossible together, so this
            // one names the pair rather than picking a side.
-           rate: 'Check the pay and the time.' }[r.doubt] || 'Read that again.')
+           rate: 'Check the pay and the time.',
+           // There is no card, so there is nothing to check. Spoken because
+           // the alternative is "read that again" about a screen that will
+           // never become an offer however long it is pointed at.
+           screen: 'Not an offer.' }[r.doubt] || 'Read that again.')
       : (({ go: 'Accept', warn: 'Close call', no: 'Pass' }[r.state] || '')
          + ', ' + rateText(r.perHour) + ' an hour'
          + (r.locked && r.whole !== false ? '.' : ', still reading.'));
@@ -1856,7 +1860,14 @@
           // over. The long version is in the notes below, where there is room
           // for it; this label has to be read at a glance from the seat.
           leg: 'CHECK THE TIME',
-          rate: 'CHECK PAY AND TIME' }[r.doubt] || 'READ AGAIN';
+          rate: 'CHECK PAY AND TIME',
+          // Not a figure to check — there is no offer to check it against.
+          // Uber's route planner and DoorDash's idle screen both reached the
+          // rig with a payout on them, at $68.18/hr and $376.50/hr. The Pi's
+          // own panel has named this since the reason was added; this screen,
+          // which is the same decision shown larger, fell through to READ
+          // AGAIN and sent the driver looking for a card that is not there.
+          screen: 'NOT AN OFFER' }[r.doubt] || 'READ AGAIN';
     } else {
       el.verdictLabel.textContent =
         ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '')

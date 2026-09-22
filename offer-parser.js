@@ -2269,6 +2269,16 @@
   // dominates the rate; above it, the rate is a rate.
   var SANE_RATE_OVER_MINUTES = 10.0;
 
+  // Every reason rate() can withhold a verdict for, in the order it asks them.
+  // The twin of offer_parser.DOUBT_REASONS, which carries the argument for why
+  // this list exists at all; `rpi/test_lint.py` holds the two side by side and
+  // asks every screen to cover them.
+  var DOUBT_REASONS = ['pay', 'time', 'rate', 'speed', 'leg', 'screen'];
+  // ...and the four a TYPED entry can reach. See the Python twin: the keypad
+  // builds its own parsed dict with no legs and no card text, so `leg` and
+  // `screen` cannot fire there and naming them would be a dead branch.
+  var TYPED_DOUBT_REASONS = ['pay', 'time', 'rate', 'speed'];
+
   // Why this reading cannot be true, or null if it might be. Written the same
   // way as offer_parser.doubt so the two cannot answer differently.
   //
@@ -2511,6 +2521,8 @@
   // test.
   return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
            setting: setting, doubt: doubt, round2: round2,
+           DOUBT_REASONS: DOUBT_REASONS,
+           TYPED_DOUBT_REASONS: TYPED_DOUBT_REASONS,
            DEFAULT_SETTINGS: DEFAULT_SETTINGS,
            findDeadline: findDeadline, minutesUntil: minutesUntil,
            findPlaces: findPlaces, trimPlace: trimPlace,

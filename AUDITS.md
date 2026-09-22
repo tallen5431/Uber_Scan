@@ -1026,6 +1026,28 @@ every place at a second apiece. `tests/mapview.test.js` pins both directions.
 
 ### The phone's scanner
 
+**The MILES cell printed the distance from before the repair.** `scan.html`'s
+three figures under the headline exist to be checked against the phone, and
+this one took the PARSE's distance while the rate above it, the journal row
+this page writes, `live.html`, the Pi's panel and the CSV all take the
+verdict's. On a card stating a deadline and no duration the parse never checks
+the distance at all — `milesChecked` is `minutes !== null` — so `rate()` is
+where a lost decimal is put back, and this cell showed the figure from before
+it. The corpus's own $41.11 DoorDash card with `9.8 mi` read as `98 mi`, at
+18:57: headline **$127/hr ACCEPT**, PAY $41.11, MIN 18, MILE **98.0**, with
+this page's own note directly underneath saying a decimal had been recovered.
+Nothing on that screen added up — $41.11 over 18 minutes less $0.30/mi on 98
+miles is $39/hr, not $127.
+
+The cell one line above it has taken the verdict's minutes since the billed/
+card split, under a comment saying this row exists to be checked against the
+phone; this one silently did not. `846c050` fixed the ROW for this exact card
+and left the SCREEN two lines away. The fixture builds its deadline from the
+browser's own clock, so the card states the same eighteen minutes whenever the
+suite runs, and it asserts the preconditions — that the parse leaves this
+card's distance unchecked and reads it as 98 — so that a future parser change
+making the two figures equal cannot let it pass for the wrong reason.
+
 **A blank settings box stored the default, and saved it.** `bind()` in
 `scan.js` answered a half-typed field with `DEFAULTS[key]`, while `ui.js` —
 which binds the *same five keys against the same stored object*,
@@ -1307,6 +1329,50 @@ inverted with respect to the danger, so the check passed in exactly the case it
 exists for. `a5cbe64`, plus the `CLOCK_BELIEVABLE_UNTIL` clamp in `server.js`.
 
 ### The panel
+
+**Seven screens name the reason a verdict was withheld, and every one was
+missing a different one.** `rate()` can refuse to price a card for six reasons
+— `pay`, `time`, `rate`, `speed`, `leg`, `screen` — and seven surfaces turn
+that into words: the Pi's panel and its voice, the driving view's label and its
+voice, the phone scanner, and the keypad's label and its refusal toast. The
+panel had no `leg`; the voice had no `rate`, `leg` or `screen`; the driving
+view and its voice had no `screen`; the phone had neither `leg` nor `screen`;
+the keypad had no `rate`. Each fell through to "READ AGAIN", so the same card
+was named on one screen and unexplained on the next.
+
+The project had already fixed one instance of this drift and left five behind:
+`rpi/scan_pi.py`'s own comment says the `rate` entry was added "because without it
+this panel fell back to READ AGAIN while the other two screens named it".
+
+*And the check written that day to stop it happening again could not see the
+two reasons that were forgotten next.* It derived the list from
+`inspect.getsource(doubt)` and took the `return` values out of it, which finds
+four of the six: `leg` and `screen` are decided in `rate()`, not in `doubt()`,
+and are assigned rather than returned. So the panel had no name for `leg` for
+as long as `leg` existed, under a check whose own comment said the next reason
+could not be forgotten and a paragraph in `rpi/README.md` repeating it. That is
+the sixth fault class — a check that cannot fail for the case it names — and it
+is worse than no check at all, because the sentence beside it is believed. Both
+have been corrected, and the derivation moved one step back: the list is the
+parser's, and the lint holds the list against the source.
+
+The gap is sharpest on the keypad, because `rate` is the ONLY reason that
+catches a decimal that slipped while staying inside `SANE_PAY`. **$11.84 typed
+as $118.40 is one wrong key** — 0 instead of `.` — and over twenty minutes it
+is $355/hr. The pad refused it correctly and then said "CHECK THAT AGAIN" where
+`scan.html` and `live.html` both name the two figures. `index.html` includes
+the shared parser for exactly that refusal; the sentence the driver read did
+not agree with it.
+
+The WORDS stay with each screen — a 480x320 hat, an 800x480 panel, a phone, a
+keypad and a voice genuinely need different ones — and the LIST is now shared:
+`DOUBT_REASONS` in both parser ports, with `TYPED_DOUBT_REASONS` for the four a
+typed entry can reach. The keypad builds `rate()`'s argument itself, with no
+legs and no card text, so `leg` and `screen` cannot fire there and naming them
+would be a dead branch; `rpi/test_lint.py` refuses both directions. It also
+holds the list against what `doubt()` and `rate()` can actually return, so a
+seventh reason cannot be added without every screen being told. Nine mutations
+die, one per table plus the list itself.
 
 **Numbers in the documentation that nothing counted, and had drifted.** Both
 of these are the fifth fault class, in the two files that describe this

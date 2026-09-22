@@ -6177,9 +6177,20 @@ doubt on a reading that never earned it.
 The same pass found `DOUBT_LABELS` had no entry for `rate`, the reason added
 with the ceiling above — so a card the other two screens named as CHECK PAY AND
 TIME fell back to READ AGAIN on the one screen where the driver cannot go and
-look it up. `test_scan_pi.py` now derives the reasons from the parser's own
-source and asserts the panel has a name for every one, so the next reason cannot
-be forgotten either.
+look it up.
+
+*And the check written to stop that happening again could not see the two
+reasons that were forgotten next.* It derived the list from
+`inspect.getsource(doubt)`, which finds four of the six: `leg` and `screen` are
+decided in `rate()`, not in `doubt()`, and are assigned rather than returned. So
+the panel had no name for `leg` for as long as `leg` existed, under a sentence
+here saying the next reason could not be forgotten. Both parser ports now carry
+`DOUBT_REASONS`, `rpi/test_lint.py` holds that list against what `doubt()` and
+`rate()` can actually produce, and it asks each of the **seven** surfaces that
+turn a reason into words — the panel, the rig's voice, the driving screen and
+its voice, the phone scanner, the keypad and the keypad's refusal toast — to
+cover every reason it can be given and none it cannot. Every one of them was
+missing a different entry when that check was written.
 
 ### The second look that could not happen
 
@@ -6627,13 +6638,13 @@ python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 324 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 329 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
 python3 rpi/test_sync.py        # 180 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
-python3 rpi/test_scanjs.py      # 194 on the phone's own scanner, through a
+python3 rpi/test_scanjs.py      # 201 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
 python3 rpi/test_liveview.py    # 111 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
@@ -6648,7 +6659,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      #  94 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 197 on the faults that only surface when a
+python3 rpi/test_lint.py        # 223 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #  50 on the three files the browser and the

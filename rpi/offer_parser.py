@@ -2796,6 +2796,34 @@ SANE_RATE = 200.0
 # none of which these apps pay.
 SANE_RATE_OVER_MINUTES = 10.0
 
+# Every reason rate() can withhold a verdict for, in the order it asks them.
+#
+# SEVEN screens turn this into words — the Pi's panel and its voice, the
+# driving view's label and its voice, the phone scanner, the keypad's label and
+# its refusal toast — and every one of them held its own table, and every one
+# was missing a different entry. The panel had no `leg`; the voice had no
+# `rate`, `leg` or `screen`; the driving view had no `screen`; the phone had
+# neither `leg` nor `screen`; the keypad had no `rate`. So the same card was
+# named on one screen and "READ AGAIN" on the next, and the gap was widest on
+# the keypad, where `rate` is the ONLY reason that catches a slipped decimal
+# staying inside SANE_PAY: $11.84 typed as $118.40 — one wrong key — is
+# $355/hr over twenty minutes, and the pad said "CHECK THAT AGAIN" where the
+# two camera screens name the figures.
+#
+# The WORDS stay with each screen, because a 480x320 hat, an 800x480 panel, a
+# phone, a keypad and a voice genuinely differ. What is shared is the list:
+# `rpi/test_lint.py` reads it and asks every surface to cover it, and asks this
+# list to be exactly what `doubt()` and `rate()` below can produce.
+DOUBT_REASONS = ('pay', 'time', 'rate', 'speed', 'leg', 'screen')
+
+# ...and the two of those a typed entry cannot reach. The keypad hands rate() a
+# dict it built itself — pay, minutes, miles, no legs and no card text — so
+# `leg` (most of the journey missing from a two-leg card) and `screen` (a route
+# planner rather than an offer) cannot fire there. Naming them on the pad would
+# be a branch no input can reach, which is this project's fourth fault class,
+# so the split is written down rather than left to whoever edits next.
+TYPED_DOUBT_REASONS = ('pay', 'time', 'rate', 'speed')
+
 
 def doubt(pay, minutes, miles=None):
     """Why this reading cannot be true, or None if it might be.

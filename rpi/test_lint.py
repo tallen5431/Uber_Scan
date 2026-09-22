@@ -457,6 +457,85 @@ for _suite in sorted(f for f in os.listdir(os.path.join(ROOT, 'tests'))
                      if f.endswith('.test.js')):
     ok_("rpi/README.md lists tests/%s" % _suite, _suite in _readme_rpi)
 
+# --- every screen names every reason a verdict can be withheld for ---------
+#
+# rate() can refuse to price a card for six reasons, and SEVEN surfaces turn
+# that into words: the Pi's panel and its voice, the driving view's label and
+# its voice, the phone scanner, and the keypad's label and its refusal toast.
+# Each held its own table, and each was missing a DIFFERENT entry — the panel
+# had no `leg`, the voice had no `rate`, `leg` or `screen`, the driving view
+# and the phone had no `screen`, the phone had no `leg` either, and the keypad
+# had no `rate`. So one card was named on one screen and "READ AGAIN" on the
+# next, and scan_pi's own comment records the project fixing exactly this drift
+# once already, for `rate`, and leaving four copies behind.
+#
+# The WORDS are deliberately not shared: a 480x320 hat, an 800x480 panel, a
+# phone, a keypad and a voice each need their own. The LIST is, and this is
+# where it is enforced.
+import offer_parser as _OP_L
+
+_REASONS = set(_OP_L.DOUBT_REASONS)
+
+# First, that the list is what the parser can actually produce. A seventh
+# reason added to doubt() or rate() and not to the list would make every check
+# below pass while the screens went on falling through to READ AGAIN.
+_py_src = open(os.path.join(ROOT, 'rpi/offer_parser.py'), encoding='utf-8').read()
+_doubt_body = _py_src[_py_src.index('\ndef doubt('):]
+_doubt_body = _doubt_body[:_doubt_body.index('\ndef ', 1)]
+_produced = set(re.findall(r"return '([a-z]+)'", _doubt_body))
+_produced |= set(re.findall(r"^\s+why = '([a-z]+)'", _py_src, re.M))
+eq('DOUBT_REASONS is what doubt() and rate() can return',
+   sorted(_produced), sorted(_REASONS))
+
+# ...and that the two ports agree about it, the way they agree about
+# everything else the shared corpus holds them to.
+_js_src = open(os.path.join(ROOT, 'offer-parser.js'), encoding='utf-8').read()
+for _name in ('DOUBT_REASONS', 'TYPED_DOUBT_REASONS'):
+    _js_list = re.search(r'var %s = \[(.*?)\];' % _name, _js_src, re.S)
+    eq('offer-parser.js %s matches the Python' % _name,
+       sorted(re.findall(r"'([a-z]+)'", _js_list.group(1))) if _js_list else None,
+       sorted(getattr(_OP_L, _name)))
+
+# The four surfaces that read a real card, each of which can meet all six.
+#
+# Matched inside the table itself rather than anywhere in the file: `leg` and
+# `screen` appear in prose all over scan_pi.py, and a check that greps the
+# whole file would pass on a comment.
+_TABLES = [
+    ('the Pi\'s panel', 'rpi/scan_pi.py', r'DOUBT_LABELS = \{(.*?)\n\n', _REASONS),
+    ('the Pi\'s voice', 'rpi/scan_pi.py',
+     r"if rate\['state'\] == 'doubt':(.*?)\n\n", _REASONS),
+    ('the driving screen', 'live.html',
+     r"el\.verdictLabel\.textContent =\s*\{(.*?)\}\[r\.doubt\]", _REASONS),
+    ('what the rig says out loud', 'live.html',
+     r"var say = r\.state === 'doubt'(.*?)\[r\.doubt\]", _REASONS),
+    ('the phone scanner', 'scan.js',
+     r"el\.verdictLabel\.textContent = !r\.ready(.*?)\}\[r\.doubt\]", _REASONS),
+    # ...and the keypad, which can reach four of the six: it builds rate()'s
+    # argument itself, with no legs and no card text. Naming the other two
+    # there would be a branch no input can reach.
+    ('the keypad', 'ui.js',
+     r"el\.verdictLabel\.textContent = r\.state === 'doubt'(.*?)\}\[r\.doubt\]",
+     set(_OP_L.TYPED_DOUBT_REASONS)),
+    ('the keypad\'s refusal', 'ui.js', r"toast\((.*?)\}\[r\.doubt\]",
+     set(_OP_L.TYPED_DOUBT_REASONS)),
+]
+for _what, _file, _pat, _want in _TABLES:
+    _src = open(os.path.join(ROOT, _file), encoding='utf-8').read()
+    _m = re.search(_pat, _src, re.S)
+    ok_('%s still has a table of doubt reasons (%s)' % (_what, _file), bool(_m))
+    if not _m:
+        continue
+    # Comments stripped first. Every one of these tables carries a paragraph
+    # saying why an entry is there, and a key read out of prose would let a
+    # table pass on its own explanation.
+    _body = re.sub(r'(?m)\s*(?://|#).*$', '', _m.group(1))
+    _named = set(re.findall(r"(?:\A|[{,])\s*'?([a-z]+)'?\s*:", _body))
+    _named &= _REASONS
+    eq('%s names every reason it can be given' % _what,
+       sorted(_want - _named), [])
+    eq('...and none it cannot: %s' % _what, sorted(_named - _want), [])
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is

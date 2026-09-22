@@ -1194,9 +1194,18 @@ def spoken(rate):
     # nothing: the driver is looking at the road, the voice is the whole of
     # what they get, and a number that confident is one they will act on.
     if rate['state'] == 'doubt':
+        # All six reasons, in the driving screen's own words. This had three,
+        # and the voice is the whole of what a driver gets while they are
+        # looking at the road: a card doubted for its RATE — the one reason
+        # that catches a decimal that slipped while staying inside SANE_PAY —
+        # was spoken as "read that again" here and as "check the pay and the
+        # time" by live.html, about the same card on the same rig.
         return {'pay': 'check the pay.', 'time': 'check the time.',
-                'speed': 'check the distance.'}.get(rate.get('doubt'),
-                                                    'read that again.')
+                'speed': 'check the distance.',
+                'rate': 'check the pay and the time.',
+                'leg': 'check the time, most of the trip did not read.',
+                'screen': 'not an offer.'}.get(rate.get('doubt'),
+                                               'read that again.')
     dollars = int(round(rate['perHour']))
     word = {'go': 'accept', 'warn': 'close', 'no': 'pass'}[rate['state']]
     return '%s. %d an hour.' % (word, dollars)
@@ -3163,6 +3172,14 @@ DOUBT_LABELS = {'pay': 'CHECK PAY', 'time': 'CHECK TIME', 'speed': 'CHECK MILES'
                 # reason itself; without it this panel fell back to READ AGAIN
                 # while the other two screens named it.
                 'rate': 'CHECK PAY & TIME',
+                # The TIME, because that is what is wrong with it: the reading
+                # is over one leg of a journey the card printed two of, so the
+                # minutes are the drive to the rider and the rate is the job's
+                # several times over. The driving screen has said exactly this
+                # since `leg` was added and this table was not given it, so a
+                # card whose trip leg failed to read was named on the 800x480
+                # panel and "READ AGAIN" on the hat beside it.
+                'leg': 'CHECK TIME',
                 # Not a figure to check — there is no offer to check it
                 # against. Uber's route planner and DoorDash's idle screen both
                 # reached this panel with a payout on them, at $68.18/hr in

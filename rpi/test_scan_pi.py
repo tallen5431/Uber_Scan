@@ -759,14 +759,26 @@ ok_('the loop hands the panel what it knows about the journey',
 #
 # `rate` was added to doubt() and not to this panel, so a card the other two
 # screens named as CHECK PAY AND TIME fell back to READ AGAIN in the car — the
-# one screen where the driver cannot go and look it up. Derived from the
-# parser's own source rather than kept as a list, so the next reason cannot be
-# forgotten either.
+# one screen where the driver cannot go and look it up.
+#
+# This read `inspect.getsource(_OP.doubt)` and took the `return` values out of
+# it, which sees four of the six: `leg` and `screen` are decided in rate(),
+# not in doubt(), and are assigned rather than returned. So the check written
+# to make sure the next reason could not be forgotten could not see the next
+# two reasons, and both of them were forgotten — the panel had no `leg` for as
+# long as `leg` existed. A check that cannot fail for the case it names is
+# worse than no check, because the sentence beside it is believed.
+#
+# `DOUBT_REASONS` is now the parser's own list, and `rpi/test_lint.py` holds
+# THAT against what doubt() and rate() can actually produce, so the derivation
+# is one step further back and covers both places a reason is decided.
 import offer_parser as _OP                                     # noqa: E402
-_reasons = set(re.findall(r"return '([a-z]+)'", inspect.getsource(_OP.doubt)))
-ok_('the parser can refuse a card for %d reasons' % len(_reasons), len(_reasons) >= 4)
+_reasons = set(_OP.DOUBT_REASONS)
+ok_('the parser can refuse a card for %d reasons' % len(_reasons), len(_reasons) >= 6)
 eq('...and the panel in the car has a name for every one',
    sorted(r for r in _reasons if r not in SP.DOUBT_LABELS), [])
+eq('...and none it cannot be given',
+   sorted(r for r in SP.DOUBT_LABELS if r not in _reasons), [])
 
 # And the voice, which is the whole of what a driver gets while watching the
 # road. "accept, three thousand five hundred an hour" was what this said.
@@ -779,6 +791,21 @@ eq('...and so is a misread time', SP.spoken(_rate('doubt', 90.0, 'time')),
    'check the time.')
 eq('...and a misread distance', SP.spoken(_rate('doubt', 90.0, 'speed')),
    'check the distance.')
+# The three the voice had no words for. It had pay, time and speed, so a card
+# doubted for its RATE — the one reason that catches a decimal that slipped
+# while staying inside SANE_PAY — was spoken as "read that again" here and as
+# "check the pay and the time" by live.html, about the same card on the same
+# rig. The voice is the whole of what a driver gets while looking at the road.
+eq('...and a rate no card pays', SP.spoken(_rate('doubt', 900.0, 'rate')),
+   'check the pay and the time.')
+eq('...and a journey most of which did not read',
+   SP.spoken(_rate('doubt', 220.8, 'leg')),
+   'check the time, most of the trip did not read.')
+eq('...and a screen that is not an offer at all',
+   SP.spoken(_rate('doubt', 68.18, 'screen')), 'not an offer.')
+eq('...leaving none of the parser\'s reasons unspoken',
+   sorted(r for r in _reasons
+          if SP.spoken(_rate('doubt', 90.0, r)) == 'read that again.'), [])
 ok_('a doubt this build has no words for still says something',
     SP.spoken(_rate('doubt', 90.0, 'newer-reason')))
 ok_('...and never says a number',
