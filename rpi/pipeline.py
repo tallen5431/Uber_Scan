@@ -1134,8 +1134,34 @@ def _in_process(image, config, tsv):
             engine = engines[key] = _Tesseract(lib, oem, variables)
         return engine.read(image, psm, tsv)
     except Exception as e:
-        # This one is dead; the next read builds a fresh one. Twice in a row and
-        # the library is the problem rather than the engine.
+        # Any failure hands the read back to the binary, permanently, and says
+        # so once. That is the policy stated at the head of this section and
+        # again in rpi/README.md, and this handler honoured it in NEITHER
+        # direction.
+        #
+        # A failure inside the constructor never reached `_tess_off` at all.
+        # `engine = engines[key] = _Tesseract(...)` does not assign when the
+        # constructor raises, so `engine` was still None and the guard below
+        # skipped both the close and the giving up. An Init2 returning
+        # non-zero — no eng.traineddata where the library's NULL datapath
+        # resolves, which is easily different under the systemd unit from the
+        # shell the binary was tried in — therefore printed nothing, left
+        # `_TESS_LIB` live, and made the rig re-attempt TessBaseAPICreate and
+        # the LSTM model load on EVERY read for the rest of the shift before
+        # running the binary anyway. Not permanent, not one line in the log,
+        # not one line at all.
+        #
+        # And the comment that stood here claimed the opposite policy — "this
+        # one is dead; the next read builds a fresh one. Twice in a row and the
+        # library is the problem" — which nothing counted and nothing
+        # implemented: a single exception inside read() already turned the
+        # library off for good. Two texts said permanent, one said retry, and
+        # the code did one of each depending on where the failure landed.
+        #
+        # Permanent is the right one and is the one the driver was promised. A
+        # rig that reads slowly is working; a rig spending an LSTM model load
+        # per read and then reading with the binary anyway is the worst of
+        # both. `UBERSCAN_TESSERACT=binary` is still the way back.
         engines.pop(key, None)
         if engine is not None:
             try:
@@ -1143,7 +1169,7 @@ def _in_process(image, config, tsv):
                 _TESS_OPEN.remove(engine)
             except Exception:
                 pass
-            _tess_off(str(e))
+        _tess_off(str(e))
         return None
 
 

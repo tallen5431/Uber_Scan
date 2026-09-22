@@ -44,10 +44,18 @@ WHOLE_VIEW = [0.0, 0.0, 1.0, 1.0]
 # if you measure the whole frame.
 SHARP_ROI = [0.0, 0.40, 1.0, 0.60]
 
-# Two numbers, because they mean different things. 350px is where reading
+# Two numbers, because they mean different things. 380px is where reading
 # measurably stops working; below it no setting helps. 450px is where there is
 # comfortable margin for a dimmer or busier card. Refusing to calibrate anywhere
 # between the two would be enforcing a preference as though it were a limit.
+#
+# This said 350, which is not a number anything here has ever used: the constant
+# below is 380, the refusal this file prints says "below about 380 px",
+# rpi/README.md says 380 and rpi/test_calibrate.py pins 380. So the one drifted
+# copy was the comment that justifies the constant — and it argued against
+# refusing between 350 and 450 beside code that refuses below 380, which is
+# inside its own range. A reader tuning this floor was being argued at with a
+# number the code has never used.
 MIN_CARD_PIXELS = 380          # below this, do not bother
 GOOD_CARD_PIXELS = 450         # above this, no notes
 

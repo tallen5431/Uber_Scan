@@ -1190,6 +1190,28 @@ memory pressure, not swiping away from the app.
 
 ### The aiming
 
+**`FULL_FOV_MODES` had a second copy that nothing read, and a card-height floor
+was argued for with a number the code has never used.** Two documentation
+faults in the files that decide where the camera points.
+
+  - **A dead second table.** `rpi/scan_pi.py` carried its own `FULL_FOV_MODES`
+    with a paragraph explaining that the IMX519's two smaller modes are
+    *cropped* out of the sensor rather than scaled down. Nothing read it —
+    `start_camera` takes `main_size` straight from the config and never checks
+    it against the table, and no test mentions it — so it stated a rule the
+    file it sat in does not apply, with no caller to make the two observably
+    drift. Deleted; the live one is `rpi/calibrate.py`'s, which `--mode` is
+    chosen from.
+
+  - **The comment justifying the card-height floor named 350px.** The constant
+    beside it is 380, the refusal `rpi/calibrate.py` prints says "below about
+    380 px", `rpi/README.md` says 380 and `rpi/test_calibrate.py` pins 380 — so
+    the one drifted copy was the comment that exists to justify the constant.
+    It also argued that refusing anywhere between its two numbers "would be
+    enforcing a preference as though it were a limit", beside code that refuses
+    below 380, which is inside that range. A reader tuning this floor was being
+    argued at with a number nothing has ever used.
+
 **The preflight answered "can this rig focus?" from every tuning directory on
 the machine, while the loader only ever reads this pipeline's.** `tuning_report`
 searches all three ISP directories on purpose — its comment says so and
@@ -1394,6 +1416,54 @@ inverted with respect to the danger, so the check passed in exactly the case it
 exists for. `a5cbe64`, plus the `CLOCK_BELIEVABLE_UNTIL` clamp in `server.js`.
 
 ### The panel
+
+**A health window whose only news was "a card reached the journal" was thrown
+away, and the offers page then called that card missing.** `saw` goes up on the
+first read that finds a payout; `kept` goes up on the read that lands the row.
+They are different moments, and `Health.report` resets the window between them
+whenever a boundary falls in the gap. On the owner's own week **104 of 1,166
+offers** have at least one read between the two — median 3, p90 5, max 7, which
+at a 1.85s read is three to thirteen seconds.
+
+`note_tally` refused to write any window without a `saw`, so when no other card
+arrived in the second window the `kept` was dropped; the health line was gated
+the same way, so the log said nothing either. `server.js` sums both over the
+rows that exist, so a 1 and a 0 reached the offers page as "**1 offer is
+missing from everything above**" — about a card sitting in the journal. That is
+the figure whose whole job is to say what the file is missing, reporting a miss
+against a file that is complete, which is the fault the forty lines of comment
+around it were written to fix for glare frames, arriving through the window
+boundary instead. At 1,166 offers over 27.9 driving hours it is on the order of
+one phantom a week, and the point of the number is that it is trusted.
+
+`worth_recording` is now the single rule and takes either count. The gate is
+kept, because a quiet two minutes with the phone out of the mount is still not
+evidence and would bury the windows that are.
+
+**The kept engine's failure policy was the opposite of what two texts said, in
+both directions.** `rpi/pipeline.py`'s own header and `rpi/README.md` both say
+that any failure — a missing library, a missing symbol, an init returning
+non-zero, an exception mid-read — hands the read back to the binary
+permanently, with one line in the log. The handler stated a third thing in its
+own comment, "this one is dead; the next read builds a fresh one. Twice in a
+row and the library is the problem", and honoured none of the three.
+
+A failure inside the constructor never reached `_tess_off` at all:
+`engine = engines[key] = _Tesseract(...)` does not assign when the constructor
+raises, so `engine` was still None and the `if engine is not None:` guard
+skipped both the close and the giving up. An `Init2` returning non-zero — no
+`eng.traineddata` where the library's NULL datapath resolves, easily different
+under the systemd unit from the shell the binary was tried in — therefore
+printed nothing, left the library live, and made the rig re-attempt
+`TessBaseAPICreate` and the LSTM model load **on every read for the rest of the
+shift** before running the binary anyway. And the retry policy the comment
+described was never implemented: nothing counted to two, and one exception
+inside `read()` already turned the library off for good.
+
+Permanent is the right one and is what was promised. The existing check could
+not see any of it: it set `_TESS_SAID = True` with the note "the message is not
+what is tested" and never looked at `_TESS_LIB`, so the missing log line, the
+still-live library and the per-read model load were all invisible to it.
 
 **Seven screens name the reason a verdict was withheld, and every one was
 missing a different one.** `rate()` can refuse to price a card for six reasons

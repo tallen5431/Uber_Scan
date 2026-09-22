@@ -777,6 +777,19 @@ handed over rather than guessed at, because silently dropping a flag would read
 the card under settings nobody chose. `UBERSCAN_TESSERACT=binary` is the way
 back without a code change.
 
+*That paragraph described the intent and not the handler, in both directions.*
+A failure inside the engine's constructor never reached the giving-up at all —
+`engine = engines[key] = _Tesseract(...)` does not assign when the constructor
+raises, so the `if engine is not None:` guard skipped it — and an init
+returning non-zero therefore printed nothing, left the library live, and made
+the rig re-attempt `TessBaseAPICreate` and the LSTM model load on **every read
+for the rest of the shift** before running the binary anyway. Meanwhile the
+comment inside that handler claimed a third policy — "this one is dead; the
+next read builds a fresh one, twice in a row and the library is the problem" —
+which nothing counted and nothing implemented, since one exception inside
+`read()` already turned the library off for good. Both halves now do what this
+paragraph says.
+
 Two details worth knowing. `GetTSVText` is reached by its C++ symbol, since the
 C wrapper does not export it; that is the one brittle thing here, it is looked
 up at load, and its absence is simply another reason to use the binary. And the
@@ -6658,7 +6671,7 @@ python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 329 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 336 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
@@ -6679,7 +6692,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      #  94 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 225 on the faults that only surface when a
+python3 rpi/test_lint.py        # 228 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #  50 on the three files the browser and the
@@ -6694,7 +6707,7 @@ python3 rpi/test_doctor.py      # 100 on the preflight running to the end, on
                                 #     slower not being reported as broken, and
                                 #     on a journal with a hole in it being
                                 #     reported at one line and failed at more
-python3 rpi/test_tesseract.py   # 116 on the kept OCR engine reading exactly as
+python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
 python3 rpi/test_dashboard.py   # 568 on what the driving screen shows while a

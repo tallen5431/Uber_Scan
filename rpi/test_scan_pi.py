@@ -1421,6 +1421,50 @@ ok_('every row is either an offer or a kind, never both',
 ok_('...and a tally carries the pair the sync keys on',
     all(r.get('id') and r.get('seq') for r in _mixed if r.get('kind') == 'seen'))
 
+# --- a window whose only news is that a card reached the journal -------------
+#
+# `saw` goes up on the first read that finds a payout and `kept` on the read
+# that lands the row. They are different moments — on the owner's own week 104
+# of 1,166 offers have at least one read between the two, median 3 and max 7,
+# which at a 1.85s read is three to thirteen seconds — so a health boundary can
+# fall in the gap and split one card across two windows. The row was written
+# only when the window had a `saw`, so the second window's `kept` was dropped;
+# server.js sums both over the rows that exist, so a 1 and a 0 became "1 offer
+# is missing from everything above" on the offers page, about a card sitting in
+# the journal. The figure whose whole job is to say what the file is missing,
+# reporting a miss against a file that is complete.
+eq('a window that saw a card is worth recording',
+   SP.worth_recording({'saw': 1, 'kept': 1}), True)
+eq('...and one that saw one and lost it', SP.worth_recording({'saw': 1, 'kept': 0}),
+   True)
+eq('...and one whose only news is that a card was recorded',
+   SP.worth_recording({'saw': 0, 'kept': 1}), True)
+# The reason the gate exists at all, which must survive the widening: a quiet
+# two minutes with the phone out of the mount is not evidence about anything
+# and would bury the windows that are.
+eq('...while a window with neither is not',
+   SP.worth_recording({'saw': 0, 'kept': 0, 'reads': 40}), False)
+eq('...and nor is no window at all', SP.worth_recording(None), False)
+# ...and the log line on the machine, which was gated the same way and so said
+# nothing about that window either.
+_split = SP.Health()
+_split.reset(0.0)
+_split.kept = 1
+_split.add({'ms': {'total': 40}, 'clipped': False}, {'pay': 16.05, 'complete': True})
+_lines = []
+_real_log = SP.log
+try:
+    SP.log = lambda m: _lines.append(m)
+    _split.report(SP.HEALTH_EVERY + 1.0, None,
+                  type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log
+ok_('the health line says a card was recorded in that window (%r)'
+    % (_lines[:1] or [''])[0][:90],
+    any('1 recorded' in m for m in _lines))
+ok_('...and says where the card came from, since this window did not see it',
+    any('first seen before this window' in m for m in _lines))
+
 # --- a fault that comes back is said again --------------------------------
 # The read-failure log is rate limited by message, and it never cleared that
 # message on a good read — so a fault that recurred an hour later matched the

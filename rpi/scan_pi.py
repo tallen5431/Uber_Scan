@@ -703,15 +703,13 @@ def save_config(path, cfg):
 
 LORES = (640, 480)
 
-# IMX519 modes, from `rpicam-hello --list-cameras`. The two smallest are
-# *cropped* out of the sensor, not scaled down: 1280x720 sees only a
-# 2560x1440 window and 1920x1080 only 3840x2160, so both throw away field of
-# view. Only these two see the whole sensor, which is what a phone in a mount
-# needs.
-FULL_FOV_MODES = {
-    '2328x1748': (2328, 1748),   # 2x2 binned, 30fps — the default
-    '4656x3496': (4656, 3496),   # full resolution, 9fps
-}
+# The table of full-field-of-view IMX519 modes used to be copied out here as
+# well, with its own paragraph explaining that the two smaller modes are
+# *cropped* out of the sensor rather than scaled down. Nothing in this file read
+# it — not start_camera, which takes `main_size` straight from the config, and
+# not any test — so it was a second statement of a rule this file does not
+# apply, with no caller to make the two observably drift. Deleted; the live one
+# is calibrate.FULL_FOV_MODES, which `--mode` is actually chosen from.
 
 
 def start_camera(cfg, exposure_us, gain, lens):
@@ -1091,9 +1089,17 @@ class Health:
                 'median %.0fms' % median]
         if self.failed:
             bits.append('%d failed' % self.failed)
-        if self.saw:
-            bits.append('%d card%s seen, %d recorded'
-                        % (self.saw, '' if self.saw == 1 else 's', self.kept))
+        # `or self.kept`, because the two are counted at different moments and
+        # a window boundary can fall between them. `saw` goes up on the first
+        # read that finds a payout and `kept` on the read that lands the row,
+        # and on the owner's own week 104 of 1,166 offers have at least one
+        # read between the two — median 3, max 7, which at a 1.85s read is
+        # three to thirteen seconds. Gated on `saw` alone, a window whose only
+        # news was "a card reached the journal" said nothing at all.
+        if self.saw or self.kept:
+            bits.append('%d card%s seen, %d recorded%s'
+                        % (self.saw, '' if self.saw == 1 else 's', self.kept,
+                           '' if self.saw else ' (first seen before this window)'))
         if self.no_pay:
             bits.append('%d found no payout' % self.no_pay)
         if self.clipped:
@@ -1174,6 +1180,30 @@ class Health:
                  'addressAsOffer': self.address_refused_as_offer}
         self.reset(now)
         return tally
+
+
+def worth_recording(tally):
+    """Whether a health window has news the journal should keep.
+
+    A quiet two minutes with the phone out of the mount is not evidence about
+    anything and would bury the windows that are. A window in which a card was
+    SEEN or a card was RECORDED is evidence, and it used to have to be the
+    former.
+
+    `saw` goes up on the first read that finds a payout; `kept` goes up on the
+    read that lands the row. They are different moments and `report()` resets
+    the window between them whenever a boundary falls in the gap — on the
+    owner's own week, 104 of 1,166 offers have at least one read between the
+    two (median 3, p90 5, max 7). When that happened and no other card arrived
+    in the second window, the `kept` was thrown away: `server.js` sums `saw`
+    and `kept` over the rows that exist, so a 1 and a 0 became "1 offer is
+    missing from everything above" on the offers page, about a card sitting in
+    the journal. That is the figure whose whole job is to say what the file is
+    missing, reporting a miss against a file that is complete — the same fault
+    the surrounding comments were written to fix for glare frames, arriving
+    through the window boundary instead.
+    """
+    return bool(tally) and bool(tally.get('saw') or tally.get('kept'))
 
 
 def _fmt_roi(roi):
@@ -2457,7 +2487,7 @@ def main():
         seen — a quiet two minutes with the phone out of the mount is not
         evidence about anything and would bury the windows that are.
         """
-        if offer_log is None or not tally or not tally.get('saw'):
+        if offer_log is None or not worth_recording(tally):
             return
         at = JR.now_ms()
         offer_log.journal.append({

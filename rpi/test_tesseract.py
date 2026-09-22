@@ -20,6 +20,8 @@ version, or breaks in the middle of a shift. Every one of those has to end with
 the rig still reading, via the binary, having said so once.
 """
 
+import contextlib
+import io
 import os
 import sys
 import threading
@@ -214,9 +216,16 @@ real_lib, real_said = PL._TESS_LIB, PL._TESS_SAID
 class Exploding:
     """A library that binds fine and fails when actually used."""
 
+    def __init__(self):
+        # How many times an engine was built — or attempted. The whole policy
+        # is "give up permanently", and the only way to see that from outside
+        # is that a second read does not try again.
+        self.tries = 0
+
     def __getattr__(self, name):
         if name == 'TessBaseAPICreate':
             def boom(*a):
+                self.tries += 1
                 raise RuntimeError('the engine fell over')
             return boom
         return getattr(real_lib, name)
@@ -236,11 +245,31 @@ def hands_back(name, fn):
 
 
 try:
-    PL._TESS_LIB = Exploding()
+    _boom = PL._TESS_LIB = Exploding()
     PL._TESS_LOCAL.engines = {}
-    PL._TESS_SAID = True                     # the message is not what is tested
-    hands_back('an engine that will not start hands the read back',
-               lambda: PL._in_process(image, PL.OCR_CONFIG, tsv=True))
+    PL._TESS_SAID = False
+    _log = io.StringIO()
+    with contextlib.redirect_stdout(_log):
+        hands_back('an engine that will not start hands the read back',
+                   lambda: PL._in_process(image, PL.OCR_CONFIG, tsv=True))
+    # ...and the whole of the stated policy, which this case honoured none of.
+    #
+    # `engine = engines[key] = _Tesseract(...)` does not assign when the
+    # constructor raises, so `engine` stayed None and the `if engine is not
+    # None:` guard skipped `_tess_off` entirely. An Init2 that returns non-zero
+    # — no eng.traineddata where the library's NULL datapath resolves, easily
+    # different under the systemd unit from the shell the binary was tried in —
+    # printed nothing, left the library live, and made the rig re-attempt
+    # TessBaseAPICreate and the LSTM model load on EVERY read for the rest of
+    # the shift before running the binary anyway. The old version of this block
+    # set `_TESS_SAID = True` and never looked at `_TESS_LIB`, so all three of
+    # those were invisible to it.
+    eq('...and the library is given up on, as the header and the README say',
+       PL._TESS_LIB, False)
+    ok_('...saying so, once, in the log (%r)' % _log.getvalue().strip()[:60],
+        'tesseract binary instead of the library' in _log.getvalue())
+    eq('...and exactly once', _log.getvalue().count('binary instead'), 1)
+    _after = _boom.tries
     broken = PL.tsv_rows(image, PL.OCR_CONFIG)
     ok_('...and the card is still read, by the binary', len(broken) > 5)
     # The journey rather than the payout: at this mount distance psm 6 loses
@@ -248,6 +277,51 @@ try:
     # and not the one being tested here.
     ok_('...with the card still on it',
         'trip' in ' '.join(r.split('\t')[-1] for r in broken))
+    eq('...without paying for a model load on every read from here on',
+       _boom.tries, _after)
+finally:
+    PL._TESS_LIB, PL._TESS_SAID = real_lib, real_said
+    PL._TESS_LOCAL.engines = {}
+
+# The other half of the same policy: an engine that STARTS and then throws
+# mid-read. This one always turned the library off — on the first exception,
+# not the second — while the comment beside it said "this one is dead; the next
+# read builds a fresh one. Twice in a row and the library is the problem".
+# Nothing counted to two and nothing ever built a fresh one, so two texts said
+# permanent, one said retry, and the code did one of each depending on where
+# the failure landed. Permanent is what the driver was promised, and it is what
+# both halves do now.
+
+
+class Sullen:
+    """A library that builds an engine happily and fails on the read."""
+
+    def __getattr__(self, name):
+        if name == 'TessBaseAPISetImage':
+            def boom(*a):
+                raise RuntimeError('the read fell over')
+            return boom
+        return getattr(real_lib, name)
+
+
+try:
+    PL._TESS_LIB = Sullen()
+    PL._TESS_LOCAL.engines = {}
+    PL._TESS_SAID = False
+    _open_before = len(PL._TESS_OPEN)
+    _log = io.StringIO()
+    with contextlib.redirect_stdout(_log):
+        hands_back('an engine that throws mid-read hands the read back',
+                   lambda: PL._in_process(image, PL.OCR_CONFIG, tsv=True))
+    eq('...and the library is given up on too', PL._TESS_LIB, False)
+    ok_('...saying so once', _log.getvalue().count('binary instead') == 1)
+    # The one it built and then lost is closed and dropped. Measured against
+    # the count this block started at, not against zero: the paired-read checks
+    # above deliberately leave engines open and this is not about those.
+    eq('...leaving no engine of its own open behind it',
+       len(PL._TESS_OPEN), _open_before)
+    ok_('...and the card is still read, by the binary',
+        len(PL.tsv_rows(image, PL.OCR_CONFIG)) > 5)
 finally:
     PL._TESS_LIB, PL._TESS_SAID = real_lib, real_said
     PL._TESS_LOCAL.engines = {}
