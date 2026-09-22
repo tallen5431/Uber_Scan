@@ -1286,6 +1286,26 @@ FAIL  autofocus available   none of 1 tuning file(s) for imx519 contain an AF al
 If Arducam's tuning ends up somewhere non-standard, point straight at it:
 `UBERSCAN_TUNING=/path/to/imx519.json`.
 
+*The verdict is the LOADER's, not the listing's, and for a while it was not.*
+The report shows every tuning file on the machine, including ones in another
+ISP pipeline's directory, because "there is an autofocus tuning here and it is
+for the wrong ISP" is precisely the diagnosis somebody needs — and the verdict
+was built from that same wide list. On a Pi 4 with an autofocus tuning under
+`rpi/pisp/` and none under `rpi/vc4/` it printed `ok  autofocus available` and
+ended **All good.** over a lens libcamera will never move, while the rig's own
+answer for the same machine was `supported: False`. Both now ask
+`camera.focus_answer`, which is the restricted search plus the `UBERSCAN_TUNING`
+override, and a stranded file is reported as one:
+
+```
+FAIL  autofocus available   an autofocus tuning exists but not in the pipeline
+                            this machine runs (.../rpi/pisp/imx519.json) —
+                            libcamera will not load it, and handing it over
+                            registers no cameras at all
+      no AF  /usr/share/libcamera/ipa/rpi/vc4/imx519.json
+      AF     /usr/share/libcamera/ipa/rpi/pisp/imx519.json   (not loaded here)
+```
+
 **Autofocus may not exist even though the control does.** libcamera
 advertises `AfMode` for this sensor, but Raspberry Pi's stock `imx519.json`
 tuning contains no autofocus *algorithm*, so setting it logs
@@ -6659,7 +6679,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      #  94 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 223 on the faults that only surface when a
+python3 rpi/test_lint.py        # 225 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #  50 on the three files the browser and the
@@ -6668,9 +6688,9 @@ python3 rpi/test_handoff.py     #  50 on the three files the browser and the
 python3 rpi/test_service.py     #  45 on the systemd units BOTH installers
                                 #     write, asking systemd itself whether an
                                 #     environment assignment survived
-python3 rpi/test_camera.py      #  34 on which tuning file opens the camera, and
+python3 rpi/test_camera.py      #  42 on which tuning file opens the camera, and
                                 #     on who is already holding it
-python3 rpi/test_doctor.py      #  73 on the preflight running to the end, on
+python3 rpi/test_doctor.py      # 100 on the preflight running to the end, on
                                 #     slower not being reported as broken, and
                                 #     on a journal with a hole in it being
                                 #     reported at one line and failed at more

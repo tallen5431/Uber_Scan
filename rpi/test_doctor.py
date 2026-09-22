@@ -143,6 +143,57 @@ eq('a sensor with the full frame passes it',
    findings(big.stdout).get('full-frame modes available'), True)
 ok_('...printing both modes', '4656x3496' in big.stdout)
 
+# --- can this rig focus, asked of the loader rather than of the listing -----
+#
+# `tuning_report` searches every ISP's directory on purpose, so that an
+# autofocus tuning sitting in the wrong one can be SHOWN — that is the
+# diagnosis somebody needs. This turned the listing into the verdict, so a Pi 4
+# with an AF tuning under rpi/pisp and none under rpi/vc4 — the state camera.py
+# records this machine having been in — printed "ok  autofocus available" and
+# ended "All good." over a lens libcamera will never move, while the rig's own
+# answer for the same machine is `supported: False`, spoken by the autopilot as
+# "no working autofocus". The fix line, the one instruction that repairs it,
+# was suppressed exactly when it was needed.
+def ipa_tree(vc4_af, pisp_af):
+    """A libcamera tuning tree, with autofocus where asked for."""
+    root = tempfile.mkdtemp()
+    for pipeline, af in (('pisp', pisp_af), ('vc4', vc4_af)):
+        if af is None:
+            continue
+        where = os.path.join(root, 'rpi', pipeline)
+        os.makedirs(where)
+        body = {'algorithms': ([{'rpi.af': {}}] if af else []) + [{'rpi.lux': {}}]}
+        with open(os.path.join(where, 'imx519.json'), 'w') as fh:
+            json.dump(body, fh)
+    return root
+
+
+_stranded = run(UBERSCAN_IPA_ROOT=ipa_tree(vc4_af=False, pisp_af=True))
+eq('an autofocus tuning this pipeline cannot load is not a working autofocus',
+   findings(_stranded.stdout).get('autofocus available'), False)
+ok_('...saying it is the wrong pipeline rather than that it is missing (%r)'
+    % [l for l in _stranded.stdout.splitlines() if 'autofocus' in l][:1],
+    any('not in the pipeline this machine runs' in l
+        for l in _stranded.stdout.splitlines()))
+ok_('...and still showing the file, which is the diagnosis',
+    any('pisp' in l and 'AF' in l for l in _stranded.stdout.splitlines()))
+ok_('...marked as the one nothing here will load',
+    any('not loaded here' in l for l in _stranded.stdout.splitlines()))
+ok_('...and giving back the instruction that repairs it',
+    'UBERSCAN_TUNING=' in _stranded.stdout)
+no_('...so the report does not end by calling that rig fine',
+    'All good.' in _stranded.stdout)
+# The two controls. A tuning this pipeline CAN load and that focuses passes,
+# and one it can load that cannot focus fails for the other reason.
+_loadable = run(UBERSCAN_IPA_ROOT=ipa_tree(vc4_af=True, pisp_af=False))
+eq('a tuning this pipeline loads and that focuses passes',
+   findings(_loadable.stdout).get('autofocus available'), True)
+_nofocus = run(UBERSCAN_IPA_ROOT=ipa_tree(vc4_af=False, pisp_af=None))
+eq('a tuning this pipeline loads that cannot focus fails',
+   findings(_nofocus.stdout).get('autofocus available'), False)
+ok_('...for the reason it actually has',
+    any('contain an AF algorithm' in l for l in _nofocus.stdout.splitlines()))
+
 # The backup. A stamp sync.py wrote a day and a half ago is a copy machine
 # that has not answered for a day and a half, and the report says so.
 journal_dir = tempfile.mkdtemp()
@@ -166,6 +217,39 @@ fresh = run(JOURNAL=journal)
 eq('a backup twenty minutes old passes it',
    findings(fresh.stdout).get('offers backed up off the car'), True)
 ok_('...saying so in minutes', any('20 min ago' in l for l in fresh.stdout.splitlines()))
+
+# ...and a stamp AHEAD of this machine's clock, which is the ordinary state of
+# a Pi before NTP answers — it has no clock of its own, boots in 1970 and jumps
+# forward when the network arrives. That is the same condition, no network,
+# under which the backup is most likely to be stale.
+#
+# The age was `max(0.0, now - at)`, so it clamped to zero and the line read
+# "ok  offers backed up off the car   0 min ago" — a specific, confident
+# number — over a copy nobody had reached for days. In that state the check
+# could not fail at all: 0.0 < 24 always. Three stamps, because the clock being
+# a few hours out, forty days out and fifty-five years out (which is a clock
+# reading 1970) all produced the same reassuring zero.
+for _label, _ahead in (('six hours', 6 * 3600000),
+                       ('forty days', 40 * 86400000),
+                       ('a clock still in 1970', 55 * 365 * 86400000)):
+    with open(journal + '.synced', 'w') as fh:
+        json.dump({'at': int(time.time() * 1000) + _ahead, 'to': 'http://nuc:8080',
+                   'have': 12}, fh)
+    _future = run(JOURNAL=journal)
+    _line = [l for l in _future.stdout.splitlines() if 'backed up' in l]
+    eq('a stamp ahead of the clock by %s is not called healthy' % _label,
+       findings(_future.stdout).get('offers backed up off the car'), False)
+    no_('...and no age is invented for it (%r)' % _line[:1],
+        any('0 min ago' in l for l in _line))
+    ok_('...it says it cannot tell', any('cannot tell' in l for l in _line))
+    ok_('...and names the clock as the likely reason',
+        'clock is almost certainly not set yet' in _future.stdout)
+    no_('...so the report does not end by calling that rig fine',
+        'All good.' in _future.stdout)
+# Put the fresh stamp back: the checks below run against this same journal.
+with open(journal + '.synced', 'w') as fh:
+    json.dump({'at': int(time.time() * 1000) - 20 * 60000, 'to': 'http://nuc:8080',
+               'have': 12}, fh)
 
 # ...and a rig with the timer installed but no stamp yet, which is every rig
 # for the first ten minutes after the update that introduced the stamp.
@@ -235,6 +319,44 @@ ok_('...and warning that the backup will go on reporting success',
 # The ordinary rig is not accused by it.
 eq('a journal that can be appended to passes',
    findings(run(JOURNAL=journal).stdout).get('the journal can be written'), True)
+
+# ...and the probe does not bring the file it is asking about into existence.
+#
+# `open(p, 'a')` creates the file when it is absent, which is every first run
+# on a fresh rig — the run this script's own docstring recommends — under a
+# comment saying "it creates nothing that was not there". Run once with sudo,
+# which most of the fix lines here begin with, and the journal is created
+# root-owned in a user-owned directory, after which the scanner running as the
+# driver cannot append to it: the preflight causing the fault it exists to
+# find.
+_fresh_dir = tempfile.mkdtemp()
+_fresh = os.path.join(_fresh_dir, 'journal.jsonl')
+_fresh_out = run(JOURNAL=_fresh)
+no_('the preflight does not create the journal it is asking about',
+    os.path.exists(_fresh))
+eq('...and still says a row could be added',
+   findings(_fresh_out.stdout).get('the journal can be written'), True)
+ok_('...saying which question it answered (%r)'
+    % [l for l in _fresh_out.stdout.splitlines() if 'can be written' in l][:1],
+    any('no journal yet' in l for l in _fresh_out.stdout.splitlines()
+        if 'can be written' in l))
+# ...and a directory that will refuse the first row is still caught, which is
+# the whole point of asking.
+_locked_dir = tempfile.mkdtemp()
+os.chmod(_locked_dir, 0o500)
+try:
+    _locked = run(JOURNAL=os.path.join(_locked_dir, 'journal.jsonl'))
+    # Skipped when this process can write anywhere regardless of the mode,
+    # which is what running as root does — and says so rather than passing
+    # quietly on a check that could not have failed.
+    if os.access(_locked_dir, os.W_OK):
+        print('      (running as root: the unwritable-directory case cannot be '
+              'posed on this machine)')
+    else:
+        eq('a journal whose directory refuses it fails the check',
+           findings(_locked.stdout).get('the journal can be written'), False)
+finally:
+    os.chmod(_locked_dir, 0o700)
 
 # The next step named is the autopilot, which aims, calibrates and scans on
 # its own — not the three scripts it replaced.

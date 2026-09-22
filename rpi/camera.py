@@ -33,9 +33,17 @@ os.environ.setdefault('LIBCAMERA_LOG_LEVELS', '*:WARN')
 # flat directory on older libcamera. These are NOT interchangeable — a Pi 5
 # tuning describes an ISP a Pi 4 does not have — so the running pipeline decides
 # the order rather than a fixed preference.
-PISP_DIR = '/usr/share/libcamera/ipa/rpi/pisp'
-VC4_DIR = '/usr/share/libcamera/ipa/rpi/vc4'
-LEGACY_DIR = '/usr/share/libcamera/ipa/raspberrypi'
+#
+# Where libcamera keeps them is overridable, for the same reason
+# UBERSCAN_SYNC_TIMER is: the verdict built out of these is the one that
+# reported a working autofocus over a lens libcamera will never move, and a
+# check that can only be posed on a machine with tuning files installed is a
+# check nothing runs until it is wrong again. Unset — which is every rig — this
+# is the path libcamera ships.
+IPA_ROOT = os.environ.get('UBERSCAN_IPA_ROOT') or '/usr/share/libcamera/ipa'
+PISP_DIR = os.path.join(IPA_ROOT, 'rpi', 'pisp')
+VC4_DIR = os.path.join(IPA_ROOT, 'rpi', 'vc4')
+LEGACY_DIR = os.path.join(IPA_ROOT, 'raspberrypi')
 
 
 def pi_model():
@@ -132,11 +140,35 @@ def tuning_report(sensor=None):
     """
     sensor = sensor or sensor_name()
     found = []
-    for directory in ALL_DIRS + ['/usr/share/libcamera/ipa/rpi/*']:
+    for directory in ALL_DIRS + [os.path.join(IPA_ROOT, 'rpi', '*')]:
         for path in sorted(glob.glob(os.path.join(directory, sensor + '*.json'))):
             if path not in [f[0] for f in found]:
                 found.append((path, _has_af(path)))
     return sensor, found
+
+
+def focus_answer(sensor=None):
+    """The tuning this machine will actually load, and whether it can focus.
+
+    The loader's own rule, in one place, because two readers need it and they
+    had drifted. `start_camera` decides this and `doctor.py` reports it, and
+    the doctor was reporting something else: it took the verdict from
+    `tuning_report`, which searches ALL_DIRS on purpose so a file in the wrong
+    ISP's directory can be SHOWN. Turning that listing into the verdict meant a
+    Pi 4 with an autofocus tuning sitting in the pisp directory printed
+    "ok  autofocus available" and "All good." over a lens libcamera will never
+    move — while the rig's own answer for the identical machine is
+    `supported: False`, spoken by the autopilot as "no working autofocus".
+
+    See tuning_dirs(): handing a pisp tuning to vc4 is not a degraded camera,
+    it is no camera at all, and that is exactly how the search came to be
+    restricted in the first place.
+    """
+    sensor = sensor or sensor_name()
+    override = os.environ.get('UBERSCAN_TUNING')
+    if override and os.path.exists(override):
+        return override, _has_af(override)
+    return find_tuning(sensor)
 
 
 def find_tuning(sensor):
@@ -214,12 +246,10 @@ def open_camera(prefer_autofocus=True):
     sensor = sensor_name()
 
     # An explicit override wins: if Arducam's tuning is installed somewhere
-    # non-standard, pointing at it is the whole fix.
-    override = os.environ.get('UBERSCAN_TUNING')
-    if override and os.path.exists(override):
-        tuning_path, has_af = override, _has_af(override)
-    else:
-        tuning_path, has_af = find_tuning(sensor)
+    # non-standard, pointing at it is the whole fix. Asked of focus_answer so
+    # the preflight and the loop cannot answer it differently — see its
+    # docstring for what happened when they did.
+    tuning_path, has_af = focus_answer(sensor)
 
     focus = {'sensor': sensor, 'tuning': tuning_path, 'supported': has_af, 'reason': None}
 

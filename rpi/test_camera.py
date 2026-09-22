@@ -167,6 +167,49 @@ mine = tuning(other, 'imx708.json', af=False)
 path, has_af = pick([other], sensor='imx708')
 eq('another sensor\'s tuning is not used', path, mine)
 
+# --- and the one answer both the loop and the preflight are given ----------
+#
+# `start_camera` decided this and `doctor.py` worked it out again, from the
+# wider list the REPORT is built from — so on a Pi 4 with an autofocus tuning
+# in the pisp directory and none in vc4, the preflight printed "ok  autofocus
+# available" and "All good." while the rig's own answer for the same machine
+# was `supported: False`, spoken as "no working autofocus". One function now,
+# and it is the restricted search plus the override.
+def answer(directories, sensor='imx519', override=None):
+    real, had = CAM.TUNING_DIRS, os.environ.get('UBERSCAN_TUNING')
+    try:
+        CAM.TUNING_DIRS = directories
+        if override is None:
+            os.environ.pop('UBERSCAN_TUNING', None)
+        else:
+            os.environ['UBERSCAN_TUNING'] = override
+        return CAM.focus_answer(sensor)
+    finally:
+        CAM.TUNING_DIRS = real
+        os.environ.pop('UBERSCAN_TUNING', None)
+        if had is not None:
+            os.environ['UBERSCAN_TUNING'] = had
+
+
+path, has_af = answer([os.path.join(work, 'vc4')])
+eq('the answer both readers get is the loadable tuning', path, focus)
+ok_('...and it can focus', has_af)
+# The case that inverted the preflight's verdict: the AF file exists on the
+# machine and is in the other pipeline's directory. `wrong` above is exactly
+# that, and the report will still SHOW it.
+path, has_af = answer([only_plain])
+eq('an autofocus tuning in the other pipeline is not the answer', path, stock)
+ok_('...and the answer is that this machine cannot focus', not has_af)
+ok_('...while the report still shows the file, which is the diagnosis',
+    CAM._has_af(os.path.join(wrong, 'imx519.json')))
+# The override start_camera honours, which the preflight has to honour too or
+# it will tell a driver to do the thing they have already done.
+path, has_af = answer([only_plain], override=focus)
+eq('an explicit override is the answer when it exists', path, focus)
+ok_('...and is reported as focusing', has_af)
+path, has_af = answer([only_plain], override=os.path.join(work, 'gone.json'))
+eq('...while one pointing at nothing falls back to the search', path, stock)
+
 # --- what is attached, without starting libcamera --------------------------
 #
 # It has to be answered before the camera manager registers anything, because

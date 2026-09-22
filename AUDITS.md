@@ -1190,6 +1190,33 @@ memory pressure, not swiping away from the app.
 
 ### The aiming
 
+**The preflight answered "can this rig focus?" from every tuning directory on
+the machine, while the loader only ever reads this pipeline's.** `tuning_report`
+searches all three ISP directories on purpose — its comment says so and
+`rpi/test_camera.py` pins it — because "there is an autofocus tuning here and it
+is for the wrong ISP" is exactly the diagnosis somebody needs. `rpi/doctor.py` then
+built the VERDICT out of that listing: `usable = [t for t in tunings if t[1]]`
+over every directory. On a Pi 4 with an autofocus tuning under `rpi/pisp/` and
+none under `rpi/vc4/` it printed `ok  autofocus available` and ended **All
+good.** over a lens libcamera will never move.
+
+That state is not hypothetical: `camera.tuning_dirs()`'s own docstring records
+this machine having been in it — "the search fell through to pisp looking for
+autofocus and found it there", and handing a pisp tuning to vc4 registers no
+cameras at all. The rig's own answer for the identical machine is
+`supported: False`, which the autopilot speaks as "no working autofocus" and the
+scan loop prints as "focus not settable". And the fix line — the one instruction
+that repairs it — is printed only on a failure, so it was withheld precisely
+when it was needed.
+
+`camera.focus_answer` is now the single rule, the restricted search plus the
+`UBERSCAN_TUNING` override, and both `start_camera` and the preflight ask it.
+A stranded file is named as one rather than counted as missing, and the listing
+still shows it, marked `(not loaded here)`. The tuning root is overridable
+through `UBERSCAN_IPA_ROOT` for the same reason `UBERSCAN_SYNC_TIMER` is: a
+branch that can only be exercised on a machine with tuning files installed is a
+branch nothing runs until it is wrong again.
+
 **A guard against a stuck outline was written, commented, and placed one line
 too late — so it never ran.** `rpi/track.py`'s miss branch called
 `_forget_stall()` unconditionally, and that nulls `_off_since` itself, so the
@@ -1221,6 +1248,44 @@ calibration" for the whole shift while the crop is on a rectangle that is not
 the card. Every number downstream is then read off the wrong pixels.
 
 ### The backup
+
+**A clock behind the stamp clamped the backup's age to zero, so the check could
+not fail.** `rpi/doctor.py` measured it as `max(0.0, now - last['at'])` and then
+asked `hours < 24`. With this machine's clock at or before the stamp that is
+`0.0`, so the line printed `ok  offers backed up off the car   0 min ago, to
+http://nuc.lan:8080` — a specific, confident number — over a copy nobody had
+reached for days, and `0.0 < 24` is always true, so in that state the check
+could not fail at all.
+
+Not a contrived state. By this project's own boot model a Pi has no clock, boots
+in 1970 and jumps forward when the network arrives — which is the same
+condition, **no network**, under which the backup is most likely to be stale —
+and fake-hwclock restoring a pre-shutdown time after the engine cut power does
+it too. Measured end to end against a real `rpi/sync.py` run: a four-day-old stamp
+reports `96.0 hours` with the clock right and `0 min ago` with the clock five
+days behind. Reproduced at six hours, forty days and fifty-five years ahead;
+all three printed the same zero.
+
+Every other place here that turns the Pi's clock into a judgement guards it
+first — `futureCeiling()` falls back to the fixed ceiling, `todaySummary()`
+reports `clockSet`, the scan loop refuses deadlines below `CLOCK_BELIEVABLE_AFTER`,
+and `rpi/sync.py` defines that constant and is imported two lines above this —
+and this was the only verdict about the one artefact that cannot be
+regenerated. It now says it cannot tell, and names the clock, the way the
+`last is None` branch above it already handles its own ambiguity. This is the
+fourth way the rig has reported a healthy backup it did not have.
+
+**The journal-writability probe created the journal.** The comment said "it
+creates nothing that was not there, writes no byte, and asks the filesystem the
+exact question the scanner will ask it" — and `open(path, 'a')` creates the file
+when it is absent, which is every first run on a fresh rig, the run this
+script's own docstring recommends. The claim is load-bearing: it is the
+justification for running this probe against the file the project calls
+irreplaceable. Worse with `sudo`, which most of the doctor's own fix lines begin
+with: the journal is then created root-owned in a user-owned directory and the
+scanner, running as the driver, cannot append to it — the preflight causing the
+fault it exists to find. The absent case now asks the DIRECTORY, which is the
+same question the first row will ask it.
 
 **Two uploads in flight together each appended the whole batch, and the
 doubling then hid a real gap from the repair that exists to find it.**

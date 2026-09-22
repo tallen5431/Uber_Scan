@@ -142,8 +142,36 @@ def main():
                   'sudo systemctl start uberscan-sync.service, then run this '
                   'again. If it still says this, run python3 rpi/sync.py --to '
                   '<the copy machine> and read what it says.')
+        elif last['at'] > JR.now_ms():
+            # A stamp ahead of this machine's clock, which is not a strange
+            # state on this rig: the Pi has no clock of its own, boots in 1970
+            # and jumps forward when the network arrives — and that is the same
+            # condition, no network, under which the backup is most likely to
+            # be stale. fake-hwclock restoring a pre-shutdown time after the
+            # engine cut power does it too.
+            #
+            # This was `hours = max(0.0, now - at)`, so the age clamped to zero
+            # and the line read "ok  offers backed up off the car   0 min ago,
+            # to http://nuc.lan:8080" — a specific, confident number — over a
+            # copy nobody had reached for days. Measured: a real four-day-old
+            # stamp reports 96.0 hours with the clock right and "0 min ago"
+            # with the clock five days behind. In that state the check could
+            # not fail at all, because 0.0 < 24 always.
+            #
+            # Said rather than guessed, like the `last is None` branch above:
+            # every other place in this repo that turns the Pi's clock into a
+            # judgement guards it first, and this is the only verdict about the
+            # one artefact that cannot be regenerated.
+            check('offers backed up off the car', False,
+                  'cannot tell — the stamp is ahead of this machine\'s clock, '
+                  'so the backup\'s age cannot be worked out (to %s)'
+                  % (last.get('to') or '?'),
+                  'the clock is almost certainly not set yet — a Pi has none of '
+                  'its own and boots in 1970. Give it a network, wait for NTP, '
+                  'and run this again; if the clock is right, the copy machine '
+                  'stamped a time in the future and its own clock is wrong.')
         else:
-            hours = max(0.0, (JR.now_ms() - last['at']) / 3600000.0)
+            hours = (JR.now_ms() - last['at']) / 3600000.0
             check('offers backed up off the car', hours < 24,
                   '%s ago, to %s' % (
                       ('%d min' % round(hours * 60)) if hours < 1 else '%.1f hours' % hours,
@@ -201,13 +229,37 @@ def main():
         # copy as well. Two greens and a silent, total loss of the only
         # permanent record.
         #
-        # Opened for append and closed again: it creates nothing that was not
-        # there, writes no byte, and asks the filesystem the exact question the
-        # scanner will ask it in a few seconds' time.
+        # Opened for append and closed again: it writes no byte, and asks the
+        # filesystem the exact question the scanner will ask it in a few
+        # seconds' time.
+        #
+        # It also said "it creates nothing that was not there", and `open(p,
+        # 'a')` creates the file when it is absent — which is every first run
+        # on a fresh rig, the run this script's own docstring recommends. So
+        # the preflight left a 0-byte journal behind on a machine that had
+        # none, under the sentence justifying it as safe to run against the one
+        # file this project calls irreplaceable. Worse with sudo, which most of
+        # the fix lines here start with: the journal is then created root-owned
+        # in a user-owned directory and the scanner, running as the driver,
+        # cannot append to it at all — the preflight causing the fault it is
+        # here to find.
+        #
+        # So the absent case is asked of the DIRECTORY instead, which is the
+        # same question the filesystem will answer for the first row: an
+        # unwritable directory is exactly where the first append fails. The
+        # file is created by whatever writes the first offer, as it always was.
+        created = os.path.exists(journal_path)
         try:
-            with open(journal_path, 'a'):
-                pass
-            writable, why = True, 'a row can be added'
+            if created:
+                with open(journal_path, 'a'):
+                    pass
+                writable, why = True, 'a row can be added'
+            elif os.access(os.path.dirname(journal_path) or '.', os.W_OK):
+                writable, why = True, ('no journal yet — the directory it will '
+                                       'be written in accepts one')
+            else:
+                writable, why = False, ('no journal yet, and its directory '
+                                        'cannot be written')
         except Exception as e:                                # noqa: BLE001
             writable, why = False, 'cannot be written (%s)' % e
         check('the journal can be written', writable, why,
@@ -268,17 +320,47 @@ def main():
         if not tunings:
             check('focus tuning', False, 'no tuning file found for %s' % sensor)
         else:
-            usable = [t for t in tunings if t[1]]
-            check('autofocus available', bool(usable),
-                  ('%s' % usable[0][0]) if usable else
+            # The verdict comes from the LOADER, not from the listing.
+            #
+            # tuning_report searches every ISP's directory on purpose, so that
+            # an autofocus tuning sitting in the wrong one can be SHOWN — its
+            # comment says so, and test_camera.py pins it. This line turned
+            # that listing into the answer: `usable = [t for t in tunings if
+            # t[1]]` over all of them. On a Pi 4 with an AF tuning under
+            # .../rpi/pisp/ and none under .../rpi/vc4/ — the state camera.py's
+            # own tuning_dirs() docstring records this machine having been in —
+            # it printed "ok  autofocus available" and the report ended "All
+            # good." about a lens libcamera will never move. The rig's own
+            # answer for that machine is `supported: False`, which the
+            # autopilot speaks as "no working autofocus" and the scan loop
+            # prints as "focus not settable"; and the fix line below, the one
+            # instruction that repairs it, was suppressed exactly when needed.
+            #
+            # camera.focus_answer is what start_camera itself asks, including
+            # the UBERSCAN_TUNING override, so the preflight and the loop
+            # cannot disagree about it any more.
+            loadable, has_af = CAM.focus_answer(sensor)
+            # ...and when the answer is no, whether an AF tuning exists that
+            # this machine simply cannot load. That is a different diagnosis
+            # from "no such file anywhere" and it has a different fix, so it is
+            # said rather than folded into the count.
+            stranded = [p for p, af in tunings if af and p != loadable]
+            check('autofocus available', has_af,
+                  loadable if has_af else
+                  ('an autofocus tuning exists but not in the pipeline this '
+                   'machine runs (%s) — libcamera will not load it, and '
+                   'handing it over registers no cameras at all'
+                   % stranded[0]) if stranded else
                   'none of %d tuning file(s) for %s contain an AF algorithm'
                   % (len(tunings), sensor),
                   'install Arducam\'s tuning for this module, then re-run. Point at '
                   'it directly with UBERSCAN_TUNING=/path/to/tuning.json if it lands '
                   'outside /usr/share/libcamera. Without it the lens cannot be moved '
                   'at all — focus it by hand using the sharpness number in preview.py')
-            for path, has_af in tunings:
-                print('      %s  %s' % ('AF  ' if has_af else 'no AF', path))
+            for path, af in tunings:
+                print('      %s  %s%s' % ('AF  ' if af else 'no AF', path,
+                                          '' if path == loadable
+                                          else '   (not loaded here)'))
     except Exception as e:
         check('focus tuning', False, str(e))
 
