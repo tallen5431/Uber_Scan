@@ -1828,6 +1828,65 @@ stated 1,008. The dead clause is deleted and `r.items` with it.
 
 ### The advice
 
+**The page said where to draw the line and never what holding one costs.**
+A line is a decision about WAITING and nothing priced the waiting. What makes
+that worth pricing is that offers are not scarce: 1,140 reached this rig over
+26 hours of scanning, **43 an hour, 81% of them less than a minute after the
+one before**, and genuinely distinct — only 1.1% of consecutive pairs share a
+payout, 3.6% share both ends. Declining costs seconds, so the line is the whole
+game. Three things now sit under the recommendation, all off offers already in
+the journal:
+
+  - **What each line takes and what it costs.** At $20, 24% of offers clear it
+    and the next is 2 minutes off; at $25, 9.4% and 6 minutes; at $35, 2.3% and
+    28 minutes with a 2.6-hour tail. Measured inside runs, so a break is never
+    a wait. The lines are the DRIVER's target and steps either side, not a
+    fixed ladder — a table that ignores the number in their settings answers
+    somebody else's question.
+  - **The line set against the line kept.** $25 in the settings against a
+    median $30.20 actually ticked — the top 4.8% of what came past, worth about
+    $3/hr in the replay. Silent when nothing is ticked: the median of what
+    merely arrived is the market, not a decision.
+  - **Where the clock went.** 13.6 of 26.4 scanning hours carrying somebody, so
+    48% of the time the car was empty. Intervals MERGED, so a stacked pair
+    occupies the clock once (summing durations gives 15.5 h and 59% busy), and
+    the clock runs to the end of the last trip rather than the last scan, which
+    is `replay()`'s own stated rule.
+
+*The idle figure is a ceiling and says so.* An unticked trip is
+indistinguishable from a break, so `unexplained()`'s silence count rides with
+it. **With no ticks at all the figure is refused outright** — the first version
+announced "100% of the time it was on, the car was empty" over a driver who had
+simply never pressed the tick, a false headline over a true caveat. Caught by
+the offers-page fixture, which has no ticks in it.
+
+*And the closing sentence of the working had to change.* It said what a driver
+would earn an hour "depends on how much of that time was driving rather than
+parked, which the scanner cannot see" — which was true until the paragraph
+above it started reporting exactly that. The scanner still cannot; a tick can,
+for the trips that got one. Left standing it would have denied a number printed
+four inches above it, which is the fifth fault class.
+
+**Two acceptance rules were tested against the replay and both lose.** Recorded
+here because both are things a driver would reasonably try.
+
+  - **$/mile costs 24% against $/hr.** Same shift, same replay: best $/hr rule
+    $19.80/hr at a $22 line; best $/mile rule $16.03 at $1.00/mi; a payout
+    floor $14.25, barely above taking everything at $13.94. Combining did not
+    help — $/hr >= 20 AND not a shop order came out at $19.18, below $/hr >= 20
+    alone.
+  - **A line per hour overfits.** In-sample the 12-3am block wants $30 and
+    earns $29.64 where a flat $22 earns $24.63, which looks like $5/hr left on
+    the table. Leave one night out, fitting on the other four: a line per block
+    $19.50/hr, one fitted flat line $18.93, and **a plain $22 fitted to nothing
+    $19.76**. The fitted line is worse than the unfitted one. Night-to-night
+    swing is $13.92 to $27.06 and swamps the tuning.
+
+None of these model the drive to the pickup — `toPickupMinutes` is null on all
+1,166 rows — so the absolute figures are optimistic. The comparisons between
+rules are fair; the omission falls on all of them equally.
+
+
 **The threshold and the headline counted different piles.** `bestAt` reports
 `offers` as what the replay walked — rows dropped with their single-offer run
 are not evidence it used — and the ready gate went on testing `rows.length`. A
@@ -1932,6 +1991,21 @@ the first load after a reboot is reported as a real problem, and then delay it a
 few seconds after `listen` rather than running it inline.
 
 ### The maps
+
+**Do not tune the acceptance line to the hour, the weekday or anything else in
+your own history.** It is the obvious next step after the by-time-of-day chart
+and it loses money. In-sample the 12-3am block wants a $30 line and earns
+$29.64/hr where a flat $22 earns $24.63. Held out one night at a time, fitting
+on the other four: a line per block earns **$19.50/hr**, one fitted flat line
+**$18.93**, and a plain $22 fitted to nothing **$19.76**. Fitting makes it
+worse, both ways. The night-to-night swing on the owner's week is $13.92 to
+$27.06 and no tuning survives it. `advise` already gives the answer the data
+supports — a plateau, and whether the driver's line is inside it.
+
+**Do not judge offers on $/mile, or on a payout floor.** Replayed over the same
+shift: $/hr at $22 earns $19.80/hr, the best $/mile rule $16.03, the best
+payout floor $14.25, and taking everything $13.94. $/mile is 24% worse than the
+rule the rig already uses. Combining them does not help either.
 
 **Do not add a weekday term to the map's time filter.** It is the obvious
 next step and the data refuses it. A 168-hour window holds each weekday-and-

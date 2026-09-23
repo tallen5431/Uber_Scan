@@ -4757,6 +4757,101 @@ tell you at a glance how far apart two jobs end — that needs coordinates, and
 the measurement that would justify them is in the section above. This is the
 90% of the value at 5% of the risk, and it may well be enough.
 
+### What holding a line costs, and the two rules that do not work
+
+`Advice.advise` says where to draw the line. It never said what holding one is
+*like*, and that is the half a driver actually decides on — a line is a
+decision about waiting, and nothing here priced the waiting.
+
+**The fact that reframes it: offers are not scarce.** 1,140 reached this rig
+over 26 hours of scanning — **43 an hour**, and **81% of them arrive less than
+a minute after the one before**. They are not one card read twice: only 1.1% of
+consecutive pairs share a payout and 3.6% share both ends. Declining costs
+seconds. So the line is the entire game, and three things about it are now on
+the page.
+
+**1. What each line takes, and what it costs in waiting.** Measured between
+offers inside a run of scanning, so a break is never counted as a wait:
+
+| hold out for | of what comes past | typical wait | slowest 1 in 10 |
+|---|---|---|---|
+| $20/hr | 24% | 2 min | 11 min |
+| **$25/hr** | 9.4% | 6 min | 33 min |
+| $30/hr | 4.8% | 9 min | 73 min |
+| $35/hr | 2.3% | 28 min | 2.6 hours |
+
+The lines are the driver's own target and steps either side of it, not a fixed
+ladder — a table that ignores the number in their settings is answering
+somebody else's question. The last column is the one that decides whether a
+line is liveable: a six-minute typical wait with a half-hour tail is a
+different evening from one with an eight-minute tail.
+
+**2. The line you set against the line you keep.** These are different numbers
+and only one of them is in the settings. The owner's target is $25 and the
+median of what they actually ticked is **$30.20** — the top 4.8% of everything
+that came past, and worth about $3/hr in the replay. Being too picky is the
+failure that hides itself: it looks like standards and shows up only as an
+empty evening. Silent when nothing is ticked, because the median of what merely
+*arrived* is the market and not a decision.
+
+**3. Where the clock went.** 13.6 of 26.4 scanning hours on a job that was
+ticked, so **48% of the time the rig was on, the car was empty**. That is the
+number a line is really chosen against. Two things it is careful about:
+intervals are **merged**, so a stacked pair occupies the clock once rather than
+twice (summing the trips instead gives 15.5 hours and a driver who was 59%
+busy); and the clock runs to the end of the last trip rather than the last
+scan, which is the rule `replay()` already states.
+
+*And it is a ceiling on idleness, not a measurement.* An unticked trip is
+indistinguishable from a break, so every one of them inflates it — the page
+prints the count of silences nothing accounts for (8 on the owner's week) and
+says what it is. **With no ticks at all it refuses the figure outright**: the
+first version announced "100% of the time it was on, the car was empty" over a
+driver who had simply never pressed ✓, with a true caveat underneath a false
+headline.
+
+#### Two rules that were tested and do not work
+
+Both are things a driver would reasonably try, and both cost money. They are
+here so nobody builds them.
+
+**$/hr is the right thing to judge on — $/mile would cost 24%.** Replaying the
+same shift under each rule, accepting the first offer that passes and then
+being busy for as long as it said:
+
+| rule | best it reaches |
+|---|---|
+| **$/hr at or above $22** | **$19.80/hr** |
+| $/mile at or above $1.00 | $16.03/hr |
+| payout at or above $7 | $14.25/hr |
+| take everything | $13.94/hr |
+
+A payout floor is barely better than accepting everything. Combining rules did
+not help either ($/hr ≥ 20 *and* not a shop order came out at $19.18, below
+$/hr ≥ 20 alone).
+
+**Do not vary the line by hour — it overfits.** In-sample it looks compelling:
+the best line at 12–3am is $30 and earns $29.64/hr where a flat $22 earns
+$24.63, which reads as $5/hr left on the table. Held out one night at a time,
+fitting on the other four:
+
+| | |
+|---|---|
+| a line per block, fitted | $19.50/hr |
+| one flat line, fitted | $18.93/hr |
+| **a plain $22, fitted to nothing** | **$19.76/hr** |
+
+The fitted flat line is *worse* than the unfitted one. Night-to-night swing —
+$13.92 to $27.06 across five nights — swamps anything the tuning finds, and
+`advise` already gives the humble answer: a plateau of $20–$25, with the
+driver's $25 inside it at a cost of 1%.
+
+**What none of this models:** the drive to the pickup. `toPickupMinutes` is
+null on all 1,166 rows — Uber states the split positionally and `to_pickup()`
+needs the word `away`, which appears on none of them — so every replay figure
+above is optimistic in absolute terms. The comparisons between rules are fair,
+since the omission falls on all of them equally.
+
 ### Where the money is, and the ranking that had to be thrown away
 
 The driver's own request: *"find areas where it might be best to find high
@@ -6743,7 +6838,7 @@ The Pi parser is a port of the browser one, and both run the same corpus:
 ```sh
 node tests/corpus.test.js       # 793 checks, the shared corpus
 node tests/parser.test.js       #  98 on the browser side alone
-node tests/advice.test.js       # 303 on what line to tell a driver to draw
+node tests/advice.test.js       # 339 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
@@ -6827,7 +6922,7 @@ python3 rpi/test_dashboard.py   # 568 on what the driving screen shows while a
 python3 rpi/test_layout.py      # 795 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
-python3 rpi/test_offerspage.py  # 333 on the offers page as a driver reads it:
+python3 rpi/test_offerspage.py  # 364 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 166 on judging a second job against the one

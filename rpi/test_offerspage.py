@@ -30,6 +30,7 @@ skip.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -479,6 +480,34 @@ def wobbly(seed=73, n=120, step=8.0):
 
 WOBBLY = wobbly()
 
+# The same market, with some of it ticked — which is the state every figure
+# about the CLOCK depends on and WOBBLY cannot reach, because nothing in it is
+# taken. Two different things are being checked here and they need two feeds:
+# without a tick the page must refuse to say how much of the time the car was
+# empty (it used to announce "100% of the time it was on, the car was empty"
+# over a driver who had simply never pressed ✓), and with ticks it must say it
+# and say how far it could be wrong.
+#
+# Ticked on the good offers only — every sixth, taken when it clears $40 —
+# because that is what makes the line KEPT differ from the line SET, which is
+# the comparison the paragraph exists to draw. A fixture that ticked at random
+# would have the two land on top of each other and the check would pass on a
+# page that printed either.
+TICKED = [dict(r) for r in wobbly(seed=91)]
+for _i, _r in enumerate(TICKED):
+    _r['id'] = 't%d' % _i
+    _r['accepted'] = bool(_r['perHour'] >= 40 and _i % 2 == 0)
+    # ...and a silence in the middle of it, which is the state the caveat under
+    # the idle figure exists for. A stretch longer than the break that no
+    # ticked trip accounts for is either a break or a trip nobody ticked, and
+    # from the journal those are the same thing — so the figure is a CEILING on
+    # idleness and the page has to say so. Without a gap here the fixture has
+    # no silences, takes the other branch ("not a ceiling — it is the figure"),
+    # and the sentence that matters is never drawn.
+    if _i >= 60:
+        _r['at'] += 95 * 60000
+        _r['firstAt'] = _r['at']
+
 FEEDS = {
     'a line that moves': {
         'count': len(WOBBLY), 'total': len(WOBBLY), 'truncated': False,
@@ -537,6 +566,10 @@ FEEDS = {
     'mapped': {'count': len(MAPPED), 'total': len(MAPPED), 'truncated': False,
                'days': 7, 'hidden': 0, 'watched': {'saw': 4, 'kept': 4},
                'unreadable': None, 'pairs': [], 'offers': MAPPED},
+    'a line with ticks': {'count': len(TICKED), 'total': len(TICKED),
+                          'truncated': False, 'days': 7, 'hidden': 0,
+                          'watched': {'saw': len(TICKED), 'kept': len(TICKED)},
+                          'unreadable': None, 'pairs': [], 'offers': TICKED},
     'mixed cost': {'count': len(MIXED_COST), 'total': len(MIXED_COST),
                    'truncated': False, 'days': 7, 'hidden': 0,
                    'watched': {'saw': 7, 'kept': 7},
@@ -736,6 +769,22 @@ const TEXT = (sel) => {
         // the two are told apart by `working`, which only an answer fills in.
         advice: document.getElementById('advice').hidden ? null : {
           lead: text('#adviceLead'), working: text('#adviceWorking'),
+          // What holding that line COSTS, which the lead cannot say: the wait
+          // table, the line kept against the line set, and where the clock
+          // went. Read as rows and paragraphs rather than as one blob, because
+          // each of the three is silent in its own circumstances and a check
+          // on the blob cannot tell a missing one from a short one.
+          waits: [].slice.call(document.querySelectorAll('#adviceCost table.waits tbody tr'))
+            .map(function (tr) {
+              return { mine: tr.classList.contains('mine'),
+                       cells: [].slice.call(tr.children).map(function (td) {
+                         return (td.textContent || '').replace(/\s+/g, ' ').trim();
+                       }) };
+            }),
+          cost: [].slice.call(document.querySelectorAll('#adviceCost p'))
+            .map(function (n) {
+              return (n.textContent || '').replace(/\s+/g, ' ').trim();
+            }),
         },
         nothing: document.getElementById('nothing').hidden
           ? null : text('#nothing'),
@@ -1361,6 +1410,90 @@ try:
     # too small to reach the answered state, so the case that keeps it is
     # checked against the module in tests/advice.test.js rather than through a
     # second hundred-row fixture.
+
+    # --- what holding that line is LIKE -------------------------------------
+    #
+    # "Your target sits inside the best range. Nothing to change." is the right
+    # answer and not one a driver can act on, because a line is a decision
+    # about WAITING and nothing here said what any line costs in waiting. What
+    # makes that worth showing at all: offers are not scarce. 1,140 of them
+    # reached this rig over 26 hours of scanning — 43 an hour, 81% arriving
+    # less than a minute after the one before, and genuinely distinct (1.1% of
+    # consecutive pairs share a payout). Declining costs seconds, so the line
+    # is the whole game and its price is time.
+    _w = wob.get('waits') or []
+    ok_('the advice says what each line costs in waiting (%r)'
+        % ([c['cells'][0] for c in _w],), len(_w) >= 3)
+    eq('...with exactly one of them marked as the driver\'s own',
+       len([c for c in _w if c['mine']]), 1)
+    ok_('...and that one is the target they set',
+        _w and [c for c in _w if c['mine']][0]['cells'][0].startswith('$25'))
+    ok_('...with lines either side of it, not a ladder starting somewhere else',
+        _w and _w[0]['cells'][0] < _w[-1]['cells'][0]
+        and not _w[0]['mine'] and not _w[-1]['mine'])
+    for _c in _w:
+        ok_('...every line says what share of offers clears it: %s'
+            % _c['cells'][0], _c['cells'][1].endswith('%'))
+        ok_('...and how long until one does: %s' % _c['cells'][0],
+            re.search(r'min|hours|under a minute', _c['cells'][2]))
+    # The tail, which is the column that decides whether a line is liveable at
+    # all: a six-minute typical wait with a half-hour worst case is a different
+    # evening from one with an eight-minute worst case.
+    ok_('...and how bad the slowest one in ten gets',
+        all(re.search(r'min|hours|under a minute', c['cells'][3]) for c in _w))
+    # A pickier line cannot take a bigger share of what comes past. If it does,
+    # the share and the wait are being read off different piles.
+    _shares = [float(c['cells'][1].rstrip('%')) for c in _w]
+    eq('a pickier line never takes a larger share of what came past',
+       _shares, sorted(_shares, reverse=True))
+
+    # NOTHING TICKED IS NOT AN EMPTY CAR. With no ✓ anywhere the arithmetic is
+    # 0 busy hours out of 15.8, and the page announced "100% of the time it was
+    # on, the car was empty" about a driver who had simply never used the tick.
+    # The caveat under it was true and the headline was false, which is the
+    # wrong way round: a figure whose whole content comes from the ticks cannot
+    # be stated at all when there are none.
+    _wc = ' '.join(wob.get('cost') or [])
+    ok_('with nothing ticked the page does not claim the car was empty (%r)'
+        % _wc[-170:], 'no way to tell driving from parked' in _wc)
+    no_('...and states no share of the time at all',
+        re.search(r'\d+% of the time', _wc))
+    no_('...nor a line kept, there being no decision on record',
+        'you ticked came in at a median' in _wc)
+    ok_('...and names the one thing that would fill it in', '✓' in _wc)
+
+    # ...and the same page over a window that IS ticked, which is where all
+    # three of these actually earn their place.
+    _tk = (got.get('a line with ticks') or {}).get('advice') or {}
+    _tc = ' '.join(_tk.get('cost') or [])
+    ok_('a ticked window says how much of the clock went on a job (%r)'
+        % _tc[-190:], re.search(r'Of the [\d.]+ hours the rig was scanning', _tc))
+    ok_('...and what share of it the car was empty',
+        re.search(r'\d+% of the time it was on, the car was empty', _tc))
+    # A ceiling, not a measurement: an unticked trip is indistinguishable from
+    # a break, so every one of them inflates this and the page has to say so.
+    # A CEILING on idleness, not a measurement, and the page must say which.
+    # An unticked trip is indistinguishable from a break, so every one of them
+    # inflates the figure above — and this fixture carries a 95-minute gap in
+    # the middle for exactly that reason.
+    ok_('...saying how far that figure could be wrong (%r)' % _tc[-160:],
+        'accounted for by nothing here' in _tc)
+    no_('...and not also claiming it is exact', 'it is the figure' in _tc)
+    ok_('...naming what would settle it', 'did not tick looks exactly like a '
+        'break' in _tc)
+    ok_('...and how many stretches it rests on, not merely that some exist',
+        re.search(r'\d+ stretch(es)? longer than \d+ minutes (is|are) '
+                  r'accounted for by nothing here', _tc))
+    # The line SET against the line KEPT, which are different numbers and only
+    # one of them is in the settings. Being too picky is the failure that hides
+    # itself: it looks like standards and shows up as an empty evening.
+    ok_('...and the line kept against the line set',
+        re.search(r'You set \$\d+/hr, and the \d+ jobs you ticked came in at a '
+                  r'median of \$\d+/hr', _tc))
+    ok_('...as a share of everything that came past',
+        re.search(r'the top [\d.]+% of everything that came past', _tc))
+    ok_('...naming what it rests on, 32 decisions being not many',
+        'the only record of a decision this has' in _tc)
 
     # --- net and gross may not disagree about the same offers ----------------
     #

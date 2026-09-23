@@ -59,6 +59,23 @@
   .advice p { margin: 0; font-size: 14px; line-height: 1.5; }
   .advice b { font-variant-numeric: tabular-nums; }
   .advice .note { margin-top: 8px; }
+  .advice #adviceCost p { margin-top: 10px; }
+  /* The wait table. Small, tabular numerals, and the driver's own line picked
+     out — the row that is theirs should not have to be counted to. It has to
+     survive the 800x480 panel and the 3.5" hat, so it is a plain table that
+     wraps its headings rather than anything that scrolls sideways. */
+  table.waits { width: 100%; border-collapse: collapse; margin-top: 10px;
+                font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.waits th { text-align: right; font-weight: 400; font-size: 11px;
+                   color: var(--muted); padding: 2px 6px; border-bottom: 1px solid var(--line);
+                   text-transform: uppercase; letter-spacing: .03em; }
+  table.waits th:first-child, table.waits td:first-child { text-align: left; }
+  table.waits td { text-align: right; padding: 4px 6px;
+                   border-bottom: 1px solid var(--line); }
+  table.waits tr:last-child td { border-bottom: 0; }
+  table.waits tr.mine td { font-weight: 700; color: var(--text); }
+  table.waits tr.mine td i { font-style: normal; font-weight: 400;
+                             font-size: 11px; color: var(--muted); }
   /* One caveat per line, marked, rather than four facts run together in a grey
      block the eye skips whole. */
   ul.note { list-style: none; margin: 18px 0 0; padding: 0; }
@@ -500,6 +517,13 @@
   <section class="advice" id="advice" hidden>
     <h2>Where to draw the line</h2>
     <p id="adviceLead"></p>
+    <!-- What holding that line is LIKE, which the sentence above cannot say.
+         A line is a decision about waiting, and the three things under here are
+         the three halves of that a driver cannot see from the log: what share
+         of offers clear each line and how long until one does, the line they
+         actually keep as against the one they set, and how much of the clock
+         went on a job at all. -->
+    <div id="adviceCost"></div>
     <p class="note" id="adviceWorking"></p>
   </section>
 
@@ -652,7 +676,7 @@
   var el = {};
   ['p25', 'p50', 'p75', 'headline', 'blocks', 'blockScale', 'kinds',
    'caveats', 'ranges', 'csv', 'recentNote', 'log', 'more',
-   'advice', 'adviceLead', 'adviceWorking', 'runs', 'runsHead',
+   'advice', 'adviceLead', 'adviceWorking', 'adviceCost', 'runs', 'runsHead',
    'blocksHead', 'kindsHead', 'undo', 'undoWhat', 'undoGo', 'showHidden',
    'find', 'findNote', 'live', 'nothing', 'ladder',
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
@@ -1539,11 +1563,152 @@
     // recorded time was really driving, which nothing here knows: on the data
     // this was built from that figure ranged from $26 to $78 while the line it
     // recommends never moved off $20.
+    // "which the scanner cannot see" was the whole of this until the block
+    // above started reporting how much of the clock went on a ticked job. The
+    // scanner still cannot see it — a ✓ can, and only for the trips that got
+    // one, which is why that figure is a ceiling and says so. Left standing,
+    // this sentence would have denied a number printed four inches above it.
     working += ' The <em>line</em> is what this can tell you; what you would '
              + 'actually earn an hour depends on how much of that time was '
-             + 'driving rather than parked, which the scanner cannot see.';
+             + 'driving rather than parked. The scanner cannot see that — only '
+             + 'the ✓ on a row can, and the figures above go exactly as far as '
+             + 'those ticks do and no further.';
 
     el.adviceWorking.innerHTML = working;
+    showAdviceCost(a, target);
+  }
+
+  /* --- what holding that line is like -------------------------------------
+   *
+   * "Your target sits inside the best range. Nothing to change." is the right
+   * answer and it is not enough to act on, because a line is a decision about
+   * WAITING and nothing on this page said what any line costs in waiting.
+   *
+   * The three things under here are the three a driver cannot get from the log
+   * by looking, all measured on offers already in it:
+   *
+   *   1. what share of what comes past clears a line, and how long until one
+   *      does. On the owner's own week $20 takes 24% of offers and the next
+   *      one is two minutes off; $35 takes 2% and half an hour.
+   *   2. the line they SET against the line they KEEP. $25 in the settings
+   *      against a median $30.20 actually ticked — the top 5% of what came
+   *      past — which is worth about $3/hr in the replay. Being too picky is
+   *      the failure that hides itself: it looks like standards and shows up
+   *      only as an empty evening.
+   *   3. how much of the clock went on a job at all. 13.6 of 26.4 scanning
+   *      hours on the owner's week, so nearly half of it the car was empty.
+   *
+   * Why this is worth showing at all, and it is the fact that reframes the
+   * whole page: offers are not scarce. 43 an hour reached this rig, 81% of
+   * them less than a minute after the one before. Declining costs seconds, so
+   * the line is the entire game — see waitFor in advice.js.
+   */
+  function showAdviceCost(a, target) {
+    if (!a || !a.ready) { el.adviceCost.innerHTML = ''; return; }
+    var html = '';
+    var mins = function (ms) {
+      if (ms === null) return '—';
+      var m = ms / 60000;
+      return m < 1 ? 'under a minute'
+           : m < 90 ? Math.round(m) + ' min'
+           : (m / 60).toFixed(1) + ' hours';
+    };
+
+    var rows = (a.waits || []).filter(function (w) { return w.n > 0; });
+    if (rows.length) {
+      html += '<table class="waits"><thead><tr><th>hold out for</th>'
+            + '<th>of what comes past</th><th>typical wait</th>'
+            + '<th>slowest 1 in 10</th></tr></thead><tbody>';
+      rows.forEach(function (w) {
+        // The driver's own line marked, because the table is about their
+        // decision and the row that is theirs should not have to be counted to.
+        var mine = w.line === target;
+        html += '<tr' + (mine ? ' class="mine"' : '') + '><td>'
+              + money(w.line) + '/hr' + (mine ? ' <i>yours</i>' : '') + '</td>'
+              + '<td>' + (w.share === null ? '—'
+                          : (w.share * 100).toFixed(w.share < 0.1 ? 1 : 0) + '%')
+              + '</td><td>' + mins(w.median) + '</td>'
+              + '<td>' + mins(w.p90) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      html += '<p class="note">Measured between offers inside a run of '
+            + 'scanning, so a break is not counted as a wait. The slowest '
+            + 'column is the one that decides whether a line is liveable: a '
+            + 'six-minute typical wait with a half-hour tail is a different '
+            + 'evening from one with an eight-minute tail.</p>';
+    }
+
+    /* The line set against the line kept. Silent when nothing was ticked —
+       there is no record of a decision then, and inventing one from the offers
+       that merely arrived would be reporting the market as a choice. */
+    var k = a.kept || {};
+    if (k.n && k.median !== null && typeof target === 'number') {
+      var apart = Math.abs(k.median - target) >= 2;
+      html += '<p>You set <b>' + money(target) + '/hr</b>, and the '
+            + (k.n === 1 ? 'one job' : '<b>' + k.n + '</b> jobs')
+            + ' you ticked came in at a median of <b>' + money(k.median)
+            + '/hr</b>'
+            + (k.share !== null
+               ? ' — the top <b>' + (k.share * 100).toFixed(1)
+                 + '%</b> of everything that came past' : '')
+            + '. '
+            + (!apart
+               ? 'The line you keep is the line you set.'
+               : k.median > target
+                 ? 'The line you <em>keep</em> is well above the one you set, '
+                   + 'and holding out costs the time in the table above. Being '
+                   + 'too picky is the failure that hides itself — it looks '
+                   + 'like standards and shows up only as an empty evening.'
+                 : 'The line you <em>keep</em> is below the one you set, so '
+                   + 'the target in your settings is not what is deciding '
+                   + 'these.')
+            // Said every time, because 31 decisions is not many and this is
+            // the figure most likely to be quoted back as a fact about how
+            // somebody drives.
+            + ' <span class="note">Off the ' + k.n + ' you ticked; the ✓ on a '
+            + 'row is the only record of a decision this has.</span></p>';
+    }
+
+    /* Where the clock went. A ceiling on idleness rather than a measurement,
+       and the sentence has to carry that: an unticked trip is indistinguishable
+       from a break, so every one of them inflates this. */
+    var i = a.idle || {};
+    /* Nothing ticked is not an empty car, and this said it was: with no ✓
+     * anywhere the arithmetic is 0 busy hours out of 15.8 and the page
+     * announced "100% of the time it was on, the car was empty" over a driver
+     * who had simply never used the tick. The caveat underneath it was true
+     * and the headline was false, which is the wrong way round — a figure
+     * whose entire content comes from the ticks cannot be stated at all when
+     * there are none. */
+    if (i.hours > 0 && !i.tagged) {
+      html += '<p>Nothing in this stretch is ticked, so there is no way to '
+            + 'tell driving from parked here — <b>' + i.hours.toFixed(1)
+            + '</b> hours of scanning and no record of a single job taken. '
+            + 'The ✓ on a row is what fills this in, and a handful of them is '
+            + 'worth more than another shift of scanning.</p>';
+    } else if (i.share !== null && i.share !== undefined && i.hours > 0) {
+      html += '<p>Of the <b>' + i.hours.toFixed(1) + '</b> hours the rig was '
+            + 'scanning, <b>' + i.busyHours.toFixed(1) + '</b> were spent on a '
+            + 'job you ticked — so <b>' + Math.round(i.share * 100) + '%</b> of '
+            + 'the time it was on, the car was empty. That is the number a '
+            + 'line is really chosen against: being pickier buys a better rate '
+            + 'and pays for it here.';
+      if (i.silences) {
+        html += ' <span class="note">At most, though, not exactly: <b>'
+              + i.silences + '</b> stretch' + (i.silences === 1 ? '' : 'es')
+              + ' longer than ' + Advice.SHOWN_AT + ' minutes '
+              + (i.silences === 1 ? 'is' : 'are') + ' accounted for by nothing '
+              + 'here, and a trip you did not tick looks exactly like a break. '
+              + 'Ticking a few of them is worth more than another shift of '
+              + 'scanning.</span>';
+      } else {
+        html += ' <span class="note">Every silence longer than '
+              + Advice.SHOWN_AT + ' minutes is accounted for by a job you '
+              + 'ticked, so this one is not a ceiling — it is the figure.</span>';
+      }
+      html += '</p>';
+    }
+    el.adviceCost.innerHTML = html;
   }
 
   function full0(target) { return target * 2; }

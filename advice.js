@@ -1198,6 +1198,143 @@
     return { tagged: tagged, silences: silences };
   }
 
+  /* --- what a line actually feels like ---------------------------------
+   *
+   * `bestAt` says which line earns most. It does not say what holding that
+   * line is LIKE, and a driver deciding whether they can afford to be pickier
+   * is asking the second question. Measured on the owner's own week, inside
+   * runs of scanning: at $20 a line takes 23.7% of what comes past and the
+   * next one is about two minutes off; at $35 it is 2.3% and half an hour.
+   * The shape of that curve is the whole of "how picky can I be", and nothing
+   * here could draw it.
+   *
+   * WHY THIS IS AFFORDABLE AT ALL, and it is the fact that reframes the
+   * feature: offers are not scarce. 1,140 of them reached this rig over 26
+   * hours of scanning — 43 an hour, 81% of them arriving less than a minute
+   * after the one before. They are not the same card read twice: only 1.1% of
+   * consecutive pairs share a payout and 3.6% share both ends. Declining costs
+   * seconds, so the line is the whole game.
+   *
+   * From every offer to the next one at or above the line, within a run —
+   * which is what a driver who has just declined experiences. A gap that spans
+   * a break is not a wait and runs() has already cut those out.
+   */
+  function waitFor(theRuns, lines, rows) {
+    var all = rows || [];
+    return (lines || []).map(function (line) {
+      var waits = [];
+      (theRuns || []).forEach(function (run) {
+        for (var i = 0; i < run.length; i++) {
+          var j = i + 1;
+          while (j < run.length && run[j].perHour < line) j++;
+          if (j < run.length) waits.push(run[j].at - run[i].at);
+        }
+      });
+      waits.sort(function (a, b) { return a - b; });
+      var clears = all.filter(function (o) { return o.perHour >= line; }).length;
+      return {
+        line: line,
+        // Of everything that came past, not of what was taken.
+        share: all.length ? clears / all.length : null,
+        n: waits.length,
+        median: waits.length ? waits[waits.length >> 1] : null,
+        // The tail is the half that decides whether a line is liveable. A
+        // six-minute median with a half-hour ninetieth is a different night
+        // from a six-minute median with an eight-minute ninetieth.
+        p90: waits.length ? waits[Math.floor(0.9 * (waits.length - 1))] : null
+      };
+    });
+  }
+
+  /* The line the driver KEEPS, as against the one they set.
+   *
+   * These are different numbers and only one of them is in the settings. On
+   * the owner's own week the target is $25 and the median of what was actually
+   * ticked is $30.20 — the top 4.8% of what came past. The rig holds both and
+   * has never put them side by side, and the gap is worth about $3/hr in the
+   * replay. Being too picky is the failure that hides itself: it looks like
+   * high standards and shows up only as an empty evening.
+   *
+   * Over what was ticked, which is the only record of a decision this has. A
+   * thin count is reported rather than hidden — see `n`.
+   */
+  function keptLine(rows) {
+    var all = rows || [];
+    var took = all.filter(function (r) { return r.took; });
+    if (!took.length) return { n: 0, median: null, share: null };
+    var mid = Math.round(median(took.map(function (r) {
+      return r.perHour;
+    })) * 100) / 100;
+    // ...and how much of what came past would have cleared that line, which is
+    // what turns "$30.20" from a number into "the top 5%". Computed here so
+    // the page does not re-filter a pile it has a different name for.
+    var clears = all.filter(function (r) { return r.perHour >= mid; }).length;
+    return { n: took.length, median: mid,
+             share: all.length ? clears / all.length : null };
+  }
+
+  /* How much of the clock was spent carrying somebody.
+   *
+   * The biggest lever there is and nothing reported it: on the owner's week
+   * 13.6 of 26.4 scanning hours are covered by a ticked trip, so 48% of the
+   * time the rig was on, the car was empty. (Summing the trips' own durations
+   * instead gives 15.5 — see the merge below, which is what stops a stacked
+   * pair being counted twice.) A line is chosen against that
+   * number — being pickier buys a better rate and pays for it here.
+   *
+   * MERGED intervals, not a sum of durations: two ticked offers can overlap
+   * when a second is picked up before the first is delivered, and adding their
+   * lengths would report a driver as busier than the clock allows. Clipped to
+   * the runs as well, so a trip that ran past the last scan does not borrow
+   * time from a stretch nobody was scanning.
+   *
+   * AND IT IS A CEILING ON IDLENESS, NOT A MEASUREMENT, which is why
+   * `silences` comes back with it. A trip the driver never ticked is
+   * indistinguishable from a break, so every untagged trip inflates this. On
+   * the owner's week 31 trips are tagged and 8 silences are accounted for by
+   * nothing — the page must say so rather than print 41% as a fact.
+   */
+  function idleIn(theRuns, breakMinutes, rows) {
+    var spans = [], busy = [];
+    (theRuns || []).forEach(function (run) {
+      var from = run[0].at, to = run[run.length - 1].at;
+      run.forEach(function (o) {
+        if (!o.took) return;
+        var end = o.at + o.mins * 60000;
+        // The clock runs until the last trip FINISHES, not until the last
+        // offer appeared — the same rule replay() states in as many words, and
+        // for the same reason. Clipping the tail instead charged the driver
+        // for a trip that ran past the last scan and then called that time
+        // idle: on the owner's week that reads 51% idle against a true 48%.
+        if (end > to) to = end;
+        busy.push([Math.max(o.at, from), end]);
+      });
+      spans.push([from, to]);
+    });
+    busy.sort(function (x, y) { return x[0] - y[0]; });
+    var merged = [];
+    busy.forEach(function (iv) {
+      var last = merged[merged.length - 1];
+      if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+      else merged.push(iv.slice());
+    });
+    var scanning = spans.reduce(function (s, v) { return s + (v[1] - v[0]); }, 0);
+    var carrying = merged.reduce(function (s, v) { return s + (v[1] - v[0]); }, 0);
+    var counted = unexplained((theRuns || []).reduce(function (a, r) {
+      return a.concat(r);
+    }, []), breakMinutes);
+    return {
+      hours: scanning / 3600000,
+      busyHours: carrying / 3600000,
+      share: scanning ? 1 - carrying / scanning : null,
+      tagged: counted.tagged,
+      // Stretches longer than the break that no ticked trip accounts for. Each
+      // one is either a break or a trip nobody tagged, and from here they look
+      // identical — so this is how far the figure above could be wrong.
+      silences: counted.silences
+    };
+  }
+
   /* The best line at one threshold, and the plateau around it. */
   function bestAt(rows, breakMinutes) {
     var theRuns = runs(rows, breakMinutes);
@@ -1399,9 +1536,27 @@
       }
     }
 
+    /* ...and what that line is like to hold, which is the half `bestAt` has
+       never answered. Lines around the DRIVER's own target rather than a fixed
+       ladder: the question is what their decision costs, and a table that
+       ignores the number in their settings is answering somebody else's. */
+    var theRuns = runs(rows, o.breakMinutes || SHOWN_AT);
+    var mine = typeof o.target === 'number' && isFinite(o.target) && o.target > 0
+      ? o.target : suggested;
+    var steps = [mine - 5, mine, mine + 5, mine + 10].filter(function (v, i, a) {
+      return v > 0 && a.indexOf(v) === i;
+    }).sort(function (a, b) { return a - b; });
+
     return {
       ready: true,
       offers: shown.offers,
+      // What each line takes and what it costs in waiting. See waitFor.
+      waits: waitFor(theRuns, steps, rows),
+      // The line actually kept, against the one set. See keptLine.
+      kept: keptLine(rows),
+      // How much of the clock was carrying somebody, and how far that could be
+      // wrong. See idleIn.
+      idle: idleIn(theRuns, o.breakMinutes || SHOWN_AT, rows),
       // Rows that were read but fell outside any counted run — a stray offer in
       // a driveway, the last one before the rig was switched off. Named rather
       // than silently dropped, because "231 offers" against a journal holding
@@ -1498,6 +1653,7 @@
            // shown. The thresholds are exported for the same reason
            // THRESHOLDS below is: a page that says "eight offers on two days"
            // in words must read the number it is describing.
+           waitFor: waitFor, keptLine: keptLine, idleIn: idleIn,
            areas: areas, AREA_FLOOR: AREA_FLOOR, AREA_DAYS: AREA_DAYS,
            AREA_ALPHA: AREA_ALPHA, AREA_SHUFFLES: AREA_SHUFFLES,
            outingsIn: outingsIn,

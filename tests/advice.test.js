@@ -1272,6 +1272,157 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
 })();
 
 
+/* ---- what holding a line is like ---- */
+/*
+ * `bestAt` says which line earns most; these say what holding it COSTS. The
+ * fact that makes them worth having is that offers are not scarce — 43 an hour
+ * reached this rig over the owner's week, 81% of them less than a minute after
+ * the one before — so the line is the whole game and the price of it is time.
+ */
+(function () {
+  var T0 = new Date(2026, 8, 18, 18, 0, 0).getTime();
+  /* A row as `usable` hands it on. Minutes and pay are chosen so perHour is
+     exactly what is asked for, because every check below is about a threshold
+     and a fixture that lands a cent under one tests the cent. */
+  function at(minsIn, rate, mins, took) {
+    var m = mins || 30;
+    return { at: T0 + minsIn * 60000, mins: m, net: rate * (m / 60),
+             perHour: rate, took: !!took, id: 'o' + minsIn };
+  }
+
+  /* --- how long until one clears the line --- */
+  //
+  // Four offers a minute apart: $10, $40, $10, $10. From the first, the next
+  // one at or above $30 is a minute away; from the second there is none ahead
+  // of it at all and it contributes no wait, which is the case a naive
+  // implementation counts as a zero and drags the median to nothing.
+  var run = [at(0, 10), at(1, 40), at(2, 10), at(3, 10)];
+  var w30 = A.waitFor([run], [30], run)[0];
+  eq('one offer in four clears $30', Math.round(w30.share * 100), 25);
+  eq('...and only the offers with one ahead of them count as a wait', w30.n, 1);
+  eq('...which is a minute', w30.median, 60000);
+  // Below every offer: every one has a next, so every one waits.
+  var w5 = A.waitFor([run], [5], run)[0];
+  eq('a line under everything clears everything', w5.share, 1);
+  eq('...and every offer but the last has a wait', w5.n, 3);
+  eq('...of a minute', w5.median, 60000);
+  // Above everything: nothing clears it, and the page must get null rather
+  // than a zero that would print as "under a minute".
+  var w99 = A.waitFor([run], [99], run)[0];
+  eq('a line over everything clears nothing', w99.share, 0);
+  eq('...and there is no wait to report', w99.median, null);
+  eq('...nor a slowest one', w99.p90, null);
+
+  // THE CURVE, which is the whole point: a higher line waits longer. Ten
+  // offers, one in five of them good.
+  var many = [];
+  for (var i = 0; i < 20; i++) many.push(at(i, i % 5 === 0 ? 40 : 10));
+  var curve = A.waitFor([many], [5, 40], many);
+  ok_('a pickier line takes a smaller share',
+      curve[1].share < curve[0].share);
+  ok_('...and waits longer for it', curve[1].median > curve[0].median);
+
+  // A gap that spans a break is not a wait. Two runs, and the long silence
+  // between them must not be counted — which is what runs() is for and what a
+  // single flat list would get wrong.
+  var early = [at(0, 10), at(1, 40)], late = [at(600, 10), at(601, 40)];
+  var split = A.waitFor([early, late], [30], early.concat(late))[0];
+  eq('a wait is measured inside a run, never across the gap between two',
+     split.median, 60000);
+  eq('...over both runs', split.n, 2);
+
+  /* --- the line set against the line kept --- */
+  //
+  // Different numbers, and only one of them is in the settings. Three ticked
+  // at $40 against a pile that is mostly $10: the median of what was taken is
+  // $40 and it is the top quarter of what came past.
+  var mixed = [];
+  for (var j = 0; j < 12; j++) mixed.push(at(j, j % 4 === 0 ? 40 : 10, 30, j % 4 === 0));
+  var kept = A.keptLine(mixed);
+  eq('the line kept is the median of what was ticked', kept.median, 40);
+  eq('...over the count that was ticked', kept.n, 3);
+  eq('...and says what share of the window clears it',
+     Math.round(kept.share * 100), 25);
+  // Nothing ticked is no record of a decision, and the market is not one.
+  // Reporting the median of what merely ARRIVED as "the line you keep" would
+  // be the page inventing a choice nobody made.
+  var none = A.keptLine(mixed.map(function (o) {
+    return Object.assign({}, o, { took: false });
+  }));
+  eq('nothing ticked is no line kept', none.median, null);
+  eq('...and says so as a count', none.n, 0);
+  eq('...with no share either', none.share, null);
+
+  /* --- where the clock went --- */
+  //
+  // One run, an hour long, with a single half-hour job ticked in it.
+  var hour = [at(0, 20, 30, true), at(30, 20, 30, false), at(60, 20, 30, false)];
+  var idle = A.idleIn([hour], 30, hour);
+  eq('an hour of scanning is an hour', Math.round(idle.hours * 10), 10);
+  eq('...with half of it on a job', Math.round(idle.busyHours * 10), 5);
+  eq('...so half of it idle', Math.round(idle.share * 100), 50);
+
+  // A STACK must not be counted twice. Two ticked half-hour jobs starting ten
+  // minutes apart occupy forty minutes of clock, not sixty — adding their
+  // durations reports a driver as busier than the clock allows, and on a good
+  // stacking night that is how a page tells somebody they were 110% occupied.
+  var stacked = [at(0, 20, 30, true), at(10, 20, 30, true), at(60, 20, 30, false)];
+  var st = A.idleIn([stacked], 30, stacked);
+  eq('a stacked pair occupies the clock once, not twice',
+     Math.round(st.busyHours * 60), 40);
+  ok_('...which is less than the two trips add up to', st.busyHours < 1);
+
+  // The clock runs to the end of the last trip, not to the last offer — the
+  // rule replay() states in as many words. Clipping there instead charges the
+  // driver for a trip that ran past the last scan and then calls that time
+  // idle.
+  var tail = [at(0, 20), at(10, 20, 30, true)];
+  var tl = A.idleIn([tail], 30, tail);
+  eq('the clock runs on to the end of the last trip taken',
+     Math.round(tl.hours * 60), 40);
+  eq('...all of which after the tick is on that job',
+     Math.round(tl.busyHours * 60), 30);
+
+  // And it is a CEILING on idleness, not a measurement, so the count that says
+  // how far it could be wrong comes back with it. A silence nothing accounts
+  // for is either a break or a trip nobody ticked, and from here those are the
+  // same thing.
+  var quiet = [at(0, 20), at(200, 20)];
+  var q = A.idleIn([quiet], 30, quiet);
+  eq('a long silence nothing accounts for is counted', q.silences, 1);
+  eq('...and a window with nothing ticked says so', q.tagged, 0);
+  eq('...while a silence a ticked trip explains is not counted',
+     A.idleIn([[at(0, 20, 120, true), at(100, 20)]], 30,
+              [at(0, 20, 120, true), at(100, 20)]).silences, 0);
+
+  /* --- and all three reach advise(), which is what the page asks --- */
+  var week = [];
+  for (var d = 0; d < 3; d++) {
+    for (var k = 0; k < 60; k++) {
+      var when = d * 1440 + k * 3;
+      week.push(at(when, k % 6 === 0 ? 40 : 12, 20, k % 20 === 0));
+    }
+  }
+  // advise() takes journal rows, not the shape above, so they are rebuilt.
+  var asJournal = week.map(function (o) {
+    return { at: o.at, pay: o.perHour * (o.mins / 60), minutes: o.mins,
+             billedMinutes: o.mins, cost: 0, whole: 1, suspect: 0, hidden: 0,
+             accepted: o.took, id: o.id };
+  });
+  var a = A.advise(asJournal, { target: 25 });
+  ok_('advise answers at all on this fixture', a.ready);
+  ok_('...and carries what each line costs in waiting', (a.waits || []).length > 1);
+  eq('...with the driver\'s own line among them, not a fixed ladder',
+     a.waits.filter(function (x) { return x.line === 25; }).length, 1);
+  ok_('...and lines either side of it',
+      a.waits.some(function (x) { return x.line < 25; })
+      && a.waits.some(function (x) { return x.line > 25; }));
+  ok_('...the line actually kept', a.kept && a.kept.n > 0);
+  ok_('...and where the clock went', a.idle && a.idle.hours > 0);
+  ok_('...with the count that says how far that could be wrong',
+      typeof a.idle.silences === 'number');
+})();
+
 /* ---- which areas paid, and whether that may be said at all ---- */
 /*
  * The feature this guards is a ranking a driver would act on by DRIVING
