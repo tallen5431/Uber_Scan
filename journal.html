@@ -686,7 +686,14 @@
   // of answer here: nobody is driving then, so no shift can straddle it. It is
   // deliberately not configurable yet — one number that is right for almost
   // everybody beats a setting nobody finds.
-  var DAY_STARTS_AT = 4;
+  //
+  // Read from advice.js, which is where it now lives, because THREE files
+  // carried their own 4: this page, live.html and — once the area ranking
+  // needed to know how many separate outings a town was seen on — advice.js
+  // itself. `dayOf` below stays here because it returns a Date at the day's
+  // start and this page is the only thing that wants one; what moved is the
+  // number, which is the part that could come apart.
+  var DAY_STARTS_AT = Advice.DAY_STARTS_AT;
 
   // The day a moment belongs to, as a Date at that day's start.
   function dayOf(at) {

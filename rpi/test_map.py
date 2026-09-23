@@ -230,7 +230,15 @@ ROWS = [
     # Newest, deliberately: the journal comes back oldest first, so putting
     # these at the front of the list would push the one named failure above out
     # past the cap and the check on it would pass by not running.
-    offer(5 + i, 'Unfindable Pl %d, Atlantis' % i, None, 2.0, at=NOW - (i + 1) * 1000)
+    # ...across TWO towns and two nights, which the area ranking needs and
+    # nothing else here cares about: a single town has nothing to be ranked
+    # against, and a single night cannot clear the two-outing floor. The
+    # geocoder can place none of them either way, so every count above is
+    # untouched — what changes is that the sidebar's top block now has two
+    # towns to hold against each other and several hours to hold still.
+    offer(5 + i, 'Unfindable Pl %d, %s' % (i, 'Atlantis' if i % 2 else 'Borealis'),
+          None, 2.0,
+          at=NOW - (i + 1) * 1000 - (i % 2) * 86400000 - (i % 5) * 3600000)
     for i in range(26)
 ]
 
@@ -374,7 +382,57 @@ const KNOWN = {
     asked: window.__asked.length,
     privacy: document.getElementById('privacy').textContent.replace(/\s+/g, ' ').trim(),
     canPlace: !document.getElementById('place').disabled,
+    // The ranking, read at the same instant as `asked` above — which is the
+    // whole claim about it: it is grouped on the town the rig read off the
+    // card, so it is on screen before anything has been looked up and whether
+    // or not anything ever is.
+    money: {
+      heads: [].slice.call(document.querySelectorAll('#sideBody h2'))
+        .map(function (h) { return (h.textContent || '').trim(); }),
+      note: [].slice.call(document.querySelectorAll('#sideBody > .note'))
+        .map(function (n) { return (n.textContent || '').replace(/\s+/g, ' ').trim(); }),
+      rows: [].slice.call(document.querySelectorAll('#sideBody .rankrow'))
+        .map(function (r) {
+          // The support is read as something a driver can SEE, not as text in
+          // the DOM: textContent walks hidden nodes happily, so a support line
+          // that had been hidden away would still have satisfied a check on
+          // the row's text.
+          var sup = r.querySelector('.note');
+          return { town: r.getAttribute('data-town'),
+                   text: (r.textContent || '').replace(/\s+/g, ' ').trim(),
+                   support: sup && sup.getClientRects().length
+                     ? (sup.textContent || '').replace(/\s+/g, ' ').trim() : null };
+        }),
+      emptyShown: !document.getElementById('sideEmpty').hidden,
+    },
   }));
+
+  /* The two shapes the ranking has, found rather than hard-coded.
+   *
+   * "Any time" has several towns and several hours in it, so the panel holds
+   * the hour still and ranks by what is left. Narrow the `when` box far enough
+   * and one town is left standing, which is not a ranking at all — the page
+   * said "this ranking is not worth acting on" AND, in the same breath, that
+   * chance never does this well, because `areas` returns a null p where there
+   * is nothing to test against and the odds wording read that null as a zero.
+   *
+   * Which block leaves one town depends on the clock of whatever machine is
+   * running this, so the driver looks for the state instead of assuming it. */
+  stage = 'the ranking at one town and at several';
+  out.oneTown = null;
+  for (const opt of await page.$$eval('#block option', (os) => os.map((o) => o.value))) {
+    if (opt === '') continue;
+    await page.selectOption('#block', opt);
+    await page.waitForTimeout(150);
+    const seen = await page.evaluate(() => ({
+      rows: document.querySelectorAll('#sideBody .rankrow').length,
+      note: [].slice.call(document.querySelectorAll('#sideBody > .note'))
+        .map((n) => (n.textContent || '').replace(/\s+/g, ' ').trim()).join(' '),
+    }));
+    if (seen.rows === 1 && !out.oneTown) out.oneTown = seen;
+  }
+  await page.selectOption('#block', '');
+  await page.waitForTimeout(200);
 
   stage = 'place';
   await page.click('#place');
@@ -1440,7 +1498,10 @@ const STUB = `
   out.box = await page.evaluate(() => {
     const sel = document.getElementById('block');
     return sel ? { options: [].slice.call(sel.options).map((o) => o.textContent),
-                   value: sel.value } : null;
+                   value: sel.value,
+                   // Every select in the control bar, so "one box" is a fact
+                   // this reads rather than one the page happens to have.
+                   count: document.querySelectorAll('.bar select').length } : null;
   });
 
   // THE saving, and it only exists before anything is cached: a walk is one
@@ -1619,19 +1680,122 @@ try:
     if w.get('skip'):
         skip(w['skip'])
 
+    # --- what the page answers before it has asked anybody anything --------
+    #
+    # The driver's request was "find areas where it might be best to find high
+    # paying rides". The answer is grouped on the TOWN the rig read off the
+    # card, never on a coordinate, and that is not a stylistic choice: it is
+    # what lets this appear the moment the offers land, with nothing sent to a
+    # geocoder, and it is what keeps a misread street from moving a figure the
+    # driver would act on.
+    #
+    # `asked` is read in the same evaluate() as this, and it is 0.
+    _m = (got.get('onLoad') or {}).get('money') or {}
+    _notes = ' '.join(_m.get('note') or [])
+    ok_('the map answers where the money is (%r)' % (_m.get('heads') or [])[:1],
+        'Where the money is' in (_m.get('heads') or []))
+    no_('...instead of telling the driver to place them first',
+        _m.get('emptyShown'))
+    eq('...having asked nobody anything to do it',
+       (got.get('onLoad') or {}).get('asked'), 0)
+    ok_('...and saying so, since the rest of the page cannot',
+        'needed no lookups' in _notes or 'needed no lookups'
+        in ' '.join(_m.get('heads') or []))
+
+    # Every figure carries what it rests on. This one is the likeliest on the
+    # whole page to be quoted back later as a fact about a town.
+    _rows = _m.get('rows') or []
+    ok_('a town that clears the floor is ranked (%r)'
+        % (_rows[0]['text'][:60] if _rows else None), len(_rows) >= 1)
+    if _rows:
+        ok_('...with the offers behind it on the row, and on screen (%r)'
+            % _rows[0].get('support'),
+            re.search(r'\d+ offers? on \d+ separate days?',
+                      _rows[0].get('support') or ''))
+        ok_('...and a rate per hour', '/hr' in _rows[0]['text'])
+        ok_('...and the town it is about, for the map to be taken to',
+            bool(_rows[0]['town']))
+
+    # ONE town is not a ranking, and this fixture has exactly one that clears
+    # the floor. The page used to print "This ranking is not worth acting on"
+    # and, in the same sentence, that chance never does this well — two
+    # contradictory claims joined by an `and`, because `areas` returns a null p
+    # where there is nothing to test against and the odds wording read that
+    # null as a zero.
+    _one = got.get('oneTown') or {}
+    ok_('a window can be narrowed to a single town (%r)' % (_one.get('rows'),),
+        _one.get('rows') == 1)
+    ok_('...and one town alone is not called a ranking at all (%r)'
+        % (_one.get('note') or '')[:90],
+        'nothing to rank it against' in (_one.get('note') or ''))
+    no_('...and is not accused of being chance either',
+        'not worth acting on' in (_one.get('note') or ''))
+    no_('...nor credited with beating it', 'not once in' in (_one.get('note') or ''))
+    # ...and the towns that did not clear the floor are counted rather than
+    # quietly missing, which is this project's second fault class one level
+    # down: a ranking that drops the thin towns reports the window as tidier
+    # than it is.
+    ok_('the towns under the floor are counted (%r)' % _notes[:60],
+        re.search(r'\d+ more towns? had offers here but fewer', _notes))
+    ok_('...and the offers that named no town at all',
+        re.search(r'\d+ offers? named no town', _notes))
+    # The one thing a driver must not conclude from this list.
+    ok_('...and it says it ranks where you already work, not everywhere',
+        'not everywhere you could' in _notes)
+
+    # --- and the hour, which is tangled up with every one of these figures --
+    #
+    # A town's rate is partly a fact about when the driver is in it. On the
+    # owner's own week 12-3am paid $21.24 and 3-6pm paid $14.17, and 57 of
+    # Atlanta's 98 offers are in the first while 40 of Marietta's 82 are in
+    # the second — so the raw list has Atlanta ahead of Marietta by $5.38 and
+    # the true figure, at the same hours, is $2.45. A driver acting on the raw
+    # list drives to Atlanta at six in the evening and finds the six-o'clock
+    # rate. This fixture's offers are ten minutes apart and so span several
+    # blocks, which is what makes the holding visible here at all.
+    ok_('the ranking says it holds the hour still (%r)'
+        % [n for n in (_m.get('note') or []) if 'held still' in n][:1],
+        'held still' in _notes)
+    ok_('...and says what that is worth, against what it looks like unheld',
+        re.search(r'best to worst is \$[\d.]+; unheld it looks like \$[\d.]+',
+                  _notes))
+    # ...and the row LEADS with that figure rather than with what the town
+    # earned. Leading with the median is the whole fault: it is the number that
+    # looks like a rate, it is four times the true margin on the owner's week,
+    # and a driver reads the first number on the row.
+    if _rows:
+        ok_('the row leads with what is left, not with what it paid (%r)'
+            % _rows[0]['text'][:44],
+            re.match(r'^[^\d]*[+\u2212]\$[\d.]+/hr', _rows[0]['text']))
+        ok_('...with what it paid beside it, being what was earned',
+            re.search(r'\$[\d.]+ median', _rows[0].get('support') or ''))
+
     # --- the box itself ----------------------------------------------------
     box = w.get('box')
     ok_('the map can be asked about a time at all', box is not None)
     if box:
         eq('...with the eight blocks the offer log draws its chart on, '
-           'and "any time"', len(box['options']), 9)
+           '"any time", and the two day cuts', len(box['options']), 11)
         # The NAMES, from Advice.BLOCK_NAMES, because this box and that chart
         # cut the same week and a page keeping its own copy of eight edges is
         # where two answers to one question come from.
         eq('...named exactly as the offer log names them',
-           box['options'][1:],
+           box['options'][1:9],
            ['12\u20133am', '3\u20136am', '6\u20139am', '9am\u201312',
             '12\u20133pm', '3\u20136pm', '6\u20139pm', '9pm\u201312'])
+        # ...and the day cut the driver asked for, in the SAME box.
+        #
+        # AUDITS, under Settled, refuses a weekday term in this filter, and the
+        # measurement behind it is about weekday CROSSED WITH block: a 168-hour
+        # window holds each weekday-and-block once, so all thirteen occupied
+        # cells of that grid came off one date apiece. Two boxes side by side
+        # is how that grid gets built, so there is one box and picking a day
+        # cut un-picks the block. The refused question is unreachable rather
+        # than discouraged, and this is the check that keeps it that way.
+        eq('...and the two day cuts, in the same box', box['options'][9:],
+           ['weekends', 'weekdays'])
+        eq('...so there is exactly one time control on the page',
+           box['count'], 1)
         eq('...and it opens on any time, so the page is what it was',
            box['value'], '')
 

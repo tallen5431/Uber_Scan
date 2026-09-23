@@ -157,6 +157,38 @@
    * Requires a lowercase letter in the chunk, which is what keeps OCR wreckage
    * out: "ies, LAS" is one of the strings that actually produced a stray pin,
    * and "LAS" is not a town. */
+  /* The town in one place name, or null — the rule above, on its own.
+   *
+   * Lifted out of localityOf rather than written a second time, because the
+   * area ranking needs exactly this judgement and two copies of "what counts
+   * as a town" would answer differently the first time either was touched.
+   * Every word of the paragraph above applies here: the comma, the shape, and
+   * the lowercase letter that keeps "ies, LAS" out.
+   *
+   * It is the card's own words and nothing else. No lookup, no coordinate, no
+   * answer a geocoder gave — see the head of this file for why that line is
+   * where it is. */
+  function townOf(name) {
+    var v = (name == null ? '' : String(name)).trim();
+    if (!v) return null;
+    var parts = v.split(',');
+    if (parts.length < 2) return null;
+    var tail = parts[parts.length - 1].trim();
+    if (!/^[A-Z][A-Za-z .'-]{2,24}$/.test(tail)) return null;
+    if (!/[a-z]/.test(tail)) return null;
+    return tail;
+  }
+
+  /* Whichever end of this job named a town. The dropoff first: it is a street
+   * address on a card that prints one, where the pickup is usually a merchant
+   * with no town in it at all. Measured on the owner's week, the dropoff
+   * yields a town on 35% of counted offers and the pickup on 12%; taking
+   * either reaches 41%, and the ranking is real on all three separately. */
+  function townFor(offer) {
+    if (!offer) return null;
+    return townOf(offer.dropoff) || townOf(offer.pickup);
+  }
+
   function localityOf(offers) {
     var seen = {}, tally = {};
     (offers || []).forEach(function (o) {
@@ -164,11 +196,8 @@
         var v = (o && o[k] ? String(o[k]) : '').trim();
         if (!v || seen[v]) return;
         seen[v] = true;
-        var parts = v.split(',');
-        if (parts.length < 2) return;
-        var tail = parts[parts.length - 1].trim();
-        if (!/^[A-Z][A-Za-z .'-]{2,24}$/.test(tail)) return;
-        if (!/[a-z]/.test(tail)) return;
+        var tail = townOf(v);
+        if (!tail) return;
         tally[tail] = (tally[tail] || 0) + 1;
       });
     });
@@ -1054,7 +1083,7 @@
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
            detour: detour, fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
-           localityOf: localityOf,
+           localityOf: localityOf, townOf: townOf, townFor: townFor,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, statedBy: statedBy, unchecked: unchecked, ends: ends,
            accused: accused,

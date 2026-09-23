@@ -1271,6 +1271,302 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
      A.daysIn([{ at: 1e20 }, { at: at(20, 0) }]), 1);
 })();
 
+
+/* ---- which areas paid, and whether that may be said at all ---- */
+/*
+ * The feature this guards is a ranking a driver would act on by DRIVING
+ * somewhere, so the thing most worth checking is not that it ranks — anything
+ * ranks — but that it REFUSES. The obvious version of this feature, a league
+ * table of the places the cards named, is noise on the owner's own week at
+ * p = 0.21, and a page printing it would have sent them across town on a coin
+ * toss. So every check below comes in a pair: a fixture with a real difference
+ * in it, and one with the same group sizes, the same rates and no difference,
+ * which has to come back refused.
+ */
+(function () {
+  function day(n, h, m) {
+    return new Date(2026, 8, 14 + n, h, m || 0, 0).getTime();
+  }
+  /* A counted offer in a town. `whole` and the two flags are what
+     Advice.trustworthy looks at; a row it would not stand behind is not
+     evidence about a town and must not reach the ranking. */
+  function inTown(town, rate, when) {
+    return { at: when, perHour: rate, dropoff: 'Some St & Other St, ' + town,
+             pay: 10, minutes: 20, whole: 1, suspect: 0, hidden: 0 };
+  }
+  var KEY = function (o) {
+    var p = String(o.dropoff || '').split(',');
+    return p.length > 1 ? p[p.length - 1].trim() : null;
+  };
+
+  // Two towns, ten offers each, over two evenings, and one really does pay
+  // more than the other. No overlap at all, which is the clearest signal the
+  // data could carry — and the point of starting here is that if THIS comes
+  // back "chance" the test is broken rather than strict.
+  var clear = [];
+  for (var i = 0; i < 10; i++) {
+    clear.push(inTown('Rich', 24 + i * 0.1, day(i % 2, 19, i)));
+    clear.push(inTown('Poor', 9 + i * 0.1, day(i % 2, 20, i)));
+  }
+  var sharp = A.areas(clear, { key: KEY });
+  eq('two towns are ranked', sharp.groups.length, 2);
+  eq('...the better-paying one first', sharp.groups[0].name, 'Rich');
+  ok_('...at its own median', sharp.groups[0].median > 24);
+  eq('...with the offers behind it counted', sharp.groups[0].n, 10);
+  eq('...and the separate days behind it', sharp.groups[0].days, 2);
+  ok_('...and a difference this clean is not called chance', sharp.real);
+  eq('...with the odds said as a number the page can print', sharp.p, 0);
+
+  // The SAME twenty rates, the same two towns, the same ten-and-ten split —
+  // dealt out so neither town has an edge. Everything above still holds and
+  // the verdict has to flip, or the test above passed on a function that
+  // always says yes.
+  var muddled = [];
+  for (var j = 0; j < 20; j++) {
+    var rate = (j < 10 ? 24 + j * 0.1 : 9 + (j - 10) * 0.1);
+    // The day varies independently of the town, or each town lands on one
+    // evening and the day floor drops it before the test is even reached.
+    muddled.push(inTown(j % 2 ? 'Rich' : 'Poor', rate,
+                        day(Math.floor(j / 2) % 2, 19, j)));
+  }
+  var noise = A.areas(muddled, { key: KEY });
+  eq('...the same rates dealt evenly still make two towns', noise.groups.length, 2);
+  eq('...over the same number of offers', noise.groups[0].n, 10);
+  ok_('...but that ranking is refused', !noise.real);
+  ok_('...on odds the page can quote back', noise.p > A.AREA_ALPHA);
+
+  // The same window twice must not answer differently. A page that says
+  // "act on this" on one press and "this is chance" on the next, over the
+  // same rows, has told the driver nothing twice.
+  eq('the same window gets the same verdict twice',
+     A.areas(clear, { key: KEY }).p, sharp.p);
+  // ...and the exact odds, not merely the same odds. `p` equal to itself
+  // passes under Math.random() too, and under any other deterministic
+  // sequence — it is only the VALUE that pins the seeded shuffle this file
+  // promises. 0.68 is what 500 seeded shuffles make of a fixture with no
+  // difference in it; if the shuffling changes, this is the check that says
+  // so rather than a verdict quietly moving across the line somewhere else.
+  eq('...on the exact odds a seeded shuffle gives', noise.p, 0.68);
+  eq('...from the statistic behind them', noise.h, 0.14);
+
+  // Ties, which real rates are full of — a shift of $12.00 twenty-minute
+  // deliveries is a pile of identical $/hr. Ranks have to be AVERAGED across
+  // them, or a tied run is ranked in whatever order the rows happened to
+  // arrive in and the same window answers differently depending on how the
+  // server sorted it. Held by giving the same offers in the opposite order.
+  // Every offer the same to the cent, which is the case that makes the
+  // difference visible: averaged, the two towns tie exactly and the ranking is
+  // refused. Ranked by position instead, whichever town's rows the server
+  // happened to send first takes the whole bottom half of the ranks and the
+  // page reports one town as paying better than another when not one offer
+  // between them differed.
+  var tied = [];
+  for (var y = 0; y < 8; y++) tied.push(inTown('Flat', 15, day(y % 2, 19, y)));
+  for (var z = 0; z < 8; z++) tied.push(inTown('Same', 15, day(z % 2, 20, z)));
+  var forward = A.areas(tied, { key: KEY });
+  var backward = A.areas(tied.slice().reverse(), { key: KEY });
+  eq('a window full of tied rates is ranked at all', forward.groups.length, 2);
+  eq('...and reversing the rows does not change the odds', backward.p, forward.p);
+  eq('...nor the statistic behind them', backward.h, forward.h);
+  ok_('...and two towns paying identically are not told apart', !forward.real);
+  eq('...with nothing at all between them', forward.h, 0);
+
+  // The floor. Seven offers is not a median to read, and a town dropped for
+  // that has to be COUNTED rather than quietly missing — the second fault
+  // class, one level down.
+  var thin = clear.slice();
+  for (var k = 0; k < 7; k++) thin.push(inTown('Tiny', 30, day(k % 2, 21, k)));
+  var withThin = A.areas(thin, { key: KEY });
+  eq('a town under the floor is not ranked', withThin.groups.length, 2);
+  eq('...it is counted as left out', withThin.thin, 1);
+  eq('...with its offers', withThin.thinOffers, 7);
+  ok_('...and it is not the one that would have led the list',
+      withThin.groups[0].name === 'Rich');
+
+  // ...and the day floor, which is the one that keeps a single evening from
+  // wearing a habit's clothes. Ten offers is plenty; one outing is not.
+  var oneNight = clear.slice();
+  for (var n = 0; n < 10; n++) oneNight.push(inTown('Once', 30, day(0, 19, n)));
+  eq('ten offers from one evening are not a town that pays',
+     A.areas(oneNight, { key: KEY }).groups.length, 2);
+
+  // The case calendar dates get wrong, and the whole reason outingsIn exists.
+  // One shift, 10pm to 1am, is ONE outing — and two calendar dates. Counted
+  // the old way this town clears a floor of two days on a single night out.
+  var overnight = clear.slice();
+  for (var m = 0; m < 5; m++) overnight.push(inTown('Late', 30, day(0, 22, m)));
+  for (var q = 0; q < 5; q++) overnight.push(inTown('Late', 30, day(1, 1, q)));
+  var spanning = A.areas(overnight, { key: KEY });
+  eq('one shift across midnight is one outing, not two days',
+     spanning.groups.length, 2);
+  eq('...and it is counted as left out like any other thin town',
+     spanning.thin, 1);
+  // The control for that: the same ten offers, the same hours, two nights
+  // apart, really are two outings and really do get ranked.
+  var twoNights = clear.slice();
+  for (var t = 0; t < 5; t++) twoNights.push(inTown('Late', 30, day(0, 22, t)));
+  for (var u = 0; u < 5; u++) twoNights.push(inTown('Late', 30, day(2, 1, u)));
+  eq('...while the same offers on two separate nights are ranked',
+     A.areas(twoNights, { key: KEY }).groups.length, 3);
+
+  // A row the rig would not stand behind is not evidence about a town. Asked
+  // of trustworthy rather than of a fourth copy of the rule.
+  var doubted = clear.slice();
+  for (var v = 0; v < 12; v++) {
+    doubted.push(Object.assign(inTown('Doubt', 900, day(v % 2, 22, v)), { suspect: 1 }));
+  }
+  eq('a town made of suspect rows is not a town that pays',
+     A.areas(doubted, { key: KEY }).groups.length, 2);
+
+  // What the key could not name. Silence here would report the window as
+  // tidier than it is.
+  var nameless = clear.concat([
+    { at: day(0, 19), perHour: 40, dropoff: 'Nowhere', whole: 1, suspect: 0, hidden: 0 }
+  ]);
+  eq('an offer whose card named no town is counted, not dropped',
+     A.areas(nameless, { key: KEY }).unnamed, 1);
+  eq('...and the ones that did are counted too',
+     A.areas(nameless, { key: KEY }).named, 20);
+
+  // Refusals. Each of these would otherwise rank something against nothing.
+  eq('one town alone is not a ranking', A.areas(clear.filter(function (o) {
+    return KEY(o) === 'Rich';
+  }), { key: KEY }).real, false);
+  eq('...and says so rather than quoting odds', A.areas(clear.filter(function (o) {
+    return KEY(o) === 'Rich';
+  }), { key: KEY }).p, null);
+  eq('no offers, no ranking', A.areas([], { key: KEY }).groups.length, 0);
+  eq('...nor from nothing at all', A.areas(null, { key: KEY }).groups.length, 0);
+  // Without a key this file would have to know how to read a place name, and
+  // it deliberately does not. See the header: the grouping comes from the card.
+  eq('no key, no ranking', A.areas(clear, {}).groups.length, 0);
+
+  /* ---- holding the hour still ---- */
+  //
+  // The correction that makes this feature honest rather than flattering. A
+  // town's rate is tangled with WHEN the driver is in it: on the owner's own
+  // week 12-3am paid $21.24 and 3-6pm paid $14.17, and 57 of Atlanta's 98
+  // offers are in the first while 40 of Marietta's 82 are in the second. Raw,
+  // Atlanta leads Marietta by $5.38; with the hours held still it is $2.45,
+  // the best-to-worst gap drops from $6.47 to $3.69, and three towns change
+  // places. A driver reading the raw list would drive to Atlanta at six in the
+  // evening and find the six-o'clock rate.
+  //
+  // The fixture is that failure in its purest form: the two towns pay
+  // IDENTICALLY at any given hour, and one of them is only ever visited during
+  // the good hour. Raw it is a landslide. Held still there is nothing there at
+  // all, and nothing can move between the towns under a within-hour shuffle,
+  // so the page must refuse it.
+  var GOOD = 21, POOR = 11;
+  function atHour(town, h, rate, n2) {
+    return inTown(town, rate, new Date(2026, 8, 14 + n2, h, 0, 0).getTime());
+  }
+  var clockOnly = [];
+  for (var w = 0; w < 10; w++) {
+    clockOnly.push(atHour('Late', 1, GOOD + (w % 3) * 0.5, w % 2));
+    clockOnly.push(atHour('Early', 16, POOR + (w % 3) * 0.5, w % 2));
+  }
+  var HOUR = function (o) { return new Date(o.at).getHours() < 12 ? 'late' : 'early'; };
+  var unheld = A.areas(clockOnly, { key: KEY });
+  ok_('a town seen only during the good hour looks like a landslide', unheld.real);
+  ok_('...by a wide margin', unheld.spread > 9);
+  var held = A.areas(clockOnly, { key: KEY, strata: HOUR });
+  ok_('...and with the hour held still there is nothing there', !held.real);
+  eq('...nothing at all', held.p, 1);
+  eq('...and neither town is better than its own hour', held.groups[0].matched, 0);
+  eq('...nor is the other', held.groups[1].matched, 0);
+  ok_('...while the raw medians are still reported, being what was earned',
+      held.groups[0].median > 20 || held.groups[1].median > 20);
+  ok_('...and the page is told which spread is which',
+      held.matched === true && held.rawSpread > held.spread);
+
+  // The control, and the half that says this does not simply refuse
+  // everything: a town that pays better AT THE SAME HOURS still comes through.
+  var reallyBetter = [];
+  for (var x = 0; x < 10; x++) {
+    reallyBetter.push(atHour('Rich', 1, GOOD + 6 + (x % 3) * 0.5, x % 2));
+    reallyBetter.push(atHour('Rich', 16, POOR + 6 + (x % 3) * 0.5, x % 2));
+    reallyBetter.push(atHour('Poor', 1, GOOD + (x % 3) * 0.5, x % 2));
+    reallyBetter.push(atHour('Poor', 16, POOR + (x % 3) * 0.5, x % 2));
+  }
+  var stillReal = A.areas(reallyBetter, { key: KEY, strata: HOUR });
+  ok_('a town that pays more at the same hours survives holding them still',
+      stillReal.real);
+  eq('...and is named first', stillReal.groups[0].name, 'Rich');
+  ok_('...by what is left once the hour is out of it',
+      stillReal.groups[0].matched > stillReal.groups[1].matched);
+
+  // The two orders are NOT the same list, which is the only reason the
+  // distinction is worth making on screen. `Flash` earns more per hour than
+  // `Steady` — it is almost always out during the good hour — and `Steady` is
+  // the better town to be in, because at any given hour it pays more. On the
+  // owner's own week this is Atlanta against Mableton: Atlanta leads by
+  // median and Mableton by what is left.
+  //
+  // A third town carries the fixture, and it has to. What an hour pays is
+  // taken from the offers in it, so with only the two towns being compared the
+  // one that dominates an hour IS that hour's baseline and comes out level
+  // with itself by construction. A metro is not two towns, and neither is this
+  // — `Middle` works both hours evenly at the going rate and is what the other
+  // two are measured against.
+  var crossed = [];
+  for (var c = 0; c < 12; c++) {
+    crossed.push(atHour('Middle', c < 6 ? 1 : 16,
+                        (c < 6 ? GOOD : POOR) + (c % 3) * 0.2, c % 2));
+    // Flash is out during the good hour and paid the going rate for it.
+    crossed.push(atHour('Flash', c < 9 ? 1 : 16,
+                        (c < 9 ? GOOD : POOR) + (c % 3) * 0.2, c % 2));
+    // Steady works the poor hour and beats the going rate wherever it is.
+    crossed.push(atHour('Steady', c < 3 ? 1 : 16,
+                        (c < 3 ? GOOD : POOR) + 4 + (c % 3) * 0.2, c % 2));
+  }
+  var byPaid = A.areas(crossed, { key: KEY });
+  var byLeft = A.areas(crossed, { key: KEY, strata: HOUR });
+  eq('the town that earned most is the one out at the best hour',
+     byPaid.groups[0].name, 'Flash');
+  eq('...and the town worth being in is the other one',
+     byLeft.groups[0].name, 'Steady');
+  ok_('...which is why the ranking is ordered by what is left',
+      byLeft.groups[0].matched > byLeft.groups[1].matched);
+  ok_('...even though it is not the one with the bigger median',
+      byLeft.groups[0].median < byLeft.groups[1].median);
+
+  // One hour is no hours to hold still. Once the driver has picked a block the
+  // filter has already done it, every offer is measured against the same
+  // baseline, and `matched` would be the median shifted by a constant — the
+  // same order, reported as though something had been controlled for.
+  var oneHour = [];
+  for (var e = 0; e < 10; e++) {
+    oneHour.push(atHour('Here', 1, GOOD + (e % 3) * 0.5, e % 2));
+    oneHour.push(atHour('There', 1, POOR + (e % 3) * 0.5, e % 2));
+  }
+  var single = A.areas(oneHour, { key: KEY, strata: HOUR });
+  eq('two towns inside one hour are still ranked', single.groups.length, 2);
+  eq('...but nothing is held still, because nothing varies',
+     single.matched, false);
+  eq('...so the figure on the row is what the town paid',
+     single.groups[0].median > 20, true);
+
+  /* ---- outings against calendar days ---- */
+  // Two questions, not two answers to one. daysIn is right for a BLOCK, which
+  // lies inside one calendar date by construction; outingsIn is right for
+  // anything that does not.
+  var nightOut = [{ at: day(0, 22, 0) }, { at: day(1, 1, 0) }];
+  eq('a shift across midnight is two calendar days', A.daysIn(nightOut), 2);
+  eq('...and one outing', A.outingsIn(nightOut), 1);
+  eq('...while two evenings are two of both',
+     A.outingsIn([{ at: day(0, 22, 0) }, { at: day(1, 22, 0) }]), 2);
+  // 4am is the edge, so both sides of it are the check that says where it is.
+  eq('3:59am still belongs to the night before',
+     A.outingsIn([{ at: day(0, 22, 0) }, { at: day(1, 3, 59) }]), 1);
+  eq('...and 4:00am opens a new one',
+     A.outingsIn([{ at: day(0, 22, 0) }, { at: day(1, 4, 0) }]), 2);
+  eq('a row no clock can read is not an outing',
+     A.outingsIn([{ at: 1e20 }, { at: day(0, 22, 0) }]), 1);
+  eq('nothing came off no outings', A.outingsIn([]), 0);
+  eq('...and so does nothing at all', A.outingsIn(null), 0);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);

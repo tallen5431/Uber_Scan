@@ -1597,6 +1597,13 @@
   // and a calendar date cuts it in half. The same number and the same reasoning
   // as journal.html — if the two screens disagreed about when the day started
   // they would print different counts for the same day.
+  //
+  // Still written out here, and deliberately: this page does not load
+  // advice.js. It is the screen in the car, it has to come up from the service
+  // worker with no network, and pulling a library in for one integer would be
+  // paying for that at the worst moment. journal.html and advice.js share the
+  // one copy; this is the second and it is on purpose. See AUDITS, "The
+  // panel".
   var DAY_STARTS_AT = 4;
 
   // The start of the day currently being driven — 4am today, or 4am yesterday

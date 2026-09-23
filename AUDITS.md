@@ -761,6 +761,82 @@ which sizes the Open entry below about the ⌖ button.
 
 ### The maps, again
 
+**The map could not say where the money was, and the obvious way to make it
+say so is noise.** The driver asked for "areas where it might be best to find
+high paying rides, the time of day and day of the week likely also a critical
+factor". The page had no answer: it was built to check whether the rig was
+right about where the work happened, which is a narrower question.
+
+The feature everybody wants is a league table of the places the cards named.
+**It is a coin toss.** Permutation-tested on the owner's own week, on his own
+clock: 19 places clearing 5 offers on 2 outings, p = **0.2260**; with a floor
+of 8, p = **0.9400**. The table that would have shipped reads *Shake Shack
+$18.57 ... Chipotle $7.27*, a best-to-worst spread of $11.30 — and dealing the
+same rates out at random makes a spread that big or bigger **36% of the time**.
+A driver would have crossed town to sit outside a restaurant chosen by chance,
+on a page that had told them it was the best one.
+
+The TOWN survives: 9 towns, 367 offers, p = **0.0000**, Atlanta $20.01/hr to
+Dallas $13.54. It survives both objections a sceptic raises. Not one night out
+of the metro — restricted to the 8 towns seen on four or more separate outings
+it is still p = 0.0000. Not trip length wearing a hat — tested inside each
+third of the distance range it holds in all three (p = 0.0000 / 0.0020 /
+0.0000) with Atlanta leading each, and Atlanta's median trip is 9.2 miles
+against Marietta's 9.5 for $20.07 against $14.63.
+
+**And it shipped once with most of that spread being the clock.** A town's rate
+is tangled with WHEN the driver is in it: 12-3am paid $21.24 and 3-6pm $14.17,
+and 57 of Atlanta's 98 offers are in the first while 40 of Marietta's 82 are in
+the second. Raw, Atlanta led Marietta by $5.38; held at the same hours it is
+$2.45, best-to-worst falls from $6.47 to $3.69, and three towns change places —
+a number a driver acts on, four times larger than the truth. Caught by two
+independent readers of the working tree before it reached `main`, not by the
+suite, which was green. The ranking is now by what is left once each offer is
+measured against its own three-hour block, and the permutation is confined to
+shuffle WITHIN blocks so the test asks the question the number answers. Once a
+block is picked there is nothing left to hold still and the page says so.
+
+So `Advice.areas` groups on the town the rig read off the CARD, never on a
+coordinate, and **runs the test in the page** on whatever is loaded rather than
+trusting a threshold tuned to one week. The ranks are computed once and a
+shuffle only reassigns them, so it is O(n) a shuffle and costs milliseconds.
+What the driver gets on their own week is nine towns and "chance does this well
+under 1% of the time"; pick a three-hour block and the same page says the
+ranking is not worth acting on — on his clock not one block he works can tell
+its towns apart (12-3am leaves one town standing; 3-6pm, 6-9pm and 9pm-12 come
+out at p = 0.18, 0.58, 0.08).
+
+Three things worth not rediscovering:
+
+  - **It asks nobody anything.** The grouping is off the card, so the ranking
+    is on screen the moment the offers land, before "Place them on a map" and
+    whether or not it is ever pressed. A lookup may POSITION one of these
+    figures and may never CHANGE one, which is the rule at the head of
+    `map-view.js` applied to arithmetic instead of to distance.
+  - **`daysIn` was the wrong count for this and `outingsIn` exists for it.**
+    A block lies inside one calendar date by construction, which is why
+    `daysIn` counts dates; an area does not. A single shift from 8pm to 2am
+    touches two dates, so a town seen on that ONE night out reported two days
+    and cleared a floor of two — the "one evening wearing a habit's clothes"
+    the floor exists to refuse, arriving through the calendar. On the owner's
+    week the calendar says six dates where five shifts were driven.
+  - **Measure on the DRIVER's clock.** The first pass of every figure above was
+    taken in UTC by a container four hours away, which puts each offer into the
+    wrong three-hour block: a census of 382/220/112/0/0/0/254/198 against the
+    true 196/33/0/0/2/361/201/373 that `advice.js` already recorded. The town
+    ranking is timezone-free and was unharmed; the weekend/weekday figure was
+    not, and read twice as strong as it is ($15.23 v $13.20 at p = 0.0000
+    against the true $14.93 v $14.05 at p = 0.036).
+
+**What it will not answer, and says so on the page.** These are the offers that
+came to the driver where they already were. A town they have never sat in
+cannot appear, and one they passed through once will not clear the floor — so
+it ranks the places they already work, not everywhere they could. No amount of
+data from this rig fixes that: the rig only ever sees the offers that reached
+it.
+
+
+
 **The chain told the driver to press a button that cannot place the job it
 was about.** `chainRun` counts the taken jobs sitting inside a hop that are
 not drawn. `MV.jobsIn` gates on `pickup || dropoff`, so a taken job whose card
@@ -1868,6 +1944,21 @@ block is the middle option and is also worse: 4 of 9 cells, 68.9%. At 30 days
 the server truncates 5,000 of 5,444 rows and the walk goes to ~100 minutes.
 The sibling page already refuses the 8x coarser version below 14 days.
 
+*Still refused, and the box now holds a weekend/weekday cut anyway — which is
+not the same thing, and the difference is the word `x` above.* Every figure in
+this entry is about weekday CROSSED WITH block, and a grid is what two
+controls side by side build. There is one control: the day cuts are options in
+the same `when` select as the hours, so picking `weekends` un-picks `9pm-12`
+and the thirteen one-date cells cannot be reached. `rpi/test_map.py` asserts
+that there is exactly one `select` in the bar, so the refused question stays
+unreachable rather than merely discouraged.
+
+The coarse cut alone is supportable where the crossed one is not: 598 counted
+offers on 3 outings against 542 on 2, $14.93 against $14.05, p = 0.036. The
+seven-way split needed no rule of its own — Saturday, Friday and Tuesday each
+rest on ONE outing, so the two-outing floor under every figure on that page
+drops them and what is left cannot be ranked against itself.
+
 **The geocode cache IS worth keeping — this entry was wrong, and is corrected
 here rather than deleted.** It argued that the cache should not be kept on a
 server because it is "regenerable", leaning on `advice.js`'s measurement that a
@@ -2058,6 +2149,16 @@ position on rows at all is a separate question nobody has asked yet.
 
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
+
+**`live.html` keeps its own copy of the 4am day boundary.** `advice.js` now
+holds the number — the area ranking needed to know how many separate OUTINGS a
+town was seen on, which is not the same question as how many calendar dates —
+and `journal.html` reads it from there. The driving screen does not, because it
+does not load `advice.js` at all: it is the screen in the car, it has to come
+up from the service worker with no network, and pulling a library in for one
+integer would be paying for that at the worst possible moment. So there are two
+copies and the second is deliberate. They agree today; nothing checks that they
+still will.
 
 **A card with one readable place calls it the pickup, and 474 of 1,166 rows
 rest on that.** Where the card's own layout names the end, the rig now follows

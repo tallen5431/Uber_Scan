@@ -87,8 +87,23 @@
   .tag.iffy { color: var(--warn); border-color: var(--warn); }
   /* Listed strays are the one row here that does something when tapped, so
      they have to look like it — and be big enough to hit with a thumb. */
-  .row.stray, .row.nocheck { cursor: pointer; padding: 9px 0; }
-  .row.stray:hover b, .row.nocheck:hover b { text-decoration: underline; }
+  .row.stray, .row.nocheck, .row.rankrow { cursor: pointer; padding: 9px 0; }
+  .row.stray:hover b, .row.nocheck:hover b, .row.rankrow:hover b { text-decoration: underline; }
+  /* The ranking. A grid rather than a flow, so the rates line up and the
+     column can be read down without reading any of the names — which is what
+     a driver checking "am I in the right half of this list" actually does. */
+  .rankrow { display: grid; grid-template-columns: 10px 1fr auto;
+             align-items: baseline; gap: 4px 8px; }
+  .rankrow .pip { width: 10px; height: 10px; border-radius: 50%;
+                  align-self: center; }
+  .rankrow .money { font-weight: 700; font-variant-numeric: tabular-nums;
+                    justify-self: end; }
+  .rankrow .money i { font-style: normal; font-size: 11px; font-weight: 400;
+                      color: var(--muted); }
+  /* The support line spans the two columns under the name, so it can be a
+     sentence rather than a cramped column. It is never allowed to be the
+     thing that wraps away: see the note at moneyPanel. */
+  .rankrow .note { grid-column: 2 / 4; }
   .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
   .warnbox { border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px;
              margin: 8px 14px; font-size: 12px; line-height: 1.5; }
@@ -286,6 +301,50 @@
     el.block.appendChild(opt);
   });
 
+  /* ...and the two the driver asked for, in the SAME box rather than a second
+   * one beside it. That is the whole of the design and it is deliberate.
+   *
+   * AUDITS, under Settled, refuses a weekday term in this filter, and the
+   * measurement behind that refusal is about weekday CROSSED WITH block: a
+   * 168-hour window holds each weekday-and-block exactly once, so all thirteen
+   * occupied cells of that grid came off a single date apiece. Two boxes side
+   * by side is how that grid gets built. One box cannot build it — picking
+   * "weekends" un-picks "9pm–12" — so the refused question is unreachable here
+   * rather than merely discouraged.
+   *
+   * What is left is the coarsest day cut, and it is the one the data supports.
+   * Measured on the owner's own week, on HIS clock: weekend against weekday is
+   * 598 counted offers on 3 outings against 542 on 2, $14.93 against $14.05,
+   * and the ranking test in Advice.areas puts it at p = 0.036 — real, and only
+   * just. (Measured in UTC, as a machine four hours away first did, it looks
+   * twice as strong and is not.) The seven-way split is NOT offered,
+   * and does not need to be refused by hand: Saturday, Friday and Tuesday each
+   * rest on one outing on this week, so the same floor that guards every other
+   * figure on this page drops them, and what is left cannot be ranked against
+   * itself. A box offering "Fri" would be a date picker wearing a habit's
+   * clothes. */
+  var DAY_CUTS = [
+    { value: 'weekend', label: 'weekends', test: function (d) { return d === 0 || d === 6; } },
+    { value: 'weekday', label: 'weekdays', test: function (d) { return d !== 0 && d !== 6; } }
+  ];
+  DAY_CUTS.forEach(function (cut) {
+    var opt = document.createElement('option');
+    opt.value = cut.value;
+    opt.textContent = cut.label;
+    el.block.appendChild(opt);
+  });
+
+  /* Which outing a moment belongs to, for the two cuts above. The driver's own
+     day, not the calendar's: a shift from 8pm to 2am is one Saturday night and
+     a calendar date cuts it into a Saturday and a Sunday. Advice.DAY_STARTS_AT
+     is the one place that 4 is written. */
+  function outingDay(at) {
+    var d = new Date(at);
+    if (!isFinite(d.getTime())) return null;
+    d.setHours(d.getHours() - Advice.DAY_STARTS_AT);
+    return d.getDay();
+  }
+
   /* A row whose stamp no clock can read has no block, so it is in no named
      one — and it is still in "any time", which is where it was before this box
      existed. Advice.blockOf answers null for it rather than NaN; see the note
@@ -293,10 +352,28 @@
   function inBlock(o) {
     var want = el.block.value;
     if (want === '') return true;
+    var cut = null;
+    DAY_CUTS.forEach(function (c) { if (c.value === want) cut = c; });
+    if (cut) {
+      var day = outingDay(o && o.at);
+      // A stamp no clock can read belongs to no outing, the same way it
+      // belongs to no block. It is still in "any time", which is where it was
+      // before either of these existed.
+      return day === null ? false : cut.test(day);
+    }
     return String(Advice.blockOf(o && o.at)) === want;
   }
 
   function shown() { return offers.filter(inBlock); }
+
+  /* What the box is currently called, for a sentence that has to name it. */
+  function whenLabel() {
+    var want = el.block.value;
+    if (want === '') return '';
+    var cut = null;
+    DAY_CUTS.forEach(function (c) { if (c.value === want) cut = c; });
+    return cut ? cut.label : Advice.BLOCK_NAMES[Number(want)];
+  }
 
   /* The sentence that stops a block being read as a habit.
    *
@@ -309,8 +386,12 @@
    * misleads. */
   function whenNote(sub) {
     if (el.block.value === '') return '';
-    var days = Advice.daysIn(sub);
-    return ' · ' + Advice.BLOCK_NAMES[Number(el.block.value)] + ' only, and '
+    // Outings, not calendar dates. A block lies inside one date by
+    // construction, so daysIn was right for it; the two day cuts do not, and a
+    // single Saturday night spanning midnight would report two days under the
+    // old count. See Advice.outingsIn for why these are different questions.
+    var days = Advice.outingsIn(sub);
+    return ' · ' + whenLabel() + ' only, and '
       + (days === 0 ? 'no day in this window has any'
          : days === 1 ? 'all of it is one day — that is a day, not a habit'
          : days + ' separate days of it are in this window');
@@ -610,6 +691,18 @@
     var bounds = [];
     marks = {};
 
+    /* The ranking, once per draw, so a pin can say where its town stands
+       without every popup running the test again. Null when the window has no
+       ranking worth quoting — and then the pins say nothing about it, rather
+       than quoting a position in a list the page has just called chance. */
+    var rank = areaRanking();
+    var standing = {};
+    if (rank.real) {
+      rank.groups.forEach(function (g, i) {
+        standing[g.name] = { at: i + 1, of: rank.groups.length, median: g.median };
+      });
+    }
+
     MV.byPlace(placed).forEach(function (place) {
       var out = strays[place.name] || null;
       // Red for a pin that cannot be in this shift, and it wins over both
@@ -649,6 +742,20 @@
                                     + (pays.length > 1
                                        ? '–$' + Math.max.apply(null, pays).toFixed(2) : '')
                                   : '')
+                   // Where this pin's TOWN stands, not this pin. The place
+                   // itself cannot be ranked — that is the whole finding
+                   // behind Advice.areas, measured at p = 0.21 — and a popup
+                   // quoting a rate for one restaurant would be exactly the
+                   // number the ranking refuses to print.
+                   + (function () {
+                       var t = standing[MV.townOf(place.name)];
+                       return t
+                         ? '<br><span class="note">' + esc(MV.townOf(place.name))
+                           + ' is ' + t.at + ' of ' + t.of + ' towns here, '
+                           + 'median $' + t.median.toFixed(2) + '/hr — that is '
+                           + 'the town, not this place</span>'
+                         : '';
+                     }())
                    + '<br><span class="note">' + esc(when(place.jobs[0].offer.at))
                    + '</span>')
         .addTo(layer);
@@ -970,8 +1077,202 @@
       : '';
   }
 
+  /* --- where the money is ---------------------------------------------------
+   *
+   * The driver's question: "areas where it might be best to find high paying
+   * rides". Advice.areas does the deciding — the grouping, the floor, and the
+   * permutation test that says whether the ranking beats chance at all — and
+   * this turns its answer into a sentence. Read the header there before
+   * changing anything here; the short version is that the obvious version of
+   * this feature, a league table of the restaurants the cards named, is noise
+   * at p = 0.21 and would have sent this driver across town on a coin toss.
+   *
+   * ASKS NOBODY ANYTHING. This is the only answer on the page that needs no
+   * geocoder, because it is grouped on the town the rig read off the card and
+   * not on a coordinate. So it is drawn on Load, before "Place them on a map"
+   * has been pressed and whether or not it ever is — the map positions these
+   * figures and is not allowed to change one.
+   *
+   * RANK, not distance. There is no "3 miles that way": that would be a
+   * number derived from a lookup, which the head of map-view.js forbids.
+   */
+  function areaRanking() {
+    // `strata`, and the whole honesty of the answer is in it. A town's rate is
+    // tangled with WHEN the driver is in it: on the owner's own week 12–3am
+    // paid $21.24 and 3–6pm paid $14.17, and 57 of Atlanta's 98 offers are in
+    // the first while 40 of Marietta's 82 are in the second. Ranked raw,
+    // Atlanta leads Marietta by $5.38 and a driver would go there at six in
+    // the evening and find the six-o'clock rate. Held at the same hours the
+    // lead is $2.45, the gap from best to worst drops from $6.47 to $3.69, and
+    // three towns change places. See Advice.areas.
+    return Advice.areas(shown(), {
+      key: MV.townFor,
+      strata: function (o) { return Advice.blockOf(o.at); }
+    });
+  }
+
+  /* Green at the top of the ranking, amber at the bottom, on the same ramp the
+     rest of the rig uses for a verdict. Positional rather than absolute: the
+     question this answers is "which of these is better", and a driver who
+     moves to the best of a bad week has still done the right thing. */
+  function rankColour(i, n) {
+    if (n < 2) return '#7aa2f7';
+    var t = i / (n - 1);
+    return t < 0.34 ? '#17c964' : t < 0.67 ? '#f5a524' : '#f31260';
+  }
+
+  function moneyPanel() {
+    var r = areaRanking();
+    var sub = shown();
+    var html = '<h2>Where the money is</h2>';
+
+    if (!r.groups.length) {
+      // Two different nothings. A window whose cards named no town at all is
+      // not a window whose towns were all too thin, and the remedy differs:
+      // the first wants more days, the second wants the same days unfiltered.
+      html += '<div class="note">'
+        + (r.named === 0
+           ? 'None of these ' + sub.length + ' offers named a town the rig '
+             + 'could read. A town is the tail after the last comma of a '
+             + 'pickup or a dropoff, and most pickups are a restaurant name '
+             + 'with no town in it.'
+           : r.named + ' of these ' + sub.length + ' named a town, but no town '
+             + 'reached ' + r.floor + ' offers on ' + r.days + ' separate days, '
+             + 'so there is nothing here to rank against anything else.')
+        + '</div>';
+      return html;
+    }
+
+    // The verdict FIRST, because it decides whether the list below it is
+    // advice or trivia, and a reader who takes the list and leaves has to have
+    // read it. A ranking that does not beat chance is still printed — dropping
+    // it would be a page that shows a table on a good week and nothing on a
+    // quiet one, with no word about why — but it is labelled as what it is.
+    /* The odds in words, and the wording matters more than the number.
+     *
+     * "beats this 0% of the time" is what a rounded p reads as at the good
+     * end, and it is both ugly and backwards-sounding. The claim is always the
+     * same shape — how often chance alone would do this well — so it is said
+     * that way round, and a p of zero is reported as what it actually means:
+     * not once in as many shuffles as were run. */
+    var odds = r.p === null ? null
+      : r.p <= 0 ? 'not once in ' + Advice.AREA_SHUFFLES + ' tries'
+      : (r.p * 100 < 1 ? 'under 1% of the time'
+                       : Math.round(r.p * 100) + '% of the time');
+    /* One town is not a ranking, and this branch exists because the page said
+     * otherwise: with a single town clearing the floor it printed "This
+     * ranking is not worth acting on ... chance does as well or better not
+     * once in 500 tries", which is two contradictory sentences joined by an
+     * `and`. `areas` returns a null p there — there is nothing to test one
+     * group against — and the odds wording was reading that null as zero.
+     *
+     * The median itself is still worth printing. It is a real figure with real
+     * support behind it; what it has not got is anything to be better than. */
+    if (odds === null) {
+      html += '<div class="note">Only <b>one</b> town here reached '
+        + r.floor + ' offers on ' + r.days + ' separate days, so there is '
+        + 'nothing to rank it against. What it paid is still what it paid.</div>';
+    } else if (r.real) {
+      html += '<div class="note">Over <b>' + r.kept + '</b> offers in <b>'
+        + r.groups.length + '</b> towns, what a job paid really does depend on '
+        + 'which town it was in. Dealing these same rates out between these '
+        + 'same towns at random does this well ' + odds + ', so the order '
+        + 'below is not a coin toss. Best first.</div>';
+    } else {
+      html += '<div class="note"><b>This ranking is not worth acting on.</b> '
+        + 'Dealing these same rates out between these ' + r.groups.length
+        + ' towns at random does as well or better <b>' + odds + '</b>, so '
+        + 'the order below is what chance looks like on this much data. It is '
+        + 'shown rather than hidden so you can see how little is behind it — '
+        + (el.block.value === ''
+            ? 'more days is what fixes this'
+            : 'and the whole window may still have an answer: put the time box '
+              + 'back to “any time”') + '.</div>';
+    }
+
+    /* Which number leads the row, and it is not the one that looks like a
+     * rate. `matched` is what a town paid over and above what the SAME HOURS
+     * paid everywhere else on this page, and it is the figure that answers
+     * "where should I go" — the median beside it answers "what did I earn
+     * there", which is a different question a driver will otherwise read as
+     * the first one. On the owner's week the two orders are not the same list:
+     * Marietta is 7th by median and 8th by this, Smyrna 6th and last. */
+    if (r.matched) {
+      html += '<div class="note">Ranked by what is left <b>once the hour is '
+        + 'held still</b>. When you are in a town is tangled up with what it '
+        + 'pays — here the best three-hour stretch and the worst are $'
+        + (r.rawSpread).toFixed(2) + '/hr apart on their own — so the big '
+        + 'figure is how much better or worse a town paid than the same hours '
+        + 'paid elsewhere, and the median beside it is what it actually paid, '
+        + 'hours and all. Held still, best to worst is $' + r.spread.toFixed(2)
+        + '; unheld it looks like $' + r.rawSpread.toFixed(2) + '.</div>';
+    }
+    html += '<div class="rank">';
+    r.groups.forEach(function (g, i) {
+      var lead = r.matched
+        ? (g.matched >= 0 ? '+' : '\u2212') + '$' + Math.abs(g.matched).toFixed(2)
+        : '$' + g.median.toFixed(2);
+      html += '<div class="row rankrow" data-town="' + esc(g.name) + '">'
+        + '<span class="pip" style="background:'
+        + (r.real ? rankColour(i, r.groups.length) : '#54606f') + '"></span>'
+        + '<b>' + esc(g.name) + '</b>'
+        + '<span class="money">' + lead + '<i>/hr</i></span>'
+        // The support, on the row, not in a footnote. Every figure on this
+        // page that a driver could act on carries what it rests on, and this
+        // is the one most likely to be quoted back as a fact about a town.
+        + '<span class="note">'
+        + (r.matched ? '$' + g.median.toFixed(2) + ' median · ' : '')
+        + g.n + ' offer' + (g.n === 1 ? '' : 's')
+        + ' on ' + g.days + ' separate day' + (g.days === 1 ? '' : 's')
+        + (g.took ? ' · you took ' + g.took : '') + '</span>'
+        + '</div>';
+    });
+    html += '</div>';
+
+    // What was left out, which is the half that stops this reading as the
+    // whole window. Silent at zero.
+    var left = [];
+    if (r.thin) {
+      left.push('<b>' + r.thin + '</b> more town' + (r.thin === 1 ? '' : 's')
+        + ' had offers here but fewer than ' + r.floor + ' of them, or on '
+        + 'fewer than ' + r.days + ' separate days — ' + r.thinOffers
+        + ' offer' + (r.thinOffers === 1 ? '' : 's') + ' in all, left out '
+        + 'rather than ranked on too little');
+    }
+    if (r.unnamed) {
+      left.push('<b>' + r.unnamed + '</b> offer' + (r.unnamed === 1 ? '' : 's')
+        + ' named no town the rig could read, so ' + (r.unnamed === 1 ? 'it is' : 'they are')
+        + ' in none of these figures. Most pickups are a restaurant name with '
+        + 'no town in it');
+    }
+    if (left.length) {
+      html += '<div class="note">' + left.join('. ') + '.</div>';
+    }
+    // ...and the one thing this page must not let a driver conclude.
+    html += '<div class="note">These are the offers that came to you where you '
+      + 'already were. A town you have never sat in cannot appear here, and a '
+      + 'town you only passed through once will not clear the floor — so this '
+      + 'ranks the places you already work, not everywhere you could.</div>';
+    return html;
+  }
+
   function sidebar(placed, strays, found) {
-    if (!placed.length) { el.sideEmpty.hidden = false; el.sideBody.hidden = true; return; }
+    // The ranking does not need a single pin, so the sidebar is no longer
+    // empty before "Place them on a map" is pressed. It used to say "Load a
+    // few days, then place them" over a window whose best answer was already
+    // computable without asking anybody anything.
+    var money = offers.length ? moneyPanel() : '';
+    if (!placed.length) {
+      if (!money) { el.sideEmpty.hidden = false; el.sideBody.hidden = true; return; }
+      el.sideEmpty.hidden = true;
+      el.sideBody.hidden = false;
+      el.sideBody.innerHTML = money
+        + '<h2>Nothing is on the map yet</h2>'
+        + '<div class="note">The ranking above is off the cards themselves and '
+        + 'needed no lookups. Press “Place them on a map” to see where these '
+        + 'towns are and which readings cannot be right.</div>';
+      return;
+    }
     el.sideEmpty.hidden = true;
     el.sideBody.hidden = false;
     strays = strays || {};
@@ -989,7 +1290,10 @@
     });
     var strayNames = Object.keys(strays).sort(function (a, b) { return strays[b] - strays[a]; });
 
-    var html = '';
+    // The answer first, the diagnosis under it. This sidebar was built to say
+    // what could NOT be drawn, which is the right thing for a page called
+    // "Map check" — and it is not what a driver opens the map to find out.
+    var html = money;
     html += '<h2>' + drawn.length + ' drawn end to end</h2>';
     html += '<div class="note">Green is the pickup, amber the dropoff, and the '
           + 'line between them is a straight line, not a route. A pin with a '
@@ -1133,6 +1437,27 @@
   // has just told the driver it cannot settle that pair, so looking at it is
   // the only thing left to do about it.
   el.sideBody.addEventListener('click', function (ev) {
+    // A town in the ranking takes the map to every pin the cards put in it,
+    // which is the one thing the list cannot say: a median is a number and
+    // "which half of the metro is that" is a shape.
+    var town = ev.target.closest ? ev.target.closest('.rankrow') : null;
+    if (town && map) {
+      var want = town.getAttribute('data-town');
+      var seen = [];
+      Object.keys(marks).forEach(function (name) {
+        if (MV.townOf(name) === want) seen.push(marks[name].getLatLng());
+      });
+      // Nothing placed yet is the ordinary case, not an error: this ranking is
+      // drawn before anything is looked up, and saying so beats a dead tap.
+      if (!seen.length) {
+        say('Nothing in ' + want + ' is on the map yet — press “Place them on '
+            + 'a map” and these towns will have pins.');
+        return;
+      }
+      if (seen.length === 1) map.setView(seen[0], 12);
+      else map.fitBounds(seen, { padding: [50, 50] });
+      return;
+    }
     var row = ev.target.closest ? ev.target.closest('.stray, .nocheck') : null;
     if (!row || !map) return;
     var mark = marks[row.getAttribute('data-place')];

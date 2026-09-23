@@ -4757,6 +4757,113 @@ tell you at a glance how far apart two jobs end — that needs coordinates, and
 the measurement that would justify them is in the section above. This is the
 90% of the value at 5% of the risk, and it may well be enough.
 
+### Where the money is, and the ranking that had to be thrown away
+
+The driver's own request: *"find areas where it might be best to find high
+paying rides, the time of day and day of the week likely also a critical
+factor."* The map had no answer to that at all — it was a page for checking
+whether the rig was right about where the work happened, which is a different
+question and a narrower one.
+
+The obvious feature is a league table of the places the cards named. It is
+easy, it is what everybody asks for, and **it is noise.** Measured on the
+owner's own week, 1,140 counted offers over five driving days, by permutation
+test — group the rates, take Kruskal–Wallis H, then deal the same rates back
+out into the same group sizes a few hundred times and see how often chance does
+as well:
+
+| grouping | groups | offers | p | |
+|---|---|---|---|---|
+| the place the card named | 19 | 163 | 0.2260 | **noise** |
+| ...with a floor of 8 offers | 5 | 79 | 0.9400 | **noise** |
+| the **town**, from either end | 9 | 367 | 0.0000 | real |
+| the three-hour block *(control)* | 5 | 1,138 | 0.0000 | real |
+
+All of it on the **driver's** clock. That is not a detail: this rig's owner is
+at UTC-4, and measuring the same week in UTC puts every offer four hours into
+the wrong three-hour block — a census of 382/220/112/0/0/0/254/198 against the
+true 196/33/0/0/2/361/201/373, which would have printed "no offers" over the
+second-busiest block he works. `Advice.blockOf` reads the local clock, and the
+first pass of these measurements did not.
+
+The table that would have shipped reads *Shake Shack $18.57 … Chipotle $7.27* —
+a spread of $11.30 between best and worst, which sounds like a finding and is
+not: shuffling those same rates at random produces a spread that big or bigger
+**36% of the time**. A driver would have crossed town to sit outside a
+restaurant picked by a coin toss, on a page that had told them it was the best
+one. That is this project's first fault class in the one place it costs a shift.
+
+**The town survives, and survives the objections.** Not one night out of the
+metro: restricted to the seven towns seen on four or more separate outings it is
+still p < 0.001. Not trip length in disguise either — tested inside each third
+of the distance range separately it holds in all three (p = 0.0000 / 0.0020 /
+0.0000) with Atlanta leading each one, and the best town's median trip is no
+longer than the worst's: Atlanta $20.07/hr over 9.2 miles against Marietta
+$14.63 over 9.5.
+
+**And most of that spread is the clock.** A town's rate is tangled with *when*
+the driver is in it: on this week the 12–3am block paid $21.24 and 3–6pm paid
+$14.17, and **57 of Atlanta's 98 offers are in the first** while 40 of
+Marietta's 82 are in the second. Ranked raw, Atlanta leads Marietta by $5.38 —
+and a driver who drove there at six in the evening would get the six-o'clock
+rate. Held at the same hours the lead is $2.45, the gap from best to worst
+falls from **$6.47 to $3.69**, and three towns change places. The town still
+matters (the stratified test is p = 0.002) and it matters about half as much as
+it looks.
+
+So the ranking is by what is left once the hour is held still: each offer
+measured against what its own three-hour block paid across the whole list, and
+the permutation confined to shuffle *within* blocks so the test asks the same
+question the number answers. The median is still on the row, because what a
+town paid is a fact worth having — it is just not the answer to "where should I
+go". Once the driver picks a block there is nothing left to hold still, and the
+page goes back to the plain median and says the plainer sentence.
+
+`Advice.areas` groups on the town, ranks by that, prints the offers
+and the separate outings behind every row — and **runs the test in the page**,
+on whatever is loaded, refusing the ranking when it does not beat chance. The
+thresholds above are one week of one driver; a constant tuned to them would be
+wrong somewhere else without saying so. Running the test costs almost nothing:
+the ranks are computed once and a shuffle only reassigns them.
+
+What the driver sees on their own week: nine towns led by Mableton and Atlanta,
+*"dealing these same rates out between these same towns at random does this well
+under 1% of the time."* Pick a three-hour block and the same page
+refuses: on the driver's own clock not one of the blocks he works can tell its
+towns apart — 12–3am leaves a single town standing, and 3–6pm, 6–9pm and
+9pm–12 come out at p = 0.18, 0.58 and 0.08. The ranking a driver would most
+like to have is the one the data will not support, and the page says so rather
+than printing it.
+
+**It asks nobody anything.** The grouping is the town the rig read off the card,
+never a coordinate, so the ranking is on screen the moment the offers land —
+before *Place them on a map* has been pressed and whether or not it ever is. A
+lookup may position one of these figures; it may never change one. That is the
+rule at the head of `map-view.js`, and it is why this is the one answer on the
+page that needs no network.
+
+**Day of week, which is the half that had to be refused.** `AUDITS.md` already
+settled against a weekday term in this filter, and the measurement behind that
+refusal holds: a 168-hour window holds each weekday-and-block exactly once, so
+every occupied cell of that grid comes off a single date. On this week Saturday,
+Friday and Tuesday rest on **one outing apiece** — "Saturdays pay $16.82" and
+"that Saturday paid $16.82" are the same sentence, and only one of them is
+advice.
+
+What is offered instead is the coarsest cut, in the **same box** as the hours
+rather than a second box beside it — so picking *weekends* un-picks *9pm–12* and
+the grid that was refused cannot be built. Weekend against weekday is 598 counted
+offers on 3 outings against 542 on 2, $14.93 against $14.05, and the test puts
+it at p = 0.0360 — real, and only just, which is itself worth seeing. The seven-way split needs no special-casing to refuse: the same
+floor that guards every other figure here drops a weekday resting on one outing,
+and what is left cannot be ranked against itself.
+
+**What it will not tell you**, said on the page: these are the offers that came
+to you where you already were. A town you have never sat in cannot appear, and
+one you passed through once will not clear the floor. It ranks the places you
+already work, not everywhere you could — and no amount of data from this rig can
+fix that, because the rig only ever sees the offers that reached it.
+
 ### The address the card will not show you until you have taken the job
 
 106 of the driver's 604 offer cards print **"Customer dropoff"** and no address.
@@ -6636,7 +6743,7 @@ The Pi parser is a port of the browser one, and both run the same corpus:
 ```sh
 node tests/corpus.test.js       # 793 checks, the shared corpus
 node tests/parser.test.js       #  98 on the browser side alone
-node tests/advice.test.js       # 242 on what line to tell a driver to draw
+node tests/advice.test.js       # 303 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
@@ -6732,7 +6839,7 @@ python3 rpi/test_server.py      # 157 on the server's own edges: two readers of
                                 #     is not one — and on the CSV export, which
                                 #     is the one thing here that leaves the
                                 #     machine and had no check at all
-python3 rpi/test_map.py         # 170 on the map check page: that it asks
+python3 rpi/test_map.py         # 191 on the map check page: that it asks
                                 #     nobody anything until told to, that it
                                 #     keeps to one geocoder request a second,
                                 #     that it shows what it could not place —

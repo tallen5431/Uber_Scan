@@ -351,6 +351,332 @@
     return n;
   }
 
+  /* --- which areas paid, and whether that may be said at all ---------------
+   *
+   * The driver's question: "find areas where it might be best to find high
+   * paying rides". The honest answer is a ranking, and the reason this is
+   * forty lines of argument rather than a groupBy is that the OBVIOUS ranking
+   * is noise, and it took a measurement rather than an opinion to find that
+   * out.
+   *
+   * WHAT WAS MEASURED, on the owner's own week — 1,140 counted offers over
+   * five driving days, 13–20 Sep 2026. Each line is a permutation test:
+   * group the rates, compute Kruskal–Wallis H, then reshuffle the same rates
+   * into the same group sizes a few hundred times and ask how often chance
+   * alone does as well.
+   *
+   *   grouping                       groups  offers        p   verdict
+   *   the place the card named          19      163   0.2260   NOISE
+   *   ...with a floor of 8 offers        5       79   0.9400   NOISE
+   *   the TOWN, from either end           9      367   0.0000   real
+   *   the three-hour block                5    1,138   0.0000   real  (control)
+   *
+   * Every figure here is on the DRIVER'S clock, not the machine that measured
+   * it. That matters and it was got wrong once: this rig's owner is at UTC-4,
+   * a container measuring in UTC put the same offers four hours into the wrong
+   * three-hour blocks, and the block census came out 382/220/112/0/0/0/254/198
+   * against the true 196/33/0/0/2/361/201/373. `blockOf` reads the local clock
+   * for exactly this reason, and so does everything below.
+   *
+   * So: ranking the PLACES — "Shake Shack $18.57, Chipotle $7.27" — is the
+   * feature everybody wants and it is a coin toss wearing a decimal point. The
+   * best-minus-worst spread across those nineteen places is $11.30, and
+   * shuffling the rates at random produces a spread that big or bigger 36% of
+   * the time. A page printing that ranking would be this project's first fault
+   * class, a confidently wrong number, in the one place a driver would act on
+   * it — they would drive across town to sit outside a restaurant chosen by
+   * noise.
+   *
+   * The TOWN survives, and survives the obvious objection. It is not one night
+   * out of the metro: restricted to the seven towns seen on four or more
+   * separate dates it is still p < 0.001. It is not trip length dressed up
+   * either — tested inside each third of the distance range separately it
+   * holds in all three (p = 0.0000 / 0.0020 / 0.0000), and Atlanta leads all
+   * three. The best town's median trip is no longer than the worst's: Atlanta
+   * $20.07/hr over 9.2 miles against Marietta $14.63 over 9.5.
+   *
+   * WHY THE TEST IS IN THE PAGE AND NOT JUST IN THIS COMMENT. Those numbers
+   * are one week of one driver. The next window, the next month and the next
+   * driver are not that week, and a threshold tuned to it is a threshold that
+   * will be wrong somewhere else without saying so. So the page runs the test
+   * on whatever is loaded and refuses the ranking when it does not beat
+   * chance. That is cheap: the ranks are computed once and a shuffle only
+   * reassigns them, so this is O(n) per shuffle and a few milliseconds on a
+   * window the server will actually send.
+   *
+   * WHAT `key` IS AND WHY IT IS AN ARGUMENT. The grouping comes from the
+   * CARD — the town the rig read off it — never from a geocoder. That is the
+   * whole safety argument of map-view.js applied here: a lookup may position
+   * one of these figures on a map, and may never change one. This file does
+   * not know how to parse a place name and must not learn; the caller passes
+   * `MapView.townOf`, which is the tail rule `localityOf` has always used.
+   *
+   * Nothing here reads `lat`, `lon`, or any answer a geocoder gave.
+   */
+
+  /* Below this a median is not a number to read. Eight offers is the floor,
+   * and the day count beside it is not a second opinion about the same thing:
+   * eight offers from one evening is one evening, which this file has said
+   * since `daysIn`. */
+  var AREA_FLOOR = 8;
+  var AREA_DAYS = 2;
+  /* Enough shuffles to resolve the alpha below with room to spare, and few
+   * enough that this stays under a frame on the biggest window the server
+   * sends. 500 gives p to the nearest 0.002. */
+  var AREA_SHUFFLES = 500;
+  var AREA_ALPHA = 0.05;
+
+  /* Ranks, with ties averaged, which is what makes the test hold for a
+   * distribution as skewed as offer rates. A mean over $/hr is dragged by the
+   * one misread that got through; a rank is not. */
+  function ranksOf(values) {
+    var order = values.map(function (v, i) { return i; })
+                      .sort(function (a, b) { return values[a] - values[b]; });
+    var ranks = new Array(values.length);
+    var i = 0;
+    while (i < order.length) {
+      var j = i;
+      while (j + 1 < order.length && values[order[j + 1]] === values[order[i]]) j += 1;
+      var shared = (i + j) / 2 + 1;
+      for (var k = i; k <= j; k++) ranks[order[k]] = shared;
+      i = j + 1;
+    }
+    return ranks;
+  }
+
+  /* Kruskal–Wallis H over ranks already computed, given the group sizes in
+   * the order the ranks are laid out. Written to take the ranks rather than
+   * the values precisely so a shuffle costs a shuffle and not a re-sort. */
+  function kruskal(ranks, sizes) {
+    var n = ranks.length;
+    if (n < 2) return 0;
+    var mid = (n + 1) / 2, out = 0, pos = 0;
+    for (var g = 0; g < sizes.length; g++) {
+      var sum = 0;
+      for (var i = 0; i < sizes[g]; i++) sum += ranks[pos + i];
+      pos += sizes[g];
+      var gap = sum / sizes[g] - mid;
+      out += sizes[g] * gap * gap;
+    }
+    return 12 / (n * (n + 1)) * out;
+  }
+
+  /* A seeded shuffle, because a page that answers "this is chance" on one
+   * press and "this is real" on the next, over the same rows, has told the
+   * driver nothing twice. The seed is fixed: the same window always gets the
+   * same verdict, and a test can assert it.
+   *
+   * `pens` is the one thing that makes this a fair test rather than a
+   * flattering one. Given a list of index-lists, values are only ever
+   * exchanged WITHIN a list — so a shuffle can move an offer between towns but
+   * never between hours, and the question the test answers becomes "does the
+   * town matter once the hour is held still" instead of "does the town matter,
+   * counting the hours the driver happened to be in it". See `areas`. */
+  function shuffled(ranks, seed, pens) {
+    var a = ranks.slice(), s = seed >>> 0;
+    function swirl(idx) {
+      for (var i = idx.length - 1; i > 0; i--) {
+        // Numerical Recipes' LCG, which is plenty for reassigning labels.
+        s = (1664525 * s + 1013904223) >>> 0;
+        var j = s % (i + 1);
+        var t = a[idx[i]]; a[idx[i]] = a[idx[j]]; a[idx[j]] = t;
+      }
+    }
+    if (pens) { for (var p = 0; p < pens.length; p++) swirl(pens[p]); }
+    else {
+      var all = [];
+      for (var k = 0; k < a.length; k++) all.push(k);
+      swirl(all);
+    }
+    return a;
+  }
+
+  /* The ranking, its support, and whether it beats chance.
+   *
+   * Returns the groups that clear the floor, best first, and — always — what
+   * was left out and why. A ranking that quietly drops the eleven towns with
+   * three offers each reports the window as tidier than it is, which is this
+   * project's second fault class.
+   */
+  function areas(offers, opts) {
+    opts = opts || {};
+    var key = opts.key;
+    var floor = typeof opts.floor === 'number' ? opts.floor : AREA_FLOOR;
+    var needDays = typeof opts.days === 'number' ? opts.days : AREA_DAYS;
+    var alpha = typeof opts.alpha === 'number' ? opts.alpha : AREA_ALPHA;
+    // What must be held still while the groups are compared. Optional, and
+    // the caller supplies it for the same reason it supplies `key`: this file
+    // knows what a rate is and not what an hour of the driver's night is.
+    var strata = typeof opts.strata === 'function' ? opts.strata : null;
+    var shuffles = typeof opts.shuffles === 'number' ? opts.shuffles : AREA_SHUFFLES;
+    var out = { groups: [], kept: 0, named: 0, unnamed: 0,
+                thin: 0, thinOffers: 0, p: null, real: false, spread: null,
+                rawSpread: null, matched: false,
+                floor: floor, days: needDays };
+    if (typeof key !== 'function') return out;
+
+    // `trustworthy`, not a fourth copy of the rule. A row the rig would not
+    // stand behind is not evidence about a town, and the offer log and the
+    // panel already agree on what that means.
+    var pool = (offers || []).filter(function (o) {
+      return trustworthy(o) && typeof o.perHour === 'number' && isFinite(o.perHour);
+    });
+
+    var byKey = Object.create(null), order = [];
+    pool.forEach(function (o) {
+      var name = key(o);
+      if (!name) { out.unnamed += 1; return; }
+      out.named += 1;
+      if (!byKey[name]) { byKey[name] = []; order.push(name); }
+      byKey[name].push(o);
+    });
+
+    var kept = [];
+    order.forEach(function (name) {
+      var rows = byKey[name];
+      // outingsIn, not daysIn: see its comment. An area is not tied to an
+      // hour, so a single overnight shift must not report two days.
+      var days = outingsIn(rows);
+      if (rows.length < floor || days < needDays) {
+        out.thin += 1;
+        out.thinOffers += rows.length;
+        return;
+      }
+      kept.push({ name: name, n: rows.length, days: days,
+                  median: Math.round(median(rows.map(function (o) {
+                    return o.perHour;
+                  })) * 100) / 100,
+                  took: rows.filter(function (o) { return o.accepted === true; }).length,
+                  offers: rows });
+    });
+    kept.sort(function (a, b) { return b.median - a.median; });
+    out.groups = kept;
+    out.kept = kept.reduce(function (s, g) { return s + g.n; }, 0);
+    if (kept.length < 2) return out;
+    out.spread = Math.round((kept[0].median - kept[kept.length - 1].median) * 100) / 100;
+
+    // The test. Ranks over the kept rates once; a shuffle only reassigns them.
+    var flat = [], pen = [];
+    kept.forEach(function (g) {
+      g.offers.forEach(function (o) {
+        flat.push(o.perHour);
+        pen.push(strata ? String(strata(o)) : '');
+      });
+    });
+    var sizes = kept.map(function (g) { return g.n; });
+    var ranks = ranksOf(flat);
+    var real = kruskal(ranks, sizes);
+
+    /* HOLDING THE HOUR STILL, which is the difference between a finding and a
+     * flattering one — and this shipped without it for exactly as long as it
+     * took two independent readers to catch it.
+     *
+     * The rate a town pays is tangled with WHEN the driver is in it. Measured
+     * on the owner's week, on his clock: 12–3am pays $21.24 and 3–6pm pays
+     * $14.17, and 57 of Atlanta's 98 offers are in the 12–3am block while 41
+     * of Kennesaw's 69 and 40 of Marietta's 82 are in the 3–6pm one. So the
+     * raw ranking — Atlanta $20.01 against Marietta $14.63 — is partly a fact
+     * about the towns and partly a fact about the clock, and a driver reading
+     * it would go to Atlanta at six in the evening and find $14.
+     *
+     * With the hours held still the town still matters and matters LESS: the
+     * gap from top to fourth goes from **$4.20 to $1.09**, and the order moves
+     * (Mableton to the top, Smyrna from sixth to last at −$3.11). That is a
+     * number a driver acts on being four times larger than the truth, which is
+     * this project's first fault class, so it is not an enrichment — it is the
+     * correction that makes the feature honest.
+     *
+     * Two halves, and both are needed. `matched` below is how much of a town's
+     * rate is left once each offer is measured against what its own hour paid;
+     * the shuffle above is confined to the same pens, so the test asks the
+     * same question the number answers. */
+    var pens = null;
+    if (strata) {
+      var byPen = Object.create(null);
+      pen.forEach(function (k, i) { (byPen[k] = byPen[k] || []).push(i); });
+      pens = Object.keys(byPen).map(function (k) { return byPen[k]; });
+    }
+    /* ...unless there is only one pen, in which case there is nothing to hold
+     * still and saying otherwise is noise. That is the ordinary case once the
+     * driver has picked a three-hour block: the filter has already held the
+     * hour, every offer is measured against the same baseline, and `matched`
+     * would be the median shifted by a constant — the same order, reported as
+     * though something had been controlled for. The plain median is the right
+     * number there, and the page says the plainer sentence. */
+    if (pens && pens.length > 1) {
+      // What each hour paid, over the kept pool and nothing wider: a town is
+      // being compared with the other towns on this page, not with a journal.
+      var penRates = Object.create(null);
+      Object.keys(byPen).forEach(function (k) {
+        penRates[k] = median(byPen[k].map(function (i) { return flat[i]; }));
+      });
+      var seen = 0;
+      kept.forEach(function (g) {
+        var diffs = g.offers.map(function (o) {
+          return flat[seen] - penRates[pen[seen++]];
+        });
+        g.matched = Math.round(median(diffs) * 100) / 100;
+      });
+      // Ordered by what is left, not by what it paid. The question is which
+      // town is worth being in, and the raw figure answers a different one.
+      kept.sort(function (a, b) { return b.matched - a.matched; });
+      out.matched = true;
+      out.spread = Math.round((kept[0].matched
+                               - kept[kept.length - 1].matched) * 100) / 100;
+      out.rawSpread = Math.round((Math.max.apply(null, kept.map(function (g) { return g.median; }))
+                                  - Math.min.apply(null, kept.map(function (g) { return g.median; }))) * 100) / 100;
+    }
+
+    var asGood = 0;
+    for (var s = 0; s < shuffles; s++) {
+      if (kruskal(shuffled(ranks, s + 1, pens), sizes) >= real) asGood += 1;
+    }
+    out.h = Math.round(real * 100) / 100;
+    out.p = asGood / shuffles;
+    out.real = out.p < alpha;
+    return out;
+  }
+
+  /* When a driver's day starts, which is not when the calendar's does.
+   *
+   * 4am is the conventional boundary for shift work and nobody is driving
+   * then, so no shift can straddle it. `journal.html` and `live.html` have
+   * each carried this number since long before this file did; they now read it
+   * from here so the three cannot come apart, and their own day helpers stay
+   * where they are because each does more than return a key.
+   */
+  var DAY_STARTS_AT = 4;
+
+  /* How many separate OUTINGS a pile of rows came off — which is a different
+   * question from `daysIn` above, not a second answer to it.
+   *
+   * `daysIn` counts calendar dates and is right for a BLOCK, for the reason
+   * written there: every three-hour block lies inside one calendar date by
+   * construction, so one date is exactly one occurrence of it, and folding
+   * midnight back into the previous evening would count two separate nights of
+   * 12–3am as one.
+   *
+   * An area is not tied to an hour, and that same rule breaks it. A single
+   * shift from 8pm to 2am touches two calendar dates, so an area seen only on
+   * that one outing reports **two days** and clears a floor of two — which is
+   * precisely the "one evening wearing a habit's clothes" the floor exists to
+   * refuse, arriving through the calendar rather than through the data. This
+   * driver works nights: on the owner's own week the calendar says six dates
+   * where five shifts were driven, and Atlanta read `days=6` against five
+   * outings before this existed.
+   */
+  function outingsIn(rows) {
+    var seen = Object.create(null), n = 0;
+    (rows || []).forEach(function (r) {
+      var d = new Date(r && r.at);
+      if (!isFinite(d.getTime())) return;
+      d.setHours(d.getHours() - DAY_STARTS_AT);
+      var key = d.getFullYear() + '/' + d.getMonth() + '/' + d.getDate();
+      if (!(key in seen)) { seen[key] = true; n += 1; }
+    });
+    return n;
+  }
+
   /* Do these two jobs end anywhere near each other?
    *
    * Deliberately asymmetric, because the two mistakes cost different amounts. A
@@ -1168,6 +1494,15 @@
            // The offer log's chart and the map's time filter ask one question
            // and must not each keep their own eight edges.
            BLOCK_NAMES: BLOCK_NAMES, blockOf: blockOf, daysIn: daysIn,
+           // The area ranking and the test that decides whether it may be
+           // shown. The thresholds are exported for the same reason
+           // THRESHOLDS below is: a page that says "eight offers on two days"
+           // in words must read the number it is describing.
+           areas: areas, AREA_FLOOR: AREA_FLOOR, AREA_DAYS: AREA_DAYS,
+           AREA_ALPHA: AREA_ALPHA, AREA_SHUFFLES: AREA_SHUFFLES,
+           outingsIn: outingsIn,
+           // The one place the driver's 4am day boundary is written down.
+           DAY_STARTS_AT: DAY_STARTS_AT,
            mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,
            // Exported because a page that prints how far the line moved has to
            // be able to say what "settled" was allowed to mean, and a check
