@@ -236,9 +236,29 @@ ROWS = [
     # geocoder can place none of them either way, so every count above is
     # untouched — what changes is that the sidebar's top block now has two
     # towns to hold against each other and several hours to hold still.
-    offer(5 + i, 'Unfindable Pl %d, %s' % (i, 'Atlantis' if i % 2 else 'Borealis'),
+    # Two towns, two nights each, five hours apart — and every one of those is
+    # load-bearing rather than decoration, because NOW above is the WALL CLOCK
+    # and anything left to chance here passes when it is written and fails at
+    # four in the morning.
+    #
+    #   TOWN from a fixed split, NIGHT from `i // 2`. Written with `i % 2` for
+    #   both, town and night were the same term: each town landed on exactly
+    #   one outing, the two-outing floor dropped both, and the ranking checks
+    #   below failed hours after they were written. The same coupling the
+    #   advice fixtures were caught on once already.
+    #
+    #   FIVE HOURS apart, so the two towns are always in different three-hour
+    #   blocks whatever the hour happens to be. That gives "any time" two
+    #   blocks to hold still — which is what the ranking needs before it will
+    #   report what is left once the hour is out of it — and it gives every
+    #   block exactly ONE town, which is the state that used to print "this
+    #   ranking is not worth acting on" and, in the same breath, that chance
+    #   never does this well. Searching for that state instead of building it
+    #   is how a check comes to depend on the time of day it is run at.
+    offer(5 + i, 'Unfindable Pl %d, %s' % (i, 'Borealis' if i < 8 else 'Atlantis'),
           None, 2.0,
-          at=NOW - (i + 1) * 1000 - (i % 2) * 86400000 - (i % 5) * 3600000)
+          at=NOW - (i + 1) * 1000 - ((i // 2) % 2) * 86400000
+             - (0 if i < 8 else 5) * 3600000)
     for i in range(26)
 ]
 

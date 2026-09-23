@@ -386,11 +386,27 @@
    * misleads. */
   function whenNote(sub) {
     if (el.block.value === '') return '';
-    // Outings, not calendar dates. A block lies inside one date by
-    // construction, so daysIn was right for it; the two day cuts do not, and a
-    // single Saturday night spanning midnight would report two days under the
-    // old count. See Advice.outingsIn for why these are different questions.
-    var days = Advice.outingsIn(sub);
+    /* Which count, and it depends on what was picked — these are two
+     * questions, not one, and answering both with `outingsIn` was wrong.
+     *
+     * A BLOCK lies inside one calendar date by construction, so one date is
+     * exactly one occurrence of it; folding a midnight block back into the
+     * previous evening counts two separate nights of 12–3am as one and
+     * undercounts the very thing this sentence exists for. That is daysIn's
+     * own argument, written where daysIn is.
+     *
+     * A DAY CUT is not tied to an hour and the same rule breaks it: one shift
+     * from 8pm to 2am is one Saturday night and two calendar dates, and
+     * counting it as two days is the "one evening wearing a habit's clothes"
+     * this refuses.
+     *
+     * Switched wholesale to outings in the commit that added the day cuts,
+     * which made this sentence call a single 12–3am block "2 separate days"
+     * whenever the fixture's offers straddled 4am — a wall-clock-dependent
+     * wrong answer that the suite caught only hours later. */
+    var cut = null;
+    DAY_CUTS.forEach(function (c) { if (c.value === el.block.value) cut = c; });
+    var days = cut ? Advice.outingsIn(sub) : Advice.daysIn(sub);
     return ' · ' + whenLabel() + ' only, and '
       + (days === 0 ? 'no day in this window has any'
          : days === 1 ? 'all of it is one day — that is a day, not a habit'

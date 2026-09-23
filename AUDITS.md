@@ -820,6 +820,22 @@ Three things worth not rediscovering:
     and cleared a floor of two — the "one evening wearing a habit's clothes"
     the floor exists to refuse, arriving through the calendar. On the owner's
     week the calendar says six dates where five shifts were driven.
+  - **`whenNote` was switched to outings wholesale, and half of it wanted
+    dates.** The day cuts need `outingsIn` — a Saturday night spanning midnight
+    is one outing — but a BLOCK lies inside one calendar date by construction,
+    which is `daysIn`'s own stated argument where `daysIn` is written. Switched
+    for both, the sentence under a single 12-3am block read "2 separate days of
+    it are in this window" whenever the fixture's offers straddled 4am. It
+    depends on the wall clock, so it passed when it was written and went red in
+    the gate hours later. `whenNote` now picks the count from what was picked.
+  - **And the fixture that caught it was wall-clock-dependent itself.** The two
+    towns in `rpi/test_map.py` took their town from `i % 2` and their night
+    from `i % 2` as well, so each landed on exactly one outing and the
+    two-outing floor dropped both — the same coupling the advice fixtures had
+    already been caught on once. Town and night are separate terms now, the two
+    towns sit five hours apart so they are always in different blocks, and the
+    single-town state the page needs is BUILT rather than searched for. Held
+    green at every three-hour offset around the clock.
   - **Measure on the DRIVER's clock.** The first pass of every figure above was
     taken in UTC by a container four hours away, which puts each offer into the
     wrong three-hour block: a census of 382/220/112/0/0/0/254/198 against the
