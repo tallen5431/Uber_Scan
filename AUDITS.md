@@ -685,6 +685,87 @@ one. `trouble()` now carries `refusing`, the last `keep()`'s own answer, which
 clears — the present-tense warning is shown only while it is present tense,
 and the count of what has already gone is stated as the past fact it is.
 
+**Every payout-free frame was read and thrown away, and the tick is the one
+column nothing else can fill.** 31 of 1,166 offers on the owner's week carry a
+tick and every earnings figure divides by them. The rig cannot see the Accept
+press and must never make it, so the only evidence is the screen the phone goes
+to afterwards — and `an_offer` in `digest()` was already separating that screen
+from a card in order to hunt for an address on it. One of those frames per
+landed card is now kept as a `kind: "screen"` row carrying the raw reading, the
+id of the card it followed and how long after.
+
+*Collection only, and that is not temporary caution.* Nothing reads these rows
+and nothing writes `accepted` from one. There is no corpus: nothing on file says
+what a navigation screen reads as through this camera at night, so a recogniser
+written now would be a regex tuned to a screenshot deciding the one field every
+figure is gated on, and a wrong tick is a taken job that never happened in the
+file that cannot be rewritten. What gets built on these rows gets measured
+against ticks the driver made by hand first.
+
+What is written: once per landed card and at most twice, because a navigation
+screen sits in front of the camera for a whole delivery and is read every time
+the map moves; inside three minutes of that card, so a phone picked up an hour
+later is not filed against it; never on a `clipped` read, because `clipped`
+means the payout WAS found flush against the top of the crop and the reader
+answers it with an empty parse; and the raw reading rather than the flattened
+one, because on these screens the line is the grammar.
+
+**Four faults in the first version of it, all found by attacking the diff
+rather than by reading it, and all of the kind this ledger exists for.**
+
+*It could file a screen against a card the driver did not take, which is the
+only one of these that would have put a lie in the journal.* The slate is armed
+by a card REACHING the file, and a card needs two agreeing reads to lock while
+only a locked reading is written — so a card can be seen, counted in `saw`, and
+never land. That gap is not hypothetical; it is the whole reason `saw` minus
+`kept` is on the health line. Reproduced through `main()`: card A lands, card B
+is read once and never locks, the driver accepts B, and the navigation screen
+after it is written `after: <A>`. Indistinguishable from a real pairing, in the
+corpus the detector is to be measured on, in the file that cannot be rewritten.
+Any payout that is not the armed card's now drops the slate — a missing row
+instead of a wrong one, which is the direction this rig always takes.
+
+*It reused `an_offer`, which would have refused the screens it was collecting.*
+That test's second arm exists so an address is never taken off a card whose
+merchant survived a lost payout, and it rests on a measurement stated in the
+code: a navigation screen names no merchant, "it says `Dropoff <address> 12 min
+Start` and `places` comes back empty". Measured on DoorDash. Uber's post-accept
+screen names its destination the way a card names a shop — `BCG Atlanta / 1075
+Peachtree St NE Ste 3800, Atlanta, GA` off the owner's own screenshot — so the
+merchant arm would have thrown away the best evidence in the set, silently, and
+left a corpus of only the screens that read badly. The payout alone is the
+grammar now, and what the frame named is written onto the row instead of being
+acted on.
+
+*"Once per card" was really once per landed ROW.* Both append paths in
+`consider` armed the slate outright, and a card does not write one row — it
+writes one per reading that improves on the last, plus a settled upgrade. So a
+card that landed four rows re-opened the question three times after its screen
+had already been answered.
+
+*And the state behind all of it was three fields where two of the guards were
+unreachable.* On a fresh log the "already answered" test compared None with
+None, came out true, and returned the right answer for the wrong reason — so
+deleting the guard that was actually about it changed no behaviour and nothing
+in the suite could tell.
+
+One thing was **refused** rather than fixed. A single glared frame of a card
+reads as payout-free over a card, which is the positive class in the negative
+slot, and the obvious cure is to refuse any frame taken while a card was still
+up at the previous read. Measured against the loop: reads are driven by a motion
+gate, so the frame right after an accept is sometimes the only one, and refusing
+it loses the screen rather than mislabelling it. It is written with
+`cardWasUp: true` and superseded by the first clean frame — two rows at most,
+sharing an id, separated by `seq`.
+
+Two fixtures were built to drive that supersede through the real loop and
+neither survives the screen detector: a light navigation screen blows the
+exposure out with the gain already at its floor and never gets read, a dark one
+is not seen at all. Both were deleted rather than left in passing for the wrong
+reason, and the one thing they were for is asserted on the source instead —
+which is the same answer, and the same paragraph of reasoning, that
+`read_the_money`'s wiring check in that file already carries.
+
 ### The order in the car
 
 **A destination scanned while SCREENING lost its provenance the moment the card

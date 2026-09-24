@@ -88,6 +88,26 @@ RESUME_WINDOW_MS = 90 * 1000
 SANE_PAY = OP.SANE_PAY
 SANE_MINUTES = OP.SANE_MINUTES
 
+# How long after a card reached the file a payout-free screen can still be said
+# to have followed it.
+#
+# The one thing the rig cannot see is whether the driver pressed Accept, and
+# the evidence for it is on the screen the phone goes to afterwards: a
+# navigation screen carrying "Deliver to <name>", a turn instruction and a
+# speed limit, and no payout and no Accept button anywhere on it. Nothing on
+# file says what one of those reads as through this camera at night, so no
+# recogniser can be built and none can be invented from a screenshot. These
+# rows are the corpus, and this is the bound on how far from a card one may be
+# collected.
+#
+# Three minutes is generous on purpose and is still a bound. An accept happens
+# inside the card's own countdown, so the screen that follows it is seconds
+# away, not minutes; the window exists for the other case, a driver who stops
+# scanning and comes back an hour later to a phone showing something. Without
+# it that screen would be filed against a card from an hour ago, which is a
+# pairing the data does not support and the shape this collection is for.
+SCREEN_WINDOW_MS = 180 * 1000
+
 # How much of the tail to read at a time when walking backwards for the last
 # offer. Big enough that the ordinary case — an offer within a few rows of the
 # end — is one read, small enough that a file with a very long run of
@@ -521,6 +541,21 @@ class OfferLog:
         # is about THIS card: a shift that recorded fifty offers and then lost
         # the disk still has a non-zero `written`.
         self.landed_id = None
+        # The card that is still owed a screen row, as `(id, when it landed)`,
+        # or None when none is. See note_screen.
+        #
+        # ONE field rather than three, and it is the difference between a guard
+        # that can fail and a guard that cannot. Written first as a landing
+        # stamp beside `landed_id` and a separate "already answered" id, it took
+        # three states to say one thing, and two of the guards over them were
+        # unreachable: on a fresh log the "already answered" test compared None
+        # with None, came out true, and returned the right answer for the wrong
+        # reason — so deleting the test that was actually about it changed no
+        # behaviour at all, and nothing in the suite could tell. This says the
+        # whole question in one place: set when a row reaches the file, cleared
+        # when a screen has been written against it, and every path that reads
+        # it has to look at the same value.
+        self.screen_wanted = None
 
     def resume(self, now=None):
         """Adopt the last row if it is recent enough to be the card on screen.
@@ -707,6 +742,7 @@ class OfferLog:
                                   places=list(self.places), where=where)
                 if self.journal.append(upgrade):
                     self.written += 1
+                    self.screen_wanted = self._owe_screen(at)
                     self.landed_id = self.id
                     return upgrade
             return None
@@ -721,9 +757,212 @@ class OfferLog:
                       where=where)
         if self.journal.append(row):
             self.written += 1
+            self.screen_wanted = self._owe_screen(at)
             self.landed_id = self.id
             return row
         return None
+
+    def _owe_screen(self, at):
+        """What to put on the screen slate now that a row has reached the file.
+
+        Called from both append paths, BEFORE `landed_id` moves, because
+        `landed_id` is still the last card that landed and that is the whole
+        test: a row of the SAME card is not a new card.
+
+        This is what makes "one screen row per card" true rather than
+        approximately true. Both paths used to arm it outright, and a card does
+        not write one row — it writes one per reading that improves on the last,
+        plus a settled upgrade. So a card that landed four rows re-opened the
+        question three times after its screen had already been answered, and
+        the bound this feature rests on was really "one per landed ROW". On a
+        navigation screen sitting in front of the camera for a whole delivery
+        that is the difference between one row and a handful, in a file that is
+        only ever appended to.
+
+        A card already part-way through being answered stays where it is:
+        returning the current value leaves the third element alone.
+        """
+        if self.landed_id == self.id:
+            return self.screen_wanted
+        return (self.id, at, None)
+
+    def saw_card(self, pay):
+        """A payout was read off a frame. Drop the screen slate if it is not
+        the armed card's. Returns True if it was dropped.
+
+        The slate is armed by a card REACHING THE FILE, and a card that is seen
+        and never recorded arms nothing — which is not a rare case but a
+        measured one: `saw` minus `kept` is the figure the offers page turns
+        into "3 times the scanner picked a payout off the screen and never
+        managed to record it". `consider()` is only called on a reading that is
+        ready and locked, so a card that never locks never lands, never arms,
+        and never clears.
+
+        Without this the slate is "the last card that LANDED" while the driver
+        is looking at a different one. Reproduced end to end: card A lands,
+        card B is read once and never locks, the driver accepts B, and the
+        navigation screen after it is written `after: <A>` — a pairing that
+        names an offer the driver did not take, indistinguishable from a real
+        one, in the file that cannot be rewritten. `note_screen`'s own docstring
+        refuses the analogous `resume()` case on exactly this principle.
+
+        The payout is what says "a different card", for the same reason it is
+        what `consider` identifies an offer by: it is the figure the app leads
+        with and the one this reader gets right most often. A reading that
+        cannot be true says nothing about anything and is ignored here as it is
+        there — both ask `OP.doubt`, which is where that rule lives.
+
+        Dropping rather than re-arming, and the asymmetry is the point. A card
+        seen and not recorded has no stamp this process wrote, so there is
+        nothing honest to pair a screen with; the cost is a missing row and the
+        alternative is a wrong one.
+        """
+        if self.screen_wanted is None or pay is None:
+            return False
+        if self.pay is not None and pay == self.pay:
+            return False
+        if OP.doubt(pay, None, None) is not None:
+            return False
+        self.screen_wanted = None
+        return True
+
+    def note_screen(self, text, places=None, card_was_up=False, now=None):
+        """What the phone showed after a card landed. Returns the row, or None.
+
+        Records only. Nothing here writes `accepted`, and nothing reads these
+        rows yet — a recogniser built on two screenshots would be a guess about
+        the one field every earnings figure on every screen is gated on, and a
+        wrong tick is a taken job that never happened in the one file that
+        cannot be rewritten. So this collects the evidence and stops, and what
+        it collects gets measured against ticks the driver made by hand before
+        anything is built on it.
+
+        The caller decides the screen had no payout on it; this decides whether
+        it followed a card, and writes it once.
+
+        The raw reading, not the flattened one, for the same reason `row_for`
+        keeps `rawText`: flattening throws away which LINE each thing sat on,
+        and on these screens the line IS the grammar — "Deliver to Daria I." is
+        a line, and the same words scattered through a flattened blob are not
+        evidence of anything.
+
+        `places` is what the reader made of the frame, and it is RECORDED rather
+        than acted on. The caller's payout test is the app's own grammar for
+        "this is a card" and it is the only one that holds: a merchant name is
+        NOT, because an Uber navigation screen names the destination the same
+        way a card names the shop — the screenshot this was built from reads
+        `BCG Atlanta / 1075 Peachtree St NE Ste 3800, Atlanta, GA`. Refusing a
+        frame for naming a place would throw away exactly the screens worth
+        collecting, and trusting one would be the recogniser this must not
+        invent. So the frame is written and what it named is written with it,
+        and whoever builds the detector can partition on it with the evidence in
+        front of them.
+        """
+        text = text if isinstance(text, str) else ''
+        if not text.strip():
+            return None
+        # Nothing is owed a screen: either no card this process wrote has
+        # reached the file, or the one that did has already been answered.
+        #
+        # Those two are one question and one field on purpose. A navigation
+        # screen sits in front of this camera for a whole delivery and is read
+        # every time anything else moves, so "once per card, not once per look"
+        # is what keeps one job from appending a few hundred rows of the same
+        # screen to a file that is only ever appended to — and a card that never
+        # landed has nothing for a screen to have followed, which saying
+        # otherwise would invent.
+        #
+        # `resume()` deliberately leaves this alone, so a scanner that came back
+        # mid-card writes nothing about the screen after it until the next card
+        # lands. That is a real gap and it is the right one: resume adopts an id
+        # off the disk without knowing when this process last agreed with it,
+        # and a pairing measured against a stamp nothing here wrote is exactly
+        # the evidence this collection must not manufacture.
+        if self.screen_wanted is None:
+            return None
+        after, landed_at, wrote = self.screen_wanted
+        # `wrote` is what has already been written against this card: None for
+        # nothing, or the `card_was_up` of the row that was. A card is answered
+        # ONCE, with one exception — a frame taken while a card was still on
+        # screen at the previous read may be replaced, once, by one taken when
+        # there was not.
+        #
+        # That exception is the whole reason this is not a boolean. An offer
+        # card that loses its payout to glare for a single frame reads
+        # `pay: None` over a card, and a corpus whose row for that card is the
+        # card's own text has the positive class filed in the negative slot —
+        # the one confusion a recogniser built on these rows could not survive.
+        # Refusing such a frame outright was the first answer and it was worse:
+        # on a rig whose reads are driven by a motion gate, the frame right
+        # after an accept is sometimes the ONLY one, and refusing it loses the
+        # screen rather than mislabelling it. So it is written, it is labelled,
+        # and the first clean frame inside the window supersedes it.
+        #
+        # Two rows at most, sharing an id and separated by `seq`, which is the
+        # same convention every superseded reading in this file already uses.
+        if wrote is False:
+            return None
+        if wrote is True and card_was_up:
+            return None
+        at = now_ms(now)
+        # Both ends of the window, and the negative end is not symmetry for its
+        # own sake.
+        #
+        # The forward jump this rig is famous for is already covered by the far
+        # edge: a Pi boots in 1970 and steps to real time when the network
+        # arrives, and a card stamped before that step with a screen read after
+        # it comes out DECADES apart — a huge positive age, refused for being
+        # outside the window. It is the other direction that needs its own arm.
+        # NTP corrects a fast clock by stepping it BACKWARDS, and `time.time()`
+        # goes with it, so a screen genuinely read after a card can be stamped
+        # before it. A negative age is not a fresh screen and it is not an old
+        # one; it is a clock that moved, and saying nothing is the honest answer
+        # rather than filing a pairing whose `afterMs` would have to be a lie.
+        age = at - landed_at
+        if age < 0 or age > SCREEN_WINDOW_MS:
+            return None
+        row = {
+            'v': SCHEMA,
+            'kind': 'screen',
+            'at': at,
+            # Stamped from the clock the way the dropoff sighting rows are, and
+            # carrying the same caveat: two in one millisecond would be one key
+            # to the sync and one of them dropped. One per card makes that
+            # unreachable here.
+            # Keyed on the CARD, not on the clock, so that the two rows a
+            # card may produce are one row superseded rather than two rows
+            # about the same moment. `seq` is what tells them apart, exactly as
+            # it does for the readings of an offer, and the sync keys on the
+            # pair.
+            'id': 'screen-%s' % after,
+            'seq': 1 if wrote is None else 2,
+            # Which card this followed. The whole value of the row: an offer
+            # and the screen that came after it is the pair a recogniser has to
+            # be measured on, and either half alone says nothing.
+            'after': after,
+            # How long after, because "the screen five seconds later" and "the
+            # screen two minutes later" are different evidence and a reader
+            # months from now can only tell them apart if it is written down.
+            'afterMs': int(age),
+            'text': text[:TEXT_KEPT],
+            # What the reader made of the frame, so the one thing that could
+            # make this row a degraded CARD rather than a screen is on the row
+            # itself instead of being guessed at afterwards. Capped and
+            # normalised the way row_for's own places list is; absent rather
+            # than empty, so a frame that named nothing looks different from a
+            # build that did not record it.
+            'places': [p[:OP.MAX_PLACE] for p in (places or [])
+                       if isinstance(p, str) and p][:OP.MAX_PLACES] or None,
+            # Whether the rig still believed a card was in front of it at the
+            # previous read. The one thing that separates a navigation screen
+            # from one glared frame of the card before it, written down rather
+            # than decided on — see the supersede rule above.
+            'cardWasUp': bool(card_was_up),
+        }
+        if not self.journal.append(row):
+            return None
+        self.screen_wanted = (after, landed_at, bool(card_was_up))
+        return row
 
 
 # How much of a reading to keep on the row. A ride card reads to about 80

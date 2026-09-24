@@ -1176,6 +1176,311 @@ shutil.rmtree(_up_dir, ignore_errors=True)
 
 shutil.rmtree(_gps_dir, ignore_errors=True)
 
+# --- what the phone showed after a card landed ------------------------------
+#
+# The one thing the rig cannot see is the Accept press, and the evidence is on
+# the screen the phone goes to afterwards. These rows are the corpus for that
+# and nothing else: they are collected, they sync, and nothing reads them.
+#
+# Every check below is about a row NOT being written, because that is where the
+# whole risk is. A screen filed against a card it did not follow is a pairing
+# nothing later could tell from a real one, in a file that is only appended to.
+
+_sc_dir = tempfile.mkdtemp()
+_sc_log = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'screens.jsonl')))
+
+eq('a screen before any card has landed is not recorded',
+   _sc_log.note_screen('Deliver to Daria I.', now=1_700_000_000.0), None)
+
+_sc_acc = OfferAccumulator()
+_sc_p = _sc_acc.add(P.parse(_CARD), now=1_700_000_000.0)
+_sc_landed = _sc_log.consider(_sc_p, P.rate(_sc_p, MONEY), now=1_700_000_000.0,
+                              locked=True, settled=False)
+ok_('a card lands first', _sc_landed is not None)
+
+for _why, _blank in (('empty', ''), ('whitespace', '  \n\t '),
+                     ('not a string at all', None),
+                     # Not None, which `or ''` would also have handled. A
+                     # caller handing over something that is neither a string
+                     # nor falsy has to come back None rather than raising
+                     # inside a journal write on the scan loop's own thread.
+                     ('a number', 1234), ('a list of lines', ['Deliver to X'])):
+    eq('a screen that read as %s is not recorded' % _why,
+       _sc_log.note_screen(_blank, now=1_700_000_005.0), None)
+
+_nav = ('3.2 mi\nI-75 S toward 14th St\n65 LIMIT\n'
+        '8 min 4.8 mi\nDeliver to Daria I.')
+_sc_row = _sc_log.note_screen(_nav, now=1_700_000_008.0)
+ok_('the screen after it is recorded', _sc_row is not None)
+if _sc_row:
+    eq('...under a kind of its own', _sc_row.get('kind'), 'screen')
+    eq('...naming the card it followed', _sc_row.get('after'), _sc_landed['id'])
+    eq('...and how long after, in ms', _sc_row.get('afterMs'), 8000)
+    # The line breaks are the grammar on these screens: "Deliver to Daria I."
+    # is a LINE, and the same words scattered through a flattened blob are not
+    # evidence of anything. This is the same reason row_for keeps `rawText`.
+    ok_('...keeping the reading as it was read, line breaks and all',
+        '\n' in (_sc_row.get('text') or '') and _sc_row.get('text') == _nav)
+    # An id and a seq, because syncKey needs the pair for a kind it has never
+    # heard of — without them every screen row would collapse onto one key at
+    # the far end and all but the first would be dropped as duplicates.
+    ok_('...with an id', isinstance(_sc_row.get('id'), str) and _sc_row.get('id'))
+    eq('...and a seq, which is what carries it over the sync',
+       _sc_row.get('seq'), 1)
+    # A frame that named nothing says so by absence, which is a different
+    # answer from a build that did not record it.
+    eq('...and no places, because this frame named none',
+       _sc_row.get('places'), None)
+    eq('...and no card behind it at the previous read',
+       _sc_row.get('cardWasUp'), False)
+    eq('...as the first row against that card', _sc_row.get('seq'), 1)
+
+# ONCE per card, not once per look. A navigation screen sits in front of this
+# camera for a whole delivery and is read every time anything else moves.
+eq('a second screen against the same card is not recorded',
+   _sc_log.note_screen('still navigating, quite differently', now=1_700_000_060.0),
+   None)
+eq('...and the file holds one screen row, not two',
+   len([r for r in _sc_log.journal.rows() if r.get('kind') == 'screen']), 1)
+
+# A NEW card opens the question again.
+_sc_p2 = _sc_acc.add(P.parse('Delivery\n$19.40\n31 min (9.2 mi) total\n'
+                             'Pickup\nZaxbys\nCustomer dropoff'),
+                     now=1_700_000_400.0)
+_sc_landed2 = _sc_log.consider(_sc_p2, P.rate(_sc_p2, MONEY),
+                               now=1_700_000_400.0, locked=True, settled=False)
+ok_('a different card lands', _sc_landed2 is not None
+    and _sc_landed2['id'] != _sc_landed['id'])
+_sc_row2 = _sc_log.note_screen('Deliver to Bob R.', now=1_700_000_409.0)
+ok_('...and the screen after THAT one is recorded too', _sc_row2 is not None)
+if _sc_row2:
+    eq('...against the new card', _sc_row2.get('after'), _sc_landed2['id'])
+
+# The window, both ends of it.
+#
+# Past it, a screen is not evidence about the card: the case is a driver who
+# stopped scanning and came back to a phone showing something, and filing that
+# against a card from an hour ago is the pairing this collection exists to
+# avoid inventing.
+_sc_p3 = _sc_acc.add(P.parse('Delivery\n$7.25\n14 min (3.1 mi) total\n'
+                             'Pickup\nWendys\nCustomer dropoff'),
+                     now=1_700_001_000.0)
+_sc_landed3 = _sc_log.consider(_sc_p3, P.rate(_sc_p3, MONEY),
+                               now=1_700_001_000.0, locked=True, settled=False)
+ok_('a third card lands', _sc_landed3 is not None)
+eq('a screen a second past the window is not recorded',
+   _sc_log.note_screen('Deliver to someone',
+                       now=1_700_001_000.0 + (JR.SCREEN_WINDOW_MS / 1000.0) + 1),
+   None)
+# ...against a real number of seconds and not against the constant, which every
+# other check here is written in terms of. Widening the window moves all of
+# those with it and none of them notices; this is the one that pins how far a
+# screen may be from a card before the pairing stops being evidence about it.
+# Ten minutes is inside a delivery and nowhere near an accept, which happens
+# inside the card's own countdown.
+eq('...and neither is one ten minutes later',
+   _sc_log.note_screen('Deliver to someone', now=1_700_001_000.0 + 600), None)
+eq('the window is three minutes', JR.SCREEN_WINDOW_MS, 180 * 1000)
+# ...and the other end, which is not symmetry for its own sake. The Pi boots in
+# 1970 and jumps when the network arrives, so a screen read seconds after a card
+# can arrive stamped decades before it. A negative age is a clock that moved,
+# and the honest answer is to say nothing.
+eq('...nor is one stamped before the card it would follow',
+   _sc_log.note_screen('Deliver to someone', now=1_700_000_999.0), None)
+eq('...and neither refusal left a row behind',
+   len([r for r in _sc_log.journal.rows() if r.get('kind') == 'screen']), 2)
+# The window is open at its far edge, so the boundary is a boundary and not a
+# hole: exactly at it is still a screen that followed the card.
+ok_('a screen exactly at the far edge of the window is recorded',
+    _sc_log.note_screen('Deliver to someone',
+                        now=1_700_001_000.0
+                        + (JR.SCREEN_WINDOW_MS / 1000.0)) is not None)
+
+# A journal that cannot be written leaves the card unanswered rather than
+# marking it answered — otherwise the one screen the collection wanted is the
+# one it would refuse to try again for.
+_sc_dead = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'nope', 'j.jsonl')))
+_sc_dead.screen_wanted = ('off-x', JR.now_ms(1_700_002_000.0), None)
+eq('a screen that could not be appended is not reported as written',
+   _sc_dead.note_screen('Deliver to Daria I.', now=1_700_002_004.0), None)
+ok_('...and the card is left open for the next one',
+    _sc_dead.screen_wanted is not None)
+
+# ...and capped at the same length a reading is. A navigation screen fills the
+# whole phone, so the crop takes in far more of it than it does of a card —
+# these are the rows most able to run away with the file, and it is only ever
+# appended to.
+_sc_p4 = _sc_acc.add(P.parse('Delivery\n$5.55\n11 min (2.2 mi) total\n'
+                             'Pickup\nSubway\nCustomer dropoff'),
+                     now=1_700_003_000.0)
+ok_('a fourth card lands',
+    _sc_log.consider(_sc_p4, P.rate(_sc_p4, MONEY), now=1_700_003_000.0,
+                     locked=True, settled=False) is not None)
+_sc_long = _sc_log.note_screen('Deliver to ' + ('x' * 4000), now=1_700_003_002.0)
+ok_('a screen that read the whole phone is recorded', _sc_long is not None)
+if _sc_long:
+    eq('...capped at the same length a reading is',
+       len(_sc_long['text']), JR.TEXT_KEPT)
+
+# The state behind all of the above is ONE field, and a check rather than a
+# comment because the first version of this carried three and two of the guards
+# over them were unreachable — on a fresh log the "already answered" test
+# compared None with None and returned the right answer for the wrong reason, so
+# deleting the guard that was actually about it changed no behaviour and nothing
+# in the suite could tell.
+_sc_fresh = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'one.jsonl')))
+eq('a log that has written nothing owes no screen', _sc_fresh.screen_wanted, None)
+_sc_f = _sc_fresh.consider(_sc_acc.add(P.parse(_CARD), now=1_700_004_000.0),
+                           P.rate(P.parse(_CARD), MONEY), now=1_700_004_000.0,
+                           locked=True, settled=False)
+ok_('...a card landing is what puts one on the slate',
+    _sc_fresh.screen_wanted is not None
+    and _sc_fresh.screen_wanted[0] == _sc_f['id'])
+ok_('...and writing a clean screen is what closes it',
+    _sc_fresh.note_screen('Deliver to Ann', now=1_700_004_003.0) is not None
+    and _sc_fresh.screen_wanted[2] is False)
+
+# The row names the card that LANDED, not whichever card the log is holding by
+# the time the screen is read. Those are the same on every path this loop can
+# take today, which is exactly why it is worth pinning: `self.id` is assigned
+# the moment consider() decides a reading is a new card, before the append is
+# even attempted, and it is the field that has already been mistaken for "on
+# disk" once — see `landed_id`'s own comment. A screen row is a claim about a
+# pair, and the half it names has to be the half that is in the file.
+_sc_moved = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'moved.jsonl')))
+_sc_m = _sc_moved.consider(_sc_acc.add(P.parse(_CARD), now=1_700_005_000.0),
+                           P.rate(P.parse(_CARD), MONEY), now=1_700_005_000.0,
+                           locked=True, settled=False)
+ok_('a card lands and the log moves on to another id', _sc_m is not None)
+_sc_moved.id = 'a-card-that-never-landed'
+_sc_mrow = _sc_moved.note_screen('Deliver to Ann', now=1_700_005_004.0)
+ok_('...and the screen is recorded', _sc_mrow is not None)
+if _sc_mrow:
+    eq('...naming the card that reached the file, not the one in hand',
+       _sc_mrow.get('after'), _sc_m['id'])
+
+# What the frame named is RECORDED, not acted on. An Uber navigation screen
+# names its destination the way a card names a shop — `BCG Atlanta / 1075
+# Peachtree St NE Ste 3800, Atlanta, GA` off the screenshot this was built from
+# — so refusing a frame for naming a place would throw away exactly the screens
+# worth collecting, and trusting one would be the recogniser this must not
+# invent. The row carries it and whoever builds the detector partitions on it.
+_sc_named = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'named.jsonl')))
+ok_('a card lands ahead of a screen that names somewhere',
+    _sc_named.consider(_sc_acc.add(P.parse(_CARD), now=1_700_006_000.0),
+                       P.rate(P.parse(_CARD), MONEY), now=1_700_006_000.0,
+                       locked=True, settled=False) is not None)
+_sc_nrow = _sc_named.note_screen(
+    'BCG Atlanta\n1075 Peachtree St NE Ste 3800, Atlanta, GA\nDeliver to Ann',
+    places=['BCG Atlanta', '1075 Peachtree St NE Ste 3800, Atlanta, GA'],
+    now=1_700_006_006.0)
+ok_('a screen that names somewhere is still recorded', _sc_nrow is not None)
+if _sc_nrow:
+    eq('...with what it named written onto the row', _sc_nrow.get('places'),
+       ['BCG Atlanta', '1075 Peachtree St NE Ste 3800, Atlanta, GA'])
+
+# ONE ROW PER CARD, and a card does not write one row — it writes one per
+# reading that improves on the last, plus a settled upgrade. Both append paths
+# used to re-arm the slate outright, so a card that landed four rows re-opened
+# the question three times after its screen had already been answered and the
+# bound this feature rests on was really "one per landed ROW". Measured against
+# the real consider(), not against the fields.
+_sc_many = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'many.jsonl')))
+_sc_macc = OfferAccumulator()
+_LEGS = ('Delivery\n$12.40\n8 min (2.1 mi)\nZaxbys\n'
+         '19 min (6.0 mi)\nCanton Rd, Marietta')
+_m1 = _sc_macc.add(P.parse(_CARD), now=1_700_007_000.0)
+ok_('the card lands once',
+    _sc_many.consider(_m1, P.rate(_m1, MONEY), now=1_700_007_000.0,
+                      locked=True, settled=False) is not None)
+ok_('...and its screen is recorded',
+    _sc_many.note_screen('Deliver to Ann', now=1_700_007_004.0) is not None)
+# ...and now the SAME card lands again, which is the ordinary case: a later
+# reading picks up a leg the first frame missed, and the settled upgrade lands
+# after that.
+_m2 = _sc_macc.add(P.parse(_CARD + '\n23 min (4.6 mi) total'), now=1_700_007_010.0)
+_sc_many.consider(_m2, P.rate(_m2, MONEY), now=1_700_007_010.0,
+                  locked=True, settled=False)
+_m3 = _sc_macc.add(P.parse(_CARD + '\n23 min (4.6 mi) total'), now=1_700_007_014.0)
+_sc_many.consider(_m3, P.rate(_m3, MONEY), now=1_700_007_014.0,
+                  locked=True, settled=True)
+_sc_ids = set(r.get('id') for r in _sc_many.journal.rows() if not r.get('kind'))
+ok_('the same card landed more than one row (%d)'
+    % len([r for r in _sc_many.journal.rows() if not r.get('kind')]),
+    len([r for r in _sc_many.journal.rows() if not r.get('kind')]) > 1)
+eq('...all of them one card', len(_sc_ids), 1)
+eq('a screen after a card that landed twice is not recorded twice',
+   _sc_many.note_screen('still navigating', now=1_700_007_020.0), None)
+eq('...and the file holds one screen row for that card',
+   len([r for r in _sc_many.journal.rows() if r.get('kind') == 'screen']), 1)
+
+# A frame taken while a card was still up is written, LABELLED, and may be
+# replaced once by a clean one. One glared frame of an offer card reads
+# `pay: None` over a card, and a corpus whose row for that card is the card's
+# own text has the positive class in the negative slot. Refusing it outright was
+# the first answer and it was worse: reads are driven by a motion gate, so the
+# frame after an accept is sometimes the only one, and refusing it loses the
+# screen rather than mislabelling it.
+_sc_up = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'glare.jsonl')))
+_sc_ucard = _sc_up.consider(_sc_acc.add(P.parse(_CARD), now=1_700_008_000.0),
+                            P.rate(P.parse(_CARD), MONEY), now=1_700_008_000.0,
+                            locked=True, settled=False)
+ok_('a card lands ahead of a glared frame of itself', _sc_ucard is not None)
+_sc_glare = _sc_up.note_screen('Uber  ...  ', card_was_up=True,
+                               now=1_700_008_002.0)
+ok_('a frame taken with a card still up is recorded', _sc_glare is not None)
+if _sc_glare:
+    eq('...and says so on the row', _sc_glare.get('cardWasUp'), True)
+    eq('...as the first row against that card', _sc_glare.get('seq'), 1)
+eq('another frame with the card still up does not pile up',
+   _sc_up.note_screen('Uber  ...  again', card_was_up=True,
+                      now=1_700_008_004.0), None)
+_sc_clean = _sc_up.note_screen(_nav, card_was_up=False, now=1_700_008_009.0)
+ok_('...but the first clean frame supersedes it', _sc_clean is not None)
+if _sc_clean and _sc_glare:
+    eq('...under the same id', _sc_clean.get('id'), _sc_glare.get('id'))
+    eq('...at the next seq, which is how this file says superseded',
+       _sc_clean.get('seq'), 2)
+    eq('...and labelled as the clean one', _sc_clean.get('cardWasUp'), False)
+eq('...and nothing supersedes a clean one',
+   _sc_up.note_screen('still navigating', card_was_up=False,
+                      now=1_700_008_020.0), None)
+eq('so a card is answered at most twice',
+   len([r for r in _sc_up.journal.rows() if r.get('kind') == 'screen']), 2)
+
+# A CARD THE RIG SAW AND NEVER RECORDED drops the slate, and this is the one
+# that would have put a lie in the file. The slate is armed by a card REACHING
+# the journal, and a card that never locks never reaches it — `saw` minus `kept`
+# on the health line is the measured count of exactly those. So without this the
+# anchor is "the last card that landed" while the driver is looking at a
+# different one, and the screen after an accept is written against an offer they
+# did not take: a pairing indistinguishable from a real one, in the corpus the
+# detector is to be measured on.
+_sc_other = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'other.jsonl')))
+_sc_a = _sc_other.consider(_sc_acc.add(P.parse(_CARD), now=1_700_009_000.0),
+                           P.rate(P.parse(_CARD), MONEY), now=1_700_009_000.0,
+                           locked=True, settled=False)
+ok_('card A lands', _sc_a is not None)
+ok_('...and is owed a screen', _sc_other.screen_wanted is not None)
+eq('another reading of the SAME card does not drop the slate',
+   _sc_other.saw_card(_sc_a.get('pay')), False)
+# A reading that cannot be true says nothing about anything — the same rule
+# consider() applies to a lost decimal point, asked of the same function.
+eq('...and neither does a payout that cannot be true',
+   _sc_other.saw_card(883.0), False)
+ok_('...the slate is still armed', _sc_other.screen_wanted is not None)
+eq('a DIFFERENT card in front of the camera drops it',
+   _sc_other.saw_card(9.25), True)
+eq('...and then no screen is filed against the card that landed',
+   _sc_other.note_screen('Deliver to Ann', now=1_700_009_020.0), None)
+eq('...so nothing was written', [r for r in _sc_other.journal.rows()
+                                 if r.get('kind') == 'screen'], [])
+# ...and a log owing nothing is not upset by being told about a card.
+eq('a card seen with no slate armed is not an event',
+   _sc_other.saw_card(9.25), False)
+
+shutil.rmtree(_sc_dir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)

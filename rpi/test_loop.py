@@ -121,17 +121,24 @@ class FakeCam(object):
         pass
 
 
-def out_for(text):
-    p = OP.parse(text)
+def out_for(text, clipped=False):
+    # `clipped` is what the real reader answers when a payout WAS found and was
+    # sitting flush against the top of the crop — pipeline.py hands back
+    # `parse('')` for it, so the parse is empty over a screen that was a card.
+    # Reproduced here rather than described, because the branch that has to tell
+    # that apart from a payout-free screen cannot be reached any other way.
+    p = OP.parse('' if clipped else text)
     return {'parsed': dict(p), 'rate': OP.rate(p, {'target': 25}), 'locked': False,
-            'text': text, 'clipped': False, 'dropped': 0, 'recovered': 0,
+            'text': text, 'clipped': clipped, 'dropped': 1 if clipped else 0,
+            'recovered': 0,
             'crop': [0, 0, 1, 1], 'card': None, 'fitted': None,
             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 1}}
 
 
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
-        refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None):
+        refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
+        clipped_for=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return. `handoff`: a directory to point the button-press files at, so a
@@ -164,7 +171,9 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         if hang_from is not None and calls[0] >= hang_from:
             while True:
                 real_sleep(0.05)
-        return [out_for(texts_for_call(calls[0], k)) for k in range(len(frames))]
+        return [out_for(texts_for_call(calls[0], k),
+                        clipped=bool(clipped_for and clipped_for(calls[0], k)))
+                for k in range(len(frames))]
 
     announced, verdicts, beats, logs, alive = [], [], [], [], []
     real = (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
@@ -527,6 +536,170 @@ ok_('the loop publishes the frame that read the money',
     'chosen = read_the_money(batch)' in _loop_src)
 ok_('...and feeds every frame but that one to the accumulator',
     'if i != chosen:' in _loop_src)
+
+# ...and the same for the half of the screen-row wiring a run cannot reach.
+#
+# Everything else about these rows is driven through main() above. The one
+# thing that is not is a screen row carrying `cardWasUp: false`, because that
+# needs a SECOND payout-free read, and reads are driven by the motion gate: the
+# stubbed camera holds one picture, so once the card stops reading as a card the
+# verify beat stops and nothing looks again. A real navigation screen moves for
+# a whole delivery and has no such problem.
+#
+# Two fixtures were built to close that and neither survives the real screen
+# detector — a light one blows the exposure out ("the card was blown out with
+# the gain already at its floor", four times, no read) and a dark one is not
+# seen at all ("screen not visible"). Both were deleted rather than left in
+# passing for the wrong reason. `note_screen`'s own suite covers what the row
+# says; what is left to check here is that the loop hands it the right answer
+# rather than a constant, which is exactly the shape the check above is for.
+ok_('the loop tells a screen row whether a card was up a moment ago',
+    'card_was_up=card_on_screen' in _loop_src)
+
+# --- what the phone showed after a card landed ------------------------------
+#
+# The rig cannot see the Accept press and must never make it, so the only
+# evidence a job was taken is the screen the phone goes to afterwards. These
+# rows are the corpus for building that and nothing else — nothing reads them
+# and nothing writes `accepted` off them.
+#
+# Driven through main() because the branch is a closure inside digest() and the
+# one fault that matters is it never firing at all. `note_screen`'s own suite
+# proves what it writes; this proves the loop ever calls it.
+
+# The post-accept screen as the owner's own screenshot reads it, destination
+# and all. It NAMES A PLACE, and that is the point: an Uber navigation screen
+# names where the job goes the same way a card names the shop, so a guard that
+# refused a frame for naming one would throw away exactly the screens worth
+# collecting. What it named is written onto the row instead.
+NAV = ('3.2 mi\nI-75 S toward 14th St\n65 LIMIT\n8 min 4.8 mi\n'
+       'Deliver to Daria I.\nBCG Atlanta (1075 Peachtree St NE)')
+
+# The card is read four times and lands on the second, so reads three and four
+# are an offer card with a landed card already on the slate. Anything less and
+# the fixture cannot tell "only a payout-free screen is recorded" from "the
+# screen happened to be the next thing read": with the card read twice it lands
+# on the last of them, the very next read is the navigation screen either way,
+# and dropping `an_offer` from the guard entirely changes nothing anybody can
+# see. Measured — that mutation survived this check until the fixture grew
+# these two reads.
+r = run(lambda n, k: WHOLE if n <= 4 else NAV, extra_argv=['--no-parallel'],
+        seconds=30.0, health_every=0.2,
+        until=lambda rows, ann, calls: any(x.get('kind') == 'screen'
+                                           for x in rows))
+_screens = [x for x in r['rows'] if x.get('kind') == 'screen']
+_offers = [x for x in r['rows'] if not x.get('kind')]
+ok_('the screen that followed a card reaches the journal', len(_screens) == 1)
+if _screens and _offers:
+    eq('...naming the card it followed', _screens[0].get('after'),
+       _offers[-1].get('id'))
+    ok_('...and carrying what was on it',
+        'Deliver to Daria I.' in (_screens[0].get('text') or ''))
+    # The reading as it was read, not the flattened one the parser works on.
+    # On these screens the LINE is the grammar — "Deliver to Daria I." is a
+    # line — and the merged reading in `parsed` has already had that thrown
+    # away. The loop has both in hand at the call site and has to pass the
+    # right one.
+    ok_('...as it was read, line breaks and all',
+        '\n' in (_screens[0].get('text') or ''))
+# ...and the driver can see it happening from the seat, which is the only place
+# they can see anything. A collection that quietly stopped collecting would read
+# months later as a rate of zero, and the journal is not somewhere a person
+# checks while driving.
+ok_('the health line says how many screens have been recorded (%r)'
+    % ([m for m in r['logs'] if 'screen' in m][:1],),
+    any('recorded as following a card' in m for m in r['logs']))
+# ONCE, however long the navigation screen sits in front of the camera. This is
+# the check that stands between a delivery and a few hundred identical rows in
+# a file that is only ever appended to.
+# The BOUND — one screen row per card, whatever else is read — is not checked
+# here, and deliberately not. It cannot be: once a read comes back with no
+# payout `card_on_screen` goes false, the verify beat stops (see next_verify),
+# and the stubbed camera holds one still picture, so the motion gate never
+# fires again. Measured, on three fixtures: five reads every time, one of them
+# payout-free, whatever the reader is told to answer afterwards.
+#
+# A check written over that run is a check that cannot fail — and one was,
+# reading `len(_screens) <= 2` over a run whose `until` halts at the first
+# screen row. Deleting the whole once-per-card mechanism from note_screen left
+# this suite green while rpi/test_journal.py caught it with four failures.
+# That is where the bound is proven, against the real consider(), including the
+# case that made it false: a card lands several rows, not one.
+
+# An Uber navigation screen NAMES its destination, the same way a card names the
+# shop. Recorded, not acted on: refusing a frame for naming a place would throw
+# away exactly the screens this is collected for, and trusting one would be the
+# recogniser it must not invent. The loop has to hand what the frame named down
+# to the row rather than dropping it on the floor.
+ok_('...carrying what the screen named (%r)' % (_screens[0].get('places'),),
+    any('BCG Atlanta' in p for p in (_screens[0].get('places') or [])))
+# ...and it is a SCREEN, not the card. The two classes a recogniser has to
+# separate are "an offer card" and "the screen after one", so a corpus holding a
+# card's own text under `kind: screen` is a corpus that teaches the opposite of
+# what it was collected for. Asked of the payout, because that is the grammar
+# `an_offer` itself separates them by, and asked of every row rather than the
+# first: one right answer among several wrong ones is still a poisoned corpus.
+eq('no screen row carries a payout, which would make it a card',
+   [x.get('text') for x in _screens
+    if OP.find_pay(OP.normalize(x.get('text') or '')) is not None], [])
+
+# ONE FRAME of glare over a card reads `pay: None` over a card, and the loop has
+# to say which it was. `card_on_screen` still holds the PREVIOUS read's answer
+# at the call site, so the loop knows there was a card here a moment ago and
+# passes that down onto the row. Not refused — reads are driven by a motion gate
+# and the frame after an accept is sometimes the only one, so refusing would
+# lose the screen rather than label it.
+r3 = run(lambda n, k: GLARE if n == 5 else WHOLE, extra_argv=['--no-parallel'],
+         seconds=20.0,
+         until=lambda rows, ann, calls: any(x.get('kind') == 'screen'
+                                            for x in rows))
+_glared = [x for x in r3['rows'] if x.get('kind') == 'screen']
+ok_('a glared frame of a card is recorded', len(_glared) == 1)
+if _glared:
+    eq('...and the loop marks it as taken with a card still up',
+       _glared[0].get('cardWasUp'), True)
+
+# A CARD THE RIG SAW AND NEVER RECORDED must not have the next screen filed
+# against the card before it. This is the fault that would have put a lie in the
+# journal, and it is reproduced here end to end because that is how it was found
+# — reading the code, the slate looked like "the last card", and it is "the last
+# card that LANDED".
+#
+# A card needs two agreeing reads to lock (Scanner.agree_to_lock) and consider()
+# is only called on a reading that is ready AND locked, so a second card
+# delivered exactly once is seen, counted in `saw`, and never reaches the
+# journal at all. `saw` minus `kept` is the measured count of those, and the
+# offers page already renders it as "the scanner picked a payout off the screen
+# and never managed to record it".
+#
+# Before the fix this run wrote {kind: screen, after: <card A>} over a driver
+# who had just accepted card B.
+SECOND_CARD = ('$9.25 4 min (1.4 mi) away Barrett Pkwy NW, Kennesaw '
+               '18 min (5.2 mi) trip 44 Oak St, Acworth, GA 30101')
+r4 = run(lambda n, k: WHOLE if n <= 3 else (SECOND_CARD if n == 4 else NAV),
+         extra_argv=['--no-parallel'], seconds=20.0,
+         until=lambda rows, ann, calls: calls >= 6)
+_landed = [x.get('id') for x in r4['rows'] if not x.get('kind')]
+_after = [x.get('after') for x in r4['rows'] if x.get('kind') == 'screen']
+ok_('one card landed and a second was seen without landing (%r)'
+    % (sorted(set(_landed)),), len(set(_landed)) == 1)
+eq('the screen after a card that never landed is not filed against the one '
+   'before it', _after, [])
+
+# A CLIPPED read is not a payout-free screen. `clipped` means the payout was
+# found and was flush against the top of the crop, and the reader answers it
+# with an empty parse — so the parse has no payout and no places over a screen
+# that was an offer card. Filing that as "what the phone showed after the card"
+# would put a card's own text into the corpus as the negative class, which is
+# the one confusion a recogniser built on these rows could not survive.
+r2 = run(lambda n, k: WHOLE, extra_argv=['--no-parallel'], seconds=14.0,
+         clipped_for=lambda n, k: n >= 3,
+         until=lambda rows, ann, calls: calls >= 8
+         and any(not x.get('kind') for x in rows))
+ok_('a card landed before the crop slipped',
+    any(not x.get('kind') for x in r2['rows']))
+eq('a clipped read is not recorded as the screen after a card',
+   [x for x in r2['rows'] if x.get('kind') == 'screen'], [])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)

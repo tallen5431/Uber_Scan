@@ -503,6 +503,48 @@ try:
     eq('a tally from before the clock is not what the rig watched',
        (page.get('watched') or {}).get('saw'), 0)
 
+    # --- a screen row is evidence, not an offer ------------------------------
+    #
+    # `kind: "screen"` carries the raw reading of a payout-free screen that
+    # followed a card, so that an accept-detector can one day be built on
+    # something other than a screenshot. It is written by the rig, it has to
+    # reach the copy at home, and it must be invisible to every figure on the
+    # offers page — a row with no pay and no minutes counted as an offer would
+    # move every median on that page toward zero.
+    #
+    # The two halves are separate code and are checked separately: the fold in
+    # readJournal skips a `kind` it does not know, and syncKey identifies such a
+    # row by its id and seq so ingest can carry it. Neither is written for this
+    # kind in particular, which is exactly why a kind this build DOES know
+    # should be pinned against them.
+    _before = get(base, '/api/journal?days=0')
+    _screen = {'v': 1, 'kind': 'screen', 'at': NOW - 2000,
+               'id': 'screen-%d' % (NOW - 2000), 'seq': 1,
+               'after': 'off20', 'afterMs': 4000,
+               'text': '3.2 mi\nI-75 S toward 14th St\nDeliver to Daria I.'}
+    write(journal, [_screen], mode='a')
+    _after_page = get(base, '/api/journal?days=0')
+    eq('a screen row is not counted as an offer',
+       len(_after_page.get('offers') or []), len(_before.get('offers') or []))
+    eq('...nor as a card the rig watched go past',
+       (_after_page.get('watched') or {}).get('saw'),
+       (_before.get('watched') or {}).get('saw'))
+    # ...and it goes across the sync, which is the whole point of writing it
+    # into the journal rather than a file beside it: the corpus is useless on a
+    # machine in a car and the journal already syncs on its own.
+    _sent = json.dumps(_screen).encode('utf-8') + b'\n'
+    _ing = json.loads(urllib.request.urlopen(urllib.request.Request(
+        base + '/api/journal/ingest', data=_sent,
+        headers={'Content-Type': 'application/x-ndjson'}), timeout=10).read().decode())
+    eq('a screen row already stored is recognised by the sync, not doubled',
+       _ing.get('added'), 0)
+    _fresh = dict(_screen, at=NOW - 1500, id='screen-%d' % (NOW - 1500))
+    _ing2 = json.loads(urllib.request.urlopen(urllib.request.Request(
+        base + '/api/journal/ingest',
+        data=json.dumps(_fresh).encode('utf-8') + b'\n',
+        headers={'Content-Type': 'application/x-ndjson'}), timeout=10).read().decode())
+    eq('...and one the far end has not seen is stored', _ing2.get('added'), 1)
+
     # --- a sighting nobody asked for, against a card that named its own end ---
     #
     # The live path already refuses this: an unprompted address may fill a

@@ -535,6 +535,108 @@ announced the button goes back to unmarked, so a mark left set cannot be
 inherited by whatever arrives next — the same failure the address line avoids by
 clearing.
 
+### Collecting the evidence for a tick the rig could make itself
+
+The button above is one press, and it is still a press. Measured on the owner's
+real week: **31 of 1,166 offers carry a tick**, and every earnings figure on
+every screen — the takings line, the $/hr the advice is fitted to, the cost of
+holding a line — divides by those 31. The record is not wrong, it is thin, and
+it is thin in the one column nothing else can supply.
+
+**The cheap way to thicken it does not work, and the owner's own ticks are what
+prove it.** A quiet stretch in the record looks exactly like a driver out on a
+job, `unexplained()` already counts those stretches, and listing the offer in
+front of each one is a few lines away. Against the 31 known ticks, a silence of
+thirty minutes — what the pages already use — catches **2** of them and fires on
+8 offers that were not ticked; at its most generous, five minutes, it catches 17
+and fires on 61. The threshold is not the problem. The app is: median stated
+length of an accepted job is 29 minutes and the median gap to the next card
+after one is **5.4 minutes**, because offers keep arriving through the whole
+delivery. That is the stacking feature working as designed, and it is why
+`Advice.stack` exists at all. A phone that goes on offering work cannot fall
+silent to mark the start of a job.
+
+What is left is the screen. After an accept the phone shows a navigation screen
+— a turn instruction, a speed limit, "Deliver to <name>" — with **no payout and
+no Accept button anywhere on it**. `an_offer` in `digest()` is already the test
+that separates that from a card, and until now every one of those frames was
+read, counted twice on the health line, and thrown away.
+
+So one is now kept, as a `kind: "screen"` row alongside the marks, the rules and
+the pairings:
+
+```
+after      the id of the card this screen followed
+afterMs    how long after it was read
+text       the reading, raw, line breaks and all, capped like any other
+places     what the reader made of it, recorded rather than acted on
+cardWasUp  whether a card was still on screen at the previous read
+```
+
+What decides whether a row is written:
+
+- **Once per card, and at most twice.** A navigation screen sits in front of
+  this camera for a whole delivery and is read every time the map moves.
+  Unbounded, one job would append a few hundred rows of the same screen to a
+  file that is only ever appended to. One row per card that reached the file —
+  not per landed *row*, which is what the first version of this really did,
+  since a card writes one row per reading that improves on the last plus a
+  settled upgrade. On the owner's measured week that bound is about 1,166 rows
+  and a third of a megabyte.
+- **Inside three minutes of that card.** An accept happens inside the card's own
+  countdown, so the screen after it is seconds away. The window is for the other
+  case — a driver who stops scanning and comes back an hour later to a phone
+  showing something — which would otherwise be filed against a card from an hour
+  ago.
+- **Not a clipped read.** `clipped` means the payout *was* found and was sitting
+  flush against the top of the crop, and the reader answers that with an empty
+  parse — a card with no payout in it, which no test of the parse can see
+  through.
+- **The raw reading, not the flattened one.** On these screens the LINE is the
+  grammar. "Deliver to Daria I." is a line; the same words scattered through a
+  flattened blob are not evidence of anything.
+- **Not after a card the rig saw and never recorded.** A card needs two agreeing
+  reads to lock and only a locked reading is written, so a card can be seen,
+  counted in `saw`, and never reach the journal — which is the gap `saw` minus
+  `kept` exists to measure. The slate is armed by a card *landing*, so without
+  this the anchor is "the last card that landed" while the driver is looking at
+  a different one: card A lands, card B is read once and never lands, the driver
+  accepts **B**, and the screen after it is written against **A**. A pairing
+  naming an offer they did not take, indistinguishable from a real one. Any
+  payout that is not the armed card's now drops the slate, and the cost is a
+  missing row instead of a wrong one.
+
+Two things it deliberately does **not** decide, and both were wrong in the first
+version:
+
+- **A merchant name does not make it a card.** The address hunt next door
+  refuses any frame naming a place, on a measurement that says a navigation
+  screen names none — *"it says `Dropoff <address> 12 min Start` and `places`
+  comes back empty"*. That was measured on DoorDash. Uber's post-accept screen
+  names its destination the way a card names a shop: `BCG Atlanta / 1075
+  Peachtree St NE Ste 3800, Atlanta, GA`. Reusing that test would have refused
+  exactly the screens worth collecting, silently, and the corpus would have come
+  back holding only the ones that read badly. The payout alone is the grammar,
+  and what the frame named goes **onto the row**.
+- **One glared frame of a card is labelled, not refused.** A card that loses its
+  payout for a single frame reads as payout-free over a card, which is the
+  positive class in the negative slot. Refusing such a frame was the first
+  answer and it was worse: reads are driven by a motion gate, so the frame right
+  after an accept is sometimes the only one, and refusing it loses the screen
+  rather than mislabelling it. So it is written with `cardWasUp: true`, and the
+  first frame with no card behind it supersedes it — two rows at most, sharing
+  an id, separated by `seq`, which is the same convention every superseded
+  reading in this file already uses.
+
+**Nothing reads them, and nothing writes `accepted` from them.** That is the
+whole discipline of this feature and it is not temporary caution. Nothing on
+file says what one of these screens reads as through this camera, at night,
+through a windscreen — so a recogniser written today would be a regex tuned to a
+screenshot, deciding the one field every earnings figure is gated on. A wrong
+tick is a taken job that never happened, in the file that cannot be rewritten.
+The rows are collected, they sync to the NUC on their own, and what gets built
+on them gets measured against ticks the driver made by hand first.
+
 ### ...and what the shift adds up to
 
 Marking was write-only. A driver could put a fact into the record from the

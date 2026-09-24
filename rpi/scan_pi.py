@@ -966,6 +966,27 @@ class Health:
         # missing destination is find_address being strict on purpose.
         self.address_refused_as_offer = 0
         self.street_seen_no_address = 0
+        # `screens_kept` is how many payout-free screens were recorded as
+        # having followed a card — the corpus an accept-detector has to be
+        # built on, and which does not exist yet. A run total for the same
+        # reason as the two above: it answers a question about a shift.
+        #
+        # Counted at all because this is a collection, and a collection that
+        # quietly stops collecting reads months later as a rate of zero. One
+        # row per card is the bound, so on a shift of a hundred offers this is
+        # a number under a hundred; anything near the offer count means every
+        # card is being followed by a screen, and anything at zero means none
+        # of them is.
+        #
+        # Deliberately NOT widened into the tally beside the other two, and the
+        # difference is what each of them records. Those two count frames the
+        # rig threw away, so a number in a log on a car computer was the only
+        # trace they left and the `seen` row is what gets them off the Pi. This
+        # one counts rows that went straight into the journal, which syncs on
+        # its own — putting the count beside them would be one question
+        # answered in two places, and the second would be the one nothing
+        # could correct.
+        self.screens_kept = 0
         self.gain = None
         self.bright = None
         self.banding = None
@@ -1126,6 +1147,10 @@ class Health:
                         'offer card'
                         % (self.address_refused_as_offer,
                            '' if self.address_refused_as_offer == 1 else 'es'))
+        if self.screens_kept:
+            bits.append('%d screen%s since start recorded as following a card'
+                        % (self.screens_kept,
+                           '' if self.screens_kept == 1 else 's'))
         # Brightness and banding, because "the picture looks dark" and "the
         # screen looks wavy" are things a person notices and a log should be
         # able to confirm or deny with a number.
@@ -2102,6 +2127,87 @@ def main():
         # documents, not for the export.
         an_offer = shot.get('pay') is not None or bool(shot.get('places'))
         found = None if an_offer else shot.get('address')
+        # ...and KEPT, which is new, and is the one thing standing between this
+        # rig and knowing which offers the driver took.
+        #
+        # 31 of 1,166 offers on the owner's week carry a tick, and every
+        # earnings figure on every screen rests on those 31. The rig cannot see
+        # the Accept press and must never make it, so the only evidence is the
+        # screen the phone goes to afterwards — a navigation screen with
+        # "Deliver to <name>" on it, a turn instruction and a speed limit, and
+        # no payout and no Accept button anywhere. `an_offer` is already the
+        # test that separates that screen from a card, and until now every one
+        # of those frames was read, counted twice below, and thrown away.
+        #
+        # The cheaper idea was measured first and refused: a quiet stretch in
+        # the record does NOT mean the driver was out on a job. Against the 31
+        # ticks already on file, a thirty-minute silence catches 2 of them and
+        # fires on 8 offers that were not ticked, because offers keep arriving
+        # through the whole delivery — median 5.4 minutes to the next card
+        # after an accepted job of a stated 29. See AUDITS, "A silence does not
+        # mean the driver accepted".
+        #
+        # THE PAYOUT ALONE, and deliberately not `an_offer`. The two questions
+        # look identical and are not, and using one test for both would have
+        # thrown away the very screens this is collecting.
+        #
+        # `an_offer`'s second arm is there so that an address is never taken off
+        # a card whose payout was lost but whose MERCHANT survived, and the
+        # comment above states the measurement it rests on: "a navigation screen
+        # names no merchant — it says 'Dropoff <address> 12 min Start' and
+        # `places` comes back empty". That was measured on DoorDash. Uber's
+        # post-accept screen names its destination the same way a card names a
+        # shop — `BCG Atlanta / 1075 Peachtree St NE Ste 3800, Atlanta, GA` off
+        # the screenshot this was built from — so the merchant arm would refuse
+        # exactly the frames worth having, silently, and the corpus would come
+        # back holding only the screens that happened to read badly.
+        #
+        # What the frame named is written ONTO the row instead, so the one thing
+        # that could make it a degraded card rather than a screen is evidence
+        # rather than a guess, and the detector gets to partition on it.
+        #
+        # WHETHER A CARD WAS UP is recorded, not acted on, and that is the
+        # second half of the same problem. An offer card that loses its payout
+        # to glare for ONE frame reads `pay: None` over a card — the positive
+        # class in the negative slot, which is the single confusion a recogniser
+        # built on these rows could not survive. Refusing such a frame outright
+        # was the first answer and it was worse: reads are driven by a motion
+        # gate, so the frame right after an accept is sometimes the only one,
+        # and refusing it loses the screen rather than mislabelling it.
+        # `card_on_screen` still holds the PREVIOUS read's answer at this point
+        # in digest(), which is exactly the question — was there a card here a
+        # moment ago — so it is passed down and written onto the row, and the
+        # first frame that arrives with no card behind it supersedes.
+        #
+        # NOT a clipped read either. `clipped` means a payout WAS found and was
+        # sitting flush against the top of the crop, and pipeline.py answers
+        # that by handing back `parse('')` — an empty parse over a screen that
+        # was a card, which no test of the parse can see through.
+        #
+        # Recording only. `note_screen` writes nothing to `accepted` and
+        # nothing reads these rows; see its docstring for why that stays true
+        # until they have been measured against ticks the driver made by hand.
+        #
+        # No `now`. Every other row the rig writes is stamped when digest runs,
+        # and `started` is when the FRAME WAS CAPTURED — a read is 1.8s median
+        # on this Pi, so passing it would put this row on a different clock from
+        # the offer row it names and make `afterMs` short by a whole read.
+        if offer_log is not None and not out.get('clipped'):
+            if shot.get('pay') is None:
+                if offer_log.note_screen(out.get('text'),
+                                         places=shot.get('places'),
+                                         card_was_up=card_on_screen):
+                    health.screens_kept += 1
+            else:
+                # ...and a card in front of the camera that is NOT the one the
+                # slate is armed for drops it. The slate is armed by a card
+                # REACHING THE FILE, and `saw` minus `kept` on the health line
+                # above is the measured count of cards that never do — so
+                # without this the screen after an accept is filed against the
+                # previous card, which is a pairing naming an offer the driver
+                # did not take. Reproduced through main() before it existed;
+                # see `saw_card`, and the check in rpi/test_loop.py.
+                offer_log.saw_card(shot.get('pay'))
         # ...and COUNTED, both ways, because all three outcomes look identical
         # from the driver's seat: "the rig didn't get it".
         #
