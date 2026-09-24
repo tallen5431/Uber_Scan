@@ -2377,6 +2377,16 @@ question**, which made the time filter a precondition rather than a companion.
 That precondition is now met: the `when` box ships, eight three-hour blocks of
 it, and Settled says why it carries no weekday term.
 
+***Done — the town table shipped, and it is `Advice.areas` on the map.*** The
+paragraph below is what it was built from and every word of it held up. What it
+did not anticipate is that the ranking needed a significance test of its own:
+the place-level table it warns about is noise at p=0.23, and the map now refuses
+any ranking that does not beat chance on whatever is loaded. The hour is held
+still per the paragraph further down — Atlanta's raw lead over the fourth town
+is $4.20 and $1.09 once each offer is measured against its own block. See "The
+map could not say where the money was" under Done. The rest of this entry
+stands as the record of why the heat map itself is still refused.
+
 *The cheaper thing to try first.* A **town table** needs no geocoder, no new
 map pane, no ninth control on a bar that already carries eight and wraps on
 the 3.5" hat, and no 24-minute wait: `Advice.area()`
