@@ -314,6 +314,44 @@ ok_('the browser row keeps the raw reading, not the flattened one',
     'parsed.rawText || parsed.text' in _jc)
 ok_('...and caps it', 'slice(0, TEXT_KEPT)' in _jc)
 
+# ...and the same for the one number the DRIVING SCREEN has to keep in step
+# with the library. `advice.js` holds DAY_STARTS_AT and `journal.html` and
+# `map.html` read it from there; `live.html` writes its own `4` out, and that
+# second copy is deliberate — the panel does not load advice.js at all, because
+# it has to come up from the service worker with no network and pulling a
+# library in for one integer would be paying for that at the worst moment.
+#
+# What the copy costs is that the two can come apart, and the failure is
+# silent and expensive: the day boundary decides which offers belong to
+# tonight, so a panel at 4 and a journal at 3 would print two different
+# takings for the same shift with neither able to say which was the shift.
+# That is the same fault this file's MAX_PLACES and TEXT_KEPT checks exist
+# for, arriving through a copy this project has decided to keep. So the copy
+# is allowed and the DRIFT is not.
+#
+# Read out of the two files rather than imported, because the point is that
+# the numbers agree and importing one of them would only prove it agrees with
+# itself.
+_adv = open(os.path.join(ROOT, 'advice.js')).read()
+_live = open(os.path.join(ROOT, 'live.html')).read()
+_ad = re.search(r'\bvar\s+DAY_STARTS_AT\s*=\s*([0-9]+)\s*;', _adv)
+_lv = re.search(r'\bvar\s+DAY_STARTS_AT\s*=\s*([0-9]+)\s*;', _live)
+ok_('DAY_STARTS_AT is a named constant in the advice library', _ad is not None)
+ok_('...and in the driving screen, which cannot import it', _lv is not None)
+if _ad and _lv:
+    eq('...and the two agree about when a driver\'s day starts '
+       '(advice %s, panel %s)' % (_ad.group(1), _lv.group(1)),
+       int(_ad.group(1)), int(_lv.group(1)))
+# And the pages that CAN import it still do, rather than quietly growing a
+# third copy. `var DAY_STARTS_AT = 4` in either of these would pass the check
+# above and be exactly the drift it is written to stop.
+for _page in ('journal.html', 'map.html'):
+    _src = open(os.path.join(ROOT, _page)).read()
+    ok_('%s asks advice.js for the day boundary' % _page,
+        'Advice.DAY_STARTS_AT' in _src)
+    ok_('...and keeps no copy of its own', not re.search(
+        r'\bvar\s+DAY_STARTS_AT\s*=\s*[0-9]', _src))
+
 # --- the two hand-written approach checks stay in step ---------------------
 #
 # laid_out_approach's `isTotal` refusal shows only in `legDetail[].isApproach`,

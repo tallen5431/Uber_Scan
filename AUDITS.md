@@ -1748,6 +1748,26 @@ picks between them on `last.ready` — a phase message alone does not move it,
 so a check that means to measure the between-offers branch has to send a
 reading that is not ready.
 
+**Two copies of the 4am day boundary, and nothing held them together.**
+`advice.js` holds the number — the area ranking needed to know how many
+separate OUTINGS a town was seen on, which is not the same question as how many
+calendar dates — and `journal.html` and `map.html` read it from there. The
+driving screen does not, because it does not load `advice.js` at all: it is the
+screen in the car, it has to come up from the service worker with no network,
+and pulling a library in for one integer would be paying for that at the worst
+possible moment. So the second copy stays, and it is on purpose.
+
+What the copy costs is drift, and the drift would have been silent and
+expensive. The boundary decides which offers belong to tonight, so a panel at 4
+and a journal at 3 print two different takings for the same shift with neither
+able to say which was the shift — the same fault the `MAX_PLACES` and
+`TEXT_KEPT` checks in `rpi/test_lint.py` exist for, arriving through a copy
+this project decided to keep. So the copy is allowed and the drift is not: the
+same file now reads the integer out of both sources and compares them, and
+asserts that the two pages which *can* import it still do rather than quietly
+growing a third. All four failure shapes were mutated and each killed a named
+check.
+
 ### The offers page
 
 **A pairing's withheld claim was printed as its opposite.** "Beats finishing
@@ -2006,6 +2026,54 @@ boot is when the scanner is starting Python, OpenCV and Tesseract. Do it only if
 the first load after a reboot is reported as a real problem, and then delay it a
 few seconds after `listen` rather than running it inline.
 
+**A silence does not mean the driver accepted, and no threshold makes it
+one.** Only 31 of 1,166 offers carry a tick, every earnings figure on every
+screen rests on those 31, and the obvious way to recover the rest is to read
+the gaps: a stretch with no cards in it looks exactly like a driver who is out
+on a job. `unexplained()` already counts those stretches, so listing the offer
+in front of each one and asking "did you take this?" is a few lines away.
+
+**It is wrong, and the owner's own week says so against the ticks it already
+has.** These are known accepts with a known job length, so sensitivity here is
+measured rather than argued:
+
+| a silence of | catches | of the 31 known ticks | and also fires on |
+|---|---|---|---|
+| 5 min | 17 | 55% | 61 offers that were not ticked |
+| 10 min | 12 | 39% | 26 |
+| 20 min | 6 | 19% | 12 |
+| **30 min** (what `SHOWN_AT` uses) | **2** | **6%** | **8** |
+
+The cause is not a badly chosen threshold, it is the app: **offers keep
+arriving during a job.** Median stated length of a ticked job is 29 minutes and
+the median gap to the next card after one is **5.4 minutes** — 45% of accepted
+jobs have another card on the screen inside five minutes, 16% inside one. That
+is the stacking feature working as designed, and `Advice.stack` exists in this
+repo because of it. A phone that goes on offering work through the whole
+delivery cannot fall silent to mark the start of it.
+
+So the prompt would miss more than half of what it is for at its most generous
+setting and 94% of it at the setting the pages actually use, while proposing
+several times more offers than it got right. Filling the gap in the record with
+guesses of that quality is worse than the gap: a wrong tick is a taken job that
+never happened, in the one file that cannot be rewritten, and it moves every
+$/hr figure that follows.
+
+*The 8 unexplained silences the offers page reports are still worth the
+driver's attention* — they are the stretches nothing accounts for, which is a
+true statement and is all that page claims. What is refused here is reading
+them backwards into "these offers were accepted".
+
+**What is left is the screen**, which is where the evidence actually is: after
+an accept the phone shows a navigation screen carrying "Deliver to <name>", a
+turn instruction and a speed limit, and no payout and no Accept button
+anywhere on it. The rig computes `an_offer` for exactly that shape already and
+throws the frame away. Nothing on file says what one of those screens reads as
+through this camera, at night, so there is no corpus to build a recogniser on
+and none can be invented from a screenshot. Collecting one is the next step,
+and it must not write `accepted` until it has been measured against ticks the
+driver made by hand.
+
 ### The maps
 
 **Do not tune the acceptance line to the hour, the weekday or anything else in
@@ -2239,16 +2307,6 @@ position on rows at all is a separate question nobody has asked yet.
 
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
-
-**`live.html` keeps its own copy of the 4am day boundary.** `advice.js` now
-holds the number — the area ranking needed to know how many separate OUTINGS a
-town was seen on, which is not the same question as how many calendar dates —
-and `journal.html` reads it from there. The driving screen does not, because it
-does not load `advice.js` at all: it is the screen in the car, it has to come
-up from the service worker with no network, and pulling a library in for one
-integer would be paying for that at the worst possible moment. So there are two
-copies and the second is deliberate. They agree today; nothing checks that they
-still will.
 
 **A card with one readable place calls it the pickup, and 474 of 1,166 rows
 rest on that.** Where the card's own layout names the end, the rig now follows
