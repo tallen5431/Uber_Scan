@@ -925,6 +925,99 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(1600);
     out['held ' + panel[0]].afterDropAndATick = await stackSeen();
 
+    /* --- and a dropoff scan that found nothing SAYS SO -------------------
+     *
+     * This was the only control on the bar that could not report its own
+     * failure. The rig emitted only when it found an address, so a press that
+     * found none produced no message, and the page's own timer repainted the
+     * button exactly as it was — the driver tapped the address open on their
+     * phone, pressed, waited, and got the same grey button whether it worked
+     * or not. Took says "· not saved", Drop says "Drop · failed", Re-find says
+     * "⟳ failed".
+     *
+     * Answered from the RIG, not from a timer here, which is why this is
+     * driven as a message rather than by waiting. A read that started inside
+     * the window still counts and a read has been measured at 5.9s, so an
+     * address can land six seconds after the window shuts: a page giving up on
+     * its own clock would print "not read" and then be corrected by a green
+     * address, which is a worse fault than the silence.
+     */
+    // Set up the one state where this button ASKS to be pressed — screening a
+    // card that printed "Customer dropoff" and no address — so that "it is not
+    // still asking in amber" is a check about the failure suppressing it, and
+    // not about a button that was never going to ask anyway.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, {
+        offer: { id: 'o-empty', pay: 9.5, minutes: 20, perHour: 18,
+                 dropoff: null, endRefused: true },
+        holding: null, stack: null }));
+    await page.waitForTimeout(250);
+    out['destEmpty ' + panel[0]] = { wantedBefore: await page.evaluate(
+      () => document.getElementById('dest').classList.contains('wanted')) };
+    await page.evaluate(() => document.getElementById('dest').click());
+    await page.waitForTimeout(150);
+    out['destEmpty ' + panel[0]].whilePressed = await page.evaluate(
+      () => document.getElementById('dest').textContent.trim());
+    await page.evaluate(() => window.__es.push(
+      { dropoff: { line: null, street: null, city: null, state: null,
+                   zip: null, found: false, asked: true, at: 1 } }));
+    await page.waitForTimeout(200);
+    Object.assign(out['destEmpty ' + panel[0]], await page.evaluate(() => {
+      const d = document.getElementById('dest');
+      return { label: (d.textContent || '').trim(),
+               failed: d.classList.contains('failed'),
+               done: d.classList.contains('done'),
+               wanted: d.classList.contains('wanted'),
+               title: d.getAttribute('title') || '' };
+    }));
+    // ...and an address arriving afterwards clears it, rather than leaving a
+    // failure standing over a button that has since worked.
+    await page.evaluate(() => window.__es.push(
+      { dropoff: { line: '12 Oak Ln, Marietta', found: true, asked: true, at: 2 } }));
+    await page.waitForTimeout(200);
+    Object.assign(out['destEmpty ' + panel[0]], { after: await page.evaluate(() => {
+      const d = document.getElementById('dest');
+      return { failed: d.classList.contains('failed'),
+               done: d.classList.contains('done') };
+    }) });
+    // An UNPROMPTED empty read is not the answer to a question anybody asked,
+    // so it must not paint a failure over a button nobody pressed.
+    await page.evaluate(() => document.getElementById('dest').click());
+    await page.waitForTimeout(150);
+    await page.evaluate(() => window.__es.push(
+      { dropoff: { line: null, found: false, asked: false, at: 3 } }));
+    await page.waitForTimeout(200);
+    Object.assign(out['destEmpty ' + panel[0]], { unprompted: await page.evaluate(
+      () => document.getElementById('dest').classList.contains('failed')) });
+    // ...and the SAME state without the failure does go amber, which is what
+    // makes the check above mean something. Holding an order whose end is
+    // unknown is exactly when this button asks to be pressed, so if it were
+    // not asking for some other reason, "not still asking in amber" would be
+    // passing on nothing. Cleared by pressing again, which is what a driver
+    // does next.
+    await page.evaluate(() => document.getElementById('dest').click());
+    await page.waitForTimeout(150);
+    await page.evaluate(() => window.__es.push(
+      { dropoff: { line: '9 Elm St, Acworth', found: true, asked: true, at: 9 } }));
+    await page.waitForTimeout(150);
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, {
+        offer: { id: 'o-fresh', pay: 9.5, minutes: 20, perHour: 18,
+                 dropoff: null, endRefused: true },
+        holding: { pay: 12, minutes: 30, dropoff: null }, stack: null }));
+    await page.waitForTimeout(250);
+    Object.assign(out['destEmpty ' + panel[0]], { wantedWhenNotFailed:
+      await page.evaluate(() =>
+        document.getElementById('dest').classList.contains('wanted')) });
+
+    // ...and put the button back down before the checks below, which are about
+    // a different state. The asked answer is what ends a press: destBusy is
+    // cleared by an answer and by nothing else, so leaving one outstanding
+    // would leave every check after this reading "⌖ reading…".
+    await page.evaluate(() => window.__es.push(
+      { dropoff: { line: null, found: false, asked: true, at: 4 } }));
+    await page.waitForTimeout(200);
+
     /* --- the same button, before the accept ------------------------------
      *
      * The driver's own words: "for doordash orders I need to tap the customer
@@ -3016,6 +3109,50 @@ try:
         # rate for a job they no longer had, under the verdict, next to a Drop
         # button that had already gone. Measured a full tick after the press,
         # because the press itself clears it — the fault is the repaint.
+        # The one control on this bar that could not report its own failure.
+        # A press that found no address produced no message at all from the
+        # rig, so the page's timer put the button back exactly as it was and
+        # the driver could not tell a failure from a success. Answered from the
+        # rig now, because a read that started inside the window can land six
+        # seconds after it shuts and a page giving up on its own clock would
+        # print "not read" and then be corrected by a green address.
+        de = got.get('destEmpty ' + panel) or {}
+        eq('%s: the dropoff button says it is reading while it is' % panel,
+           de.get('whilePressed'), '⌖ reading…')
+        eq('%s: ...and says so when the window closed with nothing on it' % panel,
+           de.get('label'), '⌖ not read')
+        ok_('%s: ...in the same colour every other failure on this bar uses'
+            % panel, de.get('failed'))
+        no_('%s: ...not the colour that means an address was read' % panel,
+            de.get('done'))
+        # Two states on one button is one too many at 74px in a moving car,
+        # and the failure is the newer news.
+        no_('%s: ...and not still asking to be pressed in amber' % panel,
+            de.get('wanted'))
+        ok_('%s: ...saying what to do about it (%r)'
+            % (panel, (de.get('title') or '')[:48]),
+            'press again' in (de.get('title') or '').lower())
+        # A failure that outlived the thing that failed would be worse than
+        # not saying it.
+        _after = de.get('after') or {}
+        no_('%s: an address arriving afterwards clears the failure' % panel,
+            _after.get('failed'))
+        ok_('%s: ...and turns the button green instead' % panel,
+            _after.get('done'))
+        # An unprompted empty read answers no question anybody asked.
+        no_('%s: an unprompted empty read paints no failure' % panel,
+            de.get('unprompted'))
+        # ...and the same state WITHOUT a failure does ask to be pressed, which
+        # is what makes "not still asking in amber" a check rather than a
+        # sentence about a button that was never going to ask anyway.
+        ok_('%s: the same state without a failure does ask to be pressed' % panel,
+            de.get('wantedWhenNotFailed'))
+        # ...and it was asking BEFORE the press, which is what makes the amber
+        # check above about the failure rather than about a button that had no
+        # reason to ask.
+        ok_('%s: ...and was asking before the press that failed' % panel,
+            de.get('wantedBefore'))
+
         held = got.get('held ' + panel) or {}
         ok_('%s: the pair line is up while the order is held' % panel,
             held.get('shown'))

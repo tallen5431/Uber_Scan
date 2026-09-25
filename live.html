@@ -1449,6 +1449,10 @@
   // motion gate scores as nothing happening.
   var destBusy = false;
   var destSaid = '';
+  // Whether the last press came back with nothing. Cleared by the next press
+  // and by an address arriving, the same way `tookFailed` is — a failure that
+  // outlived the thing that failed would be worse than not saying it.
+  var destFailed = false;
 
   /* The other state this button is for, which it did not used to have.
    *
@@ -1504,8 +1508,12 @@
     // a driver to read before they read words, and it costs no width at all.
     // The address itself goes where there is room for it - the title, and the
     // stack line's own geography.
-    el.dest.textContent = destBusy ? '⌖ reading…' : '⌖ Dropoff';
+    el.dest.textContent = destBusy ? '⌖ reading…'
+      : destFailed ? '⌖ not read' : '⌖ Dropoff';
     el.dest.classList.toggle('done', !destBusy && !!destSaid);
+    // The same class Re-find and Took already use for the same thing, so a
+    // failure looks like a failure on this bar whichever control it came from.
+    el.dest.classList.toggle('failed', !destBusy && destFailed);
     // ...and asked for, in the one state where pressing it changes an answer.
     //
     // The order in the car has no end the geography check can use — its card
@@ -1527,12 +1535,19 @@
     // nothing to reveal, and lighting up over it would be asking for a press
     // that cannot help. See endRefused, which is why the two are now telling
     // apart at all.
-    var wants = !destBusy && !destSaid
+    // ...and a press that came back empty does not go on asking to be pressed
+    // in the amber "this one needs you" colour while it is saying it failed.
+    // Two states on one button is one too many at 74px on a moving car, and
+    // the failure is the newer news.
+    var wants = !destBusy && !destSaid && !destFailed
       && (holdingNow ? heldEnds === null
                      : (screening && !!onRecord.endRefused));
     el.dest.classList.toggle('wanted', wants);
     el.dest.title = destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
+      : destFailed
+      ? 'Nothing on that screen read as an address. Get the destination up on '
+        + 'your phone and press again.'
       : wants && holdingNow
       ? 'The order you are carrying has no address on record, so the rig '
         + 'cannot say whether a second job ends near it. Read it off your '
@@ -1549,6 +1564,9 @@
     // changed and a screen reader cannot see it.
     el.dest.setAttribute('aria-label', destSaid
       ? 'Dropoff read as ' + destSaid + '. Press again to read it afresh.'
+      : destFailed
+      ? 'Nothing on that screen read as an address. Press again once the '
+        + 'destination is up.'
       : wants && holdingNow
       ? 'Read the dropoff off your phone. The order you are carrying has no '
         + 'address on record, so second jobs cannot be judged on where they end.'
@@ -1562,6 +1580,7 @@
     if (destBusy) return;
     destBusy = true;
     destSaid = '';
+    destFailed = false;
     showDest();
     ask('/api/dropoff', { method: 'POST' }).then(function (r) {
       return r.json().catch(function () { return null; });
@@ -2274,6 +2293,13 @@
           // /api/status is fetched once, at load — it is not a poll — so
           // nothing downstream was ever going to catch this up.
           destSaid = '';
+          // ...and so does a failed one. "Nothing on that screen read as an
+          // address" is an answer about the card the driver was looking at
+          // when they pressed; carried onto the next card it is a complaint
+          // about a press that was never made, on a button that would then be
+          // refusing to ask for the press the new card actually needs — see
+          // `wants`, which this suppresses.
+          destFailed = false;
         }
         onRecord = msg.offer;
         showTook();
@@ -2348,6 +2374,32 @@
       // scan caught the right screen.
       if (msg.dropoff && msg.dropoff.line) {
         destSaid = msg.dropoff.line;
+        destFailed = false;
+        destBusy = false;
+        showDest();
+      } else if (msg.dropoff && msg.dropoff.found === false
+                 && msg.dropoff.asked) {
+        // The window closed with nothing on it, which is an ANSWER.
+        //
+        // This was the only control on the bar that could not report its own
+        // failure. The rig emitted only when it found an address, so a press
+        // that found none produced no message at all, and the page's own timer
+        // put the button back exactly as it was — the driver tapped the
+        // address open on their phone, pressed, waited, and got the same grey
+        // button whether it had worked or not. Took says "· not saved", Drop
+        // says "Drop · failed", Re-find says "⟳ failed".
+        //
+        // It is answered from the RIG and not from a timer here, and that is
+        // the whole reason this branch exists rather than a setTimeout. A read
+        // that started inside the window still counts, and a read has been
+        // measured at 5.9s, so an address can land six seconds after the
+        // window shut. A page that gave up on its own clock would print "not
+        // read" and then be corrected by a green address a moment later, which
+        // is a worse fault than the silence it was curing.
+        //
+        // `asked` only: an unprompted sighting finding nothing is not the
+        // answer to a question anybody asked.
+        destFailed = true;
         destBusy = false;
         showDest();
       }

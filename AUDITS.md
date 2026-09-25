@@ -766,6 +766,45 @@ reason, and the one thing they were for is asserted on the source instead —
 which is the same answer, and the same paragraph of reasoning, that
 `read_the_money`'s wiring check in that file already carries.
 
+**The one control on the bar that could not report its own failure.** The rig
+emitted a dropoff only from inside `if found:`, so a press that found no
+address produced no line at all, and the panel's own thirteen-second timer
+repainted the button exactly as it was. The driver tapped the address open on
+their phone, pressed, waited, and got the same grey button whether it had
+worked or not. Every other control there names its failure: "Took … · not
+saved", "Drop · failed", "⟳ failed", "could not set the box: …". A control that
+cannot say it failed is one that gets abandoned, and abandoning this one costs
+the geography half of the stacking advice — the stack line is already silent on
+39% of the pairs it is asked about, and 50% of the owner's offers carry no
+dropoff at all.
+
+*Answered from the RIG, not from a timer on the page, and that distinction is
+the whole of why this took a change on both sides.* `asked` is
+`started < dropoff_until`, so a read that BEGAN before the deadline still
+counts and still emits when it lands — 1.8s median on this Pi, 5.9s at worst
+measured. A page giving up on its own clock would print "not read" and then be
+corrected by a green address a moment later, which is this project's first
+fault class used to cure its second. So the rig waits for any read that could
+still answer — the same predicate `asked` itself uses — and then says so.
+
+**A check found a real fault rather than guarding one.** The press was closed
+only by an address off an *asked* read, so a read straddling the deadline sent
+the address, the panel put it up in green, and the press stayed outstanding
+until the empty answer arrived over the address already showing: two claims
+about one press, the second contradicting the first, on the screen the driver
+reads while moving. Any address closes the press now. `asked` still travels on
+the message, so the server goes on telling a press from a sighting where that
+matters.
+
+On the panel the failure uses the same `failed` class every other control does,
+stops asking to be pressed in amber while it is saying it failed — two states
+on one button is one too many at 74px — clears when an address arrives, and
+clears when a new card lands, because a failure belonging to the last card
+would otherwise suppress the amber ask on the next one. Twelve mutations across
+the two sides, all killed; the in-flight wait is pinned on the source, because
+these checks run `--no-parallel` where a read is synchronous and `reader.busy`
+is never true at the moment the window is judged.
+
 ### The order in the car
 
 **A destination scanned while SCREENING lost its provenance the moment the card

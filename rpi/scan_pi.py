@@ -1400,7 +1400,20 @@ def emit_dropoff(address, ms=None, asked=True):
     address is found; a second one arriving would be the driver having moved on
     to a different screen, and the first is the one they asked about.
     """
+    # A window that closed with nothing on it, which is an answer and not a
+    # silence. `None` rather than a blank address: every field below would be
+    # null anyway, and a caller reading `line` would have to tell "the rig
+    # found nothing" from "the rig read an address with no line in it", which
+    # are different things. The shape stays the same so the receiving end has
+    # one branch to add and not a second message to learn.
+    if address is None:
+        print(json.dumps({'dropoff': {
+            'line': None, 'street': None, 'city': None, 'state': None,
+            'zip': None, 'found': False, 'asked': bool(asked), 'ms': ms,
+            'at': int(time.time() * 1000)}}), flush=True)
+        return
     print(json.dumps({'dropoff': {
+        'found': True,
         # What to show and what to store. `city` and `zip` are what the
         # geography is actually decided on — see Advice.sameArea — and `line` is
         # what the driver reads to tell whether the scan worked.
@@ -1942,6 +1955,17 @@ def main():
     # last address it produced. See DROPOFF_WINDOW and dropoff_requested.
     dropoff_until = 0.0
     last_dropoff_read = 0.0
+    # A press that has not been answered yet.
+    #
+    # Separate from `dropoff_until`, which says whether the window is still
+    # OPEN. This says whether the driver is still owed a reply, and it is the
+    # difference between the only control on the bar that cannot report its own
+    # failure and one that can: every other one names it — "Took … · not
+    # saved", "Drop · failed", "⟳ failed", "could not set the box: …" — while
+    # this one repainted itself identically whether the scan worked or not.
+    # A control that cannot say it failed is a control that gets abandoned,
+    # and abandoning this one costs the geography half of the stacking advice.
+    dropoff_asked = False
     # The last address sent, so a navigation screen sitting there for twenty
     # minutes is reported once rather than on every read that happens to catch
     # it. A DIFFERENT address is a different job and is always sent.
@@ -2001,7 +2025,7 @@ def main():
         # is how a loop rewritten into a closure loses its memory without
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
-        nonlocal dropoff_until, dropoff_said
+        nonlocal dropoff_until, dropoff_said, dropoff_asked
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as
@@ -2296,6 +2320,29 @@ def main():
             # the button, gets their address, and then finds the rig
             # unresponsive until the twelve seconds run out.
             dropoff_until = 0.0
+            # Answered. By ANY address, not only by one off a read the driver
+            # asked for — which is what this said first, and it was wrong on
+            # the glass.
+            #
+            # `asked` is `started < dropoff_until`, so a read that begins after
+            # the deadline is an unprompted sighting however close behind the
+            # press it is. On this rig a read is 1.8s and the window is twelve,
+            # so one can straddle the deadline: the press goes unanswered, the
+            # very next read finds the address and sends it, and the panel puts
+            # it up in green — while the press is still outstanding and the
+            # branch below then reports "nothing on that screen read as an
+            # address" over the address already showing. Two claims about one
+            # press, the second contradicting the first, on the screen the
+            # driver is reading in a moving car.
+            #
+            # What the driver asked was "what is on that screen", and something
+            # was. Which read found it is a distinction this button does not
+            # have to make; `asked` still travels ON the message, so the server
+            # goes on telling a press from a sighting where that matters.
+            #
+            # Found by a check, not by reading: the empty answer and the found
+            # one were both being sent for one press.
+            dropoff_asked = False
             if args.json:
                 emit_dropoff(found, ms=out.get('ms'), asked=asked)
             log('destination read%s: %s'
@@ -2833,6 +2880,7 @@ def main():
                 # motion gate scores as nothing happening.
                 if dropoff_requested():
                     dropoff_until = now + DROPOFF_WINDOW
+                    dropoff_asked = True
                     # `do_read` here looks redundant against the beat further
                     # down, and on the FIRST press it is: last_dropoff_read
                     # starts at 0.0, so the beat fires on this same pass. It is
@@ -3097,6 +3145,36 @@ def main():
                         and (now - last_dropoff_read) > RESAMPLE_EVERY:
                     do_read = True
                     last_dropoff_read = now
+
+                # ...and a window that closes with nothing on it SAYS SO.
+                #
+                # The rig emitted only from inside `if found:`, so a press that
+                # found no address produced no line at all, and the panel's own
+                # timer put the button back exactly as it was. The driver tapped
+                # the address open on their phone, pressed, waited, and got the
+                # same grey button whether it had worked or not. Every other
+                # control on that bar names its failure.
+                #
+                # Not curable on the page, which is where it was tried first. A
+                # read that STARTED inside the window still counts — that is
+                # what `asked` means — and a read is 1.8s median and has been
+                # measured at 5.9s, so an answer can land a good six seconds
+                # after the window shut, well past any timer the page could
+                # set. A page saying "not read" and then being corrected by a
+                # green address a moment later is this project's first fault
+                # class, on the panel, to cure its second.
+                #
+                # So the wait here is the same predicate `asked` is: a read
+                # that began before the deadline can still answer, and nothing
+                # that began after it ever will. Once no such read is left in
+                # flight, the question has an answer and the answer is no.
+                if dropoff_asked and now >= dropoff_until \
+                        and not (reader.busy and reader.since is not None
+                                 and reader.since < dropoff_until):
+                    dropoff_asked = False
+                    if args.json:
+                        emit_dropoff(None, asked=True)
+                    log('nothing on that screen read as an address')
 
                 # ...and the slow beat, for as long as there is a card there.
                 # See VERIFY_EVERY: a new offer arriving in place of the old one

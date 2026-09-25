@@ -138,7 +138,7 @@ def out_for(text, clipped=False):
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
         refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
-        clipped_for=None):
+        clipped_for=None, dropoff_window=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return. `handoff`: a directory to point the button-press files at, so a
@@ -175,12 +175,15 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                         clipped=bool(clipped_for and clipped_for(calls[0], k)))
                 for k in range(len(frames))]
 
-    announced, verdicts, beats, logs, alive = [], [], [], [], []
+    announced, verdicts, beats, logs, alive, dropoffs = [], [], [], [], [], []
     real = (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
             PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
-            SP.emit_reading)
+            SP.emit_reading, SP.emit_dropoff)
     real_sleep = real[6]
     SP.emit_reading = lambda *a, **k: None
+    # Captured rather than printed, like the offer line beside it. The empty
+    # answer — a press that found no address — is only visible here.
+    SP.emit_dropoff = lambda address, **k: dropoffs.append((address, k))
     SP.start_camera = lambda *a, **k: cam
     SP.emit = lambda *a, **k: verdicts.append((a, k))
     SP.emit_offer = lambda *a, **k: announced.append(a)
@@ -202,6 +205,9 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     was_alive_every = SP.ALIVE_EVERY
     if alive_every is not None:
         SP.ALIVE_EVERY = alive_every
+    was_window = SP.DROPOFF_WINDOW
+    if dropoff_window is not None:
+        SP.DROPOFF_WINDOW = dropoff_window
     was_refind_s = SP.REFIND_NOTICE_S
     if refind_notice_s is not None:
         SP.REFIND_NOTICE_S = refind_notice_s
@@ -230,7 +236,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     finally:
         (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
          PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
-         SP.emit_reading) = real
+         SP.emit_reading, SP.emit_dropoff) = real
+        SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.REFIND_NOTICE_S = was_refind_s
         if handoff:
@@ -239,7 +246,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             else:
                 os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
-                logs=logs, alive=alive)
+                logs=logs, alive=alive, dropoffs=dropoffs)
 
 
 FRAG = '$16.05 20 min (7.3 mi) trip'
@@ -555,6 +562,78 @@ ok_('...and feeds every frame but that one to the accumulator',
 # rather than a constant, which is exactly the shape the check above is for.
 ok_('the loop tells a screen row whether a card was up a moment ago',
     'card_was_up=card_on_screen' in _loop_src)
+
+# ...and the other half of the dropoff answer that a run cannot reach: it waits
+# for any read that STARTED inside the window, because such a read can still
+# answer the press. These checks run --no-parallel, where a read is synchronous
+# and `reader.busy` is never true at the moment the window is judged; the
+# threaded path is the one it is for, and on the rig a read started at 11.9s of
+# a twelve-second window lands a second or more after it. The predicate is the
+# same one `asked` itself uses, which is the property worth pinning.
+ok_('the empty dropoff answer waits for a read that could still answer it',
+    'reader.since < dropoff_until' in _loop_src)
+
+# --- a dropoff scan that finds nothing says so -------------------------------
+#
+# The rig emitted only from inside `if found:`, so a press that found no
+# address produced no line at all and the panel's own timer repainted the
+# button exactly as it was. The driver tapped the address open on their phone,
+# pressed, waited, and got the same grey button whether it had worked or not.
+# Every other control on that bar names its failure: "Took … · not saved",
+# "Drop · failed", "⟳ failed", "could not set the box: …".
+#
+# Answered from HERE and not from a timer on the page. `asked` is
+# `started < dropoff_until`, so a read that began before the deadline still
+# counts and still emits when it lands — 1.8s median on this Pi and 5.9s at
+# worst measured. A page giving up on its own clock would print "not read" and
+# then be corrected by a green address a moment later, which is this project's
+# first fault class used to cure its second.
+#
+# Run to the deadline rather than to a read count: the answer comes when the
+# WINDOW closes, and a run that stops at four reads stops before it does.
+_ho = tempfile.mkdtemp()
+open(os.path.join(_ho, 'uberscan-dropoff'), 'w').close()
+r5 = run(lambda n, k: WHOLE, extra_argv=['--no-parallel'], seconds=6.0,
+         handoff=_ho, dropoff_window=1.0)
+_said = [d for d in r5['dropoffs'] if d[1].get('asked')]
+ok_('a press that found no address is answered, not left silent (%r)'
+    % (r5['dropoffs'][:1],), len(_said) == 1)
+if _said:
+    eq('...with no address, because there was none', _said[0][0], None)
+    ok_('...and marked as the answer to a press', _said[0][1].get('asked'))
+ok_('...and the log says it too, for whoever reads one',
+    any('read as an address' in l for l in r5['logs']))
+# ONCE. The window closes, it is answered, and the answer does not repeat on
+# every pass of the loop for the rest of the shift.
+eq('...said once, over %d reads' % r5['calls'], len(_said), 1)
+
+# ...and a press that IS answered is not also reported as a failure.
+#
+# This one found a real fault rather than guarding one. `asked` is false for a
+# read that began after the deadline, and the press was being closed only by an
+# asked read — so a read straddling the deadline sent the address, the panel
+# put it up in green, and the press stayed outstanding until the branch below
+# announced "nothing on that screen read as an address" over the address
+# already showing. Two claims about one press, the second contradicting the
+# first, on the screen the driver is reading in a moving car. Any address
+# closes the press now.
+_ho2 = tempfile.mkdtemp()
+open(os.path.join(_ho2, 'uberscan-dropoff'), 'w').close()
+NAV_ADDR = 'Dropoff 123 Main St, Acworth, GA 30101 12 min Start'
+r7 = run(lambda n, k: NAV_ADDR, extra_argv=['--no-parallel'], seconds=6.0,
+         handoff=_ho2, dropoff_window=1.0)
+_found = [d for d in r7['dropoffs'] if d[0] is not None]
+_empty = [d for d in r7['dropoffs'] if d[0] is None]
+ok_('a press that finds an address is answered with it (%r)'
+    % ([(d[0] or {}).get('line') for d in r7['dropoffs']][:2],), len(_found) >= 1)
+eq('...and is not ALSO reported as having found nothing', _empty, [])
+
+# ...and a rig nobody pressed anything on says nothing. Without this the checks
+# above pass on a message that is simply always sent.
+r6 = run(lambda n, k: WHOLE, extra_argv=['--no-parallel'], seconds=6.0,
+         handoff=tempfile.mkdtemp(), dropoff_window=1.0)
+eq('a rig nobody pressed says nothing about a dropoff',
+   [d for d in r6['dropoffs'] if d[1].get('asked')], [])
 
 # --- what the phone showed after a card landed ------------------------------
 #
