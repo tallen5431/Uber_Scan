@@ -1736,6 +1736,37 @@ try:
         ok_('...and the town it is about, for the map to be taken to',
             bool(_rows[0]['town']))
 
+    # WHICH END of the job put an offer in a town, which is the thing most
+    # likely to be misread off this panel. MV.townFor takes the dropoff first
+    # and falls back to the pickup, and on the owner's week 86% of the placed
+    # rows come off the dropoff — so a row under "where the money is" is mostly
+    # describing where those jobs ENDED.
+    #
+    # The note said the opposite as shipped: "these are the offers that came to
+    # you where you already were", which is a claim about the driver's
+    # position, on a page where no row carries one.
+    ok_('the panel says a town is whichever END of the job named one',
+        'end' in _notes and 'dropoff first' in _notes)
+    no_('...and no longer claims they came to the driver where they already were',
+        'already were' in _notes)
+    ok_('...and says outright that nothing here knows where the car was',
+        'nothing carries a position' in _notes)
+    # ...and on the row, counted over that group's own offers so it can never
+    # disagree with the count beside it — and SILENT when it is not true.
+    #
+    # Every ranked offer in this fixture carries its town on the PICKUP and no
+    # dropoff at all, so the correct row here says nothing about ends. That is
+    # the half worth checking through the page: the tally is rendered from
+    # g.offers, and a version that printed unconditionally, or counted the
+    # wrong end, would put "20 by where they ended" on a group where not one
+    # of them did. The other half — that it appears when the dropoff IS the
+    # end that named the town — is tests/mapview.test.js's, against
+    # MV.townEndFor itself, because no fixture on this page ranks dropoffs.
+    if _rows:
+        no_('...and says nothing about ends where no offer had one (%r)'
+            % (_rows[0].get('support') or '')[:80],
+            'by where they ended' in (_rows[0].get('support') or ''))
+
     # ONE town is not a ranking, and this fixture has exactly one that clears
     # the floor. The page used to print "This ranking is not worth acting on"
     # and, in the same sentence, that chance never does this well — two

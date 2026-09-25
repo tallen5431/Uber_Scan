@@ -1056,6 +1056,56 @@ function gaps(sent) {
 
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' map-view checks passed');
+  /* --- which end of a job named the town it is ranked under --------------
+   *
+   * The map's "Where the money is" groups on MV.townFor, which takes the
+   * DROPOFF first and falls back to the pickup. On the owner's real week 86%
+   * of the placed rows come off the dropoff — so a town near the top of that
+   * list is mostly a town jobs END in, and the panel's note said the opposite
+   * ("these are the offers that came to you where you already were") on a
+   * page where no row carries a position at all.
+   *
+   * townFor is derived from townEndFor rather than restating the precedence,
+   * so the two cannot disagree. Written the other way round first, which is
+   * two copies of one rule and the first edit to either would have made the
+   * ranking's rows disagree with the ranking.
+   *
+   * Checked here because rpi/test_map.py's fixture carries every ranked town
+   * on the PICKUP, so the page can prove the silence and not the sentence. */
+  var byEnd = { pickup: 'Zaxbys', dropoff: 'Peachtree St NE, Atlanta' };
+  eq('a job whose dropoff names a town is ranked under that town',
+     MV.townFor(byEnd), 'Atlanta');
+  eq('...and says the dropoff is where it came from',
+     MV.townEndFor(byEnd), 'dropoff');
+  // THE DROPOFF WINS when both ends name one, which is the whole reason the
+  // panel's note had to change: it is what makes 86% of the placed rows a
+  // statement about where jobs END. Without this the order can be swapped and
+  // every other case here still passes, because no other fixture has a town
+  // at both ends — measured, by swapping it.
+  var both = { pickup: 'Barrett Pkwy, Kennesaw', dropoff: 'Oak Ln, Acworth' };
+  eq('with a town at both ends the dropoff is the one ranked',
+     MV.townFor(both), 'Acworth');
+  eq('...and is named as the end it came from', MV.townEndFor(both), 'dropoff');
+
+  var byPickup = { pickup: 'Canton Rd, Marietta', dropoff: 'Zaxbys' };
+  eq('a job whose dropoff names nowhere falls back to the pickup',
+     MV.townFor(byPickup), 'Marietta');
+  eq('...and says so', MV.townEndFor(byPickup), 'pickup');
+  var neither = { pickup: 'Zaxbys', dropoff: 'Wendys' };
+  eq('a job naming no town is under none', MV.townFor(neither), null);
+  eq('...and names no end either', MV.townEndFor(neither), null);
+  eq('nothing at all is nothing', MV.townEndFor(null), null);
+  // The derivation, not a restatement of it: whatever end is named, the town
+  // is the town OF that end. A precedence that drifted would break this
+  // without breaking any single case above.
+  [byEnd, byPickup, neither, { pickup: 'Barrett Pkwy, Kennesaw',
+                               dropoff: 'Oak Ln, Acworth' }]
+    .forEach(function (o, i) {
+      var end = MV.townEndFor(o);
+      eq('the town is read off the end that named it (' + i + ')',
+         MV.townFor(o), end ? MV.townOf(o[end]) : null);
+    });
+
   process.exit(fail ? 1 : 0);
 })().catch(function (e) {
   console.log('FAIL  the suite itself threw: ' + (e && e.stack || e));

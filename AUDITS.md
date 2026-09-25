@@ -855,6 +855,38 @@ because it is an order and not a behaviour, and because the way it regresses is
 an edit to this file — the same reason `rpi/test_map.py` counts the selects in
 its bar.
 
+**"Where the money is" said the offers came to the driver where they already
+were, and 86% of them are labelled by where the job ENDS.** `MV.townFor` takes
+the dropoff's town and falls back to the pickup's — right for coverage, since a
+pickup is usually a merchant with no town in it — but nothing downstream said
+which end any row came off. Measured on the owner's week: of 482 placed
+offers, **415 are labelled by the dropoff and 67 by the pickup**. So the
+closing note was a claim about the driver's POSITION, on a page where no row
+carries one, about a ranking that is mostly a ranking of where jobs finish.
+
+The note now says a town is whichever end named one, dropoff first, that a town
+near the top is mostly a town jobs **end** in, and outright that nothing here
+knows where the car was. Each ranked row carries the tally when it is mostly
+one end — counted over that group's own `offers`, so it can never disagree with
+the count beside it — and says nothing when it is not.
+
+`townFor` is now derived from a new `townEndFor` rather than restating the
+precedence. Written the other way round first, which is two copies of one rule:
+the first edit to either would have made the rows disagree with the ranking
+they sit in.
+
+*The dollar claim that came with this was refuted and is not the reason it was
+done.* Re-grouping on pickups alone, on the driver's own clock, gives 103
+offers in 5 towns at p = 0.174 — which does not clear the page's own
+`AREA_ALPHA`, so that version would print "this ranking is not worth acting
+on". The fault fixed here is the sentence, not the arithmetic.
+
+The suite's fixture carries every ranked town on the PICKUP, so the page can
+prove the silence and not the sentence; the other half is in
+`tests/mapview.test.js` against `townEndFor` itself, including the case with a
+town at both ends — without which the precedence can be swapped and every
+other check still passes. Measured, by swapping it.
+
 ### The maps, again
 
 **The map could not say where the money was, and the obvious way to make it

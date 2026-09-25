@@ -184,9 +184,25 @@
    * with no town in it at all. Measured on the owner's week, the dropoff
    * yields a town on 35% of counted offers and the pickup on 12%; taking
    * either reaches 41%, and the ranking is real on all three separately. */
-  function townFor(offer) {
+  function townEndFor(offer) {
     if (!offer) return null;
-    return townOf(offer.dropoff) || townOf(offer.pickup);
+    if (townOf(offer.dropoff)) return 'dropoff';
+    if (townOf(offer.pickup)) return 'pickup';
+    return null;
+  }
+
+  /* ...and townFor is derived from it rather than restating the order.
+   *
+   * Written the other way round first — `townOf(dropoff) || townOf(pickup)`
+   * here and a second function repeating that precedence — which is two
+   * copies of one rule, and the first edit to either would have made the
+   * ranking's rows disagree with the ranking. Which END a town came off is
+   * not a footnote on this page: 86% of the placed rows come off the dropoff,
+   * so a panel headed "where the money is" is mostly describing where jobs
+   * END. */
+  function townFor(offer) {
+    var end = townEndFor(offer);
+    return end ? townOf(offer[end]) : null;
   }
 
   function localityOf(offers) {
@@ -1084,6 +1100,7 @@
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
            detour: detour, fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
            localityOf: localityOf, townOf: townOf, townFor: townFor,
+    townEndFor: townEndFor,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, statedBy: statedBy, unchecked: unchecked, ends: ends,
            accused: accused,

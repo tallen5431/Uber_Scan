@@ -1240,6 +1240,24 @@
         + (r.matched ? '$' + g.median.toFixed(2) + ' median · ' : '')
         + g.n + ' offer' + (g.n === 1 ? '' : 's')
         + ' on ' + g.days + ' separate day' + (g.days === 1 ? '' : 's')
+        // ...and WHICH END of the job put them in this town, which is the
+        // thing most likely to be misread off this panel. MV.townFor takes
+        // the dropoff first and falls back to the pickup, and on the owner's
+        // week 86% of the placed rows come off the dropoff — so a row reading
+        // "98 offers" under a heading about where the money is describes
+        // where those jobs ENDED, not where the driver was sitting.
+        //
+        // Counted over g.offers, which is the group's own rows, so this can
+        // never disagree with the count beside it. Said only when it is
+        // actually mostly one end: on a town split evenly there is nothing to
+        // warn about and the row is already carrying four figures.
+        + (function () {
+            var ends = (g.offers || []).filter(function (o) {
+              return MV.townEndFor(o) === 'dropoff';
+            }).length;
+            return ends > g.n / 2
+              ? ' · ' + ends + ' by where they ended' : '';
+          }())
         + (g.took ? ' · you took ' + g.took : '') + '</span>'
         + '</div>';
     });
@@ -1264,11 +1282,23 @@
     if (left.length) {
       html += '<div class="note">' + left.join('. ') + '.</div>';
     }
-    // ...and the one thing this page must not let a driver conclude.
-    html += '<div class="note">These are the offers that came to you where you '
-      + 'already were. A town you have never sat in cannot appear here, and a '
-      + 'town you only passed through once will not clear the floor — so this '
-      + 'ranks the places you already work, not everywhere you could.</div>';
+    // ...and the two things this page must not let a driver conclude.
+    //
+    // The second of these was WRONG as shipped. It read "these are the offers
+    // that came to you where you already were", which is a claim about the
+    // driver's position — and MV.townFor takes the dropoff first, so 86% of
+    // the placed rows are labelled by where the job ENDED. A town at the top
+    // of this list is mostly a town jobs finish in, which is a different fact
+    // and points a driver somewhere else.
+    html += '<div class="note">A town here is whichever end of the job named '
+      + 'one — the dropoff first, the pickup only when the dropoff named '
+      + 'nowhere — so a town near the top is mostly a town jobs <b>end</b> '
+      + 'in, not one you were sitting in when the card arrived. No row here '
+      + 'knows where the car was: nothing carries a position.</div>'
+      + '<div class="note">And a town you have never sat in cannot appear '
+      + 'here, while a town you only passed through once will not clear the '
+      + 'floor — so this ranks the places you already work, not everywhere '
+      + 'you could.</div>';
     return html;
   }
 
