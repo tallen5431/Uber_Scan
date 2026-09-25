@@ -12,11 +12,33 @@
   var HISTORY_MAX = 100;
   var DRAFT_TTL = 3 * 60 * 1000;  // an offer older than this is long gone
 
+  // What a driver STARTS FROM, which is not what the parser falls back to, and
+  // the difference is money on the glass.
+  //
+  // offer_parser.DEFAULT_SETTINGS has costPerMile 0 and that is deliberate: it
+  // means "nobody has told me what this car costs, so do not invent a
+  // deduction". This is the other question — see rpi/calibrate.py's
+  // SEED_SETTINGS, which answers it with 0.30 and warns in as many words that
+  // the two "are easy to confuse and were written out by hand in three places,
+  // one of which was a diagnostic that hardcoded 0.30 while the parser it was
+  // diagnosing used 0". This block and scan.js's were the fourth and fifth,
+  // and both took the parser's fallback as the driver's starting line.
+  //
+  // Measured on the owner's own week, every row of which the rig scored at
+  // 0.30: re-scored at 0, 182 of 1,157 offers (15.7%) show a green ACCEPT that
+  // the rig would not have shown green, at a median $6.80/hr overstatement, and
+  // another 202 soften from PASS to CLOSE CALL. A third of the week reads more
+  // favourably on a phone than it does in the car.
+  //
+  // A SEED, not a fallback: these back load() only, and the settings screen
+  // edits them. A driver who genuinely pays nothing to drive a mile sets it to
+  // zero and the labels below say "trip pay" rather than "net pay", which is
+  // the honest way to show that state and is already there.
   var DEFAULTS = {
-    target: 25,      // $/hour that earns a green ACCEPT
-    band: 15,        // % below target that still shows amber
-    costPerMile: 0,  // gas + wear, subtracted from the offer
-    pad: 0,          // minutes added to every offer (pickup drive, waiting)
+    target: 25,         // $/hour that earns a green ACCEPT
+    band: 15,           // % below target that still shows amber
+    costPerMile: 0.30,  // gas + wear, subtracted from the offer
+    pad: 0,             // minutes added to every offer (pickup drive, waiting)
     haptics: true
   };
 

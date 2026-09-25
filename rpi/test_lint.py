@@ -352,6 +352,51 @@ for _page in ('journal.html', 'map.html'):
     ok_('...and keeps no copy of its own', not re.search(
         r'\bvar\s+DAY_STARTS_AT\s*=\s*[0-9]', _src))
 
+# --- what a driver STARTS from, in the three places that seed it ------------
+#
+# Two questions that look like one, and rpi/calibrate.py states the difference
+# where the answer lives: `offer_parser.DEFAULT_SETTINGS` has costPerMile 0 and
+# means "nobody has told me what this car costs, so do not invent a deduction";
+# `SEED_SETTINGS` is "what should a driver start from" and says 0.30. That file
+# already records the two being confused once — "written out by hand in three
+# places, one of which was a diagnostic that hardcoded 0.30 while the parser it
+# was diagnosing used 0" — and the browsers were the fourth and fifth, both
+# seeding a driver at the parser's refusal.
+#
+# What it cost, measured on the owner's week, every row of which the rig scored
+# at 0.30: re-scored at 0, 182 of 1,157 offers (15.7%) come out a green ACCEPT
+# the rig would not have shown green, median $6.80/hr over, and 202 more soften
+# from PASS to CLOSE CALL. A wrong number on a screen the driver acts on, which
+# is this project's first fault class, on the two surfaces that have no
+# calibrate step to correct them.
+#
+# Held here because the three cannot import from each other, which is the same
+# reason TEXT_KEPT and DAY_STARTS_AT are held here. The parser's own 0 is
+# asserted too: it is not a stale copy of the seed, it is the other answer, and
+# a well-meaning edit making all four agree would delete the distinction.
+_cal = open(os.path.join(ROOT, 'rpi', 'calibrate.py')).read()
+_seed = re.search(r"SEED_SETTINGS\s*=\s*\{[^}]*'costPerMile'\s*:\s*([0-9.]+)", _cal, re.S)
+_parser_default = re.search(
+    r"(?m)^DEFAULT_SETTINGS\s*=\s*\{[^}]*'costPerMile'\s*:\s*([0-9.]+)", _py, re.S)
+ok_('the rig has a seed for what a mile costs', _seed is not None)
+ok_('...and the parser has its own, separate, refusal', _parser_default is not None)
+if _seed and _parser_default:
+    eq('the parser still refuses to invent a deduction',
+       float(_parser_default.group(1)), 0.0)
+    ok_('...and the seed is not that refusal (%s)' % _seed.group(1),
+        float(_seed.group(1)) > 0)
+    for _file in ('ui.js', 'scan.js'):
+        _src = open(os.path.join(ROOT, _file)).read()
+        _b = re.search(r'\bvar\s+DEFAULTS\s*=\s*\{.*?\}', _src, re.S)
+        ok_('%s has a DEFAULTS block' % _file, _b is not None)
+        if not _b:
+            continue
+        _c = re.search(r'costPerMile\s*:\s*([0-9.]+)', _b.group(0))
+        ok_('...naming what a mile costs', _c is not None)
+        if _c:
+            eq('...and seeding it from the same place the rig does (%s %s)'
+               % (_file, _c.group(1)), float(_c.group(1)), float(_seed.group(1)))
+
 # --- the two hand-written approach checks stay in step ---------------------
 #
 # laid_out_approach's `isTotal` refusal shows only in `legDetail[].isApproach`,

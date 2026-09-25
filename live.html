@@ -1983,7 +1983,30 @@
     // Sent by the server, which is where the order in the car is known. A page
     // works it out for nobody: several may be open and each would answer
     // slightly differently as its own clock drifted.
-    showStack(r.stack);
+    //
+    // ...but against the hold as it is NOW, not as it was when this reading
+    // arrived, which is the same rule `withStack` applies in server.js: no
+    // hold, no pair line.
+    //
+    // `r` is `last`, the stored reading, and its `stack` was computed while an
+    // order was still held. render() runs on the one-second tick, so it UNDID
+    // all three of this page's own `showStack(null)` calls — press Drop and a
+    // second later "+ $26 to $35/hr with the one you have" was back under the
+    // verdict with the Drop button beside it already gone, until the next
+    // reading arrived two and a half to six seconds later. The un-tick path
+    // never even flickered, because that handler calls showDrop and showDest
+    // and not showStack.
+    //
+    // server.js fixed exactly this for the reload path and its comment
+    // describes the same screen: "press Drop and reload, and the panel showed
+    // '+ $25-50/hr with the one you have' under the verdict while the Drop
+    // button beside it was hidden because nothing was held". The live path was
+    // left holding the reading's own copy.
+    //
+    // `holdingNow`, not `r.holding`: the page is told the hold has ended by the
+    // mark reply, the Drop reply, the event stream and the status poll, and the
+    // whole fault is that the READING is the one thing that has not heard.
+    showStack(holdingNow ? r.stack : null);
     el.working.innerHTML = rows.map(function (row) {
       return '<div class="' + row[0] + '">' + row[1] + '</div>';
     }).join('');

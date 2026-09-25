@@ -2344,6 +2344,29 @@ finally:
     except Exception:
         proc.kill()
 
+# --- the scans come first ---------------------------------------------------
+#
+# The driver's own words: "make it so it shows the most recent scans at the
+# top, as I have to scroll down to actually get to them." The list was already
+# newest-first WITHIN itself; what it was not was near the top of the page —
+# it sat under the advice block, four charts, the runs and the pairings, so
+# reaching the thing a person opens this page to look at meant scrolling past
+# everything they might stay for.
+#
+# Pinned on the source rather than on the rendered page because it is an order,
+# not a behaviour, and because the ways it regresses are all edits to this file:
+# a section moved, a block re-inserted where it used to be. The same reason
+# rpi/test_map.py counts the selects in its bar.
+_jh = open(os.path.join(ROOT, 'journal.html'), encoding='utf-8').read()
+_list_at = _jh.find('<h2>Every offer')
+_advice_at = _jh.find('<section class="advice"')
+_charts_at = _jh.find('id="blocksHead"')
+ok_('the offers page still has a list of every offer', _list_at > 0)
+ok_('...and an advice block and charts to put it against',
+    _advice_at > 0 and _charts_at > 0)
+ok_('the list comes before the advice block', _list_at < _advice_at)
+ok_('...and before the charts', _list_at < _charts_at)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d offers-page checks passed' % ok)
 sys.exit(1 if bad else 0)

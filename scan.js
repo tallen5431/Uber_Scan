@@ -10,8 +10,14 @@
   'use strict';
 
   var SETTINGS_KEY = 'uberscan.settings.v1';
+  // 0.30, not the parser's 0, and the two are different questions. See the same
+  // block in ui.js for the measurement, and rpi/calibrate.py's SEED_SETTINGS
+  // for the rule: the parser's 0 means "nobody told me what this car costs, so
+  // do not invent a deduction"; this is "what should a driver start from". A
+  // phone seeded at 0 called 182 of the owner's 1,157 offers a green ACCEPT
+  // that the rig, seeded at 0.30, did not.
   var DEFAULTS = {
-    target: 25, band: 15, costPerMile: 0, pad: 0,
+    target: 25, band: 15, costPerMile: 0.30, pad: 0,
     secondsPerItem: 0, fullFrame: false, haptics: true
   };
 

@@ -840,6 +840,21 @@ is near zero the guard must never be written. `kept` false is the other half —
 the tap discarded because the held order already knew where it was going —
 which sizes the Open entry below about the ⌖ button.
 
+**The scans were the last thing on the offers page.** The driver's own words:
+"make it so it shows the most recent scans at the top, as I have to scroll down
+to actually get to them." The list was already newest-first *within itself* —
+what it was not was near the top of the page. It sat under the advice block,
+four charts, the runs and the pairings, so reaching the thing a person opens
+this page to look at meant scrolling past everything they might stay for.
+
+Moved above all of it. The block's own comments had to move with it: "every
+figure above stays the whole window's" became "below", and a sheet line reading
+"it is in none of the figures above" now says "on this page". The order is
+pinned in `rpi/test_offerspage.py` on the source rather than the rendered page,
+because it is an order and not a behaviour, and because the way it regresses is
+an edit to this file — the same reason `rpi/test_map.py` counts the selects in
+its bar.
+
 ### The maps, again
 
 **The map could not say where the money was, and the obvious way to make it
@@ -1310,6 +1325,31 @@ handler returns immediately — annoying and visibly inert. **Unticking** it lef
 every read to that box: the driver is told the crop is off while the crop
 decides whether anything is read at all. One line, `setAdjusting(adjusting())`
 in the change handler.
+
+**The phone and the keypad priced a mile at nothing, and called 182 of the
+week's offers a green ACCEPT that the rig would not have.** `rpi/calibrate.py`
+states the distinction where the answer lives: `offer_parser.DEFAULT_SETTINGS`
+has `costPerMile` 0 and means *"nobody has told me what this car costs, so do
+not invent a deduction"*; `SEED_SETTINGS` is the other question, *"what should
+a driver start from"*, and says 0.30. That file already records the two being
+confused once — "written out by hand in three places, one of which was a
+diagnostic that hardcoded 0.30 while the parser it was diagnosing used 0" —
+and `ui.js` and `scan.js` were the fourth and fifth. Both took the parser's
+refusal as the driver's starting line.
+
+Measured on the owner's week, every row of which the rig scored at 0.30 and
+re-scored at 0: **182 of 1,157 offers (15.7%) come out a green ACCEPT the rig
+would not have shown green, at a median $6.80/hr overstatement**, and 202 more
+soften from PASS to CLOSE CALL. A third of the week reads more favourably on a
+phone than it does in the car — a wrong number on a screen the driver acts on,
+on the two surfaces that have no calibrate step to correct them.
+
+Both now seed from 0.30. The three are held together in `rpi/test_lint.py`,
+which also asserts the parser's own 0 is still 0: it is not a stale copy of the
+seed, it is the other answer, and an edit making all four agree would delete
+the distinction. All four drift directions were mutated and each killed a
+named check. A driver who genuinely pays nothing to drive a mile still sets it
+to zero, and `ui.js` already relabels "net pay" to "trip pay" when they do.
 
 ### The keypad
 
@@ -1848,6 +1888,29 @@ same file now reads the integer out of both sources and compares them, and
 asserts that the two pages which *can* import it still do rather than quietly
 growing a third. All four failure shapes were mutated and each killed a named
 check.
+
+**The pair line outlived the order it was about, by one second, for ever.**
+`render()` runs on the one-second tick and repainted `showStack(r.stack)` from
+`last` — the stored reading, whose stack was computed while an order was still
+held. That undid all three of the page's own `showStack(null)` calls: press
+Drop and "+ $26 to $35/hr with the one you have" was back under the verdict a
+second later, beside a Drop button that had already gone, until the next
+reading arrived 2.5 to 6.0 seconds after. The un-tick path never even
+flickered, because that handler calls `showDrop` and `showDest` and not
+`showStack`.
+
+`server.js` fixed exactly this on the RELOAD path and its comment describes the
+same screen — "press Drop and reload, and the panel showed '+ $25-50/hr with
+the one you have' under the verdict while the Drop button beside it was hidden
+because nothing was held" — and wrapped `/api/status`'s `last` in `withStack`.
+The live path was left holding the reading's own copy. The page now applies
+`withStack`'s own rule to the stored reading: no hold, no pair line.
+
+It bites in the ordinary stacking case, which is not rare on this driver's
+week: 58% of accepted jobs have a `go`-rated offer arrive while they are still
+running, and 7 of 30 consecutive ticked pairs actually overlap. The check waits
+a full tick after the press, because the press itself clears the line — the
+fault is what the repaint puts back — and it is measured on both panels.
 
 ### The offers page
 

@@ -890,6 +890,41 @@ const framed = (page) => page.waitForFunction(
       };
     });
 
+    // THE PAIR LINE MUST NOT OUTLIVE THE ORDER IT IS ABOUT.
+    //
+    // `render()` runs on the one-second tick and repainted `showStack(r.stack)`
+    // off `last` — the stored reading, whose stack was computed while an order
+    // was still held. So all three of this page's own `showStack(null)` calls
+    // were undone a second later: press Drop and "+ $26 to $35/hr with the one
+    // you have" came back under the verdict with the Drop button beside it
+    // already gone, until the next reading arrived 2.5 to 6.0 seconds later.
+    //
+    // server.js fixed the identical fault on the reload path — its comment at
+    // /api/status describes the same screen — and `withStack` states the rule
+    // this now mirrors: no hold, no pair line.
+    //
+    // Waited out past the tick deliberately. Checking immediately after the
+    // press passes on the broken build, because the press itself clears the
+    // line; the fault is what the next tick puts back.
+    await page.route('**/api/delivered', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, holding: false }) }));
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, {
+        holding: { pay: 12, minutes: 30, dropoff: 'Oak Ln, Marietta' },
+        stack: { pay: 16.8, minMinutes: 30, maxMinutes: 50, worst: 20.2,
+                 best: 33.6, state: 'warn', sure: true, ends: 'same-town',
+                 route: null } }));
+    await page.waitForTimeout(250);
+    const stackSeen = () => page.evaluate(() => {
+      const row = document.getElementById('stack');
+      return !!row && !row.hidden;
+    });
+    out['held ' + panel[0]] = { shown: await stackSeen() };
+    await page.evaluate(() => document.getElementById('drop').click());
+    await page.waitForTimeout(1600);
+    out['held ' + panel[0]].afterDropAndATick = await stackSeen();
+
     /* --- the same button, before the accept ------------------------------
      *
      * The driver's own words: "for doordash orders I need to tap the customer
@@ -2974,6 +3009,19 @@ try:
         ok_('%s: ...and can be read, not just measured' % panel,
             ends.get('reachable'))
         eq('%s: ...saying which' % panel, ends.get('text'), 'ENDS ELSEWHERE')
+        # ...and it goes when the order does, which is the rule server.js's
+        # `withStack` states: no hold, no pair line. The page had three places
+        # that cleared this row and a one-second tick that put it straight back
+        # from the stored reading, so a driver who pressed Drop got the pair
+        # rate for a job they no longer had, under the verdict, next to a Drop
+        # button that had already gone. Measured a full tick after the press,
+        # because the press itself clears it — the fault is the repaint.
+        held = got.get('held ' + panel) or {}
+        ok_('%s: the pair line is up while the order is held' % panel,
+            held.get('shown'))
+        eq('%s: ...and gone a tick after the order is put down' % panel,
+           held.get('afterDropAndATick'), False)
+
         link = row.get('link') or {}
         ok_('%s: the route link is inside its own box' % panel,
             link.get('inside'))
