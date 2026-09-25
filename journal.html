@@ -498,9 +498,20 @@
        manufactures exactly the fat right tail that destroys a mean. The middle
        of the distribution is also the honest answer to "what does a shift round
        here actually pay". -->
+  <!-- ...and they are percentiles of every offer READ, which is not the same
+       question as what a shift paid and reads exactly like it without the
+       noun. 935 of the owner's 1,166 offers are PASS and 31 were worked: the
+       median of what was actually ticked is $30.20/hr against a typical offer
+       of $15. A driver glancing at the three biggest figures on the page and
+       taking "$15 typical" for their own rate is reading the market, not
+       themselves. The same failure was caught once already one line down —
+       see the note on `.unit` in the stylesheet, where "$21 TYPICAL" was
+       found to read as a payout rather than a rate — and fixed there by
+       attaching the unit rather than leaving it to be inferred. This is the
+       other half of it: the unit says /hr, and now the label says of what. -->
   <div class="stats" id="ladder">
-    <div><span id="p25">--</span><i class="unit">/hr</i><small>quarter below</small></div>
-    <div class="answer"><span id="p50">--</span><i class="unit">/hr</i><small>typical</small></div>
+    <div><span id="p25">--</span><i class="unit">/hr</i><small>quarter of offers below</small></div>
+    <div class="answer"><span id="p50">--</span><i class="unit">/hr</i><small>typical offer</small></div>
     <div><span id="p75">--</span><i class="unit">/hr</i><small>quarter above</small></div>
   </div>
 
@@ -1416,6 +1427,21 @@
     if (!a.ready) {
       el.advice.hidden = false;
       el.adviceWorking.textContent = '';
+      // ...and the three figures under it go with the working, which this
+      // branch used to walk straight past.
+      //
+      // The ready exit ends in showAdviceCost(); this one returned without
+      // touching #adviceCost and left the section VISIBLE. So the ordinary
+      // after-shift sequence put a refusal on the glass with the previous
+      // window's wait table, line-set-against-line-kept and "N% of the time
+      // the car was empty" still standing underneath it — three figures about
+      // a range the page had just said it could not answer for, with nothing
+      // saying they belonged to a different one.
+      //
+      // showAdviceCost() rather than blanking the element, because it already
+      // blanks on a reading that is not ready: one rule for what that section
+      // holds, in the function that owns it.
+      showAdviceCost(a);
       if (a.reason === 'unsettled') {
         // What settles this is not always more driving. The swing comes from
         // not knowing which silences were breaks and which were trips, and the

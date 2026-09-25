@@ -2060,6 +2060,36 @@ week's `items` figure counts, which is the cross-check that it was the item
 count deciding. On the chip alone it is Rides 109 / Shop 23 ($11.05) / Not
 stated 1,008. The dead clause is deleted and `r.items` with it.
 
+**A refused window left the previous one's figures standing under the
+refusal.** `showAdvice` has two exits: the ready one ends in
+`showAdviceCost()`, and the not-ready one wrote the refusal, blanked the
+working and returned — while leaving the section VISIBLE. So the ordinary
+after-shift sequence put "not enough trips yet" on the glass with the last
+range's wait table, line-set-against-line-kept sentence and "N% of the time
+the car was empty" still underneath it, with nothing saying they belonged to a
+different window. It calls `showAdviceCost(a)` on that path now, rather than
+blanking the element, so one function owns what that section holds.
+
+Pinned on the source, and that is the honest trade rather than the lazy one:
+the sequence it guards is ready-then-refused, and no fixture in that suite can
+produce it — the ones whose advice is ready are ready on every range and the
+ones that refuse refuse on every range, so a browser check written over them
+would pass with the line deleted. That is the shape of check this project
+removes. `rpi/test_loop.py` makes the same trade for the same reason.
+
+**The three biggest figures on the page did not say what they were figures
+of.** "$11 · $15 · $20 /hr" under "quarter below · typical · quarter above"
+are percentiles of every offer READ, which is a fact about the market and
+reads exactly like a fact about the driver. 935 of the owner's 1,166 offers
+are PASS and 31 were worked: the median of what was actually ticked is
+**$30.20/hr against a typical offer of $15**. The same confusion was caught
+once already one line down — "$21 TYPICAL" reading as a payout rather than a
+rate — and fixed by attaching the unit to the figure. This is the other half:
+the unit says `/hr` and the label now says of what. The check asks the MIDDLE
+one specifically, because a noun on either wing while the figure in the centre
+still reads "typical" leaves the misreading where it was — measured, by
+mutating exactly that.
+
 ### The advice
 
 **The page said where to draw the line and never what holding one costs.**

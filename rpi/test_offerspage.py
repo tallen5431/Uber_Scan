@@ -2358,6 +2358,55 @@ finally:
 # a section moved, a block re-inserted where it used to be. The same reason
 # rpi/test_map.py counts the selects in its bar.
 _jh = open(os.path.join(ROOT, 'journal.html'), encoding='utf-8').read()
+
+# --- a refusal does not leave the last window's figures under it -------------
+#
+# showAdvice has two exits. The ready one ends in showAdviceCost(); the
+# not-ready one wrote the refusal, blanked the working, and RETURNED — while
+# leaving the section visible. So the ordinary after-shift sequence put "not
+# enough trips yet" on the glass with the previous range's wait table,
+# line-kept sentence and "N% of the time the car was empty" still standing
+# underneath, with nothing saying they belonged to a different window.
+#
+# Asserted on the source, and that is the honest thing rather than the lazy
+# one: the sequence it guards is ready-then-refused, and no fixture in this
+# suite can produce it — the ones whose advice is ready are ready on every
+# range, and the ones that refuse refuse on every range, so a browser check
+# written over them would pass with the line deleted. Exactly the shape of
+# check this file removed from the panel suite. See rpi/test_loop.py, which
+# makes the same trade for the same reason.
+_ready_at = _jh.find('showAdviceCost(a, target)')
+_refuse_at = _jh.find('showAdviceCost(a);')
+ok_('the advice block fills its cost figures when it has an answer',
+    _ready_at > 0)
+ok_('...and clears them when it refuses, rather than leaving the last ones',
+    _refuse_at > 0 and _refuse_at < _ready_at)
+
+# ...and the three biggest figures on the page say what they are figures OF.
+#
+# They are percentiles of every offer READ, which is a fact about the market
+# and reads exactly like a fact about the driver without the noun: 935 of the
+# owner's 1,166 offers are PASS, 31 were worked, and the median of what was
+# actually ticked is $30.20/hr against a typical offer of $15. The same
+# confusion was caught once already one line down — "$21 TYPICAL" reading as a
+# payout rather than a rate — and fixed by attaching the unit. This is the
+# other half: the unit says /hr, the label says of what.
+_ladder = re.search(r'<div class="stats" id="ladder">(.*?)</div>\s*</div>',
+                    _jh, re.S)
+ok_('the page still leads with three figures', _ladder is not None)
+if _ladder:
+    _labels = re.findall(r'<small>(.*?)</small>', _ladder.group(1))
+    eq('...three of them', len(_labels), 3)
+    # The MIDDLE one specifically. It is the one marked `.answer`, drawn
+    # largest, and the one a glance lands on — a noun on either wing while the
+    # figure in the centre still reads "typical" leaves the misreading exactly
+    # where it was.
+    _answer = re.search(r'class="answer".*?<small>(.*?)</small>',
+                        _ladder.group(1), re.S)
+    ok_('...the middle one is the answer', _answer is not None)
+    ok_('...and it names what it is a figure of (%r)'
+        % (_answer.group(1) if _answer else _labels,),
+        _answer is not None and 'offer' in _answer.group(1))
 _list_at = _jh.find('<h2>Every offer')
 _advice_at = _jh.find('<section class="advice"')
 _charts_at = _jh.find('id="blocksHead"')
