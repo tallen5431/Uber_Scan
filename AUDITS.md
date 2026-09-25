@@ -926,6 +926,43 @@ prove the silence and not the sentence; the other half is in
 town at both ends — without which the precedence can be swapped and every
 other check still passes. Measured, by swapping it.
 
+**The order in the car did not survive the ignition.** `scanner.holding` was
+process memory, on "a box velcroed into a car where the ignition is the power
+switch" — `rpi/calibrate.py`'s own words. Press Took, drive to the restaurant,
+switch the engine off, walk in, come back: no order in the car, the stack line
+quiet, Drop and the dropoff scan gone, every card for the rest of that delivery
+judged standalone with nothing on the glass saying why. On the owner's week 58%
+of accepted jobs have a `go`-rated offer arrive while they are still running,
+so that is a real decision made without the figure the feature exists for.
+
+***The comment at `/api/delivered` argued the opposite, and it is answered
+rather than ignored.*** It said the hold "is memory only, and a restarted
+server simply has no order in hand, which is the safe way to be wrong". Both
+halves are right about the ERRORS: forgetting an order that is there costs
+advice, remembering one that is not puts a pair rate on the glass for a job
+already delivered, and the second is worse. What does not follow is that
+keeping it causes the second. `holding()` expires an order on its own stated
+time plus `HOLD_OVERRUN` plus `HOLD_GRACE_MS`, and a restored one is read
+through exactly that — a hold that has outlived its clock is refused whether it
+came from memory or from disk.
+
+Its own file beside the journal, not in it: the journal is the one artefact
+that cannot be regenerated and its ingest is idempotent over the whole file,
+while this is a scrap of state about right now. Same shape and same reasoning
+as `places.json`. Written synchronously on purpose — the whole point is to
+survive the instant between the press and the engine stopping, and a queued
+write does not.
+
+Both directions on the clock, for the reason `rpi/journal.py`'s `resume()` gives: a
+Pi boots in 1970 and jumps when the network arrives, and `over` is
+`now − acceptedAt − …`, so a stamp ahead of the clock now reading it never goes
+positive and the order would never expire. A missing stamp does the same thing
+through NaN, and a string one passes `isFinite` — all three are refused. The
+restore answers through `holding()` so the boot line cannot announce an order
+`/api/status` then denies, and a hold file that will not parse leaves the
+server up and quiet rather than printing a stack trace at a driver who has
+never heard of it. Seven mutations, all killed.
+
 ### The maps, again
 
 **The map could not say where the money was, and the obvious way to make it

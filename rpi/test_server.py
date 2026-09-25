@@ -1674,6 +1674,238 @@ finally:
     stop(_pproc)
     shutil.rmtree(_pdir, ignore_errors=True)
 
+# --- the order in the car survives the ignition ------------------------------
+#
+# `scanner.holding` was process memory, on "a box velcroed into a car where the
+# ignition is the power switch" — rpi/calibrate.py's own words. Press Took,
+# drive to the restaurant, switch the engine off, walk in, come back: no order
+# in the car, the stack line quiet, Drop and the dropoff scan gone, every card
+# for the rest of that delivery judged standalone with nothing saying why. On
+# the owner's week 58% of accepted jobs have a `go`-rated offer arrive while
+# they are still running.
+#
+# The comment at /api/delivered argued the opposite and is answered rather than
+# ignored: it is right that forgetting is the safer error, and wrong that
+# keeping it forces the other one. holding() expires an order on its own stated
+# time plus HOLD_OVERRUN plus HOLD_GRACE_MS, and a restored order is read
+# through exactly that.
+_hdir = tempfile.mkdtemp()
+_hjournal = os.path.join(_hdir, 'offers.jsonl')
+_hold = os.path.join(_hdir, 'holding.json')
+# A scanner of its own, because the hold is set from the SLOT — marking a row
+# in the journal does not put an order in the car, and with no scanner there is
+# no slot. This is the write half; everything after it is the read half.
+_hfake = os.path.join(_hdir, 'fake.py')
+with open(_hfake, 'w') as _fh:
+    _fh.write(
+        'import json, sys, time\n'
+        'print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
+        '    "grossPerHour": 36.0, "pay": 21.0, "minutes": 30.0, "miles": 5.0,\n'
+        '    "cost": 1.75, "billedMinutes": 30.0, "target": 25, "band": 15,\n'
+        '    "costPerMile": 0.35, "at": int(time.time() * 1000),\n'
+        '    "offer": {"id": "h-1", "pay": 21.0, "minutes": 30.0,\n'
+        '              "billedMinutes": 30.0, "miles": 5.0, "cost": 1.75,\n'
+        '              "perHour": 30.0, "target": 25, "band": 15,\n'
+        '              "costPerMile": 0.35, "dropoff": "Oak Ln, Marietta"}}),\n'
+        '    flush=True)\n'
+        'time.sleep(600)\n')
+open(_hjournal, 'w').close()
+_hproc, _hbase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': _hfake}, _hjournal)
+try:
+    _on = None
+    for _ in range(120):
+        _s = get(_hbase, '/api/status')
+        if (_s.get('offer') or {}).get('id') == 'h-1':
+            _on = _s
+            break
+        time.sleep(0.05)
+    ok_('a card reaches the slot', _on is not None)
+    _hcode, _hsaid = post(_hbase, '/api/offers/mark',
+                          {'id': 'h-1', 'accepted': True})
+    eq('an offer on the slot can be marked taken', _hcode, 200)
+    ok_('...and the server says an order is being carried',
+        (get(_hbase, '/api/status') or {}).get('holding'))
+    ok_('...and it is written down, not only remembered',
+        os.path.exists(_hold))
+finally:
+    stop(_hproc)
+
+# The engine goes off and comes back on. Same journal, same file, new process.
+#
+# Started with its output kept, because the restored order is state the driver
+# pressed nothing for on THIS run and the boot line is the only place anything
+# says so — and because that line must not announce an order /api/status will
+# then deny.
+def _start_loud(env, journal):
+    port = free_port()
+    proc = subprocess.Popen(
+        ['node', os.path.join(ROOT, 'server.js')],
+        env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=journal,
+                 **env),
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    base = 'http://127.0.0.1:%d' % port
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(base + '/api/status', timeout=1).read()
+            return proc, base
+        except Exception:
+            time.sleep(0.1)
+    proc.kill()
+    raise RuntimeError('the server never came up')
+
+
+_hproc2, _hbase2 = _start_loud({'SCANNER': '0'}, _hjournal)
+try:
+    _back = (get(_hbase2, '/api/status') or {}).get('holding')
+    ok_('a restarted server still has the order in the car (%r)'
+        % ((_back or {}).get('pay'),), bool(_back))
+    if _back:
+        eq('...the same one', _back.get('pay'), 21.0)
+        eq('...with where it ends, which is what the stack line needs',
+           _back.get('dropoff'), 'Oak Ln, Marietta')
+    # ...and putting it down removes the file, so the NEXT restart does not
+    # bring back a job that has been delivered.
+    post(_hbase2, '/api/delivered', {})
+    no_('an order put down is gone from the panel',
+        (get(_hbase2, '/api/status') or {}).get('holding'))
+    no_('...and gone from the disk too', os.path.exists(_hold))
+finally:
+    _hproc2.terminate()
+    try:
+        _hproc2.wait(timeout=5)
+    except Exception:
+        _hproc2.kill()
+
+# ...and the boot line SAYS the order is there, because it is state nobody
+# pressed anything for on this run. Read after the drop above, which is when
+# the process has printed everything it is going to.
+_hout = ''
+try:
+    _hout = _hproc2.stdout.read() or ''
+except Exception:
+    _hout = ''
+ok_('the restart says out loud that it is carrying an order (%r)'
+    % (_hout[-90:].replace('\n', ' '),),
+    'carrying an order from before the restart' in _hout)
+
+# A HOLD STAMPED IN THE FUTURE IS REFUSED, both directions on the clock, for
+# the same reason journal.py's resume() does it: a Pi has no real-time clock,
+# boots in 1970 and jumps when the network arrives. `over` in holding() is
+# `now - acceptedAt - ...`, so a stamp ahead of the clock now reading it never
+# goes positive — the order would never expire and the panel would offer a pair
+# line against it for the rest of the shift.
+with open(_hold, 'w') as _fh:
+    json.dump({'id': 'h-1', 'pay': 21.0, 'minutes': 30,
+               'acceptedAt': NOW + 3600000}, _fh)
+_hproc3, _hbase3 = start({'SCANNER': '0'}, _hjournal)
+try:
+    no_('a held order stamped after the clock reading it is refused',
+        (get(_hbase3, '/api/status') or {}).get('holding'))
+finally:
+    stop(_hproc3)
+
+# ...and one that has outlived its own clock is put down at boot rather than
+# waiting to be noticed, which is holding()'s rule and not a second one.
+with open(_hold, 'w') as _fh:
+    json.dump({'id': 'h-1', 'pay': 21.0, 'minutes': 30,
+               'acceptedAt': NOW - 86400000}, _fh)
+_hproc4, _hbase4 = _start_loud({'SCANNER': '0'}, _hjournal)
+try:
+    no_('a held order past its own stated time is not brought back',
+        (get(_hbase4, '/api/status') or {}).get('holding'))
+finally:
+    _hproc4.terminate()
+    try:
+        _hproc4.wait(timeout=5)
+    except Exception:
+        _hproc4.kill()
+# ...and the boot line does not announce it either. loadHolding answers through
+# holding(), so the sentence and /api/status cannot disagree — without that,
+# the rig greets the driver with an order the very next request denies.
+_hout4 = ''
+try:
+    _hout4 = _hproc4.stdout.read() or ''
+except Exception:
+    _hout4 = ''
+no_('...and the boot line does not announce one either',
+    'carrying an order from before the restart' in _hout4)
+
+# ...and neither is one with no stamp on it at all, which is the shape that
+# would never go away: `over` in holding() is `now - acceptedAt - ...`, and with
+# acceptedAt missing that is NaN, `over > 0` is false, and the order is carried
+# for the rest of the shift with a pair line against it.
+with open(_hold, 'w') as _fh:
+    json.dump({'id': 'h-1', 'pay': 21.0, 'minutes': 30}, _fh)
+_hproc6, _hbase6 = start({'SCANNER': '0'}, _hjournal)
+try:
+    no_('a held order with no stamp is refused rather than carried for ever',
+        (get(_hbase6, '/api/status') or {}).get('holding'))
+finally:
+    stop(_hproc6)
+
+# ...nor one whose stamp is a STRING. `isFinite("30")` is true, so the type
+# test is the only thing between a hand-edited file and arithmetic on a value
+# that is not a time — and this file sits beside the journal where a person
+# looking for the journal will find it.
+with open(_hold, 'w') as _fh:
+    json.dump({'id': 'h-1', 'pay': 21.0, 'minutes': 30,
+               'acceptedAt': str(NOW - 60000)}, _fh)
+_hproc7, _hbase7 = start({'SCANNER': '0'}, _hjournal)
+try:
+    no_('a held order whose stamp is not a number is refused',
+        (get(_hbase7, '/api/status') or {}).get('holding'))
+finally:
+    stop(_hproc7)
+
+# A file that will not parse is not a held order, and must not stop the server
+# coming up — the panel is worth more than the hold.
+with open(_hold, 'w') as _fh:
+    _fh.write('{not json at all')
+_hport5 = free_port()
+_hproc5 = subprocess.Popen(
+    ['node', os.path.join(ROOT, 'server.js')],
+    env=dict(os.environ, PORT=str(_hport5), HTTPS_PORT='0', JOURNAL=_hjournal,
+             SCANNER='0'),
+    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+_hbase5 = 'http://127.0.0.1:%d' % _hport5
+for _ in range(120):
+    try:
+        urllib.request.urlopen(_hbase5 + '/api/status', timeout=1).read()
+        break
+    except Exception:
+        time.sleep(0.1)
+try:
+    # Still ALIVE a moment later, not merely answering once. loadHolding runs
+    # in the listen callback, so an exception there lands after the port is
+    # open: the first request can succeed and the process be gone by the
+    # second. Without the pause this check passed with the guard deleted.
+    time.sleep(0.5)
+    ok_('a hold file that will not parse still lets the server start',
+        (get(_hbase5, '/api/status') or {}).get('scanner') is not None)
+    eq('...and the process is still running, not dead behind an open port',
+       _hproc5.poll(), None)
+    no_('...and is not read as an order', (get(_hbase5, '/api/status') or {}).get('holding'))
+finally:
+    _hproc5.terminate()
+    try:
+        _hproc5.wait(timeout=5)
+    except Exception:
+        _hproc5.kill()
+# ...and does it QUIETLY. The process survives either way, because this server
+# logs an uncaught exception and carries on rather than dying — so without the
+# guard the only signs are a stack trace at boot and the rest of the startup
+# never running. A file the driver has never heard of must not greet them with
+# one.
+_herr5 = ''
+try:
+    _herr5 = _hproc5.stderr.read() or ''
+except Exception:
+    _herr5 = ''
+no_('...without a stack trace at boot (%r)' % (_herr5[:70].replace('\n', ' '),),
+    'uncaught' in _herr5)
+shutil.rmtree(_hdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

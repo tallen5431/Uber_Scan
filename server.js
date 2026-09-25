@@ -881,6 +881,82 @@ var HOLD_OVERRUN = 1.5;      // an order may take half again its stated time
 var HOLD_GRACE_MS = Number(process.env.HOLD_GRACE_MS);
 if (!isFinite(HOLD_GRACE_MS) || HOLD_GRACE_MS < 0) HOLD_GRACE_MS = 10 * 60000;
 
+/* The order in the car, kept where a power cut cannot take it.
+ *
+ * `scanner.holding` is process memory, and this is "a box velcroed into a car
+ * where the ignition is the power switch" — rpi/calibrate.py's own words. A
+ * driver who presses Took, drives to the restaurant, switches the engine off
+ * and walks in comes back to a rig with no order in the car: the stack line
+ * goes quiet, Drop and the dropoff scan disappear, and every card for the rest
+ * of that delivery is judged standalone, with nothing on the glass saying why.
+ * On the owner's week 58% of accepted jobs have a `go`-rated offer arrive while
+ * they are still running, so that is a real decision made without the figure it
+ * was built for.
+ *
+ * THE COMMENT AT /api/delivered ARGUED THE OPPOSITE and it is answered rather
+ * than ignored. It says the hold "is memory only, and a restarted server simply
+ * has no order in hand, which is the safe way to be wrong". Both halves are
+ * right about the ERRORS — forgetting an order that is there costs advice,
+ * remembering one that is not puts a pair rate on the glass for a job already
+ * delivered, and the second is worse. What does not follow is that keeping it
+ * causes the second: `holding()` expires an order on its own stated time plus
+ * HOLD_OVERRUN plus HOLD_GRACE_MS, and a restored one is read through exactly
+ * that. A hold that has outlived its own clock is refused whether it came from
+ * memory or from disk.
+ *
+ * Its own file, not the journal. The journal is the one artefact that cannot be
+ * regenerated and its ingest is idempotent over the whole file; this is a
+ * scrap of state about right now. Same reasoning, and the same shape, as
+ * places.json beside it.
+ *
+ * Written synchronously, and that is deliberate on a box whose power can go at
+ * any moment: the whole point is to survive the instant between the press and
+ * the engine stopping, and a queued write does not. It is one small object,
+ * once per accept.
+ */
+function holdPath() {
+  return path.join(path.dirname(JOURNAL_PATH), 'holding.json');
+}
+
+function setHolding(h) {
+  scanner.holding = h || null;
+  try {
+    if (h) fs.writeFileSync(holdPath(), JSON.stringify(h));
+    else fs.unlinkSync(holdPath());
+  } catch (e) {
+    // A hold that could not be written is a hold that will not survive a
+    // reboot, which is where this started — said once rather than swallowed,
+    // and never fatal: the panel works from memory either way and the driver
+    // is mid-shift.
+    if (e && e.code !== 'ENOENT') console.error('holding: ' + e.message);
+  }
+}
+
+/* ...and read back once, at startup, which is the only moment it means
+ * anything.
+ *
+ * BOTH DIRECTIONS on the clock, for the same reason journal.py's resume() does
+ * it: a Pi has no real-time clock, it boots in 1970 and jumps when the network
+ * arrives. A hold stamped after the clock now reading it makes `over` in
+ * holding() permanently negative, so the order would never expire and the
+ * panel would offer a pair line against it for the rest of the shift. Refusing
+ * is always available and costs one delivery's advice.
+ */
+function loadHolding() {
+  var raw;
+  try { raw = fs.readFileSync(holdPath(), 'utf8'); } catch (e) { return null; }
+  var h;
+  try { h = JSON.parse(raw); } catch (e) { h = null; }
+  if (!h || typeof h !== 'object' || typeof h.acceptedAt !== 'number'
+      || !isFinite(h.acceptedAt)) return null;
+  if (h.acceptedAt > Date.now()) return null;
+  scanner.holding = h;
+  // Through holding(), so an order that has outlived its own clock is put down
+  // here rather than waiting to be noticed — and so the answer to "is there an
+  // order in the car" is the same function at boot as it is everywhere else.
+  return holding(Date.now());
+}
+
 function holding(now) {
   var h = scanner.holding;
   if (!h) return null;
@@ -889,7 +965,7 @@ function holding(now) {
   if (stated === null) return null;
   var over = (now - h.acceptedAt) - (stated * HOLD_OVERRUN * 60000) - HOLD_GRACE_MS;
   if (over > 0) {
-    scanner.holding = null;
+    setHolding(null);
     return null;
   }
   return h;
@@ -2593,7 +2669,7 @@ function route(req, res) {
           // and stacking onto a job they refused is the same wrong number as
           // stacking onto one they already delivered.
           if (note.accepted) {
-            scanner.holding = {
+            setHolding({
               id: scanner.offer.id,
               pay: scanner.offer.pay,
               minutes: typeof scanner.offer.billedMinutes === 'number'
@@ -2651,13 +2727,13 @@ function route(req, res) {
               // expires it on the card's own clock, which for a prompt
               // press is the same moment.
               acceptedAt: scanner.offerAt || Date.now()
-            };
+            });
           } else {
             // Through holding() as well: taking the mark back off an order the
             // rest of the rig has already forgotten should not depend on which
             // of the two ways of asking this line happens to use.
             var carried = holding(Date.now());
-            if (carried && carried.id === note.id) scanner.holding = null;
+            if (carried && carried.id === note.id) setHolding(null);
           }
         }
         // ...and whether there is now an order in the car, because marking is
@@ -2698,7 +2774,7 @@ function route(req, res) {
     // the same thing here as it does on the panel, or the driver is told they
     // put down a job the rig stopped counting an hour ago.
     var wasHolding = !!holding(Date.now());
-    scanner.holding = null;
+    setHolding(null);
     return send(res, 200, JSON.stringify({ ok: true, wasHolding: wasHolding }),
                 { 'Content-Type': 'application/json; charset=utf-8' });
   }
@@ -3813,6 +3889,20 @@ listen(http.createServer(handler), PORT, 'http', true, function () {
   lanAddresses().forEach(function (ip) {
     console.log('  http://' + ip + ':' + PORT + '/   (keypad only — see below)');
   });
+  // The order in the car, if the last run of this server left one behind.
+  //
+  // Said out loud, because it is state the driver did not press anything for
+  // on THIS run and the panel will start offering pair lines against it. The
+  // silent version of this would be a rig that quietly believes something
+  // about the car that nobody told it.
+  var back = loadHolding();
+  if (back) {
+    console.log('\ncarrying an order from before the restart: $'
+                + (typeof back.pay === 'number' ? back.pay.toFixed(2) : '?')
+                + ', ' + back.minutes + ' min'
+                + (back.dropoff ? ' to ' + back.dropoff : '')
+                + '\n  press Drop on the panel if it has already been delivered');
+  }
 });
 
 if (tls) {
