@@ -6768,9 +6768,31 @@ start the camera scanner, fails on the missing picamera2, and restart-loops
 every few seconds forever — harmless to the ingest endpoint but a spinning child
 process and a log full of nothing.
 
-That is the whole install. `SCANNER=0` is already a supported mode — it exists
-so the site keeps working when the camera does not — and it gives the offers
-page, the JSON API and the CSV export with no camera, no picamera2 and no OCR.
+`SCANNER=0` is already a supported mode — it exists so the site keeps working
+when the camera does not — and it gives the offers page, the JSON API and the
+CSV export with no camera, no picamera2 and no OCR.
+
+**Install it as a service, though, and not as a command in a terminal.** That
+line above was for a long time described here as "the whole install", and it
+ends the moment the machine reboots, the terminal closes or an unattended
+upgrade restarts something. Nothing tells the driver: `far_end()` returns None
+on a refused connection and `sync.py` exits 0, deliberately, because a car is
+offline most of the time and a timer that complains every ten minutes about a
+normal condition is a timer nobody reads. So a backup that has simply stopped
+looks exactly like a car that is out of range, and the only copy of the one
+artefact that cannot be regenerated is back to being one SD card in a vehicle.
+
+```sh
+# on the machine keeping the copy
+sudo COPY=/var/lib/uberscan/journal.jsonl bash rpi/install-service.sh
+```
+
+The same script as the rig's, which is the point: the two ends run the same
+server and the unit differs in three lines — `SCANNER=0`, `JOURNAL`, and the
+audio and video groups the copy machine has no use for. Two unit files would
+drift. It also makes the directory and gives it to you, which is the step the
+box above tells you to do by hand, because the installer is already root and
+that is the one moment in the install where it is free.
 
 ```sh
 # on the rig

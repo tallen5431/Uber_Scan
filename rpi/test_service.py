@@ -23,6 +23,7 @@ So the script is run against a temporary root and what it wrote is read back.
 Nothing here touches the real /etc, and nothing needs systemd to be installed.
 """
 
+import getpass
 import os
 import re
 import shutil
@@ -335,6 +336,100 @@ if sync_unit:
             'SYNC_TOKEN=pc%%25' in open(pct_path).read())
 
 shutil.rmtree(sync_work, ignore_errors=True)
+
+# --- and the same installer on the machine that keeps the copy --------------
+#
+# That machine holds the only off-car copy of the one artefact this project
+# calls irreplaceable, and it was documented as a command typed into a
+# terminal — "that is the whole install" — so the backup ended whenever the
+# machine rebooted. Nothing says so: far_end() returns None on a refused
+# connection and sync.py exits 0, deliberately, because a car is offline most
+# of the time. A backup that has stopped looks exactly like being out of range.
+#
+# One script and one unit template for both ends, because two would drift.
+# Three lines differ, and each is checked here in BOTH directions — the copy
+# needs SCANNER=0 or it restart-loops on the missing picamera2, and the rig
+# must not get it or the rig stops scanning.
+copy_work = tempfile.mkdtemp()
+try:
+    copy_units = os.path.join(copy_work, 'units')
+    copy_stub = os.path.join(copy_work, 'bin')
+    os.makedirs(copy_units)
+    os.makedirs(copy_stub)
+    # The same shadowing the rig's run above uses: pretend to be root, record
+    # what would have been done to the system and do none of it. The heredoc
+    # that composes the unit is the shipped code either way.
+    for _name, _body in (
+        ('id', '#!/bin/sh\necho 0\n'),
+        ('systemctl', '#!/bin/sh\nexit 0\n'),
+        ('logname', '#!/bin/sh\necho %s\n' % getpass.getuser()),
+    ):
+        _p = os.path.join(copy_stub, _name)
+        with open(_p, 'w') as fh:
+            fh.write(_body)
+        os.chmod(_p, 0o755)
+    copy_project = os.path.join(copy_work, 'project')
+    os.makedirs(os.path.join(copy_project, 'rpi'))
+    copy_script = os.path.join(copy_project, 'rpi', 'install-service.sh')
+    with open(copy_script, 'w') as fh:
+        fh.write(open(SCRIPT).read().replace(
+            '/etc/systemd/system/uberscan.service',
+            os.path.join(copy_units, 'uberscan.service')))
+    copy_journal = os.path.join(copy_work, 'var', 'uberscan', 'journal.jsonl')
+    cp = subprocess.run(
+        ['bash', copy_script],
+        env=dict(os.environ,
+                 PATH=copy_stub + os.pathsep + os.environ.get('PATH', ''),
+                 SUDO_USER=getpass.getuser(), COPY=copy_journal),
+        capture_output=True, text=True, timeout=60)
+    eq('the installer runs cleanly on the copy machine', cp.returncode, 0)
+    if cp.returncode != 0:
+        print(cp.stdout[-600:])
+        print(cp.stderr[-600:])
+    copy_unit_path = os.path.join(copy_units, 'uberscan.service')
+    ok_('...and leaves a unit behind', os.path.exists(copy_unit_path))
+    copy_unit = open(copy_unit_path).read() if os.path.exists(copy_unit_path) else ''
+
+    # Without this the server starts the scanner, fails on the missing
+    # picamera2, and the unit restarts it every few seconds for ever. It is
+    # the single reason the rig's own installer could not just be reused.
+    ok_('the copy is told there is no camera here',
+        re.search(r'^Environment=SCANNER=0$', copy_unit, re.M) is not None)
+    ok_('...and the rig is NOT, or it stops scanning',
+        re.search(r'^Environment=SCANNER=0$', unit, re.M) is None)
+    # Left at the default the copy lands in rpi/journal.jsonl inside the
+    # clone, which works and stands the only backup next to a `git clean`.
+    ok_('...and where to keep the copy, outside the checkout',
+        re.search(r'^Environment=JOURNAL=' + re.escape(copy_journal) + r'$',
+                  copy_unit, re.M) is not None)
+    ok_('...which the rig does not set, keeping its own default',
+        re.search(r'^Environment=JOURNAL=', unit, re.M) is None)
+    # Speech needs the driver's audio devices. The copy machine says nothing
+    # and has no camera, so the grants are dropped rather than handed to
+    # something that cannot use them.
+    ok_('the copy machine is granted no audio or video devices',
+        'SupplementaryGroups' not in copy_unit)
+    ok_('...while the rig still is, because speech needs them',
+        'SupplementaryGroups=audio video' in unit)
+    # The same server, which is the whole reason there is one script.
+    ok_('both ends run the same server',
+        '/server.js' in copy_unit and '/server.js' in unit)
+    # The server can only make the directory where it is allowed to, and this
+    # script is already root — the one moment in the install where it is free.
+    ok_('the directory for the copy is made and handed over',
+        os.path.isdir(os.path.dirname(copy_journal)))
+    # A relative path would put it wherever systemd happened to start, which
+    # is not a place anybody chose.
+    rel = subprocess.run(
+        ['bash', copy_script],
+        env=dict(os.environ,
+                 PATH=copy_stub + os.pathsep + os.environ.get('PATH', ''),
+                 SUDO_USER=getpass.getuser(), COPY='journal.jsonl'),
+        capture_output=True, text=True, timeout=60)
+    ok_('a relative path for the copy is refused rather than guessed at',
+        rel.returncode != 0 and 'absolute path' in (rel.stderr or ''))
+finally:
+    shutil.rmtree(copy_work, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d service checks passed' % ok)

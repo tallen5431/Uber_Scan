@@ -82,8 +82,16 @@ so it does not try to open a camera it has not got. It listens on 8080 unless
 PORT says otherwise — 8081 is this Pi's aiming preview, which is a different
 thing and cannot receive a journal.
 
-  on the copy machine:  SCANNER=0 npm start
+  on the copy machine:  sudo COPY=/var/lib/uberscan/journal.jsonl \\
+                             bash rpi/install-service.sh
   then from here:       curl $SYNC_TO/api/journal/newest
+
+That installs it as a service, so the backup survives the machine rebooting.
+It used to say \`SCANNER=0 npm start\` here, which is a terminal somebody has to
+keep open — and it left out JOURNAL, so the only copy landed inside the clone,
+next to a \`git clean\`. To try it by hand first, both are needed:
+
+  SCANNER=0 JOURNAL=/var/lib/uberscan/journal.jsonl npm start
 EOF
     exit 1
 fi

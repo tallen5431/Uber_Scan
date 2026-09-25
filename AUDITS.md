@@ -1628,6 +1628,34 @@ unwritable was not checked at all; and the verdict on the off-car backup was
 inverted with respect to the danger, so the check passed in exactly the case it
 exists for. `a5cbe64`, plus the `CLOCK_BELIEVABLE_UNTIL` clamp in `server.js`.
 
+**The machine holding the only off-car copy was installed by typing a command
+into a terminal.** The rig gets a systemd unit and the sync gets a timer; the
+receiving end — which holds the one artefact this project calls irreplaceable —
+was documented as `SCANNER=0 JOURNAL=… npm start` and the words "that is the
+whole install". So the backup ended the moment that machine rebooted, the
+terminal closed, or an unattended upgrade restarted something.
+
+*And nothing would have said so.* `far_end()` returns None on a refused
+connection and `rpi/sync.py` exits 0, both deliberately, because a car is offline
+most of the time and a timer that complains every ten minutes about a normal
+condition is a timer nobody reads. Correct for being out of range — and it
+means a backup that has simply stopped looks identical from the car, while the
+only copy is one SD card in a vehicle.
+
+`rpi/install-service.sh` now takes `COPY=<path>` and writes the same unit with
+three lines changed: `SCANNER=0`, `JOURNAL`, and no audio or video groups. One
+script and one template rather than two units that drift — the two ends run the
+same server, which is the whole reason this works at all. Each of the three is
+checked in BOTH directions, because `SCANNER=0` on the rig stops it scanning
+just as surely as its absence on the copy machine starts a restart loop against
+the missing picamera2. It also makes the journal's directory and hands it over,
+which the README told the operator to do by hand: the installer is already
+root, and that is the one moment in the install where it is free.
+
+`tools/install-sync.sh`'s own failure text pointed at `SCANNER=0 npm start` and
+omitted `JOURNAL` — so an operator following the gate's advice landed the only
+backup inside the clone, next to a `git clean`. It names the installer now.
+
 ### The panel
 
 **A health window whose only news was "a card reached the journal" was thrown
