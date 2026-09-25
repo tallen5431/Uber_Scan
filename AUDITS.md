@@ -963,6 +963,45 @@ restore answers through `holding()` so the boot line cannot announce an order
 server up and quiet rather than printing a stack trace at a driver who has
 never heard of it. Seven mutations, all killed.
 
+**Two rules for what a town is, and the map's ranking used the worse one.**
+`map-view.js`'s `townOf` carried its own judgement — a comma, a shape, a
+lowercase letter — while `advice.js`'s `PLACE_TOWN` carried another. `townOf`'s
+own comment said it had been lifted out of `localityOf` "rather than written a
+second time, because the area ranking needs exactly this judgement and two
+copies of 'what counts as a town' would answer differently the first time
+either was touched". A second copy already existed and already did.
+
+*Measured on the owner's 1,325 distinct place strings, on the driver's own
+clock: they disagree on 81 (6.1%), and every disagreement goes map-view's way
+and map-view is wrong on all of them.* 69 towns it cannot see through OCR
+damage or a ZIP tail (`…, } Acworth`, `322 Thompson Dr, Dallas, GA 30132-3289`),
+7 junk strings it accepts (`li woods`, `a tt acworth`), and 5 where it keeps
+the damage **inside** the name — so `F Marietta` and `Marietta` ranked as two
+towns.
+
+**It changed the advice, which is why this was worth doing.** Ranked through
+`Advice.area` instead, 48 more offers are placed, every town gains rows
+(Atlanta 98→113, Marietta 84→101, Kennesaw 70→77), the ranking gets *stronger*
+— p = 0.008 becomes p = 0.002 — and the order moves: **Acworth falls from 2nd
+to 4th and Kennesaw rises from 5th to 2nd**. A driver acting on the shipped
+list was being pointed at the wrong town.
+
+The rule is now handed IN rather than copied: `townOf`, `townFor`,
+`townEndFor` and `localityOf` take it as an argument and `map.html` — the only
+page that calls any of them, and one that loads both files — passes
+`Advice.area`. Not a global lookup and not a quiet fallback: without a rule
+they answer null, because a fallback is how the duplication grows back.
+`live.html` loads `map-view.js` and deliberately not `advice.js`, and calls
+none of these four.
+
+One piece of the old judgement stays map-view's and is stated where it lives:
+an all-capitals tail is an abbreviation or a fragment of a road name, not a
+place anybody lives. `Advice.area` reads `LAS` as a town quite happily, so
+`ies, LAS` has to be refused here. The test moved onto the SOURCE string,
+because the rule hands back a lowercased town and every answer would pass it
+otherwise — and the answer is title-cased on the way out, since that is what
+the ranking prints while the rule lowercases in order to compare.
+
 ### The maps, again
 
 **The map could not say where the money was, and the obvious way to make it

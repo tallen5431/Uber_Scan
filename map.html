@@ -565,7 +565,11 @@
         // to search in, which is a fact about the driver rather than about the
         // hour, and a block with two offers in it would box the geocoder on
         // two cards.
-        var town = MV.localityOf(offers);
+        // Advice.area is the rule, passed in rather than copied: map-view
+        // used to carry its own idea of what a town is and the two answered
+        // differently on 81 of this driver's 1,325 place strings. See
+        // MV.townOf, and AUDITS.
+        var town = MV.localityOf(offers, Advice.area);
         var filled = '';
         if (town && !el.hint.value.trim()) {
           el.hint.value = town;
@@ -764,9 +768,9 @@
                    // quoting a rate for one restaurant would be exactly the
                    // number the ranking refuses to print.
                    + (function () {
-                       var t = standing[MV.townOf(place.name)];
+                       var t = standing[MV.townOf(place.name, Advice.area)];
                        return t
-                         ? '<br><span class="note">' + esc(MV.townOf(place.name))
+                         ? '<br><span class="note">' + esc(MV.townOf(place.name, Advice.area))
                            + ' is ' + t.at + ' of ' + t.of + ' towns here, '
                            + 'median $' + t.median.toFixed(2) + '/hr — that is '
                            + 'the town, not this place</span>'
@@ -1122,7 +1126,8 @@
     // lead is $2.45, the gap from best to worst drops from $6.47 to $3.69, and
     // three towns change places. See Advice.areas.
     return Advice.areas(shown(), {
-      key: MV.townFor,
+      // The town rule lives in advice.js and is handed over, not copied.
+      key: function (o) { return MV.townFor(o, Advice.area); },
       strata: function (o) { return Advice.blockOf(o.at); }
     });
   }
@@ -1253,7 +1258,7 @@
         // warn about and the row is already carrying four figures.
         + (function () {
             var ends = (g.offers || []).filter(function (o) {
-              return MV.townEndFor(o) === 'dropoff';
+              return MV.townEndFor(o, Advice.area) === 'dropoff';
             }).length;
             return ends > g.n / 2
               ? ' · ' + ends + ' by where they ended' : '';
@@ -1491,7 +1496,7 @@
       var want = town.getAttribute('data-town');
       var seen = [];
       Object.keys(marks).forEach(function (name) {
-        if (MV.townOf(name) === want) seen.push(marks[name].getLatLng());
+        if (MV.townOf(name, Advice.area) === want) seen.push(marks[name].getLatLng());
       });
       // Nothing placed yet is the ordinary case, not an error: this ranking is
       // drawn before anything is looked up, and saying so beats a dead tap.

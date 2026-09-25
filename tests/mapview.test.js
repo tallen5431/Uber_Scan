@@ -27,6 +27,9 @@
  */
 
 var MV = require('../map-view.js');
+// The town rule, which map-view no longer carries a copy of. It is handed in
+// at every call, the way map.html hands it in — see MV.townOf.
+var ADV = require('../advice.js');
 
 var pass = 0, fail = 0;
 
@@ -215,7 +218,7 @@ var TOWNS = [
   { pickup: 'Wendys', dropoff: 'Barrett Pkwy, Kennesaw' }
 ];
 eq('the town the cards keep naming is what a bare name is searched near',
-   MV.localityOf(TOWNS), 'Marietta');
+   MV.localityOf(TOWNS, ADV.area), 'Marietta');
 // Counted over DISTINCT place strings, not over offers: one restaurant the
 // driver is sent to forty times must not decide where the window is searched.
 var REPEATED = [
@@ -224,31 +227,31 @@ var REPEATED = [
   { pickup: 'A St, Marietta' }, { pickup: 'B St, Marietta' }
 ];
 eq('...counted once per distinct place, not once per offer',
-   MV.localityOf(REPEATED), 'Marietta');
+   MV.localityOf(REPEATED, ADV.area), 'Marietta');
 // OCR wreckage is not a town. "ies, LAS" is one of the strings that really did
 // produce a stray pin, and a hint taken off it would send the whole window to
 // Nevada.
 eq('a shouted OCR fragment is not taken for a town',
-   MV.localityOf([{ pickup: 'ies, LAS' }, { dropoff: 'x, LAS' }]), null);
-eq('...nor is a number', MV.localityOf([{ pickup: 'Store, 414' }]), null);
+   MV.localityOf([{ pickup: 'ies, LAS' }, { dropoff: 'x, LAS' }], ADV.area), null);
+eq('...nor is a number', MV.localityOf([{ pickup: 'Store, 414' }], ADV.area), null);
 // A suite number reads as a town to anything that only asks "does it have a
 // lowercase letter in it". The driver's own cards carry plenty — "ALDI (860
 // Cobb Pl Blvd NW Ste 400)" — and a window searched near "Ste 400" is a window
 // searched nowhere.
 eq('a suite number is not a town',
-   MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'x, Ste 400' }]), null);
+   MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'x, Ste 400' }], ADV.area), null);
 eq('...nor is a tail that starts small',
-   MV.localityOf([{ pickup: 'x, total House' }, { dropoff: 'y, total House' }]), null);
+   MV.localityOf([{ pickup: 'x, total House' }, { dropoff: 'y, total House' }], ADV.area), null);
 // ...and a real town still wins against a cardful of those, rather than the
 // guard quietly rejecting everything.
 eq('...while a real town among them still wins',
-   MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'y, Smyrna' }]), 'Smyrna');
+   MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'y, Smyrna' }], ADV.area), 'Smyrna');
 // Nothing to go on is answered as nothing, so the page leaves the box empty
 // and says so rather than inventing a metro.
 eq('places with no town in them give no hint',
-   MV.localityOf([{ pickup: 'McDonalds' }, { dropoff: 'Wendys' }]), null);
-eq('...and no offers at all give none', MV.localityOf([]), null);
-eq('...and neither does nothing', MV.localityOf(null), null);
+   MV.localityOf([{ pickup: 'McDonalds' }, { dropoff: 'Wendys' }], ADV.area), null);
+eq('...and no offers at all give none', MV.localityOf([], ADV.area), null);
+eq('...and neither does nothing', MV.localityOf(null, ADV.area), null);
 
 /* ---- a pin that cannot be in this shift --------------------------------- */
 var FOUND = {
@@ -1074,9 +1077,9 @@ function gaps(sent) {
    * on the PICKUP, so the page can prove the silence and not the sentence. */
   var byEnd = { pickup: 'Zaxbys', dropoff: 'Peachtree St NE, Atlanta' };
   eq('a job whose dropoff names a town is ranked under that town',
-     MV.townFor(byEnd), 'Atlanta');
+     MV.townFor(byEnd, ADV.area), 'Atlanta');
   eq('...and says the dropoff is where it came from',
-     MV.townEndFor(byEnd), 'dropoff');
+     MV.townEndFor(byEnd, ADV.area), 'dropoff');
   // THE DROPOFF WINS when both ends name one, which is the whole reason the
   // panel's note had to change: it is what makes 86% of the placed rows a
   // statement about where jobs END. Without this the order can be swapped and
@@ -1084,26 +1087,59 @@ function gaps(sent) {
   // at both ends — measured, by swapping it.
   var both = { pickup: 'Barrett Pkwy, Kennesaw', dropoff: 'Oak Ln, Acworth' };
   eq('with a town at both ends the dropoff is the one ranked',
-     MV.townFor(both), 'Acworth');
-  eq('...and is named as the end it came from', MV.townEndFor(both), 'dropoff');
+     MV.townFor(both, ADV.area), 'Acworth');
+  eq('...and is named as the end it came from', MV.townEndFor(both, ADV.area), 'dropoff');
+
+  // ONE RULE, HANDED IN. map-view used to carry its own idea of what a town
+  // is — a comma, a shape, a lowercase letter — while advice.js carried
+  // another, and townOf's own comment said it had been lifted out "rather
+  // than written a second time, because two copies of 'what counts as a town'
+  // would answer differently the first time either was touched". They already
+  // did: on the owner's 1,325 distinct place strings they disagreed on 81.
+  //
+  // Every disagreement went map-view's way and map-view was wrong on all of
+  // them — 69 towns it could not see through OCR damage or a ZIP tail, 7 junk
+  // strings it accepted, and 5 where it kept the damage IN the name. Those
+  // five mattered most: "F Marietta" and "Marietta" ranked as two towns.
+  eq('a town damaged by OCR is still read',
+     MV.townOf('Bob Cox Rd NW & Granville Dr NW, I Marietta', ADV.area),
+     'Marietta');
+  eq('...and one behind a ZIP tail, which is what a scanned address ends in',
+     MV.townOf('322 Thompson Dr, Dallas, GA 30132-3289', ADV.area), 'Dallas');
+  eq('...and a two-word one keeps both words',
+     MV.townOf('Waterway Cir, - R Lithia Springs', ADV.area), 'Lithia Springs');
+  // The one piece of the old judgement that is still map-view's, and the case
+  // it was written for: an all-capitals tail is an abbreviation or a fragment
+  // of a road name, not a place anybody lives. The rule reads "LAS" as a town
+  // quite happily, so this cannot be delegated with the rest.
+  eq('an all-capitals tail is not a town', MV.townOf('ies, LAS', ADV.area), null);
+  // Title case, because this is what the ranking prints and the rule
+  // lowercases in order to compare.
+  eq('a town comes back as it is printed, not as it is compared',
+     MV.townOf('Oak Ln, Powder Springs', ADV.area), 'Powder Springs');
+  // WITHOUT the rule there is no answer, rather than a second opinion. That is
+  // the whole point: map-view is not allowed to decide this on its own any
+  // more, and a quiet fallback would be the duplication growing back.
+  eq('with no rule handed in there is no town', MV.townOf('Peachtree, Atlanta'), null);
+  eq('...and no end either', MV.townEndFor({ dropoff: 'Peachtree, Atlanta' }), null);
 
   var byPickup = { pickup: 'Canton Rd, Marietta', dropoff: 'Zaxbys' };
   eq('a job whose dropoff names nowhere falls back to the pickup',
-     MV.townFor(byPickup), 'Marietta');
-  eq('...and says so', MV.townEndFor(byPickup), 'pickup');
+     MV.townFor(byPickup, ADV.area), 'Marietta');
+  eq('...and says so', MV.townEndFor(byPickup, ADV.area), 'pickup');
   var neither = { pickup: 'Zaxbys', dropoff: 'Wendys' };
-  eq('a job naming no town is under none', MV.townFor(neither), null);
-  eq('...and names no end either', MV.townEndFor(neither), null);
-  eq('nothing at all is nothing', MV.townEndFor(null), null);
+  eq('a job naming no town is under none', MV.townFor(neither, ADV.area), null);
+  eq('...and names no end either', MV.townEndFor(neither, ADV.area), null);
+  eq('nothing at all is nothing', MV.townEndFor(null, ADV.area), null);
   // The derivation, not a restatement of it: whatever end is named, the town
   // is the town OF that end. A precedence that drifted would break this
   // without breaking any single case above.
   [byEnd, byPickup, neither, { pickup: 'Barrett Pkwy, Kennesaw',
                                dropoff: 'Oak Ln, Acworth' }]
     .forEach(function (o, i) {
-      var end = MV.townEndFor(o);
+      var end = MV.townEndFor(o, ADV.area);
       eq('the town is read off the end that named it (' + i + ')',
-         MV.townFor(o), end ? MV.townOf(o[end]) : null);
+         MV.townFor(o, ADV.area), end ? MV.townOf(o[end], ADV.area) : null);
     });
 
   process.exit(fail ? 1 : 0);

@@ -168,15 +168,27 @@
    * It is the card's own words and nothing else. No lookup, no coordinate, no
    * answer a geocoder gave — see the head of this file for why that line is
    * where it is. */
-  function townOf(name) {
+  function townOf(name, rule) {
     var v = (name == null ? '' : String(name)).trim();
-    if (!v) return null;
-    var parts = v.split(',');
-    if (parts.length < 2) return null;
-    var tail = parts[parts.length - 1].trim();
-    if (!/^[A-Z][A-Za-z .'-]{2,24}$/.test(tail)) return null;
-    if (!/[a-z]/.test(tail)) return null;
-    return tail;
+    if (!v || typeof rule !== 'function') return null;
+    var got = rule(v);
+    var town = got && got.town;
+    if (!town) return null;
+    // The lowercase test, kept — and moved onto the SOURCE, because the rule
+    // hands back a lowercased town and every answer would pass it otherwise.
+    // It is what keeps "ies, LAS" out: an all-capitals tail is an abbreviation
+    // or a fragment of a road name, not a place anybody lives. `rule` does not
+    // make that distinction — it reads `LAS` as a town quite happily — so this
+    // is the one piece of the old judgement that is still map-view's.
+    var at = v.toLowerCase().lastIndexOf(town);
+    if (at < 0) return null;
+    var asWritten = v.slice(at, at + town.length);
+    if (!/[a-z]/.test(asWritten)) return null;
+    // Title case, because this is what the ranking prints and the rule
+    // lowercases to compare. "Powder Springs", not "powder springs".
+    return town.replace(/(^|[\s'-])([a-z])/g, function (_, before, c) {
+      return before + c.toUpperCase();
+    });
   }
 
   /* Whichever end of this job named a town. The dropoff first: it is a street
@@ -184,10 +196,10 @@
    * with no town in it at all. Measured on the owner's week, the dropoff
    * yields a town on 35% of counted offers and the pickup on 12%; taking
    * either reaches 41%, and the ranking is real on all three separately. */
-  function townEndFor(offer) {
+  function townEndFor(offer, rule) {
     if (!offer) return null;
-    if (townOf(offer.dropoff)) return 'dropoff';
-    if (townOf(offer.pickup)) return 'pickup';
+    if (townOf(offer.dropoff, rule)) return 'dropoff';
+    if (townOf(offer.pickup, rule)) return 'pickup';
     return null;
   }
 
@@ -200,19 +212,19 @@
    * not a footnote on this page: 86% of the placed rows come off the dropoff,
    * so a panel headed "where the money is" is mostly describing where jobs
    * END. */
-  function townFor(offer) {
-    var end = townEndFor(offer);
-    return end ? townOf(offer[end]) : null;
+  function townFor(offer, rule) {
+    var end = townEndFor(offer, rule);
+    return end ? townOf(offer[end], rule) : null;
   }
 
-  function localityOf(offers) {
+  function localityOf(offers, rule) {
     var seen = {}, tally = {};
     (offers || []).forEach(function (o) {
       ['pickup', 'dropoff'].forEach(function (k) {
         var v = (o && o[k] ? String(o[k]) : '').trim();
         if (!v || seen[v]) return;
         seen[v] = true;
-        var tail = townOf(v);
+        var tail = townOf(v, rule);
         if (!tail) return;
         tally[tail] = (tally[tail] || 0) + 1;
       });
