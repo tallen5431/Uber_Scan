@@ -1912,6 +1912,32 @@ running, and 7 of 30 consecutive ticked pairs actually overlap. The check waits
 a full tick after the press, because the press itself clears the line — the
 fault is what the repaint puts back — and it is measured on both panels.
 
+**The one page that must survive a dead network never asked for the offline
+shell.** `sw.js` lists `live.html` in ASSETS and this project states the
+panel's offline requirement as a hard constraint — it is the screen bolted to
+the car, and it is the stated reason the panel does not load `advice.js` for a
+single integer. It never registered the service worker. The only three
+registrations were `scan.js`, `ui.js` and `journal.html`, so the panel was
+covered only when the same browser profile had already opened the keypad, the
+phone scanner or the offers page, and then only because `sw.js` claims clients
+at scope `/`. On the Pi that is usually true — `index.html` is where the driver
+lands and `ui.js` registers there — so the exposed profile is a browser pointed
+straight at the panel's own URL and nothing else, which is the dashboard
+and the 480x320 hat.
+
+*The obvious fix is dead code on this page, and the check is what proved it.*
+Copied from the keypad, `window.addEventListener('load', ...)` registers
+nothing at all: the panel holds an open MJPEG stream, so the load event never
+fires. Written that way first, the new check timed out waiting for `load` and
+counted zero registrations — so the version that looks right in a diff and does
+nothing was caught before it shipped. It registers at the end of boot instead.
+
+The existing checks made the gap look covered without testing it:
+`rpi/test_scanjs.py` asserts every `.html` in the directory is in ASSETS, which
+is a check about the LIST, and separately that `scan.html` registers. Nothing
+asked this page. It does now, in a browser context that opens nothing else,
+because sharing a context would test the mask rather than the gap.
+
 ### The offers page
 
 **A pairing's withheld claim was printed as its opposite.** "Beats finishing

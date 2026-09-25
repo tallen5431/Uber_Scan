@@ -813,6 +813,40 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   // /scan.html had nothing cached and got a browser error in a garage.
   out.swAuto = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
 
+  // ...and the same asked of the PANEL, in the one browser profile that has
+  // nobody else to register for it.
+  //
+  // sw.js lists live.html in ASSETS and that file's comments treat the panel as
+  // part of the offline shell — it is the screen bolted to the car, it must
+  // come up with no network, and that is the stated reason it does not load
+  // advice.js for one integer. It never registered the worker. The only three
+  // registrations in the repo were scan.js, ui.js and journal.html, so the
+  // panel was covered only when that same profile had already opened one of
+  // them, and then only because sw.js claims clients at scope '/'.
+  //
+  // A CONTEXT OF ITS OWN, opening nothing else. On the Pi the gap is usually
+  // masked, because index.html is where the driver lands and ui.js registers
+  // there; the profile that matters is a browser pointed straight at
+  // /live.html and at nothing before it, which is the dashboard panel and the
+  // 480x320 hat. Sharing this page's context would have tested the mask.
+  out.panelSw = await (async () => {
+    const ctx3 = await browser.newContext({ viewport: { width: 800, height: 480 } });
+    const p3 = await ctx3.newPage();
+    // `domcontentloaded`, not `load`: this page holds an open MJPEG stream, so
+    // the load event never fires on it. That is not incidental to the check —
+    // it is the reason the registration cannot be hung off `load` the way the
+    // keypad and the phone scanner hang theirs.
+    await p3.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+            .catch(() => {});
+    await p3.waitForFunction(
+      async () => (await navigator.serviceWorker.getRegistrations()).length > 0,
+      null, { timeout: 10000 }).catch(() => {});
+    const n = await p3.evaluate(async () =>
+      (await navigator.serviceWorker.getRegistrations()).length);
+    await ctx3.close();
+    return n;
+  })();
+
   // The reader failing to load, as a language file that never arrives would
   // have it: the deadline passes with no reader.
   out.engineDown = await (async () => {
@@ -1208,6 +1242,11 @@ try:
     eq('...reading the next card (%r)' % st.get('pay'), st.get('pay'), 16.05)
     # The shell, registered from this page.
     eq('scan.html registers the offline shell on its own', got.get('swAuto'), 1)
+    # ...and so does the panel, in a browser that has opened nothing else. This
+    # is the page with the hard "must come up with no network" requirement and
+    # it was the one page not asking for the shell.
+    eq('live.html registers the offline shell on its own',
+       got.get('panelSw'), 1)
     ed = got.get('engineDown') or {}
     ok_('a reader that never loads is called failed (%r)' % (ed.get('status') or '')[:50],
         'failed to load' in (ed.get('status') or '') and ed.get('failed') is True)

@@ -3575,6 +3575,43 @@
     if (!document.hidden && Date.now() - shiftAt >= SHIFT_EVERY_MS) loadShift();
   }, 1000);
   loadShift();
+
+  /* The offline shell, installed by the page that most needs it.
+   *
+   * `sw.js` lists live.html in ASSETS and this file's comments treat the panel
+   * as part of the shell — it is the screen bolted to the car, it has to come
+   * up with no network, and that is the stated reason it does not load
+   * advice.js for a single integer. It never registered the worker.
+   *
+   * The only three registrations in the repo were scan.js, ui.js and
+   * journal.html, so the panel was covered only when the same browser profile
+   * had already opened the keypad, the phone scanner or the offers page — and
+   * then only because sw.js claims clients at scope '/'. On the Pi that is
+   * usually true, because index.html is where the driver lands and ui.js
+   * registers there. The profile it is not true for is the one that matters
+   * most: a browser pointed straight at /live.html and nothing else, which is
+   * the dashboard panel and the 480x320 hat.
+   *
+   * The existing checks made this look covered without testing it:
+   * rpi/test_scanjs.py asserts every .html in the directory is in ASSETS — a
+   * check about the LIST — and separately that scan.html registers. Nothing
+   * asked this page.
+   *
+   * NOT on `load`, which is what scan.js and ui.js do and what this was written
+   * as first. THE LOAD EVENT NEVER FIRES ON THIS PAGE. The panel holds an open
+   * MJPEG stream — `/api/frame.mjpeg`, see viewSrc — and a document with a
+   * response that never completes never finishes loading. Copied from the
+   * keypad it registered nothing at all, which the check in
+   * rpi/test_scanjs.py caught by timing out waiting for `load` and then
+   * counting zero registrations.
+   *
+   * So: straight away, at the end of boot. The cost of that is a fetch of
+   * sw.js competing with the first verdict, and it is small and paid once;
+   * the cost of the other version is the panel having no offline shell at
+   * all, which is the thing this page's whole design is arranged around. */
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
 })();
 </script>
 </body>
