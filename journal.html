@@ -1608,7 +1608,7 @@
              + 'those ticks do and no further.';
 
     el.adviceWorking.innerHTML = working;
-    showAdviceCost(a, target);
+    showAdviceCost(a, target, kept);
   }
 
   /* --- what holding that line is like -------------------------------------
@@ -1636,7 +1636,7 @@
    * them less than a minute after the one before. Declining costs seconds, so
    * the line is the entire game — see waitFor in advice.js.
    */
-  function showAdviceCost(a, target) {
+  function showAdviceCost(a, target, kept) {
     if (!a || !a.ready) { el.adviceCost.innerHTML = ''; return; }
     var html = '';
     var mins = function (ms) {
@@ -1741,6 +1741,66 @@
       }
       html += '</p>';
     }
+
+    /* ...and what the whole answer above is resting on, which is not the line.
+     *
+     * Every verdict is (pay - miles x costPerMile) over hours. This page has
+     * an apparatus for checking the LINE — a replay, a plateau, a stability
+     * test across six break thresholds — and has never asked whether the other
+     * number is right. It is not measured, it is a seed: rpi/calibrate.py sets
+     * a new config to 30c and its own comment calls that "a petrol midsize
+     * with some depreciation in it", a figure the driver is expected to edit.
+     *
+     * It is worth saying because it moves the answer. Shown only when the
+     * recommendation actually changes across the sweep — on a week where the
+     * line holds at every rate there is nothing here to warn about, and a
+     * table saying so four times is noise on a page that already carries
+     * plenty. */
+    // `kept`, the offers themselves — NOT `rows`, which by this point is the
+    // wait table. costLadder re-scores each offer at a different running cost
+    // and hands the result back through usable(), so it needs the pay, the
+    // distance and the deduction the rig applied, none of which survives into
+    // a wait row.
+    var ladder = kept && Advice.costLadder
+      ? Advice.costLadder(kept, { target: target,
+                                  breakMinutes: Advice.SHOWN_AT })
+      : null;
+    var moves = ladder && ladder.some(function (r) {
+      return r.suggested !== ladder[0].suggested;
+    });
+    if (ladder && moves) {
+      var mine = ladder.filter(function (r) { return r.mine; })[0];
+      var breaks = ladder.filter(function (r) { return r.holds === false; });
+      html += '<p>All of that assumes a mile costs you <b>$'
+            + (mine ? mine.perMile.toFixed(2) : '?') + '</b>, which is the '
+            + 'figure on your rows — and it is the one number here nobody has '
+            + 'ever checked. It is a seed the rig starts from, not something '
+            + 'it measured. Move it and the answer moves:</p>';
+      html += '<table class="waits"><thead><tr><th>a mile costs</th>'
+            + '<th>line</th><th>range</th><th>your $' + target + '</th>'
+            + '</tr></thead><tbody>';
+      ladder.forEach(function (r) {
+        html += '<tr' + (r.mine ? ' class="mine"' : '') + '>'
+              + '<td>$' + r.perMile.toFixed(2) + (r.mine ? ' (yours)' : '') + '</td>'
+              + '<td>$' + r.suggested + '</td>'
+              + '<td>$' + r.low + '&ndash;$' + r.high + '</td>'
+              + '<td>' + (r.holds === null ? '&mdash;'
+                          : r.holds ? 'inside' : '<b>outside</b>') + '</td>'
+              + '</tr>';
+      });
+      html += '</tbody></table>';
+      html += breaks.length
+        ? '<p class="note">So your line is only inside the range while a mile '
+          + 'costs under about $' + breaks[0].perMile.toFixed(2) + '. Fuel and '
+          + 'tyres alone on a small car is nearer the top of this table; fuel, '
+          + 'servicing and depreciation counted properly is nearer the bottom. '
+          + 'Which of those you mean is worth an evening with a spreadsheet, '
+          + 'because it is worth more than anything else on this page.</p>'
+        : '<p class="note">Your line stays inside the range at every one of '
+          + 'these, so whatever a mile really costs you, the target is not '
+          + 'what is resting on the guess.</p>';
+    }
+
     el.adviceCost.innerHTML = html;
   }
 

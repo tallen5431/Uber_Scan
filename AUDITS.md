@@ -2122,6 +2122,49 @@ one specifically, because a noun on either wing while the figure in the centre
 still reads "typical" leaves the misreading where it was — measured, by
 mutating exactly that.
 
+**The line got an apparatus; the other number in every verdict was never
+checked once.** A verdict is (pay − miles × costPerMile) ÷ hours. This project
+built `replay`, `bestAt`, a plateau, a stability test across six break
+thresholds and leave-one-night-out validation to check the THRESHOLD, and has
+three Settled entries refusing rules that lose to it. It never asked whether
+the denominator's input is right. It is not measured — it is a seed:
+`rpi/calibrate.py` sets a new config to 30c and its own comment calls that "a
+petrol midsize with some depreciation in it", a figure the driver is expected
+to edit. On the owner's week it is 30c on all 1,166 rows, which is what never
+editing it looks like.
+
+It matters because it moves the answer. `Advice.costLadder` re-scores the
+window at half the driver's rate through double it, and on that week:
+
+| a mile costs | line | range | the driver's $25 |
+|---|---|---|---|
+| $0.15 | $24 | $24–29 | inside |
+| $0.22 | $21 | $21–27 | inside |
+| **$0.30 (theirs)** | **$20** | **$20–25** | inside, at the top edge |
+| $0.45 | $18 | $18–21 | **outside** |
+| $0.60 | $16 | $16–20 | **outside** |
+
+So "your line is right" is true *conditional on a number nobody measured*. The
+page says so now, and only when the recommendation actually moves across the
+sweep — on a week where it holds at every rate there is nothing to warn about.
+
+The rate is read off the rows rather than asked for: every row carries the
+deduction and the distance it was applied to, so it is already in the data.
+Median, because one misread distance would otherwise move it. The sweep is
+anchored on the driver's own rate rather than a fixed list — a table not
+containing their number would be answering somebody else's question — and each
+rate is re-scored THROUGH `usable()` rather than beside it, so a sweep can
+never drift from the figure it is a sweep of.
+
+*Two things the tests caught that the code claimed.* "A dearer mile can never
+ask for a higher line" was asserted as arithmetic and is false: the replay
+picks the best of a ladder of whole dollars, and lowering every rate can move
+which rung wins either way. It held on the real week — $24, $21, $20, $18, $16
+— and that is a fact about that week. And an explicit `if (!(mine > 0)) return
+null` could not be made to fail: a null rate and a zero rate are both already
+refused further down, so the branch went, and the behaviour it stated is
+pinned against the outcome instead.
+
 ### The advice
 
 **The page said where to draw the line and never what holding one costs.**

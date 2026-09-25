@@ -2375,7 +2375,7 @@ _jh = open(os.path.join(ROOT, 'journal.html'), encoding='utf-8').read()
 # written over them would pass with the line deleted. Exactly the shape of
 # check this file removed from the panel suite. See rpi/test_loop.py, which
 # makes the same trade for the same reason.
-_ready_at = _jh.find('showAdviceCost(a, target)')
+_ready_at = _jh.find('showAdviceCost(a, target, kept)')
 _refuse_at = _jh.find('showAdviceCost(a);')
 ok_('the advice block fills its cost figures when it has an answer',
     _ready_at > 0)

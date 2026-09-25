@@ -1382,6 +1382,100 @@
     };
   }
 
+  /* What a mile is being charged at, read off the rows rather than asked for.
+   *
+   * Every row carries the deduction the rig applied (`cost`) and the distance
+   * it applied it to, so the rate is already in the data and nothing has to be
+   * told it. Median, not mean, for the same reason everything else here is:
+   * one row with a misread distance would otherwise move it.
+   *
+   * Null when no row can answer — a week with no distances is a week with no
+   * running cost, and saying 0 would be inventing the very number this is
+   * about. */
+  function costPerMileIn(offers) {
+    var rates = [];
+    (offers || []).forEach(function (o) {
+      if (!o || typeof o.miles !== 'number' || !isFinite(o.miles) || o.miles <= 0) return;
+      if (typeof o.cost !== 'number' || !isFinite(o.cost)) return;
+      rates.push(o.cost / o.miles);
+    });
+    return rates.length ? median(rates.sort(function (a, b) { return a - b; })) : null;
+  }
+
+  /* How much of the answer rests on that rate.
+   *
+   * This project has built an apparatus to check the LINE — replay, bestAt, a
+   * plateau, leave-one-night-out, and three Settled entries refusing rules
+   * that lose to it — and never once asked whether the other number in every
+   * verdict is right. It is not measured, it is a SEED: rpi/calibrate.py sets
+   * a new config to 30c and its own comment calls that "a petrol midsize with
+   * some depreciation in it", a figure the driver is expected to edit. On the
+   * owner's week it is 30c on all 1,166 rows, which is what never editing it
+   * looks like.
+   *
+   * It matters because it moves the answer, not a little: over that same week
+   * the recommended line is $24 at 15c, $20 at 30c and $18 at 45c, and the
+   * driver's own $25 is inside the plateau at the first two and OUTSIDE it at
+   * the third. "Your line is right" is true conditional on a number nobody
+   * checked.
+   *
+   * Anchored on the driver's own rate rather than on a fixed list, because the
+   * question is about THEIR number and a table that did not contain it would
+   * be answering somebody else's. Halved and doubled, which is the spread
+   * between "fuel and tyres on a small car" and "fuel, tyres, servicing and
+   * depreciation counted properly" — wide enough that if the answer holds
+   * across it, the rate is not what the line is resting on.
+   *
+   * Re-scored through `usable()` rather than beside it. The deduction is read
+   * in exactly one place and this hands that place different rows, so a sweep
+   * can never drift from the figure it is a sweep OF. */
+  function costLadder(offers, opts) {
+    var o = opts || {};
+    var mine = costPerMileIn(offers);
+    var out = [];
+    // No guard on `mine` here, and that is deliberate rather than an omission.
+    //
+    // A rate of null (no row carries both a distance and a deduction) or of
+    // zero (the driver pays nothing a mile) both come out as nothing from the
+    // bottom of this function anyway: every multiple of zero is zero and the
+    // dedup below leaves one column, every multiple of null is NaN and
+    // `bestAt` has nothing to answer with — and one column is not a sweep, so
+    // `out.length > 1` refuses it. An explicit `if (!(mine > 0)) return null`
+    // was written first and it could not be made to fail: both inputs were
+    // already refused, by a longer route, with the guard deleted. This
+    // project deletes branches no input can reach.
+    //
+    // What that leaves is a behaviour nothing states, so it is stated here and
+    // both cases are pinned in tests/advice.test.js against the OUTCOME rather
+    // than against whichever line produces it.
+    [0.5, 0.75, 1, 1.5, 2].forEach(function (mult) {
+      var rate = Math.round(mine * mult * 100) / 100;
+      if (out.length && out[out.length - 1].perMile === rate) return;
+      var rescored = (offers || []).map(function (row) {
+        var copy = {}, k;
+        for (k in row) { if (Object.prototype.hasOwnProperty.call(row, k)) copy[k] = row[k]; }
+        copy.cost = (typeof row.miles === 'number' && isFinite(row.miles) && row.miles > 0)
+          ? row.miles * rate : 0;
+        return copy;
+      });
+      var b = bestAt(usable(rescored), o.breakMinutes || SHOWN_AT);
+      if (!b) return;
+      out.push({
+        perMile: rate,
+        mine: mult === 1,
+        suggested: b.low,
+        low: b.low,
+        high: b.high,
+        // Whether the driver's own line survives this assumption. The whole
+        // point of the row: a target inside the plateau at 30c and outside it
+        // at 45c is a target whose rightness is an assumption, not a finding.
+        holds: typeof o.target === 'number' && isFinite(o.target)
+          ? (o.target >= b.low && o.target <= b.high) : null
+      });
+    });
+    return out.length > 1 ? out : null;
+  }
+
   /* The whole answer, or a `ready: false` saying what it is short of.
    *
    * `target` in opts is the driver's current line, used only for the comparison. */
@@ -1659,6 +1753,7 @@
            outingsIn: outingsIn,
            // The one place the driver's 4am day boundary is written down.
            DAY_STARTS_AT: DAY_STARTS_AT,
+           costPerMileIn: costPerMileIn, costLadder: costLadder,
            mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,
            // Exported because a page that prints how far the line moved has to
            // be able to say what "settled" was allowed to mean, and a check

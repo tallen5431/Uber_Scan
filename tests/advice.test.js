@@ -1718,6 +1718,152 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   eq('...and so does nothing at all', A.outingsIn(null), 0);
 })();
 
+/* ---- what the answer rests on, which is not the line ---- */
+/* Every verdict is (pay - miles x costPerMile) over hours. This file has an
+   apparatus for checking the LINE and none for the other number: it is a SEED,
+   set to 30c by rpi/calibrate.py, whose own comment calls it "a petrol midsize
+   with some depreciation in it" and expects the driver to edit it. On the
+   owner's week it is 30c on all 1,166 rows, which is what never editing looks
+   like — and the recommended line is $24 at 15c, $20 at 30c and $18 at 45c. */
+(function () {
+  // Read off the rows, because the rate is already in them: every row carries
+  // the deduction and the distance it was applied to.
+  var priced = [offer(0, 20, 30, 3.0), offer(5, 20, 30, 3.0),
+                offer(10, 20, 30, 3.0)];
+  priced.forEach(function (o) { o.miles = 10; });
+  eq('the running cost is read off the rows rather than asked for',
+     A.costPerMileIn(priced), 0.3);
+  var withJunk = priced.concat([(function () {
+    var o = offer(15, 20, 30, 3.0); o.miles = 0.01; return o;
+  }())]);
+  eq('...by the median, so a misread distance cannot move it',
+     A.costPerMileIn(withJunk), 0.3);
+  eq('a week with no distances has no running cost to read',
+     A.costPerMileIn([offer(0, 20, 30, 0)]), null);
+  eq('...and neither has nothing at all', A.costPerMileIn([]), null);
+  var free = [offer(0, 20, 30, 0)];
+  free.forEach(function (o) { o.miles = 10; });
+  eq('a car that costs nothing to drive has no sweep', A.costLadder(free), null);
+
+  // The sweep itself, on a market built so the answer MOVES: jobs with real
+  // distance on them, where charging more a mile eats the ones that only just
+  // clear the line.
+  var market = [];
+  for (var i = 0; i < 80; i++) {
+    var o = offer(i * 3, 14 + (i % 7) * 3, 30, 0);
+    o.miles = 12 + (i % 5) * 4;
+    o.cost = o.miles * 0.30;
+    market.push(o);
+  }
+  var lad = A.costLadder(market, { target: 25 });
+  ok_('a sweep comes back', lad && lad.length > 1);
+  if (lad) {
+    // Anchored on the driver's OWN rate, not a fixed list: a table that did
+    // not contain their number would be answering somebody else's question.
+    var mine = lad.filter(function (r) { return r.mine; });
+    eq('...with exactly one row marked as the driver own', mine.length, 1);
+    eq('...and that row is the rate their journal actually used',
+       mine[0].perMile, 0.3);
+    eq('...swept from half their rate', lad[0].perMile, 0.15);
+    eq('...to double it', lad[lad.length - 1].perMile, 0.6);
+    // The rates climb, and each row's recommendation sits inside its own
+    // range. Those are the structural claims; MONOTONICITY IS NOT ONE.
+    //
+    // "A dearer mile can never ask for a higher line" was asserted here first
+    // and is false: the replay picks the best of a discrete ladder of whole
+    // dollars, and lowering every offer's net rate can move which rung wins
+    // either way. It held on the owner's real week — $24, $21, $20, $18, $16
+    // — and that is a fact about that week, not about the arithmetic. This
+    // check failed on the first synthetic market it was run against, which is
+    // the only reason it is not in the file as a comment claiming otherwise.
+    for (var j = 1; j < lad.length; j++) {
+      ok_('the rates climb (' + lad[j].perMile + ')',
+          lad[j].perMile > lad[j - 1].perMile);
+    }
+    lad.forEach(function (r) {
+      ok_('the line it suggests at ' + r.perMile + ' is inside its own range',
+          r.suggested >= r.low && r.suggested <= r.high);
+    });
+    lad.forEach(function (r) {
+      eq('$25 is inside the range at ' + r.perMile + ' exactly when it is',
+         r.holds, 25 >= r.low && 25 <= r.high);
+    });
+  }
+  // THE ANSWER ACTUALLY MOVES, which is the entire claim the table makes.
+  // Without this the sweep could stop re-scoring altogether — hand usable()
+  // each row's original deduction back — and every check above would still
+  // pass, because they are all about the shape of the table and not about the
+  // figures in it. Measured: that mutation survived until this line existed.
+  if (lad) {
+    var lines = lad.map(function (r) { return r.suggested; });
+    ok_('...and the line it recommends is not the same at every rate (' + lines + ')',
+        lines.some(function (v) { return v !== lines[0]; }));
+  }
+
+  // Anchored on THEIR rate, not on a number written into this file. A market
+  // priced at 20c must produce a table containing 20c, which a hardcoded 30c
+  // would not — and the fixture above is at 30c, so it cannot tell.
+  var cheap = market.map(function (o) {
+    var c = {}, k;
+    for (k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) c[k] = o[k]; }
+    c.cost = c.miles * 0.20;
+    return c;
+  });
+  var cheapLad = A.costLadder(cheap, { target: 25 });
+  ok_('a journal priced at 20c is swept around 20c, not around a constant',
+      cheapLad && cheapLad.filter(function (r) { return r.mine; })
+        .every(function (r) { return r.perMile === 0.2; }));
+
+  eq('nothing at all has no rate to sweep around', A.costLadder([]), null);
+
+  // A JOURNAL WITH NO DISTANCES AT ALL, which is the case the guard is really
+  // for and the empty one cannot show. With pay and minutes but no miles there
+  // is no rate to read, so every multiple of it is NaN — and without the guard
+  // the dedup never fires (NaN never equals NaN), five identical rows come
+  // back, and the table prints "a mile costs $NaN" five times. Measured: that
+  // is what removing the guard actually does.
+  var noMiles = [];
+  for (var m = 0; m < 40; m++) noMiles.push(offer(m * 3, 14 + (m % 7) * 3, 30, 0));
+  eq('a journal with no distances has no rate to sweep around',
+     A.costLadder(noMiles, { target: 25 }), null);
+
+  // ...and a row with no distance is charged NOTHING at each rate, not left
+  // holding whatever deduction it arrived with. Its old cost was computed
+  // against a distance this sweep is replacing; keeping it would price one row
+  // at the driver's rate while every other row moved.
+  var mixed = market.map(function (o) {
+    var c = {}, k;
+    for (k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) c[k] = o[k]; }
+    return c;
+  });
+  mixed.slice(0, 12).forEach(function (o) { o.miles = null; o.cost = 9.99; });
+  var mixedLad = A.costLadder(mixed, { target: 25 });
+  ok_('a sweep still comes back with some rows lacking a distance',
+      mixedLad && mixedLad.length > 1);
+  if (mixedLad) {
+    ok_('...and the sweep did not mutate the rows it was given',
+        mixed.slice(0, 12).every(function (o) { return o.cost === 9.99; }));
+    // A row with no distance is charged NOTHING at each rate, not left holding
+    // the deduction it arrived with — that deduction was computed against a
+    // distance this sweep is replacing. Checked by building the same journal
+    // with those rows already at zero: if the sweep charges them right, the
+    // two tables are the same table.
+    var zeroed = mixed.map(function (o) {
+      var c = {}, k;
+      for (k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) c[k] = o[k]; }
+      if (c.miles === null) c.cost = 0;
+      return c;
+    });
+    eq('a row with no distance is charged nothing, not its old deduction',
+       JSON.stringify(A.costLadder(zeroed, { target: 25 })),
+       JSON.stringify(mixedLad));
+  }
+
+  var noTarget = A.costLadder(market, {});
+  ok_('with no line set, the sweep says nothing about one',
+      noTarget && noTarget.every(function (r) { return r.holds === null; }));
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);
