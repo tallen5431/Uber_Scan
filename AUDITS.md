@@ -2157,6 +2157,42 @@ so the one document that states the arithmetic had never matched any of it. It
 now says `net / miles`, and names the driving panel as the one deliberate
 exception.
 
+**The shift row's median was the typical OFFER, printed one separator after the
+driver's own takings.** `shiftSummary` builds it from `counted.map(o =>
+o.perHour)` — every offer the window read — and 935 of the week's 1,166 were a
+PASS. The words in front of it are "took 10 for $140 net", so the figure read as
+the rate of the jobs just named. Replayed day by day on the 4am boundary against
+the median of what was actually ticked:
+
+| day | the row said | the jobs taken ran | out by |
+|---|---|---|---|
+| 13 Sep | $14/hr | $25.50 | 1.88x |
+| 15 Sep | $11/hr | $21.70 | 1.96x |
+| 18 Sep | $15/hr | $34.40 | 2.28x |
+| 19 Sep | $17/hr | $31.00 | 1.82x |
+| 20 Sep | $17/hr | $25.70 | 1.51x |
+
+Pessimistic on all five driving days, beside a $25 target it looks measured
+against. The offers page had this exact fault and its cure was to name the
+population; its big figure reads `typical offer`.
+
+*Copying those words was tried, measured, and is wrong on this screen.* The row
+is ellipsised from the tail, and at 480px "typical offer -$17/hr" put the digits
+at 507px against a box ending at 468px — the label ate the number it was
+labelling, which trades the first fault class for the second. "typical" alone
+overshot by 5px. The budget is exactly the seven characters `median ` already
+spent, so the figure goes FIRST and the noun joins the tail: `-$17/hr an offer`.
+That is the one arrangement where naming the population cannot cost the figure,
+and it follows the rule this row already states — the figures lead, the count
+and the set-aside are what a small screen loses.
+
+*The check that proves it had to be rebuilt once.* Ranging over the digits at
+480px was right; anchoring the range to the words beside them was not. A
+mutation that changed the label made the measurement SKIP rather than fail,
+because the regex stopped matching and the assertion sat behind a guard. It
+finds the line's one rate by shape now, so the wording cannot switch it off.
+Four mutations, four named killers.
+
 ### The offers page
 
 **A pairing's withheld claim was printed as its opposite.** "Beats finishing

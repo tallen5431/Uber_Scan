@@ -7036,7 +7036,7 @@ python3 rpi/test_doctor.py      # 100 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 612 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 618 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying

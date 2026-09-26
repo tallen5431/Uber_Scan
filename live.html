@@ -1710,8 +1710,44 @@
         // "$-12/hr" before, which is the shape this page spends a comment at
         // line 615 refusing — and a median can go negative as soon as a
         // running cost is set.
-        bits.push('median ' + (s.median < 0 ? '-$' : '$')
-                  + Math.abs(Math.round(s.median)) + '/hr');
+        // ...and it now says WHAT it is the median OF, which it did not.
+        //
+        // `shiftSummary` builds it from `counted.map(o => o.perHour)` — every
+        // offer the window read, and 935 of this driver's 1,166 were a PASS.
+        // The words immediately before it are "took 10 for $140 net", so a bare
+        // "median $15/hr" reads as the rate of the jobs just named. It is not.
+        // Replayed day by day over the real week on the 4am boundary, against
+        // the median of what was actually ticked on the same day:
+        //
+        //   13 Sep  took 7 for $98 net · median $14/hr    took ran $25.50
+        //   15 Sep  took 1 for $14 net · median $11/hr    took ran $21.70
+        //   18 Sep  took 10 for $140 net · median $15/hr  took ran $34.40
+        //   19 Sep  took 12 for $206 net · median $17/hr  took ran $31.00
+        //   20 Sep  took 1 for $12 net · median $17/hr    took ran $25.70
+        //
+        // Pessimistic on all five days, by 1.88x, 1.96x, 2.28x, 1.82x and
+        // 1.51x, beside a $25 target it looks measured against. The offers page
+        // had this exact fault and its cure was to name the population: its big
+        // figure reads `typical offer`.
+        //
+        // THE FIGURE GOES FIRST, and that is the whole of why this reads the
+        // way it does. Copying the offers page's words was tried and measured
+        // and is wrong here: this line is ellipsised from the tail, and on the
+        // 480px hat "typical offer -$17/hr" put the digits at 507px against a
+        // box ending at 468px — the label ate the number it was labelling,
+        // which trades this project's first fault class for its second. So did
+        // "typical" alone, by 5px. The budget is exactly the seven characters
+        // "median " already spent.
+        //
+        // Putting the number in front of its noun spends nothing: the row's
+        // stated rule is that the figures lead and the count and set-aside are
+        // what a small screen loses, and the noun is now part of that tail. It
+        // is the one arrangement where the cure cannot cost the figure.
+        // `rpi/test_dashboard.py` ranges over the digits at 480px and asks
+        // where they land, rather than asking `textContent` — which holds the
+        // whole string whether it is painted or not.
+        bits.push((s.median < 0 ? '-$' : '$')
+                  + Math.abs(Math.round(s.median)) + '/hr an offer');
       }
       bits.push(s.offers + (s.offers === 1 ? ' offer' : ' offers'));
       if (s.setAside) bits.push(s.setAside + ' set aside');

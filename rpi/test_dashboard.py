@@ -1201,6 +1201,90 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- the shift line's median, and whether its figure survives the hat ----
+  stage = "the shift line's median, and whether its figure survives the hat";
+  //
+  // The label went from "median" to "typical offer" because a bare "median"
+  // sitting one separator after "took 10 for $140 net" reads as the rate of
+  // those ten jobs, and it is the median of every offer READ — 935 of the real
+  // week's 1,166 were a PASS, so it ran 1.5x to 2.3x under the driver's own
+  // rate on all five driving days.
+  //
+  // Six characters longer, on a line this page ellipsises from the tail and
+  // already measured as not fitting: 392px of text in 223px on the 480px hat.
+  // So the question is not what `textContent` says — that holds the whole
+  // string whether it is painted or not — it is whether the DIGITS reach the
+  // glass. A mislabelled number swapped for no number is the second fault
+  // class, not a fix, so this walks the text node and asks the range itself.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 480, height: 320 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      // The widest real shape: four figures, two-digit everything, a negative
+      // median (which costs a character) and a set-aside to push the tail out.
+      body: JSON.stringify({ offers: 435, counted: 428, setAside: 7, took: 10,
+                             median: -17, earned: 140.5, earnedCost: 31.0,
+                             beforeClock: 0, unreadable: null, rolled: false,
+                             clockSet: true }),
+    }));
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction("window.__es !== undefined", null,
+                               { timeout: 10000 }).catch(() => {});
+    await page.waitForFunction(
+      "(document.getElementById('shift') || {}).textContent || '' ? "
+      + "/\\/hr an offer/.test(document.getElementById('shift').textContent) : false",
+      null, { timeout: 8000 }).catch(() => {});
+    out.hatShift = await page.evaluate(() => {
+      const s = document.getElementById('shift');
+      if (!s) return { there: false };
+      const text = (s.textContent || '');
+      const box = s.getBoundingClientRect();
+      // The digits of the median, not the word before them. Found by walking
+      // the one text node this element holds and ranging over the run.
+      // Wording-INDEPENDENT on purpose. Anchored to " an offer" first, and a
+      // mutation that changed the label made this measurement skip instead of
+      // fail — a guarded assertion that disappears quietly, which is the fault
+      // it is here to catch. There is exactly one "/hr" on this line (asserted
+      // above), so the rate finds itself whatever is written beside it.
+      const m = /(-?\$\d+\/hr)/.exec(text);
+      let figure = null;
+      if (m) {
+        const node = (function find(n) {
+          if (n.nodeType === 3 && n.nodeValue.indexOf(m[1]) >= 0) return n;
+          for (var i = 0; i < n.childNodes.length; i++) {
+            var r = find(n.childNodes[i]);
+            if (r) return r;
+          }
+          return null;
+        })(s);
+        if (node) {
+          const at = node.nodeValue.indexOf(m[1]);
+          const rg = document.createRange();
+          rg.setStart(node, at);
+          rg.setEnd(node, at + m[1].length);
+          const r = rg.getBoundingClientRect();
+          // Inside the element's own painted box, with a pixel of slack for
+          // subpixel layout. `right` is the one that matters: this line is
+          // clipped on the right and nowhere else.
+          figure = { text: m[1], right: Math.round(r.right),
+                     edge: Math.round(box.right),
+                     onGlass: r.width > 0 && r.right <= box.right + 1 };
+        }
+      }
+      return { there: true, text: text.trim(), figure: figure,
+               clipped: s.scrollWidth > s.clientWidth + 1,
+               fits: document.documentElement.scrollWidth
+                     <= document.documentElement.clientWidth + 1 };
+    });
+    await page.close();
+    await ctx.close();
+  }
+
   // --- the $/mi beside the pay and the miles -------------------------------
   stage = 'the $/mi beside the pay and the miles';
   //
@@ -3479,6 +3563,36 @@ try:
             '7.8 mi' in warn)
         ok_('...on the glass, not pushed off it', (ut.get('warn') or {}).get('shown'))
 
+    # --- the shift line's median says what it is the median of -----------
+    #
+    # `shiftSummary` builds it over every offer the window counted, and the
+    # words before it are "took 10 for $140 net". Replayed over the real week
+    # the bare "median" ran under the driver's own accepted rate by 1.88x,
+    # 1.96x, 2.28x, 1.82x and 1.51x on the five driving days — always the
+    # pessimistic way, always beside a $25 target it looks measured against.
+    # The offers page had the same fault and the same cure: it calls its big
+    # figure `typical offer`, and this uses those words rather than giving one
+    # number two names on two screens.
+    hat = got.get('hatShift') or {}
+    ok_('the shift line on the 3.5" hat was measured', bool(hat.get('there')))
+    if hat.get('there'):
+        ok_('the median says what population it is over (%r)'
+            % (hat.get('text') or '')[:60],
+            '/hr an offer' in (hat.get('text') or ''))
+        ok_('...and never the bare word that read as the takings beside it',
+            'median' not in (hat.get('text') or ''))
+        # The half that makes the label change a fix rather than a trade. This
+        # line is clipped on the hat by design — the tail is what it is meant
+        # to lose — so the figure moving six characters right is only safe if
+        # the digits are still painted.
+        fig = hat.get('figure') or {}
+        ok_('the figure itself was found on the line', bool(fig))
+        if fig:
+            ok_('...and its digits reach the glass at 480px (%s ends %spx, box ends %spx)'
+                % (fig.get('text'), fig.get('right'), fig.get('edge')),
+                fig.get('onGlass'))
+        ok_('...while the line still does not widen the panel', hat.get('fits'))
+
     # --- the $/mi beside the pay and the miles ---------------------------
     #
     # Raw, because the two boxes to its left are the pay and the miles and a
@@ -3828,9 +3942,13 @@ try:
     red = got.get('shift_redshift') or {}
     ok_('the below-zero median was measured', bool(red))
     if red:
+        # Said "median -$12/hr" until the figure was moved in front of its own
+        # noun. The sign rule is what this check is about and is unchanged; the
+        # words around it moved because a bare "median" one separator after
+        # "took 1 for -$1 net" read as the rate of that one job.
         ok_('the shift median is signed before the dollar (%r)'
             % (red.get('text') or '')[-34:],
-            'median -$12/hr' in (red.get('text') or ''))
+            '-$12/hr an offer' in (red.get('text') or ''))
         ok_('...never as $-12', '$-' not in (red.get('text') or ''))
         # Whole dollars, which is what this line has always shown: a median
         # read at a glance from the driving seat does not want a decimal.
