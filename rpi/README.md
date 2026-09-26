@@ -6962,7 +6962,7 @@ The Pi parser is a port of the browser one, and both run the same corpus:
 ```sh
 node tests/corpus.test.js       # 793 checks, the shared corpus
 node tests/parser.test.js       #  98 on the browser side alone
-node tests/advice.test.js       # 339 on what line to tell a driver to draw
+node tests/advice.test.js       # 383 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
@@ -7058,7 +7058,7 @@ python3 rpi/test_server.py      # 195 on the server's own edges: two readers of
                                 #     is not one — and on the CSV export, which
                                 #     is the one thing here that leaves the
                                 #     machine and had no check at all
-python3 rpi/test_map.py         # 191 on the map check page: that it asks
+python3 rpi/test_map.py         # 195 on the map check page: that it asks
                                 #     nobody anything until told to, that it
                                 #     keeps to one geocoder request a second,
                                 #     that it shows what it could not place —
@@ -7066,7 +7066,7 @@ python3 rpi/test_map.py         # 191 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/mapview.test.js      # 195 on the deciding behind both maps, with
+node tests/mapview.test.js      # 225 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward

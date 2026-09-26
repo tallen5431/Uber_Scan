@@ -548,6 +548,39 @@
      The stray half is not covered by `impossible`, which needs a second pin to
      argue against. A stray is a pin nowhere near the rest of the shift, and
      there are 15 such pairs in the owner's 579 both-ended ones. */
+  /* The figure that leads a town's row in "Where the money is", and the one
+   * thing it must never be is a number the page invented.
+   *
+   * Three cases and they are genuinely different questions:
+   *
+   *   the ranking is not held still  the town's own median, what it PAID
+   *   held still, town comparable    what it paid over the same hours elsewhere
+   *   held still, nothing to compare a dash, because there is no answer
+   *
+   * The third exists because `Advice.areas` reports `matched: null` for a town
+   * whose every hour held no other town — there is nothing it can be said to
+   * have paid more or less THAN. `null >= 0` is true in JavaScript, so the
+   * obvious formatter prints "+$NaN/hr" there, which is this project's first
+   * fault class arriving through a comparison operator.
+   *
+   * Here rather than inline in `map.html` so it can be driven without a browser
+   * and a server: the dash is unreachable on the owner's week, where the
+   * thinnest three-hour block holds six towns, and reachable on the journal a
+   * new rig has. `unit` is returned separately because a dash takes none — a
+   * bare "—/hr" reads as a rate that failed to print rather than as a question
+   * with no answer. */
+  function rankLead(group, heldStill) {
+    var g = group || {};
+    if (!heldStill) {
+      return { text: '$' + Number(g.median).toFixed(2), unit: true };
+    }
+    if (g.matched === null || g.matched === undefined) {
+      return { text: '—', unit: false };
+    }
+    return { text: (g.matched >= 0 ? '+' : '−')
+                   + '$' + Math.abs(g.matched).toFixed(2), unit: true };
+  }
+
   function accused(p) {
     return !!(p && (p.impossible || p.fromStray || p.toStray));
   }
@@ -1115,6 +1148,7 @@
     townEndFor: townEndFor,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, statedBy: statedBy, unchecked: unchecked, ends: ends,
+           rankLead: rankLead,
            accused: accused,
            byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,

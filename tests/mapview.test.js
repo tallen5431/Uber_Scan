@@ -1057,8 +1057,11 @@ function gaps(sent) {
   ok_('...and says so in words', /1 of 2 drawn end to end/.test(noYardstick.done));
 
 
-  console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
-                   : '\nAll ' + pass + ' map-view checks passed');
+  /* The summary used to be printed HERE, two sections from the end of the
+   * file, and everything below it was counted but never announced. On a red run
+   * it printed "All 195 map-view checks passed" and then the FAIL lines
+   * underneath — the suite's own text making a claim its exit code did not
+   * honour. It goes last now, which is the only place it can be true. */
   /* --- which end of a job named the town it is ranked under --------------
    *
    * The map's "Where the money is" groups on MV.townFor, which takes the
@@ -1142,6 +1145,46 @@ function gaps(sent) {
          MV.townFor(o, ADV.area), end ? MV.townOf(o[end], ADV.area) : null);
     });
 
+  /* ---- the figure that leads a town's row ---- */
+  //
+  // Three different questions, and the third is the one that needed a function.
+  // `Advice.areas` reports `matched: null` for a town whose every hour held no
+  // other town: there is nothing it can be said to have paid more or less THAN.
+  // `null >= 0` is TRUE in JavaScript, so the obvious formatter prints
+  // "+$NaN/hr" — a confidently wrong number arriving through a comparison
+  // operator, on the page's most quotable figure.
+  eq('a ranking that is not held still leads with what the town paid',
+     MV.rankLead({ name: 'Acworth', median: 14.01, matched: null }, false).text,
+     '$14.01');
+  eq('...with a unit, being a rate',
+     MV.rankLead({ median: 14.01 }, false).unit, true);
+  eq('held still, the lead is what it paid over the same hours elsewhere',
+     MV.rankLead({ median: 19.95, matched: 3.28 }, true).text, '+$3.28');
+  // A real minus sign, not a hyphen, and before the dollar — the rule this
+  // project states for every negative figure on every screen.
+  eq('...and a town that paid less says so with a minus, not a hyphen',
+     MV.rankLead({ median: 13.62, matched: -1.7 }, true).text, '−$1.70');
+  ok_('...never as $-1.70',
+      MV.rankLead({ median: 13.62, matched: -1.7 }, true).text.indexOf('$-') < 0);
+  eq('a town with nothing to compare against leads with a dash',
+     MV.rankLead({ median: 15.8, matched: null }, true).text, '—');
+  // ...and no unit on it. "—/hr" reads as a rate that failed to print rather
+  // than as a question with no answer.
+  eq('...and takes no unit', MV.rankLead({ median: 15.8, matched: null }, true).unit,
+     false);
+  ok_('...and never prints a number it does not have',
+      MV.rankLead({ median: 15.8, matched: null }, true).text.indexOf('NaN') < 0);
+  // A missing key is the same absence as an explicit null: a reading from a
+  // server one release behind carries no `matched` at all.
+  eq('a row with no matched key at all is the same absence',
+     MV.rankLead({ median: 15.8 }, true).text, '—');
+  // Zero is an ANSWER — "it paid what the others did" — and must not be
+  // mistaken for the absence of one.
+  eq('a town level with the others is plus nothing, not a dash',
+     MV.rankLead({ median: 15.8, matched: 0 }, true).text, '+$0.00');
+
+  console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
+                   : '\nAll ' + pass + ' map-view checks passed');
   process.exit(fail ? 1 : 0);
 })().catch(function (e) {
   console.log('FAIL  the suite itself threw: ' + (e && e.stack || e));

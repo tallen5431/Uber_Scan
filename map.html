@@ -1230,14 +1230,18 @@
     }
     html += '<div class="rank">';
     r.groups.forEach(function (g, i) {
-      var lead = r.matched
-        ? (g.matched >= 0 ? '+' : '\u2212') + '$' + Math.abs(g.matched).toFixed(2)
-        : '$' + g.median.toFixed(2);
+      /* Three cases, and the reasoning is in `MV.rankLead`, where it can be
+       * driven without a browser and a server. The one worth naming here: a
+       * town whose every hour held no other town has no `matched`, so it has
+       * no answer to the question this column asks — and it keeps its row and
+       * its median, because it is still somewhere the driver worked. */
+      var lead = MV.rankLead(g, !!r.matched);
       html += '<div class="row rankrow" data-town="' + esc(g.name) + '">'
         + '<span class="pip" style="background:'
         + (r.real ? rankColour(i, r.groups.length) : '#54606f') + '"></span>'
         + '<b>' + esc(g.name) + '</b>'
-        + '<span class="money">' + lead + '<i>/hr</i></span>'
+        + '<span class="money">' + lead.text
+        + (lead.unit ? '<i>/hr</i>' : '') + '</span>'
         // The support, on the row, not in a footnote. Every figure on this
         // page that a driver could act on carries what it rests on, and this
         // is the one most likely to be quoted back as a fact about a town.

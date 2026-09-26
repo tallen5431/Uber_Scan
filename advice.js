@@ -604,25 +604,107 @@
      * though something had been controlled for. The plain median is the right
      * number there, and the page says the plainer sentence. */
     if (pens && pens.length > 1) {
-      // What each hour paid, over the kept pool and nothing wider: a town is
-      // being compared with the other towns on this page, not with a journal.
-      var penRates = Object.create(null);
-      Object.keys(byPen).forEach(function (k) {
-        penRates[k] = median(byPen[k].map(function (i) { return flat[i]; }));
+      /* What each hour paid ELSEWHERE — in the OTHER towns — which is the
+       * comparison all three texts about this number already promised and the
+       * only one a driver can act on. The question is "is it worth driving to
+       * Atlanta", and the answer has to be Atlanta against the alternatives
+       * available in the same hours, not Atlanta against a pool it is most of.
+       *
+       * It was the plain pen median over the whole kept pool, the town
+       * INCLUDED, and that quietly subtracts a town's advantage from itself: a
+       * town that owns most of an hour drags that hour's median toward its own
+       * rates, so the more of the paying hours a town owns, the less of its
+       * lead survives. Atlanta owns 65 of the 81 kept offers in the best-paying
+       * block. Measured over the real week, town by town — shipped against the
+       * same figure with the town's own offers left out:
+       *
+       *   Atlanta        +1.47 -> +3.28      Marietta      -0.54 -> -0.98
+       *   Kennesaw       +0.31 -> +0.13      Dallas        -1.08 -> -1.70
+       *   Mableton       +0.19 -> +0.13      Smyrna        -1.41 -> -1.13
+       *   Acworth        -0.05 -> -0.23      Powder Spgs   -1.45 -> -1.69
+       *   Woodstock      -0.11 -> -0.13
+       *
+       * Atlanta's figure was less than half of it, on the one town where
+       * repositioning is a real decision. Three towns move: Acworth and
+       * Woodstock swap, and Dallas goes from seventh to last.
+       *
+       * The bootstrap says the same thing about which number to trust. Over 400
+       * resamples of the kept pool, the town that comes out top is Atlanta in
+       * 305 of them under this baseline and in only 124 under the old one,
+       * where Woodstock — fifteen offers — took the top spot 107 times. A
+       * ranking that reshuffles on a resample is not a ranking.
+       *
+       * What it does NOT touch is whether the ranking may be shown at all.
+       * `p`, `h` and `real` come from the Kruskal-Wallis on `ranks` forty lines
+       * above and never see this baseline, so nothing here can talk the page
+       * into printing an order that does not beat chance.
+       *
+       * The honest caveat, because it is real: every town is measured against a
+       * slightly different pool, so these figures rank towns and do not add up.
+       * That is inherent in "better than the alternatives" and is what the
+       * sentence on the page says; the median beside it is the figure that is
+       * on a common scale. */
+      var owner = [];
+      kept.forEach(function (g) {
+        g.offers.forEach(function () { owner.push(g.name); });
       });
+      // Once per town-and-hour pair rather than once per offer: eight pens and
+      // nine towns at the very most, against 431 offers on the owner's week.
+      var elsewhere = Object.create(null);
+      var baseFor = function (k, town) {
+        var key = k + '\u0000' + town;
+        if (!(key in elsewhere)) {
+          var others = [];
+          byPen[k].forEach(function (i) {
+            if (owner[i] !== town) others.push(flat[i]);
+          });
+          // An hour in which this town is the only town has no elsewhere, and
+          // the only honest thing to do with such an offer is not to count it.
+          // No pen on the owner's week is like that — the thinnest holds six
+          // towns — but a journal two nights old can be, and the old code would
+          // have compared the town with itself and called the answer zero.
+          elsewhere[key] = others.length ? median(others) : null;
+        }
+        return elsewhere[key];
+      };
       var seen = 0;
       kept.forEach(function (g) {
-        var diffs = g.offers.map(function (o) {
-          return flat[seen] - penRates[pen[seen++]];
+        var diffs = [];
+        g.offers.forEach(function () {
+          var base = baseFor(pen[seen], g.name);
+          if (base !== null) diffs.push(flat[seen] - base);
+          seen += 1;
         });
-        g.matched = Math.round(median(diffs) * 100) / 100;
+        // Null, not zero. A town with nothing to be compared against has no
+        // answer to this question, and zero is an answer — "it paid the same".
+        g.matched = diffs.length
+          ? Math.round(median(diffs) * 100) / 100 : null;
       });
-      // Ordered by what is left, not by what it paid. The question is which
-      // town is worth being in, and the raw figure answers a different one.
-      kept.sort(function (a, b) { return b.matched - a.matched; });
-      out.matched = true;
-      out.spread = Math.round((kept[0].matched
-                               - kept[kept.length - 1].matched) * 100) / 100;
+      var placed = kept.filter(function (g) { return g.matched !== null; });
+      /* ...and if NO town can be compared with anywhere else, the page falls
+       * back to the plain median order and the plainer sentence, exactly as it
+       * does when there is only one pen — the block above this handles that case
+       * for the same reason.
+       *
+       * `placed.length` and not `placed.length > 1`, which is the same test: a
+       * town is placed only because some hour it was in held another town too,
+       * and that other town is placed by the same hour. So one is impossible and
+       * a guard against it is a guard nothing can trip — written as `> 1` first,
+       * and no fixture could tell the two apart. */
+      if (placed.length) {
+        // Ordered by what is left, not by what it paid. The question is which
+        // town is worth being in, and the raw figure answers a different one.
+        // Nulls last: they are not at the bottom of the ranking, they are not
+        // in it.
+        kept.sort(function (a, b) {
+          if (a.matched === null) return b.matched === null ? 0 : 1;
+          if (b.matched === null) return -1;
+          return b.matched - a.matched;
+        });
+        out.matched = true;
+        out.spread = Math.round((placed[0].matched
+                                 - placed[placed.length - 1].matched) * 100) / 100;
+      }
       out.rawSpread = Math.round((Math.max.apply(null, kept.map(function (g) { return g.median; }))
                                   - Math.min.apply(null, kept.map(function (g) { return g.median; }))) * 100) / 100;
     }

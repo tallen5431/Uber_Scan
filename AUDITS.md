@@ -1039,6 +1039,62 @@ measured against its own three-hour block, and the permutation is confined to
 shuffle WITHIN blocks so the test asks the question the number answers. Once a
 block is picked there is nothing left to hold still and the page says so.
 
+*And that fix introduced a second error of its own, in the opposite direction.*
+The hour's baseline was the median over the whole kept pool with the town
+INCLUDED, so a town that owns most of an hour wrote the number it was then
+measured against and had its own advantage subtracted from itself. Three texts
+said otherwise — the driver-facing sentence ("than the same hours paid
+elsewhere"), the note above it in `map.html`, and `advice.js`'s own comment ("a
+town is being compared with the other towns on this page") — and the code did
+none of it. Atlanta owns 65 of the 81 kept offers in the best-paying block:
+
+| town | shipped | own offers left out | | town | shipped | left out |
+|---|---|---|---|---|---|---|
+| **Atlanta** | **+1.47** | **+3.28** | | Marietta | −0.54 | −0.98 |
+| Kennesaw | +0.31 | +0.13 | | Dallas | −1.08 | −1.70 |
+| Mableton | +0.19 | +0.13 | | Smyrna | −1.41 | −1.13 |
+| Acworth | −0.05 | −0.23 | | Powder Springs | −1.45 | −1.69 |
+| Woodstock | −0.11 | −0.13 | | | | |
+
+Less than half the real figure on the one town where repositioning is a
+decision, and three towns move — Acworth and Woodstock swap, Dallas goes from
+seventh to last. The baseline is now what the OTHER towns paid in the same hour.
+The bootstrap says which number to trust: over 400 resamples the town coming out
+top is Atlanta in 305 of them under the new baseline and in 124 under the old,
+where Woodstock — fifteen offers — took first place 107 times.
+
+*What it does not touch is whether the ranking may be shown.* `p`, `h` and
+`real` come from the Kruskal-Wallis on ranks forty lines earlier and never see
+this baseline, so nothing here can talk the page into printing an order that
+does not beat chance. Verified on the week: `p` stays 0.002 either way.
+
+*A town with no elsewhere gets no figure, and that is not zero.* Where a town's
+every hour held no other town there is nothing it can be said to have paid more
+or less THAN, so `matched` is null and `MV.rankLead` prints a dash with no unit
+— `null >= 0` is true in JavaScript, so the obvious formatter puts "+$NaN/hr" on
+the page's most quotable figure. The formatting moved out of `map.html` to be
+driven without a browser; five mutations, five kills.
+
+*One existing check rested on the bug.* A fixture of two towns that share no
+hour asserted `matched === 0` for both, and its own comment explained why: each
+town WAS its hour's baseline and came out level with itself by construction. The
+answer was right by accident. It now asserts null, that no hour-held ranking is
+offered, and — the part that makes the fallback safe — that the medians it falls
+back to are still labelled as chance, because those medians are the $21-against-
+$11 landslide the whole section exists to refuse.
+
+*Two of the new checks were wrong first.* One asserted that two identical towns
+get the same figure, which is true under BOTH baselines, so it could not fail and
+went; what discriminates is the size — 4.0 against the old 0.1. The other guarded
+`placed.length > 1` where 1 is impossible, since a town is comparable only
+because an hour held another town that is comparable by the same hour. Written as
+`placed.length`, with the proof in the comment.
+
+*And `tests/mapview.test.js` printed its own total two sections early.* Thirty
+checks ran after the summary line and were counted but never announced, so a red
+run printed "All 195 map-view checks passed" with the failures underneath it. The
+summary goes last now, and the true count is 225.
+
 So `Advice.areas` groups on the town the rig read off the CARD, never on a
 coordinate, and **runs the test in the page** on whatever is loaded rather than
 trusting a threshold tuned to one week. The ranks are computed once and a

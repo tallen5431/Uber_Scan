@@ -1624,12 +1624,39 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   var held = A.areas(clockOnly, { key: KEY, strata: HOUR });
   ok_('...and with the hour held still there is nothing there', !held.real);
   eq('...nothing at all', held.p, 1);
-  eq('...and neither town is better than its own hour', held.groups[0].matched, 0);
-  eq('...nor is the other', held.groups[1].matched, 0);
+  /* ...and NEITHER TOWN GETS A FIGURE, where both used to get a zero.
+   *
+   * The zero was a tautology and this fixture is the proof. `Late` is only ever
+   * out at 1am, so the 1am baseline was built from `Late`'s own offers and it
+   * came out level with itself by construction — the comment further down this
+   * file said as much in as many words. The answer happened to be the right one
+   * here; the same tautology shrank Atlanta's real lead on the owner's week
+   * from $3.28 to $1.47, because a town that owns most of an hour has most of
+   * its advantage subtracted from itself.
+   *
+   * The baseline is now what the OTHER towns paid in the same hour, and these
+   * two share no hour at all, so there is no comparison to make and `matched`
+   * is null rather than zero. Null and not zero because zero is an answer —
+   * "it paid the same" — and this is the absence of one.
+   */
+  eq('neither town can be compared at its own hour', held.groups[0].matched, null);
+  eq('...nor the other, because they share no hour', held.groups[1].matched, null);
   ok_('...while the raw medians are still reported, being what was earned',
       held.groups[0].median > 20 || held.groups[1].median > 20);
-  ok_('...and the page is told which spread is which',
-      held.matched === true && held.rawSpread > held.spread);
+  /* With nothing to rank, the hour-held ranking is not offered: one town's
+   * figure is not an order, so the page falls back to the medians exactly as it
+   * does when there is only one pen. */
+  eq('...so no hour-held ranking is offered at all', held.matched, false);
+  /* And THAT is only safe because the fallback is still labelled as chance.
+   * The medians it falls back to are the $21-against-$11 landslide this whole
+   * section exists to refuse, so if it could be shown with coloured pips and no
+   * caveat the cure would be worse than the bug. It cannot: `real` comes from
+   * the Kruskal-Wallis on ranks shuffled WITHIN each hour, and an hour holding
+   * one town has nothing to permute, so a fixture that reaches this reaches it
+   * with a degenerate shuffle and p at its ceiling. Asserted rather than
+   * argued, because the argument is the kind that stops being true quietly. */
+  eq('...and the medians it falls back to are still called chance', held.real, false);
+  eq('...at the ceiling, nothing having been able to move', held.p, 1);
 
   // The control, and the half that says this does not simply refuse
   // everything: a town that pays better AT THE SAME HOURS still comes through.
@@ -1697,6 +1724,92 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
      single.matched, false);
   eq('...so the figure on the row is what the town paid',
      single.groups[0].median > 20, true);
+
+  /* ---- a town does not get to be its own baseline ---- */
+  //
+  // The bias this is about, in the shape that makes it measurable. `Big` and
+  // `Small` both pay exactly the going rate PLUS FOUR at the good hour, and the
+  // going rate at the poor one. They are identical towns. The only difference
+  // is how much of the good hour each owns: `Big` has nine tenths of it.
+  //
+  // With the town inside its own baseline, `Big` is measured against a median
+  // it mostly wrote, so nearly all of its four dollars is subtracted from
+  // itself and it reports far less than `Small` does for the identical
+  // behaviour — the figure a driver reads becomes a fact about how often they
+  // happened to be somewhere rather than about what it paid. On the owner's own
+  // week this is why Atlanta, which owns 65 of the 81 kept offers in the
+  // best-paying block, reported $1.47 where the comparison the page promises is
+  // $3.28.
+  var LIFT = 4;
+  var lopsided = [];
+  for (var b = 0; b < 18; b++) {
+    // Big owns the good hour: sixteen of its eighteen offers are in it.
+    lopsided.push(atHour('Big', b < 16 ? 1 : 16,
+                         (b < 16 ? GOOD : POOR) + LIFT + (b % 3) * 0.1, b % 2));
+    // Small is in it twice, and is otherwise the same town.
+    lopsided.push(atHour('Small', b < 2 ? 1 : 16,
+                         (b < 2 ? GOOD : POOR) + LIFT + (b % 3) * 0.1, b % 2));
+    // ...and a third town at the going rate, so each hour has an elsewhere
+    // that is not just the other one of the pair.
+    lopsided.push(atHour('Plain', b < 9 ? 1 : 16,
+                         (b < 9 ? GOOD : POOR) + (b % 3) * 0.1, b % 2));
+  }
+  var lop = A.areas(lopsided, { key: KEY, strata: HOUR });
+  ok_('the lopsided fixture is held still at all', lop.matched === true);
+  var bigOf = function (r) {
+    var g = r.groups.filter(function (x) { return x.name === 'Big'; })[0];
+    return g ? g.matched : null;
+  };
+  var smallOf = function (r) {
+    var g = r.groups.filter(function (x) { return x.name === 'Small'; })[0];
+    return g ? g.matched : null;
+  };
+  // Both are lifted, because both really are better than the hour they are in.
+  ok_('the town that owns the hour is credited for beating it (' + bigOf(lop) + ')',
+      bigOf(lop) > LIFT * 0.6);
+  ok_('...and so is the one that barely appears in it (' + smallOf(lop) + ')',
+      smallOf(lop) > LIFT * 0.6);
+  /* Both figures are the LIFT itself, 4.0 against 4.0, where the old baseline
+   * reported 0.1 and 0.1: a town that owns sixteen of an hour's eighteen good
+   * offers wrote that hour's median, so the whole of its advantage came back off
+   * itself and the identical town beside it lost the same. That the two agree is
+   * NOT asserted — they agree under both baselines, so the equality was a check
+   * that could not fail, and it went. What discriminates is the SIZE. */
+  eq('...and the figure is the lift, not a fraction of it', bigOf(lop), LIFT);
+
+  /* ---- some towns comparable, one not ---- */
+  //
+  // The mixed case, which is the only one that can say what the spread is taken
+  // over. `Pair1` and `Pair2` are both out at 1am, so each is the other's
+  // elsewhere. `Lonely` is only ever out at 4pm and is the only town there, so
+  // it has no elsewhere at all and gets no figure — while the other two still
+  // do, and the hour-held ranking is still offered.
+  var mixed = [];
+  for (var m = 0; m < 10; m++) {
+    mixed.push(atHour('Pair1', 1, GOOD + 3 + (m % 3) * 0.1, m % 2));
+    mixed.push(atHour('Pair2', 1, GOOD - 3 + (m % 3) * 0.1, m % 2));
+    mixed.push(atHour('Lonely', 16, POOR + (m % 3) * 0.1, m % 2));
+  }
+  var mix = A.areas(mixed, { key: KEY, strata: HOUR });
+  var byName = function (r, n3) {
+    return r.groups.filter(function (x) { return x.name === n3; })[0];
+  };
+  eq('a town alone in its hour gets no figure', byName(mix, 'Lonely').matched, null);
+  ok_('...while the two that share an hour do',
+      byName(mix, 'Pair1').matched !== null && byName(mix, 'Pair2').matched !== null);
+  eq('...so the ranking is still held still', mix.matched, true);
+  /* The one that has no figure sorts to the END — it is not the worst town, it
+   * is not in the order at all — and the spread is taken over the towns that
+   * HAVE figures. Taken over `kept` instead, the null coerces to zero and the
+   * span silently becomes the leader's own figure: 6 where the truth is 12. */
+  eq('...with the town that has no figure last',
+     mix.groups[mix.groups.length - 1].name, 'Lonely');
+  eq('...and the spread measured between the two that do',
+     mix.spread,
+     Math.round((byName(mix, 'Pair1').matched
+                 - byName(mix, 'Pair2').matched) * 100) / 100);
+  ok_('...which is the whole span, not the leader\'s figure (' + mix.spread + ')',
+      mix.spread > Math.abs(byName(mix, 'Pair1').matched) + 1);
 
   /* ---- outings against calendar days ---- */
   // Two questions, not two answers to one. daysIn is right for a BLOCK, which
