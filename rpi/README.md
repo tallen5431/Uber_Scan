@@ -7018,7 +7018,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      #  94 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 228 on the faults that only surface when a
+python3 rpi/test_lint.py        # 256 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #  50 on the three files the browser and the
@@ -7036,7 +7036,7 @@ python3 rpi/test_doctor.py      # 100 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 568 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 612 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying

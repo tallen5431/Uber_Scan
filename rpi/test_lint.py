@@ -644,6 +644,33 @@ for _named in sorted(set(re.findall(r'`([A-Za-z0-9_./-]+\.(?:js|py|html|css|md|s
     ok_('AUDITS.md names a file that exists: %s' % _named,
         os.path.exists(os.path.join(ROOT, _named)))
 
+# ...and the arithmetic it prints is the arithmetic that runs. The README's
+# "The math" block is the only place in the project that states the four rates
+# as formulas, and it said `$/mile = pay / miles` while offer-parser.js had
+# divided `net` since running costs were added — so the one document a driver
+# would check the rig against had never matched it, on the figure this project
+# has a Settled entry about. Found by reading the block, not by any check;
+# this is the check.
+#
+# Right-hand sides only, and matched as text against the expression in the
+# parser rather than evaluated: a checker that worked the rates out itself
+# would be a second implementation to keep in step, which is the fault it is
+# here to prevent.
+_parser_js = open(os.path.join(ROOT, 'offer-parser.js'), encoding='utf-8').read()
+_math = re.search(r'## The math\n+```\n(.*?)```', _readme, re.S)
+ok_('the README states the arithmetic', bool(_math))
+if _math:
+    for _rate, _expr in (('$/hour', 'net / (minutes / 60)'),
+                         ('$/min', 'net / minutes'),
+                         ('$/mile', 'net / miles')):
+        _line = re.search(r'^\s*%s\s*=\s*(.+?)\s*$' % re.escape(_rate),
+                          _math.group(1), re.M)
+        ok_('the README gives a formula for %s' % _rate, bool(_line))
+        if _line:
+            ok_('...and it is the one offer-parser.js runs: %s = %s'
+                % (_rate, _line.group(1)),
+                _line.group(1) == _expr and _expr in _parser_js)
+
 # ...and the README's own table covers every file the repo ships at the top
 # level, so the next one added has to be written down rather than quietly left
 # out. AUDITS.md itself was missing from it until this check was written.

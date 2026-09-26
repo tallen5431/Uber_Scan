@@ -181,8 +181,19 @@ LOSS = dict(UNCERTAIN, state='no', pay=2.50, minutes=28.0, cardMinutes=28.0,
             grossPerHour=5.36, perMile=-1.07, milesUncertain=False,
             uncosted=False, whole=True)
 
+# A card whose pay and distance divide to a round number, and whose `perMile`
+# says something else. The submetric row is the raw row — its job is to match
+# the phone — so $14.00 over 7.0 mi has to read $2.00, and `perMile` is set to
+# the net figure it must NOT be showing. Any panel that prints the reading's
+# own `perMile` here reads $1.70 and fails; only pay ÷ miles reads $2.00.
+DIVIDES = dict(UNCERTAIN, state='go', pay=14.0, minutes=30.0, cardMinutes=30.0,
+               billedMinutes=30.0, miles=7.0, perHour=23.8, grossPerHour=28.0,
+               cost=2.10, perMile=1.70, milesUncertain=False, uncosted=False,
+               whole=True)
+
 READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
-            'impossible': IMPOSSIBLE, 'untimed': UNTIMED, 'loss': LOSS}
+            'impossible': IMPOSSIBLE, 'untimed': UNTIMED, 'loss': LOSS,
+            'divides': DIVIDES}
 
 # ...and every field above has to be one the rig actually sends.
 #
@@ -1186,6 +1197,66 @@ const framed = (page) => page.waitForFunction(
       min: await page.evaluate(LOOK, '#vMin'),
       warn: await page.evaluate(LOOK, '#warn'),
     };
+    await page.close();
+    await ctx.close();
+  }
+
+  // --- the $/mi beside the pay and the miles -------------------------------
+  stage = 'the $/mi beside the pay and the miles';
+  //
+  // The fourth submetric. The row's rule is that it matches the phone, and
+  // this figure did not: it was the reading's `perMile`, which is net of the
+  // running cost, so $14.00 over 7.0 mi printed $1.70 between two boxes that
+  // divide to $2.00. The driver wanted it raw for a reason the rest of the
+  // panel cannot cover — "some apps have very bad time estimates but the $/mi
+  // could be used to judge it as well" — and an optimistic time raises no
+  // doubt at all, so on exactly those cards $/hr is wrong and this is right.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+
+    await page.evaluate((r) => window.__es.push(r), READINGS.divides);
+    await page.waitForTimeout(200);
+    out.permile = {
+      value: await page.evaluate(LOOK, '#vPerMile'),
+      label: await page.evaluate(LOOK, '#lPerMile'),
+      pay: await page.evaluate(LOOK, '#vPay'),
+      mile: await page.evaluate(LOOK, '#vMile'),
+    };
+
+    // A distance the reader itself does not trust. `perMile` is null there for
+    // the same reason, and dividing by the number anyway would put a confident
+    // rate on the glass with nothing behind it.
+    await page.evaluate((r) => window.__es.push(r), READINGS.uncertain);
+    await page.waitForTimeout(200);
+    out.permileUncertain = await page.evaluate(LOOK, '#vPerMile');
+
+    // ...and a card with no distance at all. A delivery card states a deadline
+    // and no route, which is the whole DoorDash half of a shift, and `miles`
+    // arrives null — the same clause that would refuse a zero.
+    await page.evaluate((r) => window.__es.push(r), READINGS.deadline);
+    await page.waitForTimeout(200);
+    out.permileNoMiles = await page.evaluate(LOOK, '#vPerMile');
+
+    // Each of the six doubts in turn, off the same card that divides to $2.00,
+    // so the only thing changing between them is which figure the reader says
+    // it cannot believe. Five of them take the pay or the distance with them;
+    // `time` is the one that leaves both standing.
+    out.permileDoubt = {};
+    for (const why of ['pay', 'time', 'rate', 'speed', 'leg', 'screen']) {
+      await page.evaluate((r) => window.__es.push(r),
+        Object.assign({}, READINGS.divides, { state: 'doubt', doubt: why }));
+      await page.waitForTimeout(160);
+      out.permileDoubt[why] = await page.evaluate(LOOK, '#vPerMile');
+    }
+
     await page.close();
     await ctx.close();
   }
@@ -3407,6 +3478,52 @@ try:
         ok_('...and how much of the journey that was',
             '7.8 mi' in warn)
         ok_('...on the glass, not pushed off it', (ut.get('warn') or {}).get('shown'))
+
+    # --- the $/mi beside the pay and the miles ---------------------------
+    #
+    # Raw, because the two boxes to its left are the pay and the miles and a
+    # figure that does not divide out of them is one a driver cannot check.
+    # The reading's own `perMile` is net — (pay − miles × costPerMile) ÷ miles
+    # — so it was thirty cents under the division it sits beside, and thirty
+    # cents is the whole of what this row exists to make checkable.
+    pm = got.get('permile') or {}
+    ok_('the $/mi submetric was measured', bool(pm.get('value')))
+    if pm.get('value'):
+        eq('$14.00 over 7.0 mi reads $2.00 — the division, not the net rate',
+           (pm['value'].get('text') or '').strip(), '$2.00')
+        ok_('...on the glass, not pushed off it', pm['value'].get('shown'))
+        eq('...labelled as the raw figure it is',
+           (pm.get('label') or {}).get('text'), '$/mi')
+        # The check is only a check if both halves of the sum are beside it.
+        ok_('...beside the payout it divided', '14' in ((pm.get('pay') or {}).get('text') or ''))
+        ok_('...and the distance it divided by', '7.0' in ((pm.get('mile') or {}).get('text') or ''))
+
+    unc = got.get('permileUncertain') or {}
+    ok_('the unreadable-distance case was measured', bool(unc))
+    if unc:
+        eq('a distance the reader does not trust gets no $/mi',
+           (unc.get('text') or '').strip(), '--')
+
+    nom = got.get('permileNoMiles') or {}
+    ok_('the no-distance case was measured', bool(nom))
+    if nom:
+        eq('...and a card that states no distance gets none either',
+           (nom.get('text') or '').strip(), '--')
+
+    # `doubt` names which figure the reader cannot believe, and five of the six
+    # take this one down with them: `pay` is the same impossible payout
+    # divided, `rate` and `speed` each leave either half open, `leg` means the
+    # distance is a fraction of the journey, `screen` means there is no offer.
+    # `time` is the one where the pay and the distance have each passed their
+    # own test and only the minutes failed — which is precisely the card the
+    # driver asked for this figure to cover.
+    dbt = got.get('permileDoubt') or {}
+    ok_('the six doubts were measured', len(dbt) == 6)
+    for why in ('pay', 'rate', 'speed', 'leg', 'screen'):
+        seen = ((dbt.get(why) or {}).get('text') or '').strip()
+        eq('a %r doubt withholds the $/mi too' % why, seen, '--')
+    eq('...and a doubt about the TIME alone leaves it standing',
+       ((dbt.get('time') or {}).get('text') or '').strip(), '$2.00')
 
     # --- a Re-find the scanner refused -----------------------------------
     #

@@ -634,8 +634,10 @@
            the offer, the other is the one that decides. -->
       <div class="working" id="working" hidden></div>
       <!-- As read off the card, so it can be checked against the phone in the
-           two seconds before the offer times out. These three are deliberately
-           the raw numbers: their whole job is to match what is on the screen. -->
+           two seconds before the offer times out. All four are deliberately
+           the raw numbers: their whole job is to match what is on the screen.
+           $/mi belongs to that rule and not beside it — the pay and the miles
+           are the two boxes to its left, so the division has to come out. -->
       <div class="submetrics">
         <div class="sub"><span id="vPay">--</span><small id="lPay">pay</small></div>
         <div class="sub"><span id="vMin">--</span><small id="lMin">minutes</small></div>
@@ -1925,19 +1927,56 @@
     el.lMin.textContent = r.fromDeadline ? 'min left' : 'minutes';
     el.vMile.textContent = r.miles === null ? '--' : Number(r.miles).toFixed(1);
     // Secondary on purpose: $/hr is what decides an offer, because an hour is
-    // the thing actually being spent. $/mi is the number most drivers carry a
-    // rule of thumb for, so it is worth showing beside it.
+    // the thing actually being spent. $/mi is the cross-check, for the case
+    // the driver named — "some apps have very bad time estimates but the $/mi
+    // could be used to judge it as well". Nothing else here covers it: an
+    // optimistic time raises no doubt at all (SANE_MINUTES runs 2 to 240, and
+    // an app twenty minutes hopeful sails through), so on exactly those offers
+    // $/hr is quietly wrong and this is quietly right. A cross-check, not a
+    // decision rule — AUDITS has the measurement that ranking on $/mile earns
+    // less, and that stands.
     //
-    // Except on a reading that cannot be true. The card's own pay, time and
-    // distance stay — the driver is holding the same card and those are what
-    // they check against it — but $/mi is not on the card, it is worked out
-    // from the figure that is wrong. Hiding the headline rate and leaving
-    // "$303/mi" underneath it withholds nothing: it is the same impossible
-    // number, smaller.
-    el.vPerMile.textContent = (r.state === 'doubt' || r.perMile === null
-                               || r.perMile === undefined)
-      ? '--' : money(r.perMile, 2);
-    el.lPerMile.textContent = deducted ? 'net $/mi' : '$/mi';
+    // RAW, which is the whole of what makes it checkable, and what the row's
+    // own rule already demanded: `perMile` off the reading is
+    // (pay − miles × costPerMile) ÷ miles, the raw figure minus a constant
+    // thirty cents, so $14.00 over 7.0 mi printed $1.70 between two boxes that
+    // divide to $2.00. Nothing is lost — the working directly below spells the
+    // deduction out, and the offers page and keypad still carry the net rate.
+    //
+    // It survives ONE of the six doubts, because `doubt` names which figure
+    // the reader cannot believe and only one leaves this one standing:
+    //
+    //   pay    the payout is outside SANE_PAY: the same impossible number,
+    //          divided.
+    //   rate   pay over time is impossible and either half could be the liar.
+    //   speed  miles over time is impossible; the miles could be the liar.
+    //   leg    part of the journey was never timed, so the distance is partial.
+    //   screen not an offer at all.
+    //   time   the MINUTES are outside SANE_MINUTES — the one case where the
+    //          pay and the distance have each passed their own test. This is
+    //          built from those two and nothing else, so it is the last figure
+    //          on the card still worth reading.
+    //
+    // `milesUncertain` refuses it whatever the verdict, for the same reason
+    // `perMile` is null there: a rate off a distance the reader itself doubts
+    // is a confident number with nothing behind it.
+    // One clause, because only one of them can change an answer. A guard on
+    // the denominator was written first — `r.miles > 0 &&`, mirroring
+    // offer_parser's `miles and not miles_uncertain` — and no input could make
+    // it matter: a delivery card states a deadline and no route, `miles`
+    // arrives null, and the division comes out Infinity, which `money` already
+    // answers '--' to along with a zero and a NaN. The mutation that weakens
+    // it to `!== 0` survives every check in the suite. So the missing-distance
+    // case is `money`'s refusal, and the check below pins it there.
+    //
+    // Nothing tests the types either: this runs only on a ready reading, and a
+    // reading is not ready until `net = pay - cost` has been worked out, so a
+    // pay that is not a number cannot arrive here.
+    var rawPerMile = r.milesUncertain ? null : r.pay / r.miles;
+    var mileStands = r.state !== 'doubt' || r.doubt === 'time';
+    el.vPerMile.textContent = (rawPerMile === null || !mileStands)
+      ? '--' : money(rawPerMile, 2);
+    el.lPerMile.textContent = '$/mi';
 
     // The working, in the panel rather than in the small print, and in two
     // steps so both rates are on screen at once: what the offer itself pays

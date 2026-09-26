@@ -2113,6 +2113,50 @@ is a check about the LIST, and separately that `scan.html` registers. Nothing
 asked this page. It does now, in a browser context that opens nothing else,
 because sharing a context would test the mask rather than the gap.
 
+**The fourth figure in the raw row was the net one.** The submetrics under the
+headline are the readout a driver checks against the phone in the two seconds
+before a card times out, and three of them matched it. The fourth was `perMile`
+off the reading, which is (pay − miles × costPerMile) ÷ miles — so $14.00 over
+7.0 mi printed $1.70 sitting between the two boxes that divide to $2.00, and
+nothing on the glass closed the gap unless the driver already knew what the rig
+charges a mile. It is now pay ÷ miles. Nothing is withheld by that: the working
+line directly below spells the deduction out in full, and the offers page and
+the keypad both still carry the net rate, the keypad in a row that says "net
+per mile" and means it.
+
+*A cross-check, not a decision rule.* Settled's measurement stands — ranking
+offers on $/mile earns $16.03/hr against $19.80 for $/hr — and this changes
+nothing about what picks the offer. What it covers is the case the driver named:
+an app that is twenty minutes optimistic raises no doubt at all, because
+`SANE_MINUTES` runs from 2 to 240 minutes, so on exactly those cards the
+headline is quietly wrong and pay over distance is quietly right. That case had
+no reading anywhere on the panel.
+
+*It survives one of the six doubts and no others,* because `doubt` names which
+figure the reader cannot believe: `pay` would make this the same impossible
+payout divided, `rate` and `speed` each leave either half open, `leg` means the
+distance is a fraction of the journey, `screen` means there is no card at all —
+and `time` is the one where the pay and the distance have each passed their own
+test, which is precisely the card this figure exists for. Refused outright when
+the distance is doubted, and when there is no distance, which is every delivery
+card that states a deadline and no route.
+
+*The denominator guard was deleted because no input could make it matter.*
+Written first as `r.miles > 0 &&`, mirroring offer_parser's own
+`miles and not miles_uncertain`, it looked like the load-bearing half. A
+delivery card sends `miles` as null, the division comes out Infinity, and
+`money` already answers `--` to that, to a zero and to a NaN — so the mutation
+weakening it to `!== 0` survived the whole suite. The missing-distance case is
+`money`'s refusal, and the check now kills a mutation there instead. Six
+mutations, six named killers, one of them in a function three hundred lines
+away from the change.
+
+*And the README had been describing the raw formula all along.* Its math block
+said `$/mile = pay / miles` while every screen in the project divided `net`,
+so the one document that states the arithmetic had never matched any of it. It
+now says `net / miles`, and names the driving panel as the one deliberate
+exception.
+
 ### The offers page
 
 **A pairing's withheld claim was printed as its opposite.** "Beats finishing

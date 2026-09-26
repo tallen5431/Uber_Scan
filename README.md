@@ -89,8 +89,13 @@ net     = pay - (miles x cost per mile)
 
 $/hour  = net / (minutes / 60)
 $/min   = net / minutes
-$/mile  = pay / miles
+$/mile  = net / miles
 ```
+
+The driving panel is the one exception, and deliberately: its `$/mi` is
+`pay / miles`, because it sits in a row whose job is to match the card on the
+phone, between the two boxes that divide to it. The working line under the
+headline shows the deduction, so nothing is hidden by it.
 
 ## Installing on a phone
 
