@@ -6962,7 +6962,7 @@ The Pi parser is a port of the browser one, and both run the same corpus:
 ```sh
 node tests/corpus.test.js       # 793 checks, the shared corpus
 node tests/parser.test.js       #  98 on the browser side alone
-node tests/advice.test.js       # 383 on what line to tell a driver to draw
+node tests/advice.test.js       # 410 on what line to tell a driver to draw
 node tests/crop.test.js         #  16 on the trip from a drag to a crop box
 node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
@@ -7046,7 +7046,7 @@ python3 rpi/test_dashboard.py   # 618 on what the driving screen shows while a
 python3 rpi/test_layout.py      # 795 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
-python3 rpi/test_offerspage.py  # 364 on the offers page as a driver reads it:
+python3 rpi/test_offerspage.py  # 389 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 166 on judging a second job against the one

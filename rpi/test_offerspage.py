@@ -216,6 +216,47 @@ NOON = NOW - 10 * 3600000           # NOW is 22:13 UTC; this is 12:13 UTC
 def _js_weekday(at_ms):
     """getDay(): Sunday is 0. Python's weekday() puts Monday at 0."""
     return (_dt.datetime.utcfromtimestamp(at_ms / 1000).weekday() + 1) % 7
+# --- a window wide enough to move the suggested line across the cost sweep ---
+#
+# The cost ladder only renders when the line the replay suggests MOVES as a mile
+# gets dearer, and none of the small fixtures above are wide enough to make it.
+# So the block, and the sentence under it, had no page-level check at all — and
+# the sentence was wrong: it took the first failing rung and printed it as a
+# ceiling ("only inside the range while a mile costs under about $0.15"), which
+# needs `holds` to go false-then-true and never back. Over the owner's real week
+# that contradicted the table four lines above it at 34 of the 41 whole-dollar
+# targets that render the block.
+#
+# Forty rows, which is the fewest that move the line, and a $20 target because
+# that is where the owner's own week puts the recommendation. The rates come out
+# failing at the three CHEAPEST rungs and holding at the two dearest — so the
+# old sentence took $0.15, the first failure, and printed it as a ceiling while
+# $0.45 and $0.60 both read "inside" in the table above it. That is the $16-$22
+# mode, and it is the one that bites at the line the page recommends.
+#
+# Sized as small as it can be for a plain reason: these windows are handed to
+# the browser driver on its command line, and seven hundred rows exceeds what
+# argv will take — the first draft of this fixture failed with E2BIG before it
+# failed a check.
+COST_SWEEP = []
+for _i in range(40):
+    _mi = 2 + (_i % 19)
+    _mn = 12 + (_i % 41)
+    _pay = 5 + ((_i * 13) % 38)
+    _row = offer(3000 + _i, pay=float(_pay), minutes=float(_mn),
+                 cost=round(_mi * 0.30, 2), per_mile=0.30, state='no')
+    _row['miles'] = float(_mi)
+    # Fifteen minutes apart, not three: the advice is not READY over a
+    # two-hour window, and the cost block only renders once it is. The
+    # first draft of this fixture rendered nothing for that reason and
+    # the checks below reported zero rows rather than a wrong sentence.
+    _row['at'] = _row['firstAt'] = NOW - _i * 900000
+    _row['target'] = 20
+    _row['perHour'] = round((_pay - _mi * 0.30) / (_mn / 60.0), 2)
+    _row['grossPerHour'] = round(_pay / (_mn / 60.0), 2)
+    _row['settled'] = True
+    COST_SWEEP.append(_row)
+
 WEEKS = [
     offer(100 + d, pay=8.0 + 2 * _js_weekday(NOON - d * 86400000), state='go')
     for d in range(21)
@@ -595,6 +636,10 @@ FEEDS = {
                  'truncated': False, 'days': 7, 'hidden': 0,
                  'watched': {'saw': len(NO_CLOCK), 'kept': len(NO_CLOCK)},
                  'unreadable': None, 'pairs': [], 'offers': NO_CLOCK},
+    'cost sweep': {'count': len(COST_SWEEP), 'total': len(COST_SWEEP),
+                   'truncated': False, 'days': 7, 'hidden': 0,
+                   'watched': {'saw': len(COST_SWEEP), 'kept': len(COST_SWEEP)},
+                   'unreadable': None, 'pairs': [], 'offers': COST_SWEEP},
     'weeks': {'count': len(WEEKS), 'total': len(WEEKS), 'truncated': False,
               'days': 30, 'hidden': 0, 'watched': {'saw': 21, 'kept': 21},
               'unreadable': None, 'pairs': [], 'offers': WEEKS},
@@ -1446,6 +1491,57 @@ try:
     _shares = [float(c['cells'][1].rstrip('%')) for c in _w]
     eq('a pickier line never takes a larger share of what came past',
        _shares, sorted(_shares, reverse=True))
+
+    # --- the cost sweep, and the sentence under it ------------------------
+    #
+    # What the ladder is for: the running cost is the one number on this page
+    # nobody has measured, and the block says how much the answer depends on it.
+    # The sentence beneath used to take the FIRST rung where the line falls
+    # outside and print it as a ceiling — "only inside the range while a mile
+    # costs under about $0.15" — which is a reading of a two-sided test as a
+    # one-sided one. Swept over the owner's own 1,166-offer week at every
+    # whole-dollar target from $5 to $45, it contradicted the table printed four
+    # lines above it at 34 of the 41 targets that render the block: at 27 of
+    # them nothing held anywhere and it named a cut-off regardless, and at the
+    # other 7 dearer rates held. At $20 — the line the page itself recommends on
+    # that week — the row marked "(yours)" read "inside" underneath it.
+    _sw = (got.get('cost sweep') or {}).get('advice') or {}
+    _sc = ' '.join(_sw.get('cost') or [])
+    _sr = [c for c in (_sw.get('waits') or []) if '$0.' in (c['cells'][0] or '')]
+    ok_('a wide enough window renders the cost sweep at all (%d rows)' % len(_sr),
+        len(_sr) >= 4)
+    ok_('...with the driver\'s own rate marked once',
+        len([c for c in _sr if c['mine']]) == 1)
+    # The sentence names rates, and it names them from the same two lists the
+    # table is drawn from, so the two cannot disagree.
+    _inside = [c['cells'][0].replace(' (yours)', '') for c in _sr
+               if c['cells'][3] == 'inside']
+    _outside = [c['cells'][0].replace(' (yours)', '') for c in _sr
+                if c['cells'][3] == 'outside']
+    # Both lists non-empty is what makes the check mean anything: a table that
+    # is all "inside" or all "outside" takes the other two branches of the
+    # sentence and says nothing about the one that was wrong.
+    ok_('...and the fixture has rates on both sides (%s in, %s out)'
+        % (_inside, _outside), len(_inside) >= 1 and len(_outside) >= 1)
+    # ...and specifically a DEARER rate holding than one that fails, which is
+    # what makes "only inside below $X" false however X is chosen.
+    ok_('...with a dearer rate holding than one that does not (%s / %s)'
+        % (_inside, _outside), max(_inside) > min(_outside))
+    for _r8 in _inside:
+        ok_('...the note names %s as a rate the line survives' % _r8, _r8 in _sc)
+    for _r8 in _outside:
+        ok_('...and names %s as one it does not' % _r8, _r8 in _sc)
+    # The old sentence, by its shape rather than by its exact words: any claim
+    # that the line holds BELOW some figure is a claim this table cannot make.
+    no_('...and claims no cut-off, which is what it got wrong (%r)' % _sc[:110],
+        re.search(r'only inside the range while a mile costs under', _sc))
+    # ...and the fact the driver actually needs: is MY rate one of the good ones.
+    _mineCell = [c for c in _sr if c['mine']]
+    if _mineCell:
+        _mineIn = _mineCell[0]['cells'][3] == 'inside'
+        ok_('...and says which side the driver\'s own rate falls',
+            ('your rows use among the first' in _sc) == _mineIn
+            and ('your rows use is among the second' in _sc) != _mineIn)
 
     # NOTHING TICKED IS NOT AN EMPTY CAR. With no ✓ anywhere the arithmetic is
     # 0 busy hours out of 15.8, and the page announced "100% of the time it was

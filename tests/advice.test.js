@@ -1975,6 +1975,92 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   var noTarget = A.costLadder(market, {});
   ok_('with no line set, the sweep says nothing about one',
       noTarget && noTarget.every(function (r) { return r.holds === null; }));
+
+  /* ---- which rungs the line survives, as a list and not a cut-off ---- */
+  //
+  // The offers page printed the FIRST failing rung as an upper bound: "your line
+  // is only inside the range while a mile costs under about $0.15". That reading
+  // needs `holds` to go false-then-true and never back, and `holds` is
+  // two-sided — `target >= low && target <= high` — so a line can be too high
+  // for a cheap mile and land inside once the mile gets dearer. Swept over the
+  // owner's 1,166-offer week at every whole-dollar target from $5 to $45, that
+  // sentence contradicted the table four lines above it at 34 of the 41 targets
+  // that render the block.
+  //
+  // Hand-built ladders, because the point is the SHAPE of `holds` and a replay
+  // cannot be asked for a shape on demand.
+  var rung = function (perMile, holds, isMine) {
+    return { perMile: perMile, holds: holds, mine: !!isMine };
+  };
+  // The shape at the driver's own $25: cheap rates hold, dear ones do not. The
+  // one case the old sentence got right, which is why nobody saw the rest.
+  var falling = A.costHolds([rung(0.15, true), rung(0.22, true),
+                             rung(0.30, true, true), rung(0.45, false),
+                             rung(0.60, false)]);
+  eq('the rates a line survives are listed', JSON.stringify(falling.holds),
+     '[0.15,0.22,0.3]');
+  eq('...and the rates it does not', JSON.stringify(falling.fails), '[0.45,0.6]');
+  eq('...and whether the driver\'s own rate is one of them', falling.mineHolds, true);
+
+  /* The shape at $20, which is the line the page ITSELF recommends on the
+   * owner's week: the cheap rungs fail and the dear ones hold, so the old
+   * sentence named $0.15 as a ceiling while the row marked "(yours)" at $0.30
+   * read "inside" four lines above it. */
+  var rising = A.costHolds([rung(0.15, false), rung(0.22, false),
+                            rung(0.30, true, true), rung(0.45, true),
+                            rung(0.60, true)]);
+  eq('a line too high for a cheap mile holds once the mile gets dearer',
+     JSON.stringify(rising.holds), '[0.3,0.45,0.6]');
+  eq('...and the cheap rungs are the ones that fail',
+     JSON.stringify(rising.fails), '[0.15,0.22]');
+  ok_('...so there is no single cut-off to name, and none is', rising.any);
+
+  /* And the shape no inequality can express at all, which the owner's week
+   * really produces at a $21 target: the line fails at the CHEAPEST rung and at
+   * the DEAREST, and holds in between. */
+  var middle = A.costHolds([rung(0.15, false), rung(0.22, true),
+                            rung(0.30, true, true), rung(0.45, true),
+                            rung(0.60, false)]);
+  eq('a line can fail at both ends and hold in the middle',
+     JSON.stringify(middle.holds), '[0.22,0.3,0.45]');
+  eq('...with both ends named as failures',
+     JSON.stringify(middle.fails), '[0.15,0.6]');
+  eq('...and it is not "all of them"', middle.all, false);
+
+  // Nothing holds anywhere, which is 27 of the 41 targets on the owner's week.
+  // The old sentence still named a cut-off there — the cheapest rung, whose own
+  // row reads "outside".
+  var none = A.costHolds([rung(0.15, false), rung(0.30, false, true),
+                          rung(0.60, false)]);
+  eq('a line no cost can rescue holds nowhere', none.any, false);
+  eq('...and lists no rate as holding', JSON.stringify(none.holds), '[]');
+  eq('...while saying the driver\'s own rate is not one', none.mineHolds, false);
+
+  var every = A.costHolds([rung(0.15, true), rung(0.30, true, true),
+                           rung(0.60, true)]);
+  ok_('a line that survives the whole sweep says so', every.all && every.any);
+
+  // No target set: `holds` is null on every rung, and null is neither a hold nor
+  // a failure. "It holds everywhere" would be a claim about a comparison that
+  // was never made.
+  var untested = A.costHolds([rung(0.15, null), rung(0.30, null, true),
+                              rung(0.60, null)]);
+  eq('an untested ladder holds nothing', untested.any, false);
+  eq('...and fails nothing either', JSON.stringify(untested.fails), '[]');
+  eq('...and is not "all of them"', untested.all, false);
+  eq('...and says nothing about the driver\'s own rate', untested.mineHolds, null);
+
+  /* The invariant, asked of every shape above rather than of one: the two lists
+   * together are exactly the rungs that were tested, and no rate is in both. A
+   * sentence built from these cannot describe a rung it did not read. */
+  [[falling, 5], [rising, 5], [middle, 5], [none, 3], [every, 3]]
+    .forEach(function (pairArg, i) {
+      var h = pairArg[0], n = pairArg[1];
+      eq('every tested rung is accounted for (' + i + ')',
+         h.holds.length + h.fails.length, n);
+      eq('...and none is in both lists (' + i + ')',
+         h.holds.filter(function (v) { return h.fails.indexOf(v) >= 0; }).length, 0);
+    });
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

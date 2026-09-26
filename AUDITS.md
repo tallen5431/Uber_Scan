@@ -2292,6 +2292,49 @@ Four mutations, four named killers.
 
 ### The offers page
 
+**The cost sweep's footnote read a two-sided test as a one-sided one, and
+contradicted the table four lines above it.** `holds` is `target >= low &&
+target <= high`, so a line can be too HIGH for a cheap mile and land inside once
+the mile gets dearer. The note took the first rung where `holds` is false and
+printed it as a ceiling — "your line is only inside the range while a mile costs
+under about $0.15" — which is true only if `holds` never goes back. Swept over
+the owner's own 1,166-offer week at every whole-dollar target from $5 to $45, it
+contradicted the table it sits under at **34 of the 41 targets that render the
+block**, in two ways:
+
+| targets | n | what it printed | what the table said |
+|---|---|---|---|
+| $5–$15, $30–$45 | 27 | "under about $0.15" | **no rung holds at all**, $0.15 included |
+| $16–$22 | 7 | "under about $0.15" | $0.45 and $0.60 hold, and at $20 so does the row marked **(yours)** |
+
+$20 is the line the page itself recommends on that week, so the worst case is
+the page telling a driver who took its advice to change the number it had just
+given them. The owner's own $25 falls in the region where the old reading is
+right, which is why it was never seen.
+
+*No inequality, no interval, no assumption about the shape.* `Advice.costHolds`
+returns the rates the line survives, the rates it does not, and which side the
+driver's own rate falls, and the page lists them: "inside at $0.30, $0.45 and
+$0.60 a mile and outside it at $0.15 and $0.22 — the $0.30 your rows use among
+the first." True whatever the band does, including the shape that has no
+cut-off to name at all: on a 60-row replay at half-hour spacing the line holds
+at $0.15, fails at $0.22 and holds again at $0.30, $0.45 and $0.60.
+
+*The fixture had to be found rather than written.* No existing window on the
+offers page renders this block, because the ladder only appears when the
+suggested line MOVES across the sweep — so the sentence had no page-level check
+of any kind. Forty rows at fifteen-minute spacing is the smallest that both
+renders it and reaches the failing shape; three-minute spacing leaves the advice
+not READY and the block never appears, and seven hundred rows exceeds what the
+browser driver's command line will take. Five checks on the page kill the old
+sentence by name, and five mutations on `costHolds` are killed by the unit tests.
+
+*And the fix broke the page twice before it worked.* The helper that joins the
+rates was called `money`, which is the name of a page-wide formatter declared at
+the top of `journal.html`; `var` hoists, so it shadowed the real one for the
+whole function and emptied the entire advice block — nineteen checks, none of
+them about the cost sweep, and no error in the console.
+
 **A pairing's withheld claim was printed as its opposite.** "Beats finishing
 what you have" is the one clause of a stacking answer stated flat, because it
 is the only one that does not depend on the geography. `Advice.stack` returns

@@ -1770,7 +1770,7 @@
     });
     if (ladder && moves) {
       var mine = ladder.filter(function (r) { return r.mine; })[0];
-      var breaks = ladder.filter(function (r) { return r.holds === false; });
+      var held = Advice.costHolds(ladder);
       html += '<p>All of that assumes a mile costs you <b>$'
             + (mine ? mine.perMile.toFixed(2) : '?') + '</b>, which is the '
             + 'figure on your rows — and it is the one number here nobody has '
@@ -1789,16 +1789,51 @@
               + '</tr>';
       });
       html += '</tbody></table>';
-      html += breaks.length
-        ? '<p class="note">So your line is only inside the range while a mile '
-          + 'costs under about $' + breaks[0].perMile.toFixed(2) + '. Fuel and '
-          + 'tyres alone on a small car is nearer the top of this table; fuel, '
-          + 'servicing and depreciation counted properly is nearer the bottom. '
-          + 'Which of those you mean is worth an evening with a spreadsheet, '
-          + 'because it is worth more than anything else on this page.</p>'
-        : '<p class="note">Your line stays inside the range at every one of '
+      /* The rates it survives, LISTED. This said "your line is only inside the
+       * range while a mile costs under about $X", taking X from the first rung
+       * that fails — which is an upper bound only if `holds` never goes back to
+       * true, and it does. Over the driver's own week that sentence contradicted
+       * the table directly above it at 34 of the 41 whole-dollar targets that
+       * render this block: at 27 of them nothing held at all and it still named
+       * a cut-off, and at the other 7 dearer rates held. At $20, the line this
+       * very page recommends, the row marked "(yours)" read "inside" four lines
+       * above a note saying it was not.
+       *
+       * `Advice.costHolds` gives the two lists and nothing is inferred from
+       * their shape, so the sentence is true whatever the band does. */
+      /* NOT called `money`. This page already has a page-wide `money(n, dp)`
+       * at the top of the file, and a `var` of that name inside this function
+       * hoists over it for the whole of it — a shadow that breaks any later
+       * caller silently. Named for what it does instead. */
+      var rateList = function (rates) {
+        var each = rates.map(function (v) { return '$' + v.toFixed(2); });
+        return each.length < 2 ? (each[0] || '')
+          : each.slice(0, -1).join(', ') + ' and ' + each[each.length - 1];
+      };
+      html += !held.any
+        ? '<p class="note">No figure in this table keeps your $' + target
+          + ' inside the range \u2014 at every one of them the line wants '
+          + 'moving, not the cost. What a mile really costs you is still worth '
+          + 'an evening with a spreadsheet, but it is not what this target is '
+          + 'resting on.</p>'
+        : held.all
+        ? '<p class="note">Your line stays inside the range at every one of '
           + 'these, so whatever a mile really costs you, the target is not '
-          + 'what is resting on the guess.</p>';
+          + 'what is resting on the guess.</p>'
+        : '<p class="note">Your line is inside the range at ' + rateList(held.holds)
+          + ' a mile and outside it at ' + rateList(held.fails) + ' \u2014 '
+          + (held.mineHolds === true
+              ? 'the $' + (mine ? mine.perMile.toFixed(2) : '?')
+                + ' your rows use among the first.'
+              : held.mineHolds === false
+              ? 'and the $' + (mine ? mine.perMile.toFixed(2) : '?')
+                + ' your rows use is among the second.'
+              : 'and your own rate is not one of them.')
+          + ' Fuel and tyres alone on a small car is nearer the top of this '
+          + 'table; fuel, servicing and depreciation counted properly is nearer '
+          + 'the bottom. Which of those you mean is worth an evening with a '
+          + 'spreadsheet, because it is worth more than anything else on this '
+          + 'page.</p>';
     }
 
     el.adviceCost.innerHTML = html;

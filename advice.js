@@ -1558,6 +1558,52 @@
     return out.length > 1 ? out : null;
   }
 
+  /* Which rungs of that ladder the driver's line actually survives, as a list
+   * rather than as a cut-off.
+   *
+   * The page used to take the FIRST rung where `holds` is false and print it as
+   * an upper bound — "your line is only inside the range while a mile costs
+   * under about $0.15". That is only true if `holds` goes false-then-true and
+   * never back, and it does not: `holds` is `target >= low && target <= high`,
+   * two-sided, so a line can be too HIGH for a cheap mile and land inside once
+   * the mile gets dearer. This file already records that the suggested line is
+   * not monotone in the cost; the footnote assumed the band was.
+   *
+   * Swept over the driver's own 1,166-offer week at every whole-dollar target
+   * from $5 to $45, the old sentence contradicted the table printed four lines
+   * above it at 34 of the 41 targets that render it, in two ways:
+   *
+   *   $5-$15, $30-$45   no rung holds at all, and it named $0.15 as the
+   *     (27 targets)    cut-off although the $0.15 row itself reads "outside"
+   *   $16-$22           dearer rungs hold, and it named $0.15 anyway. At $20 —
+   *      (7 targets)    the line the page itself recommends — the row marked
+   *                     "(yours)" says "inside" under a note saying it is not
+   *
+   * The driver's own $25 is in the clean region, which is why nobody saw it.
+   *
+   * So: no inequality, no interval, no assumption about the shape. The rates at
+   * which the line holds, the rates at which it does not, and whether the
+   * driver's own rate is among the first — all of which are true by
+   * construction, whatever `holds` does across the ladder. The page words it.
+   */
+  function costHolds(ladder) {
+    var rungs = ladder || [];
+    var holds = [], fails = [], mineHolds = null;
+    rungs.forEach(function (r) {
+      if (r.holds === true) holds.push(r.perMile);
+      else if (r.holds === false) fails.push(r.perMile);
+      // `holds === null` is "no target to test", and it is neither.
+      if (r.mine) mineHolds = r.holds;
+    });
+    return { holds: holds, fails: fails,
+             any: holds.length > 0,
+             // `any &&` because a ladder whose every rung has a null `holds` has
+             // no target at all, and "it holds everywhere" would be a claim
+             // about a comparison nobody made.
+             all: holds.length > 0 && fails.length === 0,
+             mineHolds: mineHolds };
+  }
+
   /* The whole answer, or a `ready: false` saying what it is short of.
    *
    * `target` in opts is the driver's current line, used only for the comparison. */
@@ -1836,6 +1882,7 @@
            // The one place the driver's 4am day boundary is written down.
            DAY_STARTS_AT: DAY_STARTS_AT,
            costPerMileIn: costPerMileIn, costLadder: costLadder,
+           costHolds: costHolds,
            mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,
            // Exported because a page that prints how far the line moved has to
            // be able to say what "settled" was allowed to mean, and a check
