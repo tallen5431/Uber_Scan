@@ -184,6 +184,39 @@ for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
     for suffix in ('.part', '.4321.7.part', '.tmp'):
         ok_('...and %s%s with it' % (base, suffix), is_ignored(base + suffix))
 
+# ...and the rule the paragraph above STATES is now the rule this file ENFORCES,
+# which it did not. It asserted that both name shapes are gitignored — a fact
+# about `.gitignore` — and said in prose that the crop endpoint appends a pid
+# and a counter so two writes cannot interleave. Three other sites wrote a fixed
+# `<name>.part` and nothing asked.
+#
+# Measured on the real server before it was fixed: two concurrent POSTs of 600
+# places and 1, against a seeded 1,325-place file, ten runs — two left
+# `places.json` unparseable with `GET /api/places` answering `stored: 0`, and
+# the other eight lost one writer's batch while replying `stored: 1925` over a
+# file holding 1,326. None of the ten came out right.
+#
+# A temporary that is renamed into place must carry something unique to the
+# writer. The check is textual because the alternative is running every writer
+# concurrently, which is `rpi/test_server.py`'s job and costs a server per case;
+# this costs nothing and catches the next one at the point it is typed.
+for _f, _mark in (('server.js', 'process.pid'), ('rpi/sync.py', 'getpid')):
+    _src = open(os.path.join(ROOT, _f), encoding='utf-8').read().splitlines()
+    for _i, _line in enumerate(_src, 1):
+        # `//` and `#` catch a trailing comment; a continuation line of a `/* */`
+        # block starts with `*` and would otherwise be read as code. Both shapes
+        # exist in server.js within ten lines of the helper, and both failed
+        # this check as prose the first time it ran — which is the check being
+        # wrong, not the file.
+        _bare = _line.lstrip()
+        if _bare.startswith(('*', '/*')):
+            continue
+        _code = _line.split('//')[0].split('#')[0]
+        if '.part' not in _code:
+            continue
+        ok_('%s:%d builds its temporary a name of its own' % (_f, _i),
+            _mark in _code)
+
 # --- nothing big rides along that the rig cannot use ------------------------
 #
 # Four Python wheels sat at the root of this repository for a while: 48MB,

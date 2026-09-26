@@ -1709,6 +1709,47 @@ test and say so in the code rather than pretending otherwise: the
 double-release guard, which no current path reaches, and the `setImmediate`,
 which buys latency and not safety.
 
+**That queue was right and was built for one endpoint out of three that needed
+it.** `/api/places` does the same read, decide, write on a file two browsers
+reach at once, and its own comment says what it was meant to do: "MERGED, never
+written over. Two browsers place different days of the same journal, and a POST
+that replaced the file would have whichever finished last throw the other's work
+away." Measured against the real server — two concurrent POSTs of 600 places and
+1, against a seeded 1,325-place file, ten runs:
+
+| outcome | runs |
+|---|---|
+| `places.json` unparseable, `GET` answering `stored: 0` | 2 |
+| one writer's whole batch lost, reply claiming `stored: 1925` over a file of 1,326 | 8 |
+| correct | **0** |
+
+The cache is what the Settled entry prices at 1,325 places and about 24 minutes
+to rebuild, and the POST that destroyed it answered `ok: true`. With the queue,
+ten of ten come out right at 1,926.
+
+*One cure per fault, because two cures hid each other.* Three sites wrote a
+fixed `<name>.part` where the crop endpoint appends a pid and a counter, and
+`rpi/test_lint.py` had stated that rule in prose since it was written while
+checking only that both name shapes are gitignored. Both cures were applied to
+both endpoints first, and then neither could be tested: with the queue in place
+the shared temporary is unreachable, and with unique names the missing queue
+costs nothing the suite can see. So `/api/places` keeps the queue — it is the
+lost update that costs the 24 minutes — and `/api/config/backup` keeps only the
+unique name, because its read is a "has it changed" test and last-writer-wins is
+the right answer there. Reverting either one now fails a named check.
+
+*The rule is enforced rather than described.* `rpi/test_lint.py` reads both
+files and asks of every `.part` it finds outside a comment that the line also
+builds a name of its own. It failed as written, on two lines of prose inside a
+`/* */` block — the check being wrong, not the file — and skips block
+continuations now. Four sites, four mutations, four kills.
+
+*What a missed release does here is documented rather than asserted.* The queue's
+own comment already says a stranded request would hang every upload after it, and
+on this endpoint that is what happens: the suite's second sequential POST hangs
+and the file exits non-zero at that line. It is caught, but by a crash rather
+than by a named check, so the check that follows the concurrent pair asks
+separately whether a later batch is still answered.
 
 **One bad byte put "Offers are NOT being saved" on the driving screen over a
 journal that was taking every write, and it never cleared.** `rows()` opens the

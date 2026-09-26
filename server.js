@@ -765,7 +765,15 @@ var WATCH_PATH = handoffPath('.viewing');
 var RESET_PATH = handoffPath('.recalibrate');
 var DROPOFF_PATH = handoffPath('.dropoff');
 var CROP_PATH = handoffPath('.cropbox.json');
-var cropSeq = 0;
+/* One counter for every temporary this process publishes through a rename, so
+ * no two of them can pick the same name. It was `cropSeq` and served the one
+ * endpoint that had the rule applied; three other sites wrote a fixed
+ * `<name>.part` and `rpi/test_lint.py` states the rule those three broke. */
+var partSeq = 0;
+
+function partName(base) {
+  return base + '.' + process.pid + '.' + (partSeq++) + '.part';
+}
 var lastTouch = 0;
 var lastView = '';
 
@@ -803,9 +811,19 @@ function touchWatchFile(view) {
    * invalidated and the driver watches the wrong picture until the next write,
    * up to a second later. A rename has no such window: the scanner sees the
    * old contents or the new ones. */
-  fs.writeFile(WATCH_PATH + '.part', want + '\n', function (err) {
-    if (err) return;
-    fs.rename(WATCH_PATH + '.part', WATCH_PATH, function () {});
+  /* ...and a name of its own, for the same reason the three other renames in
+   * this file now have one. This write is not request-driven, but it is called
+   * from more than one place and up to thirty times a second, so two of them
+   * interleaving into one fixed `.part` publishes a mixture — and what this
+   * file holds is the name of the picture the driver is watching. A torn name
+   * reads as "no view named, use the scene", which is the exact wrong answer
+   * the rename above was added to prevent. */
+  var tmp = partName(WATCH_PATH);
+  fs.writeFile(tmp, want + '\n', function (err) {
+    if (err) { fs.unlink(tmp, function () {}); return; }
+    fs.rename(tmp, WATCH_PATH, function (renameErr) {
+      if (renameErr) fs.unlink(tmp, function () {});
+    });
   });
 }
 
@@ -2095,18 +2113,41 @@ var journalCache = null;
  * overlap the request it is retrying.
  *
  * A queue rather than a mutex flag, so a caller cannot forget to wait. */
-var ingestQueue = [];
-var ingestRunning = false;
+/* ...and the same queue by name, because ingest was not the only endpoint that
+ * does a read, then a decision, then a write, on a file two callers can reach
+ * at once. `/api/places` and `/api/config/backup` both do, and both were
+ * unserialised.
+ *
+ * Measured on the real server, two concurrent POSTs of 600 places and 1 against
+ * a seeded 1,325-place file, ten runs: TWO left `places.json` unparseable and
+ * `GET /api/places` answering `stored: 0`, and the other EIGHT lost one
+ * writer's batch entirely — while replying `stored: 1925` over a file holding
+ * 1,326. None of the ten came out right. The endpoint's own comment ten lines
+ * into the handler says what it was meant to do: "MERGED, never written over.
+ * Two browsers place different days of the same journal, and a POST that
+ * replaced the file would have whichever finished last throw the other's work
+ * away." That is precisely what it did.
+ *
+ * A name per file rather than one global queue, so a slow sync cannot sit in
+ * front of a geocode batch that touches nothing it touches. Keyed on the lock's
+ * PURPOSE and not on the path, because the path is configurable and two names
+ * for one file would be two queues over it.
+ */
+var lockQueues = Object.create(null);
 
-function ingestLock(run) {
-  ingestQueue.push(run);
-  if (!ingestRunning) nextIngest();
+function fileLock(name, run) {
+  var q = lockQueues[name] || (lockQueues[name] = { waiting: [], running: false });
+  q.waiting.push(run);
+  if (!q.running) nextLocked(name);
 }
 
-function nextIngest() {
-  var run = ingestQueue.shift();
-  if (!run) { ingestRunning = false; return; }
-  ingestRunning = true;
+function ingestLock(run) { return fileLock('ingest', run); }
+
+function nextLocked(name) {
+  var q = lockQueues[name];
+  var run = q.waiting.shift();
+  if (!run) { q.running = false; return; }
+  q.running = true;
   var done = false;
   var release = function () {
     // No path in the handler reaches this twice — each exit is a `return` on
@@ -2121,7 +2162,7 @@ function nextIngest() {
     // ingest's read begins and a slow read cannot sit in front of it.
     // Correctness does not rest on this — the append is already done by the
     // time release is called — so it is latency, not safety.
-    setImmediate(nextIngest);
+    setImmediate(function () { nextLocked(name); });
   };
   try {
     run(release);
@@ -3029,6 +3070,29 @@ function route(req, res) {
         // same journal, and a POST that replaced the file would have whichever
         // finished last throw the other's work away — the same fault the map
         // page's own remember() was fixed for.
+        // Serialised, because what follows is a read, a merge and a write on a
+        // file two browsers reach at once.
+        //
+        // THE QUEUE IS THE CURE HERE, not the unique temporary below. Measured
+        // on the real server, two concurrent POSTs of 600 places and 1 against
+        // a seeded 1,325-place file, ten runs: two left the file unparseable
+        // and the other eight lost one writer's batch entirely, replying
+        // `stored: 1925` over a file holding 1,326. Zero of ten came out right;
+        // with the queue, ten of ten do. The unique name cannot be tested at
+        // this site at all — the queue means two writes never hold the
+        // temporary at once — so it is here as the uniform rule
+        // `rpi/test_lint.py` now enforces across all four renames in this
+        // repository, and not as a claim about this endpoint. What the queue
+        // buys that a name cannot is the lost update: the second read must not
+        // happen before the first write lands, and that is the eight.
+        fileLock('places', function (release) {
+        // Every exit from here goes through `done`, so the queue cannot be left
+        // held by a path that forgot. `release` is idempotent — it guards a
+        // double shift — but a MISSED release strands every later batch behind
+        // a lock nobody holds, and that is the failure this shape removes
+        // rather than documents. There are five exits below and all five are a
+        // `return done(...)`.
+        var done = function (code, body) { release(); placesReply(code, body); };
         fs.readFile(placesPath, 'utf8', function (readErr, before) {
           var held = {};
           if (!readErr) {
@@ -3051,21 +3115,21 @@ function route(req, res) {
             held[k] = v;
           });
           if (!added) {
-            return placesReply(200, { ok: true, added: 0,
-                                      stored: Object.keys(held).length });
+            return done(200, { ok: true, added: 0,
+                                stored: Object.keys(held).length });
           }
           var body = JSON.stringify(held) + '\n';
-          var tmp = placesPath + '.part';
+          var tmp = partName(placesPath);
           withDirectory(placesPath, function (dirErr) {
             if (dirErr) {
               console.error('places: ' + dirErr.message);
-              return placesReply(500, { ok: false, error: dirErr.message });
+              return done(500, { ok: false, error: dirErr.message });
             }
             fs.writeFile(tmp, body, function (writeErr) {
               if (writeErr) {
                 fs.unlink(tmp, function () {});
                 console.error('places: ' + writeErr.message);
-                return placesReply(500, { ok: false, error: writeErr.message });
+                return done(500, { ok: false, error: writeErr.message });
               }
               // Renamed rather than written in place, the same way the config
               // backup is: a half-written cache that will not parse costs the
@@ -3074,13 +3138,14 @@ function route(req, res) {
                 if (renameErr) {
                   fs.unlink(tmp, function () {});
                   console.error('places: ' + renameErr.message);
-                  return placesReply(500, { ok: false, error: 'could not save' });
+                  return done(500, { ok: false, error: 'could not save' });
                 }
-                placesReply(200, { ok: true, added: added,
-                                   stored: Object.keys(held).length });
+                done(200, { ok: true, added: added,
+                             stored: Object.keys(held).length });
               });
             });
           });
+        });
         });
       });
     }
@@ -3114,13 +3179,30 @@ function route(req, res) {
       var body = JSON.stringify(parsed, null, 2) + '\n';
       // Only when it changed. This arrives on every sync tick and a calibration
       // changes a handful of times in a rig's life.
+      //
+      // The overlap here needs no imagining: sync.py's own stderr tells the
+      // operator to run `--all` by hand while the installed ten-minute timer
+      // keeps ticking. Two of those at once left `config-backup.json`
+      // unparseable at 60,168 bytes — one body's JSON followed by part of the
+      // other's — and what is lost is the copy of the calibration on the one
+      // machine that is NOT in the car. Re-aiming a camera at the roadside is
+      // an afternoon, and the loss is believed until somebody tries to restore.
+      //
+      // The unique `.part` name below is the whole cure, and deliberately the
+      // ONLY one. A queue was written here too and then taken out: unlike the
+      // places batch there is nothing to lose to a lost update — the read is
+      // only a "has it changed" test, so last-writer-wins is the right answer
+      // and a redundant write is the worst a race can cost. With both in place
+      // neither could be tested, because each hid the other; the suite passed
+      // with the temporary's name reverted. One cure, one check.
+      var fin = function (code, b) { reply(code, b); };
       fs.readFile(dest, 'utf8', function (readErr, before) {
-        if (!readErr && before === body) return reply(200, { ok: true, changed: false });
-        var tmp = dest + '.part';
+        if (!readErr && before === body) return fin(200, { ok: true, changed: false });
+        var tmp = partName(dest);
         withDirectory(dest, function (dirErr) {
           if (dirErr) {
             console.error('config backup: ' + dirErr.message);
-            return reply(500, { ok: false,
+            return fin(500, { ok: false,
                                 error: 'could not create ' + path.dirname(dest)
                                        + ' (' + dirErr.code + ')' });
           }
@@ -3128,17 +3210,17 @@ function route(req, res) {
           if (writeErr) {
             fs.unlink(tmp, function () {});
             console.error('config backup: ' + writeErr.message);
-            return reply(500, { ok: false,
+            return fin(500, { ok: false,
                                 error: 'could not save (' + writeErr.code + ')' });
           }
           fs.rename(tmp, dest, function (renameErr) {
             if (renameErr) {
               fs.unlink(tmp, function () {});
               console.error('config backup: ' + renameErr.message);
-              return reply(500, { ok: false, error: 'could not save' });
+              return fin(500, { ok: false, error: 'could not save' });
             }
             console.log('config backup: updated ' + dest);
-            reply(200, { ok: true, changed: true });
+            fin(200, { ok: true, changed: true });
           });
           });
         });
@@ -3314,7 +3396,7 @@ function route(req, res) {
       // on a laggy link is all it takes — have both writes interleaving into one
       // file, and the rename then publishes whichever mixture won. Unique names
       // make each rename genuinely atomic with respect to the other.
-      var tmp = CROP_PATH + '.' + process.pid + '.' + (cropSeq++) + '.part';
+      var tmp = partName(CROP_PATH);
       var failed = function (err) {
         fs.unlink(tmp, function () {});     // never leave a .part behind
         send(res, 500, JSON.stringify({ ok: false, error: 'could not save the box' }),

@@ -1670,6 +1670,144 @@ try:
     _dcode2, _dsaid2 = delete(_pbase, '/api/places')
     eq('throwing away an empty cache is not a failure', _dcode2, 200)
     eq('...and reports nothing removed', _dsaid2.get('removed'), 0)
+
+    # --- two browsers placing at once, which the handler promised to survive --
+    #
+    # The handler's own comment says what it was for: "MERGED, never written
+    # over. Two browsers place different days of the same journal, and a POST
+    # that replaced the file would have whichever finished last throw the
+    # other's work away." It did exactly that, because the merge was a read, a
+    # decision and a write with nothing holding the three together, and the
+    # write went through one fixed `places.json.part`.
+    #
+    # Measured before the fix, ten runs of the two POSTs below against a seeded
+    # 1,325-place file: TWO left places.json unparseable with GET answering
+    # `stored: 0`, and the other EIGHT lost one writer's batch entirely while
+    # replying `stored: 1925` over a file holding 1,326. None of the ten came
+    # out right. Two things were wrong and each needed its own cure — unique
+    # `.part` names so the bytes cannot interleave, and a queue so the second
+    # read cannot happen before the first write lands.
+    #
+    # Sized to keep the window open: one body big enough that its write does not
+    # finish inside a tick, one small enough to overtake it.
+    # 1,325, which is the owner's own distinct-place count and what the Settled
+    # entry prices at 24 minutes to rebuild. The SIZE is load-bearing: written
+    # first at 400 places the whole merge finished inside one tick, the two
+    # requests never overlapped, and all three reverts of this fix passed the
+    # check. A race the test cannot open is a check that cannot fail.
+    _seed = dict(('Seed St %d, Marietta' % i, {'lat': 34.0 + i * 1e-5, 'lon': -84.6})
+                 for i in range(1325))
+    _batchA = dict(('A Rd %d, Acworth' % i, {'lat': 34.1, 'lon': -84.7})
+                   for i in range(600))
+    _batchB = {'B Rd 1, Kennesaw': {'lat': 34.2, 'lon': -84.5}}
+    post(_pbase, '/api/places', _seed)
+    _said = {}
+
+    def _fire(which, payload):
+        try:
+            _said[which] = post(_pbase, '/api/places', payload)
+        except Exception as exc:                      # noqa: BLE001
+            _said[which] = ('threw', str(exc))
+
+    _ta = threading.Thread(target=_fire, args=('A', _batchA))
+    _tb = threading.Thread(target=_fire, args=('B', _batchB))
+    _ta.start()
+    _tb.start()
+    _ta.join()
+    _tb.join()
+    _after = get(_pbase, '/api/places')
+    # The file still parses. This is the half that costs the whole 24 minutes.
+    ok_('two batches at once leave the cache readable',
+        not (_after.get('unreadable') or ''))
+    # ...and neither writer's work was thrown away, which is what the comment
+    # above the handler promises and what the queue is for. 400 + 600 + 1.
+    eq('...and both batches are in it', _after.get('stored'), 1926)
+    eq('...with the big batch\'s places really there',
+       sum(1 for k in (_after.get('places') or {}) if k.startswith('A Rd ')), 600)
+    ok_('...and the small one too', 'B Rd 1, Kennesaw' in (_after.get('places') or {}))
+    # Both replies were true AT THE MOMENT THEY WERE SENT, which is a weaker
+    # claim than "both match the file" and the only one that is right: the queue
+    # runs them in some order, so the first writer honestly reports a partial
+    # total and the second reports the lot. Written as "both equal the file"
+    # first, and B failed with 401 against 1001 — the test being wrong, not the
+    # server. What distinguishes an honest partial from the failure this pins is
+    # that no reply may claim MORE than the file ends up holding: the POST that
+    # hid this answered `stored: 1925` over a file holding 1,326.
+    _counts = []
+    for _who in ('A', 'B'):
+        _code, _body = _said.get(_who, (0, {}))
+        eq('...and the %s reply was a success' % _who, _code, 200)
+        _counts.append(_body.get('stored'))
+        ok_('...claiming no more than the file ends up holding (%s: %s)'
+            % (_who, _body.get('stored')),
+            isinstance(_body.get('stored'), int)
+            and _body['stored'] <= _after.get('stored'))
+    # ...and whichever ran second saw everything, so between them the replies
+    # account for the whole file rather than both describing a partial one.
+    eq('...and the one that ran second reports the whole cache',
+       max(_counts), _after.get('stored'))
+    # ...and the queue drained. A lock that is taken and not given back answers
+    # the request that took it and then strands every later one behind a holder
+    # that has gone — which is silence, not an error, and is exactly what the
+    # ingest lock's own comment says a forgotten release would do. Nothing after
+    # the pair above would have noticed, so this asks.
+    # Caught, because a held lock makes this HANG rather than answer, and an
+    # unhandled timeout here ends the suite in a traceback with no named check
+    # against it — which the mutation sweep cannot tell from a pass.
+    try:
+        _ncode, _nsaid = post(_pbase, '/api/places',
+                              {'C Rd 1, Woodstock': {'lat': 34.1, 'lon': -84.5}})
+    except Exception as _exc:                          # noqa: BLE001
+        _ncode, _nsaid = 'no answer: %s' % type(_exc).__name__, {}
+    eq('a batch arriving after two at once is still answered', _ncode, 200)
+    eq('...and lands on top of both of them', _nsaid.get('stored'), 1927)
+
+    # --- and the calibration backup, which queues for the same reason --------
+    #
+    # The overlap here needs no imagining: sync.py's own stderr tells the
+    # operator to run `--all` by hand, and the installed ten-minute timer keeps
+    # ticking. Two of those at once left `config-backup.json` unparseable at
+    # 60,168 bytes — and what is lost is the copy of the calibration on the one
+    # machine that is NOT in the car, so it is believed until somebody tries to
+    # restore it. Bodies sized the same way as the places pair: one big enough
+    # that its write spans ticks, one small enough to overtake it.
+    _cfgA = {'quad': [[1, 2], [3, 4], [5, 6], [7, 8]],
+             'pad': dict(('k%d' % i, 'v' * 40) for i in range(700))}
+    _cfgB = {'quad': [[9, 9], [9, 9], [9, 9], [9, 9]]}
+    _csaid = {}
+
+    def _fireCfg(which, payload):
+        try:
+            _csaid[which] = post(_pbase, '/api/config/backup', payload)
+        except Exception as exc:                       # noqa: BLE001
+            _csaid[which] = ('threw', str(exc))
+
+    _ca = threading.Thread(target=_fireCfg, args=('A', _cfgA))
+    _cb = threading.Thread(target=_fireCfg, args=('B', _cfgB))
+    _ca.start()
+    _cb.start()
+    _ca.join()
+    _cb.join()
+    _cfgPath = os.path.join(_pdir, 'config-backup.json')
+    _cfgRaw = ''
+    if os.path.exists(_cfgPath):
+        with open(_cfgPath, encoding='utf-8') as _fh:
+            _cfgRaw = _fh.read()
+    _cfgParsed = None
+    try:
+        _cfgParsed = json.loads(_cfgRaw)
+    except Exception:                                  # noqa: BLE001
+        _cfgParsed = None
+    ok_('two calibration backups at once leave a file that parses (%d bytes)'
+        % len(_cfgRaw), _cfgParsed is not None)
+    # Whichever landed last, it is ONE of the two whole configs and not a
+    # mixture of both — the failure was a 60KB body with a 40-byte one spliced
+    # into it, which still contains `quad` and would restore garbage.
+    ok_('...and holds exactly one of the two, whole',
+        _cfgParsed in (_cfgA, _cfgB))
+    for _who in ('A', 'B'):
+        eq('...and the %s backup was answered' % _who,
+           (_csaid.get(_who) or (0,))[0], 200)
 finally:
     stop(_pproc)
     shutil.rmtree(_pdir, ignore_errors=True)

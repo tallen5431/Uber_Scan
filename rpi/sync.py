@@ -65,7 +65,16 @@ def stamp_path(journal):
 
 def stamp(journal, to, have):
     try:
-        tmp = stamp_path(journal) + '.part'
+        # A name of its own per process. The ten-minute timer and a hand-run
+        # `--all` overlap — sync.py's own stderr tells the operator to do
+        # exactly that — and two writes into one fixed `<journal>.synced.part`
+        # interleave, so the replace publishes a mixture. The stake here is the
+        # smallest of the four sites that had this: `last_synced` below returns
+        # None on a ValueError, so a torn stamp degrades to "the copy has never
+        # been reached" and doctor.py reports the backup age as unknown rather
+        # than wrong. Fixed anyway, because the rule is the rule and one line is
+        # cheaper than an entry explaining the exception.
+        tmp = '%s.%d.part' % (stamp_path(journal), os.getpid())
         with open(tmp, 'w') as fh:
             json.dump({'at': JR.now_ms(), 'to': to, 'have': have}, fh)
         os.replace(tmp, stamp_path(journal))

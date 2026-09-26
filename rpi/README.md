@@ -7018,7 +7018,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      #  94 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 256 on the faults that only surface when a
+python3 rpi/test_lint.py        # 258 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #  50 on the three files the browser and the
@@ -7051,7 +7051,7 @@ python3 rpi/test_offerspage.py  # 364 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 166 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 157 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 195 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
