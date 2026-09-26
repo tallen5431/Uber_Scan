@@ -2434,6 +2434,62 @@ mid-trip scan the old arithmetic was right, which is backwards: a row being
 
 ## Settled — do not re-propose
 
+### The clock
+
+**Do not re-time an offer at a pace, however the pace is derived.** It looks
+like the one thing this rig cannot do — the driver's own complaint is "some apps
+have very bad time estimates" — and it was designed, measured on the real week,
+and killed on algebra. Re-timing at a speed is a `$/mile` floor wearing a clock:
+
+```
+retimedPerHour = net / (miles / pace)   =   (net / miles) x pace
+```
+
+`pace` is a constant wherever it is looked up, so "this offer survives being
+re-timed" is identically "its net `$/mile` clears `target / pace`". Checked
+numerically over the week's 106 ACCEPTs against a bare banded `$/mile` floor:
+**0 disagreements out of 106**. The floors it amounts to are $3.42, $2.08,
+$1.62, $1.45, $1.19 and $0.88 a mile over the bands `[0,4,6,8,10,14,inf)`. So it
+lands the entry two above this one — *judge offers on $/mile* — by a route that
+does not mention miles, and a replay gives up 18% of the week's money for
++0.7% on the hourly rate, inside a confidence interval that spans zero.
+
+*The reference statistic was the whole answer, and nothing argued for it.* On
+identical bands, the share of ACCEPTs that fail re-timing is 63% at the band
+p25, 36% at the median, 31% at the mean and 14% at the p75. A headline of "36%
+of your greens do not survive" was a choice of quantile written up as a
+measurement. Two bands give the same 38 cards as six, which is the tell: the
+banding was doing none of the work.
+
+*And the cards refuse the proportionality the model needs.* Within a band,
+minutes barely move with distance, so dividing by a speed is fitting a line
+through the origin to a cloud that has no slope:
+
+| band mi | n | intercept | slope min/mi | R² | what a pace forces |
+|---|---|---|---|---|---|
+| 0–4 | 186 | 24.0 | 0.77 | 0.003 | 8.20 |
+| 4–6 | 195 | 15.9 | 2.16 | 0.013 | 5.00 |
+| 6–8 | 191 | 4.2 | 3.65 | 0.035 | 3.90 |
+| 8–10 | 194 | 32.4 | **0.05** | **0.000** | 3.47 |
+| 10–14 | 194 | 20.7 | 1.24 | 0.014 | 2.85 |
+| 14+ | 195 | 26.7 | 0.85 | 0.286 | 2.11 |
+
+*There is also a selection effect that accounts for part of any such finding.*
+`perHour` is `netPerMile x mph`, so choosing the offers with the highest `$/hr`
+chooses offers with a high implied speed — 61% of ACCEPTs run above their band
+median against 50% of all cards. Re-timing to the median then pulls exactly
+those back. Some of "your greens do not survive" is regression to the mean on
+the variable the verdict selected on.
+
+What would NOT be this entry: a re-timing with a non-zero intercept, because
+`minutes = a + b x miles` adds a payout term and stops being a `$/mile` rule. It
+is a different proposal and has to be argued on its own evidence. It is not
+argued here, and it disagrees with the pace form on 10% of the ACCEPTs, so
+whoever proposes it is choosing a model, not reading the data.
+
+The honest route to the driver's actual question needs elapsed times, not a
+model of them, and 31 of 1,166 offers carry a tick. That is a data problem.
+
 ### The journal read
 
 **Do not window `/api/journal/newest`, `/api/journal/notes` or
@@ -2710,6 +2766,28 @@ newer one, and it moves several of them. Where the two disagree, this wins.
 1,166 and it was caught (`doubt`, `suspect`, `milesUncertain` all set). Reads
 run 1.80s median, 2.80s p90, 5.4s max. Consecutive duplicate rows are 0.6%, so
 the accumulator's identity rule is holding. Nothing here needs fixing.
+
+**Most of a delivery is not driving.** Fitted over the 1,155 cards that state
+both a distance and a duration, `minutes = 23.0 + 1.00 x miles`, R² = 0.285. A
+**23-minute fixed overhead on every card**, and then a minute a mile on top —
+so the driving is the smaller term on every job under 23 miles, which is 96% of
+the week. The implied door-to-door speed is 16.3 mph median and it is almost
+entirely an artefact of that constant: it runs 9.8 mph under 6 miles and 30.6
+mph over 16 (shuffle p = 0.0000), not because the driver goes faster on long
+jobs but because the overhead is spread over more miles. Any reasoning that
+treats a card's minutes as proportional to its miles is reading that constant as
+a speed. The entry under Settled about re-timing an offer is what happens when
+you do.
+
+**The reader stopped needing the ceiling.** `milesUncertain` is **4 of 1,166 on
+this week, 0.3%** — against the 52-of-121 and 108-of-202 recorded further up this
+file from earlier shifts. Zero of the 222 go-or-warn cards carry any notice at
+all, so the "rate is a ceiling" line, the uncosted cap and the notice-versus-
+figures rule at `live.html`'s `#verdict:has(#warn:not([hidden]))` are machinery
+that fires on almost nothing now. Nothing to remove — a guard that stops firing
+because the thing it guards against stopped happening is a guard that worked —
+but the older percentages in this file describe a worse reader than the one
+running, and anything reasoning from them is reasoning about 2026's spring.
 
 **The line is right.** `Advice.advise` over the whole week: ready, stable,
 spread $0 — $20 at every one of the six thresholds, plateau $20–$25, over 27.9

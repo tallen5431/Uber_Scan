@@ -341,8 +341,13 @@
     #detail { font-size: 10px; line-height: 1; margin: 0; }
     /* On a panel this small a notice and the figures cannot both fit, and the
        notice wins: it is there because something is wrong with the reading, so
-       the three numbers underneath it are the ones not to trust. The headline
-       and the reason for doubting it are the pair worth keeping. */
+       the four numbers underneath it are the ones not to trust. The headline
+       and the reason for doubting it are the pair worth keeping.
+       Said "three" until $/mi joined the row, three lines from the edit that
+       added it. On the current week the pair never actually collides — 0 of the
+       222 go-or-warn cards carry a notice, because `milesUncertain` is down to
+       4 in 1,166 — so this hides nothing today and the count still has to be
+       right, because the day it fires is the day nobody is reading the CSS. */
     #verdict:has(#warn:not([hidden])) .submetrics { display: none; }
     /* ...and hiding the figures is not enough on its own, which took measuring
        to see. A card can carry three notices at once — a distance that could not
