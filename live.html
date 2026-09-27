@@ -1108,10 +1108,27 @@
   // what it knows \u2014 what the pair pays over a time bounded at both ends \u2014 and
   // leaves the geography to the driver, who is looking at the phone anyway.
   //
-  // The class follows the verdict's own three states so it reads at a glance
-  // from the driving seat, and `go` is only ever set when the WHOLE range
-  // clears the target: a range straddling the line is a maybe, and a maybe
-  // drawn in green is a wrong answer. See stack() in advice.js.
+  // NO VERDICT COLOUR. This row used to take the verdict's three states from
+  // `s.state`, green only when the whole range cleared the target, and that
+  // was a verdict on the wrong thing. `worst` is the pair's money over the
+  // pair's time, which is the time-weighted mean of the held job's rate and
+  // the offer's — so money already being earned on the job in the car carried
+  // the colour, and a cheap card drawn in against a rich hold came out green.
+  // Replayed over the real week on the driver's own 31 marks: 267 pair lines,
+  // 71 of them green, and 45 of those 71 were offers whose own net rate was
+  // under the $25 line — 30 drawn under a PASS headline and 15 under CLOSE
+  // CALL. A green "take both" beneath a red PASS is a confidently wrong
+  // answer on the one screen read at a glance.
+  //
+  // Deleted, not redefined. The fix every proposal reached for — green only
+  // where the offer's OWN rate clears target — is the headline restated:
+  // `withStack` hands stack() the same billed minutes, cost and target rate()
+  // used, so the offer's own marginal rate IS the headline's perHour. Over the
+  // same 267 lines "own rate clears target" and the headline's ACCEPT
+  // disagree 0 times. The accept decision is the headline's; this row says
+  // what only it can — how much clock the pair adds, and where the two jobs
+  // end. `s.state` stays on the payload, because server.js writes it into
+  // the journal's pair rows and the offers page buckets on it.
   // Whole dollars with the sign in front of the dollar, not inside it.
   //
   // The same rule rateText() applies a hundred lines up, and the reason is the
@@ -1137,7 +1154,8 @@
     // dividing a negative by a smaller number makes it more negative. A losing
     // pair therefore printed its range backwards, low end first and larger.
     var lo = Math.min(s.worst, s.best), hi = Math.max(s.worst, s.best);
-    el.stack.className = 'stackline ' + s.state;
+    // The base colour, whatever the state. See NO VERDICT COLOUR above.
+    el.stack.className = 'stackline';
     // Built from parts rather than one string, because the parts have different
     // priorities when the row runs out of room. See .stackline in styles.css:
     // this is the half that gives way, and it can because the same figures are
@@ -1179,12 +1197,12 @@
       + (s.sure ? ' \u00b7 beats finishing alone' : '')
       // ...and whether that range is the pair or only a ceiling on it. One of
       // the two cards printed no distance the rig could charge, so the money
-      // above is gross and the target it is being held to is net \u2014 which is
-      // why this line can be amber on a range that appears to clear it.
+      // above is gross and the target it is being held to is net.
       //
       // The note above the verdict says the same thing when the OFFER is the
       // uncosted one. It says nothing when the order already in the car is,
-      // and then this line was an amber with no reason on the screen.
+      // and then this line was a range with no reason on the screen to read
+      // it as a ceiling.
       + (s.uncosted ? ' \u00b7 a ceiling, no distance to charge' : '')
       // Where the two jobs END, which is the half the arithmetic above cannot
       // reach: the range assumes either nothing is shared or the new job rides
@@ -1204,16 +1222,15 @@
     el.stack.appendChild(sum);
     // ...and the half that does not give way. Its own element, so the ellipsis
     // above can never reach it: these words are the only place this claim is
-    // made, and losing them leaves the driver an amber line that also means
-    // "the range straddles your target".
+    // made, and losing them leaves the driver a range with nothing to say
+    // that its optimistic end has been ruled out.
     //
     // ...including when it has nothing to say, which is the case that had no
     // shape at all. `null` — about half of real pairs — appended no chip and
     // changed nothing else on the row, so "I looked at where these two jobs
     // end and found nothing to warn you about" and "I have no idea where they
-    // end" drew the identical line. The range beside it is still coloured
-    // green by the pay arithmetic, so an unchipped green row reads at a glance
-    // as a pair that was checked and came back clean — which is precisely the
+    // end" drew the identical line, and an unchipped row reads at a glance as
+    // a pair that was checked and came back clean — which is precisely the
     // wrong "these end near each other" this rig prices at an hour of driving
     // and a rating.
     //

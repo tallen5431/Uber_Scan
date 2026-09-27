@@ -197,13 +197,16 @@ html, body {
  * push the headline rate off the glass. One line, ellipsised, like its
  * neighbour.
  *
- * It borrows the verdict's three colours because a driver reads colour before
- * they read words, and this line is answering the same kind of question the
- * panel above it is. `go` is set only when the WHOLE range clears the target —
- * a range that straddles the line is amber, never green. Named `.stackline`
- * rather than `.stack` so a bare state class here can never collide with the
- * verdict panel's own `.go`/`.warn`/`.no`, which is a mistake this stylesheet
- * has already made once with `.warn`. */
+ * It does NOT borrow the verdict's colours, and it used to. Its green meant the
+ * pair's range cleared the target, and the pair's range is the time-weighted
+ * mean of the job already in the car and the offer — so money already being
+ * earned carried the colour. On the real week 45 of its 71 greens were offers
+ * whose own rate was under the line, 30 of them beneath a PASS. The accept
+ * decision is the headline's; this line is muted and says how much clock the
+ * pair adds and where the two jobs end. See showStack() in live.html.
+ * Named `.stackline` rather than `.stack` so no state class set anywhere else
+ * can collide with the verdict panel's own `.go`/`.warn`/`.no`, which is a
+ * mistake this stylesheet has already made once with `.warn`. */
 /* A ROW, not a run of text, and that is the fix for two failures at once.
  *
  * It used to be one nowrap, ellipsised string with the map link appended as a
@@ -262,22 +265,18 @@ html, body {
  *
  * Its own colour rather than the row's, and deliberately none of the three the
  * verdict ladder uses — exactly as `.verdict.doubt` is off that ladder. The
- * range beside it is still green or amber because the pay arithmetic is still
- * true; what this says is that the half of the question the arithmetic cannot
- * reach was not answered. Outlined like `same town`, never filled like ENDS
- * ELSEWHERE: a filled chip on this line means "this overrides the number", and
- * a refusal overrides nothing. */
+ * range beside it is still true because the pay arithmetic is still true; what
+ * this says is that the half of the question the arithmetic cannot reach was
+ * not answered. Outlined like `same town`, never filled like ENDS ELSEWHERE: a
+ * filled chip on this line means "this overrides the number", and a refusal
+ * overrides nothing. */
 .stackline .ends.unknown { color: var(--doubt); }
-.stackline.go { color: var(--go); }
-.stackline.warn { color: var(--warn); }
-.stackline.no { color: var(--muted); }
-/* A second job that ends somewhere else is not a shade of the same answer, so
-   it is not a shade of the same colour. The range above is still true — it is
-   the range that is being qualified — but the driver should read it from its
-   worst end, and the one word that says so has to survive being glanced at
-   from the driver's seat. Overrides the state colour deliberately: geography
-   outranks the arithmetic here, because the arithmetic's optimistic end is
-   exactly what geography has just ruled out. */
+/* A second job that ends somewhere else is the one thing on this line allowed a
+   colour of its own. The range above is still true — it is the range that is
+   being qualified — but the driver should read it from its worst end, and the
+   one word that says so has to survive being glanced at from the driver's
+   seat. Geography outranks the arithmetic here, because the arithmetic's
+   optimistic end is exactly what geography has just ruled out. */
 .stackline.elsewhere { color: var(--warn); }
 /* Filled, not outlined, for the one verdict that overrides the arithmetic. This
    is the claim that costs an hour when it is missed, and it is now the only

@@ -845,6 +845,47 @@ const framed = (page) => page.waitForFunction(
       return { text: sum ? (sum.textContent || '').trim() : null };
     });
 
+    // A cheap card drawn in against a rich job in the car: the headline says
+    // PASS, and the pair's range clears the target anyway, because `worst` is
+    // the time-weighted mean of the two jobs and the one in the car is paying
+    // $36/hr. stack() calls that `go`. The row used to paint it green — a
+    // "take both" under a PASS, 30 times on the real week and 15 more under a
+    // CLOSE CALL — and the colour belonged to money already being earned.
+    //
+    // Shaped off a real pair from that week: $3.55 / 20 min at $8.40/hr own,
+    // green $27.82-40.73/hr against a hold running $36.83 alone.
+    await page.evaluate((r) => window.__es.push(
+      Object.assign({}, r, {
+        holding: { pay: 28.74, minutes: 53, dropoff: null },
+        stack: { pay: 25.0, minMinutes: 40, maxMinutes: 60, worst: 27.82,
+                 best: 40.73, alone: 36.83, sure: false, state: 'go',
+                 ends: null, route: null } })),
+      READINGS.loss);
+    await page.waitForTimeout(250);
+    out['dilutive ' + panel[0]] = await page.evaluate(() => {
+      const row = document.getElementById('stack');
+      return { shown: !row.hidden,
+               classes: [].slice.call(row.classList),
+               colour: getComputedStyle(row).color,
+               verdict: (document.getElementById('verdictLabel').textContent
+                         || '').trim() };
+    });
+    // ...and ENDS ELSEWHERE still takes its own colour over a `go` pair: the
+    // one claim on this row that outranks the arithmetic keeps its class.
+    await page.evaluate((r) => window.__es.push(
+      Object.assign({}, r, {
+        holding: { pay: 28.74, minutes: 53, dropoff: 'Oak Ln, Marietta' },
+        stack: { pay: 25.0, minMinutes: 40, maxMinutes: 60, worst: 27.82,
+                 best: 40.73, alone: 36.83, sure: false, state: 'go',
+                 ends: 'elsewhere', route: null } })),
+      READINGS.loss);
+    await page.waitForTimeout(250);
+    out['elsewhere ' + panel[0]] = await page.evaluate(() => {
+      const row = document.getElementById('stack');
+      return { classes: [].slice.call(row.classList),
+               colour: getComputedStyle(row).color };
+    });
+
     // A notice longer than any card produces today, on the smallest panel.
     //
     // The three the `uncertain` fixture stacks are 139px of prose in a 191px
@@ -3355,6 +3396,28 @@ try:
                 ends_seen[0] <= ends_seen[1])
         ok_('%s: ...with a separator that cannot be read as a sign' % panel,
             '\u2013-' not in losing)
+
+        # The pair row carries no verdict colour. Its green was the blend of
+        # the job in the car and the offer, so a PASS card drawn in against a
+        # rich hold came out "take both" in green, 45 times on the real week.
+        # Redefining it as "the offer's own rate clears target" would be the
+        # headline restated \u2014 0 disagreements in 267 real pair lines \u2014 so the
+        # colour is gone and the headline is the one place that answers.
+        dil = got.get('dilutive ' + panel) or {}
+        ok_('%s: a green-arithmetic pair under a PASS is drawn' % panel,
+            dil.get('shown') and dil.get('verdict') == 'PASS')
+        eq('%s: ...and the pair row takes no verdict state as a class (%r)'
+           % (panel, dil.get('classes')),
+           [c for c in (dil.get('classes') or []) if c in ('go', 'warn', 'no')],
+           [])
+        eq('%s: ...so it is in the muted colour, not green' % panel,
+           dil.get('colour'), 'rgb(159, 179, 201)')
+        els = got.get('elsewhere ' + panel) or {}
+        ok_('%s: ENDS ELSEWHERE still marks the row (%r)'
+            % (panel, els.get('classes')),
+            'elsewhere' in (els.get('classes') or []))
+        eq('%s: ...in its own colour' % panel,
+           els.get('colour'), 'rgb(255, 206, 75)')
 
         # The other answer this line can give, which used to be no answer at
         # all: about half of real pairs print too little for the geography to

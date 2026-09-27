@@ -5805,7 +5805,9 @@ no mileage deducted, because the distance could not be trusted — and uses it t
 withhold green from the verdict panel. It is emitted nowhere, so `stack()` has
 never seen it and can paint a pair green off the same rate the panel above it
 deliberately would not. Real, and structurally the same mistake as the wire
-fields this file already records.
+fields this file already records. (Since superseded on the panel: the stack line
+takes no verdict colour at all now, so it can paint nothing green. The state is
+still computed and still written into the journal's `pair` rows.)
 
 Measured: **5 of 892 offers are uncosted, and 1 clears the target** — so one
 offer in 892 could show amber above and green below. Worth knowing; not worth a
