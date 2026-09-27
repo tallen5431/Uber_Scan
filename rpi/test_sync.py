@@ -240,6 +240,49 @@ try:
        SY.send(far.base, [{'v': 2, 'kind': 'weather', 'id': 'w1', 'seq': 1,
                            'at': now}])['added'], 1)
 
+    # ...and the drop row, which is that case in practice: server.js writes it
+    # and keys it by nothing but the fallback, `[kind, id, seq]`. Written by a
+    # REAL server here — the rig's, pressed through /api/offers/mark and
+    # /api/delivered — and carried by the real sender through the real
+    # /api/journal/ingest, because a drop row built by hand in this file would
+    # only prove the fixture has a seq.
+    #
+    # Two drops of one offer, which is a driver re-ticking a card after a Drop
+    # and dropping it again. With `seq: 1` both rows share one key, the copy
+    # keeps the first and throws the second away as a duplicate, and nothing
+    # anywhere says so. Asserting that syncKey is non-null would pass on that.
+    rig = FarEnd()
+    try:
+        def _press(path, body):
+            req = urllib.request.Request(
+                rig.base + path, data=json.dumps(body).encode('utf-8'),
+                headers={'Content-Type': 'application/json'}, method='POST')
+            return json.loads(urllib.request.urlopen(req, timeout=5).read()
+                              .decode('utf-8'))
+        _card = {'id': 'drop-7', 'pay': 11.0, 'minutes': 22.0,
+                 'billedMinutes': 22.0, 'miles': 5.0, 'cost': 1.5}
+        for _ in range(2):
+            _press('/api/offers/mark', {'id': 'drop-7', 'accepted': True,
+                                        'offer': _card})
+            # Two presses in one millisecond would be one key, and a person
+            # cannot press twice that fast; a test can.
+            time.sleep(0.01)
+            _press('/api/delivered', {})
+        written = [r for r in lines(rig.journal) if r.get('kind') == 'drop']
+        eq('the rig writes a drop row for each press',
+           [r.get('id') for r in written], ['drop-7', 'drop-7'])
+        rigrows, _ = SY.rows_since(rig.journal, 0)
+        dropsent = SY.send(far.base, rigrows)
+        eq('two drops of one offer both reach the copy',
+           sorted(r.get('seq') for r in lines(far.journal)
+                  if r.get('kind') == 'drop'),
+           sorted(r.get('seq') for r in written))
+        eq('...with nothing refused as malformed', dropsent['malformed'], 0)
+        eq('...and a second sync adds no duplicate',
+           SY.send(far.base, rigrows)['added'], 0)
+    finally:
+        rig.close()
+
     # A mark with no offer to name cannot be de-duplicated or applied.
     eq('a mark naming nothing is still refused',
        SY.send(far.base, [{'v': 1, 'at': now, 'kind': 'mark', 'accepted': True}])['malformed'], 1)

@@ -2044,6 +2044,64 @@ no_('...without a stack trace at boot (%r)' % (_herr5[:70].replace('\n', ' '),),
     'uncaught' in _herr5)
 shutil.rmtree(_hdir, ignore_errors=True)
 
+# --- Drop leaves a row saying when ------------------------------------------
+#
+# The one quantity the ledger says the rig lacks is how long a taken job really
+# took, and the driver already presses Drop when it is done. `/api/delivered`
+# put the order down and wrote nothing, so every press was thrown away. It now
+# appends a `kind: 'drop'` row — collection only; nothing reads it.
+#
+# No scanner: the mark carries the offer, which is the restarted-server path in
+# the mark handler, so the hold is the real one and nothing here is staged.
+# `lines` is rebound to a list by the ⌖ block above, so this reads its own.
+def _drows(path):
+    return [json.loads(l) for l in open(path) if l.strip()]
+
+
+_ddir = tempfile.mkdtemp()
+_djournal = os.path.join(_ddir, 'offers.jsonl')
+open(_djournal, 'w').close()
+_dproc, _dbase = start({'SCANNER': '0'}, _djournal)
+try:
+    _doffer = {'id': 'drop-1', 'pay': 14.0, 'minutes': 25.0,
+               'billedMinutes': 25.0, 'miles': 6.0, 'cost': 1.8}
+    _dcode, _dsaid = post(_dbase, '/api/offers/mark',
+                          {'id': 'drop-1', 'accepted': True, 'offer': _doffer})
+    ok_('a marked offer goes in the car', _dsaid.get('holding') is True)
+    with open(os.path.join(_ddir, 'holding.json')) as _fh:
+        _dheld = json.load(_fh)
+    _dbefore = int(time.time() * 1000)
+    _dcode, _dsaid = post(_dbase, '/api/delivered', {})
+    _dafter = int(time.time() * 1000)
+    eq('Drop answers as it always did', (_dcode, _dsaid.get('wasHolding')),
+       (200, True))
+    _drops = [r for r in _drows(_djournal) if r.get('kind') == 'drop']
+    eq('Drop writes a drop row naming the order it put down',
+       [r.get('id') for r in _drops], ['drop-1'])
+    if _drops:
+        _d = _drops[0]
+        ok_('...stamped with the moment of the press',
+            _dbefore <= _d.get('at', 0) <= _dafter)
+        # The press time as seq, so a second drop of the same offer is a second
+        # key to the sync; test_sync.py sends two through the real ingest.
+        eq('...whose seq is the press time, not a constant', _d.get('seq'),
+           _d.get('at'))
+        eq('...carrying when the card was on the screen, off the hold itself',
+           _d.get('acceptedAt'), _dheld.get('acceptedAt'))
+    # The mark is a fact about the offer and Drop does not make it untrue.
+    eq('...and the tick it was taken on is untouched',
+       [r.get('accepted') for r in _drows(_djournal) if r.get('kind') == 'mark'],
+       [True])
+    _dcount = len(_drows(_djournal))
+    _dcode, _dsaid = post(_dbase, '/api/delivered', {})
+    eq('Drop with nothing in the car still answers',
+       (_dcode, _dsaid.get('wasHolding')), (200, False))
+    eq('...and writes nothing, having no offer to name',
+       len(_drows(_djournal)), _dcount)
+finally:
+    stop(_dproc)
+    shutil.rmtree(_ddir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

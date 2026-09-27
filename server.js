@@ -912,9 +912,11 @@ if (!isFinite(HOLD_GRACE_MS) || HOLD_GRACE_MS < 0) HOLD_GRACE_MS = 10 * 60000;
  * was built for.
  *
  * THE COMMENT AT /api/delivered ARGUED THE OPPOSITE and it is answered rather
- * than ignored. It says the hold "is memory only, and a restarted server simply
- * has no order in hand, which is the safe way to be wrong". Both halves are
- * right about the ERRORS — forgetting an order that is there costs advice,
+ * than ignored. It said the hold "is memory only, and a restarted server simply
+ * has no order in hand, which is the safe way to be wrong" — in the present
+ * tense, after this file had stopped doing it, and rpi/README.md said the
+ * same; both now describe this file instead. Both halves are right about the
+ * ERRORS — forgetting an order that is there costs advice,
  * remembering one that is not puts a pair rate on the glass for a job already
  * delivered, and the second is worse. What does not follow is that keeping it
  * causes the second: `holding()` expires an order on its own stated time plus
@@ -2803,21 +2805,70 @@ function route(req, res) {
    *
    * Separate from the mark, and deliberately: the mark is a permanent fact
    * about the journal — this offer was taken — and dropping it off does not
-   * make that untrue. Only one of the two belongs on disk. This changes nothing
-   * but what the panel measures the next card against, so it is memory only,
-   * and a restarted server simply has no order in hand, which is the safe way
-   * to be wrong.
+   * make that untrue, so the mark is never touched here. The hold itself is
+   * not in the journal either: it lives in holding.json beside it, written by
+   * setHolding() and read back by loadHolding() — see the comment above
+   * those, which answers what this one used to say ("memory only").
+   *
+   * WHAT IS APPENDED is a second fact, not an edit of the first: a `kind:
+   * 'drop'` row saying that at this moment the driver pressed Drop on this
+   * offer. It is the one quantity the ledger says the rig lacks — the re-timing
+   * entry in AUDITS.md's Settled closes on "the honest route to the driver's
+   * actual question needs elapsed times, not a model of them ... That is a data
+   * problem" — and it costs the driver nothing, because they already press
+   * Drop and the hold already knows when the card was on the screen.
+   *
+   * COLLECTION ONLY. Nothing in this repository reads a drop row, and nothing
+   * may divide by `at - acceptedAt`: an observed elapsed time turned into a
+   * rate on the glass is the re-timing Settled refuses, arriving by a new door.
+   * It is data to be held against the card's own stated minutes, by hand, once
+   * a week of it exists. And it is censored: a row exists only for a press
+   * made while holding() still held the job, so a delivery that ran past its
+   * stated time × HOLD_OVERRUN + HOLD_GRACE_MS leaves no row at all. Absence is
+   * not "never delivered".
+   *
+   * `seq` is the press time, NOT 1. syncKey carries an unknown kind across on
+   * `[kind, id, seq]`, so with a constant seq every drop row for one offer
+   * collapses onto one key and the second is thrown away on the copy at home
+   * as a duplicate of the first — the same collapse the `id: null` paragraph
+   * in syncKey records. Re-ticking the same card and dropping it again is two
+   * presses and two rows. Keyed by the fallback rather than by a branch of its
+   * own, so a NucBox one build behind still stores it.
    *
    * It answers the same either way. Pressing "delivered" with nothing in the
-   * car is not an error a driver needs told about; it is the state they wanted. */
+   * car is not an error a driver needs told about; it is the state they wanted,
+   * and there is no offer to name, so nothing is written. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/delivered') {
     // holding(), not the raw slot: "there was an order to put down" has to mean
     // the same thing here as it does on the panel, or the driver is told they
     // put down a job the rig stopped counting an hour ago.
-    var wasHolding = !!holding(Date.now());
+    //
+    // Asked BEFORE setHolding(null), and kept: after it, holding() answers
+    // null and the row would have no offer to name.
+    var droppedAt = Date.now();
+    var dropped = holding(droppedAt);
     setHolding(null);
-    return send(res, 200, JSON.stringify({ ok: true, wasHolding: wasHolding }),
-                { 'Content-Type': 'application/json; charset=utf-8' });
+    if (!dropped) {
+      return send(res, 200, JSON.stringify({ ok: true, wasHolding: false }),
+                  { 'Content-Type': 'application/json; charset=utf-8' });
+    }
+    return appendLines(JSON.stringify({
+      v: 1, kind: 'drop', at: droppedAt,
+      id: dropped.id, seq: droppedAt,
+      // Dated from the card, as the hold is — see acceptedAt in the mark
+      // handler — so this is the same clock holding() expires the job on.
+      acceptedAt: dropped.acceptedAt
+    }) + '\n', function (err) {
+      // The order is down whether or not the row landed, so the answer is
+      // still ok: the panel believes this reply about the HOLD (see the Drop
+      // handler in live.html) and the hold is gone. The lost row is said out
+      // loud like every other append on this server, because a collection
+      // that silently stopped would be read in a week as a driver who never
+      // pressed Drop.
+      if (err) console.error('journal: could not record a drop: ' + err.message);
+      send(res, 200, JSON.stringify({ ok: true, wasHolding: true }),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    });
   }
 
   // The one thing on this server that is not a read. It asks the scanner to

@@ -3227,10 +3227,23 @@ it, at half again that plus ten minutes, because orders run long. Ending it
 early costs a figure the driver could have used; ending it late costs a wrong
 one, and only the standalone verdict is unaffected either way.
 
-`Drop` puts it down sooner. It is memory only and deliberately not written to
-the journal: the mark is a permanent fact — this offer was taken — and dropping
-it off does not make that untrue. A restarted server simply has nothing in hand,
-which is the safe way to be wrong.
+The order in hand survives the ignition. It is written synchronously to
+`holding.json` beside the journal — not into it — on every accept, read back
+once at startup, and removed by `Drop`. A restored order is asked about through
+the same `holding()` as a live one, so one that has outlived its stated time,
+half again, and ten minutes is refused whichever side it came from, and so is
+one stamped later than the clock reading it (a Pi boots in 1970).
+
+`Drop` puts it down sooner, and leaves the mark alone: the mark is a permanent
+fact — this offer was taken — and dropping it off does not make that untrue.
+What the press does add is a second fact, a `kind: "drop"` row naming the offer,
+when its card was on the screen (`acceptedAt`) and when Drop was pressed (`at`,
+and `seq`, so two drops of one offer are two rows to the sync rather than one).
+It is **collected and read by nothing**: it exists to be held against the card's
+stated minutes once a week of it exists, and an elapsed time turned into a rate
+on the panel would be the re-timing that is refused on measurement. A press with
+no order held writes nothing, so a delivery that ran past the hold's own expiry
+leaves no row.
 
 **What it cost the bar of controls.** Two of the six are conditional — "Took
 $8.04" with an offer on the record, "Drop" with an order in the car — so with
