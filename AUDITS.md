@@ -22,6 +22,41 @@ Listed so the same fault is not reported as news, and so the shape of the fix
 is findable. Every one of these is mutation-tested: the old behaviour is put
 back mechanically and a named check has to fail.
 
+### The harness
+
+**Every claim this project has made about being green was made in a zone the rig
+does not run in.** `tools/test.sh` named no timezone. Six suites read the local
+clock — `blockOf` buckets by hour, the 4am day boundary, every "took 3 for $48"
+day header — so they answered in whichever zone the machine happened to be in,
+and the machine was UTC while the driver is at UTC-4. Measured:
+
+| | |
+|---|---|
+| `node tests/advice.test.js` in the container | All 410 passed |
+| `TZ=America/New_York node tests/advice.test.js` | **409 passed, 1 FAILED** |
+| `grep -n TZ tools/test.sh` | nothing |
+
+The failure was `tests/advice.test.js`'s `A.blockOf(8.64e15) === 0`. `blockOf` is
+`floor(getHours() / 3)` on the LOCAL clock and the largest representable instant
+is 20:00 in New York, so the answer there is 6. The assertion's own comment says
+what it was for — "the guard has not swallowed the ordinary case with them" — and
+that claim is about whether a block came back at all, not which one. It now
+asserts `!== null` and passes in America/New_York, UTC, Asia/Kolkata and
+Pacific/Kiritimati.
+
+*Not repaired the obvious way, which would have been unfalsifiable.* Deriving the
+expectation as `Math.floor(new Date(8.64e15).getHours() / 3)` is `blockOf`'s own
+body, so the check could never fail — this project's sixth fault class, installed
+in the one file whose job is to catch it.
+
+`tools/test.sh` now exports `TZ="${TZ:-America/New_York}"`, defaulted rather than
+forced so a caller can still prove a suite is zone-independent — which is how the
+one failure was found. `rpi/test_lint.py` holds the runner to it, and holds it to
+naming the driver's own zone ON THE EXPORT LINE: written first as a search of the
+whole file, it was satisfied by the explanatory comment, so `TZ=UTC` passed while
+reinstating the exact fault. Three mutations, three named kills. All 37 suites
+pass on the driver's clock; that one assertion was the only casualty.
+
 ### The reader
 
 **The hour guard left the third of the three rows it was written for, and the

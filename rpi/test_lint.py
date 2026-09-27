@@ -573,6 +573,30 @@ for _suite in sorted(f for f in os.listdir(os.path.join(ROOT, 'tests'))
                      if f.endswith('.test.js')):
     ok_("rpi/README.md lists tests/%s" % _suite, _suite in _readme_rpi)
 
+# ...and that the runner names the CLOCK the suites are read on.
+#
+# Six suites read the local clock — `blockOf` buckets by hour, the 4am day
+# boundary, every "took 3 for $48" day header — and the runner named no zone, so
+# they answered in whichever one the machine was in. The machine was UTC and the
+# driver is at UTC-4. Measured: `TZ=America/New_York node tests/advice.test.js`
+# gave "409 passed, 1 FAILED" while the same file in the container said all 410
+# passed, on an assertion that wanted UTC's answer to a local-clock question.
+# Every claim this project has made about being green was made in a zone the rig
+# does not run in, and nothing could have said so.
+#
+# Checked as text, not by running the script: a check that had to execute
+# tools/test.sh to find out would be the 15-minute suite inside the 5-second one.
+_runner = open(os.path.join(ROOT, 'tools/test.sh'), encoding='utf-8').read()
+_tz_line = re.search(r'^export TZ=.*$', _runner, re.M)
+ok_('tools/test.sh names the clock its suites are read on', _tz_line is not None)
+# ...and names the driver's own zone ON THAT LINE. Written first as
+# `'America/New_York' in _runner`, which the paragraph of comment above the
+# export also satisfies — so exporting TZ=UTC passed it while reinstating the
+# exact fault. A check a comment can satisfy is a check that cannot fail.
+ok_('...and it is the zone the rig runs in, on the line that sets it (%r)'
+    % (_tz_line.group(0) if _tz_line else None),
+    _tz_line is not None and 'America/New_York' in _tz_line.group(0))
+
 # --- every screen names every reason a verdict can be withheld for ---------
 #
 # rate() can refuse to price a card for six reasons, and SEVEN surfaces turn

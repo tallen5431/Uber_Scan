@@ -19,6 +19,23 @@ cd "$(dirname "$0")/.." || exit 1
 # real rig; the tests need it for the same reason.
 export OMP_THREAD_LIMIT=1
 
+# The clock the rig lives on, unless the caller names another.
+#
+# Half a dozen suites read the local clock — blockOf buckets by hour, the 4am day
+# boundary, every "took 3 for $48" day header — and none of them said which zone
+# they wanted. So they answered in whatever zone the machine happened to be in,
+# and the machine was UTC while the driver is at UTC-4. Measured the day this was
+# added: `TZ=America/New_York node tests/advice.test.js` gave 409 passed and one
+# FAILED, on an assertion that wanted UTC's answer to a local-clock question,
+# while the same file in the container said all 410 passed. Every "the suite is
+# green" statement this project has ever made was made in a zone the rig does not
+# run in.
+#
+# `${TZ:-...}` rather than a bare assignment, so a caller who wants to prove a
+# suite is zone-independent can still say so — which is how the one failure above
+# was found.
+export TZ="${TZ:-America/New_York}"
+
 QUICK=0
 [ "${1:-}" = "--quick" ] && QUICK=1
 

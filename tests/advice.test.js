@@ -1245,9 +1245,22 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
      A.blockOf(8.64e15 + 1), null);
   eq('...and so does something that is not a time at all',
      A.blockOf('a Tuesday'), null);
-  // ...and the guard has not swallowed the ordinary case with them.
+  /* ...and the guard has not swallowed the ordinary case with them.
+   *
+   * Asserted as "it has a block", not as "its block is 0". Zero was UTC's
+   * answer: `blockOf` is `floor(getHours() / 3)` on the LOCAL clock, and the
+   * largest representable instant is 20:00 in America/New_York, which is block
+   * 6. So this line passed in the container and failed on the clock the rig
+   * actually runs on — `409 passed, 1 FAILED` under TZ=America/New_York — and
+   * `tools/test.sh` set no TZ at all, so every "the suite is green" claim this
+   * project has made was made in a zone the driver does not live in.
+   *
+   * NOT written as `A.blockOf(8.64e15) === Math.floor(new Date(8.64e15).getHours() / 3)`,
+   * which is the obvious repair and is a tautology: that is the function's own
+   * body, so the check could not fail. What the comment above claims, and the
+   * only thing worth asserting here, is that the guard let this one through. */
   eq('...while the largest date there IS still has one',
-     A.blockOf(8.64e15), 0);
+     A.blockOf(8.64e15) === null, false);
 
   /* How many separate days a pile of rows came off.
    *
