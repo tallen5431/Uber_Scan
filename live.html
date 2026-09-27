@@ -1563,9 +1563,26 @@
     // in the amber "this one needs you" colour while it is saying it failed.
     // Two states on one button is one too many at 74px on a moving car, and
     // the failure is the newer news.
+    //
+    // ...and not on a card this same panel is telling the driver to PASS.
+    // Measured over the real week: the card refused a destination and none
+    // was read on 457 cards, and 400 of them (87.5%) were rated `no`. The
+    // driver ticked 4 of the 457 as taken, all go or warn, and none of the
+    // 400. So the ask drops to 57 a week and loses no card anybody took. The
+    // button stays on the bar and still reads the address when pressed — the
+    // driver asked for it while screening, to look the place up — it only
+    // stops asking in the doubt colour for a press the verdict has already
+    // made moot. Taken anyway, and the held branch asks again.
+    //
+    // The card's OWN state, carried on the offer, never `last.state`: once the
+    // card leaves the phone the latest reading is an `empty` one, and a PASS
+    // card's button would start asking the moment it went. `!== 'no'` rather
+    // than a list of the states that may ask, so an offer from a rig one
+    // release behind, which carries no state, asks exactly as it did.
     var wants = !destBusy && !destSaid && !destFailed
       && (holdingNow ? heldEnds === null
-                     : (screening && !!onRecord.endRefused));
+                     : (screening && !!onRecord.endRefused
+                        && onRecord.state !== 'no'));
     el.dest.classList.toggle('wanted', wants);
     el.dest.title = destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'

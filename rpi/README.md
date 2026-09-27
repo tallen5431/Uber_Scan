@@ -3194,7 +3194,13 @@ So ⌖ Dropoff appears in one more state: no order in the car, a card on the
 panel, and no destination on it. It asks to be pressed only when the card
 REFUSED one — `endRefused`, which parse() and the accumulator both now report,
 because "Uber printed *Customer dropoff*" and "the reader found nothing" arrive
-identically as a null dropoff and only the first is a state a tap can fix.
+identically as a null dropoff and only the first is a state a tap can fix — and
+only on a card the panel is not telling the driver to PASS. On the real week
+457 cards refused a destination with none read, 400 of them rated `no`, and not
+one of the 400 was ticked as taken; the 4 that were ticked were go or warn. So
+the offer line carries the card's own `state` and the ask drops to 57 a week.
+The button still shows on a PASS card and still reads the address when pressed;
+it just does not ask.
 
 The address then lands on the card being screened rather than on an order in
 the car, appended as a note naming the offer the same way a tick is. server.js

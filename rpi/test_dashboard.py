@@ -1110,6 +1110,35 @@ const framed = (page) => page.waitForFunction(
                title: dest.title, bar: bar() };
     }, barShape.toString());
 
+    // ...but not on a card this panel is telling the driver to PASS. 400 of
+    // the 457 cards on the real week that lit this ask were rated `no`, and
+    // none of the 400 was ticked as taken. The state is the card's own, off
+    // the offer line — the reading sent just before it says ACCEPT, so a
+    // gate that read the latest reading instead would ask here.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.divides, { holding: null, stack: null }));
+    await page.evaluate((r) => window.__es.push(r),
+      { offer: { id: 'o-pass', pay: 3.55, minutes: 20, perHour: 8.40,
+                 dropoff: null, endRefused: true, state: 'no' }, at: 3 });
+    await page.waitForTimeout(250);
+    out['screening-pass ' + panel[0]] = await page.evaluate(() => {
+      const dest = document.getElementById('dest');
+      return { hidden: dest.hidden, cls: dest.className, title: dest.title };
+    });
+    // ...and the same card rated go does ask, so the check above is about
+    // the verdict and not about a button that had stopped asking for
+    // everything. Behind a PASS reading this time, the other way round.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, { holding: null, stack: null }));
+    await page.evaluate((r) => window.__es.push(r),
+      { offer: { id: 'o-go', pay: 14.25, minutes: 23, perHour: 30.0,
+                 dropoff: null, endRefused: true, state: 'go' }, at: 3 });
+    await page.waitForTimeout(250);
+    out['screening-go ' + panel[0]] = await page.evaluate(() => {
+      const dest = document.getElementById('dest');
+      return { hidden: dest.hidden, cls: dest.className };
+    });
+
     // ...and a card the reader simply got nothing off. The button still shows
     // — reading the dropoff is still worth doing — but it must not ASK to be
     // pressed, because there is nothing on the card saying an address exists.
@@ -3486,6 +3515,23 @@ try:
         ok_('%s: ...with the bar no fuller than it fits (%d: %r)'
             % (panel, bar.get('count') or 0, bar.get('labels')),
             (bar.get('count') or 99) <= 6)
+
+        # ...but not on a card the same panel is painting PASS. 400 of the 457
+        # asks on the real week were on `no` cards and not one was ticked.
+        # The button stays; only the ask goes.
+        pas = got.get('screening-pass ' + panel) or {}
+        no_('%s: a PASS card that refused a destination still offers the '
+            'button' % panel, pas.get('hidden'))
+        ok_('%s: ...but does not ask to be pressed on a card the panel says '
+            'to pass (%r)' % (panel, pas.get('cls')),
+            'wanted' not in (pas.get('cls') or ''))
+        no_('%s: ...nor tells the driver it is needed' % panel,
+            'Customer dropoff' in (pas.get('title') or ''))
+        # ...and a go card does, behind a PASS reading, so the verdict it
+        # follows is the card's own and not the last reading's.
+        gone = got.get('screening-go ' + panel) or {}
+        ok_('%s: a go card that refused a destination asks to be pressed (%r)'
+            % (panel, gone.get('cls')), 'wanted' in (gone.get('cls') or ''))
 
         # A card the reader simply got nothing off is a different state. The
         # button still shows — reading the dropoff is still worth doing — but

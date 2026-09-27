@@ -1767,6 +1767,17 @@ ceiling = said(lambda: SP.emit_offer('x', {'pay': 18.77, 'minutes': 25.0},
 eq('the offer says when nothing could be charged for the miles',
    ceiling['offer']['uncosted'], True)
 eq('...and says so plainly when something was', told['offer']['uncosted'], False)
+# ...and the verdict this card got, inside the offer. ⌖ Dropoff asks for a
+# press only on a card that is not a PASS, and the reading beside this line is
+# not a safe place to read that from: once the card leaves the phone the latest
+# reading is an `empty` one. 400 of the 457 cards that lit the ask on the real
+# week were PASS.
+passed = said(lambda: SP.emit_offer('x', {'pay': 3.55, 'minutes': 20.0,
+                                          'endRefused': True},
+                                    {'ready': True, 'perHour': 8.4,
+                                     'cardMinutes': 20.0, 'state': 'no'}))
+eq('the offer carries the verdict its own card got', passed['offer'].get('state'), 'no')
+ok_('...inside the offer, still with no `ready` beside it', 'ready' not in passed)
 
 # The card's own minutes, not the billed ones. The button is named after what
 # the driver saw on the phone; a figure with their pickup pad added would not

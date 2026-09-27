@@ -1542,6 +1542,24 @@ def emit_offer(offer_id, parsed, rate):
         # decided - nothing here re-derives them.
         'doubt': rate.get('doubt'),
         'uncosted': bool(rate.get('uncosted')),
+        # ...and the verdict THIS card got, for the same reason and one more.
+        #
+        # ⌖ Dropoff asks to be pressed on a card that refused a destination,
+        # and it asked on every one: 457 cards on the real week, 400 of them
+        # (87.5%) cards the same panel was painting PASS. It now asks only when
+        # the card's own verdict is not a PASS — 57 a week, and all 4 of the
+        # driver's ticks in that population were go or warn.
+        #
+        # It has to ride HERE and not be read off the reading beside it. The
+        # page's `last` is whatever reading came most recently, and once the
+        # card leaves the phone that is an `empty` one; seeded from
+        # /api/status it can be a different card altogether. Gated on that, a
+        # PASS card's button starts asking the moment the card goes. Inside
+        # the offer, beside the other two, it can only mean this card.
+        #
+        # Not a verdict to be mistaken for one: the message still carries no
+        # `ready`, so it can neither replace a verdict nor stand in for one.
+        'state': rate.get('state'),
     }, 'at': int(time.time() * 1000)}), flush=True)
 
 

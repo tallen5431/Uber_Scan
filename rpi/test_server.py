@@ -874,7 +874,7 @@ if shutil.which('python3'):
             '        "offer": {"id": i, "pay": 12.0, "minutes": 24.0, "billedMinutes": 24.0,\n'
             '                  "miles": 5.0, "cost": 1.75, "perHour": 30.0, "target": 25,\n'
             '                  "band": 15, "costPerMile": 0.35, "dropoff": None,\n'
-            '                  "endRefused": True}}), flush=True)\n'
+            '                  "endRefused": True, "state": "go"}}), flush=True)\n'
             'def addr(line):\n'
             '    print(json.dumps({"dropoff": {"line": line, "street": "3100 Esquire Dr NW",\n'
             '        "city": "Kennesaw", "state": "GA", "zip": "30144",\n'
@@ -918,6 +918,12 @@ if shutil.which('python3'):
         # job, and a hold started here would measure every later offer against
         # a job the driver never took.
         ok_('...without putting an order in the car', got.get('holding') is None)
+        # ...and the card's own verdict comes back with it. A panel opened or
+        # reloaded mid-card seeds ⌖ Dropoff's ask from this echo, and the ask
+        # is gated on the card not being a PASS; without the state here a
+        # reloaded panel would go back to asking on every PASS card.
+        eq('...and the offer echoed on /api/status keeps the card\'s own '
+           'verdict', (got.get('offer') or {}).get('state'), 'go')
 
         # On the record, not only in memory. The panel is process memory and a
         # restart loses it; the whole point of reading the address before
