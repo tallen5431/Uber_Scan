@@ -2078,6 +2078,44 @@ eq('...from every place it could have been left',
    [os.path.exists(p) for p in _HO.candidates(_HO.DROPOFF)],
    [False] * len(_HO.candidates(_HO.DROPOFF)))
 
+# ...but only while it can still be about the screen in front of the camera.
+#
+# /api/dropoff writes the file and answers ok whether or not a scanner is
+# listening, and /dev/shm outlives a scanner restart. A press made while this
+# process was down was honoured whenever it came back — against whatever was on
+# the phone by then, filed as ASKED, onto the order in the car or the card on
+# the slot, in a journal that cannot be corrected. A press older than its own
+# window is refused, cleared, and the log says so.
+_said = []
+_real_log = SP.log
+SP.log = _said.append
+try:
+    _now = time.time()
+    for _age, _name in ((SP.DROPOFF_WINDOW + 30, 'a press from before the scanner was listening'),
+                        (-600, 'a press stamped ahead of a clock that has since stepped back')):
+        del _said[:]
+        _HO.clear(_HO.DROPOFF)
+        open(_HO.path(_HO.DROPOFF), 'w').close()
+        os.utime(_HO.path(_HO.DROPOFF), (_now - _age, _now - _age))
+        eq('%s is not acted on' % _name, SP.dropoff_requested(now=_now), False)
+        eq('...is cleared, so it cannot fire later either',
+           [os.path.exists(p) for p in _HO.candidates(_HO.DROPOFF)],
+           [False] * len(_HO.candidates(_HO.DROPOFF)))
+        ok_('...and the log says it was ignored (%r)' % (_said[-1:],),
+            any('ignored a destination request' in m for m in _said))
+    # ...and the refusal is an AGE, not a reflex: a press a moment old, and one
+    # right at the edge of the window, are both still the driver's.
+    for _age in (0.5, SP.DROPOFF_WINDOW - 0.5):
+        del _said[:]
+        open(_HO.path(_HO.DROPOFF), 'w').close()
+        os.utime(_HO.path(_HO.DROPOFF), (_now - _age, _now - _age))
+        eq('a press %.1fs old is still taken' % _age,
+           SP.dropoff_requested(now=_now), True)
+        eq('...silently', _said, [])
+finally:
+    SP.log = _real_log
+    _HO.clear(_HO.DROPOFF)
+
 # It opens a window rather than taking one reading. The driver presses the
 # button and THEN gets the destination onto the screen, and the phone sits
 # perfectly still showing it - which is precisely what the motion gate scores as

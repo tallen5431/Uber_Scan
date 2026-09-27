@@ -531,21 +531,59 @@ def reset_requested():
     return True
 
 
-def dropoff_requested():
+def dropoff_requested(now=None):
     """True once per press of "read the dropoff". Same shape as reset_requested.
 
     Separate from the reading itself: this only says the driver asked. What it
     buys is a window — see DROPOFF_WINDOW — because the phone is showing a
     navigation screen that is not going to move, and the motion gate reads a
     still picture as nothing happening.
+
+    ...AND ONLY WHILE THE PRESS IS STILL ABOUT THE SCREEN IN FRONT OF IT.
+
+    The request was a bare file with no age, and this asked only whether it
+    existed. /api/dropoff writes it and answers ok without asking whether a
+    scanner is listening, and handoff files live in /dev/shm, which a scanner
+    restart does not clear. So a press made while this process was down — the
+    child between restarts on server.js's backoff, a wedge-kill, the systemd
+    unit stopped — sat on disk until the next loop pass and was honoured then,
+    against whatever was on the phone by then. An address read that way is
+    filed as ASKED: onto the order in the car if there is one, else onto the
+    card on the slot, overwriting a destination the card stated for itself,
+    and in the journal's fold a press outranks every sighting. That is a
+    destination nobody asked about, written into a file that cannot be
+    corrected, from a press the driver had long since given up on.
+
+    A press whose own window would already have shut — older than
+    DROPOFF_WINDOW — cannot still be about the screen the driver was looking
+    at, so it is cleared and not acted on, and the log says so. So is one
+    stamped AHEAD of the clock, which is a clock that stepped (see
+    `handoff.age`), not a fresh press. Refusing costs the driver one more tap;
+    honouring costs a wrong address on the record.
+
+    Nothing is sent to the panel. live.html stops saying "reading…" 13 seconds
+    after the server answers the press, whatever happens, so a stale press is
+    found after the
+    panel has stopped waiting for it, and a "not read" arriving then is the
+    late contradiction the ⌖ button's handling was built to avoid.
     """
     try:
-        asked = any(os.path.exists(p) for p in HO.candidates(HO.DROPOFF))
+        pressed = HO.age(HO.DROPOFF, now)
     except OSError:
         return False
-    if not asked:
+    if pressed is None:
         return False
     HO.clear(HO.DROPOFF)
+    if pressed < 0:
+        log('ignored a destination request stamped %ds ahead of the clock: the '
+            'clock has stepped since, so how old the press is cannot be told'
+            % int(-pressed))
+        return False
+    if pressed > DROPOFF_WINDOW:
+        log('ignored a destination request from %ds ago: older than its '
+            '%d-second window, so it is not about the screen on the phone now'
+            % (int(pressed), int(DROPOFF_WINDOW)))
+        return False
     return True
 
 

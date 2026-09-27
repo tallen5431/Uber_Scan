@@ -213,6 +213,56 @@ finally:
         except OSError:
             pass
 
+# --- how old a request is ----------------------------------------------------
+#
+# A request file used to be a bare fact — it exists — and a `.dropoff` press made
+# while the scanner was down was honoured whenever it came back, against
+# whatever was on the phone by then. `age` is what lets a reader refuse one; the
+# refusal itself is checked in test_scan_pi.py, which runs dropoff_requested.
+_agedir = tempfile.mkdtemp()
+_hadenv = os.environ.get(HO.ENV_DIR)
+os.environ[HO.ENV_DIR] = _agedir
+try:
+    for _p in HO.candidates(HO.DROPOFF):
+        try:
+            os.remove(_p)
+        except OSError:
+            pass
+    eq('no request has no age', HO.age(HO.DROPOFF), None)
+    _t = 1790000000.0
+    open(HO.path(HO.DROPOFF), 'w').close()
+    os.utime(HO.path(HO.DROPOFF), (_t - 40, _t - 40))
+    eq('a request reports how long ago it was written',
+       round(HO.age(HO.DROPOFF, now=_t), 3), 40.0)
+    # Written ahead of the clock reading it: the clock stepped back. Reported
+    # as it is, negative, so the reader can say which of the two it refused.
+    eq('...and one stamped ahead of the clock comes back negative',
+       round(HO.age(HO.DROPOFF, now=_t - 100), 3), -60.0)
+    # The freshest copy, because either place may hold the press just made.
+    _legacy = HO.legacy(HO.DROPOFF)
+    if _legacy != HO.path(HO.DROPOFF):
+        _hadlegacy = os.path.exists(_legacy)
+        if not _hadlegacy:
+            open(_legacy, 'w').close()
+            os.utime(_legacy, (_t - 2, _t - 2))
+            try:
+                eq('...taken from the freshest of its copies',
+                   round(HO.age(HO.DROPOFF, now=_t), 3), 2.0)
+            finally:
+                os.remove(_legacy)
+finally:
+    for _p in HO.candidates(HO.DROPOFF):
+        if _p.startswith(_agedir):
+            try:
+                os.remove(_p)
+            except OSError:
+                pass
+    if _hadenv is None:
+        os.environ.pop(HO.ENV_DIR, None)
+    else:
+        os.environ[HO.ENV_DIR] = _hadenv
+    shutil.rmtree(_agedir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d handoff checks passed' % ok)
 sys.exit(1 if bad else 0)
