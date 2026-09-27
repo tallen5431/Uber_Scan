@@ -1687,6 +1687,62 @@ the card. Every number downstream is then read off the wrong pixels.
 
 ### The backup
 
+**The backup read one file where the card holds three, and sent a window where
+the copy holds nothing.** Two separate holes in the only copy of the one artefact
+this project calls irreplaceable, both ending with exit 0, a fresh `.synced`
+stamp and `doctor` green. Measured against a real `server.js`:
+
+| what the card held | what `rpi/sync.py` sent | what it said |
+|---|---|---|
+| 1,200 offers across two rolls | **100** | "sent 100 row(s) … now holds 100", `--all` |
+| 905 offers over 90 days, empty copy | **302**, then nothing for ever | "sent 302 … 302 were new", exit 0 |
+
+*The roll.* `rpi/journal.py`'s backstop moves the live file aside at 64MB and keeps
+every roll, and nothing in the repository ever read one back — `server.js` stats
+`.1`'s mtime and reads nothing. `rows_since` and the shortfall count both saw the
+live file alone, so `--all`, whose own help says "send the whole journal", sent
+the tail of it. Both now walk the chain oldest-first.
+
+*And the roll is a season, not a lifetime.* `rpi/sync.py`'s docstring says "about
+19MB a year" while `rpi/journal.py`'s own `last()` says "a year of driving — 40,000
+rows, 68MB", which already exceeds the cap: the repository contradicts itself
+about whether its own backstop can fire. Replaying the real week's frames through
+the real accumulator gives 2.8 rows an offer and 5.7MB a week, so about four rolls
+a year — and that is a floor, because the replay writes no `seen`, `screen`,
+`pair` or `mark` rows.
+
+*The window could not see across a roll either,* and that is why the count alone
+was not enough: every archived row is older than `--days` by construction, so
+`settled` saw ten rows against the copy's ten and called it even with fifty in
+`.1`. A rolled card now also compares all-time counts, once, and only when it has
+actually rolled.
+
+*The empty copy was the other half.* `FIRST_RUN_DAYS` was documented as "what to
+send when the far end has nothing, **or** cannot say what it has" and did both,
+and the first half was the fault: a copy holding nothing is not a guess to be
+bounded, it is a fresh install — the premise of the whole tool, and of the
+documented `COPY=` migration that points JOURNAL at a new empty file. It cannot
+self-repair either, and structurally: `settled` counts the rig's rows inside the
+same window the first tick used, so the rows the window excluded are excluded
+from the rig's own side and the two numbers agree. It converges only when the
+newest row is hours old — that is, exactly when the rig is not scanning, which is
+not when the timer runs.
+
+*A damaged archive warns rather than blocking.* Extending the abort-on-unreadable
+rule to the archives has a cost the live file does not: measured, a `.1` that
+could not be opened made the first sync send NOTHING and exit 1, so a file
+nothing had written to since the spring cost tonight's offers their backup. The
+readable rows go, the warning names the file on stderr where `--quiet` cannot
+silence it, and `--all` alone reports the failure — because `--all` is the run
+that promised all of them.
+
+*Two of the new checks were written wrong first.* One asserted the shortfall
+across a roll and failed at 10 rows against 60, which was the fix being
+incomplete rather than the check being wrong — the window, not the count. The
+other called its fixture an ordinary tick while the copy was empty, so the
+first-sync branch read the archives for a good reason and the check failed on its
+own premise. Five mutations, five kills.
+
 **A clock behind the stamp clamped the backup's age to zero, so the check could
 not fail.** `rpi/doctor.py` measured it as `max(0.0, now - last['at'])` and then
 asked `hours < 24`. With this machine's clock at or before the stamp that is

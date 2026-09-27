@@ -20,6 +20,8 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import time
 import urllib.error
 import urllib.request
@@ -1010,11 +1012,26 @@ try:
 finally:
     stamp_far.close()
 
-# --- --days bounds the second tick as well as the first ------------------------
+# --- an empty copy is sent everything, not a window ---------------------------
 #
-# The first tick sent thirty days as promised; the second saw the rig holding
-# more offers than the copy "up to that point" — the older ones, deliberately
-# not sent — and sent everything from the start of the file.
+# `--days` used to bound this, and the constant said so: "what to send when the
+# far end has nothing, OR cannot say what it has". The first half was a fault. A
+# rig holding 905 offers across 90 days, newest row a minute old — the normal
+# mid-shift tick — sent 302 on the first run against a real server and then
+# nothing on the second, third or fourth. 603 offers on exactly one SD card, in
+# a vehicle, exit 0, the stamp refreshed on every tick.
+#
+# It cannot repair itself, and that is structural rather than unlucky: `settled`
+# counts this rig's rows inside the same window the first tick used, so the rows
+# the window excluded are excluded from the rig's own side of the comparison and
+# the two numbers agree. It converges only when the newest row is hours old,
+# because then `since` lands before the first floor and the band between them
+# reads as a gap — so it self-heals exactly when the rig is NOT scanning, which
+# is not when the ten-minute timer runs.
+#
+# A copy that holds nothing is not a guess to be bounded. It is a fresh install,
+# which is the premise of this whole tool, and of the documented `COPY=`
+# migration that points JOURNAL at a new empty file.
 days_far = FarEnd()
 try:
     work4 = tempfile.mkdtemp()
@@ -1022,12 +1039,210 @@ try:
     write(j4, [offer(i, now - i * 86400000) for i in range(60)])
     run_main(days_far.base, j4, ['--days', '30'])
     first_tick = len(lines(days_far.journal))
-    ok_('the first tick sends the window (%d rows)' % first_tick, 29 <= first_tick <= 31)
+    eq('an empty copy is sent the whole journal, not the window (%d rows)'
+       % first_tick, first_tick, 60)
     run_main(days_far.base, j4, ['--days', '30'])
-    eq('...and the second sends nothing more, rather than everything',
-       len(lines(days_far.journal)), first_tick)
+    eq('...and the next tick sends nothing more', len(lines(days_far.journal)),
+       first_tick)
 finally:
     days_far.close()
+
+
+# --- ...and --days still bounds the copy that cannot say what it has ----------
+#
+# Which is the job the constant is left with, and the one shape a real server.js
+# cannot be made to play: an older build whose `/api/journal/newest` carries no
+# `offers` key at all. Without this the bounded branch is reachable by no input
+# in this file and the window is a number nothing tests.
+class OldCopy(object):
+    """A far end from before the count existed. Answers, but will not say."""
+
+    def __init__(self):
+        self.rows = []
+        me = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _json(self, body):
+                raw = json.dumps(body).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def do_GET(self):
+                if self.path.startswith('/api/status'):
+                    return self._json({'ok': True})
+                if self.path.startswith('/api/journal/newest'):
+                    # No `offers`, no `offersSince`: the whole point.
+                    return self._json({'ok': True, 'newest': 0})
+                self.send_response(404)
+                self.end_headers()
+
+            def do_POST(self):
+                n = int(self.headers.get('Content-Length') or 0)
+                body = self.rfile.read(n).decode('utf-8')
+                got = [l for l in body.split('\n') if l.strip()]
+                me.rows.extend(got)
+                return self._json({'ok': True, 'added': len(got),
+                                   'have': len(me.rows)})
+
+        self.httpd = HTTPServer(('127.0.0.1', 0), Handler)
+        self.base = 'http://127.0.0.1:%d' % self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+old_copy = OldCopy()
+try:
+    work4b = tempfile.mkdtemp()
+    j4b = os.path.join(work4b, 'journal.jsonl')
+    write(j4b, [offer(i, now - i * 86400000) for i in range(60)])
+    run_main(old_copy.base, j4b, ['--days', '30'])
+    bounded = len(old_copy.rows)
+    ok_('a copy that will not say what it has gets the window (%d rows)'
+        % bounded, 29 <= bounded <= 31)
+    ok_('...which is not the whole journal', bounded < 60)
+finally:
+    old_copy.close()
+
+
+# --- a rolled journal is still inside the backup's reach ----------------------
+#
+# `journal.py`'s backstop moves the live file aside at 64MB and keeps every roll
+# — `.1` newest, `.2` the one before — and nothing in the repository ever read
+# one back. `server.js` stats `.1`'s mtime and reads nothing. So `rows_since`
+# and the shortfall count both saw the live file alone.
+#
+# Measured against a real server before the fix, on a card holding 1,200 offers
+# across two rolls: `sync.py --all`, whose own help says "send the whole
+# journal", SENT 100. It replied "100 were new", refreshed the stamp and exited
+# 0, and the shortfall repair could not see it either because `mine` counted the
+# same live file, so the two sides agreed. 1,100 offers on exactly one SD card.
+#
+# The roll is a season, not a lifetime: this file's docstring says ~19MB a year
+# while `journal.py`'s `last()` says "a year of driving — 40,000 rows, 68MB",
+# which already exceeds the 64MB cap. Replaying the real week's own frames gives
+# 2.8 rows an offer and 5.7MB a week — about four rolls a year, and a floor,
+# because the replay writes no `seen`, `screen`, `pair` or `mark` rows.
+roll_far = FarEnd()
+try:
+    work6 = tempfile.mkdtemp()
+    j6 = os.path.join(work6, 'journal.jsonl')
+    # Oldest in `.2`, then `.1`, then the live file — which is the order the
+    # roll creates and the order the rows have to arrive in.
+    write(j6 + '.2', [offer(i, now - 90 * 86400000 + i * 1000) for i in range(30)])
+    write(j6 + '.1', [offer(30 + i, now - 60 * 86400000 + i * 1000) for i in range(80)])
+    write(j6, [offer(110 + i, now - 3600000 + i * 1000) for i in range(10)])
+    run_main(roll_far.base, j6, ['--all'])
+    got = lines(roll_far.journal)
+    eq('--all sends what a rolled card holds, not just the live file',
+       len(got), 120)
+    ids = [r.get('id') for r in got]
+    ok_('...including the oldest roll', 'off0' in ids)
+    ok_('...and the one between', 'off30' in ids)
+    ok_('...and the live file', 'off119' in ids)
+    # Oldest first, so a reader of the copy sees one history rather than three
+    # shuffled together.
+    ats = [r.get('at') for r in got]
+    eq('...oldest first, as one history', ats, sorted(ats))
+    # ...and an ordinary tick does NOT pay to parse them. Every archived row is
+    # older than a floor an hour before the copy's newest, so reading them would
+    # be megabytes discarded on a ten-minute timer.
+    eq('an ordinary tick reads the live file alone',
+       SY.chain_of(j6, archives=False), [j6])
+    eq('...and --all walks the whole chain, oldest first',
+       SY.chain_of(j6), [j6 + '.2', j6 + '.1', j6])
+    # A card that has never rolled has a chain of one, so nothing here changes
+    # the ordinary rig.
+    work7 = tempfile.mkdtemp()
+    j7 = os.path.join(work7, 'journal.jsonl')
+    write(j7, [offer(i, now - i * 1000) for i in range(3)])
+    eq('a card that never rolled is a chain of one', SY.chain_of(j7), [j7])
+finally:
+    roll_far.close()
+
+
+# --- ...and the shortfall across a roll repairs itself, without --all ---------
+#
+# The count is the half that turns "somebody has to notice and run --all" into
+# something that heals on the next tick, and counted on the live file alone a
+# rolled card AGREES with a copy holding a fraction of it: `settled` and
+# `theirs_window` both see ten rows, nothing is short, and the gap stays open for
+# ever. So the reconciliation reads the whole chain even though the ordinary
+# floor does not.
+gap_roll = FarEnd()
+try:
+    work8 = tempfile.mkdtemp()
+    j8 = os.path.join(work8, 'journal.jsonl')
+    write(j8 + '.1', [offer(i, now - 40 * 86400000 + i * 1000) for i in range(50)])
+    write(j8, [offer(50 + i, now - 7200000 + i * 1000) for i in range(10)])
+    # The copy is given the live file's rows only — the state the old code left
+    # behind after a roll — and then an ORDINARY tick runs, with no --all.
+    write(gap_roll.journal, [offer(50 + i, now - 7200000 + i * 1000)
+                             for i in range(10)])
+    run_main(gap_roll.base, j8)
+    got8 = lines(gap_roll.journal)
+    eq('an ordinary tick notices a rolled card is ahead of the copy',
+       len(got8), 60)
+    ok_('...and closes it with the archived rows', 'off0' in
+        [r.get('id') for r in got8])
+finally:
+    gap_roll.close()
+
+
+# --- a damaged archive does not stop today's offers being backed up ----------
+#
+# An unreadable journal aborts the run without stamping, on purpose: the caller
+# cannot tell an empty list from an unread one, so sending nothing and claiming
+# success is the one failure this tool must not have. Extending that to the
+# archives has a cost the live file does not — a months-old `.2` that will not
+# parse would block every tick for ever, and today's offers would go unbacked
+# because of a file nothing has written to since the spring.
+#
+# So the ordinary tick reads the live file alone, which is also correct on its
+# own terms: its floor is an hour before the copy's newest row, and every
+# archived row is older than that by definition.
+torn_far = FarEnd()
+try:
+    work9 = tempfile.mkdtemp()
+    j9 = os.path.join(work9, 'journal.jsonl')
+    write(j9, [offer(i, now - 3600000 + i * 1000) for i in range(6)])
+    # A `.1` that cannot be read at all, not merely a torn line in it.
+    os.mkdir(j9 + '.1')
+    # The copy is given the live rows first, so what follows is an ORDINARY
+    # tick. Written without this, the copy was empty, the first-sync branch set
+    # the floor to 0, the archives were read for the good reason that a first
+    # sync must read them — and the check below failed on its own premise.
+    write(torn_far.journal, [offer(i, now - 3600000 + i * 1000) for i in range(6)])
+    code9, said9 = run_main(torn_far.base, j9)
+    eq('an ordinary tick still backs up with a damaged archive beside it',
+       code9, 0)
+    eq('...sending the live file\'s rows', len(lines(torn_far.journal)), 6)
+    ok_('...and a stamp says so', SY.last_synced(j9) is not None)
+    # ...and says nothing about it, which is the half that pins the guard. A tick
+    # that read the archives would warn about a file it has no reason to open,
+    # on every tick, for ever — and a warning that is always there is a warning
+    # nobody reads by the second evening.
+    ok_('...without a word about the archive it had no reason to read (%r)'
+        % said9[:80], 'journal.jsonl.1' not in said9)
+    # ...while --all, which is the run that promises the whole journal, refuses
+    # rather than quietly leaving the archive out — and names the file to look
+    # at, which is not the one the message used to name.
+    code9b, said9b = run_main(torn_far.base, j9, ['--all'])
+    eq('--all refuses to call a partial journal a whole one', code9b, 1)
+    ok_('...naming the archive rather than the live file (%r)' % said9b[:90],
+        'journal.jsonl.1' in said9b)
+finally:
+    torn_far.close()
 
 # --- a copy that is genuinely missing rows repairs itself -------------------
 #

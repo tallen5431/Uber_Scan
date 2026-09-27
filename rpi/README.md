@@ -7001,7 +7001,7 @@ python3 rpi/test_scan_pi.py     # 336 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
-python3 rpi/test_sync.py        # 180 on getting the offers off the car, and
+python3 rpi/test_sync.py        # 198 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
 python3 rpi/test_scanjs.py      # 201 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)

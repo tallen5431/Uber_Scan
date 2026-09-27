@@ -48,7 +48,20 @@ DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # one loses an offer permanently.
 OVERLAP_MS = 60 * 60 * 1000
 
-# What to send when the far end has nothing, or cannot say what it has.
+# What to send when the far end CANNOT SAY what it has.
+#
+# It said "has nothing, or cannot say" and did both, and the first half was a
+# fault: a copy that holds no offers is not a guess to be bounded, it is a fresh
+# install — the premise of this whole tool, and of the documented `COPY=`
+# migration that points JOURNAL at a new empty file. Bounded to thirty days, a
+# rig holding 905 offers over 90 days sent 302 on the first tick and nothing ever
+# again, exit 0 and the stamp refreshed, because the shortfall check windows this
+# rig's own count the same way and so cannot see what the window left out. That
+# case takes `floor = 0` now; see the branch in main().
+#
+# What is left for this constant is the case it is actually for: a copy whose
+# reply carries no `offers` at all, an older build that cannot be asked. A
+# bounded guess beats both a silent nothing and a year on the wire.
 FIRST_RUN_DAYS = 30
 
 # Where a successful run leaves its mark: beside the journal, as
@@ -130,7 +143,53 @@ def newest_at(base, timeout=TIMEOUT):
 CLOCK_BELIEVABLE_AFTER = 1735689600000       # 2025-01-01
 
 
-def rows_since(path, floor_ms):
+def chain_of(path, archives=True):
+    """The journal files to read, oldest first: `<path>.N` down to `.1`, then
+    `<path>` itself.
+
+    `journal.py`'s backstop moves the live file aside at 64MB and keeps every
+    roll — `.1` is the newest archive, `.2` the one before it — and until this
+    existed nothing in the repository ever read one back. `server.js:2459` stats
+    `.1`'s mtime and reads nothing. So `rows_since` and the shortfall count both
+    saw the live file alone, and every roll cut the backup's reach.
+
+    Measured against a real `server.js` on a card holding 1,200 offers across two
+    rolls — 300 in `.2`, 800 in `.1`, 100 live: `sync.py --all`, whose own help
+    says "send the whole journal", **sent 100 of them**, replied "100 were new",
+    refreshed the stamp and exited 0. The shortfall repair could not see it
+    either, because `mine` counted the same live file, so the two sides agreed.
+    1,100 offers existed on exactly one SD card in a vehicle and every
+    instrument said the backup was healthy.
+
+    And the roll is routine rather than a once-in-a-rig's-life event. This file's
+    own docstring says "about 19MB a year" and `journal.py`'s `last()` says "a
+    year of driving — 40,000 rows, 68MB"; the second already exceeds the 64MB cap,
+    so the repository contradicts itself about whether its own backstop can fire.
+    Replaying the real week's 1,166 offers through the real accumulator gives
+    2.8 rows an offer and 5.7MB a week — a roll about every 12 weeks, four a year
+    — and that is a floor, because the replay writes no `seen`, `screen`, `pair`
+    or `mark` rows.
+
+    `archives=False` for the ordinary ten-minute tick, whose floor is an hour
+    before the copy's newest row: every archived row is older than that by
+    definition, so reading them would be megabytes of parsing to discard. The
+    archives are read exactly when the floor is 0 — `--all`, or a shortfall the
+    tick has already decided it must close — which is when the question is "what
+    does this card hold" rather than "what is new".
+    """
+    out = []
+    if archives:
+        highest = 0
+        while os.path.exists('%s.%d' % (path, highest + 1)):
+            highest += 1
+        # Oldest first, so the rows arrive in the order they were written and a
+        # reader of the copy sees one history rather than three shuffled.
+        out.extend('%s.%d' % (path, n) for n in range(highest, 0, -1))
+    out.append(path)
+    return out
+
+
+def rows_since(path, floor_ms, damaged=None):
     """Rows at or after `floor_ms`, oldest first, and why if there are none.
 
     Returns (rows, why_not). `why_not` is None when the list is the truth and a
@@ -159,12 +218,32 @@ def rows_since(path, floor_ms):
     (id, seq) pair once however often it arrives, so re-offering them on every
     tick costs a few hundred bytes and closes the hole permanently.
     """
-    log = JR.Journal(path)
-    rows = [r for r in log.rows()
-            if isinstance(r, dict)
-            and ((r.get('at') or 0) >= floor_ms
-                 or (r.get('at') or 0) < CLOCK_BELIEVABLE_AFTER)]
-    return rows, log.unreadable
+    rows, unreadable = [], None
+    for one in chain_of(path, archives=(floor_ms == 0)):
+        log = JR.Journal(one)
+        rows.extend(r for r in log.rows()
+                    if isinstance(r, dict)
+                    and ((r.get('at') or 0) >= floor_ms
+                         or (r.get('at') or 0) < CLOCK_BELIEVABLE_AFTER))
+        # The LIVE file's failure aborts the run, and only the live file's. That
+        # rule is right where it came from — the caller cannot tell an empty
+        # list from an unread one, so sending nothing and stamping success is
+        # the one failure this tool must not have — and extending it to the
+        # archives has a cost the live file does not: a months-old `.2` that
+        # will not parse would block every tick for ever, and today's offers
+        # would go unbacked because of a file nothing has written to since the
+        # spring. Measured: with a `.1` that cannot be opened, the first sync
+        # into an empty copy sent NOTHING and exited 1.
+        #
+        # So a damaged archive is a warning carried back to the caller, which
+        # says it on stderr — where `--quiet` cannot silence it, because the
+        # installed unit runs `--quiet` and stderr is what journalctl keeps.
+        if log.unreadable:
+            if one == path:
+                unreadable = unreadable or log.unreadable
+            elif damaged is not None:
+                damaged.append('%s (%s)' % (os.path.basename(one), log.unreadable))
+    return rows, unreadable
 
 
 def send_config(base, path, token=None, timeout=TIMEOUT):
@@ -398,7 +477,12 @@ def main():
     # limit, the POST is reset, the reset is indistinguishable from being out of
     # range, and the sync reports success and backs up nothing — for good, and
     # silently, which is the worst way for the only backup to fail.
-    mine = [r for r in JR.Journal(args.journal).rows()
+    # Over the archives too, for the reason `chain_of` gives: counted on the
+    # live file alone, a rolled card agrees with a copy that holds a fraction of
+    # it, so the shortfall the count exists to find is exactly the one it cannot
+    # see. This is the reconciliation, so it reads everything the card holds.
+    mine = [r for one in chain_of(args.journal)
+            for r in JR.Journal(one).rows()
             if isinstance(r, dict) and not r.get('kind')]
     # ...inside the window --days asked for. The first tick sent thirty days
     # as promised and the second saw the rig holding more offers than the
@@ -443,6 +527,22 @@ def main():
         short = (isinstance(theirs, int) and settled_all > theirs)
         behind, held = theirs, settled_all
 
+    # ...and a rolled card cannot be reconciled through the window at all, which
+    # is why this second comparison exists beside it. Every archived row is
+    # older than `--days` by construction — a roll takes about three months of
+    # driving to fill — so `settled`, which counts only inside the window, sees
+    # ten rows against the copy's ten and calls it even while fifty sit in `.1`.
+    # Verified: without this the ordinary tick sends nothing after a roll and
+    # only a hand-run `--all` ever closes it.
+    #
+    # An all-time count, and only when the card has actually rolled, so the
+    # ordinary un-rolled rig is untouched. It fires once — after it, the two
+    # numbers are equal and it stays quiet.
+    rolled = len(chain_of(args.journal)) > 1
+    if not short and rolled and isinstance(theirs, int) and len(mine) > theirs:
+        short = True
+        behind, held = theirs, len(mine)
+
     if args.all or short:
         floor = 0
         if short and not args.all:
@@ -450,6 +550,33 @@ def main():
                 'sending everything to close the gap' % (args.to, behind, held))
     elif newest:
         floor = newest - OVERLAP_MS
+    elif theirs == 0:
+        # A copy that holds NOTHING gets the whole journal, once.
+        #
+        # `--days` is for the case below this: a copy that cannot say what it
+        # has, where a bounded guess beats both a silent nothing and a year on
+        # the wire. A copy that CAN say, and says zero, is not a guess — it is a
+        # fresh install, which is the premise of this whole tool ("until this
+        # existed there was exactly one copy of it, on an SD card, in a
+        # vehicle") and the documented `COPY=` migration, which points JOURNAL
+        # at a new empty file.
+        #
+        # Measured against a real server, 905 offers spanning 90 days with the
+        # newest a minute old — the normal mid-shift tick: tick one sent 302 and
+        # the next three sent nothing, for ever. 603 offers on exactly one disk,
+        # exit 0, stamp refreshed. It cannot repair itself either, and that is
+        # structural rather than bad luck: `settled` counts the rig's rows inside
+        # the same window the first tick used, so the rows the window excluded
+        # are excluded from the rig's own side of the comparison and the two
+        # numbers agree. It converges only when the newest row is hours old,
+        # because then `since` lands before the first floor and the band between
+        # them reads as a gap — so it repairs itself exactly when the rig is NOT
+        # scanning, which is not when the timer runs.
+        #
+        # A year is ~19MB by this file's own estimate and `chunks()` already
+        # splits the body at 4MB, so the whole history is a handful of POSTs paid
+        # once.
+        floor = 0
     else:
         floor = JR.now_ms() - args.days * 86400000
 
@@ -486,7 +613,17 @@ def main():
         elif came:
             say('%d tag(s) made on the copy came back, %d new here' % (pulled, came))
 
-    rows, unreadable = rows_since(args.journal, floor)
+    damaged = []
+    rows, unreadable = rows_since(args.journal, floor, damaged)
+    if damaged:
+        # Not fatal, and not silent either. What is on the card and cannot be
+        # read will never reach the copy, so this is the only notice that exists
+        # for it — and the rows that CAN be read still go, because a damaged
+        # archive from the spring must not cost tonight's offers their backup.
+        print('%d rolled journal file(s) could not be read and were left out: '
+              '%s. Everything readable was sent. Those offers exist only on this '
+              'card until the file is repaired or removed.'
+              % (len(damaged), ', '.join(damaged)), file=sys.stderr)
     if unreadable:
         # No stamp, and a non-zero exit. Stamping here would tell doctor.py the
         # offers were backed up minutes ago, which is exactly the sentence a
@@ -532,6 +669,14 @@ def main():
     if result.get('malformed'):
         print('%d row(s) were refused as malformed' % result['malformed'],
               file=sys.stderr)
+    # Stamped either way, because the stamp's claim is "the copy was reached and
+    # given what could be read", and that is true — tonight's offers are on the
+    # copy. But `--all` says "send the whole journal", and with an archive it
+    # could not read it did not, so it reports a failure while the ordinary tick
+    # reports the success it actually had. The ordinary tick's job is today's
+    # rows; `--all`'s job is all of them.
+    if damaged and args.all:
+        return 1
     return 0
 
 
