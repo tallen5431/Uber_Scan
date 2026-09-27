@@ -1710,6 +1710,21 @@
       bits = ['today: the journal could not be read'];
     } else if (s.rolled) {
       bits = ['today: the journal just rolled over'];
+    } else if (s.failed) {
+      // The request itself failed — an answer that was a 500, a deadline that
+      // fired while the server was parsing the journal, a dropped packet on
+      // car wifi. This used to blank the row, and SHIFT_EVERY_MS is three
+      // minutes, so one lost request took the only takings figure on the
+      // panel off the glass for three minutes with nothing in its place. A
+      // blank reads exactly like a night with nothing in it.
+      //
+      // About the FIGURES, not about reaching the rig: when the rig is really
+      // gone the connection line beside this already says "reconnecting to
+      // the server…", and this saying it too would be one question answered
+      // twice on one bar. The case only this row can name is a reachable rig
+      // whose answer did not arrive. No old figures reprinted with it — an
+      // hour on, they would still read like the truth.
+      bits = ['today: figures could not be fetched'];
     } else {
       // Money first. This is one line, cut with an ellipsis where it does
       // not fit, and on the 480px hat and a phone it does not: measured
@@ -1832,17 +1847,27 @@
     ask('/api/today?since=' + since).then(function (r) {
       // An older build has no such route, and an unknown /api path on this
       // server falls past every handler to a text/plain 404 — so `.json()`
-      // rejects with a SyntaxError rather than returning a status to branch on.
-      // Both paths have to end up in the same place.
-      if (!r.ok) throw new Error('http ' + r.status);
+      // would reject with a SyntaxError rather than returning a status to
+      // branch on. The status is read here instead and carried on the error,
+      // because the catch below treats a 404 differently from a failure.
+      if (!r.ok) {
+        var e = new Error('http ' + r.status);
+        e.status = r.status;
+        throw e;
+      }
       return r.json();
     }).then(function (s) {
       showShift(s);
-    }).catch(function () {
+    }).catch(function (e) {
       // Not a silent swallow. Leaving the last good figures up with nothing
       // saying they are old is the failure this file keeps warning about — an
       // hour into a shift they would still read like the truth.
-      showShift(null);
+      //
+      // Hidden only for a 404, which is a server with no such route at all:
+      // there are no figures to fail to fetch, and a sentence complaining
+      // about them every three minutes would be a light that never clears.
+      // Every other failure says so. See `s.failed` in showShift.
+      showShift(e && e.status === 404 ? null : { failed: true });
     }).then(function () {
       shiftBusy = false;
       if (shiftAgain) { shiftAgain = false; loadShift(); }

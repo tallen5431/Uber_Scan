@@ -2012,6 +2012,10 @@ const framed = (page) => page.waitForFunction(
       viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
     });
     const page = await ctx.newPage();
+    // Three answers in turn: figures, then a server error, then no such
+    // route. The middle one is the ordinary failure — a 500, or the deadline
+    // firing while the journal is parsed — and it used to blank the row for
+    // the three minutes to the next poll with nothing in its place.
     let asks = 0;
     await page.route('**/api/today*', async (route) => {
       asks += 1;
@@ -2021,6 +2025,9 @@ const framed = (page) => page.waitForFunction(
                                    median: 19, beforeClock: 0,
                                    unreadable: null, rolled: false,
                                    clockSet: true }) }
+        : asks === 2
+        ? { status: 500, contentType: 'application/json',
+            body: '{"ok":false}' }
         : { status: 404, contentType: 'text/plain', body: 'not found' });
     });
     await page.route('**/api/offers/mark', async (route) => {
@@ -2041,7 +2048,13 @@ const framed = (page) => page.waitForFunction(
       { offer: { id: 'g1', pay: 8.04, minutes: 23, perHour: 14.71 }, at: 1 }));
     await page.waitForTimeout(300);
     out.shiftBefore = await peek();
-    // Marking refetches, and this time the endpoint is not there.
+    // Marking refetches, and this time the server answers 500.
+    await page.click('#took', { timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    out.shiftFailed = await peek();
+    out.shiftFailedAsks = asks;
+    // ...and unmarking refetches again, and this time the endpoint is not
+    // there at all.
     await page.click('#took', { timeout: 3000 }).catch(() => {});
     await page.waitForTimeout(500);
     out.shiftLost = await peek();
@@ -4013,7 +4026,20 @@ try:
     ok_('the shift line was on the panel first', bool(before))
     if before:
         ok_('...showing a shift', '7 offers' in (before.get('text') or ''))
-        eq('...and the failed ask really happened', got.get('shiftLostAsks'), 2)
+        # A request that FAILED says so. The row used to be hidden here too,
+        # and at three minutes a poll one dropped request blanked the only
+        # takings figure on the panel — a blank that reads exactly like a
+        # night with nothing in it.
+        failed = got.get('shiftFailed') or {}
+        eq('...and the 500 really was asked for', got.get('shiftFailedAsks'), 2)
+        no_('a failed request for the figures leaves the row on the panel',
+            failed.get('hidden'))
+        ok_('...naming the failure (%r)' % (failed.get('text') or ''),
+            'could not be fetched' in (failed.get('text') or ''))
+        no_('...without the old figures standing beside it',
+            'offer' in (failed.get('text') or '')
+            or '$' in (failed.get('text') or ''))
+        eq('...and the 404 ask really happened', got.get('shiftLostAsks'), 3)
         ok_('...and it comes off when the figures can no longer be had',
             lost.get('hidden'))
 
