@@ -472,7 +472,81 @@ ok_('...and that this is not an empty journal',
     'not an empty journal' in _wall_out.stdout)
 ok_('...naming the file to look at', _wall in _wall_out.stdout)
 
+# --- a clock corrected mid-shift leaves a fingerprint, and it is read --------
+#
+# The one fault in the journal that leaves no other trace. A Pi has no
+# real-time clock and CLOCK_BELIEVABLE_AFTER covers the 1970 boot, but a clock
+# that is merely WRONG — right year, hours out — passes every guard in the rig:
+# the 2025 floor, `futureCeiling`'s whole day of slack, and an offers page that
+# renders `at` in the viewer's timezone with complete confidence.
+#
+# It happened. A shift's 25 offers reached the journal stamped seven hours after
+# they were really read, the offers page showed them at 4am, and the driver
+# noticing was the only reason anybody knew. The rates survived — a duration
+# card carries its own minutes, and on a delivery card `minutes_until` would
+# make a seventeen-hour job that SANE_MINUTES refuses — so the money is
+# protected and the clock is not.
+#
+# What is visible is the CORRECTION. The journal is append-only and written in
+# order by one process, so `at` never goes backwards on a rig, and NTP fixes a
+# fast clock by stepping it back. That step stays in the file.
+_clock_dir = tempfile.mkdtemp()
+
+
+def _clock_journal(name, rows):
+    path = os.path.join(_clock_dir, name)
+    with open(path, 'w') as fh:
+        for r in rows:
+            fh.write(json.dumps(r) + '\n')
+    return path
+
+
+def _crow(i, at):
+    return {'v': 1, 'id': 'c%d' % i, 'seq': 1, 'at': at, 'pay': 10.0,
+            'minutes': 20.0, 'miles': 5.0, 'perHour': 21.0, 'state': 'no',
+            'whole': True, 'target': 25, 'band': 15, 'costPerMile': 0.3}
+
+
+_cnow = int(time.time() * 1000)
+# Seven hours fast for 25 offers, then NTP steps it back and the shift goes on.
+_skewed = _clock_journal('skewed.jsonl',
+                         [_crow(i, _cnow + 7 * 3600000 + i * 20000) for i in range(25)]
+                         + [_crow(25 + i, _cnow + i * 20000) for i in range(15)])
+_sk = run(JOURNAL=_skewed)
+eq('a clock corrected mid-shift is caught',
+   findings(_sk.stdout).get("the journal's stamps run forwards"), False)
+_skline = [l for l in _sk.stdout.splitlines() if 'stamps run forwards' in l]
+ok_('...saying how many rows are on the wrong side of it (%r)' % _skline[:1],
+    any('15 rows stamped before' in l for l in _skline))
+ok_('...and by how far the clock was out',
+    any('7.1 hours' in l for l in _skline))
+# The remedy has to say the thing a driver would otherwise get wrong: the file
+# cannot be repaired, and it is the EARLIER rows that carry the wrong time.
+ok_('...and that the file cannot be put right, being append-only',
+    any('append-only' in l for l in _sk.stdout.splitlines()))
+
+# ...and it is quiet on an ordinary shift, which is the half that makes it worth
+# printing at all.
+_clean = _clock_journal('clean.jsonl', [_crow(i, _cnow + i * 20000) for i in range(30)])
+eq('an ordinary shift\'s stamps run forwards',
+   findings(run(JOURNAL=_clean).stdout).get("the journal's stamps run forwards"), True)
+# A row from before the clock was set is a DIFFERENT fault with its own
+# handling, and every one of them would otherwise read as a step backwards.
+_prentp = _clock_journal('prentp.jsonl',
+                         [_crow(i, _cnow + i * 20000) for i in range(30)]
+                         + [_crow(99, 1000)])
+eq('a row from before the clock was set is not a step backwards',
+   findings(run(JOURNAL=_prentp).stdout).get("the journal's stamps run forwards"), True)
+# One row cannot be out of order with itself, and an empty file has nothing to
+# be out of order — both must still print the line rather than skipping it, or
+# a green report would be indistinguishable from an unasked question.
+for _n, _rows in (('one.jsonl', [_crow(0, _cnow)]), ('none.jsonl', [])):
+    eq('the line is printed even for %s' % _n,
+       findings(run(JOURNAL=_clock_journal(_n, _rows)).stdout)
+       .get("the journal's stamps run forwards"), True)
+
 import shutil as _shutil
+_shutil.rmtree(_clock_dir, ignore_errors=True)
 _shutil.rmtree(_work, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad

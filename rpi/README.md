@@ -7029,7 +7029,7 @@ python3 rpi/test_service.py     #  45 on the systemd units BOTH installers
                                 #     environment assignment survived
 python3 rpi/test_camera.py      #  42 on which tuning file opens the camera, and
                                 #     on who is already holding it
-python3 rpi/test_doctor.py      # 100 on the preflight running to the end, on
+python3 rpi/test_doctor.py      # 109 on the preflight running to the end, on
                                 #     slower not being reported as broken, and
                                 #     on a journal with a hole in it being
                                 #     reported at one line and failed at more

@@ -216,6 +216,65 @@ def main():
                   'append-only and nothing keeps a second copy of a line. One is '
                   'what a power cut costs; this many is a card starting to fail. '
                   'Copy %s somewhere else now, then check the card.' % journal_path)
+        # ...and whether the stamps on those rows run FORWARDS.
+        #
+        # This is the one fault in the journal that leaves no other trace. A Pi
+        # has no real-time clock; it boots in 1970 and steps to real time when
+        # the network arrives, and CLOCK_BELIEVABLE_AFTER exists for that. What
+        # it does not cover is a clock that is merely WRONG — plausible, in the
+        # right year, and hours out. Every guard in the rig passes it:
+        # `CLOCK_BELIEVABLE_AFTER` wants 2025, `futureCeiling` in server.js
+        # allows a whole day of slack, and the offers page renders whatever
+        # `at` says in the viewer's own timezone with complete confidence.
+        #
+        # This happened. A shift's 25 offers reached the journal stamped
+        # 08:00-08:09 UTC when they were really read at about 01:00, seven hours
+        # earlier; the offers page showed them at 4am, faithfully, and the
+        # driver's own report is the only reason anybody knew. On duration cards
+        # the rates survive it — they carry their own minutes — and on a delivery
+        # card `minutes_until` would turn "deliver by 21:40" into a seventeen-hour
+        # job, which SANE_MINUTES refuses. So the money is protected and the
+        # clock is not.
+        #
+        # What CAN be seen is the correction. The journal is append-only and
+        # written by one process in order, so `at` never goes backwards on a rig
+        # — and NTP fixes a fast clock by stepping it back. That step is a
+        # permanent fingerprint in the file, and it says both that the clock was
+        # wrong and by how much, long after the fact.
+        #
+        # Not run on the copy machine, where a backwards step is ordinary: the
+        # sync sends archives oldest-first, so a `--all` into a copy that already
+        # holds newer rows appends older ones after them, legitimately.
+        if not log.unreadable:
+            import sync as _SY
+            rows = log.rows()
+            peak, back, worst = 0, 0, 0.0
+            for r in rows:
+                at = r.get('at') if isinstance(r, dict) else None
+                if not isinstance(at, (int, float)) or isinstance(at, bool):
+                    continue
+                # Rows from before the clock was set are a different fault with
+                # its own handling, and every one of them would read as a step.
+                # The threshold is `rpi/sync.py`'s, not a fourth copy of the date.
+                if at < _SY.CLOCK_BELIEVABLE_AFTER:
+                    continue
+                if peak and at < peak - 1000:
+                    back += 1
+                    worst = max(worst, (peak - at) / 3600000.0)
+                peak = max(peak, at)
+            check('the journal\'s stamps run forwards', back == 0,
+                  'no row is stamped before one written earlier'
+                  if not back else
+                  '%d row%s stamped before a row written earlier, by up to '
+                  '%.1f hours' % (back, '' if back == 1 else 's', worst),
+                  'the clock was corrected while the rig was scanning, so the '
+                  'offers written BEFORE that moment carry a time up to %.1f '
+                  'hours away from when they were really read. Nothing can put '
+                  'it right in the file — it is append-only — but the rows are '
+                  'identifiable: everything stamped later than the row that '
+                  'follows it. Give the Pi a network before a shift and let NTP '
+                  'land before scanning starts.' % worst)
+
         # ...and whether a row can still be ADDED to it, which is a different
         # question and the one the rig actually depends on.
         #

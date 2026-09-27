@@ -1685,6 +1685,57 @@ and `wander` are 0.0: the health line prints "corners held, 0px from
 calibration" for the whole shift while the crop is on a rectangle that is not
 the card. Every number downstream is then read off the wrong pixels.
 
+### The clock
+
+**A clock that is merely WRONG passed every guard in the rig, and the driver
+found it.** Reported from the seat: "the time stamps are wrong on the offers
+page, they show 4am when it is 9pm". Twenty-five offers reached the journal
+stamped `1790409639879` onwards — 2026-09-26 08:00:39 UTC — when they were
+really read about seven hours earlier, and the offers page rendered that as
+4:00 AM in the viewer's own timezone, faithfully. The page was not the fault.
+`at` is `int(time.time() * 1000)` off the Pi's own clock, with no timezone or
+offset anywhere in the path, so the stored number was simply untrue.
+
+*Nothing had a chance of catching it.* `CLOCK_BELIEVABLE_AFTER` wants only that
+the year be 2025 or later; `futureCeiling` in `server.js` allows a whole day of
+slack; and the panel shows no wall clock at all, so there was nothing on the rig
+to disagree with. Between them they cover a Pi that boots in 1970 and a row
+stamped in the year 5138, and they leave the whole space in the middle open.
+
+*The money survived, and that is worth stating precisely.* A duration card
+carries its own minutes, so 25 of 25 of these rows rate correctly. A DELIVERY
+card would not — its minutes come from "deliver by 21:40" minus now — but
+`minutes_until` wraps a negative gap by 24 hours, so a seven-hour skew turns a
+45-minute job into a seventeen-hour one and `SANE_MINUTES` refuses it. The rig
+would have said CHECK THE TIME and named the card, which is the wrong culprit,
+but it would not have printed a confident wrong rate.
+
+*What CAN be seen is the correction, and it is permanent.* The journal is
+append-only and written in order by one process, so `at` never goes backwards on
+a rig — and NTP fixes a fast clock by stepping it BACKWARDS. That step stays in
+the file for ever, and it names both that the clock was wrong and by how much,
+months after the shift. `rpi/doctor.py` now reads it: on a replayed journal of 25
+rows written seven hours fast followed by 15 written after the step, it reports
+**"15 rows stamped before a row written earlier, by up to 7.1 hours"** and says
+in the remedy that the file cannot be put right, being append-only, and that it
+is the EARLIER rows which carry the wrong time.
+
+Quiet on an ordinary shift, on one row, and on an empty file — and quiet on a
+row from before the clock was set, which is a different fault with its own
+handling and would otherwise read as a step. Not run on the copy machine, where
+a backwards step is ordinary: the sync sends archives oldest-first, so `--all`
+into a copy holding newer rows appends older ones after them, legitimately.
+
+Five mutations. Four kill a named check; the fifth — taking the last row's stamp
+as the high-water mark instead of the highest seen — is caught by the count of
+affected rows rather than by the verdict, because on a journal that runs forwards
+the two are the same walk.
+
+*Still open.* The rows already written cannot be corrected, only identified. An
+annotation row carrying a measured offset, applied by the fold the way a `mark`
+is, would let the pages show the true time without editing history — it is the
+shape this project already uses for corrections, and it is not built.
+
 ### The backup
 
 **The backup read one file where the card holds three, and sent a window where
