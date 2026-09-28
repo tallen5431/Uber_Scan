@@ -160,6 +160,18 @@ const [base] = process.argv.slice(2);
   // The writers are the settings sheet's own inputs and the haptics toggle,
   // and those are where the whole entry used to be replaced.
   await page.click('#openSettings');
+  // What the sheet says about where its settings go, and whether it says it
+  // before the first field or somewhere below the last one.
+  out.sheetWhere = await page.evaluate(() => {
+    const said = document.getElementById('settingsWhere');
+    const first = document.getElementById('setTarget');
+    return {
+      text: said ? said.innerText.trim() : '',
+      shown: !!said && said.offsetParent !== null,
+      first: !!said && !!(said.compareDocumentPosition(first)
+                          & Node.DOCUMENT_POSITION_FOLLOWING),
+    };
+  });
   await page.fill('#setTarget', '30');
   await page.waitForTimeout(150);
   out.afterEditing = await page.evaluate(
@@ -573,6 +585,17 @@ eq('...and leaves the scanner\'s shopping allowance alone',
    edited.get('secondsPerItem'), 90)
 eq('...and its whole-frame setting', edited.get('fullFrame'), True)
 eq('...and this page\'s other settings', edited.get('costPerMile'), 0.35)
+# --- the sheet says which machine it changes -------------------------------
+# The rig's panel has ⌨ Type one press from the verdict, so this sheet opens on
+# the glass the rig's verdicts are read from. A target of $22 typed here changed
+# the keypad's colours and nothing the panel said, and the sheet was headed
+# "Targets" with nothing under it saying whose.
+sw = got.get('sheetWhere') or {}
+ok_('the Targets sheet says it changes this browser, not the rig (%r)'
+    % (sw.get('text') or '')[:60],
+    'this browser' in (sw.get('text') or '') and 'rig' in (sw.get('text') or ''))
+ok_('...where it can be seen', sw.get('shown'))
+ok_('...before the first field rather than under the last', sw.get('first'))
 toggled = got.get('afterToggling') or {}
 eq('turning haptics off writes that', toggled.get('haptics'), False)
 eq('...and still leaves the scanner\'s settings alone',
