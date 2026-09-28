@@ -1206,6 +1206,52 @@ const TEXT = (sel) => {
       out[name].unjudged = await page.evaluate(sheet);
     }
     if (name === 'took six') {
+      // The tick pressed on a FOLDED row, by the pointer, at the place it is
+      // drawn. The end-of-shift pass down the ACCEPT list is this, a row at
+      // a time, and it used to be two presses and a scroll: open the row,
+      // find "I took this" under four headings of facts, press it. Pressed
+      // with the mouse and not with element.click(), because click() fires on
+      // a button inside a closed <details> that nobody can see — which is
+      // exactly the old control, and a check that used it would pass on the
+      // page this replaces.
+      //
+      // 'r10' is unticked in the feed. The row-by-row reading above opened
+      // every row to read it, so it is folded again here first.
+      out[name].folded = await (async () => {
+        const where = await page.evaluate(() => {
+          window.__marks = [];
+          const was = window.fetch;
+          window.fetch = function (url, opts) {
+            if (String(url).indexOf('/api/offers/mark') === 0) {
+              try { window.__marks.push(JSON.parse(opts.body)); } catch (e) {}
+            }
+            return was.apply(this, arguments);
+          };
+          const d = document.querySelector('#log details.offer[data-id="r10"]');
+          if (!d) return null;
+          d.open = false;
+          d.scrollIntoView({ block: 'center' });
+          const b = [].slice.call(d.querySelectorAll('[data-act="took"]'))
+            .filter((e) => { const r = e.getBoundingClientRect(); return r.width && r.height; })[0];
+          if (!b) return { drawn: false };
+          const r = b.getBoundingClientRect();
+          const x = r.left + r.width / 2, y = r.top + r.height / 2;
+          const hit = document.elementFromPoint(x, y);
+          return { drawn: true, x: x, y: y, h: r.height,
+                   onTop: !!(hit && hit.closest('[data-act="took"]') === b),
+                   pressed: b.getAttribute('aria-pressed') };
+        });
+        if (where && where.drawn) {
+          await page.mouse.click(where.x, where.y);
+          await page.waitForTimeout(900);
+        }
+        const after = await page.evaluate(() => {
+          const d = document.querySelector('#log details.offer[data-id="r10"]');
+          return { marks: window.__marks || [], open: !!(d && d.open),
+                   undo: (document.getElementById('undoWhat').textContent || '').trim() };
+        });
+        return Object.assign({ where: where }, after);
+      })();
       // A mark, made on an opened row a long way down the list: the row
       // must still be open and on screen afterwards. The mark goes to the
       // real server (only /api/journal is stubbed), which answers, and the
@@ -1216,10 +1262,15 @@ const TEXT = (sel) => {
         d.open = true;
         d.scrollIntoView({ block: 'center' });
         const before = { y: window.scrollY, top: d.getBoundingClientRect().top };
-        d.querySelector('button[data-act="took"]').click();
+        // One control for the mark on a row, not two: the tick on the
+        // summary is it, and the opened row has no "I took this" of its own.
+        window.__tookButtons = d.querySelectorAll('button[data-act="took"]').length;
+        const tick = d.querySelector('summary button[data-act="took"]');
+        if (tick) tick.click();
         await new Promise((r) => setTimeout(r, 900));
         const again = document.querySelector('#log details.offer[data-id="' + d.getAttribute('data-id') + '"]');
         return { id: d.getAttribute('data-id'), before: before,
+                 buttons: window.__tookButtons,
                  open: !!(again && again.open),
                  top: again ? again.getBoundingClientRect().top : null,
                  y: window.scrollY, inner: window.innerHeight,
@@ -1656,8 +1707,34 @@ try:
     eq('three runs are all drawn', len(few['rows']), 3)
     ok_('...with nothing to press', few['button'] is None)
 
+    # --- the tick on a folded row is the control ----------------------------
+    #
+    # The end-of-shift pass the ACCEPT chip exists for: 106 rows the panel
+    # said ACCEPT to on the real week, carrying 24 of its 31 ticks. Each used
+    # to take opening the row, scrolling past four headings of facts, and
+    # pressing "I took this" at the foot of it. Now it is the tick itself, on
+    # the folded row, and a press there must post the mark for THAT row and
+    # leave the list folded so the next row is where it was.
+    fd = got['took six'].get('folded') or {}
+    fw = fd.get('where') or {}
+    # Asked by hit-testing the middle of it, not by its box: a button inside
+    # a closed <details> still reports a width and height in Chromium, which
+    # is how the old page's "I took this" passed a box test while folded
+    # away where nobody could press it.
+    ok_('a folded row has a tick a press on it reaches (%r)' % fw,
+        fw.get('drawn') and fw.get('onTop'))
+    ok_('...52px tall, like every control on this page (%r)' % fw.get('h'),
+        (fw.get('h') or 0) >= 51.5)
+    eq('...saying it is not pressed on a row nobody ticked',
+       fw.get('pressed'), 'false')
+    eq('one press on it marks that row taken, and nothing else',
+       fd.get('marks'), [{'id': 'r10', 'accepted': True}])
+    ok_('...says so (%r)' % fd.get('undo'), 'taken' in (fd.get('undo') or ''))
+    no_('...and leaves the row folded', fd.get('open'))
+
     # --- a mark leaves the row where it was -------------------------------
     mk = got['took six'].get('mark') or {}
+    eq('an opened row has one mark control, not two', mk.get('buttons'), 1)
     ok_('the row acted on was opened and scrolled to before the mark',
         mk.get('before') and mk['before'].get('y', 0) > 0)
     ok_('the mark was made (%r)' % mk.get('undo'), 'taken' in (mk.get('undo') or ''))

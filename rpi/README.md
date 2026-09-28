@@ -535,6 +535,16 @@ announced the button goes back to unmarked, so a mark left set cannot be
 inherited by whatever arrives next — the same failure the address line avoids by
 clearing.
 
+The other route is after the shift, on the offers page, and it is one press a
+row too: the ✓ on the folded row **is** the control — faint and outlined on a
+row nobody has marked, solid green on one that is — and pressing it posts the
+same `{id, accepted}` the old "I took this" button inside the opened row did,
+with the same Undo. The ACCEPT chip narrows the list to the cards the panel
+cleared (106 on the real week, carrying 24 of its 31 ticks), so a pass down that
+list is the one way to add ticks that involves no inference at all: the driver
+says so, and the rig writes nothing it was not told. It stays off `live.html`,
+which is read at a glance.
+
 ### Collecting the evidence for a tick the rig could make itself
 
 The button above is one press, and it is still a press. Measured on the owner's

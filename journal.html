@@ -240,6 +240,31 @@
   .offer .dot.no   { background: var(--no); }
   .offer .took { flex: none; font-size: 13px; color: var(--go); font-weight: 800; }
   .offer.mine > summary .big { color: var(--go); }
+  /* ...and on an offer row the tick IS the control, not a picture of one.
+     It used to be a span here and a button four headings down inside the
+     opened row, so marking a job took a press to open, a scroll past "Off the
+     card", "How the rate was worked out", "The verdict" and "How it was
+     read", and a press on "I took this" — then the row stayed open and the
+     next one had to be found under it. The pass this is for is the
+     end-of-shift one down the ACCEPT chip's list, where 24 of the 31 ticks on
+     the real week sit, and that is one press a row now.
+
+     Drawn faint and outlined when unticked, so a row nobody has marked still
+     shows where the press goes, and solid green when ticked, which is the
+     picture the span used to be. 52px tall like every other control on this
+     page, with the summary's own padding given back: measured on the phone,
+     a row goes 56px → 58px with it and would go to 72px without it, which
+     over three hundred rows is a list a quarter longer to scroll. What it
+     costs is width, and `.meta`, which ellipsises, pays it — 127px → 119px
+     on the phone, 180px → 159px on the 3.5" hat, none at 800x480. */
+  .offer button.took {
+    font: inherit; font-size: 15px; font-weight: 800; line-height: 1;
+    min-width: 52px; min-height: 52px; margin: -7px 0; padding: 0 10px;
+    color: var(--muted); background: none; opacity: .55;
+    border: 1px dashed currentColor; border-radius: 8px; cursor: pointer;
+  }
+  .offer button.took.on { color: var(--go); border-style: solid; opacity: 1; }
+  .offer button.took:disabled { opacity: .3; }
 
   /* A pairing row carries more in its summary than an offer row does — a range,
      two payouts, a span, a verdict chip and where both jobs end — so its places
@@ -289,8 +314,11 @@
   .offer.pair .big { min-width: 104px; }
 
   .acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px 20px; }
-  /* These are the destructive ones — 'I took this', 'hide every offer like
-     this' — so they are the last place a mis-tap should be easy. */
+  /* These are the destructive ones — 'hide this one', 'hide every offer like
+     this' — so they are the last place a mis-tap should be easy. The tick left
+     this row for the summary: a wrong tick is taken back by pressing it again
+     or by Undo, and a row hidden by a rule is not seen to be gone until next
+     week, so the two are not the same risk and do not need the same depth. */
   .acts button {
     font: inherit; font-size: 13px; font-weight: 700;
     min-height: 52px; padding: 8px 14px;
@@ -640,8 +668,8 @@
   <!-- Every action on this page is one tap and none of them could be taken
        back. "Hide every $12.50 · 34 min" is the worst of them: permanent,
        retroactive, and prospective — it keeps hiding offers that have not
-       happened yet — and it sits next to "I took this" on a phone held in a
-       parked car. The journal is append-only, so undoing is not a deletion,
+       happened yet — and it sits under the same row's tick on a phone held
+       in a parked car. The journal is append-only, so undoing is not a deletion,
        it is the opposite note appended after it. -->
   <div id="undo" hidden>
     <span id="undoWhat"></span>
@@ -1095,7 +1123,23 @@
       + (whereOf(r).length
          ? '<em>' + esc(whereOf(r).join(' → ')) + '</em>' : '')
       + '</span>'
-      + (r.accepted ? '<span class="took" title="you took this">\u2713</span>' : '')
+      // The mark itself, on the folded row. See `.offer button.took`: this was
+      // a span, and the only way to change it was a button inside the opened
+      // row. Pressed, it posts the same `{id, accepted}` that button did.
+      //
+      // A <button> and not a span with a click handler, and that is what keeps
+      // the row folded: a press on a button inside a <summary> activates the
+      // button and not the summary, so the row does not open under the
+      // driver's thumb. Measured in Chromium before relying on it — a press
+      // on the button left `open` false, a press on the text beside it set it
+      // true — so no preventDefault is needed, and none is written: it would
+      // be a branch with nothing to do. rpi/test_offerspage.py presses it with
+      // the pointer and asks.
+      + '<button type="button" class="took' + (r.accepted ? ' on' : '') + '"'
+        + ' data-act="took" aria-pressed="' + (r.accepted ? 'true' : 'false') + '"'
+        + ' aria-label="I took this"'
+        + ' title="' + (r.accepted ? 'you took this \u2014 press to unmark'
+                                   : 'I took this') + '">\u2713</button>'
       + (r.hidden ? '<span class="tag">hidden</span>' : '')
       + (aside && !r.hidden
          ? '<span class="tag">' + (r.whole === false ? 'partial' : 'odd') + '</span>' : '')
@@ -1245,9 +1289,10 @@
          ? '<details class="cardtext"><summary>what the reader read</summary>'
            + '<pre>' + esc(String(r.text).trim()) + '</pre></details>'
          : '')
+      // No "I took this" here any more: the tick on the summary is that
+      // control, and two buttons for one mark on one row would be one question
+      // answered in two places.
       + '<div class="acts">'
-      + '<button type="button" data-act="took"' + (r.accepted ? ' class="on"' : '')
-        + '>' + (r.accepted ? '\u2713 you took this' : 'I took this') + '</button>'
       + (r.hidden
          ? '<button type="button" data-act="unhide">Put this back</button>'
          : '<button type="button" class="danger" data-act="hide">Hide this one</button>')
