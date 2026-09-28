@@ -63,12 +63,13 @@ may cost you more than it gains. Try split screen first.
 |---|---|
 | Target $/hour | The green line. Default $25 — but see **where to draw the line** on the offers page, which works out from your own offers what that line is costing you. |
 | Near-miss band | How far below target still counts as amber. Default 15%. |
-| Cost per mile | Gas and wear, subtracted from the offer before the rate is figured. Set it to `0` to see gross pay; the 2025 IRS rate is `0.70`. |
+| Cost per mile | Gas and wear, subtracted from the offer before the rate is figured. Set it to `0` to see gross pay; the 2025 IRS rate is `0.70`. Served by the rig, this is the rig's figure too: the box shows what the rig is costing a mile at, a change is sent to it when you leave the box, and the line under the box says whether it took. |
 | Pickup padding | Minutes added to every offer, since the quoted time usually ignores the drive to the rider. |
 | Haptics | Buzz on each key. |
 
 Settings and history are stored on the phone only — there is no account and no
-tracking. The one thing it talks to is the rig: served by the rig's own server,
+tracking — and the other settings change this keypad, not the rig's panel. The
+one thing it talks to is the rig: served by the rig's own server,
 **LOG** also hands the offer to the rig's journal so the offers page can count
 it, and says so in the history when that did not get through. Served from
 anywhere else (GitHub Pages, a file), it asks once whether a rig is there,

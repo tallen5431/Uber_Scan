@@ -173,14 +173,16 @@ for name in sorted(written):
 # ...and the fallback names handoff.py uses where there is no RAM disk, which
 # are built rather than written out as literals.
 import handoff as HO                                          # noqa: E402
-for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
+for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.SETTINGS,
+             HO.FRAME_LEGACY):
     ok_('the fallback %s is ignored' % base, is_ignored(base))
 
 # Every one of them is written through a temporary and renamed into place, and
 # the temporary names are not all `<name>.part`: the crop endpoint appends a pid
 # and a counter so two drags arriving together cannot interleave into one file.
 # Naming them exactly is what left three of these committable.
-for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
+for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.SETTINGS,
+             HO.FRAME_LEGACY):
     for suffix in ('.part', '.4321.7.part', '.tmp'):
         ok_('...and %s%s with it' % (base, suffix), is_ignored(base + suffix))
 

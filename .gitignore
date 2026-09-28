@@ -21,6 +21,10 @@ rpi/.cropbox.json*
 # startup, and the scanner opens an unasked-for twelve-second destination
 # window against whatever happens to be in front of the camera.
 rpi/.dropoff*
+# The fifth: a cost per mile typed on a screen, waiting for the scan loop.
+# Committed, every checkout would set the car's running cost to whatever the
+# committing machine last typed.
+rpi/.settings.json*
 rpi/live-frame.jpg*
 # Advisory between this project's own scripts, so a second one says which pid
 # holds the camera instead of dying with a traceback about a device. It contains

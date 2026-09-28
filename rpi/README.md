@@ -2242,6 +2242,18 @@ over the life of the car.
 
 `0` gives the gross rate, which is pay divided by time and nothing else.
 
+`costPerMile` can also be set from a screen, without SSH or a restart: the
+keypad's **⚙︎ Targets** sheet (**⌨ Type** on the panel) sends it to
+`POST /api/settings` when the rig is serving the page, the scan loop takes it on
+its next frame, re-reads the card in front of it, and saves it to this file.
+Every reading on the panel already ends "after $0.30/mi costs", which is where
+the new figure shows. Only that key: `target`, `band`, `pad`,
+`secondsPerItem` and `keepPlaces` stay in this file, because the last three
+decide how every stored rate is worked out and whether addresses are recorded
+at all, and the route refuses a request that names any of them. The copy at
+home (`SCANNER=0`) refuses the request rather than writing a file no scanner
+reads.
+
 ### Picking the target, from your own offers
 
 `target` was the one number here nobody checked. It gets picked once — $25/hr

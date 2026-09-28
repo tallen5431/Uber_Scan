@@ -166,6 +166,13 @@ CROPBOX = '.cropbox.json'
 # showing a navigation screen is exactly what the motion gate calls "nothing
 # happening".
 DROPOFF = '.dropoff'
+# "A mile costs this much" — the one setting the driver can change from a
+# screen, written by POST /api/settings and taken by the scan loop within a
+# frame. ONE key, `costPerMile`, and nothing else is read out of it: the block
+# it lands in also holds `keepPlaces`, which decides whether addresses reach the
+# append-only journal at all, and `pad` and `secondsPerItem`, which move every
+# rate the rig prints and stores. See settings_requested in scan_pi.py.
+SETTINGS = '.settings.json'
 
 
 # The live picture is the fourth file the two sides share, and it moved here

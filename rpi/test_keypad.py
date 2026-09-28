@@ -481,6 +481,77 @@ const [base] = process.argv.slice(2);
   await page.unroute('**/api/status');
   await page.unroute('**/api/journal/ingest');
 
+  // --- the cost per mile reaches the rig, and says whether it did ------------
+  // This server runs with SCANNER=0 — the copy at home's configuration — so
+  // the first answer is the real one from a machine with no scanner.
+  const costLine = () => page.evaluate(() => {
+    const el = document.getElementById('costRig');
+    return el && !el.hidden ? el.textContent.trim() : '';
+  });
+  const costPosts = [];
+  page.on('request', r => {
+    if (r.url().endsWith('/api/settings') && r.method() === 'POST') {
+      costPosts.push(r.postDataJSON());
+    }
+  });
+  await open({ [SETTINGS]: SEEDED, [DRAFT]: null, [HISTORY]: null });
+  await page.click('#openSettings');
+  await page.waitForTimeout(250);
+  out.costNoScanner = { line: await costLine() };
+  await page.fill('#setCost', '0.4');
+  await page.dispatchEvent('#setCost', 'change');
+  await page.waitForTimeout(250);
+  out.costNoScanner.posts = costPosts.length;
+  out.costNoScanner.kept = await page.evaluate(k => JSON.parse(localStorage.getItem(k)).costPerMile, SETTINGS);
+  await page.click('[data-close="settingsSheet"]');
+
+  // ...and a rig that has one, costing a mile at $0.30 while this browser
+  // has $0.35 stored.
+  let rigAnswer = { ok: true, scanner: true, running: true, costPerMile: 0.3, pending: null };
+  let rigRefuses = null;
+  await page.route('**/api/settings', r => {
+    if (r.request().method() === 'POST') {
+      const asked = r.request().postDataJSON();
+      if (rigRefuses) {
+        return r.fulfill({ status: 409, contentType: 'application/json',
+                           body: JSON.stringify(rigRefuses) });
+      }
+      rigAnswer = Object.assign({}, rigAnswer, { pending: asked.costPerMile });
+    }
+    return r.fulfill({ status: 200, contentType: 'application/json',
+                       body: JSON.stringify(rigAnswer) });
+  });
+  costPosts.length = 0;
+  await open({ [SETTINGS]: SEEDED, [DRAFT]: null, [HISTORY]: null });
+  await page.waitForTimeout(250);
+  out.costAdopted = await page.evaluate(k => JSON.parse(localStorage.getItem(k)).costPerMile, SETTINGS);
+  await page.click('#openSettings');
+  await page.waitForTimeout(250);
+  out.costRigLine = await costLine();
+  out.costBox = await page.inputValue('#setCost');
+  // Typed a key at a time, the way a thumb does it.
+  await page.click('#setCost', { clickCount: 3 });
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('0.45', { delay: 40 });
+  await page.waitForTimeout(200);
+  out.costPostsWhileTyping = costPosts.length;
+  await page.click('[data-close="settingsSheet"]');
+  await page.waitForTimeout(300);
+  out.costPosted = costPosts.slice();
+  await page.click('#openSettings');
+  await page.waitForTimeout(250);
+  out.costSentLine = await costLine();
+  // ...and a refusal is said, and stays said.
+  rigRefuses = { ok: false, scanner: false, error: 'no scanner runs on this machine' };
+  await page.fill('#setCost', '0.5');
+  await page.dispatchEvent('#setCost', 'change');
+  await page.waitForTimeout(300);
+  out.costRefusedLine = await costLine();
+  await page.waitForTimeout(1800);
+  out.costRefusedLater = await costLine();
+  await page.click('[data-close="settingsSheet"]');
+  await page.unroute('**/api/settings');
+
   // --- storage that will not answer ----------------------------------------
   // A browser told to block site data. The page has to open and add up an
   // offer either way; only remembering it is optional.
@@ -596,6 +667,33 @@ ok_('the Targets sheet says it changes this browser, not the rig (%r)'
     'this browser' in (sw.get('text') or '') and 'rig' in (sw.get('text') or ''))
 ok_('...where it can be seen', sw.get('shown'))
 ok_('...before the first field rather than under the last', sw.get('first'))
+# --- the cost per mile reaches the rig, and says whether it did -------------
+# The one setting the rig can now be told (POST /api/settings). A box that
+# posts on every keystroke prices the card on the phone at 0, then 0.4, then
+# 0.45; a box on the copy at home would write a file no scanner reads; and a
+# refusal shown as a toast is gone before it is read.
+ns = got.get('costNoScanner') or {}
+ok_('on a machine with no scanner the sheet says the rig was not changed (%r)'
+    % (ns.get('line') or '')[:60], 'No scanner' in (ns.get('line') or ''))
+eq('...and sends it nowhere', ns.get('posts'), 0)
+eq('...while this keypad keeps it', ns.get('kept'), 0.4)
+eq('a rig that answers sets the keypad to the cost it is using',
+   got.get('costAdopted'), 0.3)
+eq('...in the box as well', got.get('costBox'), '0.3')
+ok_('...and says so under it (%r)' % (got.get('costRigLine') or '')[:60],
+    '$0.30' in (got.get('costRigLine') or ''))
+eq('typing a cost a key at a time sends nothing to the rig',
+   got.get('costPostsWhileTyping'), 0)
+eq('...and leaving the box sends it once, that key and no other',
+   got.get('costPosted'), [{'costPerMile': 0.45}])
+ok_('...and the sheet says the rig has it and where to see it (%r)'
+    % (got.get('costSentLine') or '')[:70],
+    'after $0.45/mi costs' in (got.get('costSentLine') or ''))
+ok_('a refusal is said under the box (%r)' % (got.get('costRefusedLine') or '')[:70],
+    'did not take it' in (got.get('costRefusedLine') or '')
+    and 'no scanner' in (got.get('costRefusedLine') or ''))
+eq('...and is still there after a toast would have gone',
+   got.get('costRefusedLater'), got.get('costRefusedLine'))
 toggled = got.get('afterToggling') or {}
 eq('turning haptics off writes that', toggled.get('haptics'), False)
 eq('...and still leaves the scanner\'s settings alone',

@@ -139,7 +139,12 @@ var scanner = {
   // startScanner() deliberately leaves them alone. See the note there.
   offer: null,         // the last offer read, so it can still be marked taken
   offerAt: null,
-  holding: null        // the order being carried, if any. See holding().
+  holding: null,       // the order being carried, if any. See holding().
+  // What the running scanner says it is pricing a mile at — its own word, off
+  // the stream, not a file on this machine. A fact about the PROCESS, so
+  // startScanner() clears it: the next one reads config.json afresh and says
+  // again. See /api/settings.
+  costPerMile: null
 };
 
 var listeners = [];    // open server-sent-event responses
@@ -213,6 +218,7 @@ function startScanner() {
   scanner.started = Date.now();
   scanner.error = null;
   scanner.heardAt = null;          // nothing from the scan loop yet
+  scanner.costPerMile = null;      // ...and nothing about its settings either
   // What is NOT cleared here, and why.
   //
   // `started`, `error` and `heardAt` are facts about the PROCESS, and a new
@@ -315,6 +321,11 @@ function startScanner() {
         }
         // Setup messages carry no rate, so they must not overwrite the last read.
         if (read.ready !== undefined) scanner.last = read;
+        // The cost per mile the scan loop is using, said when it starts and
+        // whenever the driver changes it. See /api/settings.
+        if (read.settings && typeof read.settings.costPerMile === 'number') {
+          scanner.costPerMile = read.settings.costPerMile;
+        }
         // Which offer is on the record, so the driving screen can offer to mark
         // it as taken. Held here as well as pushed, because a tab opened after
         // the card has gone — which is the normal case, the driver accepts on
@@ -765,6 +776,7 @@ var WATCH_PATH = handoffPath('.viewing');
 var RESET_PATH = handoffPath('.recalibrate');
 var DROPOFF_PATH = handoffPath('.dropoff');
 var CROP_PATH = handoffPath('.cropbox.json');
+var SETTINGS_PATH = handoffPath('.settings.json');
 /* One counter for every temporary this process publishes through a rename, so
  * no two of them can pick the same name. It was `cropSeq` and served the one
  * endpoint that had the rule applied; three other sites wrote a fixed
@@ -3424,6 +3436,124 @@ function route(req, res) {
                                       offersSince: wantWindow ? offersSince : undefined,
                                       can: SYNC_CAN }),
            { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
+
+  /* The driver's cost per mile — ONE key, and deliberately not "the settings".
+   *
+   * Every verdict the rig prints is net of it, and it was the one number in
+   * them nobody had chosen: `costPerMile` is 0.3 on all 1,166 rows of the real
+   * week, the factory seed, because the rig's copy lives in a JSON file edited
+   * over SSH and read once at startup. It moves the answer a lot. Re-scored at
+   * $0.00 / $0.15 / $0.30 / $0.45 / $0.70 a mile — rate()'s own arithmetic,
+   * which reproduces the rig's 106 recorded greens exactly at $0.30 — the same
+   * week has 290 / 181 / 106 / 78 / 52 green cards and 146.6 / 88.7 / 46.0 /
+   * 31.4 / 21.5 green job-hours: 89 hours or 31 between two defensible
+   * figures. The rig cannot work it out (31 of those 1,166 offers are ticked
+   * taken, so its miles are offered miles, not driven ones); it has to be told.
+   *
+   * WHY ONE KEY. The `settings` block is not a list of preferences. It also
+   * holds `keepPlaces`, which decides whether addresses are written into the
+   * append-only journal at all, and `pad` and `secondsPerItem`, which move
+   * `billedMinutes` and so every rate the rig prints and stores. A route
+   * scoped to "the block" could switch off place recording, or shift the money
+   * on every row that follows, from a screen, with nothing on any page saying
+   * so. So a body naming anything but `costPerMile` is refused whole, and the
+   * scan loop reads nothing but `costPerMile` out of the file either.
+   *
+   * WHY IT SAYS WHICH MACHINE. The copy at home runs this same server, with
+   * SCANNER=0 and an rpi/config.json of its own. A POST there would write a
+   * file no scanner ever reads and answer ok — the driver would believe the
+   * rig had it. So `scanner` is in every answer, and a machine with none
+   * refuses the write rather than performing it.
+   *
+   * Through the handoff directory rather than into rpi/config.json. The scan
+   * loop writes that file from its own memory, whole — save_config, at four
+   * call sites before this one — so a value this process wrote there could be
+   * written back
+   * over by the scanner's next save before it had read it — an ok answered for
+   * a change that silently un-happens. The scanner takes the request, applies
+   * it in the loop, saves it itself, and says what it is now using; GET answers
+   * from that, not from a file.
+   *
+   * Nothing is restarted for it: a restart is an aim-and-calibrate cycle mid-
+   * shift. The panel's existing "after $0.30/mi costs" on every reading is how
+   * the driver sees it take effect.
+   */
+  if (req.url.split('?')[0] === '/api/settings'
+      && (req.method === 'GET' || req.method === 'POST')) {
+    var settingsReply = function (code, body) {
+      send(res, code, JSON.stringify(body),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    };
+    // A request written and not yet taken, so a panel opened in between can
+    // say the change is on its way rather than that it did not happen.
+    var pendingCost = function (then) {
+      fs.readFile(SETTINGS_PATH, 'utf8', function (err, text) {
+        var sent = null;
+        if (!err) {
+          try { sent = JSON.parse(text).costPerMile; } catch (e) { sent = null; }
+        }
+        then(typeof sent === 'number' ? sent : null);
+      });
+    };
+    if (req.method === 'GET') {
+      if (!scannerEnabled()) {
+        return settingsReply(200, { ok: true, scanner: false, costPerMile: null,
+                                    pending: null });
+      }
+      return pendingCost(function (pending) {
+        settingsReply(200, { ok: true, scanner: true, running: !!scanner.proc,
+                             // null until the scan loop has said: aiming and
+                             // calibrating come first, and a figure read off a
+                             // file here would be a guess about the process.
+                             costPerMile: scanner.costPerMile,
+                             pending: pending });
+      });
+    }
+    return readJsonBody(req, function (err, body) {
+      if (err || !body || Array.isArray(body)) {
+        return settingsReply(400, { ok: false, error: 'not a JSON object' });
+      }
+      var others = Object.keys(body).filter(function (k) { return k !== 'costPerMile'; });
+      if (others.length) {
+        return settingsReply(400, {
+          ok: false,
+          error: 'only costPerMile can be set here; refused: ' + others.join(', ') });
+      }
+      var cost = body.costPerMile;
+      // A number, not something that reads as one. The config file is lenient
+      // because a person hand-edits it (see OP.setting); a screen sends JSON,
+      // and "0.45" arriving as a string is a client that is not this one.
+      if (typeof cost !== 'number' || !isFinite(cost) || cost < 0) {
+        return settingsReply(400, { ok: false,
+                                    error: 'costPerMile must be a number, 0 or more' });
+      }
+      if (!scannerEnabled()) {
+        return settingsReply(409, {
+          ok: false, scanner: false,
+          error: 'no scanner runs on this machine, so nothing here would use '
+                 + 'it — set it on the rig' });
+      }
+      // A name per request, for the reason /api/crop gives: two presses landing
+      // together would interleave into one shared `.part` and the rename would
+      // publish the mixture. No queue as well — there is nothing to merge, the
+      // last figure typed is the right one, and a second cure would hide
+      // whether the first one works (see /api/config/backup).
+      var tmp = partName(SETTINGS_PATH);
+      fs.writeFile(tmp, JSON.stringify({ costPerMile: cost }), function (writeErr) {
+        var failed = function (e) {
+          fs.unlink(tmp, function () {});
+          console.error('settings: ' + e.message);
+          settingsReply(500, { ok: false, scanner: true, error: 'could not save' });
+        };
+        if (writeErr) return failed(writeErr);
+        fs.rename(tmp, SETTINGS_PATH, function (renameErr) {
+          if (renameErr) return failed(renameErr);
+          settingsReply(200, { ok: true, scanner: true, running: !!scanner.proc,
+                               costPerMile: scanner.costPerMile, pending: cost });
+        });
+      });
     });
   }
 

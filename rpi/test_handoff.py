@@ -57,7 +57,7 @@ def ok_(name, cond):
 # the same path for it, and that a private directory moves it for both of them.
 # A request written where the reader is not looking is not a stale picture, it
 # is a button that does nothing.
-BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF]
+BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS]
 
 # --- the rule --------------------------------------------------------------
 for base in BASES:
@@ -114,6 +114,14 @@ else:
         theirs = json.loads(got.stdout.strip())
         mine = [HO.path(b) for b in BASES]
         eq('both sides put the requests in the same place', theirs, mine)
+
+    # ...and the server WRITES each of them under that name. The probe above
+    # proves both sides derive the same path from a base; it cannot see which
+    # base server.js hands its rule. A request written under a name the scanner
+    # does not take is a button that answers ok and does nothing.
+    for base in BASES:
+        ok_('server.js writes %s through the shared rule' % base,
+            "handoffPath('%s')" % base in server)
 
     # ...and the same for the picture, whose names predate the module and are
     # written out in FRAME_CANDIDATES rather than derived.

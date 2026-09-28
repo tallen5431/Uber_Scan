@@ -176,16 +176,21 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 for k in range(len(frames))]
 
     announced, verdicts, beats, logs, alive, dropoffs = [], [], [], [], [], []
+    said_settings = []
     real = (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
             PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
-            SP.emit_reading, SP.emit_dropoff)
+            SP.emit_reading, SP.emit_dropoff, SP.emit_settings)
     real_sleep = real[6]
+    # What the loop tells the server it is pricing a mile at, as a copy: the
+    # loop hands over its live dict, which is exactly the thing that changes.
+    SP.emit_settings = lambda settings: said_settings.append(dict(settings or {}))
     SP.emit_reading = lambda *a, **k: None
     # Captured rather than printed, like the offer line beside it. The empty
     # answer — a press that found no address — is only visible here.
     SP.emit_dropoff = lambda address, **k: dropoffs.append((address, k))
     SP.start_camera = lambda *a, **k: cam
-    SP.emit = lambda *a, **k: verdicts.append((a, k))
+    # Stamped, so a check can ask how soon after something a verdict came.
+    SP.emit = lambda *a, **k: verdicts.append((a, k, time.time()))
     SP.emit_offer = lambda *a, **k: announced.append(a)
 
     def beat(*a, **k):
@@ -236,7 +241,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     finally:
         (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
          PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
-         SP.emit_reading, SP.emit_dropoff) = real
+         SP.emit_reading, SP.emit_dropoff, SP.emit_settings) = real
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.REFIND_NOTICE_S = was_refind_s
@@ -246,7 +251,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             else:
                 os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
-                logs=logs, alive=alive, dropoffs=dropoffs)
+                logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
+                settings=said_settings, config=config)
 
 
 FRAG = '$16.05 20 min (7.3 mi) trip'
@@ -451,6 +457,77 @@ ok_('the second press, with the card there, was honoured',
 said = [bool(b.get('refind_refused')) for b in r['alive']]
 ok_('...and took the refusal down with it, without waiting for it to age out',
     pressed_again[0] and said and not said[-1])
+
+# --- a cost per mile typed on a screen prices the next reading ---------------
+#
+# POST /api/settings leaves the request in the handoff directory; the loop takes
+# it without a restart (a restart is an aim-and-calibrate cycle mid-shift) and
+# the very next reading is costed at it. Dropped here once the loop has read a
+# couple of times at the config's own 0.30, so the check sees both sides —
+# and once the card has sat still long enough for the verify beat to back off,
+# so what happens next is the loop's own doing rather than a read that was
+# coming anyway. A still card is re-read on that beat, 2.5s backing off to 6s,
+# and the panel's "after $0.30/mi costs" would stand under it until then.
+#
+# The request also names `keepPlaces`, `pad` and `secondsPerItem`, which the
+# route refuses — written here by hand, the way a server a `git pull` behind or
+# a person at a terminal could. They share the block with the cost, and they
+# decide whether addresses reach the append-only journal and how many minutes
+# every stored rate is divided by. Only the cost may come through.
+_sho = tempfile.mkdtemp()
+_sreq = os.path.join(_sho, 'uberscan-settings.json')
+_typed_at = [None, None]
+_last_read = [0, time.time(), 0.0]     # calls, when, the gap before it
+
+
+def type_a_cost(rows, ann, calls):
+    """Drop the request once the verify beat has backed off — the last gap
+    between reads was 3.5s or more, so the next is 6s — and two seconds into
+    that wait. Stop two reads after."""
+    now = time.time()
+    if calls != _last_read[0]:
+        _last_read[:] = [calls, now, now - _last_read[1]]
+    if (_typed_at[0] is None and calls >= 2 and _last_read[2] >= 3.5
+            and now - _last_read[1] > 2.0):
+        _typed_at[:] = [calls, time.time()]
+        with open(_sreq + '.w', 'w') as fh:
+            json.dump({'costPerMile': 0.45, 'keepPlaces': False, 'pad': 9,
+                       'secondsPerItem': 60}, fh)
+        os.replace(_sreq + '.w', _sreq)
+    return _typed_at[0] is not None and calls >= _typed_at[0] + 2
+
+
+r = run(lambda n, k: WHOLE, extra_argv=['--no-parallel'], seconds=35.0,
+        handoff=_sho, until=type_a_cost)
+_costs = [(v[0][0].get('costPerMile'), round(v[0][0].get('perHour') or 0, 2))
+          for v in r['verdicts'] if v[0] and v[0][0].get('ready')]
+_first_new = next((v[2] for v in r['verdicts'] if v[0] and v[0][0].get('ready')
+                   and v[0][0].get('costPerMile') == 0.45), None)
+_took = (_first_new - _typed_at[1]) if (_first_new and _typed_at[1]) else None
+ok_('the card still on the phone is re-read at the new cost at once, not on '
+    'the next verify beat (%s)' % ('%.2fs' % _took if _took is not None else 'never'),
+    _took is not None and _took < 1.5)
+# $16.05 over 23 minutes and 8.4 miles: at $0.30 a mile $35.30/hr, at $0.45
+# $32.01/hr. With the refused pad of 9 minutes let through it is $23.01/hr and
+# a CLOSE CALL instead of an ACCEPT.
+eq('the readings before the request are costed at the config\'s 0.30',
+   _costs[:1], [(0.3, 35.3)])
+eq('...and the readings after it at the 0.45 typed, in the same process',
+   _costs[-1:], [(0.45, 32.01)])
+ok_('...with no reading in between at any third figure (%r)' % sorted(set(_costs)),
+    set(_costs) <= {(0.3, 35.3), (0.45, 32.01)})
+eq('the loop told the server what it priced with, then what it prices with now',
+   [x.get('costPerMile') for x in r['settings']], [0.3, 0.45])
+_saved = json.load(open(r['config'])).get('settings', {})
+eq('the cost is saved, so the next start begins from it',
+   _saved.get('costPerMile'), 0.45)
+eq('...and nothing else the request named reached the settings block',
+   sorted(k for k in ('keepPlaces', 'pad', 'secondsPerItem') if k in _saved), [])
+ok_('...and the request was taken, not left for the next start',
+    not os.path.exists(_sreq))
+ok_('...and the log says what it changed from and to (%r)'
+    % [l for l in r['logs'] if 'cost per mile' in l][:1],
+    any('$0.45' in l and '$0.30' in l for l in r['logs']))
 
 # --- a journal that will not take writes ------------------------------------
 #

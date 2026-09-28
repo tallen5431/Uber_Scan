@@ -15,6 +15,7 @@ mid-offer costs more time than the OCR does.
 
 import argparse
 import json
+import math
 import os
 import re
 import queue
@@ -612,6 +613,71 @@ def dropoff_requested(now=None):
 # reason: long enough to cover a person doing one thing on a phone, short enough
 # that the rig is not still hunting for an address when the next offer arrives.
 DROPOFF_WINDOW = 12.0
+
+
+def settings_requested():
+    """A cost per mile the driver typed on a screen, once; None when there is none.
+
+    Written by POST /api/settings, which answers only for a machine that runs a
+    scanner. Taken and cleared in both places for the reason reset_requested
+    gives, and never fatal.
+
+    ONE KEY. The block this lands in is not a list of preferences: `keepPlaces`
+    decides whether addresses are written into the append-only journal at all,
+    and `pad` and `secondsPerItem` move `billedMinutes` and so every rate the
+    rig prints AND STORES. The route refuses a body naming any of them; this
+    reads `costPerMile` out of whatever is in the file and nothing else, so a
+    request written some other way — by hand, by a server a `git pull` behind —
+    cannot switch off address recording or shift the money on every row that
+    follows.
+
+    Not aged, unlike a dropoff press. That press is about the screen in front of
+    the camera and goes stale with it; this is about the car, and a figure typed
+    while the scanner was between restarts is still the figure the driver meant
+    when it comes back.
+
+    A finite number of zero or more, as the route insists. A bool is refused
+    although Python calls it a number: `true` is not a price.
+    """
+    where = HO.candidates(HO.SETTINGS)
+    raw = None
+    for candidate in where:
+        try:
+            with open(candidate) as fh:
+                raw = fh.read()
+            break
+        except (IOError, OSError):
+            continue
+    if raw is None:
+        return None
+    HO.clear(HO.SETTINGS)
+    try:
+        cost = json.loads(raw).get('costPerMile')
+    except (ValueError, AttributeError):
+        cost = None
+    if (isinstance(cost, bool) or not isinstance(cost, (int, float))
+            or not math.isfinite(cost) or cost < 0):
+        log('ignored a settings request with no usable cost per mile in it '
+            '(%r): the cost per mile in use is unchanged' % raw[:80])
+        return None
+    return float(cost)
+
+
+def emit_settings(settings):
+    """The cost per mile this scanner is pricing with, on its own line.
+
+    Said once when the loop starts and again whenever the driver changes it,
+    so GET /api/settings answers with what the running scanner is USING — not
+    with what a file says, which a hand edit over SSH can make disagree with the
+    process until the next restart. The value rate() will actually take, after
+    the same fallback it applies, so a figure it cannot read is reported as the
+    figure it prices with instead.
+
+    Like the heartbeat, no `ready`, so it cannot stand in for a verdict.
+    """
+    print(json.dumps({'settings': {'costPerMile': OP.setting(
+        (settings or {}).get('costPerMile'), OP.DEFAULT_SETTINGS['costPerMile'])}}),
+        flush=True)
 
 
 def use_manual_box(scanner, quad_px):
@@ -1867,7 +1933,12 @@ def main():
         # against the pixel budget — same text, three times the work, smaller
         # by the time it is read.
         card_share=1.0 if manual else None,
-        settings=cfg.get('settings', {}),
+        # No `settings=` here any more. The Scanner priced every frame from a
+        # copy of this block taken at startup, and digest() replaced that rate
+        # with its own before anything read it — so the copy decided nothing,
+        # and was a second settings object in the process waiting for the day
+        # a change reached one and not the other. digest() prices off `cfg`,
+        # per card, and is the only thing that does.
     )
     # The tracker works in the small stream's coordinates and reports in the
     # capture's, so it needs the ratio between them.
@@ -2772,6 +2843,11 @@ def main():
                 accumulator.add(other['parsed'])
         return digest(batch[chosen], done['frames'][0], done.get('at'))
 
+    # What the server answers GET /api/settings with, from the moment the loop
+    # runs. See emit_settings.
+    if args.json:
+        emit_settings(cfg.get('settings'))
+
     try:
         while True:
             # A read that finished while the camera kept running. Taken here,
@@ -2953,6 +3029,34 @@ def main():
                 # A box drawn on the live view. It arrives as fractions of the
                 # frame, which is the only form that survives the trip: what the
                 # driver drew on was a 480px JPEG of a 2328px sensor frame.
+                # A cost per mile typed on the keypad. Taken in the loop, never
+                # by a restart: a restart costs an aim-and-calibrate cycle, which
+                # is a minute of no readings mid-shift for a change of one
+                # number. Written into the same dict digest() reads per card —
+                # in place, so there is only ever the one — and saved, so the
+                # next start begins from it.
+                #
+                # And read again now, for the reason the drawn box below is: a
+                # card sitting still on the phone produces no motion, and the
+                # panel would go on saying "after $0.30/mi costs" under it until
+                # the next verify beat. That string is how the driver sees the
+                # change take effect, so it should take effect on the card in
+                # front of them. The journal does not grow for it: consider()
+                # decides novelty on the reading's content, which the cost is
+                # not part of.
+                cost = settings_requested()
+                if cost is not None:
+                    live = cfg.setdefault('settings', {})
+                    was = OP.setting(live.get('costPerMile'),
+                                     OP.DEFAULT_SETTINGS['costPerMile'])
+                    live['costPerMile'] = cost
+                    save_config(args.config, cfg)
+                    if args.json:
+                        emit_settings(live)
+                    moved = do_read = True
+                    log('cost per mile set to $%.2f from a screen (was $%.2f): '
+                        'the next reading is costed at it' % (cost, was))
+
                 drawn = CX.take_request()
                 if drawn is not None:
                     manual = True
