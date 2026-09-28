@@ -188,8 +188,15 @@
    *     11% of the next day's. Restaurants repeat; customers do not.
    *   - 69% of the addresses name a town, but 66 of 177 name "Atlanta", which
    *     is twenty miles across. A centroid there is not a location.
-   *   - Not one card in 836 stated a deadline, so "in time" has nothing on the
-   *     card to be measured against.
+   *   - "In time" is not attempted, and this used to give the wrong reason:
+   *     that no card in 836 stated a deadline, so there was nothing to measure
+   *     against. The count is right — 0 in 836, and 0 in the 1,166 of the
+   *     later week — but the reason is backwards for the one shape where the
+   *     question IS answerable from printed numbers: a card that states
+   *     `Deliver by` gives the minutes left, and `worst` below against those
+   *     minutes is plain arithmetic. It is not asked because no card on
+   *     record could check the answer, and because those minutes come off the
+   *     rig's clock, the one figure on such a card a wrong clock corrupts.
    *
    * So this does not pretend to know the geography. It answers the part that is
    * arithmetic, which is the part a driver cannot do at a glance and the part

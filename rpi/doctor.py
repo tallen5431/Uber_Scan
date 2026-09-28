@@ -235,10 +235,22 @@ def main():
         # 08:00-08:09 UTC when they were really read at about 01:00, seven hours
         # earlier; the offers page showed them at 4am, faithfully, and the
         # driver's own report is the only reason anybody knew. On duration cards
-        # the rates survive it — they carry their own minutes — and on a delivery
-        # card `minutes_until` would turn "deliver by 21:40" into a seventeen-hour
-        # job, which SANE_MINUTES refuses. So the money is protected and the
-        # clock is not.
+        # the rates survive it — they carry their own minutes. On a deadline
+        # card they do not, and this said "the money is protected and the clock
+        # is not", which is true of the seven hours that happened and false of
+        # a smaller error. Measured on the real parser at the seed settings, a
+        # DoorDash card of $10.86, 7.4 mi, "Deliver by 9:15 PM", read at 8:30
+        # PM: 45 minutes, $11.52/hr, PASS. The same card with the clock fast by
+        # 30 minutes is 15 minutes, $34.56/hr, a confident GO with no doubt
+        # reason. Fast by 21-24 minutes it is CLOSE CALL, by 25-39 a GO, and
+        # only from 40 does a doubt reason (speed, then time) refuse it; the
+        # +7 hours is refused as time, a seventeen-hour job. So a small clock
+        # error can print a wrong GO on a deadline card, with nothing on the
+        # panel saying so.
+        #
+        # The owner has chosen not to build a guard against that. What this
+        # check does is find the backwards step NTP leaves once the clock is
+        # corrected — afterwards, not at the moment the card is on screen.
         #
         # What CAN be seen is the correction. The journal is append-only and
         # written by one process in order, so `at` never goes backwards on a rig

@@ -829,6 +829,23 @@ _limits = _limits[:_limits.index('\n## ', 1)]
 if 'deliverBy' in _js_src:
     ok_('SCANNING.md\'s limits name the deadline card the parser reads',
         'Deliver by' in _limits)
+    # ...and the two sentences that reasoned about a deadline card as if it were
+    # safe from the clock, or unanswerable from the card. doctor.py said "the
+    # money is protected and the clock is not": measured on the real parser, a
+    # $10.86 / 7.4 mi / Deliver by 9:15 PM card read at 8:30 PM is $11.52/hr
+    # PASS, and a confident $34.56/hr GO with no doubt reason when the clock is
+    # 30 minutes fast. advice.js gave "not one card in 836 stated a deadline"
+    # as why "in time" has nothing to be measured against — backwards for the
+    # one card shape where it is printed. Held as text, not as a test of the
+    # wrong GO: a case asserting that GO would be a record of what the rig
+    # does passed off as what it should do.
+    _doctor = open(os.path.join(ROOT, 'rpi', 'doctor.py'), encoding='utf-8').read()
+    ok_('doctor.py no longer says a wrong clock leaves the money protected',
+        'So the money is protected' not in _doctor)
+    ok_('advice.js no longer says a deadline card has nothing to measure against',
+        'has nothing on the card to be measured against' not in re.sub(
+            r'[\s*]+', ' ', open(os.path.join(ROOT, 'advice.js'),
+                                   encoding='utf-8').read()))
     for _doc, _txt in (('SCANNING.md', _scanning), ('rpi/README.md', _readme_rpi)):
         ok_('%s no longer says only Uber\'s wording is handled' % _doc,
             'Only Uber\'s current card wording' not in _txt)
