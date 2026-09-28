@@ -284,6 +284,30 @@ ok_('the startup line counts rows, not offers (%r)'
     % [l for l in r['logs'] if l.startswith('journal:')][:1],
     any(l.startswith('journal:') and 'journal row' in l and 'offer' not in l for l in r['logs']))
 
+# --- ...and so is a reading of the same card whose verdict moved -------------
+#
+# The offer carries its card's verdict, because ⌖ Dropoff asks on it and the
+# reading beside it can be a different card. It was only told again when
+# minutes, miles or dropoff moved, and an item count read late moves none of
+# the three: it adds the shopping allowance to the BILLED minutes. At 90s an
+# item and 30c a mile that takes this card from go to PASS, and the headline
+# said PASS while the offer on record still said go.
+WHOLE_ITEMS = ('$16.05 3 min (1.1 mi) away Cobb Pkwy NW, Kennesaw 20 items '
+               '20 min (7.3 mi) trip 123 Main St, Acworth, GA 30101')
+r = run(lambda n, k: WHOLE if n <= 1 else WHOLE_ITEMS, seconds=25.0,
+        config_extra={'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                                   'secondsPerItem': 90}},
+        until=lambda rows, ann, calls: any(x.get('items') for x in rows if not x.get('kind'))
+        and calls >= 4)
+told = [(a[0], a[1].get('minutes'), a[1].get('miles'), a[1].get('dropoff'),
+         a[2].get('state')) for a in r['announced']]
+ok_('the card was told first with the verdict it got first (%r)' % (told[:1],),
+    told and told[0][4] == 'go')
+ok_('...and told again, same id and same journey, when its verdict moved (%r)'
+    % (told[-1:],),
+    len(told) >= 2 and told[-1][0] == told[0][0]
+    and told[-1][1:4] == told[0][1:4] and told[-1][4] == 'no')
+
 # --- one misread frame is not a card the rig failed to record ----------------
 r = run(lambda n, k: LOST_DECIMAL if n == 3 else WHOLE, extra_argv=['--no-parallel'],
         seconds=16.0, health_every=3.0,

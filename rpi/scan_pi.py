@@ -2635,9 +2635,21 @@ def main():
             # 8.4 mi with the address. A reading that lands a row and reads
             # differently is told; server.js replaces the offer on record
             # and keeps its mark.
+            #
+            # The verdict is in the tuple as well, because the offer now carries
+            # it (see emit_offer) and ⌖ Dropoff asks on it. Without it a later
+            # reading of the same card whose verdict moved for a reason that is
+            # not minutes, miles or dropoff — an item count read late, which
+            # changes the billed minutes through secondsPerItem and not the
+            # card's own; a payout the reader first doubted — was never told,
+            # and the panel's headline and the offer beside it disagreed about
+            # one card. A PASS that became go lost its ask with nothing saying
+            # so. Measured frame by frame over the week's stored scans, frames
+            # of one row agreeing on minutes, miles and dropoff and not on the
+            # verdict: 1 row of 1,166, so this costs about one line a week.
             if args.json and offer_log.id is not None:
                 reading = (offer_log.id, parsed.get('minutes'), parsed.get('miles'),
-                           parsed.get('dropoff'))
+                           parsed.get('dropoff'), rate.get('state'))
                 if offer_log.id != told_offer or (landed and reading != told_as):
                     told_offer = offer_log.id
                     told_as = reading
