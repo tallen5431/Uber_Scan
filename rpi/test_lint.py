@@ -730,6 +730,21 @@ if _math:
                 % (_rate, _line.group(1)),
                 _line.group(1) == _expr and _expr in _parser_js)
 
+# ...and the Targets section does not say the settings never leave the phone.
+# It did — "stored on the phone only" — in the same section whose table says
+# cost per mile, served by the rig, is sent to the rig; two answers in one
+# section, and the first one false once ui.js posts to /api/settings. Tied to
+# that post, so the claim may come back only if the posting goes.
+_targets = re.search(r'## Targets.*?(?=\n## )', _readme, re.S)
+_ui_js = open(os.path.join(ROOT, 'ui.js'), encoding='utf-8').read()
+ok_('the README has a Targets section', bool(_targets))
+if _targets and "'/api/settings'" in _ui_js:
+    _phone_only = re.findall(r'[Ss]ettings[^.]*?\bon the phone only',
+                             re.sub(r'\s+', ' ', _targets.group(0)))
+    ok_('...which does not say the settings stay on the phone while the '
+        'keypad sends cost per mile to the rig (%r)' % _phone_only[:1],
+        not _phone_only)
+
 # ...and the README's own table covers every file the repo ships at the top
 # level, so the next one added has to be written down rather than quietly left
 # out. AUDITS.md itself was missing from it until this check was written.

@@ -170,6 +170,11 @@ const [base] = process.argv.slice(2);
       shown: !!said && said.offsetParent !== null,
       first: !!said && !!(said.compareDocumentPosition(first)
                           & Node.DOCUMENT_POSITION_FOLLOWING),
+      // Every other line on the sheet, to ask whether any of them answers
+      // the same question a second time.
+      others: Array.from(document.querySelectorAll('#settingsSheet .note'))
+        .filter(n => n.id !== 'settingsWhere' && n.id !== 'costRig')
+        .map(n => n.textContent.trim()),
     };
   });
   await page.fill('#setTarget', '30');
@@ -667,6 +672,12 @@ ok_('the Targets sheet says it changes this browser, not the rig (%r)'
     'this browser' in (sw.get('text') or '') and 'rig' in (sw.get('text') or ''))
 ok_('...where it can be seen', sw.get('shown'))
 ok_('...before the first field rather than under the last', sw.get('first'))
+# ...and says it once. The bottom note said "Settings and history stay on this
+# phone" under the sentence above, a second answer on the same sheet, and
+# false for cost per mile once the keypad sends it to the rig.
+_twice = [n for n in (sw.get('others') or []) if 'settings' in n.lower()]
+ok_('...and no other line on the sheet says where the settings go (%r)'
+    % [n[:50] for n in _twice], sw.get('others') is not None and not _twice)
 # --- the cost per mile reaches the rig, and says whether it did -------------
 # The one setting the rig can now be told (POST /api/settings). A box that
 # posts on every keystroke prices the card on the phone at 0, then 0.4, then

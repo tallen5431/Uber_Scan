@@ -67,9 +67,10 @@ may cost you more than it gains. Try split screen first.
 | Pickup padding | Minutes added to every offer, since the quoted time usually ignores the drive to the rider. |
 | Haptics | Buzz on each key. |
 
-Settings and history are stored on the phone only — there is no account and no
-tracking — and the other settings change this keypad, not the rig's panel. The
-one thing it talks to is the rig: served by the rig's own server,
+There is no account and no tracking. History is kept in the browser. The
+settings are too, and change this keypad, not the rig's panel — except cost
+per mile, which, served by the rig, is the rig's own figure as described above.
+The one thing it talks to is the rig: served by the rig's own server,
 **LOG** also hands the offer to the rig's journal so the offers page can count
 it, and says so in the history when that did not get through. Served from
 anywhere else (GitHub Pages, a file), it asks once whether a rig is there,
