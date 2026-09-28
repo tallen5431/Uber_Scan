@@ -372,8 +372,8 @@ def main():
                 weeks = free / float(JR.WEEK_BYTES)
                 if free < FREE_WEEKS * JR.WEEK_BYTES:
                     writable = False
-                    why = ('only %.1fMB free where it is kept — %.1f weeks of '
-                           'driving, under the %d this asks for'
+                    why = ('only %.1fMB free where it is kept — at most %.1f '
+                           'weeks of driving, under the %d this asks for'
                            % (free / 1e6, weeks, FREE_WEEKS))
                     fix = ('the card is nearly full, and a full card still '
                            'opens the journal: the scanner only finds out at '
@@ -384,10 +384,18 @@ def main():
                            'are the record itself.'
                            % (os.path.dirname(journal_path) or '.'))
                 else:
-                    why += (' — %.0fMB free, about %.0f weeks of driving'
-                            % (free / 1e6, weeks))
+                    # "At most": WEEK_BYTES is the floor on the rate, so the
+                    # real rig fills this room sooner than the figure says.
+                    why += (' — %.0fMB free, at most about %.0f weeks of '
+                            'driving' % (free / 1e6, weeks))
             except Exception as e:                            # noqa: BLE001
+                # Not the read-only card: the journal has just opened for
+                # append, so the one thing known is that the room is unknown.
                 writable, why = False, 'free space could not be asked (%s)' % e
+                fix = ('the journal opens, but how much room is left behind '
+                       'it could not be asked, so a full card cannot be told '
+                       'from one with room. df -h %s says it by hand.'
+                       % (os.path.dirname(journal_path) or '.'))
         check('the journal can be written', writable, why, fix)
     except Exception as e:                                    # noqa: BLE001
         check('the journal file is whole', False, str(e))
