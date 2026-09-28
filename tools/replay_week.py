@@ -11,7 +11,8 @@ cannot say what a change to the reader does to them. The card-boundary rules
 are where that bites: the week this was written, widening one guard by one
 word produced a $750/hr row with every suite green. So a parser change is
 replayed over a whole week before it ships, and every row whose pay, minutes,
-miles, pickup, dropoff, verdict or rate moves is printed with both readings.
+miles, pickup, dropoff, verdict, rate, wholeness or doubt moves is printed with
+both readings. See FIELDS.
 
 WHAT IS REPLAYED, per row of the export (numbered from 1, the way a spreadsheet
 and every AUDITS.md entry number them):
@@ -61,8 +62,20 @@ csv.field_size_limit(1 << 30)
 # What a row is compared on. The first six are the ones a driver acts on; the
 # places are there because the card boundary's other fault is a merchant or a
 # destination blanked with nothing saying so, which moves no number at all.
+#
+# `whole`, the rate's `doubt` and `untimedMiles` are there because they decide
+# what happens to a reading without moving its number. `whole` is the flag the
+# voice waits for (scan_pi.py speaks only a locked, whole reading), the panel
+# settles on (live.html prints ", still reading." until it is true), and the
+# journal records — a row stored whole=0 is set aside by the offers page. This
+# tuple left all three out while summary() computed `whole` for every reading,
+# so the diff of the change that fixed rows 450 and 908 printed their numbers
+# and was blind to both going whole -> not whole on every frame: offers that
+# would never be spoken again, reported as "no published state moved".
+# untimedMiles is the figure live.html prints in "a leg this reading could not
+# time"; the doubt is which of the rate's refusals fired.
 FIELDS = ('pay', 'minutes', 'miles', 'pickup', 'dropoff', 'state', 'perHour',
-          'places')
+          'places', 'whole', 'doubt', 'untimedMiles')
 
 # A second apart, which is well inside the accumulator's window and about the
 # pace the rig reads at. The merge keys on silence, not on the clock, so any
@@ -94,6 +107,8 @@ def summary(parsed, rate):
         # half cent, and that is not a disagreement between the parsers.
         'perHour': per_hour,
         'whole': OP.is_whole(parsed) if parsed.get('pay') else None,
+        'doubt': rate.get('doubt'),
+        'untimedMiles': parsed.get('untimedMiles'),
     }
 
 

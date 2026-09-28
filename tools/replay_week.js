@@ -24,6 +24,8 @@ function summary(parsed, rate) {
     state: rate.state === undefined ? null : rate.state,
     perHour: perHour === undefined ? null : perHour,
     whole: parsed.pay ? OP.isWhole(parsed) : null,
+    doubt: rate.doubt === undefined ? null : rate.doubt,
+    untimedMiles: parsed.untimedMiles === undefined ? null : parsed.untimedMiles,
   };
 }
 
