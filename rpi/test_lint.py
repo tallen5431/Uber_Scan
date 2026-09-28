@@ -799,6 +799,24 @@ _readme = open(os.path.join(ROOT, 'README.md')).read()
 ok_('the record of what has been audited is readable', len(_audits) > 500)
 ok_('...and the README points at it', 'AUDITS.md' in _readme)
 
+# The keypad's withheld verdict, in the one page that tells a driver how to use
+# the keypad. README said that answer came "on the rig only", while ui.js blanks
+# the headline and every figure under it on four reasons and refuses LOG on
+# the same four — so the screen the docs call the one to rely on could refuse
+# its own entry with its documentation saying it cannot. Held to ui.js's own
+# table, so a fifth label or a reworded one has to reach the README too.
+_ui_src = open(os.path.join(ROOT, 'ui.js'), encoding='utf-8').read()
+_ui_tbl = re.search(r"el\.verdictLabel\.textContent = r\.state === 'doubt'(.*?)\}\[r\.doubt\]",
+                    _ui_src, re.S)
+_ui_words = re.findall(r"[a-z]+: '([A-Z ]+)'", _ui_tbl.group(1)) if _ui_tbl else []
+ok_('the keypad names a figure for each typed reason (%d)' % len(_ui_words),
+    len(_ui_words) == len(_OP_L.TYPED_DOUBT_REASONS))
+_unsaid = [_w for _w in _ui_words if _w not in re.sub(r'\s+', ' ', _readme)]
+ok_('README says what the keypad shows when it withholds a rate%s'
+    % (' (not ' + ', '.join(_unsaid) + ')' if _unsaid else ''), not _unsaid)
+ok_('...and no longer says that answer is the rig\'s alone',
+    'on the rig only' not in _readme)
+
 # Every path it names in backticks is a path that exists. A doc naming a file
 # that was renamed a year ago is a doc nobody trusts the rest of.
 for _named in sorted(set(re.findall(r'`([A-Za-z0-9_./-]+\.(?:js|py|html|css|md|sh))`',

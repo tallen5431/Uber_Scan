@@ -23,13 +23,20 @@ answer before you finish typing:
 | 🟠 | CLOSE CALL | within the near-miss band below target |
 | 🔴 | PASS | below the band |
 
-A fourth answer, on the rig only: where the reading cannot be trusted as a rate
-— a payout and a time that cannot both be true, or a card whose second leg the
-camera could not time — no number is shown at all, and the panel names which
-figure to check against the phone in your hand.
+A fourth answer, on this keypad as well as on `scan.html` and `live.html`: where
+the figures cannot be trusted as a rate, no number is shown at all — the
+headline, $/mile, $/min and net pay all read `--` — and the verdict names the
+figure to fix instead. Here that is the figure you just typed: **CHECK THE PAY**
+(a payout no offer makes), **CHECK THE TIME** (a duration no offer states),
+**CHECK THE DISTANCE** (more miles than those minutes can drive) or **CHECK PAY
+AND TIME** (the two together are a rate no offer pays — $11.84 typed as $118.40
+over 20 minutes is $355/hr). The two camera screens can say two more, about a
+card whose second leg the camera could not time, and name the figure to check
+against the phone in your hand.
 
 Other keys: **⌫** deletes (and on an empty field jumps back to the previous one),
-**CLR** resets, **LOG** saves the offer to history.
+**CLR** resets, **LOG** saves the offer to history — except an entry showing one
+of those four, which it refuses and tells you which figure to fix first.
 
 If haptics are on, each key gives a short buzz and the verdict gives a distinct
 one — a double-tap buzz for green, a long buzz for red — so you can feel the
