@@ -1337,6 +1337,73 @@ const TEXT = (sel) => {
         });
         return Object.assign({ where: where }, after);
       })();
+      // The same pointer press on a row the driver DID tick ('r3' is ticked
+      // in the feed). Nothing else asked what a ticked row's control looks
+      // like or does: drawn with the unticked faint mark, every ticked row
+      // lost its ✓ from the folded list, and a press re-posted accepted:true
+      // and never unmarked it — while the CSS said a wrong tick is taken back
+      // by pressing it again.
+      const pressAt = (id) => page.evaluate((id) => {
+        window.__marks = [];
+        const d = document.querySelector('#log details.offer[data-id="' + id + '"]');
+        if (!d) return null;
+        d.open = false;
+        d.scrollIntoView({ block: 'center' });
+        const b = d.querySelector('summary [data-act="took"]');
+        if (!b) return { drawn: false };
+        const r = b.getBoundingClientRect();
+        const s = d.querySelector('summary').getBoundingClientRect();
+        return { drawn: true, x: r.left + r.width / 2, y: r.top + r.height / 2,
+                 w: r.width, rowH: s.height,
+                 pressed: b.getAttribute('aria-pressed'),
+                 on: b.classList.contains('on'), text: b.textContent };
+      }, id);
+      out[name].ticked = await (async () => {
+        const before = await pressAt('r3');
+        if (before && before.drawn) {
+          await page.mouse.click(before.x, before.y);
+          await page.waitForTimeout(900);
+        }
+        const after = await page.evaluate(() => ({
+          marks: window.__marks || [],
+          undo: (document.getElementById('undoWhat').textContent || '').trim() }));
+        return Object.assign({ before: before }, after);
+      })();
+      // ...and a press whose mark the server refuses. The tick used to have
+      // "could not save" written into it, which in a folded row's summary is
+      // a 52px ✓ turned into a word that shoves the row's facts aside, under
+      // an aria-label still reading "I took this".
+      out[name].refused = await (async () => {
+        const before = await pressAt('r10');
+        await page.evaluate(() => {
+          const was = window.fetch;
+          window.__unrefuse = () => { window.fetch = was; };
+          window.fetch = function (url, opts) {
+            if (String(url).indexOf('/api/offers/mark') === 0) {
+              return Promise.resolve({ ok: false, status: 500,
+                json: () => Promise.resolve({}) });
+            }
+            return was.apply(this, arguments);
+          };
+        });
+        if (before && before.drawn) {
+          await page.mouse.click(before.x, before.y);
+          await page.waitForTimeout(600);
+        }
+        const after = await page.evaluate(() => {
+          window.__unrefuse();
+          const d = document.querySelector('#log details.offer[data-id="r10"]');
+          const b = d && d.querySelector('summary [data-act="took"]');
+          const bar = document.getElementById('undo');
+          return { text: b && b.textContent, w: b && b.getBoundingClientRect().width,
+                   rowH: d && d.querySelector('summary').getBoundingClientRect().height,
+                   label: b && b.getAttribute('aria-label'),
+                   disabled: b && b.disabled,
+                   said: bar.hidden ? '' : (document.getElementById('undoWhat').textContent || '').trim(),
+                   undoShown: document.getElementById('undoGo').getBoundingClientRect().width > 0 };
+        });
+        return Object.assign({ before: before }, after);
+      })();
       // A mark, made on an opened row a long way down the list: the row
       // must still be open and on screen afterwards. The mark goes to the
       // real server (only /api/journal is stubbed), which answers, and the
@@ -1359,7 +1426,9 @@ const TEXT = (sel) => {
                  open: !!(again && again.open),
                  top: again ? again.getBoundingClientRect().top : null,
                  y: window.scrollY, inner: window.innerHeight,
-                 undo: (document.getElementById('undoWhat').textContent || '').trim() };
+                 undo: (document.getElementById('undoWhat').textContent || '').trim(),
+                 // Asked after the refused mark above hid the Undo.
+                 undoShown: document.getElementById('undoGo').getBoundingClientRect().width > 0 };
       });
       // Two loads in flight: the slower earlier one must not paint over the
       // window pressed later. 7 days is answered after 1.5s with the feed;
@@ -1916,6 +1985,29 @@ try:
        fd.get('marks'), [{'id': 'r10', 'accepted': True}])
     ok_('...says so (%r)' % fd.get('undo'), 'taken' in (fd.get('undo') or ''))
     no_('...and leaves the row folded', fd.get('open'))
+    # A row the driver ticked: the solid ✓ they are reading down the list for,
+    # and a press that takes it back.
+    tk = got['took six'].get('ticked') or {}
+    tb = tk.get('before') or {}
+    eq('a ticked row draws its tick pressed (%r)' % tb,
+       [tb.get('pressed'), tb.get('on')], ['true', True])
+    eq('...and one press on it unmarks that row, and nothing else',
+       tk.get('marks'), [{'id': 'r3', 'accepted': False}])
+    ok_('...says so (%r)' % tk.get('undo'), 'Unmarked' in (tk.get('undo') or ''))
+    # A press the server refuses: the ✓ stays a ✓ the width it was, and the
+    # failure is said where the Undo is said, and to a screen reader.
+    rf = got['took six'].get('refused') or {}
+    rb = rf.get('before') or {}
+    ok_('a refused mark leaves the tick a ✓ (%r), the width it was (%r -> %r)'
+        % (rf.get('text'), rb.get('w'), rf.get('w')),
+        rf.get('text') == '✓' and rb.get('w') and rf.get('w') == rb.get('w'))
+    eq('...and the row the height it was', rf.get('rowH'), rb.get('rowH'))
+    ok_('...says it could not be saved (%r)' % rf.get('said'),
+        'could not save' in (rf.get('said') or '').lower())
+    no_('...with no Undo offered for a mark never made', rf.get('undoShown'))
+    ok_('...tells a screen reader too (%r)' % rf.get('label'),
+        'could not save' in (rf.get('label') or '').lower())
+    no_('...and can be pressed again', rf.get('disabled'))
 
     # --- a mark leaves the row where it was -------------------------------
     mk = got['took six'].get('mark') or {}
@@ -1923,6 +2015,7 @@ try:
     ok_('the row acted on was opened and scrolled to before the mark',
         mk.get('before') and mk['before'].get('y', 0) > 0)
     ok_('the mark was made (%r)' % mk.get('undo'), 'taken' in (mk.get('undo') or ''))
+    ok_('...with its Undo offered, after a refused mark hid it', mk.get('undoShown'))
     ok_('...and the row is still open afterwards', mk.get('open'))
     ok_('...and still on screen (top %r of %r)' % (mk.get('top'), mk.get('inner')),
         mk.get('top') is not None and 0 <= mk['top'] < (mk.get('inner') or 0))

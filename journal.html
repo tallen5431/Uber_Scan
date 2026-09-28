@@ -125,6 +125,7 @@
           border-radius: 12px; font-size: 13px; }
   #undo[hidden] { display: none; }
   #undoWhat { flex: 1; min-width: 0; }
+  #undoGo[hidden] { display: none; }
   #undoGo { flex: none; min-height: 52px; padding: 8px 16px; font: inherit;
             font-size: 13px; font-weight: 800; color: var(--text);
             background: var(--panel); border: 1px solid var(--muted);
@@ -3684,7 +3685,18 @@
       offerUndo(what, undo);
       load();
     }).catch(function () {
-      button.textContent = 'could not save';
+      // Not written into the tick. It sits in a folded row's summary, 52px
+      // wide around one glyph, and "could not save" there shoved the row's
+      // facts aside under an aria-label still reading "I took this". The ✓
+      // stays as it was, the bar where Undo is offered says what went wrong
+      // (with no Undo: nothing was made to undo), and the label says it to a
+      // screen reader. Pressing the ✓ again tries again.
+      if (act === 'took') {
+        button.setAttribute('aria-label', 'Could not save — press to try again');
+        sayOnly('Could not save the mark. Press the ✓ again to retry.');
+      } else {
+        button.textContent = 'could not save';
+      }
       Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
         b.disabled = false;
       });
@@ -3713,8 +3725,19 @@
     undoBody = body;
     el.undoWhat.textContent = what;
     el.undo.hidden = false;
+    el.undoGo.hidden = false;
     el.undoGo.disabled = false;
     el.undoGo.textContent = 'Undo';
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(hideUndo, UNDO_MS);
+  }
+
+  // ...and the same bar with nothing to undo, for a mark the server refused.
+  function sayOnly(what) {
+    undoBody = null;
+    el.undoWhat.textContent = what;
+    el.undo.hidden = false;
+    el.undoGo.hidden = true;
     clearTimeout(undoTimer);
     undoTimer = setTimeout(hideUndo, UNDO_MS);
   }
