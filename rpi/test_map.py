@@ -1815,9 +1815,10 @@ try:
     # its two towns share a block only through o1, twenty minutes older than
     # the Borealis rows, so for the first twenty minutes of every third hour
     # o1 fell into the previous block, no block held two towns, and these four
-    # checks failed \u2014 20 minutes in every 180, found failing at 00:04 and
-    # 00:13 New York time, and the same suite passing whole at 00:23. A check that fails by the clock is a check nobody believes when it
-    # fails for a reason.
+    # checks failed — 20 minutes in every 180, found failing at 00:04 and
+    # 00:13 New York time, and the same suite passing whole at 00:23. A check
+    # that fails by the clock is a check nobody believes when it fails for a
+    # reason.
 
     # --- the box itself ----------------------------------------------------
     box = w.get('box')
@@ -2172,7 +2173,12 @@ const STUB = `
   await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
     const q = decodeURIComponent(new URL(route.request().url())
       .searchParams.get('q') || '').toLowerCase();
-    const key = Object.keys(KNOWN).filter((k) => q.indexOf(k) >= 0)[0];
+    // The page asks '<place>, <hint>', and fills the hint with the busiest
+    // town, Kennesaw — so every query holds 'kennesaw', and taking the first
+    // KNOWN key found ANYWHERE sent all three towns to Kennesaw's point. The
+    // place comes first, so the key that appears earliest is the place's own.
+    const key = Object.keys(KNOWN).filter((k) => q.indexOf(k) >= 0)
+      .sort((a, b) => q.indexOf(a) - q.indexOf(b))[0];
     await route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify(key
         ? [{ lat: String(KNOWN[key][0]), lon: String(KNOWN[key][1]), display_name: key }]
@@ -2211,6 +2217,13 @@ const STUB = `
     null, { timeout: 60000 });
   out.popups = await page.evaluate(() => window.__pins.map(function (m) {
     return String(m.popup || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  }));
+  // Where each pin sits, so 'every town is pinned' counts towns and not
+  // pins stacked on one point.
+  out.points = await page.evaluate(() => window.__pins.map(function (m) {
+    var ll = m.ll || [];
+    return [Number(ll.lat != null ? ll.lat : ll[0]).toFixed(3),
+            Number(ll.lng != null ? ll.lng : ll[1]).toFixed(3)].join(',');
   }));
 
   console.log(JSON.stringify(out));
@@ -2335,6 +2348,12 @@ try:
     leads = dict((r['town'], r['lead']) for r in (loaded.get('rows') or []))
     pops = r3.get('popups') or []
     eq('every town is pinned', len(pops), 3)
+    # ...each at its own town. The stub once answered every query with
+    # Kennesaw's point, because the page's hint put 'kennesaw' in all of them,
+    # and three pins on one coordinate counted as three towns.
+    _pts = r3.get('points') or []
+    eq('...each at its own town, not three on one point (%r)' % _pts,
+       sorted(set(_pts)), ['33.749,-84.388', '33.952,-84.549', '34.023,-84.615'])
     for _town, _lead in sorted(leads.items()):
         _pop = [p for p in pops if (_town + ' is ') in p][:1]
         _pop = _pop[0] if _pop else ''
