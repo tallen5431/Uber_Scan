@@ -816,6 +816,22 @@ ok_('README says what the keypad shows when it withholds a rate%s'
     % (' (not ' + ', '.join(_unsaid) + ')' if _unsaid else ''), not _unsaid)
 ok_('...and no longer says that answer is the rig\'s alone',
     'on the rig only' not in _readme)
+# ...and the two the camera screens add, held to live.html's own table the same
+# way. The README called both of them a card "whose second leg the camera could
+# not time" that "name the figure to check", which is true of `leg` alone:
+# `screen` reads NOT AN OFFER, and there is no figure on a route planner to
+# check against anything.
+_live_tbl = re.search(r"el\.verdictLabel\.textContent =\s*\{(.*?)\}\[r\.doubt\]",
+                      open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read(), re.S)
+_cam = dict(re.findall(r"([a-z]+): '([A-Z ]+)'", _live_tbl.group(1))) if _live_tbl else {}
+_cam = {_k: _v for _k, _v in _cam.items() if _k not in _OP_L.TYPED_DOUBT_REASONS}
+_cam_unsaid = [_v for _v in _cam.values() if _v not in re.sub(r'\s+', ' ', _readme)]
+ok_('README names what the camera screens add (%d)%s'
+    % (len(_cam), ' (not ' + ', '.join(_cam_unsaid) + ')' if _cam_unsaid else ''),
+    len(_cam) == len(_OP_L.DOUBT_REASONS) - len(_OP_L.TYPED_DOUBT_REASONS)
+    and not _cam_unsaid)
+ok_('...and does not call a screen that is not an offer a figure to check',
+    'name the figure to check' not in _readme)
 
 # ...and the phone scanner's limits list, which said "Only Uber's current card
 # wording is handled" while the shared parser reads a DoorDash card that states

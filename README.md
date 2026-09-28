@@ -30,9 +30,11 @@ figure to fix instead. Here that is the figure you just typed: **CHECK THE PAY**
 (a payout no offer makes), **CHECK THE TIME** (a duration no offer states),
 **CHECK THE DISTANCE** (more miles than those minutes can drive) or **CHECK PAY
 AND TIME** (the two together are a rate no offer pays — $11.84 typed as $118.40
-over 20 minutes is $355/hr). The two camera screens can say two more, about a
-card whose second leg the camera could not time, and name the figure to check
-against the phone in your hand.
+over 20 minutes is $355/hr). The two camera screens can say two more that
+typing cannot: **CHECK THE TIME** on a card whose second leg the camera could
+not time, and **NOT AN OFFER** on a screen that is not an offer at all — a
+route planner or an idle screen with a payout on it — where there is no figure
+to check.
 
 Other keys: **⌫** deletes (and on an empty field jumps back to the previous one),
 **CLR** resets, **LOG** saves the offer to history — except an entry showing one
