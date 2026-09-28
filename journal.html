@@ -3074,7 +3074,12 @@
                + (setAside ? ' (' + setAside + ' set aside)' : '')
                + (usable.length ? ' · median ' + money(percentile(usable, 0.5), 0) + '/hr' : '')
                + ' · ' + money(offered, 2) + ' offered'
-               + (tookToday.length ? ' · took ' + tookToday.length + ' for '
+               // A tick and not "took": these are the rows the driver MARKED,
+               // and the headline above already says "You marked". The same
+               // glyph the row itself carries, and the same words the panel's
+               // shift line uses for the same count — one changed without the
+               // other is two screens describing one number two ways.
+               + (tookToday.length ? ' · \u2713 ' + tookToday.length + ' for '
                   + money(tookPay, 2) : '')
                + '</span></div>');
       }

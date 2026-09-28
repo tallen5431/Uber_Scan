@@ -3957,7 +3957,13 @@ try:
         ok_('...saying how many offers', '9 offers' in (first.get('text') or ''))
         ok_('...how many were set aside rather than dropping them',
             'set aside' in (first.get('text') or ''))
-        ok_('...how many were taken', 'took 2' in (first.get('text') or ''))
+        ok_('...how many were marked taken', '\u2713 2' in (first.get('text') or ''))
+        # ...as ticks. `took` is the count of offers the driver MARKED, and on
+        # the real week's two busiest days that was 10 against 41 green cards
+        # and 12 against 54. "took 10 for $140" reads as the evening's
+        # takings; the tick is the glyph the button and the offers page use.
+        no_('...as ticks, never as the word "took"',
+            'took' in (first.get('text') or ''))
         ok_('...and the median rate', '$21/hr' in (first.get('text') or ''))
         # What the taken ones were worth. This check used to forbid any dollar
         # total here, and its reason still stands: `pay` is what the card
@@ -3967,7 +3973,7 @@ try:
         # from, the same rule as the offers page's "took 6 for $48.00" — and
         # says so. "Offered" is still the word that must not appear.
         ok_('...and what they were worth, net, in the day header\'s own words',
-            'took 2 for $48 net' in (first.get('text') or ''))
+            '\u2713 2 for $48 net' in (first.get('text') or ''))
         ok_('...never as what was offered',
             'offered' not in (first.get('text') or ''))
         ok_('...and still only one rate on the line',
@@ -3981,7 +3987,8 @@ try:
         # ellipsis takes is the count of offers and the set-aside figure.
         text = first.get('text') or ''
         ok_('...with what was taken before how many offers there were',
-            'took' in text and 'offers' in text and text.index('took') < text.index('offers'))
+            '\u2713' in text and 'offers' in text
+            and text.index('\u2713') < text.index('offers'))
         ok_('...and the median before them too',
             '/hr' in text and text.index('/hr') < text.index('offers'))
         # On the glass and on one line, on the panel this is bolted to.
@@ -4001,9 +4008,9 @@ try:
         eq('...and the count is asked for again when an offer is marked',
            got.get('shiftAsked'), 2)
         ok_('...so the taken figure follows the button',
-            'took 3' in (after.get('text') or ''))
+            '\u2713 3' in (after.get('text') or ''))
         ok_('...and the money with it',
-            'took 3 for $62 net' in (after.get('text') or ''))
+            '\u2713 3 for $62 net' in (after.get('text') or ''))
 
     # A number that cannot be right is not printed. Each of these is a state
     # where the count would look perfectly plausible and be wrong.
@@ -4060,7 +4067,7 @@ try:
         # did, not print "for $undefined" or "for $NaN".
         ok_('...and a server that sends no total leaves the count alone (%r)'
             % (early.get('text') or '')[-30:],
-            'took 1' in (early.get('text') or '')
+            '\u2713 1' in (early.get('text') or '')
             and ' for $' not in (early.get('text') or ''))
 
     # A net below zero, signed the way every other figure on these pages is.
@@ -4069,7 +4076,7 @@ try:
     ok_('the negative-net state was measured', bool(neg))
     if neg:
         ok_('...and prints the sign before the dollar (%r)' % (neg.get('text') or '')[-24:],
-            'took 1 for -$1 net' in (neg.get('text') or ''))
+            '\u2713 1 for -$1 net' in (neg.get('text') or ''))
         ok_('...never as $-1', '$-' not in (neg.get('text') or ''))
 
     # ...and the median, which had its own copy of the same slip. A shift of

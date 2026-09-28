@@ -1734,15 +1734,28 @@
       // a driver glances down for. They lead now; the count of offers and
       // the set-aside figure are what a small screen loses.
       bits = [];
-      // "took 3 for $48" — the same words the offers page puts on a day
+      // "✓ 3 for $48" — the same words the offers page puts on a day
       // header, so the two screens say the same thing about the same rows.
+      //
+      // A TICK, not "took". `s.took` is `counted.filter(o => o.accepted)`:
+      // the offers the driver MARKED, not the jobs they did, and the two are
+      // known to differ. Per day over the real week (4am boundary), ticks
+      // against cards the panel called ACCEPT ran 7 of 8, 1 of 2, 10 of 41,
+      // 12 of 54 and 1 of 1 — the two busiest days are the two where a
+      // quarter as many ticks as greens were recorded. "took 10 for $140"
+      // reads as the evening's takings; the glyph is the one the Took button
+      // wears once pressed and the offers page puts on a marked row, so this
+      // reads as what it is, the ticks and what they came to. Two characters
+      // where "took " spent five, on a line whose tail is cut on the hat —
+      // shorter is the one change here that cannot push a figure off.
+      //
       // Whole dollars, like the median beside it: this is read at arm's
       // length. Net, and only claimed as net when a running cost was really
       // taken off — with costs at zero the two are one number and "after
       // costs" would describe a subtraction that never happened. `earned` is
       // absent from a server one release behind, and then the count stands
       // alone as it did.
-      bits.push('took ' + s.took
+      bits.push('\u2713 ' + s.took
                 + (s.took > 0 && typeof s.earned === 'number'
                    // Signed the way every other figure on these pages is:
                    // "-$1", not "$-1". A job whose mileage cost more than it
@@ -1763,8 +1776,8 @@
         //
         // `shiftSummary` builds it from `counted.map(o => o.perHour)` — every
         // offer the window read, and 935 of this driver's 1,166 were a PASS.
-        // The words immediately before it are "took 10 for $140 net", so a bare
-        // "median $15/hr" reads as the rate of the jobs just named. It is not.
+        // The words immediately before it were "took 10 for $140 net", so a bare
+        // "median $15/hr" read as the rate of the jobs just named. It is not.
         // Replayed day by day over the real week on the 4am boundary, against
         // the median of what was actually ticked on the same day:
         //

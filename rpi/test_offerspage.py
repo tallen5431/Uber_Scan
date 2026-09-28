@@ -1675,7 +1675,12 @@ try:
     ok_('there is a day header to compare it with', bool(took['days']))
     day = ' '.join(took['days'])
     ok_('the day header agrees with the headline about the same six (%r)'
-        % day[-60:], 'took 6 for $48.00' in day)
+        % day[-60:], '\u2713 6 for $48.00' in day)
+    # ...and names them as marked, in the panel's words. "took 6" read as the
+    # day's takings; it is the count of ticks, and the headline above it
+    # already says "You marked". The panel's shift line says the same thing
+    # about the same rows with the same glyph.
+    no_('...as ticks, not as "took"', 'took 6' in day)
     no_('...rather than quoting the gross figure beside a net rate',
         '$60.00' in day)
     # The whole line, not only the half that was wrong: the median beside these
