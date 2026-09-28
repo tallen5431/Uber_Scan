@@ -182,11 +182,15 @@ Description=Copy this rig's offers to the machine that keeps them, regularly
 # week wrote 2.3MB, which would go in one 4MB POST (5.7MB a week: see
 # rpi/journal.py's WEEK_BYTES) — it is how long the newest offer can be missing
 # from the copy if the card dies at the worst moment.
+#
+# OnBootSec is also the catch-up: a run missed while the car was parked and the
+# Pi powered down happens two minutes into the next boot rather than being
+# skipped in silence. That used to be credited to Persistent=true, which
+# systemd.timer(5) says "only has an effect on timers configured with
+# OnCalendar=" — this one is monotonic, so the line did nothing while its
+# comment named it as the protection.
 OnBootSec=2min
 OnUnitActiveSec=10min
-# So a run missed while the car was parked and the Pi powered down happens once
-# at the next boot rather than being skipped in silence.
-Persistent=true
 RandomizedDelaySec=60s
 
 [Install]
