@@ -1275,7 +1275,7 @@ const framed = (page) => page.waitForFunction(
   stage = "the shift line's median, and whether its figure survives the hat";
   //
   // The label went from "median" to "typical offer" because a bare "median"
-  // sitting one separator after "took 10 for $140 net" reads as the rate of
+  // sitting one separator after "✓ 10 for $140 net" reads as the rate of
   // those ten jobs, and it is the median of every offer READ — 935 of the real
   // week's 1,166 were a PASS, so it ran 1.5x to 2.3x under the driver's own
   // rate on all five driving days.
@@ -3729,7 +3729,7 @@ try:
     # --- the shift line's median says what it is the median of -----------
     #
     # `shiftSummary` builds it over every offer the window counted, and the
-    # words before it are "took 10 for $140 net". Replayed over the real week
+    # words before it are "✓ 10 for $140 net". Replayed over the real week
     # the bare "median" ran under the driver's own accepted rate by 1.88x,
     # 1.96x, 2.28x, 1.82x and 1.51x on the five driving days — always the
     # pessimistic way, always beside a $25 target it looks measured against.
@@ -4022,7 +4022,7 @@ try:
         # offered, and a GROSS sum beside a net median is the sentence the
         # offers page was corrected for. What is printed now is net — pay less
         # the running cost each row recorded, off the same rows the count comes
-        # from, the same rule as the offers page's "took 6 for $48.00" — and
+        # from, the same rule as the offers page's "✓ 6 for $48.00" — and
         # says so. "Offered" is still the word that must not appear.
         ok_('...and what they were worth, net, in the day header\'s own words',
             '\u2713 2 for $48 net' in (first.get('text') or ''))

@@ -643,8 +643,11 @@ Marking was write-only. A driver could put a fact into the record from the
 driving screen and never see it come back: the figures that fact feeds live on
 the offers page, which is the wrong screen to be on while driving.
 
-One line on the status row now: **`· took 3 for $61 net · median $26/hr · 9
-offers · 1 set aside`**. Three things decided it.
+One line on the status row now: **`· ✓ 3 for $61 net · $26/hr an offer · 9
+offers · 1 set aside`**. Three things decided it. (It said "took 3" and "median
+$26/hr" when this was written; the tick is the Took button's own glyph, because
+the count is of marks and "took" read as the evening's takings, and the rate
+names what it is the median of.)
 
 The money leads. It used to read "9 offers · 1 set aside · took 3 · median
 $26/hr", counts first, and the line is ellipsised from the right on a narrow

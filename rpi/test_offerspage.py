@@ -1704,7 +1704,7 @@ try:
 
     # Six taken offers, $10.00 each with $2.00 of running cost: $48.00 net,
     # $60.00 gross. The headline was already net; the day header was not, and
-    # any rendered "took N for $X" guarantees the headline is above it, so the
+    # any rendered "✓ N for $X" guarantees the headline is above it, so the
     # two were never apart.
     took = got['took six']
     ok_('the headline names what was taken (%r)' % (took['headline'] or '')[:70],
