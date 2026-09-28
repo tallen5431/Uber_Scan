@@ -919,8 +919,9 @@ ok_('...holding the rows just before the live file, not the oldest ones (%r)'
 shutil.rmtree(_roll_dir, ignore_errors=True)
 
 # ...and a second roll is not called a bug. At WEEK_BYTES' measured 5.7MB a
-# week the 64MB cap is about twelve weeks of driving, so a rig on the road all
-# year rolls four or five times — and the line printed on every roll after the
+# week the 64MB cap is at most about twelve weeks of driving, so a rig on the
+# road all year rolls at least four times — and the line printed on every roll
+# after the
 # first called that "worth looking at", against a yearly figure nobody had
 # measured: a false alarm three or four times a year on ordinary driving. It says
 # what the rolls add up to instead. The cap here is one measured week, so each
@@ -941,8 +942,15 @@ _said = _said.getvalue()
 ok_('a second roll is reported (%r)' % _said[:60], 'rolled 2 times' in _said)
 ok_('...without calling a season of driving a bug', 'worth looking at' not in _said)
 ok_('...saying each roll is a week of driving when the cap is a week',
-    'each roll is about 1.0 weeks' in _said)
-ok_('...and what the rolls add up to', 'this is about 2 weeks' in _said)
+    'each roll is at most about 1.0 weeks' in _said)
+ok_('...and what the rolls add up to', 'this is at most about 2 weeks' in _said)
+# ...as a ceiling, and without calling fewer weeks a fault. WEEK_BYTES is a
+# floor on the rate: a real rig writes seen, screen, pair and mark rows the
+# replay did not, so it ALWAYS rolls sooner than the figure. The first version
+# of this line said "far fewer weeks than that on this card means something is
+# writing more than offers" — the season-as-a-bug alarm again, one step removed.
+ok_('...without reading fewer weeks than the floor as a fault',
+    'fewer weeks than that' not in _said and 'rolls sooner' in _said)
 shutil.rmtree(_season_dir, ignore_errors=True)
 
 # --- a line that will not read is an offer that is gone ----------------------

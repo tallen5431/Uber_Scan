@@ -167,9 +167,9 @@ def chain_of(path, archives=True):
     the second already past the 64MB cap, so the repository contradicted itself
     about whether its own backstop can fire. Replaying the real week's 1,166
     offers through the real accumulator gives 2.8 rows an offer and 5.7MB a week
-    — `journal.WEEK_BYTES`, where the measurement is written up — a roll about
-    every 12 weeks, four a year, and that is a floor, because the replay writes
-    no `seen`, `screen`, `pair` or `mark` rows.
+    — `journal.WEEK_BYTES`, where the measurement is written up — a roll at
+    most every 12 weeks, at least four a year, and sooner and more on a real
+    rig, because the replay writes no `seen`, `screen`, `pair` or `mark` rows.
 
     `archives=False` for the ordinary ten-minute tick, whose floor is an hour
     before the copy's newest row: every archived row is older than that by

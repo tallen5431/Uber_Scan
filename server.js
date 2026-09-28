@@ -2051,16 +2051,19 @@ function parseLines(text, rows, torn) {
 
 // The journal, parsed once, and after that only the part that grew.
 //
-// It was read and parsed whole on every call — a 20MB file of fifty thousand
-// rows, which is three and a half weeks at the 5.7MB a week rpi/journal.py's
-// WEEK_BYTES measures and a third of what the live file reaches before its
-// 64MB roll, measured at 150-265ms on a desktop and, per the estimate this
-// file has carried for a while, the best part of a second on a Pi 4 — on the
-// event loop that also relays the live picture to the
-// panel. Every offers-page load paid it. Worse, every offer the scanner
-// appends changes the file, so the driving screen's next /api/today poll
-// paid it again: a second of frozen picture, every few minutes, for the
-// whole shift.
+// It was read and parsed whole on every call, on the event loop that also
+// relays the live picture to the panel. The first timing, 150-265ms on a
+// desktop, was of a 20MB file of fifty thousand short rows — about 400 bytes
+// a row, where the real week's average 1,752 (rpi/journal.py's WEEK_BYTES,
+// 5.7MB a week over 3,265 rows) — so it was not a real journal's shape, and
+// calling it three and a half weeks counted its bytes and not its rows.
+// Re-timed on real rows: a third of the 64MB roll, 22.4MB and 12,766 rows of
+// the replayed week, parses here in 64-223ms over 48 runs (medians 87-93) on
+// the development container. Not timed on a Pi 4, which is slower.
+//
+// Every offers-page load paid it. Worse, every offer the scanner appends
+// changes the file, so the driving screen's next /api/today poll paid it
+// again: a frozen picture, every few minutes, for the whole shift.
 //
 // The file is append-only apart from the 64MB roll, so what was parsed last
 // time is still true and only the bytes past it are new. Kept: the inode,
@@ -2471,10 +2474,11 @@ function shiftSummary(rows, since) {
 // The parse is synchronous once the file is in hand — split, then a JSON.parse
 // per line — and it runs on the event loop that also drives the 12ms MJPEG tick
 // and touches the file telling the scanner somebody is watching. The live file
-// reaches 64MB before it rolls — about twelve weeks at the 5.7MB a week
-// rpi/journal.py's WEEK_BYTES measures — and a third of that parses in
-// 150-265ms on a desktop and more on a Pi 4, so a page that asks repeatedly
-// cannot be paying that every time. /api/journal/newest already sets the house budget for a journal-reading
+// reaches 64MB before it rolls — at most about twelve weeks at the 5.7MB a
+// week rpi/journal.py's WEEK_BYTES measures — and a third of that in real
+// rows, 22.4MB, parses in 64-223ms on the development container (see
+// parseLines' caller above) and more on a Pi 4, so a page that asks
+// repeatedly cannot be paying that every time. /api/journal/newest already sets the house budget for a journal-reading
 // GET at "every few minutes"; this keeps to it and then some.
 //
 // Keyed on SIZE as well as mtime because the file is append-only apart from the

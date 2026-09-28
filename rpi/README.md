@@ -684,8 +684,11 @@ page was corrected for.
 **What it costs.** A full journal parse — split, then a `JSON.parse` per line —
 on the event loop that also drives the 12ms MJPEG tick and touches the file
 telling the scanner somebody is watching. The live file runs to 64MB before it
-rolls — about twelve weeks at 5.7MB a week (`journal.WEEK_BYTES`) — and a parse
-of a third of that was measured at 150-265ms on a desktop, more on a Pi 4. So
+rolls — at most about twelve weeks at 5.7MB a week (`journal.WEEK_BYTES`) — and
+a third of that in real rows, 22.4MB and 12,766 rows of the replayed week, parses
+in 64-223ms on the development container (48 runs), more on a Pi 4. The
+150-265ms once quoted here was a 20MB file of fifty thousand short rows, about
+400 bytes each against the real 1,752, so it was never a third of this file. So
 the page asks every three minutes,
 matching the budget `/api/journal/newest` already set for a journal-reading GET,
 and the answer is cached against the journal's size and mtime — append-only means
@@ -3983,10 +3986,13 @@ everything behind it. The chain is shifted now — `.1` becomes `.2`, `.2` becom
 `.3` — so nothing is destroyed and `.1` stays the newest, which is what
 server.js stats to notice a roll at all. A second roll also says so out loud,
 and says what it adds up to: at 5.7MB a week (`journal.WEEK_BYTES`) each roll is
-about twelve weeks of driving, so a rig on the road all year rolls four or five
-times. The line used to call a second roll a bug rather than a season, against
-a yearly figure nobody had measured; it now prints how many weeks the rolls
-amount to, and a card that has not been in the car that long is the bug.
+at most about twelve weeks of driving, so a rig on the road all year rolls at
+least four times. The line used to call a second roll a bug rather than a
+season, against a yearly figure nobody had measured; it now prints the most
+weeks the rolls can amount to. That is a ceiling, because the week is a floor
+on the rate — a real rig writes `seen`, `screen`, `pair` and `mark` rows the
+replay did not — so a card rolling sooner is ordinary; rolls days apart are the
+bug.
 
 ### A recovery that had never once fired
 

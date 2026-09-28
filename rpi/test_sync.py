@@ -1172,8 +1172,9 @@ finally:
 # same live file, so the two sides agreed. 1,100 offers on exactly one SD card.
 #
 # The roll is a season, not a lifetime. Replaying the real week's own frames
-# gives 2.8 rows an offer and 5.7MB a week — about four rolls a year, and a
-# floor, because the replay writes no `seen`, `screen`, `pair` or `mark` rows.
+# gives 2.8 rows an offer and 5.7MB a week — at least four rolls a year, and
+# more on a real rig, because the replay writes no `seen`, `screen`, `pair` or
+# `mark` rows.
 # The measurement is written up once, at `journal.WEEK_BYTES`.
 roll_far = FarEnd()
 try:

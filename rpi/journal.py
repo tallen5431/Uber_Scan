@@ -83,8 +83,9 @@ import offer_parser as OP                                     # noqa: E402
 # holds every one of them to this number and refuses the wording it replaced.
 WEEK_BYTES = 5718962
 
-# A backstop, not a retention policy, and it fires about every twelve weeks.
-# At WEEK_BYTES the cap is 11.7 weeks of driving — four or five rolls a year —
+# A backstop, not a retention policy, and it fires at most every twelve weeks.
+# At WEEK_BYTES the cap is 11.7 weeks of driving — at least four rolls a year,
+# WEEK_BYTES being a floor, so a real rig rolls sooner and more often —
 # and there is nothing to be gained by throwing any of it away. It exists so
 # that a bug writing on every frame instead of every offer cannot quietly fill
 # the card: past the cap the live file is moved aside and a fresh one started.
@@ -480,22 +481,28 @@ class Journal:
             # happened here. The journal was used, kept, and moved aside.
             #
             # One roll is the backstop doing its job, and so is a second. At
-            # WEEK_BYTES the cap is about twelve weeks of driving, so a rig on
-            # the road all year rolls four or five times. This used to call
-            # every roll after the first "worth looking at", against a yearly
-            # figure nobody had measured — a false alarm three or four times a
-            # year, on nothing but ordinary driving.
+            # WEEK_BYTES the cap is at most about twelve weeks of driving, so a
+            # rig on the road all year rolls at least four times. This used to
+            # call every roll after the first "worth looking at", against a
+            # yearly figure nobody had measured — a false alarm three or four
+            # times a year, on nothing but ordinary driving.
             #
             # So it says what the rolls add up to at the measured rate, and
             # leaves the judgement to the one person who knows how long this
-            # card has been in the car. A bug writing on every frame shows as
-            # many rolls against few weeks; a season shows as the two agreeing.
+            # card has been in the car. As a CEILING: WEEK_BYTES is a floor on
+            # the rate (above — the replay writes no seen, screen, pair or mark
+            # rows), so a real rig always rolls sooner than it says, and a
+            # message calling "fewer weeks than that" a fault — which this one
+            # did, the first time it was given the figure — would raise the
+            # false alarm it was written to retire. What is a fault is a roll
+            # in days: 64MB is 29 of the busiest day measured, 2.3MB.
             weeks = self.cap / float(WEEK_BYTES)
             print('the offer journal has rolled %d times and every roll has '
                   'been kept (%s.1 through .%d). At the %.1fMB a week measured '
-                  'on a real week, each roll is about %.1f weeks of driving, so '
-                  'this is about %.0f weeks; far fewer weeks than that on this '
-                  'card means something is writing more than offers.'
+                  'on a replayed week, each roll is at most about %.1f weeks of '
+                  'driving, so this is at most about %.0f weeks. A real rig '
+                  'writes more than that replay and rolls sooner; rolls days '
+                  'apart are something writing more than offers.'
                   % (highest + 1, self.path, highest + 1, WEEK_BYTES / 1e6,
                      weeks, weeks * (highest + 1)))
 

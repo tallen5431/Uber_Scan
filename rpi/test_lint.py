@@ -421,7 +421,11 @@ for _dir, _subdirs, _names in os.walk(ROOT):
             _prose[_rel] = _fh.read()
 # Across a comment's line break as well: "5.7MB\n  // a week" is still a
 # quotation, and a pattern that stopped at the newline missed one in server.js.
-_WEEK_QUOTE = r'(\d+(?:\.\d+)?)MB[\s/*#]+a[\s/*#]+week'
+# And in the other ways a week is written: this once needed the digits hard
+# against "MB" and the word "a", so "5.2 MB a week", "5.2MB per week" and
+# "5.2MB/week" all drifted past it unread.
+_WEEK_QUOTE = (r'(\d+(?:\.\d+)?)\s*(?:MB|megabytes?)'
+               r'(?:[\s/*#]+(?:a|per|each|every)[\s/*#]+|\s*/\s*)week')
 if _wb:
     _week_mb = round(int(_wb.group(1).replace('_', '')) / 1e6, 1)
     _quotes = [(_rel, _m) for _rel, _src in sorted(_prose.items())
@@ -457,6 +461,31 @@ for _pat, _what in _RETIRED:
     _back = sorted(_rel for _rel, _src in _prose.items() if re.search(_pat, _src))
     ok_('no file gives the journal as %s any more%s'
         % (_what, ' (' + ', '.join(_back) + ')' if _back else ''), not _back)
+# ...and how often it rolls, which is the same figure divided into the cap and
+# was answered three ways once the week was measured: "four a year" in sync.py,
+# "about four" in test_sync.py, "four or five" in journal.py and rpi/README.md.
+# 52 weeks over the cap's 11.7 is 4.43 at the floor, and the real rate is
+# higher, so the one true wording is a lower bound: "at least four".
+_ROLLS = (r'(?<!at least )\bfour(?:[\s/*#]+or[\s/*#]+five)?(?:[\s/*#]+rolls)?'
+          r'[\s/*#]+a[\s/*#]+year|rolls[\s/*#]+four[\s/*#]+or[\s/*#]+five'
+          r'|about[\s/*#]+four[\s/*#]+rolls')
+_rolls_back = sorted(_rel for _rel, _src in _prose.items()
+                     if re.search(_ROLLS, _src))
+ok_('no file gives the rolls a year as anything but "at least four"%s'
+    % (' (' + ', '.join(_rolls_back) + ')' if _rolls_back else ''),
+    not _rolls_back)
+
+# ...and how long a third of the live file takes to parse, which three pages and
+# rpi/README.md gave as the 150-265ms a desktop took over a 20MB file of fifty
+# thousand short rows — about 400 bytes a row, where the real week's average
+# 1,752, so a quarter as many rows per byte. That figure may be quoted only as
+# what it was: within reach of the words that say what file it timed.
+_bench = ['%s:%d' % (_rel, _src.count('\n', 0, _m.start()) + 1)
+          for _rel, _src in sorted(_prose.items())
+          for _m in re.finditer(r'150-265\s*ms', _src)
+          if 'fifty thousand' not in _src[max(0, _m.start() - 300):_m.end() + 300]]
+ok_('no file gives the fifty-thousand-row benchmark as a real journal\'s parse%s'
+    % (' (' + ', '.join(_bench) + ')' if _bench else ''), not _bench)
 
 # --- what a driver STARTS from, in the three places that seed it ------------
 #
