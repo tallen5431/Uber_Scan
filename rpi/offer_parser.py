@@ -2295,7 +2295,7 @@ def find_places(text, legs, whose=None):
     return out[:MAX_PLACES]
 
 
-def one_card(text, legs, where):
+def one_card(legs, where):
     """The legs belonging to the headline payout, and nothing below it.
 
     Uber's Trip Radar screen is a LIST of offers: the top of the next card
@@ -2320,22 +2320,28 @@ def one_card(text, legs, where):
     candidate find_pay accepted, in the order they appear, so this asks the
     same question find_pay asked rather than a second version of it.
 
-    Returns the legs to use and whether anything was cut, because a frame that
-    can see two cards may also be cropping the first: the reading is not whole
-    and the rig should keep looking for a frame like row 227's first, where the
-    second card is out of shot and the sum is already right.
+    Returns the legs and nothing else, the same as the browser's oneCard. It
+    used to return whether anything was cut as well, documented as the signal
+    that "the reading is not whole and the rig should keep looking". parse(),
+    its only caller, bound it to `_spilled` and never read it; is_whole() never
+    saw it; the browser port never had it. So the paragraph described a
+    wholeness check that did not exist, on the function whose early return let
+    a two-card frame through as whole. Measured over the real week's 5,491
+    frames, it was set on 13, and all 13 were already not whole for another
+    reason — 10 left with no legs at all, 3 with one unlabelled leg — so wiring
+    it up would have been a check no frame could fail. Deleted rather than
+    ported, and the `text` argument with it, which the body never read.
     """
     if len(where) < 2:
-        return legs, False
+        return legs
     starts = [at for _v, at in where]
     # The headline this reading is priced on, which find_pay chose by size
     # rather than by position — so it is not always the first one on screen.
     top = max(where, key=lambda pair: pair[0])[1]
     after = [at for at in starts if at > top]
     edge = min(after) if after else None
-    kept = [l for l in legs
+    return [l for l in legs
             if l['start'] > top and (edge is None or l['start'] < edge)]
-    return kept, len(kept) != len(legs)
 
 
 def card_span(where):
@@ -2427,7 +2433,7 @@ def parse(raw_text):
     # be two chances for them to disagree about which figure is the
     # headline, which is the whole thing this boundary rests on.
     pay = find_pay(text, _where)
-    legs, _spilled = one_card(text, legs, _where)
+    legs = one_card(legs, _where)
     # ...and the same boundary for every other field the card states. See
     # card_span: the legs were bounded and the distance, the deadline, the item
     # count and the merchant were not, so a frame holding two cards priced one

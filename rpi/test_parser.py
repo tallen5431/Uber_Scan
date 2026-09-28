@@ -326,5 +326,23 @@ eq('one payout is one card and nothing is blanked',
    P.only_card(_frame, P.card_span([(8.0, 4)])), _frame)
 
 
+# --- one_card hands back the legs, and nothing the browser does not ----------
+#
+# It used to return a second value, "whether anything was cut", documented as
+# the signal that keeps the rig looking for a cleaner frame. parse() discarded
+# it, is_whole() never saw it, and the browser's oneCard never had it — so two
+# ports of one function had two signatures, and the corpus could not see that
+# either, because nothing consumed the difference. Row 227's shape: a $22.03
+# card with its two legs, and the top of the $16.08 card under it.
+_row227 = P.normalize('$22.03 12 min (6.6 mi) 23 mins (13.1 mi) '
+                      '$16.08 19 min (12.8 mi)')
+_w227 = []
+P.find_pay(_row227, _w227)
+_cut = P.one_card(P.find_legs(_row227), _w227)
+eq('one_card returns the legs and nothing else, the shape oneCard returns',
+   [l['minutes'] for l in _cut] if isinstance(_cut, list) else _cut,
+   [12.0, 23.0])
+
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)
