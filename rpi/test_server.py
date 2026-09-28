@@ -2168,7 +2168,7 @@ try:
     eq('a rig answers with the cost its scanner says it is pricing with',
        (_said.get('scanner'), _said.get('costPerMile'), _said.get('pending')),
        (True, 0.3, None))
-    for _bad in ('0.45', -0.1, True, None):
+    for _bad in ('0.45', -0.1, True, None, 10.01, 1e308):
         _code, _body = post(_sbase, '/api/settings', {'costPerMile': _bad})
         eq('a cost of %r is refused' % (_bad,), _code, 400)
     _code, _body = post(_sbase, '/api/settings', {})

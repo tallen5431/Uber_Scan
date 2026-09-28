@@ -57,6 +57,12 @@ whole file, it was satisfied by the explanatory comment, so `TZ=UTC` passed whil
 reinstating the exact fault. Three mutations, three named kills. All 37 suites
 pass on the driver's clock; that one assertion was the only casualty.
 
+**README said the withheld verdict was the rig's alone, and SCANNING.md said only Uber's wording is read.** The keypad withholds on four typed reasons (CHECK THE PAY, CHECK THE TIME, CHECK THE DISTANCE, CHECK PAY AND TIME; ui.js) and refuses LOG on the same four. The camera screens add CHECK THE TIME for a second leg they could not time, and NOT AN OFFER for a route planner or idle screen. The first rewrite called both of these a figure to check. The parser also reads a DoorDash Deliver-by card: '$8.75 / Deliver by 7:15 PM / 5.2 mi' at 6:45 PM is 30 min, $14.38/hr, PASS. Checks: 'README says what the keypad shows when it withholds a rate', 'README names what the camera screens add (2)', '...and does not call a screen that is not an offer a figure to check', 'SCANNING.md's limits name the deadline card the parser reads', 'SCANNING.md no longer says only Uber's wording is handled', 'rpi/README.md no longer says only Uber's wording is handled'.
+
+**A mutation that has the same byte length as the source it replaces, written within the same second, is served from the stale .pyc, so the Python suite runs the PREVIOUS source.** Measured on this lane: `(mine, legs)` came back as 11 failures, exactly the prior mutation `(text, legs)`'s result. With a fresh PYTHONPYCACHEPREFIX per run it is 2. A reported mutation result from a Python suite is valid only when the bytecode cache is bypassed or moved for each run. Restoring in a finally does not help, because the stale file is the cache, not the source.
+
+**rpi/test_loop.py's dropoff-window checks fail on timing, not on code.** The three failing checks are 'a press that found no address is answered, not left silent', '...and the log says it too' and '...said once'. They fail 4 runs in 4 against an untouched archive of 466b0cd on this 4-core host (load 0.86). The same tree passed once. On upgrade/parser-fix they failed 2 of 3 runs. The run lasts 6 s against a 1 s window, so the answer depends on scheduling. A check whose verdict depends on the host's load cannot be used to judge a change. It needs a clock the test drives.
+
 ### The reader
 
 **The hour guard left the third of the three rows it was written for, and the
@@ -840,6 +846,10 @@ the two sides, all killed; the in-flight wait is pinned on the source, because
 these checks run `--no-parallel` where a read is synchronous and `reader.busy`
 is never true at the moment the window is judged.
 
+**A card's lost-leg check was asked of the whole frame against the legs the card boundary kept, so the bracket of a leg the boundary had cut read as a leg of this card that lost its minutes.** Measured on the week after 466b0cd: rows 908 and 450 went whole -> not whole on every frame in both ports, with untimedMiles 5.4 and 3.6. They were never spoken, the panel never settled, and they were journalled whole=0. No later frame could clear it. With the other card's distance the longer one, the panel printed 'a leg this reading could not time — 19.4 mi of it' about a card whose one leg was timed. The fix asks shortATime/untimedMiles of this card's words (`mine`) against every leg the frame read. The trap: that bracket was the only thing withholding two rides the frame had cut off after their first leg. With the fix alone, row 410 went from doubt to go, $98.31/hr, whole. So half_a_ride ships with it: another card in shot, one non-total leg, distance after its time -> short a timed leg of unknown size. It fires on 4 frames, rows 410 and 450. Checks: 'a crop whose card above is the longer journey...', 'row 410: a ride cut off after its first leg...', 'whole / row 908...', 'whole / one bare leg on a frame holding ONE card is left as it was...'.
+
+**'Both apps print a payout to the cent' was false, and a next-card headline test built on it let a whole-dollar card below run into the one above.** Row 475 prints `$6 Guaranteed (incl. tip)` on all 7 frames, rows 374/479/584/602/604 print $6 or $7 the same way, and row 79's ride prints `$18 * 5.00`. A headline is now cents OR the card's label or the rider's star directly after it. Over every frame and text of the week, 0 of 121 cents-less non-chosen figures have a label or star directly after them, so it moves 0 rows. The residue, stated: 144 of 208 cents-less chosen payouts have junk between figure and label, and the gap cannot widen, because row 505's map glyph `$5 | Guaranteed` has the same shape as row 314's real `$19 | Guaranteed`. It errs long. Checks: 'a whole-dollar card below still bounds the first: DoorDash prints `$7 Guaranteed`', '...and so does a whole-dollar ride below, by the rider's star', 'a bare $5 off the map...'.
+
 ### The order in the car
 
 **A destination scanned while SCREENING lost its provenance the moment the card
@@ -1036,6 +1046,10 @@ place anybody lives. `Advice.area` reads `LAS` as a town quite happily, so
 because the rule hands back a lowercased town and every answer would pass it
 otherwise — and the answer is title-cased on the way out, since that is what
 the ranking prints while the rule lowercases in order to compare.
+
+**A ⌖ press found late was read for twelve more seconds, after the panel had stopped waiting.** dropoff_requested() accepted a press up to DROPOFF_WINDOW (12s) old, then the loop opened a fresh window from the pass that noticed it (`now + DROPOFF_WINDOW`). So one press was judged by two clocks. A press 11.5s old was read until 23.5s after it, plus a read in flight measured at up to 5.9s. Its address was filed as ASKED after live.html's 13s 'reading…' wait had ended. Fix: dropoff_requested() returns what is left of the press's own window, or None, and the loop sets `dropoff_until = now + left`. A press exactly the window old is refused, so the return is never 0.0. Trap: the fake reader lands 3 reads inside 0.08s, so a check staged by read count found the address with the fix in. It is staged by time instead, and the press is aged at the loop's first look rather than before startup. Checks: test_scan_pi '...only for the half second left of its own window, not twelve more' (fails when the loop's `now + DROPOFF_WINDOW` is restored) and 'a press exactly its window old is not taken with nothing left' (fails on `>`).
+
+**A drop row names the order the rig was holding, and with two jobs in the car that is the wrong one.** The hold is one slot and the last tick takes it. A Drop at the first delivery puts down, and writes a row naming, the second job, which is still in the car. The press at the second delivery then writes nothing. On week.csv, 12 of 31 ticks landed while an earlier tick was held, and 7 landed inside the earlier tick's stated minutes; in 6 of those 7 the earlier job was stated to end first. The server.js /api/delivered comment and rpi/README.md now say a drop row is one job's elapsed time only where no other tick overlaps it. Prose only. The row stays collection-only and nothing reads it.
 
 ### The maps, again
 
@@ -1450,6 +1464,10 @@ whose storage refuses writes keeps what it has paid for in memory. Adopting
 first would drop each answer as the next arrived and make a second press re-ask
 every place at a second apiece. `tests/mapview.test.js` pins both directions.
 
+**The map said the best three-hour stretch and the worst were $X apart, and X was how far apart the TOWNS were.** The clause printed rawSpread, the spread of the town medians, which does not depend on the blocks at all. Measured on the owner's week (TZ=America/New_York, newest N days back from the last offer, printed / true): 1 day $4.33 / $8.72, 2 days $7.10 / $5.91, 5 days $6.98 / $7.23, 7 days $6.33 / $6.95. Fix: Advice.areas returns hourSpread, the best block median minus the worst over the same kept pool and pens the held figures use. rawSpread stays where it means towns ('unheld it looks like'). Trap: on the full week the two are 62 cents apart, near enough to read as right. So the test journal puts the blocks $12 apart and the towns $6 apart, and quoting one as the other cannot pass by coincidence. Checks: advice 'the spread of the hours is the best hour against the worst'; test_map 'the sentence about the hours quotes how far apart the hours are'. A pin's popup also paired the hour-held position with the raw median: Kennesaw 3rd at $15.32 above Woodstock 4th at $15.80, 2 of 36 pairs backwards. It now goes through MV.standings, which quotes the rankLead figure the sidebar row leads with, and a town with no matched figure gets no ordinal. Checks: mapview 'a pin quotes its town's position with the figure it was ranked by' and the three test_map pin checks. Trap in the test fixture: the nominatim stub matched the first KNOWN town found anywhere in the query, and the page's hint put 'kennesaw' in every query, so three pins stacked on one point passed 'every town is pinned'. The stub now takes the earliest match, and '...each at its own town, not three on one point' fails if it is reverted.
+
+**The server's geocode cache could be lost and the map said nothing.** Since 9f2bd1a, /api/places has answered `unreadable` for a places.json that will not parse. map.html loadPlaces tested only `ok`, which is true on that answer, so it took the empty set in silence. A places.json that exists but cannot be read (EACCES/EISDIR) answered only `stored: null`. The cost is 1,325 places and 24 minutes to rebuild. Fix, overriding plan 4.5, which would have deleted the field as unread: the page reads it and says it on the load line, with the server's reason and the cost ('looked up again'). The read-error case answers `unreadable` too, and ENOENT stays a silent empty cache. Trap: said any earlier, the journal's own line writes over it a moment later. Checks: test_map 'a server cache that will not parse is said on the load line' and its three followers; 'a server with its lookups intact is not said to have lost them' (so the reader can fail both ways); test_server '...and says so too, rather than looking like a fresh box'.
+
 ### The phone's scanner
 
 **The MILES cell printed the distance from before the repair.** `scan.html`'s
@@ -1628,6 +1646,10 @@ sent that `keep()` never stored because storage was refused — the storage-off
 case under Open. It needs a `queued` flag recorded at `keep()` time so that row
 is never reconciled and goes on saying "kept here only", which is true.
 
+**Every verdict was net of a cost per mile nobody chose.** costPerMile was 0.3 on all 1,166 rows of the real week. That is the factory seed, set in rpi/config.json and read once at startup. Measured with rate() over week.csv, which reproduces the rig's 106 recorded greens, the week at $0.00/0.15/0.30/0.45/0.70 a mile has 290/181/106/78/52 green cards and 146.6/88.7/46.0/31.4/21.5 green job-hours. The fix is `/api/settings` in `server.js`, which takes costPerMile and no other key. It writes through the handoff dir under partName(). `rpi/scan_pi.py` takes the request in the loop (settings_requested), mutates cfg['settings'] in place, saves the file, re-reads the card on the phone, and reports the figure on the stream. GET answers from that report. SCANNER=0 answers scanner:false, and a POST there gets 409. Traps: the block also holds keepPlaces (whether addresses reach the journal) and pad/secondsPerItem (every stored rate), so the route and the reader both whitelist the KEY. PL.Scanner's startup settings copy fed only a rate digest() overwrote, so it was deleted, not guarded. The scanner stays the only writer of config.json. The taker claims the request by rename: read-then-clear deleted a second POST that landed in between. The keypad says the scanner is not running rather than promising a next reading. Checks: test_server, test_loop, test_pipeline, test_scan_pi ('...taken next, not deleted unread'), test_keypad, test_lint.
+
+**The keypad's Targets sheet did not say whose settings it changes, then said it twice.** The panel puts ⌨ Type one press from the verdict. A target typed on the sheet moved the keypad's colours and nothing the panel said. A sentence at the top of the sheet in `index.html` (#settingsWhere) now says it changes this browser only, with cost per mile the one exception. The bottom note's 'Settings and history stay on this phone' was a second answer on the same sheet, and false after cost per mile could reach the rig. It now speaks about history only, and README.md's Targets paragraph was corrected to match. Checks: test_keypad '...and no other line on the sheet says where the settings go', test_lint '...which does not say the settings stay on the phone while the keypad sends cost per mile to the rig'.
+
 ### The service worker
 
 **The background refresh is fired and forgotten.** Both cache writes happen
@@ -1737,13 +1759,14 @@ slack; and the panel shows no wall clock at all, so there was nothing on the rig
 to disagree with. Between them they cover a Pi that boots in 1970 and a row
 stamped in the year 5138, and they leave the whole space in the middle open.
 
-*The money survived, and that is worth stating precisely.* A duration card
+*The money survived THIS error, and only this size of it.* A duration card
 carries its own minutes, so 25 of 25 of these rows rate correctly. A DELIVERY
-card would not — its minutes come from "deliver by 21:40" minus now — but
-`minutes_until` wraps a negative gap by 24 hours, so a seven-hour skew turns a
-45-minute job into a seventeen-hour one and `SANE_MINUTES` refuses it. The rig
-would have said CHECK THE TIME and named the card, which is the wrong culprit,
-but it would not have printed a confident wrong rate.
+card takes its minutes from "deliver by 21:40" minus now, and `minutes_until`
+wraps a negative gap by 24 hours, so a seven-hour skew turns a 45-minute job into
+a seventeen-hour one and `SANE_MINUTES` refuses it. A SMALLER skew is not
+refused: 25 to 39 minutes fast turns a $11.52/hr PASS into a confident GO with no
+doubt flag, measured below under "doctor.py said a wrong clock". The owner has
+declined a guard for it; this entry said the money was safe, and it was not.
 
 *What CAN be seen is the correction, and it is permanent.* The journal is
 append-only and written in order by one process, so `at` never goes backwards on
@@ -1770,6 +1793,16 @@ the two are the same walk.
 annotation row carrying a measured offset, applied by the fold the way a `mark`
 is, would let the pages show the true time without editing history — it is the
 shape this project already uses for corrections, and it is not built.
+
+**doctor.py said a wrong clock leaves 'the money protected'. It does not.** Measured on rpi/offer_parser.py at SEED_SETTINGS, with the card $10.86 / 7.4 mi / Deliver by 9:15 PM read at a true 8:30 PM, stepping the clock one minute at a time:
+- +0 is 45 min, $11.52/hr PASS
+- +21..+24 is CLOSE CALL
+- +25..+39 is a confident GO with no doubt (+30: 15 min, $34.56/hr)
+- +40..+43 is doubt speed
+- +44 is doubt time
+- +420 (the seven-hour error that happened) is doubt time
+
+The JS port agrees at +0, +30 and +44. The owner declined a clock guard. doctor finds the backwards step afterwards. The comment now says so, and does not re-argue the decision. advice.js's in-time bullet no longer gives '0 of 836 stated a deadline' as the reason; the count is 0 of 1,166 too. The question is not asked because nothing on record can check it and its minutes come off the clock. Checks: 'doctor.py no longer says a wrong clock leaves the money protected', 'advice.js no longer says a deadline card has nothing to measure against'.
 
 ### The backup
 
@@ -2041,6 +2074,12 @@ root, and that is the one moment in the install where it is free.
 `tools/install-sync.sh`'s own failure text pointed at `SCANNER=0 npm start` and
 omitted `JOURNAL` — so an operator following the gate's advice landed the only
 backup inside the clone, next to a `git clean`. It names the installer now.
+
+**The journal's size was six unmeasured figures in twenty-one places, and the roll called a season of driving a bug.** Replaying week.csv's 1,166 offers from their own frames through the real OfferAccumulator, rate() and OfferLog.consider gives 3,265 rows, 2.80 rows an offer and 5,718,962 B a week. The busiest day was 2,278,585 B, the 64MB cap is 11.73 weeks, and a year of 52 such weeks is 297MB. The figure lives once, at journal.WEEK_BYTES. rpi/test_lint.py holds 21 quotations of '5.7MB a week' to it, each naming WEEK_BYTES within 300 characters, and refuses the retired yearly, per-shift and year-of-driving wordings. Trap: WEEK_BYTES is a FLOOR (the replay writes no seen, screen, pair or mark rows). The first roll message and doctor's free space both printed it as the rate, and the roll message called 'far fewer weeks' a fault, which is the false alarm again. Both now say 'at most'. Only rolls days apart are a fault: 64MB is 29 of the busiest day. Trap: the 150-265ms parse benchmark was a 20MB file of fifty thousand ~400 B rows, against the real 1,752 B a row. Re-timed with parseLines on 22.4MB / 12,766 real rows: 64-223ms over 48 runs (medians 87-93) on the development container. Not timed on a Pi 4. Rolls a year are 'at least four' (4.43 at the floor) everywhere. Checks: '...and every quotation is WEEK_BYTES' 5.7MB a week', 'no file gives the rolls a year as anything but "at least four"', 'no file gives the fifty-thousand-row benchmark as a real journal's parse', '...without reading fewer weeks than the floor as a fault'.
+
+**A full SD card printed 'the journal can be written' and 'backed up N min ago' as two green lines over a stopped record.** Opening for append allocates nothing, so on a full card the open succeeds and the scanner fails later, at the write (ENOSPC). doctor.py now asks os.statvfs (f_bavail: the scanner is not root) and fails, and blocks, below FREE_WEEKS=4 x WEEK_BYTES = 22.9MB. It prints the free space either way, as 'at most' that many weeks. Trap avoided: no probe byte. This check once created the root-owned journal it was asking about. Trap: a statvfs that raises is not a read-only card, so it gets its own fix line. The fix line never tells the driver to delete the journal or its rolls. Checks: 'a card too small for a month of driving fails the write check' (a real 64kB tmpfs where mountable), 'a full card fails the write check though the journal opens for append' (stubbed statvfs), '...without blaming a read-only card', 'on a 64kB card the journal still opens for append' (this was once a literal True and could not fail).
+
+**Persistent=true on the backup timer did nothing while its comment credited it with catching up missed runs.** systemd.timer(5): Persistent= 'only has an effect on timers configured with OnCalendar='. tools/install-sync.sh writes OnBootSec=2min + OnUnitActiveSec=10min, so OnBootSec is what runs a missed backup two minutes into the next boot. The line is deleted and its comment moved to OnBootSec. A rig installed earlier keeps the inert line until the installer is re-run. Checks: 'the sync timer runs at boot, which is what catches up a missed run', '...and sets no Persistent= on a timer with no OnCalendar= to obey it'.
 
 ### The panel
 
@@ -2432,6 +2471,10 @@ because the regex stopped matching and the assertion sat behind a guard. It
 finds the line's one rate by shape now, so the wording cannot switch it off.
 Four mutations, four named killers.
 
+**The pair row painted "take both" green under a PASS, and the record went on calling that green what the panel said after it was gone.** The pair line's green meant the time-weighted blend of the held job and the offer cleared the target, so money already earned carried the colour. Replaying week.csv with the 31 marks and holding()'s ×1.5 + 10 min expiry (target 25, 30c/mi) gave 267 pair lines and 71 greens. 45 of those greens were offers whose own net rate was under $25: 30 under PASS and 15 under CLOSE CALL. Redefining green as "own rate clears the target" would repeat the headline: it disagrees with the headline 0 times in 267. So the colour was deleted (ba1298b). The trap was the record: s.state stays on kind:'pair' rows so their shape holds, but the offers page read it as "Called it: take it", in the tally and in each row's dot. Rows since then carry stackShown:false and said, the headline's verdict off the card's own offer line. journal.html reads both through one pairSaid(). Older rows, which have no stackShown, still read stack.state, because on them it was on the glass. Checks: test_dashboard "...and the pair row takes no verdict state as a class"; test_server "...recording the verdict the panel showed for that card" and "...and that the pair line's own verdict was not on the panel"; test_offerspage 'pair era' feed (8 checks) and "...and no verdict colour on it either".
+
+**⌖ Dropoff asked to be pressed on 400 cards a week that the panel was saying to PASS.** The ask was measured with DROPOFF_NOT_STATED over week.csv rows that have no dropoff: 457 cards, split no 400 / go 29 / warn 28, and all 4 ticks in that set were go or warn. The ask is now gated on the card's own verdict, which the offer line carries, and never on last.state. showDest runs before `last` is updated, so last.state can belong to the previous card. The ask drops to 57 a week. The offer line is re-told when that verdict moves on the same card, for example an item count read late that moves billed minutes but not the card's own. Otherwise the offer and the headline disagree about one card. Frame by frame over the week's stored scans, this happens on 1 row of 1,166. Checks: test_dashboard "...but does not ask to be pressed on a card the panel says to pass"; test_scan_pi "the offer carries the verdict its own card got"; test_loop "...and told again, same id and same journey, when its verdict moved".
+
 ### The offers page
 
 **The cost sweep's footnote read a two-sided test as a one-sided one, and
@@ -2641,6 +2684,12 @@ which rung wins either way. It held on the real week — $24, $21, $20, $18, $16
 null` could not be made to fail: a null rate and a zero rate are both already
 refused further down, so the branch went, and the behaviour it stated is
 pinned against the outcome instead.
+
+**The offers-page browser fixtures had reached exec()'s per-argument limit.** FEEDS was passed to node as one argv string: 127,286 bytes, against MAX_ARG_STRLEN of 131,072. One more feed (131,401) failed with "Argument list too long", and not one check ran. The driver now reads the fixtures from a file.
+
+**The offers page printed the line kept as 'somewhere between' two ends that do not bound it.** Plan 4.4 withholds the too-picky / not-deciding instruction while 31 ticks cannot settle it. The first build printed the range as the ticked median and the all-cleared median ($30.20 and $24.90 on the real week), with 'the truth is somewhere between the two ends' under it. The driver took the ticks and SOME of the 191 unticked cleared cards. Measured with week.csv through Advice.advise, target $25, TZ=America/New_York: the median over the ticks plus any subset runs from $21.79 (the 24 cheapest added) to $36.02 (the 18 dearest), and $21.79 is on the other side of the $2 rule. Fix: Advice.ifCleared returns kept:{lo,hi} from a prefix/suffix scan (for fixed k the cheapest k give the lowest median, the dearest the highest), with ranks picked from two sorted lists. It is exact against brute force on 3,000 random markets, and 20,000 rows run in 11 ms. `agree` is asked of lo and hi. Trap: the empty clock is NOT bounded by its ends either, contrary to the verifier. runs() reads the ticks, so a taken job can join two runs and put the gap between them on the clock, and one cleared card lifts 48.3% to 48.7%. It is printed as its two named ends, never 'between'. Checks: '...the kept range at 31 ticks is the lowest and highest median any mix of the unticked cleared cards gives', 'the line kept runs from the cheapest mix … not between the two ends', '...and those are exactly the lowest and highest median any subset gives, on 400 small markets', '...and no sentence says the truth lies between the two ends'.
+
+**The offers-page tick on a TICKED row was checked by nothing.** After plan 2.3 made the folded row's ✓ the control, every check pressed an unticked row. Drawing every tick unticked passed all 439 checks. On that page the driver's ticks vanished from the folded list, and a press on a ticked row re-posted accepted:true instead of unmarking. Fix: a pointer press on ticked row r3 asserts aria-pressed 'true' with class 'on', a post of {id, accepted:false}, and 'Unmarked as taken.'. Also, a refused mark no longer writes 'could not save' into the 52px ✓ (measured: 127px wide in the folded summary, under an aria-label still reading 'I took this'). The Undo bar says it with no Undo button, the aria-label says it, and the buttons are enabled again for a retry. Checks: 'a ticked row draws its tick pressed', '...and one press on it unmarks that row, and nothing else', 'a refused mark leaves the tick a ✓, the width it was', '...with no Undo offered for a mark never made', '...tells a screen reader too', '...and can be pressed again', '...with its Undo offered, after a refused mark hid it'.
 
 ### The advice
 
@@ -3075,6 +3124,12 @@ below; it is the proposed cure that was wrong.
 
 ---
 
+### The upgrade plan
+
+**Plan 2.1 was not shipped: holding the Took subject on the previous card would name a declined card when the driver accepts the next one.** On week.json (1,166 offers, 31 ticks: go 24, warn 5, no 2), 29 of the 31 ticked cards follow an unticked card. That card landed less than 16 s (READ_STALE_MS) before the accepted one on 13 of 31, less than 20 s on 15, and less than 30 s on 19. Any hold driven by READ_STALE_MS leaves the button on the declined card through the prompt-press window of at least 13 real accepts. That would be a wrong tick, and a wrong hold in the car, written to a file that cannot be rewritten. The 'lost ticks' the plan counted (0 of 38 go/warn cards replaced within 10 s carry a tick) are confounded with ordinary declining. 35 of those 38 arrived less than 30 s after the card before them, with a median gap of 10.555 s, which is paging through offers. Crediting any of them as accepts would be reading silence as an accept. The plan's median gap to the next go/warn card is wrong: it is 102.055 s over n=221, not 107 s. The plan's Cost line ('live.html only') is also wrong, see the next entry. Plan 3.3 depended on this item and stays unbuilt.
+
+**Never shortening a live hold (plan 3.1) is declined on measurement.** Replayed over the week's 31 ticks and 1,166 cards: with Drop never pressed it refuses 4 marks and recovers 53 empty-car cards (5 go/warn), losing 0. With Drop pressed at each stated end it refuses 3 marks (84.9 hold minutes) and changes 0 cards either way. The 'B-only stretch: 48.3 min, 6 cards' that the naive formula prints differs on 0 cards, because the first Drop in a pair empties the one slot under both rules. What decides it: with A retained, the ⌖ press or navigation sighting for the job just accepted attaches through holding(now) (server.js:437-441). It becomes an asked:true dropoff on A's id in the append-only journal. Both retained A's in the week had no dropoff, so both were exposed. The only guard is the attribution guard refused twice above. Do not retry this without that guard. Do not argue it from drop-row corruption either: in 2 of the 3 refused pairs A was delivered first, so the rule would have named the delivered job more often than today's rule does.
+
 ## Measured on a real week — 1,166 offers, 13–20 Sep 2026
 
 The numbers above this line came from a 272-card export. This is a bigger and
@@ -3110,7 +3165,7 @@ running, and anything reasoning from them is reasoning about 2026's spring.
 **The line is right.** `Advice.advise` over the whole week: ready, stable,
 spread $0 — $20 at every one of the six thresholds, plateau $20–$25, over 27.9
 hours and 9 runs. The driver's $25 is inside that plateau and the difference is
-−0.6%, so the target does not want changing.
+−0.99%, so the target does not want changing.
 
 **Almost everything is a pass.** 935 of 1,166 are PASS, 116 warn, 106 go, and
 31 were ticked as taken. Median offer $14.56/hr against a $25 line.
@@ -3329,6 +3384,12 @@ never recovers (3.2% at n=30 and 0.7% still at n=60, against the median's 0.4%
 by n=30).
 
 ---
+
+**A panel mark for a card that is not the server's current offer replaces that offer and writes a second pair row for the newer card.** At server.js:2717-2723, the restart stand-in fires whenever note.id differs from scanner.offer.id and body.offer is present. It sets scanner.offer to the older card and keeps the newer card's offerAt. On the newer card's next re-read, sameCard (:330) is false, so :375 calls recordPairing again. The builder reproduced this against the real server.js: pair rows went ['a','b'] -> ['a','b','b'], and /api/status reported offer 'a' while 'b' was on the phone. It can happen today whenever the socket drops and the panel's onRecord falls behind, because /api/events replays scanner.last and never the offer. It has not been fixed. A fix should limit the stand-in to the case the comment describes, where nothing is on record (!scanner.offer). It should also be pinned by a check that posts a mark for an older id while a newer offer is current and asserts that exactly one pair row exists per card.
+
+**The Atlanta/Marietta figures that justify holding the hour still are stale in six places.** They are map.html areaRanking, advice.js:575, tests/advice.test.js:1697, rpi/test_map.py:1806, rpi/README.md:5056 and AUDITS.md:1066. They quote 12-3am $21.24 / 3-6pm $14.17, 57 of Atlanta's 98 and 40 of Marietta's 82, a raw lead of $5.38 and a held lead of $2.45, best-to-worst $6.47 -> $3.69, and 'three towns change places'. Measured today on week.json (1,166 offers, TZ=America/New_York, the kept pool of Advice.areas keyed on MV.townFor with Advice.blockOf strata): 12-3am $20.94 and 3-6pm $13.99; 65 of Atlanta's 113 in the first and 43 of Marietta's 101 in the second; raw lead $5.33 (19.95 - 14.62); held lead $4.26 (3.28 - -0.98); best-to-worst $6.33 -> $4.98; FOUR towns change places (Woodstock/Kennesaw and Marietta/Acworth swap); p 0.002. I did not change these. It is pre-existing, one of the six places is AUDITS.md (which this lane may not edit), and a partial update would put two sets of figures in the repo, which is fault class 3. They should be updated together.
+
+**One unlabelled bracketed leg on a lone card is called whole, and on a ride card that is the drive to the rider alone.** is_whole's single-leg clause says 'Uber labels every leg of a ride (away, trip, total)'. laid_out_approach measured 'away' on 0 of 1,166 rows. Measured on the week: rows 444 frame 0 and 805 frame 1 are ride frames whose trip leg did not read, and they read whole on the approach alone. Row 805's merge recovered; row 444's journal row is whole=0 for another reason. Not fixed, because the same shape is also an Eats card whose `total` did not read (`tota`, `te al`): 7 frames on 6 rows, all whole jobs. Telling them apart needs a text-level ride signal carried through the accumulator. half_a_ride answers it only where another card is in shot, and 'whole / one bare leg on a frame holding ONE card is left as it was' pins that boundary.
 
 ## What has been swept, and when
 

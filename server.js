@@ -3563,9 +3563,15 @@ function route(req, res) {
       // A number, not something that reads as one. The config file is lenient
       // because a person hand-edits it (see OP.setting); a screen sends JSON,
       // and "0.45" arriving as a string is a client that is not this one.
-      if (typeof cost !== 'number' || !isFinite(cost) || cost < 0) {
+      //
+      // And no more than the keypad's own box allows (ui.js bindSetting clamps
+      // setCost to 0..10). Without it the two doors answered the same question
+      // two ways: the keypad would never send 45, but a slip on any other
+      // client would have the rig price every mile at $45, and every reading
+      // after it would print a confident PASS under "after $45.00/mi costs".
+      if (typeof cost !== 'number' || !isFinite(cost) || cost < 0 || cost > 10) {
         return settingsReply(400, { ok: false,
-                                    error: 'costPerMile must be a number, 0 or more' });
+                                    error: 'costPerMile must be a number from 0 to 10' });
       }
       if (!scannerEnabled()) {
         return settingsReply(409, {
