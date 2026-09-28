@@ -4931,6 +4931,29 @@ first version announced "100% of the time it was on, the car was empty" over a
 driver who had simply never pressed ✓, with a true caveat underneath a false
 headline.
 
+**And on 31 ticks neither 2 nor 3 is printed as the answer.** Both rest on the
+ticks alone, and a card passed on is the same row as a job taken and never
+ticked — so `Advice.ifCleared` works both out again with every card the panel
+cleared counted as taken. On the owner's week that is **$24.90** kept and
+**11.3%** empty, against $30.20 and 48.3% over the ticks: the page's own rule
+turns "too picky" into "the line you keep is the line you set" across that
+range, and it was the only sentence on any page telling the driver to accept
+more. So the page says as much as the tick count allows, once for both:
+
+- **no ticks** — no line kept, and no share of the clock;
+- **some cleared cards unticked** — each figure as the range between the two
+  ends, the "too picky" / "not what is deciding these" instruction only where
+  both ends give the same one, and one sentence under the pair saying why;
+- **every cleared card ticked** — the two ends are the same rows, and the
+  figures and their instruction are printed as above.
+
+The far end is never a reading of what happened. Nothing is counted as taken
+and nothing is written; it is how far the answer could move, and the answer is
+withheld when that is far enough to reverse it. A row with no verdict on record
+(written before `state` was) counts at the far end, because nothing says the
+panel did not clear it. `rpi/test_offerspage.py` asserts the strength at 0, 31
+and 222 ticks of one market, not merely that a paragraph renders.
+
 #### Two rules that were tested and do not work
 
 Both are things a driver would reasonably try, and both cost money. They are

@@ -1434,6 +1434,49 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   ok_('...and where the clock went', a.idle && a.idle.hours > 0);
   ok_('...with the count that says how far that could be wrong',
       typeof a.idle.silences === 'number');
+
+  /* --- the other end of what the ticks allow --- */
+  //
+  // Both figures above rest on the ticks alone, and a card passed on is the
+  // same row as a job taken and never ticked. ifCleared re-asks them with
+  // every card the panel cleared counted as taken, which is how the page
+  // knows whether the answer could reverse. Six rows: one ticked ACCEPT at
+  // $40, two unticked ACCEPTs at $26 and $27, a CLOSE CALL at $23, a PASS at
+  // $10, and a row whose verdict the panel withheld.
+  function said(minsIn, rate, state, took) {
+    var o = at(minsIn, rate, 30, took);
+    o.said = state;
+    return o;
+  }
+  var six = [said(0, 40, 'go', true), said(40, 26, 'go'), said(80, 27, 'go'),
+             said(120, 23, 'warn'), said(160, 10, 'no'), said(200, 12, 'doubt')];
+  var ic = A.ifCleared(six, 30);
+  eq('the other end adds the unticked cards the panel cleared, and only those',
+     ic.added, 3);
+  eq('...moving the line kept from the one tick to the four cleared cards',
+     ic.kept.median, 26.5);
+  eq('...while the ticked end is left as it was', A.keptLine(six).median, 40);
+  eq('...and none of the three was a row with no verdict', ic.unjudged, 0);
+  // Every cleared card already ticked: the two ends are one row set, which is
+  // what lets the page print the ticked figures as the answer.
+  var all = six.map(function (o) {
+    return Object.assign({}, o, { took: o.said === 'go' || o.said === 'warn' });
+  });
+  eq('with every cleared card ticked there is nothing to add', A.ifCleared(all, 30).added, 0);
+  eq('...and no second figure to print', A.ifCleared(all, 30).kept, null);
+  // A row written before `state` existed counts as one the panel may have
+  // cleared: leaving it out would make a window of old rows look settled
+  // precisely because nothing in it could be checked.
+  var old = [said(0, 40, 'go', true), said(40, 15, null)];
+  eq('a row with no verdict on record counts at the other end',
+     A.ifCleared(old, 30).added, 1);
+  eq('...and is named as such', A.ifCleared(old, 30).unjudged, 1);
+  // usable() carries the verdict through from the journal row, or ifCleared
+  // has nothing to ask.
+  eq('the verdict the panel gave reaches the rows advise() works on',
+     A.usable([{ at: T0, pay: 10, minutes: 20, billedMinutes: 20, cost: 0,
+                 whole: 1, suspect: 0, hidden: 0, state: 'warn' }])[0].said, 'warn');
+  eq('...and advise() asks it', a.ifCleared && typeof a.ifCleared.added, 'number');
 })();
 
 /* ---- which areas paid, and whether that may be said at all ---- */

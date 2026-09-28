@@ -1079,7 +1079,11 @@
                  // Carried so a caller can join what busy() returns back onto
                  // the row it is about. Nothing in the replay reads it.
                  id: o.id,
-                 took: o.accepted === true });
+                 took: o.accepted === true,
+                 // What the panel said about it, for one question only: how
+                 // far the two figures that rest on the ticks could move if
+                 // cards nobody ticked had been taken. See ifCleared.
+                 said: (typeof o.state === 'string' && o.state) ? o.state : null });
     }
     out.sort(function (a, b) { return a.at - b.at; });
     return out;
@@ -1415,6 +1419,55 @@
       // identical — so this is how far the figure above could be wrong.
       silences: counted.silences
     };
+  }
+
+  /* keptLine and idleIn again, as if every card the panel cleared had been one
+   * the driver took.
+   *
+   * Both of those figures rest on the ticks and on nothing else, and the ticks
+   * are a floor on what was taken, not a count of it: a card passed on and a
+   * job taken and never ticked are the same row. On the owner's real week the
+   * two figures over the 31 ticks are $30.20/hr kept and 48.3% of the clock
+   * empty; with every ACCEPT and CLOSE CALL card counted as taken as well (222
+   * rows) they are $24.90/hr and 11.3%. The page printed the first pair as
+   * the answer — "the line you keep is well above the one you set … too
+   * picky" — and at $24.90 its own rule prints the opposite sentence, "the
+   * line you keep is the line you set". A driver told to accept more on the
+   * strength of 31 rows was being told something the rows cannot say.
+   *
+   * This is the other END of the range, never a reading of what happened.
+   * Nothing is counted as taken, nothing is written, and no figure made from
+   * it is printed except beside the ticked one as the edge of what the record
+   * allows — Settled refuses reading a silence as an accept, and this does not
+   * read one: it asks how far the answer could move if the silences were
+   * accepts, and withholds the answer when that is far enough to reverse it.
+   *
+   * `added` is how many rows it changed. Zero means every card the panel
+   * cleared is already ticked, the two ends are the same row set, and the
+   * ticked figures stand on their own.
+   *
+   * A row with no verdict on record — written before `state` was — counts as
+   * one the panel may have cleared, and `unjudged` says how many of those there
+   * were. Nothing says it was not cleared, and leaving it out would let a
+   * window of old rows look settled precisely because nothing could be
+   * checked. A `doubt` row is not added: the panel withheld its verdict, so it
+   * cleared nothing. */
+  function ifCleared(rows, breakMinutes) {
+    var added = 0, unjudged = 0;
+    var alt = (rows || []).map(function (r) {
+      if (r.took) return r;
+      if (r.said !== 'go' && r.said !== 'warn' && r.said !== null) return r;
+      added++;
+      if (r.said === null) unjudged++;
+      var c = {};
+      for (var k in r) c[k] = r[k];
+      c.took = true;
+      return c;
+    });
+    if (!added) return { added: 0, unjudged: 0, kept: null, idle: null };
+    return { added: added, unjudged: unjudged,
+             kept: keptLine(alt),
+             idle: idleIn(runs(alt, breakMinutes), breakMinutes, alt) };
   }
 
   /* The best line at one threshold, and the plateau around it. */
@@ -1779,6 +1832,9 @@
       // How much of the clock was carrying somebody, and how far that could be
       // wrong. See idleIn.
       idle: idleIn(theRuns, o.breakMinutes || SHOWN_AT, rows),
+      // ...and both of them again at the other end of what the ticks allow.
+      // See ifCleared.
+      ifCleared: ifCleared(rows, o.breakMinutes || SHOWN_AT),
       // Rows that were read but fell outside any counted run — a stray offer in
       // a driveway, the last one before the rig was switched off. Named rather
       // than silently dropped, because "231 offers" against a journal holding
@@ -1875,7 +1931,7 @@
            // shown. The thresholds are exported for the same reason
            // THRESHOLDS below is: a page that says "eight offers on two days"
            // in words must read the number it is describing.
-           waitFor: waitFor, keptLine: keptLine, idleIn: idleIn,
+           waitFor: waitFor, keptLine: keptLine, idleIn: idleIn, ifCleared: ifCleared,
            areas: areas, AREA_FLOOR: AREA_FLOOR, AREA_DAYS: AREA_DAYS,
            AREA_ALPHA: AREA_ALPHA, AREA_SHUFFLES: AREA_SHUFFLES,
            outingsIn: outingsIn,
