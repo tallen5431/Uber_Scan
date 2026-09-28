@@ -692,9 +692,23 @@ ok_('the empty dropoff answer waits for a read that could still answer it',
 #
 # Run to the deadline rather than to a read count: the answer comes when the
 # WINDOW closes, and a run that stops at four reads stops before it does.
+#
+# Pressed from inside the first read, not before run() starts. A press is taken
+# only while it is younger than the window (a press nobody was listening for is
+# stale, see dropoff_requested), and these runs use a one-second window — so a
+# file written before main() imports and calibrates was discarded whenever
+# start-up took longer than a second, which it did under the full runner's load
+# and not alone. That is the rig being right and the test pressing too early.
+def _press_on_first_read(handoff, text):
+    def texts(n, k):
+        if n == 1 and k == 0:
+            open(os.path.join(handoff, 'uberscan-dropoff'), 'w').close()
+        return text
+    return texts
+
+
 _ho = tempfile.mkdtemp()
-open(os.path.join(_ho, 'uberscan-dropoff'), 'w').close()
-r5 = run(lambda n, k: WHOLE, extra_argv=['--no-parallel'], seconds=6.0,
+r5 = run(_press_on_first_read(_ho, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
          handoff=_ho, dropoff_window=1.0)
 _said = [d for d in r5['dropoffs'] if d[1].get('asked')]
 ok_('a press that found no address is answered, not left silent (%r)'
@@ -719,9 +733,8 @@ eq('...said once, over %d reads' % r5['calls'], len(_said), 1)
 # first, on the screen the driver is reading in a moving car. Any address
 # closes the press now.
 _ho2 = tempfile.mkdtemp()
-open(os.path.join(_ho2, 'uberscan-dropoff'), 'w').close()
 NAV_ADDR = 'Dropoff 123 Main St, Acworth, GA 30101 12 min Start'
-r7 = run(lambda n, k: NAV_ADDR, extra_argv=['--no-parallel'], seconds=6.0,
+r7 = run(_press_on_first_read(_ho2, NAV_ADDR), extra_argv=['--no-parallel'], seconds=6.0,
          handoff=_ho2, dropoff_window=1.0)
 _found = [d for d in r7['dropoffs'] if d[0] is not None]
 _empty = [d for d in r7['dropoffs'] if d[0] is None]
