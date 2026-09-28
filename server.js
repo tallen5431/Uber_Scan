@@ -3030,8 +3030,9 @@ function route(req, res) {
         // ...and a file that IS there and cannot be read is the same lost 24
         // minutes as one that will not parse, so it says so the same way. It
         // answered `stored: null` and nothing else, which no page reads as
-        // anything: the permissions changed on the NUC and the map was simply
-        // slow again for twenty-odd minutes.
+        // anything: were places.json's permissions to change on the NUC, or
+        // a directory to take its name, the map would simply be slow again
+        // for those 24 minutes with no word about why.
         if (readErr) {
           return placesReply(200, { ok: true, places: {}, stored: null,
                                     unreadable: 'places.json could not be read ('

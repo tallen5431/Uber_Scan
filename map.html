@@ -483,13 +483,15 @@
      work a failed POST was holding on to.
 
      Resolves to what the load line should add about it, which is nothing
-     unless the server's copy is gone. The server has always answered
-     `unreadable` when places.json will not parse or cannot be read, "said
-     rather than swallowed" in its own words — and this function tested `ok`,
-     which is TRUE on that answer, took the empty set, and said nothing. So a
-     cache that costs 24 minutes to rebuild on the owner's week vanished
-     silently, and the driver on the phone, with no copy of their own, found
-     the map slow again with no word about why. The offers page says "the
+     unless the server's copy is gone. The server has answered, since 9f2bd1a,
+     `unreadable` when places.json will not parse, "said rather than
+     swallowed" in its own words — and this function tested `ok`, which is
+     TRUE on that answer, took the empty set, and said nothing. (A file that
+     is there and cannot be read answered only `stored: null` until the same
+     change that added this reader; it now answers `unreadable` too.) So a
+     cache that costs 24 minutes to rebuild on the owner's week could vanish
+     silently, and the driver on the phone, with no copy of their own, would
+     find the map slow again with no word about why. The offers page says "the
      journal could not be read" for the same shape of answer; this says the
      same about the lookups. */
   function loadPlaces() {
