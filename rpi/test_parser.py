@@ -148,9 +148,23 @@ for c in cases.get('until', []):
 # Measured before it was written: with the clause removed, this is the only
 # shape in the 1,166-offer week or the 303-case corpus whose reading moves, and
 # nothing anywhere failed. It was a branch no check could reach.
-_TWO_CARDS = ('15 min (5.4 mi) total Little Caesars (3372 Canton Rd) '
-              'Barrington Overlook, Marietta $11.06 25 min (8.1 mi) total '
-              'American Deli (Marietta, GA) Big Shanty Rd, Marietta')
+#
+# ...and it nearly became one again. The card this check was written on had
+# the upper card's `total` ABOVE the $11.06 — row 908's frame — and one_card
+# now cuts a leg a card prints above its payout once it can see that card's
+# `total` (see a_card_above), so that text reaches this clause with one leg and
+# the check went on passing without asking it anything: removing the clause
+# failed nothing. So the two cards are printed the other way up here, the
+# payout ABOVE both totals, which is what a frame shows when the LOWER card's
+# payout is the one that did not read. one_card cannot see that card — no second
+# payout, and its total is below this one's — so both legs still reach the
+# layout rule, and this clause is what refuses to call the first the approach.
+# It still sums the two, and that is recorded rather than fixed: 0 of the real
+# week's 5,491 frames keep two `total` legs after one_card.
+_TWO_CARDS = ('$11.06 Includes expected tip 15 min (5.4 mi) total '
+              'Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta '
+              '25 min (8.1 mi) total American Deli (Marietta, GA) '
+              'Big Shanty Rd, Marietta')
 _two = P.parse(_TWO_CARDS)
 eq('a total leg is never marked the approach, whatever the layout says',
    [l['isApproach'] for l in _two['legDetail']], [False, False])

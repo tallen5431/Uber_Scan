@@ -18,8 +18,11 @@ and every AUDITS.md entry number them):
 
     py.merged   every frame, in order, through rpi/offer_parser.parse, the real
                 OfferAccumulator and rate() — what the rig publishes
-    py.frames   each frame alone through parse() and rate() — what the panel
-                shows for the ~1.8s that frame is the latest read
+    py.panel    the same merge after each frame in turn — what the panel shows
+                while that frame is the latest read (scan_pi.py rates
+                accumulator.add()'s return, not the frame)
+    py.frames   each frame alone through parse() and rate() — what one read
+                says before the merge has a say
     js.frames   each frame alone through offer-parser.js, the same way
     py.text / js.text   the row's stored `text` column, which is the one frame
                 the journal kept beside the merged reading
@@ -115,14 +118,17 @@ def replay_python(rows):
         acc = OfferAccumulator()
         merged = None
         frames = []
+        panel = []
         for i, frame in enumerate(r['frames']):
             parsed = OP.parse(frame)
             frames.append(summary(parsed, OP.rate(parsed, settings)))
             merged = acc.add(parsed, now=1000.0 + i * FRAME_SECONDS)
+            panel.append(summary(merged, OP.rate(merged, settings)))
         text = OP.parse(r['text'])
         out[r['row']] = {
             'at': r['at'],
             'merged': summary(merged, OP.rate(merged, settings)) if merged else None,
+            'panel': panel,
             'frames': frames,
             'text': summary(text, OP.rate(text, settings)),
         }
@@ -172,6 +178,11 @@ def diff(old, new):
                 f = changed(a['merged'], b['merged'])
                 if f:
                     lines.append(('py.merged', a['merged'], b['merged'], f))
+                for i, (pa, pb) in enumerate(zip(a.get('panel', []),
+                                                 b.get('panel', []))):
+                    f = changed(pa, pb)
+                    if f:
+                        lines.append(('py.panel%d' % i, pa, pb, f))
             f = changed(a['text'], b['text'])
             if f:
                 lines.append(('%s.text' % port, a['text'], b['text'], f))
