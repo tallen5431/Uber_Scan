@@ -2150,6 +2150,53 @@ finally:
     SP.log = _real_log
     _HO.clear(_HO.DROPOFF)
 
+# --- a cost per mile typed on a screen, taken once and never lost -----------
+#
+# POST /api/settings renames its request onto one name. The taker used to read
+# that file and then clear every place it might be, so a second POST landing
+# between the read and the clear - a driver who typed 0.4, left the box, came
+# back and made it 0.45 - was deleted unread, after the route had answered ok
+# and the keypad had said the rig had it. Here the second one lands at exactly
+# that moment: as the taker opens the first.
+_HO.clear(_HO.SETTINGS)
+eq('no cost asked for, nothing to do', SP.settings_requested(), None)
+
+
+def _post_cost(cost):
+    """What server.js does: a temporary of its own, renamed onto the name."""
+    _tmp = _HO.path(_HO.SETTINGS) + '.test-part'
+    with open(_tmp, 'w') as _fh:
+        json.dump({'costPerMile': cost}, _fh)
+    os.replace(_tmp, _HO.path(_HO.SETTINGS))
+
+
+_landed = []
+
+
+def _open_while_posting(path, *a, **k):
+    _fh = open(path, *a, **k)
+    if not _landed and 'settings' in os.path.basename(path):
+        _landed.append(path)
+        _post_cost(0.45)
+    return _fh
+
+
+_post_cost(0.4)
+SP.open = _open_while_posting
+try:
+    _first = SP.settings_requested()
+finally:
+    del SP.open
+eq('a cost typed is taken', _first, 0.4)
+ok_('...(the second one landed while the first was being read)', _landed)
+eq('...and one that landed while it was being taken is taken next, not '
+   'deleted unread', SP.settings_requested(), 0.45)
+eq('...once', SP.settings_requested(), None)
+eq('...leaving nothing behind in either place',
+   sorted(f for _d in set(os.path.dirname(p) for p in _HO.candidates(_HO.SETTINGS))
+          for f in os.listdir(_d) if 'settings' in f and 'taken' in f), [])
+_HO.clear(_HO.SETTINGS)
+
 # It opens a window rather than taking one reading. The driver presses the
 # button and THEN gets the destination onto the screen, and the phone sits
 # perfectly still showing it - which is precisely what the motion gate scores as

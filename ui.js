@@ -700,6 +700,17 @@
     } else if (!r.scanner) {
       text = 'No scanner runs on the machine serving this page, so this changes '
            + 'this keypad only — set it on the rig.';
+    } else if (r.running === false) {
+      // The scanner is down — between restarts, wedged, stopped. A request
+      // waits in the handoff directory and is taken when it comes back, but
+      // "its next reading will say" is a promise about a reading that is not
+      // coming, and the figure the server last heard is from a process that
+      // has gone.
+      text = 'The rig\'s scanner is not running, so nothing on its panel is '
+           + 'priced right now' + (typeof r.pending === 'number'
+             ? ' — ' + money(r.pending, 2) + '/mi is waiting for it and is '
+               + 'used from its first reading when it starts.'
+             : '. A change here waits for it.');
     } else if (typeof r.pending === 'number') {
       text = 'Sent to the rig: its next reading will say "after '
            + money(r.pending, 2) + '/mi costs".';

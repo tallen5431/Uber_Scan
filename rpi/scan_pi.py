@@ -619,8 +619,8 @@ def settings_requested():
     """A cost per mile the driver typed on a screen, once; None when there is none.
 
     Written by POST /api/settings, which answers only for a machine that runs a
-    scanner. Taken and cleared in both places for the reason reset_requested
-    gives, and never fatal.
+    scanner. Taken from both places for the reason reset_requested gives, and
+    never fatal.
 
     ONE KEY. The block this lands in is not a list of preferences: `keepPlaces`
     decides whether addresses are written into the append-only journal at all,
@@ -638,19 +638,36 @@ def settings_requested():
 
     A finite number of zero or more, as the route insists. A bool is refused
     although Python calls it a number: `true` is not a price.
+
+    TAKEN BY RENAME, NOT READ AND THEN CLEARED. This used to read the file and
+    then HO.clear() every place it might be. A POST is a rename onto the same
+    name, so one landing between the read and the clear was deleted unread:
+    the route had answered ok, the keypad said the rig had it, and the loop
+    went on pricing at the figure before. Renaming the request to a name of
+    this process's own takes exactly the file that was there; one renamed in
+    after that is a new file under the old name, left for the next pass.
+    Both places are still emptied, for the reason reset_requested gives.
     """
-    where = HO.candidates(HO.SETTINGS)
     raw = None
-    for candidate in where:
+    for candidate in HO.candidates(HO.SETTINGS):
+        mine = '%s.taken-%d' % (candidate, os.getpid())
         try:
-            with open(candidate) as fh:
-                raw = fh.read()
-            break
-        except (IOError, OSError):
+            os.rename(candidate, mine)
+        except OSError:
             continue
+        try:
+            if raw is None:
+                with open(mine) as fh:
+                    raw = fh.read()
+        except (IOError, OSError) as e:
+            log('could not read a settings request (%s): the cost per mile in '
+                'use is unchanged' % e)
+        try:
+            os.remove(mine)
+        except OSError:
+            pass
     if raw is None:
         return None
-    HO.clear(HO.SETTINGS)
     try:
         cost = json.loads(raw).get('costPerMile')
     except (ValueError, AttributeError):
@@ -3026,9 +3043,6 @@ def main():
                     log('reading the destination for the next %.1f seconds: '
                         'put the address on the phone' % dropoff_left)
 
-                # A box drawn on the live view. It arrives as fractions of the
-                # frame, which is the only form that survives the trip: what the
-                # driver drew on was a 480px JPEG of a 2328px sensor frame.
                 # A cost per mile typed on the keypad. Taken in the loop, never
                 # by a restart: a restart costs an aim-and-calibrate cycle, which
                 # is a minute of no readings mid-shift for a change of one
@@ -3057,6 +3071,9 @@ def main():
                     log('cost per mile set to $%.2f from a screen (was $%.2f): '
                         'the next reading is costed at it' % (cost, was))
 
+                # A box drawn on the live view. It arrives as fractions of the
+                # frame, which is the only form that survives the trip: what the
+                # driver drew on was a 480px JPEG of a 2328px sensor frame.
                 drawn = CX.take_request()
                 if drawn is not None:
                     manual = True

@@ -546,6 +546,15 @@ const [base] = process.argv.slice(2);
   await page.click('#openSettings');
   await page.waitForTimeout(250);
   out.costSentLine = await costLine();
+  // ...and a rig whose scanner is down takes the request but will not read
+  // anything until it is back, so "its next reading will say" is not said.
+  const upAgain = rigAnswer;
+  rigAnswer = Object.assign({}, rigAnswer, { running: false, pending: 0.45 });
+  await page.click('[data-close="settingsSheet"]');
+  await page.click('#openSettings');
+  await page.waitForTimeout(250);
+  out.costDownLine = await costLine();
+  rigAnswer = upAgain;
   // ...and a refusal is said, and stays said.
   rigRefuses = { ok: false, scanner: false, error: 'no scanner runs on this machine' };
   await page.fill('#setCost', '0.5');
@@ -700,6 +709,10 @@ eq('...and leaving the box sends it once, that key and no other',
 ok_('...and the sheet says the rig has it and where to see it (%r)'
     % (got.get('costSentLine') or '')[:70],
     'after $0.45/mi costs' in (got.get('costSentLine') or ''))
+_down = got.get('costDownLine') or ''
+ok_('a rig whose scanner is down is not promised a next reading (%r)' % _down[:70],
+    'not running' in _down and 'next reading' not in _down)
+ok_('...and the cost waiting for it is named', '$0.45' in _down)
 ok_('a refusal is said under the box (%r)' % (got.get('costRefusedLine') or '')[:70],
     'did not take it' in (got.get('costRefusedLine') or '')
     and 'no scanner' in (got.get('costRefusedLine') or ''))

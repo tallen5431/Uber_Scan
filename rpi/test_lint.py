@@ -678,6 +678,38 @@ for _what, _file, _pat, _want in _TABLES:
        sorted(_want - _named), [])
     eq('...and none it cannot: %s' % _what, sorted(_named - _want), [])
 
+# --- a request the scan loop takes sits under its own comment --------------
+#
+# The loop takes four requests from the screens one after another, each under
+# a paragraph saying what it is and why it is read at once. When the cost per
+# mile was added it went in BETWEEN the drawn box's paragraph and the code it
+# described, so "A box drawn on the live view ... fractions of the frame" sat
+# directly over the cost-per-mile block and the box's own code had no comment
+# at all. Nothing can check that a comment is true; this checks that each of
+# these is on top of the code it names.
+_scan_lines = open(os.path.join(ROOT, 'rpi/scan_pi.py'), encoding='utf-8').read().split('\n')
+
+
+def _comment_over(code):
+    """The comment block ending on the line right above `code`, as one string."""
+    at = [i for i, line in enumerate(_scan_lines) if line.strip() == code]
+    if len(at) != 1:
+        return None
+    above = []
+    i = at[0] - 1
+    while i >= 0 and _scan_lines[i].strip().startswith('#'):
+        above.insert(0, _scan_lines[i].strip().lstrip('#').strip())
+        i -= 1
+    return ' '.join(above)
+
+
+for _code, _says in (('drawn = CX.take_request()', 'A box drawn on the live view'),
+                     ('cost = settings_requested()', 'A cost per mile typed')):
+    _over = _comment_over(_code)
+    ok_('scan_pi.py: the comment right above `%s` is the one about it (%r)'
+        % (_code, (_over or '')[:50]),
+        _over is not None and _over.startswith(_says))
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is
