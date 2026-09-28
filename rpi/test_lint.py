@@ -817,6 +817,22 @@ ok_('README says what the keypad shows when it withholds a rate%s'
 ok_('...and no longer says that answer is the rig\'s alone',
     'on the rig only' not in _readme)
 
+# ...and the phone scanner's limits list, which said "Only Uber's current card
+# wording is handled" while the shared parser reads a DoorDash card that states
+# a deadline instead of a duration, and rates it — `$8.75 / Deliver by 7:15 PM
+# / 5.2 mi` read at 6:45 PM is 30 minutes, $14.38/hr, PASS. A driver told the
+# phone cannot read that card does not point it at one. Held while the parser
+# holds the grammar: the day it is dropped, the doc sentence goes with it.
+_scanning = open(os.path.join(ROOT, 'SCANNING.md'), encoding='utf-8').read()
+_limits = _scanning[_scanning.index('## Known limits'):]
+_limits = _limits[:_limits.index('\n## ', 1)]
+if 'deliverBy' in _js_src:
+    ok_('SCANNING.md\'s limits name the deadline card the parser reads',
+        'Deliver by' in _limits)
+    for _doc, _txt in (('SCANNING.md', _scanning), ('rpi/README.md', _readme_rpi)):
+        ok_('%s no longer says only Uber\'s wording is handled' % _doc,
+            'Only Uber\'s current card wording' not in _txt)
+
 # Every path it names in backticks is a path that exists. A doc naming a file
 # that was renamed a year ago is a doc nobody trusts the rest of.
 for _named in sorted(set(re.findall(r'`([A-Za-z0-9_./-]+\.(?:js|py|html|css|md|sh))`',

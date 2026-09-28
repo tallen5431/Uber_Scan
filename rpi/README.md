@@ -7234,5 +7234,8 @@ is opened — `>` instead of `>>` in a shell wrapper, or `flags: 'w'` instead of
   the flip side is that a mount putting the offer in a corner needs aiming
   rather than fixing itself. Nothing here can fix a mount that was never good
   enough.
-- Only Uber's current card wording is handled. A layout change breaks parsing,
-  which is why the typed keypad on `index.html` stays the reliable path.
+- Two card grammars are handled, a stated journey (Uber's `N min (D.D mi)`
+  legs) and a stated deadline (DoorDash's `Deliver by H:MM AM/PM` with a
+  distance on its own — see "Delivery cards, and where an offer went"), and
+  nothing else. A layout change breaks parsing, which is why the typed keypad
+  on `index.html` stays the reliable path.
