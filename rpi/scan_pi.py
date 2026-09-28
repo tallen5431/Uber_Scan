@@ -532,7 +532,10 @@ def reset_requested():
 
 
 def dropoff_requested(now=None):
-    """True once per press of "read the dropoff". Same shape as reset_requested.
+    """Seconds left of a press's window, once per press; None when there is none.
+
+    Same shape as reset_requested, except that it answers with how much of the
+    window is left rather than True, for the reason at the foot of this.
 
     Separate from the reading itself: this only says the driver asked. What it
     buys is a window — see DROPOFF_WINDOW — because the phone is showing a
@@ -554,8 +557,8 @@ def dropoff_requested(now=None):
     destination nobody asked about, written into a file that cannot be
     corrected, from a press the driver had long since given up on.
 
-    A press whose own window would already have shut — older than
-    DROPOFF_WINDOW — cannot still be about the screen the driver was looking
+    A press whose own window would already have shut — DROPOFF_WINDOW old or
+    more — cannot still be about the screen the driver was looking
     at, so it is cleared and not acted on, and the log says so. So is one
     stamped AHEAD of the clock, which is a clock that stepped (see
     `handoff.age`), not a fresh press. Refusing costs the driver one more tap;
@@ -563,28 +566,41 @@ def dropoff_requested(now=None):
 
     Nothing is sent to the panel. live.html stops saying "reading…" 13 seconds
     after the server answers the press, whatever happens, so a stale press is
-    found after the
-    panel has stopped waiting for it, and a "not read" arriving then is the
-    late contradiction the ⌖ button's handling was built to avoid.
+    found after the panel has stopped waiting for it, and a "not read"
+    arriving then is the late contradiction the ⌖ button's handling was built
+    to avoid.
     """
     try:
         pressed = HO.age(HO.DROPOFF, now)
     except OSError:
-        return False
+        return None
     if pressed is None:
-        return False
+        return None
     HO.clear(HO.DROPOFF)
     if pressed < 0:
         log('ignored a destination request stamped %ds ahead of the clock: the '
             'clock has stepped since, so how old the press is cannot be told'
             % int(-pressed))
-        return False
-    if pressed > DROPOFF_WINDOW:
+        return None
+    if pressed >= DROPOFF_WINDOW:
         log('ignored a destination request from %ds ago: older than its '
             '%d-second window, so it is not about the screen on the phone now'
             % (int(pressed), int(DROPOFF_WINDOW)))
-        return False
-    return True
+        return None
+    # ...and the window it opens is the one THIS age was judged against.
+    #
+    # This returned True, and the loop then opened a fresh window from the
+    # moment it noticed: `dropoff_until = now + DROPOFF_WINDOW`. Two answers to
+    # "is this press still open", with two anchors. A press 11.5s old passed the
+    # test above as inside its window and was then read for twelve more seconds
+    # — to 23.5s after the press, plus a read in flight measured at up to 5.9s —
+    # and whatever turned up was filed as ASKED, well after live.html had
+    # stopped saying "reading…" 13s after the press was answered. Returning what
+    # is left makes the window end at press + DROPOFF_WINDOW whichever pass
+    # notices it, so the test and the window are one predicate. Always above
+    # zero, since an age of exactly the window is refused above, so a caller
+    # testing the answer for truth cannot lose a press to a 0.0.
+    return DROPOFF_WINDOW - pressed
 
 
 # How long to keep reading after the button. The driver presses it, then has to
@@ -2916,8 +2932,11 @@ def main():
                 # has to get the destination up, and the phone then sits
                 # perfectly still showing it - which is precisely what the
                 # motion gate scores as nothing happening.
-                if dropoff_requested():
-                    dropoff_until = now + DROPOFF_WINDOW
+                # The window runs from the PRESS, not from this pass: what
+                # dropoff_requested hands back is what is left of it.
+                dropoff_left = dropoff_requested()
+                if dropoff_left is not None:
+                    dropoff_until = now + dropoff_left
                     dropoff_asked = True
                     # `do_read` here looks redundant against the beat further
                     # down, and on the FIRST press it is: last_dropoff_read
@@ -2928,8 +2947,8 @@ def main():
                     # timing-sensitive test, and written down so it does not get
                     # deleted as dead on the strength of the first press alone.
                     moved = do_read = True
-                    log('reading the destination for the next %d seconds: put '
-                        'the address on the phone' % int(DROPOFF_WINDOW))
+                    log('reading the destination for the next %.1f seconds: '
+                        'put the address on the phone' % dropoff_left)
 
                 # A box drawn on the live view. It arrives as fractions of the
                 # frame, which is the only form that survives the trip: what the

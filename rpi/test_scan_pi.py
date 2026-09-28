@@ -156,7 +156,7 @@ class FakeCam(object):
 
 def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         until=None, look=None, spoil=None, config_extra=None,
-        press_dropoff=False, dispute=None):
+        press_dropoff=False, dispute=None, press_age=None):
     """Drive scan_pi.main() over a fake camera and collect what came out.
 
     `until(state)` ends the run as soon as the thing being tested has happened,
@@ -281,6 +281,22 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         HOF.clear(HOF.DROPOFF)
         for where in HOF.candidates(HOF.DROPOFF):
             open(where, 'w').close()
+    # `press_age` makes the press that many seconds old at the moment the loop
+    # first looks for it. Stamped then rather than before main() starts,
+    # because startup on a loaded machine takes a second or more and an age
+    # meant to sit half a second inside the window would drift out of it.
+    real_age = HOF.age
+    if press_dropoff and press_age is not None:
+        def aged(base, now=None):
+            if base == HOF.DROPOFF and not aged.stamped:
+                aged.stamped = True
+                back = time.time() - press_age
+                for where in HOF.candidates(HOF.DROPOFF):
+                    if os.path.exists(where):
+                        os.utime(where, (back, back))
+            return real_age(base, now)
+        aged.stamped = False
+        HOF.age = aged
 
     argv = sys.argv
     sys.argv = ['scan_pi', '--config', config, '--json', '--snapshot', '',
@@ -326,6 +342,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         PL.Scanner.look_many = real_look
         PL.Scanner.should_read = real_should
         TR.QuadTracker.disputing = real_disputing
+        HOF.age = real_age
         if press_dropoff:
             HOF.clear(HOF.DROPOFF)
             if had_dir is None:
@@ -2068,12 +2085,14 @@ shutil.rmtree(_scanwork, ignore_errors=True)
 import handoff as _HO                                          # noqa: E402
 
 _HO.clear(_HO.DROPOFF)
-eq('nothing asked for, nothing to do', SP.dropoff_requested(), False)
+eq('nothing asked for, nothing to do', SP.dropoff_requested(), None)
 
 for _where in _HO.candidates(_HO.DROPOFF):
     open(_where, 'w').close()
-eq('a request written anywhere is seen', SP.dropoff_requested(), True)
-eq('...and is taken exactly once', SP.dropoff_requested(), False)
+_left = SP.dropoff_requested()
+ok_('a request written anywhere is seen (%r left)' % (_left,),
+    _left is not None and 0 < _left <= SP.DROPOFF_WINDOW)
+eq('...and is taken exactly once', SP.dropoff_requested(), None)
 eq('...from every place it could have been left',
    [os.path.exists(p) for p in _HO.candidates(_HO.DROPOFF)],
    [False] * len(_HO.candidates(_HO.DROPOFF)))
@@ -2097,7 +2116,7 @@ try:
         _HO.clear(_HO.DROPOFF)
         open(_HO.path(_HO.DROPOFF), 'w').close()
         os.utime(_HO.path(_HO.DROPOFF), (_now - _age, _now - _age))
-        eq('%s is not acted on' % _name, SP.dropoff_requested(now=_now), False)
+        eq('%s is not acted on' % _name, SP.dropoff_requested(now=_now), None)
         eq('...is cleared, so it cannot fire later either',
            [os.path.exists(p) for p in _HO.candidates(_HO.DROPOFF)],
            [False] * len(_HO.candidates(_HO.DROPOFF)))
@@ -2109,9 +2128,24 @@ try:
         del _said[:]
         open(_HO.path(_HO.DROPOFF), 'w').close()
         os.utime(_HO.path(_HO.DROPOFF), (_now - _age, _now - _age))
-        eq('a press %.1fs old is still taken' % _age,
-           SP.dropoff_requested(now=_now), True)
+        _left = SP.dropoff_requested(now=_now)
+        ok_('a press %.1fs old is still taken (%r left)' % (_age, _left),
+            _left is not None)
+        # ...with what is left of ITS window, so the test that let it in and
+        # the window it opens are one predicate, anchored to the press.
+        ok_('...for the %.1fs left of its own window, not a fresh one'
+            % (SP.DROPOFF_WINDOW - _age),
+            _left is not None
+            and abs(_left - (SP.DROPOFF_WINDOW - _age)) < 0.01)
         eq('...silently', _said, [])
+    # The edge itself: a press exactly its window old has nothing left to read
+    # in, and a 0.0 handed back would be a press taken with no window at all.
+    del _said[:]
+    open(_HO.path(_HO.DROPOFF), 'w').close()
+    os.utime(_HO.path(_HO.DROPOFF),
+             (_now - SP.DROPOFF_WINDOW, _now - SP.DROPOFF_WINDOW))
+    eq('a press exactly its window old is not taken with nothing left',
+       SP.dropoff_requested(now=_now), None)
 finally:
     SP.log = _real_log
     _HO.clear(_HO.DROPOFF)
@@ -2232,6 +2266,53 @@ ok_('...after which the rig stops reading, rather than burning the rest of '
 eq('a destination is not a verdict', run_drop['ready'], [])
 eq('...and not an offer on the record', run_drop['announced'], [])
 eq('...and not a journal row', run_drop['rows'], [])
+
+# --- a press found late gets what is left of ITS window, not a new one -----
+#
+# dropoff_requested() takes a press up to DROPOFF_WINDOW old, and the loop then
+# opened a fresh window from the pass that noticed it: `now + DROPOFF_WINDOW`.
+# So a press 11.5s old, accepted on purpose above, was read for twelve more
+# seconds — to 23.5s after the press, plus a read in flight — and the address
+# found there was filed as ASKED, long after live.html had stopped saying
+# "reading…" 13s after the press. The same press, judged open by one clock and
+# kept open by another.
+#
+# Staged by TIME, not by read count: the fake reader here answers in
+# milliseconds, and three reads land inside a tenth of a second of the press,
+# so "the address on the third read" would fit in any window. The phone shows
+# the wrong screen until two seconds after the first read and the address
+# after that — the driver getting the destination up. With half a second left
+# the window has shut by then, so the honest answer is "not read", inside the
+# time the panel is still waiting for one. A window re-anchored to the pass is
+# still open at two seconds and files the address as asked.
+_late_reads = []
+
+
+def _address_after_two_seconds(self, frames, now=None, geom=None):
+    """The wrong screen until two seconds after the first read, then the address."""
+    _late_reads.append(time.time())
+    text = ('Home 22 min ETA 8:41 PM Navigate'
+            if time.time() - _late_reads[0] < 2.0 else
+            'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start')
+    parsed = OP2.parse(text)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+run_late = run(TC.uberx_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
+               appear_at=10_000.0, extra_argv=['--no-parallel'],
+               look=_address_after_two_seconds, press_dropoff=True,
+               press_age=SP2.DROPOFF_WINDOW - 0.5,
+               until=lambda st: st['destinations'] >= 1)
+ok_('a press 11.5s old found by the loop is still read (%d reads)'
+    % len(_late_reads), len(_late_reads) >= 1)
+eq('...only for the half second left of its own window, not twelve more',
+   [(d[0] or {}).get('line') for d in run_late['destinations']], [None])
+eq('...and the panel is told it was not read, as an answer to the press',
+   [d[1].get('asked') for d in run_late['destinations']], [True])
 
 # --- and with no press at all, which is the case the driver actually has ----
 #

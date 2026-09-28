@@ -239,17 +239,27 @@ try:
     eq('...and one stamped ahead of the clock comes back negative',
        round(HO.age(HO.DROPOFF, now=_t - 100), 3), -60.0)
     # The freshest copy, because either place may hold the press just made.
-    _legacy = HO.legacy(HO.DROPOFF)
-    if _legacy != HO.path(HO.DROPOFF):
-        _hadlegacy = os.path.exists(_legacy)
-        if not _hadlegacy:
-            open(_legacy, 'w').close()
-            os.utime(_legacy, (_t - 2, _t - 2))
-            try:
-                eq('...taken from the freshest of its copies',
-                   round(HO.age(HO.DROPOFF, now=_t), 3), 2.0)
-            finally:
-                os.remove(_legacy)
+    #
+    # The checkout copy lives in HO.HERE, which is the real checkout; this was
+    # guarded to run only when that copy was separate and not already there,
+    # so a machine with a leftover .dropoff in its checkout skipped it without
+    # a word and only the suite's count would have noticed. HERE is pointed at
+    # a directory of its own instead, so the two copies are always two and the
+    # check always runs.
+    _agehere = tempfile.mkdtemp()
+    _realhere = HO.HERE
+    HO.HERE = _agehere
+    try:
+        _legacy = HO.legacy(HO.DROPOFF)
+        eq('...there are two copies to choose between',
+           len(HO.candidates(HO.DROPOFF)), 2)
+        open(_legacy, 'w').close()
+        os.utime(_legacy, (_t - 2, _t - 2))
+        eq('...taken from the freshest of its copies',
+           round(HO.age(HO.DROPOFF, now=_t), 3), 2.0)
+    finally:
+        HO.HERE = _realhere
+        shutil.rmtree(_agehere, ignore_errors=True)
 finally:
     for _p in HO.candidates(HO.DROPOFF):
         if _p.startswith(_agedir):
