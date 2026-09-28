@@ -2827,6 +2827,17 @@ function route(req, res) {
    * stated time × HOLD_OVERRUN + HOLD_GRACE_MS leaves no row at all. Absence is
    * not "never delivered".
    *
+   * And it names the order the RIG was holding, which is not always the one
+   * just delivered. The hold is one slot and the last tick takes it, so with
+   * two jobs in the car a Drop pressed at the first delivery puts down — and
+   * writes a row naming — the second, which is still in the car; the press at
+   * the second delivery then finds nothing held and writes nothing. On the
+   * week of 1,166 offers, 7 of the 31 ticks landed while an earlier tick was
+   * still inside its own stated minutes, and in 6 of those the earlier job was
+   * stated to end first. So `at - acceptedAt` on a drop row is an elapsed time
+   * for the named job only when no other tick overlaps it; whoever reads these
+   * rows checks the marks either side before trusting one.
+   *
    * `seq` is the press time, NOT 1. syncKey carries an unknown kind across on
    * `[kind, id, seq]`, so with a constant seq every drop row for one offer
    * collapses onto one key and the second is thrown away on the copy at home

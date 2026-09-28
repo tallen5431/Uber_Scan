@@ -3243,7 +3243,12 @@ It is **collected and read by nothing**: it exists to be held against the card's
 stated minutes once a week of it exists, and an elapsed time turned into a rate
 on the panel would be the re-timing that is refused on measurement. A press with
 no order held writes nothing, so a delivery that ran past the hold's own expiry
-leaves no row.
+leaves no row. And the row names the order the rig was *holding*, which with two
+jobs in the car is the last one ticked: a Drop at the first delivery puts down
+the second. On the week of 1,166 offers, 7 of the 31 ticks landed inside an
+earlier tick's stated minutes, and in 6 of those the earlier job was stated to
+end first, so a drop row is one job's elapsed time only where no other tick
+overlaps it.
 
 **What it cost the bar of controls.** Two of the six are conditional — "Took
 $8.04" with an offer on the record, "Drop" with an order in the car — so with
