@@ -1726,27 +1726,36 @@
      * The line kept and the share of the clock spent empty are made of the
      * same rows: the ticks. A card passed on and a job taken and never ticked
      * are the same row, so the ticks are a floor on what was taken, and
-     * Advice.ifCleared works both figures out again at the other end — every
-     * card the panel cleared counted as taken. On the owner's real week that
-     * moves the line kept from $30.20/hr to $24.90/hr and the empty clock from
-     * 48.3% to 11.3%. At $30.20 this paragraph told the driver they were too
-     * picky; at $24.90 its own rule says the line they keep is the line they
-     * set. It was the only sentence on any page telling somebody to accept
-     * more, and 31 rows cannot say which of the two is true.
+     * Advice.ifCleared works both figures out again with the cards the panel
+     * cleared in play. On the owner's real week the ticks alone say $30.20/hr
+     * kept and 48.3% empty; every cleared card counted as taken says $24.90
+     * and 11.3%. At $30.20 this paragraph told the driver they were too picky;
+     * at $24.90 its own rule says the line they keep is the line they set. It
+     * was the only sentence on any page telling somebody to accept more, and
+     * 31 rows cannot say which of the two is true.
      *
      * So three strengths, and the tick count decides which:
      *   - nothing ticked: no line kept, and no share of the clock (below);
-     *   - some cleared cards unticked (`open`): each figure as the range the
-     *     two ends span, the kept line's instruction only where BOTH ends give
-     *     the same one, and one sentence saying why, under both — two caveats
-     *     about one set of rows would be the same question answered twice;
-     *   - every cleared card ticked: the two ends are one row set, and the
-     *     figures are printed as they always were, instruction and all.
+     *   - some cleared cards unticked (`open`): the line kept as the range
+     *     every mix of those cards allows, its instruction only where the
+     *     whole range gives the same one, the empty clock at its two ends, and
+     *     one sentence saying why, under both — two caveats about one set of
+     *     rows would be the same question answered twice;
+     *   - every cleared card ticked: nothing is left to mix, and the figures
+     *     are printed as they always were, instruction and all.
+     *
+     * The range is NOT the ticked median and the all-cleared one. The first
+     * version printed "somewhere between $24.90/hr and $30.20/hr" on the real
+     * week, and taking only the cheapest or only the dearest of the 191
+     * cleared cards moves the median outside that: $21.79 to $36.02, and the
+     * low end is on the "below the one you set" side. c.kept is those edges.
      *
      * `side` is the rule the kept paragraph has always used — within $2 of the
-     * target is the line you set — asked of each end. */
+     * target is the line you set. It only ever moves one way as the median
+     * rises, so the two edges giving the same side is the whole range giving
+     * it. */
     var c = a.ifCleared || {};
-    var open = !!(c.added > 0 && k.n && c.kept && c.kept.median !== null);
+    var open = !!(c.added > 0 && k.n);
     var side = function (m) {
       return Math.abs(m - target) < 2 ? 'same' : m > target ? 'above' : 'below';
     };
@@ -1777,20 +1786,19 @@
             + ' <span class="note">Off the ' + k.n + ' you ticked; the ✓ on a '
             + 'row is the only record of a decision this has.</span></p>';
     } else if (k.n && k.median !== null && typeof target === 'number') {
-      var lo = Math.min(k.median, c.kept.median);
-      var hi = Math.max(k.median, c.kept.median);
-      var agree = side(k.median) === side(c.kept.median);
+      var agree = side(c.kept.lo) === side(c.kept.hi);
       html += '<p>You set <b>' + money(target) + '/hr</b>, and the line you '
-            + 'keep is somewhere between <b>' + money(lo) + '/hr</b> and <b>'
-            + money(hi) + '/hr</b>: ' + money(k.median) + ' over the '
-            + (k.n === 1 ? 'one job' : k.n + ' jobs') + ' you ticked'
+            + 'keep is somewhere between <b>' + money(c.kept.lo) + '/hr</b> and '
+            + '<b>' + money(c.kept.hi) + '/hr</b>: ' + money(k.median)
+            + ' over the ' + (k.n === 1 ? 'one job' : k.n + ' jobs')
+            + ' you ticked'
             + (k.share !== null
                ? ' (the top ' + (k.share * 100).toFixed(1)
                  + '% of everything that came past)' : '')
-            + ', ' + money(c.kept.median) + ' if every card the panel cleared '
-            + 'had been one you took. '
+            + ', and anywhere in that range by which of the other cards the '
+            + 'panel cleared you took as well. '
             + (agree
-               ? 'Both ends say the same thing. ' + keptSays(side(k.median))
+               ? 'All of it says the same thing. ' + keptSays(side(k.median))
                : 'That range runs across the point where this would tell you '
                  + 'the opposite, so it cannot say yet whether your line is too '
                  + 'picky or not picky enough — and does not.')
@@ -1813,20 +1821,23 @@
             + '</b> hours of scanning and no record of a single job taken. '
             + 'The ✓ on a row is what fills this in, and a handful of them is '
             + 'worth more than another shift of scanning.</p>';
-    } else if (open && i.share !== null && i.share !== undefined && i.hours > 0
-               && c.idle && c.idle.share !== null) {
-      // A range, and no "that is the number a line is really chosen against":
-      // on the real week the two ends are 48% and 11%, and a figure that can
-      // be either is not the number anything is chosen against. The silences
-      // note goes too — it is a second caveat about the same unticked jobs,
-      // and the sentence under both paragraphs says it once.
+    } else if (open && i.share !== null && i.share !== undefined && i.hours > 0) {
+      // The two ends, named as the two ends, and no "that is the number a line
+      // is really chosen against": on the real week they are 48% and 11%, and
+      // a figure that can be either is not the number anything is chosen
+      // against. Not "somewhere between" either — a taken job can join two
+      // runs and put the gap between them on the clock, and on the real week
+      // one cleared card added alone lifts the ticked 48.3% to 48.7%. The
+      // silences note goes too: it is a second caveat about the same unticked
+      // jobs, and the sentence under both paragraphs says it once.
+      //
+      // c.idle.share is never null here: adding jobs only joins runs and
+      // lengthens them, so the far end's clock is at least this one's.
       var pct = function (s) { return Math.round(s * 100) + '%'; };
-      html += '<p>Of the time the rig was scanning, the car was empty '
-            + 'somewhere between <b>' + pct(Math.min(i.share, c.idle.share))
-            + '</b> and <b>' + pct(Math.max(i.share, c.idle.share)) + '</b>: '
-            + pct(i.share) + ' counting only the jobs you ticked, '
-            + pct(c.idle.share) + ' if every card the panel cleared had been '
-            + 'one you took.</p>';
+      html += '<p>Of the time the rig was scanning, the car was empty <b>'
+            + pct(i.share) + '</b> of it counting only the jobs you ticked, '
+            + 'and <b>' + pct(c.idle.share) + '</b> if every card the panel '
+            + 'cleared had been one you took.</p>';
     } else if (i.share !== null && i.share !== undefined && i.hours > 0) {
       html += '<p>Of the <b>' + i.hours.toFixed(1) + '</b> hours the rig was '
             + 'scanning, <b>' + i.busyHours.toFixed(1) + '</b> were spent on a '
@@ -1849,7 +1860,7 @@
       }
       html += '</p>';
     }
-    // ...and why both are ranges, said once under the two of them.
+    // ...and why neither is one figure, said once under the two of them.
     if (open) {
       var judged = c.added - (c.unjudged || 0);
       html += '<p class="note">Both rest on the same <b>' + k.n + '</b> '
@@ -1863,8 +1874,11 @@
                             + (c.unjudged === 1 ? 'is' : 'are')
                             + ' counted in case' : '')
             + '. A card you passed on looks exactly like a job you took and '
-            + 'did not tick, so the truth is somewhere between the two ends, '
-            + 'and every ✓ you add narrows both at once.</p>';
+            + 'did not tick. The line kept covers every mix of those cards; the '
+            + 'empty clock is only its two ends, because a job taken can join '
+            + 'two stretches of scanning and put the gap between them on the '
+            + 'clock, so a mix can land outside them. Every ✓ you add is one '
+            + 'card fewer that could go either way.</p>';
     }
 
     /* ...and what the whole answer above is resting on, which is not the line.

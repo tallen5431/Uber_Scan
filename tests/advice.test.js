@@ -1453,9 +1453,51 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   var ic = A.ifCleared(six, 30);
   eq('the other end adds the unticked cards the panel cleared, and only those',
      ic.added, 3);
-  eq('...moving the line kept from the one tick to the four cleared cards',
-     ic.kept.median, 26.5);
+  // The driver took the tick and SOME of the three, so the line kept is the
+  // lowest and highest median over every mix — not the tick and all four,
+  // $40 and $26.50. The $40 tick with only the two cheapest ($23, $26) is
+  // $26, under the all-cleared figure; on the real week that gap is $24.90
+  // printed against $21.79 possible, and $21.79 is the other side of the $2
+  // rule.
+  eq('the line kept runs from the cheapest mix of the cleared cards to the '
+     + 'dearest, not between the two ends',
+     JSON.stringify([ic.kept.lo, ic.kept.hi]), '[26,40]');
   eq('...while the ticked end is left as it was', A.keptLine(six).median, 40);
+  // ...and exactly those edges on any small market, against every subset
+  // taken by brute force. Seeded, so a failure is the same failure twice.
+  (function () {
+    var seed = 7, wrong = [];
+    var rnd = function () {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    var mid = function (v) {
+      var s = v.slice().sort(function (p, q) { return p - q; });
+      var h = Math.floor(s.length / 2);
+      return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2;
+    };
+    for (var trial = 0; trial < 400; trial++) {
+      var rows = [], nt = 1 + Math.floor(rnd() * 5), nx = 1 + Math.floor(rnd() * 7);
+      for (var t = 0; t < nt + nx; t++) {
+        rows.push({ at: T0 + t * 60000, mins: 10, took: t < nt,
+                    said: t < nt ? 'go' : 'warn',
+                    perHour: Math.round(rnd() * 6000) / 100 });
+      }
+      var tk = rows.slice(0, nt).map(function (r) { return r.perHour; });
+      var xs = rows.slice(nt).map(function (r) { return r.perHour; });
+      var lo = Infinity, hi = -Infinity;
+      for (var m = 0; m < (1 << nx); m++) {
+        var v = mid(tk.concat(xs.filter(function (_, j) { return m & (1 << j); })));
+        lo = Math.min(lo, v); hi = Math.max(hi, v);
+      }
+      var got = A.ifCleared(rows, 30).kept;
+      if (got.lo !== Math.round(lo * 100) / 100 || got.hi !== Math.round(hi * 100) / 100) {
+        wrong.push([tk, xs, got]);
+      }
+    }
+    eq('...and those are exactly the lowest and highest median any subset '
+       + 'gives, on 400 small markets', JSON.stringify(wrong.slice(0, 2)), '[]');
+  })();
   eq('...and none of the three was a row with no verdict', ic.unjudged, 0);
   // Every cleared card already ticked: the two ends are one row set, which is
   // what lets the page print the ticked figures as the answer.

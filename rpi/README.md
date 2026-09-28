@@ -4941,11 +4941,23 @@ range, and it was the only sentence on any page telling the driver to accept
 more. So the page says as much as the tick count allows, once for both:
 
 - **no ticks** — no line kept, and no share of the clock;
-- **some cleared cards unticked** — each figure as the range between the two
-  ends, the "too picky" / "not what is deciding these" instruction only where
-  both ends give the same one, and one sentence under the pair saying why;
-- **every cleared card ticked** — the two ends are the same rows, and the
-  figures and their instruction are printed as above.
+- **some cleared cards unticked** — the line kept as the range every mix of
+  those cards allows, the "too picky" / "not what is deciding these"
+  instruction only where the whole range gives the same one, the empty clock
+  at its two ends, and one sentence under the pair saying why;
+- **every cleared card ticked** — nothing is left to mix, and the figures and
+  their instruction are printed as above.
+
+The range is not $24.90 to $30.20. The driver took the ticks and *some* of the
+191 unticked cleared cards, and the median of the ticks plus only the cheapest
+of them falls below the all-cleared figure, plus only the dearest rises above
+the ticked one: on the owner's week the mixes run from **$21.79** (the 24
+cheapest) to **$36.02** (the 18 dearest), and $21.79 is on the "not what is
+deciding these" side. The first version printed the two ends and called the
+truth somewhere between them. The empty clock is printed as its two ends and
+nothing more, because it is not bounded by them either: a job taken can join
+two runs and put the gap between them on the clock, and one cleared card added
+alone lifts the ticked 48.3% to 48.7%.
 
 The far end is never a reading of what happened. Nothing is counted as taken
 and nothing is written; it is how far the answer could move, and the answer is

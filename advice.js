@@ -1435,12 +1435,32 @@
    * line you keep is the line you set". A driver told to accept more on the
    * strength of 31 rows was being told something the rows cannot say.
    *
-   * This is the other END of the range, never a reading of what happened.
-   * Nothing is counted as taken, nothing is written, and no figure made from
-   * it is printed except beside the ticked one as the edge of what the record
+   * This is the other END, never a reading of what happened. Nothing is
+   * counted as taken, nothing is written, and no figure made from it is
+   * printed except beside the ticked one as the edge of what the record
    * allows — Settled refuses reading a silence as an accept, and this does not
    * read one: it asks how far the answer could move if the silences were
    * accepts, and withholds the answer when that is far enough to reverse it.
+   *
+   * THE LINE KEPT IS NOT BOUNDED BY THOSE TWO ENDS, which is why `kept` is a
+   * low and a high rather than the median at the far end. The driver took the
+   * ticked jobs and SOME of the cleared ones, not none or all of them, and the
+   * median of the ticks plus a subset moves further than either end: adding
+   * only the cheapest cleared cards drags it below the all-cleared figure, and
+   * adding only the dearest lifts it. On the real week the page printed
+   * "somewhere between $24.90/hr and $30.20/hr" while the mixes the record
+   * allows run from $21.79 (the 24 cheapest added, which is the "below the
+   * one you set" side) to $36.02 (the 18 dearest). For each count k, the k
+   * cheapest give the lowest median any k can and the k dearest the highest,
+   * so the extremes over every k are the exact edges. See keptRange.
+   *
+   * The empty clock is not bounded by its two ends either, and is therefore
+   * returned as the two ends and nothing else, for the page to name as what
+   * they are. runs() reads the ticks — a trip bridges a silence that would
+   * otherwise be a break — so adding a job can join two runs and put the idle
+   * gap between them on the clock. On the real week one cleared card, added
+   * alone, raises the share from 48.3% to 48.7%. No sorted scan finds the edge
+   * of that, so none is claimed.
    *
    * `added` is how many rows it changed. Zero means every card the panel
    * cleared is already ticked, the two ends are the same row set, and the
@@ -1453,21 +1473,64 @@
    * checked. A `doubt` row is not added: the panel withheld its verdict, so it
    * cleared nothing. */
   function ifCleared(rows, breakMinutes) {
-    var added = 0, unjudged = 0;
+    var added = 0, unjudged = 0, extra = [];
     var alt = (rows || []).map(function (r) {
       if (r.took) return r;
       if (r.said !== 'go' && r.said !== 'warn' && r.said !== null) return r;
       added++;
       if (r.said === null) unjudged++;
+      extra.push(r.perHour);
       var c = {};
       for (var k in r) c[k] = r[k];
       c.took = true;
       return c;
     });
     if (!added) return { added: 0, unjudged: 0, kept: null, idle: null };
+    var ticked = (rows || []).filter(function (r) { return r.took; })
+      .map(function (r) { return r.perHour; });
     return { added: added, unjudged: unjudged,
-             kept: keptLine(alt),
+             kept: keptRange(ticked, extra),
              idle: idleIn(runs(alt, breakMinutes), breakMinutes, alt) };
+  }
+
+  /* The lowest and highest median of `ticked` plus any subset of `extra`,
+   * rounded to the cent as keptLine rounds.
+   *
+   * For a fixed number k added, the k cheapest give the lowest median any k
+   * can and the k dearest the highest — the median never falls when a value
+   * is raised — so scanning k from 0 to all of them, both ways, visits both
+   * edges. Each median is picked out of two sorted lists by rank rather than
+   * by sorting the union again, so a month of cleared cards costs a sort and
+   * a scan, not a sort per k. */
+  function keptRange(ticked, extra) {
+    var t = ticked.slice().sort(function (a, b) { return a - b; });
+    var x = extra.slice().sort(function (a, b) { return a - b; });
+    var lo = Infinity, hi = -Infinity;
+    for (var k = 0; k <= x.length; k++) {
+      var n = t.length + k;
+      if (!n) continue;
+      var mid = function (at) {
+        return n % 2 ? rank(t, x, at, k, (n - 1) / 2)
+                     : (rank(t, x, at, k, n / 2 - 1) + rank(t, x, at, k, n / 2)) / 2;
+      };
+      lo = Math.min(lo, mid(0));
+      hi = Math.max(hi, mid(x.length - k));
+    }
+    return { lo: Math.round(lo * 100) / 100, hi: Math.round(hi * 100) / 100 };
+  }
+
+  // The r-th smallest (from 0) of sorted `a` and the `len` sorted values of
+  // `b` starting at `at`, taken together: how many come from `a` is found by
+  // halving, and the rest come from `b`.
+  function rank(a, b, at, len, r) {
+    var from = Math.max(0, r + 1 - len), to = Math.min(a.length, r + 1);
+    while (from < to) {
+      var i = (from + to) >> 1;
+      if (a[i] < b[at + r - i]) from = i + 1;
+      else to = i;
+    }
+    var j = r + 1 - from;
+    return Math.max(from ? a[from - 1] : -Infinity, j ? b[at + j - 1] : -Infinity);
   }
 
   /* The best line at one threshold, and the plateau around it. */

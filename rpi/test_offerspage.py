@@ -590,7 +590,10 @@ for _i, _r in enumerate(TICKED):
 # 120 ACCEPT cards from $25 to $45 an hour, 102 CLOSE CALL from $21.30 to
 # $24.90 and 300 PASS, in a fixed shuffle across four runs. The 31 ticked are
 # the 31 best ACCEPT cards: a median of $42.34, well above $25. All 222
-# cleared, the median is $26.42 — within $2 of $25, the other sentence.
+# cleared, the median is $26.42 — within $2 of $25, the other sentence. And
+# the driver took SOME of the 191 unticked, so at 31 the line kept can be any
+# median from $22.39 (the ticks and the 32 cheapest, the third sentence) to
+# $42.34 (the ticks alone).
 def strength(ticks, agreeing=False):
     rows, s = [], 29
     kinds = ['go'] * 120 + ['warn'] * 102 + ['no'] * 300
@@ -631,10 +634,11 @@ def strength(ticks, agreeing=False):
 
 STRENGTH = {n: strength(n) for n in (0, 31, 222)}
 # ...and 31 ticks on a market where the panel cleared only the ACCEPT cards,
-# so the far end is the median of those 120, $35.00 — well above $25, like the
-# ticked end. The range is still a range, but both ends give the same
-# instruction, and withholding it there would be refusing an answer the record
-# does support.
+# so the 89 unticked ACCEPT cards are all there is to mix in: the lowest
+# median any mix gives is $30.16 (the ticks and the 32 cheapest) and the
+# highest the ticks alone, $42.34 — all of it well above $25. The range is
+# still a range, but every point of it gives the same instruction, and
+# withholding it there would be refusing an answer the record does support.
 AGREEING = strength(31, agreeing=True)
 
 
@@ -1772,7 +1776,10 @@ try:
     #
     #   kept:  'silent' (no line kept at all), 'range' (two figures), or
     #          'point' (one figure); and whether an instruction is given.
-    #   idle:  'none' (no share of the clock), 'range', or 'point'.
+    #   idle:  'none' (no share of the clock), 'ends' (the ticked figure and
+    #          the all-cleared one, named as such and not called a range —
+    #          see the idle branch in journal.html for why it is not one), or
+    #          'point'.
     INSTRUCT = ('The line you keep is the line you set',
                 'well above the one you set', 'is below the one you set')
 
@@ -1784,8 +1791,9 @@ try:
                 else 'point' if re.search(r'you ticked came in at a median of '
                                           r'\$[\d.]+/hr', text)
                 else 'silent')
-        idle = ('range' if re.search(r'the car was empty somewhere between '
-                                     r'\d+% and \d+%', text)
+        idle = ('ends' if re.search(r'the car was empty \d+% of it counting '
+                                    r'only the jobs you ticked, and \d+% if '
+                                    r'every card the panel cleared', text)
                 else 'point' if re.search(r'\d+% of the time it was on, the car '
                                           r'was empty', text)
                 else 'none')
@@ -1804,34 +1812,60 @@ try:
        ['silent', 'range', 'point'])
     eq('...and an instruction is given at none / none / 222 ticks',
        [st[n]['instructs'] for n in (0, 31, 222)], [False, False, True])
-    eq('the empty clock is claimed not at all / as a range / as a figure at '
-       '0 / 31 / 222 ticks', [st[n]['idle'] for n in (0, 31, 222)],
-       ['none', 'range', 'point'])
+    eq('the empty clock is claimed not at all / at its two ends / as a figure '
+       'at 0 / 31 / 222 ticks', [st[n]['idle'] for n in (0, 31, 222)],
+       ['none', 'ends', 'point'])
     eq('...and called "the number a line is really chosen against" only at 222',
        [st[n]['chosenAgainst'] for n in (0, 31, 222)], [False, False, True])
     # Once for both, because both rest on the same 31 rows: a caveat under each
     # would be one question answered in two places.
-    eq('why they are ranges is said once, under both, and only when they are',
+    eq('why neither is one figure is said once, under both, and only when it is not',
        [st[n]['caveats'] for n in (0, 31, 222)], [0, 1, 0])
-    # Withheld where the two ends disagree, not wherever there is a range.
+    # Withheld where the range crosses a flip, not wherever there is a range.
     ag = strength_of('strength 31 agreeing')
-    eq('where both ends of the range give the same instruction it is given',
+    eq('where the whole range gives the same instruction it is given',
        [ag['kept'], ag['instructs']], ['range', True])
-    ok_('...and it is the one both ends give (%r)'
+    ok_('...and it is the one the whole range gives (%r)'
         % ag['text'][ag['text'].find('You set'):][:200],
         'well above the one you set' in ag['text'])
-    # The two ends are the page's own arithmetic at 31 and at 222, so the range
-    # at 31 must be exactly the figures the 222 feed prints on their own.
+    # The range at 31 is every mix of the 191 cleared cards nobody ticked, not
+    # the ticked median and the all-cleared one. The first version printed
+    # those two ends, and a median of the ticks plus only the cheapest cleared
+    # cards falls below the all-cleared figure — on the real week $21.79
+    # against $24.90 printed, the other side of the $2 rule. Worked out here
+    # by brute force over the fixture, not by asking the page how: for each
+    # count k the k cheapest and the k dearest, every k.
+    def _med(v):
+        v = sorted(v)
+        h = len(v) // 2
+        return v[h] if len(v) % 2 else (v[h - 1] + v[h]) / 2.0
+
+    _rows = STRENGTH[31]
+    _t = [r['pay'] / (r['minutes'] / 60.0) for r in _rows if r['accepted']]
+    _x = sorted(r['pay'] / (r['minutes'] / 60.0) for r in _rows
+                if not r['accepted'] and r['state'] in ('go', 'warn'))
+    _lo = min(_med(_t + _x[:k]) for k in range(len(_x) + 1))
+    _hi = max(_med(_t + _x[len(_x) - k:]) for k in range(len(_x) + 1))
+    _whole = lambda v: '%d' % int(round(v, 2) + 0.5)
     _m = re.search(r'between \$([\d.]+)/hr and \$([\d.]+)/hr', st[31]['text'])
+    eq('...the kept range at 31 ticks is the lowest and highest median any mix '
+       'of the unticked cleared cards gives ($%.2f to $%.2f)' % (_lo, _hi),
+       _m and list(_m.groups()), [_whole(_lo), _whole(_hi)])
     _p = re.search(r'median of \$([\d.]+)/hr', st[222]['text'])
-    ok_('...the kept range at 31 ticks reaches down to the figure at 222 (%r, %r)'
-        % (_m and _m.groups(), _p and _p.group(1)),
-        _m and _p and _m.group(1) == _p.group(1))
-    _i = re.search(r'between (\d+)% and (\d+)%', st[31]['text'])
+    ok_('...which reaches below the figure with every cleared card taken '
+        '(%r at 222)' % (_p and _p.group(1)),
+        _m and _p and int(_m.group(1)) < int(_p.group(1)))
+    # The empty clock's far end at 31 is the 222 feed's own figure, since both
+    # are the same rows counted as taken.
+    _i = re.search(r'the car was empty (\d+)% of it counting only the jobs you '
+                   r'ticked, and (\d+)%', st[31]['text'])
     _j = re.search(r'(\d+)% of the time it was on', st[222]['text'])
-    ok_('...and the empty-clock range at 31 reaches down to the figure at 222 '
+    ok_('...and the empty clock at 31 names the figure at 222 as its far end '
         '(%r, %r)' % (_i and _i.groups(), _j and _j.group(1)),
-        _i and _j and _i.group(1) == _j.group(1))
+        _i and _j and _i.group(2) == _j.group(1))
+    # ...and nothing says the clock lies between two ends that do not bound it.
+    no_('...and no sentence says the truth lies between the two ends',
+        'somewhere between the two ends' in st[31]['text'])
 
     # --- net and gross may not disagree about the same offers ----------------
     #
