@@ -770,6 +770,12 @@ try:
     # one; this page moves that decision to the person it belongs to, and the
     # decision is only real if the page waits for it.
     eq('nothing is looked up before the button is pressed', on_load.get('asked'), 0)
+    # The healthy half of the lost-cache sentence, checked at the end of this
+    # file: a server whose cache is fine (here, simply not there yet) must not
+    # have the load line say it was lost.
+    no_('a server with its lookups intact is not said to have lost them (%r)'
+        % (on_load.get('status') or '')[-90:],
+        'could not be read' in (on_load.get('status') or ''))
     ok_('...and the page says where they will go',
         'OpenStreetMap' in (on_load.get('privacy') or ''))
     ok_('...and that some of them are where customers live',
@@ -2217,6 +2223,14 @@ journal3 = os.path.join(work3, 'journal.jsonl')
 with open(journal3, 'w') as fh:
     for row in RANK_ROWS:
         fh.write(json.dumps(row) + '\n')
+# ...and the server's remembered lookups, torn. The server answers `unreadable`
+# for that — rpi/test_server.py checks it does — and the one page that reads
+# /api/places tested only `ok`, which is true on that answer, so a cache that
+# costs 24 minutes to rebuild on the owner's week vanished with no word said.
+# This journal is the one to do it on because a place walk follows, and the
+# walk is what the lost cache costs.
+with open(os.path.join(work3, 'places.json'), 'w') as fh:
+    fh.write('{ not json')
 
 port3 = free_port()
 server3 = subprocess.Popen(
@@ -2261,6 +2275,20 @@ try:
     note3 = loaded.get('note') or ''
     ok_('a ranking of three towns that beats chance (%r)' % note3[:90],
         'is not a coin toss' in note3 and 'held still' in note3)
+
+    # --- the lookups the server lost, said -----------------------------------
+    #
+    # On the load line, because it is the sentence that stays up until the
+    # driver touches something: said anywhere earlier, the journal's own line
+    # wrote over it a moment later. The healthy half — that a readable cache
+    # says nothing — is the first section's, where the cache is fine.
+    st3 = loaded.get('status') or ''
+    ok_('a server cache that will not parse is said on the load line (%r)'
+        % st3[-150:], 'remembered lookups could not be read' in st3)
+    ok_('...with the server\'s own reason', 'did not parse' in st3)
+    ok_('...and what it costs: looking them up again', 'looked up again' in st3)
+    ok_('...beside the load\'s own count, not instead of it',
+        re.match(r'^\d+ offers', st3))
 
     # --- the spread of the HOURS, which is the reason for holding them ------
     #

@@ -1665,6 +1665,18 @@ try:
     eq('an unreadable places file reads as empty', _torn['places'], {})
     ok_('...and says why, rather than looking like a fresh box',
         'did not parse' in (_torn.get('unreadable') or ''))
+    # ...and one that is there and cannot be READ is the same loss. It answered
+    # `stored: null` with no `unreadable`, which the page has nothing to say
+    # about. A directory in its place is the read error a test can make as root,
+    # where a chmod would not stop anything.
+    os.remove(os.path.join(_pdir, 'places.json'))
+    os.mkdir(os.path.join(_pdir, 'places.json'))
+    _shut = get(_pbase, '/api/places')
+    eq('a places file that cannot be read reads as empty', _shut['places'], {})
+    ok_('...and says so too, rather than looking like a fresh box (%r)'
+        % _shut.get('unreadable'),
+        'could not be read' in (_shut.get('unreadable') or ''))
+    os.rmdir(os.path.join(_pdir, 'places.json'))
 
     # --- and thrown away, which is what makes the page's button true --------
     #

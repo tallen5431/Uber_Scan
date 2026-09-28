@@ -3024,9 +3024,18 @@ function route(req, res) {
       return fs.readFile(placesPath, 'utf8', function (readErr, text) {
         // A file that is not there yet is an empty cache, not a fault: the
         // first map check on a fresh box is the ordinary way this starts.
+        if (readErr && readErr.code === 'ENOENT') {
+          return placesReply(200, { ok: true, places: {}, stored: 0 });
+        }
+        // ...and a file that IS there and cannot be read is the same lost 24
+        // minutes as one that will not parse, so it says so the same way. It
+        // answered `stored: null` and nothing else, which no page reads as
+        // anything: the permissions changed on the NUC and the map was simply
+        // slow again for twenty-odd minutes.
         if (readErr) {
-          return placesReply(200, { ok: true, places: {},
-                                    stored: readErr.code === 'ENOENT' ? 0 : null });
+          return placesReply(200, { ok: true, places: {}, stored: null,
+                                    unreadable: 'places.json could not be read ('
+                                                + (readErr.code || readErr.message) + ')' });
         }
         var held;
         try { held = JSON.parse(text); } catch (e) { held = null; }

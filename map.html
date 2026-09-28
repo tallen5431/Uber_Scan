@@ -480,11 +480,27 @@
      Merged and not replaced, in that direction, for the reason the Geocoder's
      own remember() merges: this browser may hold answers that have not reached
      the server, and a load that overwrote them would throw away exactly the
-     work a failed POST was holding on to. */
+     work a failed POST was holding on to.
+
+     Resolves to what the load line should add about it, which is nothing
+     unless the server's copy is gone. The server has always answered
+     `unreadable` when places.json will not parse or cannot be read, "said
+     rather than swallowed" in its own words — and this function tested `ok`,
+     which is TRUE on that answer, took the empty set, and said nothing. So a
+     cache that costs 24 minutes to rebuild on the owner's week vanished
+     silently, and the driver on the phone, with no copy of their own, found
+     the map slow again with no word about why. The offers page says "the
+     journal could not be read" for the same shape of answer; this says the
+     same about the lookups. */
   function loadPlaces() {
     return fetch('/api/places').then(function (r) { return r.json(); })
       .then(function (body) {
-        if (!body || !body.ok) return 0;
+        if (!body || !body.ok) return '';
+        var lost = body.unreadable
+          ? ' · this server’s remembered lookups could not be read ('
+            + body.unreadable + ') — any place this device has not looked up '
+            + 'itself will be looked up again, one a second'
+          : '';
         var held = body.places || {};
         onServer = held;
         var mine = {};
@@ -502,12 +518,12 @@
           catch (e) { /* full, or site data blocked: the server copy stands */ }
           geo.cache = mine;
         }
-        return gained;
+        return lost;
       })
       .catch(function () {
         // An older server has no such endpoint, and this page still works
         // exactly as it did — the device's own cache is untouched.
-        return 0;
+        return '';
       });
   }
 
@@ -515,10 +531,17 @@
     var days = Math.max(1, Math.min(365, Number(el.days.value) || 7));
     say('loading…');
     el.place.disabled = true;
-    loadPlaces();
+    // Both at once, and the load line waits for both: it is the one sentence
+    // that stays up until the driver touches a control, so a warning about
+    // the lookups said anywhere else would be overwritten by it a moment later.
+    var lookups = loadPlaces();
     fetch('/api/journal?days=' + days + '&limit=5000')
       .then(function (r) { return r.json(); })
       .then(function (body) {
+        return lookups.then(function (lost) { return [body, lost]; });
+      })
+      .then(function (both) {
+        var body = both[0], lostLookups = both[1];
         if (body && body.unreadable) throw new Error('the journal could not be read (' + body.unreadable + ')');
         offers = (body && body.offers) || [];
         // A fresh window; nothing in the old answer describes it.
@@ -579,7 +602,7 @@
             + mappable.length + ' name both ends'
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
                             : ' · none carry a position')
-            + whenNote(sub) + filled + short);
+            + whenNote(sub) + filled + short + lostLookups);
         el.place.disabled = withEnds.length === 0;
         redraw();
       })
