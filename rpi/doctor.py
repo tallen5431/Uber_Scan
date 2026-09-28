@@ -17,6 +17,10 @@ sys.path.insert(0, HERE)
 
 results = []
 
+# How much room the journal needs before the preflight calls a card full, in
+# weeks of driving at journal.WEEK_BYTES. See the free-space check in main().
+FREE_WEEKS = 4
+
 
 def check(name, ok, detail='', fix=''):
     results.append((name, ok, detail, fix))
@@ -288,9 +292,15 @@ def main():
         # copy as well. Two greens and a silent, total loss of the only
         # permanent record.
         #
-        # Opened for append and closed again: it writes no byte, and asks the
-        # filesystem the exact question the scanner will ask it in a few
-        # seconds' time.
+        # Opened for append and closed again, which writes no byte. This said
+        # that asked the filesystem "the exact question the scanner will ask it
+        # in a few seconds' time", and it does not: opening for append
+        # allocates nothing, so on a FULL card it succeeds while the scanner's
+        # next append fails at the write with ENOSPC. sync.py then finds no new
+        # rows, stamps the backup and exits 0, and the line above says the
+        # offers were backed up minutes ago — two greens over a total loss of
+        # the record, the same shape as the read-only card. So the free space
+        # is asked as well, below.
         #
         # It also said "it creates nothing that was not there", and `open(p,
         # 'a')` creates the file when it is absent — which is every first run
@@ -321,13 +331,52 @@ def main():
                                         'cannot be written')
         except Exception as e:                                # noqa: BLE001
             writable, why = False, 'cannot be written (%s)' % e
-        check('the journal can be written', writable, why,
-              'the rig can read every offer it has already stored and cannot '
-              'record another one. An SD card that has gone read-only is the '
-              'usual cause, and it reads perfectly until you try to write: '
-              'mount | grep " on / " will say ro. Nothing is being kept until '
-              'this is fixed, and the backup will keep reporting success '
-              'because the file it copies is unchanged.')
+        fix = ('the rig can read every offer it has already stored and cannot '
+               'record another one. An SD card that has gone read-only is the '
+               'usual cause, and it reads perfectly until you try to write: '
+               'mount | grep " on / " will say ro. Nothing is being kept until '
+               'this is fixed, and the backup will keep reporting success '
+               'because the file it copies is unchanged.')
+        # ...and whether there is ROOM for it, asked of the filesystem rather
+        # than found out by writing. Not by appending a probe byte: this check
+        # has already once created the file it was asking about, root-owned,
+        # and caused the fault it exists to find (above). statvfs reads the
+        # counters and changes nothing. `f_bavail`, not `f_bfree`, because the
+        # scanner runs as the driver and the blocks kept back for root are not
+        # its to use.
+        #
+        # The floor is four weeks at journal.WEEK_BYTES' measured 5.7MB a week,
+        # 22.9MB. A week of room would clear the busiest measured day, 2.3MB,
+        # two and a half times over, but the week is a floor on the rate — it
+        # was measured by a replay that writes no seen, screen, pair or mark
+        # rows — and this script is run now and then rather than before every
+        # shift, so what it warns about should still be weeks away when it is
+        # read. The free figure is printed either way, so a card that is
+        # merely filling can be watched filling.
+        if writable:
+            try:
+                st = os.statvfs(os.path.dirname(journal_path) or '.')
+                free = st.f_bavail * st.f_frsize
+                weeks = free / float(JR.WEEK_BYTES)
+                if free < FREE_WEEKS * JR.WEEK_BYTES:
+                    writable = False
+                    why = ('only %.1fMB free where it is kept — %.1f weeks of '
+                           'driving, under the %d this asks for'
+                           % (free / 1e6, weeks, FREE_WEEKS))
+                    fix = ('the card is nearly full, and a full card still '
+                           'opens the journal: the scanner only finds out at '
+                           'the write, and from then on nothing is kept while '
+                           'the backup keeps reporting success. df -h %s says '
+                           'what is using it. Free space elsewhere — never by '
+                           'deleting the journal or its .1/.2 rolls, which '
+                           'are the record itself.'
+                           % (os.path.dirname(journal_path) or '.'))
+                else:
+                    why += (' — %.0fMB free, about %.0f weeks of driving'
+                            % (free / 1e6, weeks))
+            except Exception as e:                            # noqa: BLE001
+                writable, why = False, 'free space could not be asked (%s)' % e
+        check('the journal can be written', writable, why, fix)
     except Exception as e:                                    # noqa: BLE001
         check('the journal file is whole', False, str(e))
 
