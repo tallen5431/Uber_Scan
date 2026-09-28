@@ -387,6 +387,77 @@ for _page in ('journal.html', 'map.html'):
     ok_('...and keeps no copy of its own', not re.search(
         r'\bvar\s+DAY_STARTS_AT\s*=\s*[0-9]', _src))
 
+# ...and the same for how big the journal gets, which is a number in prose
+# rather than in code, and drifted the way prose does. Twenty-one places gave
+# it, with six figures between them and none measured — a year was "a few
+# megabytes", "single-digit megabytes", 19MB, 20MB or 68MB depending on the
+# file, and a shift was 50kB — while the one real measurement, 2.8 rows an
+# offer and 5.7MB a week, sat in a comment in test_sync.py. The 68MB already
+# sat past the 64MB cap it was being used to reason about, and the roll's own
+# warning called a season of ordinary driving a bug on the strength of the
+# smallest of them.
+#
+# `journal.WEEK_BYTES` holds the measurement now, and every other place quotes
+# it as "5.7MB a week" beside that name, so a reader can find where it came
+# from. What is held here is that every such quotation agrees with the
+# constant, points at it, and that the retired wording has not come back.
+# AUDITS.md is left out: it is a ledger of what was found, and quotes the old
+# figures on purpose.
+_jr_src = open(os.path.join(ROOT, 'rpi', 'journal.py')).read()
+_wb = re.search(r'(?m)^WEEK_BYTES\s*=\s*([0-9_]+)\s*$', _jr_src)
+ok_('WEEK_BYTES is a named constant in the journal', _wb is not None)
+_prose = {}
+for _dir, _subdirs, _names in os.walk(ROOT):
+    _subdirs[:] = [d for d in _subdirs
+                   if d not in ('.git', 'node_modules', 'vendor', '.claude')]
+    for _name in _names:
+        if not _name.endswith(('.py', '.js', '.html', '.md', '.sh', '.css')):
+            continue
+        _rel = os.path.relpath(os.path.join(_dir, _name), ROOT)
+        if _rel in ('AUDITS.md', os.path.join('rpi', 'test_lint.py')):
+            continue
+        with open(os.path.join(_dir, _name), encoding='utf-8',
+                  errors='replace') as _fh:
+            _prose[_rel] = _fh.read()
+# Across a comment's line break as well: "5.7MB\n  // a week" is still a
+# quotation, and a pattern that stopped at the newline missed one in server.js.
+_WEEK_QUOTE = r'(\d+(?:\.\d+)?)MB[\s/*#]+a[\s/*#]+week'
+if _wb:
+    _week_mb = round(int(_wb.group(1).replace('_', '')) / 1e6, 1)
+    _quotes = [(_rel, _m) for _rel, _src in sorted(_prose.items())
+               for _m in re.finditer(_WEEK_QUOTE, _src)]
+    # More than a handful, or every check below passes on nothing.
+    ok_('the journal\'s size is quoted where it is argued with (%d places)'
+        % len(_quotes), len(_quotes) >= 10)
+    _wrong = ['%s says %sMB' % (_rel, _m.group(1)) for _rel, _m in _quotes
+              if float(_m.group(1)) != _week_mb]
+    ok_('...and every quotation is WEEK_BYTES\' %.1fMB a week%s'
+        % (_week_mb, ' (' + '; '.join(_wrong) + ')' if _wrong else ''),
+        not _wrong)
+    # Within a few lines of the figure, so the reader who doubts it has a name
+    # to look up rather than a number to take on trust.
+    _unsourced = ['%s:%d' % (_rel, _prose[_rel].count('\n', 0, _m.start()) + 1)
+                  for _rel, _m in _quotes
+                  if 'WEEK_BYTES' not in _prose[_rel][
+                      max(0, _m.start() - 300):_m.end() + 300]]
+    ok_('...and each one names WEEK_BYTES beside it%s'
+        % (' (not ' + ', '.join(_unsourced) + ')' if _unsourced else ''),
+        not _unsourced)
+# The retired wording, by its own shapes. A yearly figure is refused outright
+# rather than checked against 52 weeks: every one on file was the fault, and a
+# second unit is a second number to keep in step.
+_RETIRED = (
+    (r'\d+(?:\.\d+)?\s*MB[\s/*#]+a[\s/*#]+year', 'a size a year in MB'),
+    (r'megabytes[\s/*#]+(?:a|over[\s/*#]+a)[\s/*#]+year', 'megabytes a year'),
+    (r'year of driving[^.\n]{0,30}\d|MB on a year of driving',
+     'a year of driving in rows or MB'),
+    (r"shift's offers are about", 'a shift in kB'),
+)
+for _pat, _what in _RETIRED:
+    _back = sorted(_rel for _rel, _src in _prose.items() if re.search(_pat, _src))
+    ok_('no file gives the journal as %s any more%s'
+        % (_what, ' (' + ', '.join(_back) + ')' if _back else ''), not _back)
+
 # --- what a driver STARTS from, in the three places that seed it ------------
 #
 # Two questions that look like one, and rpi/calibrate.py states the difference

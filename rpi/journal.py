@@ -57,13 +57,40 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import offer_parser as OP                                     # noqa: E402
 
-# A backstop, not a retention policy. A working shift produces on the order of a
-# hundred offers, so a year of driving is a few megabytes and there is nothing
-# to be gained by throwing any of it away. This exists so that a bug writing on
-# every frame instead of every offer cannot quietly fill the card: past the cap
-# the live file is moved aside and a fresh one started. Every roll is kept —
-# `.1` is the newest, `.2` the one before it — because the alternative, which
-# this did for a while, is that the second roll silently deletes the first.
+# What a week of driving writes to this file — measured, and the one place any
+# other file in the repository takes the figure from.
+#
+# The real week's 1,166 offers, replayed from their own frames (`week.csv`'s
+# `scans` column, read with json.loads) through the real OfferAccumulator,
+# rate() and OfferLog.consider, offering only ready readings and taking
+# `settled` the way scan_pi.py takes `stable` — the merged reading holding still
+# across two reads: 3,265 rows, 2.8 rows an offer, 5,718,962 bytes, 5.7MB. The
+# busiest day of that week, 435 offers, wrote 2.3MB on its own.
+#
+# A floor, not an average: a replay has only the texts each row kept — two to
+# eight, de-duplicated — rather than every read the car made, and it writes no
+# `seen`, `screen`, `pair` or `mark` rows. Before this, twenty-one places in the
+# repository gave the journal's size, with six figures between them and none
+# measured: a year was "a few" or "single-digit" megabytes in this file and
+# rpi/README.md, 19MB in sync.py, server.js, live.html, rpi/README.md and
+# rpi/test_sync.py, 20MB elsewhere in server.js, and 68MB in `last()` below and
+# four places that quoted it — past the cap, so this file contradicted itself
+# about whether its own backstop can fire — while tools/install-sync.sh put a
+# shift at 50kB. The one measured figure sat in a comment in rpi/test_sync.py.
+# The real year, at 52 of these weeks, is 297MB: nearly sixteen times the 19MB.
+#
+# Quoted as "5.7MB a week" everywhere else, pointing here; rpi/test_lint.py
+# holds every one of them to this number and refuses the wording it replaced.
+WEEK_BYTES = 5718962
+
+# A backstop, not a retention policy, and it fires about every twelve weeks.
+# At WEEK_BYTES the cap is 11.7 weeks of driving — four or five rolls a year —
+# and there is nothing to be gained by throwing any of it away. It exists so
+# that a bug writing on every frame instead of every offer cannot quietly fill
+# the card: past the cap the live file is moved aside and a fresh one started.
+# Every roll is kept — `.1` is the newest, `.2` the one before it — because the
+# alternative, which this did for a while, is that the second roll silently
+# deletes the first.
 MAX_BYTES = 64 * 1024 * 1024
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -223,8 +250,9 @@ class Journal:
     def rows(self, limit=0):
         """Stored rows, oldest first. Unreadable lines are skipped, not fatal.
 
-        Reads the whole file. At a few megabytes a year that is cheap, it
-        happens at startup and on request rather than in the scan loop, and it
+        Reads the whole file. The live file is at most MAX_BYTES — about
+        twelve weeks at WEEK_BYTES' 5.7MB a week — it is read at startup and on
+        request rather than in the scan loop, and it
         is the only version of this that stays correct when a line is not the
         length it was assumed to be — a power cut mid-append leaves exactly
         that.
@@ -310,7 +338,9 @@ class Journal:
 
         Read backwards from the end rather than forwards from the start. The
         old version built every row in the file into memory to look at the last
-        one: on a year of driving — 40,000 rows, 68MB — that is 287ms and 68MB
+        one: on a file of 40,000 rows and 68MB — a live file just past the cap,
+        which at WEEK_BYTES is about twelve weeks of driving and not the year
+        this used to call it — that is 287ms and 68MB
         of Python objects, at every startup, on a Pi, to answer one question
         about the tail. The watchdog restarts the scanner mid-shift, and every
         restart paid it.
@@ -449,14 +479,25 @@ class Journal:
             # "could not use the offer journal", which is the opposite of what
             # happened here. The journal was used, kept, and moved aside.
             #
-            # One roll is the backstop doing its job. A second means a hundred
-            # and twenty-eight megabytes of journal, which on a rig that
-            # produces a few megabytes a year is a bug writing on every frame
-            # rather than a season of driving.
+            # One roll is the backstop doing its job, and so is a second. At
+            # WEEK_BYTES the cap is about twelve weeks of driving, so a rig on
+            # the road all year rolls four or five times. This used to call
+            # every roll after the first "worth looking at", against a yearly
+            # figure nobody had measured — a false alarm three or four times a
+            # year, on nothing but ordinary driving.
+            #
+            # So it says what the rolls add up to at the measured rate, and
+            # leaves the judgement to the one person who knows how long this
+            # card has been in the car. A bug writing on every frame shows as
+            # many rolls against few weeks; a season shows as the two agreeing.
+            weeks = self.cap / float(WEEK_BYTES)
             print('the offer journal has rolled %d times and every roll has '
-                  'been kept (%s.1 through .%d). A few megabytes a year is '
-                  'normal, so this many is worth looking at.'
-                  % (highest + 1, self.path, highest + 1))
+                  'been kept (%s.1 through .%d). At the %.1fMB a week measured '
+                  'on a real week, each roll is about %.1f weeks of driving, so '
+                  'this is about %.0f weeks; far fewer weeks than that on this '
+                  'card means something is writing more than offers.'
+                  % (highest + 1, self.path, highest + 1, WEEK_BYTES / 1e6,
+                     weeks, weeks * (highest + 1)))
 
     # How long the same complaint stays quiet before it is said again.
     #
@@ -1154,9 +1195,9 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # Truncated, and truncated at the reading rather than the card: a real
         # ride card is about 80 characters and the cap is there for the frames
         # where the reader picks up half the map as well. It roughly doubles a
-        # row, which on a year of driving is single-digit megabytes against a
-        # 64MB roll — cheap for the only evidence that can settle whether a
-        # parser change helps on this driver's own phone.
+        # row, and WEEK_BYTES' 5.7MB a week was measured with it in — cheap
+        # for the only evidence that can settle whether a parser change helps
+        # on this driver's own phone.
         # Raw where the reader gave it raw. `text` is the flattened form every
         # parser rule works on, and the flattening throws away which LINE each
         # figure sat on — which is the part of a card's meaning that the last

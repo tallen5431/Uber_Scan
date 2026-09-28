@@ -2147,8 +2147,9 @@ def main():
             keep_places=cfg.get('settings', {}).get('keepPlaces', True) is not False)
         # Counted, not built. This line says how many offers are on record and
         # it used to ask for every one of them as a Python object to find out —
-        # 68MB on a year of driving, at every startup, on a Pi, beside a
-        # resume() that was doing the same thing again.
+        # 68MB on a full live file — about twelve weeks at journal.WEEK_BYTES'
+        # 5.7MB a week — at every startup, on a Pi, beside a resume() that was
+        # doing the same thing again.
         kept = offer_log.journal.count()
         resumed = offer_log.resume()
         log('journal: %s (%d journal row%s so far)%s'

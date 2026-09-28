@@ -1171,11 +1171,10 @@ finally:
 # 0, and the shortfall repair could not see it either because `mine` counted the
 # same live file, so the two sides agreed. 1,100 offers on exactly one SD card.
 #
-# The roll is a season, not a lifetime: this file's docstring says ~19MB a year
-# while `journal.py`'s `last()` says "a year of driving — 40,000 rows, 68MB",
-# which already exceeds the 64MB cap. Replaying the real week's own frames gives
-# 2.8 rows an offer and 5.7MB a week — about four rolls a year, and a floor,
-# because the replay writes no `seen`, `screen`, `pair` or `mark` rows.
+# The roll is a season, not a lifetime. Replaying the real week's own frames
+# gives 2.8 rows an offer and 5.7MB a week — about four rolls a year, and a
+# floor, because the replay writes no `seen`, `screen`, `pair` or `mark` rows.
+# The measurement is written up once, at `journal.WEEK_BYTES`.
 roll_far = FarEnd()
 try:
     work6 = tempfile.mkdtemp()

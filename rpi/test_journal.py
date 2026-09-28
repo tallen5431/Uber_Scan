@@ -656,9 +656,10 @@ ok_('...and its mileage actually came off the top', (clean['cost'] or 0) > 0)
 # --- reading the end of the journal without reading all of it ---------------
 #
 # `last()` reads backwards from the end of the file and `count()` counts lines,
-# where both used to build every row into memory first. On a year of driving —
-# 40,000 rows, 68MB — that was 287ms and 68MB of Python objects at every
-# startup, on a Pi, to answer "what was the last offer".
+# where both used to build every row into memory first. On a file of 40,000
+# rows and 68MB — just past the cap, about twelve weeks at journal.WEEK_BYTES'
+# 5.7MB a week — that was 287ms and 68MB of Python objects at every startup, on
+# a Pi, to answer "what was the last offer".
 #
 # The saving comes from byte handling, and byte handling is where this kind of
 # rewrite goes wrong: a row that straddles the read block, a file with no
@@ -916,6 +917,33 @@ ok_('...holding the rows just before the live file, not the oldest ones (%r)'
     % (_ids[:2],),
     _ids and _live and int(_ids[-1][4:]) == int(_live[0][4:]) - 1)
 shutil.rmtree(_roll_dir, ignore_errors=True)
+
+# ...and a second roll is not called a bug. At WEEK_BYTES' measured 5.7MB a
+# week the 64MB cap is about twelve weeks of driving, so a rig on the road all
+# year rolls four or five times — and the line printed on every roll after the
+# first called that "worth looking at", against a yearly figure nobody had
+# measured: a false alarm three or four times a year on ordinary driving. It says
+# what the rolls add up to instead. The cap here is one measured week, so each
+# roll must come out as one week of driving: that is the figure being used,
+# not merely printed.
+import contextlib as _ctx
+import io as _io
+
+_season_dir = tempfile.mkdtemp()
+_season = JR.Journal(os.path.join(_season_dir, 'offers.jsonl'), cap=JR.WEEK_BYTES)
+_said = _io.StringIO()
+with _ctx.redirect_stdout(_said):
+    for _i in range(4):
+        _season.append({'v': 3, 'id': 's%d' % _i, 'seq': 1,
+                        'at': 1_789_000_000_000 + _i,
+                        'text': 'x' * (JR.WEEK_BYTES + 1)})
+_said = _said.getvalue()
+ok_('a second roll is reported (%r)' % _said[:60], 'rolled 2 times' in _said)
+ok_('...without calling a season of driving a bug', 'worth looking at' not in _said)
+ok_('...saying each roll is a week of driving when the cap is a week',
+    'each roll is about 1.0 weeks' in _said)
+ok_('...and what the rolls add up to', 'this is about 2 weeks' in _said)
+shutil.rmtree(_season_dir, ignore_errors=True)
 
 # --- a line that will not read is an offer that is gone ----------------------
 #

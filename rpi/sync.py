@@ -3,8 +3,9 @@
 
     python3 rpi/sync.py --to http://nuc.lan:8080
 
-The journal is the one irreplaceable thing here — about 19MB a year, and until
-this existed there was exactly one copy of it, on an SD card, in a vehicle. The
+The journal is the one irreplaceable thing here — 5.7MB a week of driving, as
+measured in journal.py's WEEK_BYTES — and until this existed there was exactly
+one copy of it, on an SD card, in a vehicle. The
 scanner can be reflashed in an afternoon; a year of what the work actually paid
 cannot be got back.
 
@@ -162,13 +163,13 @@ def chain_of(path, archives=True):
     instrument said the backup was healthy.
 
     And the roll is routine rather than a once-in-a-rig's-life event. This file's
-    own docstring says "about 19MB a year" and `journal.py`'s `last()` says "a
-    year of driving — 40,000 rows, 68MB"; the second already exceeds the 64MB cap,
-    so the repository contradicts itself about whether its own backstop can fire.
-    Replaying the real week's 1,166 offers through the real accumulator gives
-    2.8 rows an offer and 5.7MB a week — a roll about every 12 weeks, four a year
-    — and that is a floor, because the replay writes no `seen`, `screen`, `pair`
-    or `mark` rows.
+    own docstring and `journal.py`'s `last()` gave two different yearly sizes,
+    the second already past the 64MB cap, so the repository contradicted itself
+    about whether its own backstop can fire. Replaying the real week's 1,166
+    offers through the real accumulator gives 2.8 rows an offer and 5.7MB a week
+    — `journal.WEEK_BYTES`, where the measurement is written up — a roll about
+    every 12 weeks, four a year, and that is a floor, because the replay writes
+    no `seen`, `screen`, `pair` or `mark` rows.
 
     `archives=False` for the ordinary ten-minute tick, whose floor is an hour
     before the copy's newest row: every archived row is older than that by
@@ -573,9 +574,9 @@ def main():
         # them reads as a gap — so it repairs itself exactly when the rig is NOT
         # scanning, which is not when the timer runs.
         #
-        # A year is ~19MB by this file's own estimate and `chunks()` already
-        # splits the body at 4MB, so the whole history is a handful of POSTs paid
-        # once.
+        # A roll is 64MB — about twelve weeks at journal.WEEK_BYTES' 5.7MB a
+        # week — and `chunks()` already splits the body at 4MB, so the whole
+        # history is paid once, about sixteen POSTs to a roll.
         floor = 0
     else:
         floor = JR.now_ms() - args.days * 86400000

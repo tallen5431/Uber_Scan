@@ -683,8 +683,10 @@ page was corrected for.
 
 **What it costs.** A full journal parse — split, then a `JSON.parse` per line —
 on the event loop that also drives the 12ms MJPEG tick and touches the file
-telling the scanner somebody is watching. A year of driving is ~19MB and the best
-part of a second of frozen loop on a Pi 4. So the page asks every three minutes,
+telling the scanner somebody is watching. The live file runs to 64MB before it
+rolls — about twelve weeks at 5.7MB a week (`journal.WEEK_BYTES`) — and a parse
+of a third of that was measured at 150-265ms on a desktop, more on a Pi 4. So
+the page asks every three minutes,
 matching the budget `/api/journal/newest` already set for a journal-reading GET,
 and the answer is cached against the journal's size and mtime — append-only means
 size is monotonic where mtime granularity is not. The cache holds the finished
@@ -1883,12 +1885,13 @@ be rounded.
 
 It does not live on the SD card. The view refreshes up to thirty times a second
 while someone is watching, at ~50kB a frame — roughly **5GB an hour written to
-the card**, against about 19MB a *year* for the journal. Every byte
-of it is stale two frames later and none of it needs to survive a reboot, so it
-goes to `/dev/shm`, which is RAM. `pipeline.py` has staged its OCR images there
-all along for exactly this reason; the live frame simply never got the same
-treatment, and it was writing fifty thousand times more to the one part of the
-system that wears out than the data worth keeping does.
+the card**, against 5.7MB a *week* for the journal (`journal.WEEK_BYTES`, where
+that is measured). Every byte of it is stale two frames later and none of it
+needs to survive a reboot, so it goes to `/dev/shm`, which is RAM. `pipeline.py`
+has staged its OCR images there all along for exactly this reason; the live
+frame simply never got the same treatment, and one hour of somebody watching
+wrote more to the one part of the system that wears out than ten years of the
+data worth keeping does.
 
 The two sides pick that path independently — this is Python and the web side is
 JavaScript — and nothing detects a mismatch, so the server takes whichever
@@ -2806,8 +2809,8 @@ Three deliberate omissions:
   The row now carries the reading, truncated at 220 characters: a ride card
   reads to about 80, and the headroom is for the frames where the crop takes in
   a slice of the map, which are exactly the frames worth studying. It adds about
-  90 bytes to a 623-byte row — single-digit megabytes over a year of driving,
-  against a 64MB roll. It is the last column of the CSV so a spreadsheet puts it
+  90 bytes to a 623-byte row, and the 5.7MB a week `journal.WEEK_BYTES` measures
+  was measured with it in. It is the last column of the CSV so a spreadsheet puts it
   off the right-hand edge and every column before it keeps the position it has
   always had.
 
@@ -3979,8 +3982,11 @@ fill the card, and in exactly that case this rolled again and again and shredded
 everything behind it. The chain is shifted now — `.1` becomes `.2`, `.2` becomes
 `.3` — so nothing is destroyed and `.1` stays the newest, which is what
 server.js stats to notice a roll at all. A second roll also says so out loud,
-because a hundred and twenty-eight megabytes of journal on a rig that makes a
-few megabytes a year is a bug, not a season.
+and says what it adds up to: at 5.7MB a week (`journal.WEEK_BYTES`) each roll is
+about twelve weeks of driving, so a rig on the road all year rolls four or five
+times. The line used to call a second roll a bug rather than a season, against
+a yearly figure nobody had measured; it now prints how many weeks the rolls
+amount to, and a card that has not been in the car that long is the bug.
 
 ### A recovery that had never once fired
 

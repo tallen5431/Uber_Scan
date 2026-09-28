@@ -1220,9 +1220,10 @@ var JOURNAL_PATH = process.env.JOURNAL || path.join(ROOT, 'rpi', 'journal.jsonl'
  *
  * It belongs in RAM, not on the card. The view refreshes about fourteen times a
  * second while someone is watching, at ~50kB a frame — roughly 2.5GB an hour
- * written to the SD card, against about 19MB a *year* for the journal. Every
- * byte of it is stale two frames later and none of it needs to survive a
- * reboot, so writing it to the one part of this system that wears out was
+ * written to the SD card, against 5.7MB a *week* for the journal (measured in
+ * rpi/journal.py's WEEK_BYTES). Every byte of it is stale two frames later and
+ * none of it needs to survive a reboot, so writing it to the one part of this
+ * system that wears out was
  * paying a real cost for nothing. pipeline.py already stages its OCR images in
  * /dev/shm for exactly this reason; the live frame simply never got the same
  * treatment.
@@ -2050,10 +2051,12 @@ function parseLines(text, rows, torn) {
 
 // The journal, parsed once, and after that only the part that grew.
 //
-// It was read and parsed whole on every call — a year of driving is about
-// 20MB and fifty thousand rows, measured at 150-265ms on a desktop and, per
-// the estimate this file has carried for a while, the best part of a second
-// on a Pi 4 — on the event loop that also relays the live picture to the
+// It was read and parsed whole on every call — a 20MB file of fifty thousand
+// rows, which is three and a half weeks at the 5.7MB a week rpi/journal.py's
+// WEEK_BYTES measures and a third of what the live file reaches before its
+// 64MB roll, measured at 150-265ms on a desktop and, per the estimate this
+// file has carried for a while, the best part of a second on a Pi 4 — on the
+// event loop that also relays the live picture to the
 // panel. Every offers-page load paid it. Worse, every offer the scanner
 // appends changes the file, so the driving screen's next /api/today poll
 // paid it again: a second of frozen picture, every few minutes, for the
@@ -2467,10 +2470,11 @@ function shiftSummary(rows, since) {
 //
 // The parse is synchronous once the file is in hand — split, then a JSON.parse
 // per line — and it runs on the event loop that also drives the 12ms MJPEG tick
-// and touches the file telling the scanner somebody is watching. A year of
-// driving is a ~19MB journal and something on the order of a second of frozen
-// loop on a Pi 4, so a page that asks repeatedly cannot be paying that every
-// time. /api/journal/newest already sets the house budget for a journal-reading
+// and touches the file telling the scanner somebody is watching. The live file
+// reaches 64MB before it rolls — about twelve weeks at the 5.7MB a week
+// rpi/journal.py's WEEK_BYTES measures — and a third of that parses in
+// 150-265ms on a desktop and more on a Pi 4, so a page that asks repeatedly
+// cannot be paying that every time. /api/journal/newest already sets the house budget for a journal-reading
 // GET at "every few minutes"; this keeps to it and then some.
 //
 // Keyed on SIZE as well as mtime because the file is append-only apart from the
@@ -2932,9 +2936,9 @@ function route(req, res) {
   // The rig lives in a car behind cellular NAT, so nothing here can reach it —
   // it has to push, and it pushes to whatever host is running this file with
   // SCANNER=0 and JOURNAL pointed at the copy. That copy is the reason this
-  // exists: the journal is the one irreplaceable thing the rig produces, about
-  // 19MB a year, and until now there was exactly one of it, on an SD card, in a
-  // car.
+  // exists: the journal is the one irreplaceable thing the rig produces, 5.7MB
+  // a week of driving (rpi/journal.py's WEEK_BYTES, where that is measured),
+  // and until now there was exactly one of it, on an SD card, in a car.
   //
   // Idempotent on purpose, and that is the whole design. Every row can say what
   // makes it itself (see syncKey), so the same batch can arrive twice — or ten

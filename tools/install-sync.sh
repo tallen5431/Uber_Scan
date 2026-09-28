@@ -178,9 +178,10 @@ sudo tee "$TIMER" >/dev/null <<'EOF'
 Description=Copy this rig's offers to the machine that keeps them, regularly
 
 [Timer]
-# The interval is not a throughput decision — a shift's offers are about 50kB —
-# it is how long the newest offer can be missing from the copy if the card dies
-# at the worst moment.
+# The interval is not a throughput decision — the busiest day of the measured
+# week wrote 2.3MB, which would go in one 4MB POST (5.7MB a week: see
+# rpi/journal.py's WEEK_BYTES) — it is how long the newest offer can be missing
+# from the copy if the card dies at the worst moment.
 OnBootSec=2min
 OnUnitActiveSec=10min
 # So a run missed while the car was parked and the Pi powered down happens once
