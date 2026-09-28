@@ -319,6 +319,21 @@ if sync_unit:
         # not a check that passed.
         print('  (no systemd-analyze here, so systemd was not asked directly)')
 
+    # The timer's missed-run catch-up is OnBootSec's, and the file used to
+    # credit it to Persistent=true — which systemd.timer(5) says "only has an
+    # effect on timers configured with OnCalendar=". This timer is monotonic,
+    # so the line was inert while its comment named it as the protection. A
+    # setting systemd ignores is a claim the unit does not honour.
+    sync_timer_path = os.path.join(sync_units, 'uberscan-sync.timer')
+    sync_timer = (open(sync_timer_path).read()
+                  if os.path.exists(sync_timer_path) else '')
+    _keys = [l.split('=', 1)[0].strip() for l in sync_timer.splitlines()
+             if '=' in l and not l.lstrip().startswith('#')]
+    ok_('the sync timer runs at boot, which is what catches up a missed run',
+        'OnBootSec' in _keys)
+    ok_('...and sets no Persistent= on a timer with no OnCalendar= to obey it',
+        'Persistent' not in _keys or 'OnCalendar' in _keys)
+
     # A percent sign is a systemd specifier even inside quotes, so it has to be
     # doubled on the way in. Checked separately because quoting alone does not
     # fix it.

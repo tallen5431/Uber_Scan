@@ -696,8 +696,13 @@ page was corrected for.
 
 **What it costs.** A full journal parse — split, then a `JSON.parse` per line —
 on the event loop that also drives the 12ms MJPEG tick and touches the file
-telling the scanner somebody is watching. A year of driving is ~19MB and the best
-part of a second of frozen loop on a Pi 4. So the page asks every three minutes,
+telling the scanner somebody is watching. The live file runs to 64MB before it
+rolls — at most about twelve weeks at 5.7MB a week (`journal.WEEK_BYTES`) — and
+a third of that in real rows, 22.4MB and 12,766 rows of the replayed week, parses
+in 64-223ms on the development container (48 runs), more on a Pi 4. The
+150-265ms once quoted here was a 20MB file of fifty thousand short rows, about
+400 bytes each against the real 1,752, so it was never a third of this file. So
+the page asks every three minutes,
 matching the budget `/api/journal/newest` already set for a journal-reading GET,
 and the answer is cached against the journal's size and mtime — append-only means
 size is monotonic where mtime granularity is not. The cache holds the finished
@@ -1896,12 +1901,13 @@ be rounded.
 
 It does not live on the SD card. The view refreshes up to thirty times a second
 while someone is watching, at ~50kB a frame — roughly **5GB an hour written to
-the card**, against about 19MB a *year* for the journal. Every byte
-of it is stale two frames later and none of it needs to survive a reboot, so it
-goes to `/dev/shm`, which is RAM. `pipeline.py` has staged its OCR images there
-all along for exactly this reason; the live frame simply never got the same
-treatment, and it was writing fifty thousand times more to the one part of the
-system that wears out than the data worth keeping does.
+the card**, against 5.7MB a *week* for the journal (`journal.WEEK_BYTES`, where
+that is measured). Every byte of it is stale two frames later and none of it
+needs to survive a reboot, so it goes to `/dev/shm`, which is RAM. `pipeline.py`
+has staged its OCR images there all along for exactly this reason; the live
+frame simply never got the same treatment, and one hour of somebody watching
+wrote more to the one part of the system that wears out than ten years of the
+data worth keeping does.
 
 The two sides pick that path independently — this is Python and the web side is
 JavaScript — and nothing detects a mismatch, so the server takes whichever
@@ -2254,6 +2260,18 @@ over the life of the car.
 ```
 
 `0` gives the gross rate, which is pay divided by time and nothing else.
+
+`costPerMile` can also be set from a screen, without SSH or a restart: the
+keypad's **⚙︎ Targets** sheet (**⌨ Type** on the panel) sends it to
+`POST /api/settings` when the rig is serving the page, the scan loop takes it on
+its next frame, re-reads the card in front of it, and saves it to this file.
+Every reading on the panel already ends "after $0.30/mi costs", which is where
+the new figure shows. Only that key: `target`, `band`, `pad`,
+`secondsPerItem` and `keepPlaces` stay in this file, because the last three
+decide how every stored rate is worked out and whether addresses are recorded
+at all, and the route refuses a request that names any of them. The copy at
+home (`SCANNER=0`) refuses the request rather than writing a file no scanner
+reads.
 
 ### Picking the target, from your own offers
 
@@ -2807,8 +2825,8 @@ Three deliberate omissions:
   The row now carries the reading, truncated at 220 characters: a ride card
   reads to about 80, and the headroom is for the frames where the crop takes in
   a slice of the map, which are exactly the frames worth studying. It adds about
-  90 bytes to a 623-byte row — single-digit megabytes over a year of driving,
-  against a 64MB roll. It is the last column of the CSV so a spreadsheet puts it
+  90 bytes to a 623-byte row, and the 5.7MB a week `journal.WEEK_BYTES` measures
+  was measured with it in. It is the last column of the CSV so a spreadsheet puts it
   off the right-hand edge and every column before it keeps the position it has
   always had.
 
@@ -3246,10 +3264,28 @@ it, at half again that plus ten minutes, because orders run long. Ending it
 early costs a figure the driver could have used; ending it late costs a wrong
 one, and only the standalone verdict is unaffected either way.
 
-`Drop` puts it down sooner. It is memory only and deliberately not written to
-the journal: the mark is a permanent fact — this offer was taken — and dropping
-it off does not make that untrue. A restarted server simply has nothing in hand,
-which is the safe way to be wrong.
+The order in hand survives the ignition. It is written synchronously to
+`holding.json` beside the journal — not into it — on every accept, read back
+once at startup, and removed by `Drop`. A restored order is asked about through
+the same `holding()` as a live one, so one that has outlived its stated time,
+half again, and ten minutes is refused whichever side it came from, and so is
+one stamped later than the clock reading it (a Pi boots in 1970).
+
+`Drop` puts it down sooner, and leaves the mark alone: the mark is a permanent
+fact — this offer was taken — and dropping it off does not make that untrue.
+What the press does add is a second fact, a `kind: "drop"` row naming the offer,
+when its card was on the screen (`acceptedAt`) and when Drop was pressed (`at`,
+and `seq`, so two drops of one offer are two rows to the sync rather than one).
+It is **collected and read by nothing**: it exists to be held against the card's
+stated minutes once a week of it exists, and an elapsed time turned into a rate
+on the panel would be the re-timing that is refused on measurement. A press with
+no order held writes nothing, so a delivery that ran past the hold's own expiry
+leaves no row. And the row names the order the rig was *holding*, which with two
+jobs in the car is the last one ticked: a Drop at the first delivery puts down
+the second. On the week of 1,166 offers, 7 of the 31 ticks landed inside an
+earlier tick's stated minutes, and in 6 of those the earlier job was stated to
+end first, so a drop row is one job's elapsed time only where no other tick
+overlaps it.
 
 **What it cost the bar of controls.** Two of the six are conditional — "Took
 $8.04" with an offer on the record, "Drop" with an order in the car — so with
@@ -3968,8 +4004,14 @@ fill the card, and in exactly that case this rolled again and again and shredded
 everything behind it. The chain is shifted now — `.1` becomes `.2`, `.2` becomes
 `.3` — so nothing is destroyed and `.1` stays the newest, which is what
 server.js stats to notice a roll at all. A second roll also says so out loud,
-because a hundred and twenty-eight megabytes of journal on a rig that makes a
-few megabytes a year is a bug, not a season.
+and says what it adds up to: at 5.7MB a week (`journal.WEEK_BYTES`) each roll is
+at most about twelve weeks of driving, so a rig on the road all year rolls at
+least four times. The line used to call a second roll a bug rather than a
+season, against a yearly figure nobody had measured; it now prints the most
+weeks the rolls can amount to. That is a ceiling, because the week is a floor
+on the rate — a real rig writes `seen`, `screen`, `pair` and `mark` rows the
+replay did not — so a card rolling sooner is ordinary; rolls days apart are the
+bug.
 
 ### A recovery that had never once fired
 
@@ -7267,5 +7309,8 @@ is opened — `>` instead of `>>` in a shell wrapper, or `flags: 'w'` instead of
   the flip side is that a mount putting the offer in a corner needs aiming
   rather than fixing itself. Nothing here can fix a mount that was never good
   enough.
-- Only Uber's current card wording is handled. A layout change breaks parsing,
-  which is why the typed keypad on `index.html` stays the reliable path.
+- Two card grammars are handled, a stated journey (Uber's `N min (D.D mi)`
+  legs) and a stated deadline (DoorDash's `Deliver by H:MM AM/PM` with a
+  distance on its own — see "Delivery cards, and where an offer went"), and
+  nothing else. A layout change breaks parsing, which is why the typed keypad
+  on `index.html` stays the reliable path.

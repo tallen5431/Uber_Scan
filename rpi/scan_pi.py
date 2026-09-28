@@ -15,6 +15,7 @@ mid-offer costs more time than the OCR does.
 
 import argparse
 import json
+import math
 import os
 import re
 import queue
@@ -531,22 +532,76 @@ def reset_requested():
     return True
 
 
-def dropoff_requested():
-    """True once per press of "read the dropoff". Same shape as reset_requested.
+def dropoff_requested(now=None):
+    """Seconds left of a press's window, once per press; None when there is none.
+
+    Same shape as reset_requested, except that it answers with how much of the
+    window is left rather than True, for the reason at the foot of this.
 
     Separate from the reading itself: this only says the driver asked. What it
     buys is a window — see DROPOFF_WINDOW — because the phone is showing a
     navigation screen that is not going to move, and the motion gate reads a
     still picture as nothing happening.
+
+    ...AND ONLY WHILE THE PRESS IS STILL ABOUT THE SCREEN IN FRONT OF IT.
+
+    The request was a bare file with no age, and this asked only whether it
+    existed. /api/dropoff writes it and answers ok without asking whether a
+    scanner is listening, and handoff files live in /dev/shm, which a scanner
+    restart does not clear. So a press made while this process was down — the
+    child between restarts on server.js's backoff, a wedge-kill, the systemd
+    unit stopped — sat on disk until the next loop pass and was honoured then,
+    against whatever was on the phone by then. An address read that way is
+    filed as ASKED: onto the order in the car if there is one, else onto the
+    card on the slot, overwriting a destination the card stated for itself,
+    and in the journal's fold a press outranks every sighting. That is a
+    destination nobody asked about, written into a file that cannot be
+    corrected, from a press the driver had long since given up on.
+
+    A press whose own window would already have shut — DROPOFF_WINDOW old or
+    more — cannot still be about the screen the driver was looking
+    at, so it is cleared and not acted on, and the log says so. So is one
+    stamped AHEAD of the clock, which is a clock that stepped (see
+    `handoff.age`), not a fresh press. Refusing costs the driver one more tap;
+    honouring costs a wrong address on the record.
+
+    Nothing is sent to the panel. live.html stops saying "reading…" 13 seconds
+    after the server answers the press, whatever happens, so a stale press is
+    found after the panel has stopped waiting for it, and a "not read"
+    arriving then is the late contradiction the ⌖ button's handling was built
+    to avoid.
     """
     try:
-        asked = any(os.path.exists(p) for p in HO.candidates(HO.DROPOFF))
+        pressed = HO.age(HO.DROPOFF, now)
     except OSError:
-        return False
-    if not asked:
-        return False
+        return None
+    if pressed is None:
+        return None
     HO.clear(HO.DROPOFF)
-    return True
+    if pressed < 0:
+        log('ignored a destination request stamped %ds ahead of the clock: the '
+            'clock has stepped since, so how old the press is cannot be told'
+            % int(-pressed))
+        return None
+    if pressed >= DROPOFF_WINDOW:
+        log('ignored a destination request from %ds ago: older than its '
+            '%d-second window, so it is not about the screen on the phone now'
+            % (int(pressed), int(DROPOFF_WINDOW)))
+        return None
+    # ...and the window it opens is the one THIS age was judged against.
+    #
+    # This returned True, and the loop then opened a fresh window from the
+    # moment it noticed: `dropoff_until = now + DROPOFF_WINDOW`. Two answers to
+    # "is this press still open", with two anchors. A press 11.5s old passed the
+    # test above as inside its window and was then read for twelve more seconds
+    # — to 23.5s after the press, plus a read in flight measured at up to 5.9s —
+    # and whatever turned up was filed as ASKED, well after live.html had
+    # stopped saying "reading…" 13s after the press was answered. Returning what
+    # is left makes the window end at press + DROPOFF_WINDOW whichever pass
+    # notices it, so the test and the window are one predicate. Always above
+    # zero, since an age of exactly the window is refused above, so a caller
+    # testing the answer for truth cannot lose a press to a 0.0.
+    return DROPOFF_WINDOW - pressed
 
 
 # How long to keep reading after the button. The driver presses it, then has to
@@ -558,6 +613,88 @@ def dropoff_requested():
 # reason: long enough to cover a person doing one thing on a phone, short enough
 # that the rig is not still hunting for an address when the next offer arrives.
 DROPOFF_WINDOW = 12.0
+
+
+def settings_requested():
+    """A cost per mile the driver typed on a screen, once; None when there is none.
+
+    Written by POST /api/settings, which answers only for a machine that runs a
+    scanner. Taken from both places for the reason reset_requested gives, and
+    never fatal.
+
+    ONE KEY. The block this lands in is not a list of preferences: `keepPlaces`
+    decides whether addresses are written into the append-only journal at all,
+    and `pad` and `secondsPerItem` move `billedMinutes` and so every rate the
+    rig prints AND STORES. The route refuses a body naming any of them; this
+    reads `costPerMile` out of whatever is in the file and nothing else, so a
+    request written some other way — by hand, by a server a `git pull` behind —
+    cannot switch off address recording or shift the money on every row that
+    follows.
+
+    Not aged, unlike a dropoff press. That press is about the screen in front of
+    the camera and goes stale with it; this is about the car, and a figure typed
+    while the scanner was between restarts is still the figure the driver meant
+    when it comes back.
+
+    A finite number of zero or more, as the route insists. A bool is refused
+    although Python calls it a number: `true` is not a price.
+
+    TAKEN BY RENAME, NOT READ AND THEN CLEARED. This used to read the file and
+    then HO.clear() every place it might be. A POST is a rename onto the same
+    name, so one landing between the read and the clear was deleted unread:
+    the route had answered ok, the keypad said the rig had it, and the loop
+    went on pricing at the figure before. Renaming the request to a name of
+    this process's own takes exactly the file that was there; one renamed in
+    after that is a new file under the old name, left for the next pass.
+    Both places are still emptied, for the reason reset_requested gives.
+    """
+    raw = None
+    for candidate in HO.candidates(HO.SETTINGS):
+        mine = '%s.taken-%d' % (candidate, os.getpid())
+        try:
+            os.rename(candidate, mine)
+        except OSError:
+            continue
+        try:
+            if raw is None:
+                with open(mine) as fh:
+                    raw = fh.read()
+        except (IOError, OSError) as e:
+            log('could not read a settings request (%s): the cost per mile in '
+                'use is unchanged' % e)
+        try:
+            os.remove(mine)
+        except OSError:
+            pass
+    if raw is None:
+        return None
+    try:
+        cost = json.loads(raw).get('costPerMile')
+    except (ValueError, AttributeError):
+        cost = None
+    if (isinstance(cost, bool) or not isinstance(cost, (int, float))
+            or not math.isfinite(cost) or cost < 0):
+        log('ignored a settings request with no usable cost per mile in it '
+            '(%r): the cost per mile in use is unchanged' % raw[:80])
+        return None
+    return float(cost)
+
+
+def emit_settings(settings):
+    """The cost per mile this scanner is pricing with, on its own line.
+
+    Said once when the loop starts and again whenever the driver changes it,
+    so GET /api/settings answers with what the running scanner is USING — not
+    with what a file says, which a hand edit over SSH can make disagree with the
+    process until the next restart. The value rate() will actually take, after
+    the same fallback it applies, so a figure it cannot read is reported as the
+    figure it prices with instead.
+
+    Like the heartbeat, no `ready`, so it cannot stand in for a verdict.
+    """
+    print(json.dumps({'settings': {'costPerMile': OP.setting(
+        (settings or {}).get('costPerMile'), OP.DEFAULT_SETTINGS['costPerMile'])}}),
+        flush=True)
 
 
 def use_manual_box(scanner, quad_px):
@@ -1831,7 +1968,12 @@ def main():
         # against the pixel budget — same text, three times the work, smaller
         # by the time it is read.
         card_share=1.0 if manual else None,
-        settings=cfg.get('settings', {}),
+        # No `settings=` here any more. The Scanner priced every frame from a
+        # copy of this block taken at startup, and digest() replaced that rate
+        # with its own before anything read it — so the copy decided nothing,
+        # and was a second settings object in the process waiting for the day
+        # a change reached one and not the other. digest() prices off `cfg`,
+        # per card, and is the only thing that does.
     )
     # The tracker works in the small stream's coordinates and reports in the
     # capture's, so it needs the ratio between them.
@@ -2023,8 +2165,9 @@ def main():
             keep_places=cfg.get('settings', {}).get('keepPlaces', True) is not False)
         # Counted, not built. This line says how many offers are on record and
         # it used to ask for every one of them as a Python object to find out —
-        # 68MB on a year of driving, at every startup, on a Pi, beside a
-        # resume() that was doing the same thing again.
+        # 68MB on a full live file — about twelve weeks at journal.WEEK_BYTES'
+        # 5.7MB a week — at every startup, on a Pi, beside a resume() that was
+        # doing the same thing again.
         kept = offer_log.journal.count()
         resumed = offer_log.resume()
         log('journal: %s (%d journal row%s so far)%s'
@@ -2748,6 +2891,11 @@ def main():
                 accumulator.add(other['parsed'])
         return digest(batch[chosen], done['frames'][0], done.get('at'))
 
+    # What the server answers GET /api/settings with, from the moment the loop
+    # runs. See emit_settings.
+    if args.json:
+        emit_settings(cfg.get('settings'))
+
     try:
         while True:
             # A read that finished while the camera kept running. Taken here,
@@ -2908,8 +3056,11 @@ def main():
                 # has to get the destination up, and the phone then sits
                 # perfectly still showing it - which is precisely what the
                 # motion gate scores as nothing happening.
-                if dropoff_requested():
-                    dropoff_until = now + DROPOFF_WINDOW
+                # The window runs from the PRESS, not from this pass: what
+                # dropoff_requested hands back is what is left of it.
+                dropoff_left = dropoff_requested()
+                if dropoff_left is not None:
+                    dropoff_until = now + dropoff_left
                     dropoff_asked = True
                     # `do_read` here looks redundant against the beat further
                     # down, and on the FIRST press it is: last_dropoff_read
@@ -2920,8 +3071,36 @@ def main():
                     # timing-sensitive test, and written down so it does not get
                     # deleted as dead on the strength of the first press alone.
                     moved = do_read = True
-                    log('reading the destination for the next %d seconds: put '
-                        'the address on the phone' % int(DROPOFF_WINDOW))
+                    log('reading the destination for the next %.1f seconds: '
+                        'put the address on the phone' % dropoff_left)
+
+                # A cost per mile typed on the keypad. Taken in the loop, never
+                # by a restart: a restart costs an aim-and-calibrate cycle, which
+                # is a minute of no readings mid-shift for a change of one
+                # number. Written into the same dict digest() reads per card —
+                # in place, so there is only ever the one — and saved, so the
+                # next start begins from it.
+                #
+                # And read again now, for the reason the drawn box below is: a
+                # card sitting still on the phone produces no motion, and the
+                # panel would go on saying "after $0.30/mi costs" under it until
+                # the next verify beat. That string is how the driver sees the
+                # change take effect, so it should take effect on the card in
+                # front of them. The journal does not grow for it: consider()
+                # decides novelty on the reading's content, which the cost is
+                # not part of.
+                cost = settings_requested()
+                if cost is not None:
+                    live = cfg.setdefault('settings', {})
+                    was = OP.setting(live.get('costPerMile'),
+                                     OP.DEFAULT_SETTINGS['costPerMile'])
+                    live['costPerMile'] = cost
+                    save_config(args.config, cfg)
+                    if args.json:
+                        emit_settings(live)
+                    moved = do_read = True
+                    log('cost per mile set to $%.2f from a screen (was $%.2f): '
+                        'the next reading is costed at it' % (cost, was))
 
                 # A box drawn on the live view. It arrives as fractions of the
                 # frame, which is the only form that survives the trip: what the

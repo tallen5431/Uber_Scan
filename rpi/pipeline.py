@@ -1400,7 +1400,7 @@ def second_look_agrees(first, second):
 class Scanner:
     """Holds the motion gate and the agreement counter across frames."""
 
-    def __init__(self, quad=None, settings=None, agree_to_lock=2,
+    def __init__(self, quad=None, agree_to_lock=2,
                  card_height=CARD_HEIGHT, config=OCR_CONFIG, roi=None,
                  ocr_height=OCR_CARD_HEIGHT, card_share=None):
         self.quad = None if quad is None else np.asarray(quad, dtype=np.float32)
@@ -1416,7 +1416,6 @@ class Scanner:
         # only to shrink it back down again against MAX_OCR_PIXELS. Same text,
         # three times the work, and smaller by the time it is read.
         self.fixed_card_share = card_share
-        self.settings = settings or {}
         self.agree_to_lock = agree_to_lock
         self.card_height = card_height
         self.ocr_height = ocr_height
@@ -1749,13 +1748,20 @@ class Scanner:
         clipped = money_is_clipped(lines, prepped.shape[0])
         if clipped:
             parsed = OP.parse('')
-
-        rate = OP.rate(parsed, self.settings)
+        # No rate here. There was one — `OP.rate(parsed, self.settings)`, off a
+        # copy of the settings block the Scanner was handed at startup — and
+        # nothing read it: scan_pi's digest() prices the MERGED reading off the
+        # live config and overwrites `out['rate']` before any consumer looks,
+        # and no other caller of look/read ever asked for it. It was a second
+        # settings object with no reader, which is the shape of a fault waiting
+        # for its first change: a cost per mile set from a screen reaches one
+        # copy, and the other goes on disagreeing about the driver's money in
+        # the same process. Pricing belongs to the caller that knows the
+        # settings in force now.
         t4 = time.perf_counter()
 
         return {
             'parsed': parsed,
-            'rate': rate,
             'locked': self.locked,
             'text': text,
             # Why a read was unsatisfying, for whoever has to explain it later.

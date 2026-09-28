@@ -139,7 +139,12 @@ var scanner = {
   // startScanner() deliberately leaves them alone. See the note there.
   offer: null,         // the last offer read, so it can still be marked taken
   offerAt: null,
-  holding: null        // the order being carried, if any. See holding().
+  holding: null,       // the order being carried, if any. See holding().
+  // What the running scanner says it is pricing a mile at — its own word, off
+  // the stream, not a file on this machine. A fact about the PROCESS, so
+  // startScanner() clears it: the next one reads config.json afresh and says
+  // again. See /api/settings.
+  costPerMile: null
 };
 
 var listeners = [];    // open server-sent-event responses
@@ -213,6 +218,7 @@ function startScanner() {
   scanner.started = Date.now();
   scanner.error = null;
   scanner.heardAt = null;          // nothing from the scan loop yet
+  scanner.costPerMile = null;      // ...and nothing about its settings either
   // What is NOT cleared here, and why.
   //
   // `started`, `error` and `heardAt` are facts about the PROCESS, and a new
@@ -315,6 +321,11 @@ function startScanner() {
         }
         // Setup messages carry no rate, so they must not overwrite the last read.
         if (read.ready !== undefined) scanner.last = read;
+        // The cost per mile the scan loop is using, said when it starts and
+        // whenever the driver changes it. See /api/settings.
+        if (read.settings && typeof read.settings.costPerMile === 'number') {
+          scanner.costPerMile = read.settings.costPerMile;
+        }
         // Which offer is on the record, so the driving screen can offer to mark
         // it as taken. Held here as well as pushed, because a tab opened after
         // the card has gone — which is the normal case, the driver accepts on
@@ -765,6 +776,7 @@ var WATCH_PATH = handoffPath('.viewing');
 var RESET_PATH = handoffPath('.recalibrate');
 var DROPOFF_PATH = handoffPath('.dropoff');
 var CROP_PATH = handoffPath('.cropbox.json');
+var SETTINGS_PATH = handoffPath('.settings.json');
 /* One counter for every temporary this process publishes through a rename, so
  * no two of them can pick the same name. It was `cropSeq` and served the one
  * endpoint that had the rule applied; three other sites wrote a fixed
@@ -912,9 +924,11 @@ if (!isFinite(HOLD_GRACE_MS) || HOLD_GRACE_MS < 0) HOLD_GRACE_MS = 10 * 60000;
  * was built for.
  *
  * THE COMMENT AT /api/delivered ARGUED THE OPPOSITE and it is answered rather
- * than ignored. It says the hold "is memory only, and a restarted server simply
- * has no order in hand, which is the safe way to be wrong". Both halves are
- * right about the ERRORS — forgetting an order that is there costs advice,
+ * than ignored. It said the hold "is memory only, and a restarted server simply
+ * has no order in hand, which is the safe way to be wrong" — in the present
+ * tense, after this file had stopped doing it, and rpi/README.md said the
+ * same; both now describe this file instead. Both halves are right about the
+ * ERRORS — forgetting an order that is there costs advice,
  * remembering one that is not puts a pair rate on the glass for a job already
  * delivered, and the second is worse. What does not follow is that keeping it
  * causes the second: `holding()` expires an order on its own stated time plus
@@ -1226,9 +1240,10 @@ var JOURNAL_PATH = process.env.JOURNAL || path.join(ROOT, 'rpi', 'journal.jsonl'
  *
  * It belongs in RAM, not on the card. The view refreshes about fourteen times a
  * second while someone is watching, at ~50kB a frame — roughly 2.5GB an hour
- * written to the SD card, against about 19MB a *year* for the journal. Every
- * byte of it is stale two frames later and none of it needs to survive a
- * reboot, so writing it to the one part of this system that wears out was
+ * written to the SD card, against 5.7MB a *week* for the journal (measured in
+ * rpi/journal.py's WEEK_BYTES). Every byte of it is stale two frames later and
+ * none of it needs to survive a reboot, so writing it to the one part of this
+ * system that wears out was
  * paying a real cost for nothing. pipeline.py already stages its OCR images in
  * /dev/shm for exactly this reason; the live frame simply never got the same
  * treatment.
@@ -2056,14 +2071,19 @@ function parseLines(text, rows, torn) {
 
 // The journal, parsed once, and after that only the part that grew.
 //
-// It was read and parsed whole on every call — a year of driving is about
-// 20MB and fifty thousand rows, measured at 150-265ms on a desktop and, per
-// the estimate this file has carried for a while, the best part of a second
-// on a Pi 4 — on the event loop that also relays the live picture to the
-// panel. Every offers-page load paid it. Worse, every offer the scanner
-// appends changes the file, so the driving screen's next /api/today poll
-// paid it again: a second of frozen picture, every few minutes, for the
-// whole shift.
+// It was read and parsed whole on every call, on the event loop that also
+// relays the live picture to the panel. The first timing, 150-265ms on a
+// desktop, was of a 20MB file of fifty thousand short rows — about 400 bytes
+// a row, where the real week's average 1,752 (rpi/journal.py's WEEK_BYTES,
+// 5.7MB a week over 3,265 rows) — so it was not a real journal's shape, and
+// calling it three and a half weeks counted its bytes and not its rows.
+// Re-timed on real rows: a third of the 64MB roll, 22.4MB and 12,766 rows of
+// the replayed week, parses here in 64-223ms over 48 runs (medians 87-93) on
+// the development container. Not timed on a Pi 4, which is slower.
+//
+// Every offers-page load paid it. Worse, every offer the scanner appends
+// changes the file, so the driving screen's next /api/today poll paid it
+// again: a frozen picture, every few minutes, for the whole shift.
 //
 // The file is append-only apart from the 64MB roll, so what was parsed last
 // time is still true and only the bytes past it are new. Kept: the inode,
@@ -2473,10 +2493,12 @@ function shiftSummary(rows, since) {
 //
 // The parse is synchronous once the file is in hand — split, then a JSON.parse
 // per line — and it runs on the event loop that also drives the 12ms MJPEG tick
-// and touches the file telling the scanner somebody is watching. A year of
-// driving is a ~19MB journal and something on the order of a second of frozen
-// loop on a Pi 4, so a page that asks repeatedly cannot be paying that every
-// time. /api/journal/newest already sets the house budget for a journal-reading
+// and touches the file telling the scanner somebody is watching. The live file
+// reaches 64MB before it rolls — at most about twelve weeks at the 5.7MB a
+// week rpi/journal.py's WEEK_BYTES measures — and a third of that in real
+// rows, 22.4MB, parses in 64-223ms on the development container (see
+// parseLines' caller above) and more on a Pi 4, so a page that asks
+// repeatedly cannot be paying that every time. /api/journal/newest already sets the house budget for a journal-reading
 // GET at "every few minutes"; this keeps to it and then some.
 //
 // Keyed on SIZE as well as mtime because the file is append-only apart from the
@@ -2823,21 +2845,81 @@ function route(req, res) {
    *
    * Separate from the mark, and deliberately: the mark is a permanent fact
    * about the journal — this offer was taken — and dropping it off does not
-   * make that untrue. Only one of the two belongs on disk. This changes nothing
-   * but what the panel measures the next card against, so it is memory only,
-   * and a restarted server simply has no order in hand, which is the safe way
-   * to be wrong.
+   * make that untrue, so the mark is never touched here. The hold itself is
+   * not in the journal either: it lives in holding.json beside it, written by
+   * setHolding() and read back by loadHolding() — see the comment above
+   * those, which answers what this one used to say ("memory only").
+   *
+   * WHAT IS APPENDED is a second fact, not an edit of the first: a `kind:
+   * 'drop'` row saying that at this moment the driver pressed Drop on this
+   * offer. It is the one quantity the ledger says the rig lacks — the re-timing
+   * entry in AUDITS.md's Settled closes on "the honest route to the driver's
+   * actual question needs elapsed times, not a model of them ... That is a data
+   * problem" — and it costs the driver nothing, because they already press
+   * Drop and the hold already knows when the card was on the screen.
+   *
+   * COLLECTION ONLY. Nothing in this repository reads a drop row, and nothing
+   * may divide by `at - acceptedAt`: an observed elapsed time turned into a
+   * rate on the glass is the re-timing Settled refuses, arriving by a new door.
+   * It is data to be held against the card's own stated minutes, by hand, once
+   * a week of it exists. And it is censored: a row exists only for a press
+   * made while holding() still held the job, so a delivery that ran past its
+   * stated time × HOLD_OVERRUN + HOLD_GRACE_MS leaves no row at all. Absence is
+   * not "never delivered".
+   *
+   * And it names the order the RIG was holding, which is not always the one
+   * just delivered. The hold is one slot and the last tick takes it, so with
+   * two jobs in the car a Drop pressed at the first delivery puts down — and
+   * writes a row naming — the second, which is still in the car; the press at
+   * the second delivery then finds nothing held and writes nothing. On the
+   * week of 1,166 offers, 7 of the 31 ticks landed while an earlier tick was
+   * still inside its own stated minutes, and in 6 of those the earlier job was
+   * stated to end first. So `at - acceptedAt` on a drop row is an elapsed time
+   * for the named job only when no other tick overlaps it; whoever reads these
+   * rows checks the marks either side before trusting one.
+   *
+   * `seq` is the press time, NOT 1. syncKey carries an unknown kind across on
+   * `[kind, id, seq]`, so with a constant seq every drop row for one offer
+   * collapses onto one key and the second is thrown away on the copy at home
+   * as a duplicate of the first — the same collapse the `id: null` paragraph
+   * in syncKey records. Re-ticking the same card and dropping it again is two
+   * presses and two rows. Keyed by the fallback rather than by a branch of its
+   * own, so a NucBox one build behind still stores it.
    *
    * It answers the same either way. Pressing "delivered" with nothing in the
-   * car is not an error a driver needs told about; it is the state they wanted. */
+   * car is not an error a driver needs told about; it is the state they wanted,
+   * and there is no offer to name, so nothing is written. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/delivered') {
     // holding(), not the raw slot: "there was an order to put down" has to mean
     // the same thing here as it does on the panel, or the driver is told they
     // put down a job the rig stopped counting an hour ago.
-    var wasHolding = !!holding(Date.now());
+    //
+    // Asked BEFORE setHolding(null), and kept: after it, holding() answers
+    // null and the row would have no offer to name.
+    var droppedAt = Date.now();
+    var dropped = holding(droppedAt);
     setHolding(null);
-    return send(res, 200, JSON.stringify({ ok: true, wasHolding: wasHolding }),
-                { 'Content-Type': 'application/json; charset=utf-8' });
+    if (!dropped) {
+      return send(res, 200, JSON.stringify({ ok: true, wasHolding: false }),
+                  { 'Content-Type': 'application/json; charset=utf-8' });
+    }
+    return appendLines(JSON.stringify({
+      v: 1, kind: 'drop', at: droppedAt,
+      id: dropped.id, seq: droppedAt,
+      // Dated from the card, as the hold is — see acceptedAt in the mark
+      // handler — so this is the same clock holding() expires the job on.
+      acceptedAt: dropped.acceptedAt
+    }) + '\n', function (err) {
+      // The order is down whether or not the row landed, so the answer is
+      // still ok: the panel believes this reply about the HOLD (see the Drop
+      // handler in live.html) and the hold is gone. The lost row is said out
+      // loud like every other append on this server, because a collection
+      // that silently stopped would be read in a week as a driver who never
+      // pressed Drop.
+      if (err) console.error('journal: could not record a drop: ' + err.message);
+      send(res, 200, JSON.stringify({ ok: true, wasHolding: true }),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    });
   }
 
   // The one thing on this server that is not a read. It asks the scanner to
@@ -2878,9 +2960,9 @@ function route(req, res) {
   // The rig lives in a car behind cellular NAT, so nothing here can reach it —
   // it has to push, and it pushes to whatever host is running this file with
   // SCANNER=0 and JOURNAL pointed at the copy. That copy is the reason this
-  // exists: the journal is the one irreplaceable thing the rig produces, about
-  // 19MB a year, and until now there was exactly one of it, on an SD card, in a
-  // car.
+  // exists: the journal is the one irreplaceable thing the rig produces, 5.7MB
+  // a week of driving (rpi/journal.py's WEEK_BYTES, where that is measured),
+  // and until now there was exactly one of it, on an SD card, in a car.
   //
   // Idempotent on purpose, and that is the whole design. Every row can say what
   // makes it itself (see syncKey), so the same batch can arrive twice — or ten
@@ -3392,6 +3474,124 @@ function route(req, res) {
                                       offersSince: wantWindow ? offersSince : undefined,
                                       can: SYNC_CAN }),
            { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
+
+  /* The driver's cost per mile — ONE key, and deliberately not "the settings".
+   *
+   * Every verdict the rig prints is net of it, and it was the one number in
+   * them nobody had chosen: `costPerMile` is 0.3 on all 1,166 rows of the real
+   * week, the factory seed, because the rig's copy lives in a JSON file edited
+   * over SSH and read once at startup. It moves the answer a lot. Re-scored at
+   * $0.00 / $0.15 / $0.30 / $0.45 / $0.70 a mile — rate()'s own arithmetic,
+   * which reproduces the rig's 106 recorded greens exactly at $0.30 — the same
+   * week has 290 / 181 / 106 / 78 / 52 green cards and 146.6 / 88.7 / 46.0 /
+   * 31.4 / 21.5 green job-hours: 89 hours or 31 between two defensible
+   * figures. The rig cannot work it out (31 of those 1,166 offers are ticked
+   * taken, so its miles are offered miles, not driven ones); it has to be told.
+   *
+   * WHY ONE KEY. The `settings` block is not a list of preferences. It also
+   * holds `keepPlaces`, which decides whether addresses are written into the
+   * append-only journal at all, and `pad` and `secondsPerItem`, which move
+   * `billedMinutes` and so every rate the rig prints and stores. A route
+   * scoped to "the block" could switch off place recording, or shift the money
+   * on every row that follows, from a screen, with nothing on any page saying
+   * so. So a body naming anything but `costPerMile` is refused whole, and the
+   * scan loop reads nothing but `costPerMile` out of the file either.
+   *
+   * WHY IT SAYS WHICH MACHINE. The copy at home runs this same server, with
+   * SCANNER=0 and an rpi/config.json of its own. A POST there would write a
+   * file no scanner ever reads and answer ok — the driver would believe the
+   * rig had it. So `scanner` is in every answer, and a machine with none
+   * refuses the write rather than performing it.
+   *
+   * Through the handoff directory rather than into rpi/config.json. The scan
+   * loop writes that file from its own memory, whole — save_config, at four
+   * call sites before this one — so a value this process wrote there could be
+   * written back
+   * over by the scanner's next save before it had read it — an ok answered for
+   * a change that silently un-happens. The scanner takes the request, applies
+   * it in the loop, saves it itself, and says what it is now using; GET answers
+   * from that, not from a file.
+   *
+   * Nothing is restarted for it: a restart is an aim-and-calibrate cycle mid-
+   * shift. The panel's existing "after $0.30/mi costs" on every reading is how
+   * the driver sees it take effect.
+   */
+  if (req.url.split('?')[0] === '/api/settings'
+      && (req.method === 'GET' || req.method === 'POST')) {
+    var settingsReply = function (code, body) {
+      send(res, code, JSON.stringify(body),
+           { 'Content-Type': 'application/json; charset=utf-8' });
+    };
+    // A request written and not yet taken, so a panel opened in between can
+    // say the change is on its way rather than that it did not happen.
+    var pendingCost = function (then) {
+      fs.readFile(SETTINGS_PATH, 'utf8', function (err, text) {
+        var sent = null;
+        if (!err) {
+          try { sent = JSON.parse(text).costPerMile; } catch (e) { sent = null; }
+        }
+        then(typeof sent === 'number' ? sent : null);
+      });
+    };
+    if (req.method === 'GET') {
+      if (!scannerEnabled()) {
+        return settingsReply(200, { ok: true, scanner: false, costPerMile: null,
+                                    pending: null });
+      }
+      return pendingCost(function (pending) {
+        settingsReply(200, { ok: true, scanner: true, running: !!scanner.proc,
+                             // null until the scan loop has said: aiming and
+                             // calibrating come first, and a figure read off a
+                             // file here would be a guess about the process.
+                             costPerMile: scanner.costPerMile,
+                             pending: pending });
+      });
+    }
+    return readJsonBody(req, function (err, body) {
+      if (err || !body || Array.isArray(body)) {
+        return settingsReply(400, { ok: false, error: 'not a JSON object' });
+      }
+      var others = Object.keys(body).filter(function (k) { return k !== 'costPerMile'; });
+      if (others.length) {
+        return settingsReply(400, {
+          ok: false,
+          error: 'only costPerMile can be set here; refused: ' + others.join(', ') });
+      }
+      var cost = body.costPerMile;
+      // A number, not something that reads as one. The config file is lenient
+      // because a person hand-edits it (see OP.setting); a screen sends JSON,
+      // and "0.45" arriving as a string is a client that is not this one.
+      if (typeof cost !== 'number' || !isFinite(cost) || cost < 0) {
+        return settingsReply(400, { ok: false,
+                                    error: 'costPerMile must be a number, 0 or more' });
+      }
+      if (!scannerEnabled()) {
+        return settingsReply(409, {
+          ok: false, scanner: false,
+          error: 'no scanner runs on this machine, so nothing here would use '
+                 + 'it — set it on the rig' });
+      }
+      // A name per request, for the reason /api/crop gives: two presses landing
+      // together would interleave into one shared `.part` and the rename would
+      // publish the mixture. No queue as well — there is nothing to merge, the
+      // last figure typed is the right one, and a second cure would hide
+      // whether the first one works (see /api/config/backup).
+      var tmp = partName(SETTINGS_PATH);
+      fs.writeFile(tmp, JSON.stringify({ costPerMile: cost }), function (writeErr) {
+        var failed = function (e) {
+          fs.unlink(tmp, function () {});
+          console.error('settings: ' + e.message);
+          settingsReply(500, { ok: false, scanner: true, error: 'could not save' });
+        };
+        if (writeErr) return failed(writeErr);
+        fs.rename(tmp, SETTINGS_PATH, function (renameErr) {
+          if (renameErr) return failed(renameErr);
+          settingsReply(200, { ok: true, scanner: true, running: !!scanner.proc,
+                               costPerMile: scanner.costPerMile, pending: cost });
+        });
+      });
     });
   }
 

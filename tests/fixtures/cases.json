@@ -977,7 +977,8 @@
    "text": "$25.60 Guaranteed (incl. tips) 8.3 mi + 36 min @ Retail pickup GoPuff (Drive) $10.40 Guaranteed (incl. tips) 12.1 mi + 40 min @ Pickup Talkin Tacos",
    "expect": {
     "minutes": 36,
-    "miles": 8.3
+    "miles": 8.3,
+    "shortATime": false
    }
   },
   {
@@ -1466,6 +1467,116 @@
     "pay": 16.05,
     "miles": 1.2
    }
+  },
+  {
+   "name": "one payout in shot and two cards: the legs above the payout are the other card's",
+   "_why": "Row 908 of the owner's week, frame 0, verbatim. Uber Eats' list cropped the upper card's payout off the top and left its `15 min (5.4 mi) total`, its merchant and its destination in shot, above the $11.06 card. With one payout on the frame no boundary was drawn, both totals were summed and the neighbour's merchant was published as the pickup: 40 min / 13.5 mi / Little Caesars, whole, no doubt, into the append-only journal. The card on screen is 25 min / 8.1 mi from American Deli. What the fix keys on is a `total` printed ABOVE the only payout, with a leg of this card's own below it: a total is a whole journey, and a card prints its payout before its journey.",
+   "text": "© 15 min (5.4 mi) total\n| Little Caesars (3372 Canton Rd)\nBarrington Overlook & Barrington PI\nMarietta\n= x\n$11.06\nIncludes expected tip\n© 25 min (8.1 mi) total\nAmerican Deli (Marietta, GA)\nI Big Shanty Rd Pidden Forest Ct,\nMarietta\nO < *",
+   "expect": {
+    "pay": 11.06,
+    "minutes": 25,
+    "miles": 8.1,
+    "pickup": "American Deli (Marietta, GA)",
+    "shortATime": false,
+    "untimedMiles": null
+   }
+  },
+  {
+   "name": "...and when the card's own leg is not labelled a total, it is still the card's own",
+   "_why": "Row 450, frame 0, verbatim, and the shape a `second total leg` rule would miss. The only `total` on the frame is the cropped upper card's `24 min (3.6 mi) total`; the $16 card's own `15 min (5.6 mi)` carries no label, so `used = totals or legs` kept the NEIGHBOUR's leg and threw this card's away. On disk as 24 min / 3.6 mi, $37.30/hr: substituted, not summed. Its cents did not read either, so no rule here may ask the chosen payout for cents. And the leg it keeps is not the journey: the $16 card is a RIDE (`*497 Verified`), which prints the drive to the rider and then the trip, and the frame ends after the first. So it is short a timed leg whose distance nobody read — shortATime with no untimedMiles, never the neighbour's 3.6 mi, which is a leg that WAS timed.",
+   "text": "> meenete tip\nOy © 24 min (3.6 mi) total fs\n» | * i\naX I Main Street Eats Burgers He\nXX N Roberts Rd NW, Kennesaw | ee\ni ie\nnN fh\nNy aie\n* \\ rf ;\nrs if\nP More trip requests pate.\naN me may be outside your preferences Be\ni\nA : » “s\not ei\ny= ~ BS\nKy\n*11\n$16 Kt\n5 ns\nLb *497 @ vie®\n> ;\n\\, 15 min (5.6 mi)\n3 Crestwind Rd & Crestwind Rd NW,\nx Kennesaw\nO CZ\n.",
+   "expect": {
+    "pay": 16,
+    "minutes": 15,
+    "miles": 5.6,
+    "shortATime": true,
+    "untimedMiles": null
+   }
+  },
+  {
+   "name": "a bare $5 off the map is not the next card's headline",
+   "_why": "Row 505, frame 2, verbatim. A `$5` in the map sludge beside `$11.47` was taken as a second card's headline, so the card was cut off at character 81 and the frame gave no minutes, no miles and no places at all: the Kroger and the destination disappeared with nothing saying so. A headline prints its cents, or has the card's label or the rider's star right after it; the `$5` has neither (`$5 | Guaranteed` is the `|` between them). On the week's 5,491 frames, 71 figures other than the chosen payout armed this boundary, on 47 rows; 69 printed no cents, and the 2 that did are row 410's genuine second card, `$6.53`, on two frames.",
+   "text": "fs\nz\n¢\n°\n$\né\n5 3 2\nMe 2 }\n3\n; 3 J\n‘ PTT e Exclusive 4 |\not }\ngl | $11.47 z\n£ | 5 $5\n| Guaranteed (incl. tip) ra\nle\nAi\n+ © 10 items (10 units) re\n'\nit © 36 min (26 mi) total\nib ;\nf Kroger (Butler Creek) nig\n, I Indigo Creek Trl NW & Juniper Dr im\nt NW, Kennesaw ate\n¥\ni a\n1%\n1 :",
+   "expect": {
+    "pay": 11.47,
+    "minutes": 36,
+    "miles": 26,
+    "pickup": "Kroger (Butler Creek)"
+   }
+  },
+  {
+   "name": "...nor a bare $ 3 printed between a card's own two legs",
+   "_why": "Row 2, frame 0, verbatim. The stray `$ 3` sits between the $26.04 card's `8 min (3.2 mi)` and its `39 mins (25.1 mi)`, so one_card kept only the approach and the panel showed $26.04 over 8 minutes. See the matching rate case.",
+   "text": "phen\nahaa err .\nante\nhes\nra =\nOe.\nOh. apr\ney; =O) ee ay\nae | ny\na | 2?\na | | ps\n= | § $26.04 3\nSoa | x\ni pI & 486 © verified x\n% =\nSA! | @® +$3.88 included for priority fe\n* ty 8 min (3.2 mi) $ 3\ny Ector Chase NW & Ector Overlook Le\nt S | NW, Kennesaw i\na | 39 mins (25.1 mi) Hat\nere: Hale St NE & Inman Village Pkwy NE, ‘a\ni Atlanta ws\nate’\n4, mi from fast charger ig\np ons\n- Gi\n7s\nSe fe) pe eee",
+   "expect": {
+    "pay": 26.04,
+    "minutes": 47,
+    "miles": 28.3
+   }
+  },
+  {
+   "name": "...nor a bare $4 twelve characters after the payout",
+   "_why": "Row 439, frame 3, verbatim. A `$4` just after `$18.61` cut the card at the $4 and the frame gave nothing. It was the first frame to read the destination; frames 6 and 7 read it too, but by then three frames' copies of the merchant and one more on frame 6 had filled the four places the merge keeps, and the published row went to the journal with no dropoff.",
+   "text": "pocsaw\ni a\n<) Ny\n! in F\nna x ?\n4 a, Piss\nx ag af P37 4\nAN a Bes i\n% Fes}:\nMarietta Ste\nvy pay\nLhe a thes\n¢ 4 SATET\nLeas mie eps\na) rg\n2 5\n| (xm . ES\nty SS\nwy | $18.61 i bg $\n4 | ‘\ni Includes expected tip N\n, © 44 min (129 mi) total sous\ntf a)\nY Super Chix (Kennesaw) 77)\nba\nv I Capriole Dr NE & Mitchell Rd,\n\\ Marietta ?\nLt\n\\ |\n, UE Col\ntH O < *",
+   "expect": {
+    "pay": 18.61,
+    "minutes": 44,
+    "miles": 12.9
+   }
+  },
+  {
+   "name": "...and the cropped card's item count is not this card's either",
+   "_why": "Row 908's shape with the upper card's `6 items (6 units)` also in shot, which is where an Uber Eats card prints it: above its leg, so above the lower card's payout. one_card cuts the upper card's leg, and the merchant goes with it because places are read off legs; the item count is read off the card's words, so the span has to start at the payout too. Without it this card was charged nine minutes of shopping at 90s an item: $20.71/hr priced as $15.23/hr. No frame of the owner's week has this shape; it is the reason card_span's one-payout branch exists.",
+   "text": "6 items (6 units) 15 min (5.4 mi) total Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta $11.06 Includes expected tip 25 min (8.1 mi) total American Deli (Marietta, GA) Big Shanty Rd, Marietta",
+   "expect": {
+    "items": null,
+    "minutes": 25
+   }
+  },
+  {
+   "name": "a real second card, printed to the cent, still bounds the first",
+   "_why": "Row 410, frame 0, verbatim: the one genuine second card in the owner's week, a `$6.53` offer above the $24.05 one. Its `36 min (7.9 mi) total` sits above the $24.05 and must stay off it: the $24.05 card reads 14 min / 3.7 mi on its own, and with no boundary at all `used = totals or legs` prices it on the neighbour's total alone, a green $36.13/hr. This is what a boundary rule narrowed too far would cost. The $24.05 card is a ride and the frame ends after its first leg, so it is short a timed leg — but not the Jason's Deli `(7.9 mi)`, which its own total claimed.",
+   "text": "a\nx\nWw\n“gy $6.53 :\nA Includes expected tip BAS.\nwy 34\nban\nDAK © 36 min (7.9 mi) total\niit Jason's Deli (945 Ernest W Barrett\nAY <¥ | Parkway) J\nLt Highcreek Vw NW & Palisades Main\nSAY NW, Kenne\nAY ennesaw\nLut\nAt\nM,\nrs\n+\n+ tet >\ntf 5 Turned Off - Uberx A\nbe\na GD x EE\n$24.05 ;\n.\n| *% 491 @ Verified\n: f 14 min (3.7 mi)\ni ei “esas\nll Oo < *",
+   "expect": {
+    "pay": 24.05,
+    "minutes": 14,
+    "miles": 3.7,
+    "shortATime": true,
+    "untimedMiles": null
+   }
+  },
+  {
+   "name": "a headline the reader cut in half is one payout, not two cards",
+   "_why": "PAY_SPLIT joins `$1 0.10` into $10.10 at the same position as the `$1` fragment it was built from, and both went into find_pay's list of headlines, so a one-card frame counted as two and one_card kept only legs after the payout: this card, whose leg sits above it, read no minutes and no places and was refused as empty. The same card with `$10.10` whole reads 25 min / 8.1 mi from American Deli. The fragment prints no cents and is followed by digits, not by the label, so it is no headline. 17 of the week's 1,166 rows carry a split on some frame, 30 frames in all; none has a leg above the payout, so this is the corpus holding a shape the week has not yet produced.",
+   "text": "Delivery Exclusive 25 min (8.1 mi) total American Deli (Marietta, GA) Big Shanty Rd, Marietta $1 0.10 Guaranteed (incl. tip)",
+   "expect": {
+    "pay": 10.1,
+    "minutes": 25,
+    "miles": 8.1,
+    "pickup": "American Deli (Marietta, GA)"
+   }
+  },
+  {
+   "name": "a whole-dollar card below still bounds the first: DoorDash prints `$7 Guaranteed`",
+   "_why": "A figure printed without cents was refused as a headline, on the stated grounds that both apps print a payout to the cent. They do not: row 475 of the owner's week reads `$6 Guaranteed (incl. tip)` on all seven frames, and rows 374, 479, 584, 602 and 604 print `$7` or `$6` the same way. With cents required the $7 card's leg was summed into the $12.50 card's: 40 min, and its Taco Bell read as this card's. The label right after the figure is what a headline has and a map glyph does not: none of the 121 cents-less figures the week offered as a second headline has one.",
+   "text": "$12.50 Guaranteed (incl. tips) 8.0 mi + 25 min @ Pickup Crumbl $7 Guaranteed (incl. tips) 3.1 mi + 15 min @ Pickup Taco Bell",
+   "expect": {
+    "pay": 12.5,
+    "minutes": 25,
+    "miles": 8.0,
+    "pickup": "Crumbl",
+    "shortATime": false
+   }
+  },
+  {
+   "name": "...and so does a whole-dollar ride below, by the rider's star",
+   "_why": "Uber prints a ride's whole-dollar fare the same way: row 79 reads `$18 * 5.00` on all three frames. Row 227's shape with the lower fare printed so: with cents required, the $16 card's 19 min (12.8 mi) was summed into the $22.03 card, 54 min / 32.5 mi, NO at $13.64/hr for a $27.63/hr card.",
+   "text": "$22.03 * 4.95 12 min (6.6 mi) Oak St & Elm St, Marietta 23 mins (13.1 mi) Pine St & Main St, Atlanta $16 * 4.90 19 min (12.8 mi) Cedar Rd, Kennesaw",
+   "expect": {
+    "pay": 22.03,
+    "minutes": 35,
+    "miles": 19.7
+   }
   }
  ],
  "rate": [
@@ -1927,6 +2038,95 @@
    "expect": {
     "shopMinutes": 0,
     "fromDeadline": true
+   }
+  },
+  {
+   "name": "row 908: the card on screen, not the two cards on the frame",
+   "_why": "The panel showed $10.52/hr for the $11.06 card by pricing it over both cards' totals. Its own 25 min / 8.1 mi is $20.71/hr. Both are below the line, so the light did not change; the number did, and so did the journal row.",
+   "text": "© 15 min (5.4 mi) total\n| Little Caesars (3372 Canton Rd)\nBarrington Overlook & Barrington PI\nMarietta\n= x\n$11.06\nIncludes expected tip\n© 25 min (8.1 mi) total\nAmerican Deli (Marietta, GA)\nI Big Shanty Rd Pidden Forest Ct,\nMarietta\nO < *",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "perHour": 20.71,
+    "state": "no",
+    "doubt": null
+   }
+  },
+  {
+   "name": "a crop whose card above is the longer journey: its leg is not one this card could not time",
+   "_why": "Row 908's shape with the upper card's total the longer one. After the upper card's leg was cut, its bracket was read against the legs this card kept and taken for a leg of this card that lost its minutes: withheld as doubt `leg`, and the panel said 'The card shows a leg this reading could not time — 19.4 mi of it' of a card whose one leg was timed. The rig can never clear that, because every frame shows both cards.",
+   "text": "45 min (19.4 mi) total Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta $11.06 Includes expected tip 25 min (8.1 mi) total American Deli (Marietta, GA) Big Shanty Rd, Marietta",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "perHour": 20.71,
+    "state": "no",
+    "doubt": null,
+    "untimedMiles": null
+   }
+  },
+  {
+   "name": "row 410: a ride cut off after its first leg is withheld for the leg it lacks, not the neighbour's",
+   "_why": "Row 410, frame 0, verbatim. The $24.05 ride shows only its drive to the rider, 14 min (3.7 mi): $98.31/hr over the approach. It was withheld, but by accident, with 'a leg this reading could not time — 7.9 mi of it' (79 on the other frame): the Jason's Deli card's total, which was timed. With that accident repaired this reading would go out green and whole unless the missing trip leg is named for what it is.",
+   "text": "a\nx\nWw\n“gy $6.53 :\nA Includes expected tip BAS.\nwy 34\nban\nDAK © 36 min (7.9 mi) total\niit Jason's Deli (945 Ernest W Barrett\nAY <¥ | Parkway) J\nLt Highcreek Vw NW & Palisades Main\nSAY NW, Kenne\nAY ennesaw\nLut\nAt\nM,\nrs\n+\n+ tet >\ntf 5 Turned Off - Uberx A\nbe\na GD x EE\n$24.05 ;\n.\n| *% 491 @ Verified\n: f 14 min (3.7 mi)\ni ei “esas\nll Oo < *",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "state": "doubt",
+    "doubt": "leg",
+    "untimedMiles": null
+   }
+  },
+  {
+   "name": "row 908's shape with the cropped card's items in shot: no shopping charged for them",
+   "text": "6 items (6 units) 15 min (5.4 mi) total Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta $11.06 Includes expected tip 25 min (8.1 mi) total American Deli (Marietta, GA) Big Shanty Rd, Marietta",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3,
+    "secondsPerItem": 90
+   },
+   "expect": {
+    "shopMinutes": 0,
+    "perHour": 20.71
+   }
+  },
+  {
+   "name": "row 450: not priced on the neighbour's leg, nor on its own approach alone",
+   "_why": "Published $37.30/hr on the cropped Eats card's 24 min / 3.6 mi. Its own 15 min / 5.6 mi is $57.28/hr, and that is not the offer either: the $16 card is a ride cut off by the frame after its drive to the rider, so the trip is missing and its size is unknown. Withheld as a leg the reading could not time, with no distance claimed for it: the 3.6 mi a first repair reported here was the neighbour's timed total.",
+   "text": "> meenete tip\nOy © 24 min (3.6 mi) total fs\n» | * i\naX I Main Street Eats Burgers He\nXX N Roberts Rd NW, Kennesaw | ee\ni ie\nnN fh\nNy aie\n* \\ rf ;\nrs if\nP More trip requests pate.\naN me may be outside your preferences Be\ni\nA : » “s\not ei\ny= ~ BS\nKy\n*11\n$16 Kt\n5 ns\nLb *497 @ vie®\n> ;\n\\, 15 min (5.6 mi)\n3 Crestwind Rd & Crestwind Rd NW,\nx Kennesaw\nO CZ\n.",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "state": "doubt",
+    "doubt": "leg",
+    "untimedMiles": null
+   }
+  },
+  {
+   "name": "row 2: a stray $ 3 between the legs no longer puts $188/hr on the panel",
+   "_why": "Cut at the `$ 3`, the $26.04 card was priced over its 8-minute approach alone: $188.10/hr, doubted, on the panel for the first frame of the offer. Over the card's own 47 min / 28.3 mi it is $22.40/hr.",
+   "text": "phen\nahaa err .\nante\nhes\nra =\nOe.\nOh. apr\ney; =O) ee ay\nae | ny\na | 2?\na | | ps\n= | § $26.04 3\nSoa | x\ni pI & 486 © verified x\n% =\nSA! | @® +$3.88 included for priority fe\n* ty 8 min (3.2 mi) $ 3\ny Ector Chase NW & Ector Overlook Le\nt S | NW, Kennesaw i\na | 39 mins (25.1 mi) Hat\nere: Hale St NE & Inman Village Pkwy NE, ‘a\ni Atlanta ws\nate’\n4, mi from fast charger ig\np ons\n- Gi\n7s\nSe fe) pe eee",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3
+   },
+   "expect": {
+    "perHour": 22.4,
+    "state": "warn"
    }
   }
  ],
@@ -2809,6 +3009,24 @@
   {
    "name": "a total is a whole journey by itself",
    "text": "$7.09 34 min (3.6 mi) total",
+   "expect": true
+  },
+  {
+   "name": "row 908: a card under a cropped one is finished when its own total is in shot",
+   "_why": "Row 908, frame 0, verbatim. With the upper card's leg cut, its `(5.4 mi)` read as a leg of this card that lost its minutes, so both frames of the row were never whole: never spoken, the panel never settled, journalled whole=0 and set aside by the offers page, and no frame could clear it because every frame shows both cards.",
+   "text": "© 15 min (5.4 mi) total\n| Little Caesars (3372 Canton Rd)\nBarrington Overlook & Barrington PI\nMarietta\n= x\n$11.06\nIncludes expected tip\n© 25 min (8.1 mi) total\nAmerican Deli (Marietta, GA)\nI Big Shanty Rd Pidden Forest Ct,\nMarietta\nO < *",
+   "expect": true
+  },
+  {
+   "name": "one bare leg on a frame holding ONE card is left as it was: an Eats total that read as `tota`",
+   "_why": "Row 429, frame 0, verbatim. The rule that withholds a ride cut off after its first leg asks for another card in shot, and this is why: on a lone card one bracketed leg without `total` is also the Eats card whose `total` did not read (`tota`, `te al`) — seven frames of the week, 429's among them, every one a whole job. Telling those apart from a lone ride that lost its trip leg (rows 444 and 805) is not something the cut-off-card rule can do, so it does not try.",
+   "text": "= aN\n2\ns =\n2 :\n’ e\ni = @ F4F,\nO aieg\n£254\nx 27.\ntie:\nVe @ Moxie Burger ee\n. ae\nhy See\nae 1 he\n4 bag > +3\n‘ ie\n.\naw | $7.23 oo\nA f\noo Includes expected tip\na © 19 min (5.2 mi) tota\n4\n\\ Papa Johns Pizza (2774 Cobb Pkwy\nit Nw Ste103) c\nvc Brittany Chase NW & Sir Johns Ct\na NW, Kennesaw\n143\n\\,\nv\n[ 4\nZ .\naon\nO < t",
+   "expect": true
+  },
+  {
+   "name": "...and a leg the card BELOW lost is that card's business, not this one's",
+   "_why": "The other half of asking the lost-leg question of this card's own words. The $6.53 card under the $24.05 ride lost its minutes to the reader (`SS min`), so its `(7.9 mi)` is a bracket no leg claimed; asked of the whole frame it made the ride, whose two legs both read, a reading short a timed leg that no later frame of the same list can clear.",
+   "text": "$24.05 * 4.91 14 min (3.7 mi) Oak St & Elm St, Marietta 20 min (8.0 mi) Pine St & Main St, Atlanta $6.53 Includes expected tip SS min (7.9 mi) total Jason's Deli (945 Ernest W Barrett Parkway)",
    "expect": true
   },
   {

@@ -112,8 +112,7 @@ for label, screen, want, want_items in CARDS:
         if quad is None:
             continue
 
-        scanner = PL.Scanner(quad=quad, card_height=900,
-                             settings=PROFILES[0][1])
+        scanner = PL.Scanner(quad=quad, card_height=900)
         acc = OfferAccumulator()
         out = scanner.read(frame, now=100.0)
         parsed = acc.add(out['parsed'], now=100.0)
@@ -169,8 +168,7 @@ for theme, pal in (('light', TC.LIGHT), ('dark', TC.DARK)):
         eq(where + ' / the screen is found', quad is not None, True)
         if quad is None:
             continue
-        scanner = PL.Scanner(quad=quad, card_height=900,
-                             settings=DELIVERY_SETTINGS)
+        scanner = PL.Scanner(quad=quad, card_height=900)
         acc = OfferAccumulator()
         out = scanner.read(frame, now=100.0)
         parsed = acc.add(out['parsed'], now=100.0)
@@ -284,7 +282,7 @@ for label, screen, true_pay, true_min, true_miles, settings in SHAPES:
         if quad is None:
             ok += 1                     # refusing to find the screen is a refusal
             continue
-        scanner = PL.Scanner(quad=quad, card_height=900, settings=settings)
+        scanner = PL.Scanner(quad=quad, card_height=900)
         out = scanner.read(frame, now=100.0)
         parsed = out['parsed']
         rate = OP.rate(parsed, settings)

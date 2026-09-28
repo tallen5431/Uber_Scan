@@ -349,6 +349,20 @@ eq('preprocess obeys an explicit polarity',
 eq('...in both directions',
    bool(PL.preprocess(dark_card, dark=False).mean() < 128), True)
 
+# --- the Scanner prices nothing ---------------------------------------------
+# It was handed the settings block at startup and priced every read off that
+# copy, and scan_pi's digest() overwrote the rate with its own, off the live
+# config, before anything read it. A copy with no reader decides nothing until
+# the day a change reaches one of the two and not the other — which a cost per
+# mile set from a screen is. One settings object in the process, owned by the
+# caller that prices.
+eq('the Scanner takes no settings of its own',
+   'settings' in inspect.signature(PL.Scanner.__init__).parameters, False)
+_priced = PL.Scanner(quad=None, card_height=900, ocr_height=900).read(
+    np.full((480, 640, 3), 255, np.uint8), now=1.0)
+eq('...and a read carries no rate for digest() to overwrite',
+   'rate' in _priced, False)
+
 # --- read height: warp once, at the size the reader wants ------------------
 sc = PL.Scanner(quad=None, card_height=900, ocr_height=900)
 eq('a half-card quad warps to double', sc.read_height, 1800)

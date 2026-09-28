@@ -2073,6 +2073,149 @@ no_('...without a stack trace at boot (%r)' % (_herr5[:70].replace('\n', ' '),),
     'uncaught' in _herr5)
 shutil.rmtree(_hdir, ignore_errors=True)
 
+# --- Drop leaves a row saying when ------------------------------------------
+#
+# The one quantity the ledger says the rig lacks is how long a taken job really
+# took, and the driver already presses Drop when it is done. `/api/delivered`
+# put the order down and wrote nothing, so every press was thrown away. It now
+# appends a `kind: 'drop'` row — collection only; nothing reads it.
+#
+# No scanner: the mark carries the offer, which is the restarted-server path in
+# the mark handler, so the hold is the real one and nothing here is staged.
+# `lines` is rebound to a list by the ⌖ block above, so this reads its own.
+def _drows(path):
+    return [json.loads(l) for l in open(path) if l.strip()]
+
+
+_ddir = tempfile.mkdtemp()
+_djournal = os.path.join(_ddir, 'offers.jsonl')
+open(_djournal, 'w').close()
+_dproc, _dbase = start({'SCANNER': '0'}, _djournal)
+try:
+    _doffer = {'id': 'drop-1', 'pay': 14.0, 'minutes': 25.0,
+               'billedMinutes': 25.0, 'miles': 6.0, 'cost': 1.8}
+    _dcode, _dsaid = post(_dbase, '/api/offers/mark',
+                          {'id': 'drop-1', 'accepted': True, 'offer': _doffer})
+    ok_('a marked offer goes in the car', _dsaid.get('holding') is True)
+    with open(os.path.join(_ddir, 'holding.json')) as _fh:
+        _dheld = json.load(_fh)
+    _dbefore = int(time.time() * 1000)
+    _dcode, _dsaid = post(_dbase, '/api/delivered', {})
+    _dafter = int(time.time() * 1000)
+    eq('Drop answers as it always did', (_dcode, _dsaid.get('wasHolding')),
+       (200, True))
+    _drops = [r for r in _drows(_djournal) if r.get('kind') == 'drop']
+    eq('Drop writes a drop row naming the order it put down',
+       [r.get('id') for r in _drops], ['drop-1'])
+    if _drops:
+        _d = _drops[0]
+        ok_('...stamped with the moment of the press',
+            _dbefore <= _d.get('at', 0) <= _dafter)
+        # The press time as seq, so a second drop of the same offer is a second
+        # key to the sync; test_sync.py sends two through the real ingest.
+        eq('...whose seq is the press time, not a constant', _d.get('seq'),
+           _d.get('at'))
+        eq('...carrying when the card was on the screen, off the hold itself',
+           _d.get('acceptedAt'), _dheld.get('acceptedAt'))
+    # The mark is a fact about the offer and Drop does not make it untrue.
+    eq('...and the tick it was taken on is untouched',
+       [r.get('accepted') for r in _drows(_djournal) if r.get('kind') == 'mark'],
+       [True])
+    _dcount = len(_drows(_djournal))
+    _dcode, _dsaid = post(_dbase, '/api/delivered', {})
+    eq('Drop with nothing in the car still answers',
+       (_dcode, _dsaid.get('wasHolding')), (200, False))
+    eq('...and writes nothing, having no offer to name',
+       len(_drows(_djournal)), _dcount)
+finally:
+    stop(_dproc)
+    shutil.rmtree(_ddir, ignore_errors=True)
+
+# --- /api/settings: one key, and it says which machine it wrote -------------
+#
+# The cost per mile is the one setting the driver can now change from a screen.
+# The block it lives in also holds `keepPlaces` (whether addresses reach the
+# append-only journal at all) and `pad`/`secondsPerItem` (the minutes every
+# stored rate is divided by), and the copy at home runs this same server with
+# no scanner. Each of those is a way for a POST to answer ok and be wrong.
+_sdir = tempfile.mkdtemp()
+_sho = os.path.join(_sdir, 'handoff')
+os.mkdir(_sho)
+_sfake = os.path.join(_sdir, 'fake.py')
+with open(_sfake, 'w') as _fh:
+    _fh.write('import json, time\n'
+              'print(json.dumps({"settings": {"costPerMile": 0.3}}), flush=True)\n'
+              'time.sleep(600)\n')
+_sjournal = os.path.join(_sdir, 'offers.jsonl')
+open(_sjournal, 'w').close()
+_sreq = os.path.join(_sho, 'uberscan-settings.json')
+
+
+def _sleft():
+    return sorted(os.listdir(_sho))
+
+
+_sproc, _sbase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': _sfake, 'UBERSCAN_HANDOFF_DIR': _sho},
+                       _sjournal)
+try:
+    _said = None
+    for _ in range(100):
+        _said = get(_sbase, '/api/settings')
+        if _said.get('costPerMile') is not None:
+            break
+        time.sleep(0.05)
+    eq('a rig answers with the cost its scanner says it is pricing with',
+       (_said.get('scanner'), _said.get('costPerMile'), _said.get('pending')),
+       (True, 0.3, None))
+    for _bad in ('0.45', -0.1, True, None):
+        _code, _body = post(_sbase, '/api/settings', {'costPerMile': _bad})
+        eq('a cost of %r is refused' % (_bad,), _code, 400)
+    _code, _body = post(_sbase, '/api/settings', {})
+    eq('...and so is no cost at all', _code, 400)
+    _code, _body = post(_sbase, '/api/settings', [0.45])
+    eq('...and a body that is not an object', _code, 400)
+    eq('...and none of those left anything for the scanner to take', _sleft(), [])
+    for _key, _val in (('quad', [[0, 0], [1, 0], [1, 1], [0, 1]]),
+                       ('cropBox', [0, 0, 1, 1]),
+                       ('trackedQuad', [[0, 0], [1, 0], [1, 1], [0, 1]]),
+                       ('keepPlaces', False), ('pad', 9), ('secondsPerItem', 60)):
+        _code, _body = post(_sbase, '/api/settings',
+                            {'costPerMile': 0.45, _key: _val})
+        ok_('a body that also names %s is refused whole, naming it (%r)'
+            % (_key, _body.get('error')),
+            _code == 400 and _key in (_body.get('error') or ''))
+    eq('...and not one of them wrote anything', _sleft(), [])
+    _code, _body = post(_sbase, '/api/settings', {'costPerMile': 0.45})
+    eq('a cost on its own is taken', (_code, _body.get('ok'), _body.get('scanner')),
+       (200, True, True))
+    eq('...answering with what is in use and what is on its way',
+       (_body.get('costPerMile'), _body.get('pending')), (0.3, 0.45))
+    eq('...leaving the scanner that key and no other, and no temporary behind',
+       (_sleft(), json.load(open(_sreq)) if os.path.exists(_sreq) else None),
+       (['uberscan-settings.json'], {'costPerMile': 0.45}))
+    eq('...and a panel opened now is told it is on its way',
+       get(_sbase, '/api/settings').get('pending'), 0.45)
+finally:
+    stop(_sproc)
+
+# The copy at home: SCANNER=0, the same server. A POST there used to be a file
+# no scanner would ever read, answered ok.
+_hho = os.path.join(_sdir, 'home-handoff')
+os.mkdir(_hho)
+_sproc, _sbase = start({'SCANNER': '0', 'UBERSCAN_HANDOFF_DIR': _hho}, _sjournal)
+try:
+    eq('a machine with no scanner says so, and quotes no figure',
+       (lambda s: (s.get('scanner'), s.get('costPerMile')))(get(_sbase, '/api/settings')),
+       (False, None))
+    _code, _body = post(_sbase, '/api/settings', {'costPerMile': 0.45})
+    eq('...and refuses the write rather than answering ok',
+       (_code, _body.get('ok'), _body.get('scanner')), (409, False, False))
+    eq('...leaving nothing behind', os.listdir(_hho), [])
+finally:
+    stop(_sproc)
+    shutil.rmtree(_sdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

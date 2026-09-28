@@ -358,6 +358,92 @@ try:
 finally:
     os.chmod(_locked_dir, 0o700)
 
+# ...and a card with no ROOM for the next row is caught too, which the probe
+# above cannot do: opening for append allocates nothing, so on a full card it
+# succeeds while the scanner's real append fails at the write with ENOSPC —
+# and sync.py then finds nothing new, stamps the backup and exits 0. Two green
+# lines over a record that has stopped. `grep statvfs` across the repository
+# found nothing before this.
+#
+# Asked two ways. On a real filesystem far too small to hold a shift — a 64kB
+# tmpfs, where the journal really does open for append — when this machine is
+# allowed to mount one; and on every machine by handing the real doctor a
+# statvfs that answers "nothing free", so the check can go red here even
+# where nothing can be mounted.
+_small_dir = tempfile.mkdtemp()
+_mounted = subprocess.run(['mount', '-t', 'tmpfs', '-o', 'size=64k', 'tmpfs',
+                           _small_dir], capture_output=True).returncode == 0
+try:
+    if not _mounted:
+        print('      (cannot mount a tmpfs here: the small-card case runs on '
+              'the stubbed statvfs below only)')
+    else:
+        _small = os.path.join(_small_dir, 'journal.jsonl')
+        with open(_small, 'w') as _fh:
+            _fh.write('{"v": 3, "id": "x", "seq": 1, "at": 1789000000000}\n')
+        # The open's own outcome, not a literal True: this line once asserted
+        # True after the open, so a card that refused the append crashed the
+        # suite instead of failing here by name.
+        try:
+            with open(_small, 'a'):
+                pass
+            _opened = True
+        except OSError as _e:
+            print('      (the append open failed: %s)' % _e)
+            _opened = False
+        ok_('on a 64kB card the journal still opens for append', _opened)
+        _small_out = run(JOURNAL=_small)
+        eq('a card too small for a month of driving fails the write check',
+           findings(_small_out.stdout).get('the journal can be written'), False)
+        ok_('...saying how much is free',
+            any('MB free' in l for l in _small_out.stdout.splitlines()
+                if 'can be written' in l))
+        ok_('...and blocks',
+            'blocking' in _small_out.stdout)
+finally:
+    if _mounted:
+        subprocess.run(['umount', _small_dir], capture_output=True)
+    os.rmdir(_small_dir)
+
+_FULL = ('import os, runpy, sys\n'
+         'class _S(object):\n'
+         '    f_bavail = 0\n'
+         '    f_frsize = 4096\n'
+         'os.statvfs = lambda p: _S()\n'
+         'sys.argv = [%r]\n'
+         'runpy.run_path(%r, run_name="__main__")\n'
+         % (os.path.join(HERE, 'doctor.py'), os.path.join(HERE, 'doctor.py')))
+_full = subprocess.run([sys.executable, '-c', _FULL], capture_output=True,
+                       text=True, timeout=300,
+                       env=dict(os.environ, JOURNAL=journal))
+eq('a full card fails the write check though the journal opens for append',
+   findings(_full.stdout).get('the journal can be written'), False)
+ok_('...telling the driver not to make room by deleting the record',
+    'never by deleting the journal' in _full.stdout)
+# An ordinary machine's free space is printed, so a card that is filling can
+# be watched filling — as a ceiling, because WEEK_BYTES is the floor on the
+# rate and a real rig fills the room sooner than a replayed week did.
+_room = [l for l in run(JOURNAL=journal).stdout.splitlines()
+         if 'can be written' in l]
+ok_('a card with room says how much', any('MB free' in l for l in _room))
+ok_('...as at most that many weeks, WEEK_BYTES being a floor',
+    any('at most about' in l for l in _room))
+
+# A statvfs that fails is not a read-only card — the journal has just opened
+# for append — and the fix line used to say it was, sending the driver to
+# `mount` for a fault that is not there.
+_NOSTAT = _FULL.replace("os.statvfs = lambda p: _S()",
+                        "def _no(p):\n    raise OSError(5, 'no statvfs')\n"
+                        "os.statvfs = _no")
+_nostat = subprocess.run([sys.executable, '-c', _NOSTAT], capture_output=True,
+                         text=True, timeout=300,
+                         env=dict(os.environ, JOURNAL=journal))
+eq('free space that cannot be asked fails the write check',
+   findings(_nostat.stdout).get('the journal can be written'), False)
+ok_('...without blaming a read-only card',
+    'free space could not be asked' in _nostat.stdout
+    and 'gone read-only' not in _nostat.stdout)
+
 # The next step named is the autopilot, which aims, calibrates and scans on
 # its own — not the three scripts it replaced.
 ok_('the next step is the autopilot', 'autopilot.py' in big.stdout)

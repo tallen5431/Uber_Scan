@@ -28,11 +28,18 @@ function check(name, text, want) {
    effect is on legDetail[].isApproach, and the corpus's parse runner compares
    with `got === want`, which is false for every list. Measured: with the clause
    removed this is the only shape in the owner's 1,166-offer week or the 303-case
-   corpus whose reading moves, and nothing anywhere failed. */
+   corpus whose reading moves, and nothing anywhere failed.
+
+   The payout is printed ABOVE both totals, as on a frame where the lower
+   card's payout did not read. With it below the upper card's total — row 908's
+   frame, which this used to be — oneCard cuts that leg (see aCardAbove), the
+   clause is never asked, and removing it failed nothing. The Python check says
+   the rest. */
 var _twoCards = P.parse(
-  '15 min (5.4 mi) total Little Caesars (3372 Canton Rd) ' +
-  'Barrington Overlook, Marietta $11.06 25 min (8.1 mi) total ' +
-  'American Deli (Marietta, GA) Big Shanty Rd, Marietta');
+  '$11.06 Includes expected tip 15 min (5.4 mi) total ' +
+  'Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta ' +
+  '25 min (8.1 mi) total American Deli (Marietta, GA) ' +
+  'Big Shanty Rd, Marietta');
 eq('a total leg is never marked the approach / leg 0',
    _twoCards.legDetail[0].isApproach, false);
 eq('a total leg is never marked the approach / leg 1',

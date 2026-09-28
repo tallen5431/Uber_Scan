@@ -17,6 +17,10 @@ sys.path.insert(0, HERE)
 
 results = []
 
+# How much room the journal needs before the preflight calls a card full, in
+# weeks of driving at journal.WEEK_BYTES. See the free-space check in main().
+FREE_WEEKS = 4
+
 
 def check(name, ok, detail='', fix=''):
     results.append((name, ok, detail, fix))
@@ -231,10 +235,22 @@ def main():
         # 08:00-08:09 UTC when they were really read at about 01:00, seven hours
         # earlier; the offers page showed them at 4am, faithfully, and the
         # driver's own report is the only reason anybody knew. On duration cards
-        # the rates survive it — they carry their own minutes — and on a delivery
-        # card `minutes_until` would turn "deliver by 21:40" into a seventeen-hour
-        # job, which SANE_MINUTES refuses. So the money is protected and the
-        # clock is not.
+        # the rates survive it — they carry their own minutes. On a deadline
+        # card they do not, and this said "the money is protected and the clock
+        # is not", which is true of the seven hours that happened and false of
+        # a smaller error. Measured on the real parser at the seed settings, a
+        # DoorDash card of $10.86, 7.4 mi, "Deliver by 9:15 PM", read at 8:30
+        # PM: 45 minutes, $11.52/hr, PASS. The same card with the clock fast by
+        # 30 minutes is 15 minutes, $34.56/hr, a confident GO with no doubt
+        # reason. Fast by 21-24 minutes it is CLOSE CALL, by 25-39 a GO, and
+        # only from 40 does a doubt reason (speed, then time) refuse it; the
+        # +7 hours is refused as time, a seventeen-hour job. So a small clock
+        # error can print a wrong GO on a deadline card, with nothing on the
+        # panel saying so.
+        #
+        # The owner has chosen not to build a guard against that. What this
+        # check does is find the backwards step NTP leaves once the clock is
+        # corrected — afterwards, not at the moment the card is on screen.
         #
         # What CAN be seen is the correction. The journal is append-only and
         # written by one process in order, so `at` never goes backwards on a rig
@@ -288,9 +304,15 @@ def main():
         # copy as well. Two greens and a silent, total loss of the only
         # permanent record.
         #
-        # Opened for append and closed again: it writes no byte, and asks the
-        # filesystem the exact question the scanner will ask it in a few
-        # seconds' time.
+        # Opened for append and closed again, which writes no byte. This said
+        # that asked the filesystem "the exact question the scanner will ask it
+        # in a few seconds' time", and it does not: opening for append
+        # allocates nothing, so on a FULL card it succeeds while the scanner's
+        # next append fails at the write with ENOSPC. sync.py then finds no new
+        # rows, stamps the backup and exits 0, and the line above says the
+        # offers were backed up minutes ago — two greens over a total loss of
+        # the record, the same shape as the read-only card. So the free space
+        # is asked as well, below.
         #
         # It also said "it creates nothing that was not there", and `open(p,
         # 'a')` creates the file when it is absent — which is every first run
@@ -321,13 +343,60 @@ def main():
                                         'cannot be written')
         except Exception as e:                                # noqa: BLE001
             writable, why = False, 'cannot be written (%s)' % e
-        check('the journal can be written', writable, why,
-              'the rig can read every offer it has already stored and cannot '
-              'record another one. An SD card that has gone read-only is the '
-              'usual cause, and it reads perfectly until you try to write: '
-              'mount | grep " on / " will say ro. Nothing is being kept until '
-              'this is fixed, and the backup will keep reporting success '
-              'because the file it copies is unchanged.')
+        fix = ('the rig can read every offer it has already stored and cannot '
+               'record another one. An SD card that has gone read-only is the '
+               'usual cause, and it reads perfectly until you try to write: '
+               'mount | grep " on / " will say ro. Nothing is being kept until '
+               'this is fixed, and the backup will keep reporting success '
+               'because the file it copies is unchanged.')
+        # ...and whether there is ROOM for it, asked of the filesystem rather
+        # than found out by writing. Not by appending a probe byte: this check
+        # has already once created the file it was asking about, root-owned,
+        # and caused the fault it exists to find (above). statvfs reads the
+        # counters and changes nothing. `f_bavail`, not `f_bfree`, because the
+        # scanner runs as the driver and the blocks kept back for root are not
+        # its to use.
+        #
+        # The floor is four weeks at journal.WEEK_BYTES' measured 5.7MB a week,
+        # 22.9MB. A week of room would clear the busiest measured day, 2.3MB,
+        # two and a half times over, but the week is a floor on the rate — it
+        # was measured by a replay that writes no seen, screen, pair or mark
+        # rows — and this script is run now and then rather than before every
+        # shift, so what it warns about should still be weeks away when it is
+        # read. The free figure is printed either way, so a card that is
+        # merely filling can be watched filling.
+        if writable:
+            try:
+                st = os.statvfs(os.path.dirname(journal_path) or '.')
+                free = st.f_bavail * st.f_frsize
+                weeks = free / float(JR.WEEK_BYTES)
+                if free < FREE_WEEKS * JR.WEEK_BYTES:
+                    writable = False
+                    why = ('only %.1fMB free where it is kept — at most %.1f '
+                           'weeks of driving, under the %d this asks for'
+                           % (free / 1e6, weeks, FREE_WEEKS))
+                    fix = ('the card is nearly full, and a full card still '
+                           'opens the journal: the scanner only finds out at '
+                           'the write, and from then on nothing is kept while '
+                           'the backup keeps reporting success. df -h %s says '
+                           'what is using it. Free space elsewhere — never by '
+                           'deleting the journal or its .1/.2 rolls, which '
+                           'are the record itself.'
+                           % (os.path.dirname(journal_path) or '.'))
+                else:
+                    # "At most": WEEK_BYTES is the floor on the rate, so the
+                    # real rig fills this room sooner than the figure says.
+                    why += (' — %.0fMB free, at most about %.0f weeks of '
+                            'driving' % (free / 1e6, weeks))
+            except Exception as e:                            # noqa: BLE001
+                # Not the read-only card: the journal has just opened for
+                # append, so the one thing known is that the room is unknown.
+                writable, why = False, 'free space could not be asked (%s)' % e
+                fix = ('the journal opens, but how much room is left behind '
+                       'it could not be asked, so a full card cannot be told '
+                       'from one with room. df -h %s says it by hand.'
+                       % (os.path.dirname(journal_path) or '.'))
+        check('the journal can be written', writable, why, fix)
     except Exception as e:                                    # noqa: BLE001
         check('the journal file is whole', False, str(e))
 

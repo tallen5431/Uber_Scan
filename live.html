@@ -1689,9 +1689,12 @@
   // lands. Marking an offer during the slow poll is exactly that case.
   var shiftAgain = false;
   // Three minutes. The server has to read and parse the whole journal to
-  // answer, on the same event loop that drives the camera stream — a year of
-  // driving is around 19MB and the best part of a second of frozen loop on a
-  // Pi 4. /api/journal/newest already sets the house budget for a
+  // answer, on the same event loop that drives the camera stream — the live
+  // file reaches 64MB before it rolls, at most about twelve weeks at the 5.7MB
+  // a week rpi/journal.py's WEEK_BYTES measures, and a third of that in real
+  // rows, 22.4MB, parses in 64-223ms on the development container and more on
+  // a Pi 4. /api/journal/newest already
+  // sets the house budget for a
   // journal-reading GET at "every few minutes", and a shift figure is not a
   // number anybody watches tick.
   var SHIFT_EVERY_MS = 180000;

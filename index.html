@@ -94,6 +94,14 @@
   <div class="sheet-inner">
     <header><h2>Targets</h2><button class="close" data-close="settingsSheet" type="button">Done</button></header>
 
+    <!-- Said first, before a field is touched. The rig's panel puts ⌨ Type one
+         press from its verdict, so this sheet is open on the same glass the
+         rig's verdicts are read from — and a target set here moved the
+         keypad's colours and nothing the panel said, with nothing to say
+         which. Cost per mile is the exception now that the rig can be told
+         it, and the line under that box says whether it was. -->
+    <p class="note" id="settingsWhere">These change this keypad, in this browser only — the rig's panel judges offers on its own settings; cost per mile is the one exception, and the line under it says whether the rig took it.</p>
+
     <label class="row">
       <span>Target $/hour<small>Green at or above this</small></span>
       <input type="number" inputmode="decimal" id="setTarget" step="1" min="0">
@@ -108,6 +116,8 @@
       <span>Cost per mile<small>Gas + wear, subtracted from pay. IRS rate is 0.70</small></span>
       <input type="number" inputmode="decimal" id="setCost" step="0.01" min="0">
     </label>
+    <!-- Whether the rig has it. Filled by ui.js from /api/settings. -->
+    <p class="note" id="costRig" hidden></p>
 
     <label class="row">
       <span>Pickup padding (min)<small>Added to every offer's time</small></span>
@@ -119,7 +129,11 @@
       <input type="checkbox" id="setHaptics">
     </label>
 
-    <p class="note">Settings and history stay on this phone. LOG also hands the offer to the rig's journal when the rig is the one serving this page.</p>
+    <!-- About history only. Where these settings go is said once, at the top
+         (#settingsWhere): this line used to say they "stay on this phone" as
+         well, which was a second answer to the same question on one sheet, and
+         after cost per mile could be sent to the rig, a wrong one. -->
+    <p class="note">History is kept in this browser. LOG also hands the offer to the rig's journal when the rig is the one serving this page.</p>
   </div>
 </div>
 

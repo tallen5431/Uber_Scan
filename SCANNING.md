@@ -224,9 +224,18 @@ does not have to carry a browser to run `bash tools/test.sh`.
 - Tested against a rendered replica with synthetic lens degradation, **not**
   against a real camera pointed at a real phone. Glare from a windshield,
   autofocus hunting and rolling-shutter banding are all untested.
-- Only Uber's current card wording is handled: `$X.XX`, `N min (D.D mi)`,
-  `N items`, plus the rideshare `away` / `trip` split. A layout change breaks
-  parsing, which is why the manual keypad stays the primary path.
+- Two card grammars are handled, and nothing else. A stated journey — `$X.XX`,
+  `N min (D.D mi)` legs, `N items` on an Uber Eats shop order, and the rideshare
+  `away` / `trip` split — which is every card in this driver's own record. And
+  a stated deadline, the DoorDash shape: `$X.XX`, `Deliver by H:MM AM/PM`, a
+  distance on its own line and the merchant. `rate()` turns the deadline into
+  minutes against the phone's clock, so that card's rate moves while it sits on
+  screen, and it is wrong exactly when the phone's clock is wrong. None of this
+  driver's 1,166 recorded offers stated a deadline; the grammar is held by the
+  corpus's DoorDash cards (`tests/fixtures/cases.json`, `deadline`), and
+  rpi/README.md "Delivery cards, and where an offer went" has the three real
+  ones it was built from. A layout change breaks parsing, which is why the
+  manual keypad stays the primary path.
 - The mount is the hard part. The camera phone must see the card square-on,
   in focus, without glare, while both phones are moving.
 - `vendor/` is ~15MB in the repo so that any phone gets a core build it can

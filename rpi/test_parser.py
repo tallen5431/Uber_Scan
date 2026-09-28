@@ -148,9 +148,23 @@ for c in cases.get('until', []):
 # Measured before it was written: with the clause removed, this is the only
 # shape in the 1,166-offer week or the 303-case corpus whose reading moves, and
 # nothing anywhere failed. It was a branch no check could reach.
-_TWO_CARDS = ('15 min (5.4 mi) total Little Caesars (3372 Canton Rd) '
-              'Barrington Overlook, Marietta $11.06 25 min (8.1 mi) total '
-              'American Deli (Marietta, GA) Big Shanty Rd, Marietta')
+#
+# ...and it nearly became one again. The card this check was written on had
+# the upper card's `total` ABOVE the $11.06 — row 908's frame — and one_card
+# now cuts a leg a card prints above its payout once it can see that card's
+# `total` (see a_card_above), so that text reaches this clause with one leg and
+# the check went on passing without asking it anything: removing the clause
+# failed nothing. So the two cards are printed the other way up here, the
+# payout ABOVE both totals, which is what a frame shows when the LOWER card's
+# payout is the one that did not read. one_card cannot see that card — no second
+# payout, and its total is below this one's — so both legs still reach the
+# layout rule, and this clause is what refuses to call the first the approach.
+# It still sums the two, and that is recorded rather than fixed: 0 of the real
+# week's 5,491 frames keep two `total` legs after one_card.
+_TWO_CARDS = ('$11.06 Includes expected tip 15 min (5.4 mi) total '
+              'Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta '
+              '25 min (8.1 mi) total American Deli (Marietta, GA) '
+              'Big Shanty Rd, Marietta')
 _two = P.parse(_TWO_CARDS)
 eq('a total leg is never marked the approach, whatever the layout says',
    [l['isApproach'] for l in _two['legDetail']], [False, False])
@@ -324,6 +338,24 @@ eq('...but its room kept, so nothing after it moved',
 # blanked down to whatever a span of None would mean.
 eq('one payout is one card and nothing is blanked',
    P.only_card(_frame, P.card_span([(8.0, 4)])), _frame)
+
+
+# --- one_card hands back the legs, and nothing the browser does not ----------
+#
+# It used to return a second value, "whether anything was cut", documented as
+# the signal that keeps the rig looking for a cleaner frame. parse() discarded
+# it, is_whole() never saw it, and the browser's oneCard never had it — so two
+# ports of one function had two signatures, and the corpus could not see that
+# either, because nothing consumed the difference. Row 227's shape: a $22.03
+# card with its two legs, and the top of the $16.08 card under it.
+_row227 = P.normalize('$22.03 12 min (6.6 mi) 23 mins (13.1 mi) '
+                      '$16.08 19 min (12.8 mi)')
+_w227 = []
+P.find_pay(_row227, _w227)
+_cut = P.one_card(P.find_legs(_row227), _w227)
+eq('one_card returns the legs and nothing else, the shape oneCard returns',
+   [l['minutes'] for l in _cut] if isinstance(_cut, list) else _cut,
+   [12.0, 23.0])
 
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)

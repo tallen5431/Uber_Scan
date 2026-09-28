@@ -80,6 +80,41 @@ MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'
 # means they are two different things, and this driver's cards are full of
 # stray marks that would happily glue an $8 offer into an $85 one — 60 of the
 # 420 texts on file change what they match if the gap is allowed to hold junk.
+
+# What a HEADLINE looks like, as against a figure that merely passed find_pay.
+# Asked only of the figures that could be the NEXT card's headline, never of
+# the payout being priced. See find_pay's `where`.
+#
+# A headline prints to the cent, or it is followed at once by what the card
+# prints after its headline: `Guaranteed` (DoorDash), `Includes expected tip`
+# (Uber Eats — the same two words PAY_SPLIT keys on), or the rider's star (an
+# Uber ride, `$18 * 5.00`). "Both apps print a payout to the cent" is what this
+# said first, and it is false: row 475 reads `$6 Guaranteed (incl. tip)` on all
+# seven frames, and rows 374, 479, 584, 602 and 604 print `$7` or `$6` the same
+# way; row 79's ride reads `$18 * 5.00` on all three. Cents alone let a
+# whole-dollar card below the one being priced run into it — its legs summed
+# on, its merchant and distance read as this card's — which is the fault the
+# boundary exists to stop, arriving by the door built to keep map glyphs out.
+#
+# Measured over every frame and stored text of the week (6,616 payouts read
+# off one figure): of the 124 figures find_pay accepted and did not choose, 121 print
+# no cents and NONE of those 121 is followed at once by a label or a star, so
+# the label keeps every map glyph and `$1` fragment out exactly as cents alone
+# did. Of the 208 chosen payouts without cents, 64 carry a label or a star
+# right after. The other 144 — cents lost AND something between the figure and
+# its label (`$19 | Guaranteed`, `$16 Kt 5 ns Lb *497`) — are the headlines this
+# still cannot see, and a second card printed that way below this one is still
+# summed into it. The gap cannot be widened to reach them: row 505's map glyph
+# reads `$5 | Guaranteed`, the same shape as row 314's real `$19 | Guaranteed`.
+# That residue errs long, which is the side to err on: `$22.03 12 min (6.6 mi)
+# 23 mins (13.1 mi) $16 19 min (12.8 mi)` reads 54 min / 32.5 mi, NO at
+# $13.64/hr, where the card is $27.63/hr — a good offer missed. Letting such a
+# figure cut the card instead is what put row 2's `$ 3` between its own two legs
+# and $188.10/hr on the panel. The week holds no second card without a label or
+# cents (row 410's `$6.53` is its only one).
+CENTS = re.compile(r'[.,]' + DC + r'{2}$', ASCII)
+HEADLINE_LABEL = re.compile(r'\s*(?:guarant|includ|\*)', re.IGNORECASE)
+
 PAY_SPLIT = re.compile(
     r'\$\s*(' + DC + r'{1,3})\s+(' + DC + r'{1,2}[.,]' + DC + r'{2})'
     r'\s*(?=guarant|includ)',
@@ -632,15 +667,34 @@ PAY_IS_A_DURATION = re.compile(
 
 
 def find_pay(text, where=None):
-    """The offer's headline payout, and — if asked — where every candidate was.
+    """The offer's headline payout, and — if asked — where every headline was.
 
-    `where` is filled with (amount, position) for every figure that passed this
-    filter, in the order they appear. parse() needs that to know where one card
-    stops: Uber's Trip Radar screen lists offers, so the top of the NEXT card
-    shows below the first, and the only thing marking the boundary is where the
-    next headline starts. Gathered HERE rather than re-derived by the caller so
-    there is one rule for what counts as a headline rather than two that can
-    drift apart.
+    `where` is filled with (amount, position) for the chosen payout and every
+    other figure that looks like a headline, in the order they appear. parse()
+    needs that to know where one card stops: Uber's Trip Radar screen lists
+    offers, so the top of the NEXT card shows below the first, and the only
+    thing marking the boundary is where the next headline starts. Gathered HERE
+    rather than re-derived by the caller so there is one rule for what counts as
+    a headline rather than two that can drift apart.
+
+    "Every figure that passed this filter" is what it used to hold, and a figure
+    passing this filter is only a figure that could be the payout — the largest
+    one wins, so a stray `$3` off the map layer never mattered to `best`. It
+    mattered to the boundary. On the owner's week, 71 figures other than the
+    chosen payout, at positions of their own, armed a second-card boundary on
+    47 rows of 1,166, and 69 of them printed no cents: `$3`, `$4`, `$5` glyphs
+    in the map sludge. The `$1` fragment PAY_SPLIT's join is built from armed
+    it too, from the join's own position, on 30 frames. Where one sat inside a
+    card it cut the card short. Row 505's `$5`, 15
+    characters after `$11.47`, blanked the card from there on, so the frame
+    gave no minutes, no miles and no places — the Kroger disappeared with
+    nothing saying so. Row 2's `$ 3`, between the $26.04 card's two legs, left
+    only the 8-minute approach, and the panel read $188.10/hr for the first
+    two reads of that offer. The 2 that printed cents are row 410's `$6.53`,
+    the one real second card of the week, and they still bound it. A figure
+    without cents still counts when the card's label or the rider's star
+    follows it at once, because whole-dollar offers are printed that way. See
+    CENTS and HEADLINE_LABEL.
     """
     chips = [m.span() for m in PAY_CHIP.finditer(text)]
     found = []
@@ -682,7 +736,9 @@ def find_pay(text, where=None):
         v = to_number(m.group(1).strip())
         # The offer headline is the largest dollar figure; promo lines are smaller.
         if v is not None and 0 < v < 2000:
-            found.append((v, m.start()))
+            found.append((v, m.start(),
+                          bool(CENTS.search(m.group(1))
+                               or HEADLINE_LABEL.match(text, m.end()))))
             if best is None or v > best:
                 best = v
 
@@ -700,11 +756,18 @@ def find_pay(text, where=None):
             continue
         v = to_number(m.group(1).strip() + m.group(2).strip())
         if v is not None and 0 < v < 2000:
-            found.append((v, m.start()))
+            found.append((v, m.start(), True))
             if best is None or v > best:
                 best = v
     if where is not None:
-        where.extend(sorted(found, key=lambda pair: pair[1]))
+        # The chosen payout is kept whatever it printed, and it is the FIRST of
+        # its value by position — the one one_card and card_span take as `top`.
+        # By index rather than by position, because the `$1` fragment and the
+        # join built from it start at the same `$`.
+        found.sort(key=lambda one: one[1])
+        chosen = next((i for i, one in enumerate(found) if one[0] == best), None)
+        where.extend((v, at) for i, (v, at, headline) in enumerate(found)
+                     if headline or i == chosen)
     return best
 
 
@@ -820,6 +883,10 @@ def find_legs(text):
             # read from the other side.
             'lostMiles': miles is None and (side is not None
                                             or bool(LEG_LOST_MILES.search(tail))),
+            # Whether the distance was printed AFTER the time — `14 min (3.7
+            # mi)`, the Uber layout — rather than before it, `8.3 mi + 36 min`,
+            # DoorDash's one-line summary of a whole job. See half_a_ride.
+            'milesAfter': m.group(4) is not None,
             # Where this leg sat in the text, so the address printed after it
             # can be found without searching the whole card again.
             'start': m.start(), 'end': m.end(),
@@ -2295,7 +2362,50 @@ def find_places(text, legs, whose=None):
     return out[:MAX_PLACES]
 
 
-def one_card(text, legs, where):
+def a_card_above(legs, top):
+    """Whether a card printed ABOVE the only payout in shot is in the frame too.
+
+    one_card and card_span drew a boundary only between two payouts, so a frame
+    with ONE payout in shot was always one card. Uber Eats' list breaks that: it
+    crops the upper card's payout off the top of the frame and leaves its leg,
+    its merchant and its destination in shot above the next card's payout. Row
+    908 of the owner's week, both frames:
+
+        15 min (5.4 mi) total                <- the upper card, payout cropped
+        Little Caesars (3372 Canton Rd)
+        Barrington Overlook & Barrington Pl, Marietta
+        $11.06                               <- the only payout in shot
+        Includes expected tip
+        25 min (8.1 mi) total                <- this card
+        American Deli (Marietta, GA)
+
+    Both totals were summed onto the $11.06 and the neighbour's merchant was
+    published as the pickup: 40 min / 13.5 mi, $10.52/hr, Little Caesars —
+    whole, no doubt, into the append-only journal — where the card on screen is
+    25 min / 8.1 mi, $20.71/hr, American Deli. Row 450 is the same crop reached
+    another way: the upper card's `24 min (3.6 mi) total` is the only TOTAL on
+    the frame, so `used = totals or legs` priced the $16 card on its
+    neighbour's leg alone and threw its own `15 min (5.6 mi)` away — $37.30/hr,
+    whole and spoken. That leg is only the drive to the rider (the $16 card is
+    a ride cut off by the frame after its first leg), so the card is not
+    $57.28/hr either: see half_a_ride, which withholds it.
+
+    A `total` above the payout, and a leg of the card's own below it, is the
+    test. A total is a whole journey, and a card prints its payout before its
+    journey, so a total above the payout belongs to something printed earlier.
+    It has to be a TOTAL. An unlabelled leg above a lone payout is on the
+    corpus's route-planner screen ("50 min $ 50 min $120 5 min (2.3 mi)") and on
+    two of the week's rows as a map ETA; cutting there took the route planner
+    from a doubt on the screen itself to a doubt at $1,431.72/hr over five
+    minutes. And there has to be a leg below: with every leg above the payout
+    there is nothing of this card's to keep, and the reading stays as it was.
+    On the week this fires on 4 frames, rows 450 and 908, and on no other.
+    """
+    return (any(l['start'] < top and l['isTotal'] for l in legs)
+            and any(l['start'] > top for l in legs))
+
+
+def one_card(legs, where):
     """The legs belonging to the headline payout, and nothing below it.
 
     Uber's Trip Radar screen is a LIST of offers: the top of the next card
@@ -2317,29 +2427,46 @@ def one_card(text, legs, where):
 
     The boundary is the next headline. A card's own legs sit after its payout
     and before the next card's, so that is what is kept. `where` is every
-    candidate find_pay accepted, in the order they appear, so this asks the
-    same question find_pay asked rather than a second version of it.
+    headline find_pay found, in the order they appear, so this asks the same
+    question find_pay asked rather than a second version of it. With one
+    headline in shot the frame is one card unless a card above it left its
+    total behind — see a_card_above.
 
-    Returns the legs to use and whether anything was cut, because a frame that
-    can see two cards may also be cropping the first: the reading is not whole
-    and the rig should keep looking for a frame like row 227's first, where the
-    second card is out of shot and the sum is already right.
+    Returns the legs and nothing else, the same as the browser's oneCard. It
+    used to return whether anything was cut as well, documented as the signal
+    that "the reading is not whole and the rig should keep looking". parse(),
+    its only caller, bound it to `_spilled` and never read it; is_whole() never
+    saw it; the browser port never had it. So the paragraph described a
+    wholeness check that did not exist, on the function whose early return let
+    a two-card frame through as whole. Measured over the real week's 5,491
+    frames, it was set on 13, and all 13 were already not whole for another
+    reason — 10 left with no legs at all, 3 with one unlabelled leg — so wiring
+    it up would have been a check no frame could fail. Deleted rather than
+    ported, and the `text` argument with it, which the body never read.
     """
+    if not where:
+        return legs
     if len(where) < 2:
-        return legs, False
+        # One payout in shot is one card, unless a card above it left its
+        # total in the frame. See a_card_above.
+        if not a_card_above(legs, where[0][1]):
+            return legs
+        return [l for l in legs if l['start'] > where[0][1]]
     starts = [at for _v, at in where]
     # The headline this reading is priced on, which find_pay chose by size
     # rather than by position — so it is not always the first one on screen.
     top = max(where, key=lambda pair: pair[0])[1]
     after = [at for at in starts if at > top]
     edge = min(after) if after else None
-    kept = [l for l in legs
+    return [l for l in legs
             if l['start'] > top and (edge is None or l['start'] < edge)]
-    return kept, len(kept) != len(legs)
 
 
-def card_span(where):
+def card_span(where, legs=()):
     """Where the chosen card's own words are, or None if there is only one card.
+
+    One payout in shot is one card, except where a_card_above sees the crop of
+    the card above it; then the card starts at its payout.
 
     THE LEGS WERE BOUNDED AND NOTHING ELSE WAS. one_card above trims the legs to
     the chosen headline's card and every other field went on reading the whole
@@ -2376,12 +2503,73 @@ def card_span(where):
     next" is the honest bound for them and two corpus cases pin it.
     """
     if len(where) < 2:
+        # ...and the one-payout crop, where the card above has no payout in
+        # shot to bound it. Its words sit before this payout, so this card
+        # starts AT the payout: legs exist only on the Uber layout, which
+        # prints the money first. The merchant does not need this — find_places
+        # reads a place off a leg, and one_card has already cut the upper
+        # card's leg — but everything read off `mine` does. An Uber Eats card
+        # prints its item count above its leg, so the cropped card's `6 items`
+        # sits above this payout, and without this span it was read as this
+        # card's: nine minutes of shopping at 90s an item, $20.71/hr priced as
+        # $15.23/hr. See a_card_above.
+        if where and a_card_above(legs, where[0][1]):
+            return (where[0][1], None)
         return None
     starts = [at for _v, at in where]
     top = max(where, key=lambda pair: pair[0])[1]
     before = [at for at in starts if at < top]
     after = [at for at in starts if at > top]
     return (max(before) if before else 0, min(after) if after else None)
+
+
+def half_a_ride(used, where, legs):
+    """True when this card shares the frame with another and its journey is one
+    bare leg — the first leg of a ride, whose second is off the bottom edge.
+
+    `used` is the legs the reading is priced on, `where` find_pay's headlines
+    and `legs` every leg the frame read, the pair a_card_above is asked of.
+
+    A list on the phone is photographed through a window, and a window cuts
+    cards at BOTH edges. a_card_above is the top edge; this is the bottom. On
+    the owner's week two rows put a ride card under an Uber Eats card:
+
+        row 410   $6.53 ... 36 min (7.9 mi) total  Jason's Deli ...
+                  $24.05  * 4.91  Verified  14 min (3.7 mi)      <- frame ends
+        row 450   ... 24 min (3.6 mi) total  Main Street Eats Burgers ...
+                  $16  * 4.97  Verified  15 min (5.6 mi)
+                  Crestwind Rd & Crestwind Rd NW, Kennesaw       <- frame ends
+
+    A ride card prints the drive to the rider, the rider's corner, then the
+    trip and the destination (see laid_out_approach), so each of these is the
+    approach alone: $98.31/hr and $57.28/hr over the minutes it takes to reach
+    the rider. They were withheld only by accident — the Eats card's `total`
+    bracket read as a leg of THIS card that lost its minutes, which is the
+    mistake shortATime is no longer asked in a way that makes — and would have
+    gone out whole, spoken and green without this.
+
+    So it is answered as a leg the reading could not time and whose distance
+    it does not know: shortATime with no untimedMiles, which is the refusal
+    most_of_the_journey_missing already gives a missing piece of unknown size.
+    The rig keeps looking, and a frame scrolled far enough to show the second
+    leg reads two legs and clears it. Not asked of:
+
+      - a total, which is the whole journey in one line (row 908's card);
+      - a distance printed BEFORE its time, `8.3 mi + 36 min`, which is
+        DoorDash's summary of a whole job, and whose two-card frames the
+        corpus holds;
+      - a frame holding one card. One bare leg on a lone ride card is the same
+        question and is not answered here: on the week it is the approach of
+        rows 444 and 805 on frames where the trip leg did not read, and it is
+        also the Eats card whose `total` did not read (`tota`, `te al`) on
+        seven frames of six rows, every one a whole job. Telling those
+        apart is a question for the whole reader.
+
+    On the week this fires on 4 frames, rows 410 and 450, and on no other.
+    """
+    listed = len(where) >= 2 or bool(where and a_card_above(legs, where[0][1]))
+    return (listed and len(used) == 1 and not used[0]['isTotal']
+            and used[0]['milesAfter'])
 
 
 def only_card(text, span):
@@ -2427,12 +2615,15 @@ def parse(raw_text):
     # be two chances for them to disagree about which figure is the
     # headline, which is the whole thing this boundary rests on.
     pay = find_pay(text, _where)
-    legs, _spilled = one_card(text, legs, _where)
+    # card_span asks a_card_above the question one_card asks, and it has to be
+    # asked of the same legs — one_card's answer has the upper card's leg cut.
+    found_legs = legs
+    legs = one_card(legs, _where)
     # ...and the same boundary for every other field the card states. See
     # card_span: the legs were bounded and the distance, the deadline, the item
     # count and the merchant were not, so a frame holding two cards priced one
     # of them and described the other.
-    mine = only_card(text, card_span(_where))
+    mine = only_card(text, card_span(_where, found_legs))
 
     totals = [l for l in legs if l['isTotal']]
     used = totals or legs
@@ -2678,10 +2869,30 @@ def parse(raw_text):
         # lost its minutes and took its miles with it. See
         # distance_without_a_time: this is not a number, it is the reason the
         # reading is not finished, and is_whole is where it is spent.
-        'shortATime': distance_without_a_time(text, legs),
+        #
+        # Asked of THIS card's words (`mine`) against EVERY leg the frame read
+        # (`found_legs`), not of the whole frame against the legs one_card
+        # kept. That pairing turned the card boundary into a lost leg: once
+        # a_card_above cut the upper card's `15 min (5.4 mi) total` from row
+        # 908's legs, its bracket was a distance no kept leg claimed, so both
+        # of the row's frames read shortATime, untimedMiles 5.4 and not whole
+        # in both ports — never spoken, never settled on the panel, journalled
+        # whole=0 and set aside — and no later frame could clear it, because
+        # every frame shows both cards. Where the neighbour's distance was the
+        # longer one the rate withheld with doubt `leg` and the panel said "a
+        # leg this reading could not time — 19.4 mi of it" about a card whose
+        # every leg was timed. A bracket some leg on the frame claimed is that
+        # leg's distance, whichever card it belongs to; one outside this card's
+        # span is the other card's business. On the week this moves `whole` on
+        # rows 450 and 908 only (see the commit) and no other frame or text.
+        #
+        # ...and a card cut off by the bottom edge after its first leg is short
+        # a timed leg too, one whose distance nobody read. See half_a_ride.
+        'shortATime': (distance_without_a_time(mine, found_legs)
+                       or half_a_ride(used, _where, found_legs)),
         # ...and how far that leg was, which is what decides whether this is a
         # reading to hedge or one to refuse outright. See untimed_miles.
-        'untimedMiles': untimed_miles(text, legs),
+        'untimedMiles': untimed_miles(mine, found_legs),
         'complete': is_complete(pay, minutes, deadline),
         # What the card says it is. None when the card did not say — the top
         # chip may simply not have been inside the crop — which is different

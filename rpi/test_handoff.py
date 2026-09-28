@@ -57,7 +57,7 @@ def ok_(name, cond):
 # the same path for it, and that a private directory moves it for both of them.
 # A request written where the reader is not looking is not a stale picture, it
 # is a button that does nothing.
-BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF]
+BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS]
 
 # --- the rule --------------------------------------------------------------
 for base in BASES:
@@ -114,6 +114,14 @@ else:
         theirs = json.loads(got.stdout.strip())
         mine = [HO.path(b) for b in BASES]
         eq('both sides put the requests in the same place', theirs, mine)
+
+    # ...and the server WRITES each of them under that name. The probe above
+    # proves both sides derive the same path from a base; it cannot see which
+    # base server.js hands its rule. A request written under a name the scanner
+    # does not take is a button that answers ok and does nothing.
+    for base in BASES:
+        ok_('server.js writes %s through the shared rule' % base,
+            "handoffPath('%s')" % base in server)
 
     # ...and the same for the picture, whose names predate the module and are
     # written out in FRAME_CANDIDATES rather than derived.
@@ -212,6 +220,66 @@ finally:
             os.remove(HO.path(base))
         except OSError:
             pass
+
+# --- how old a request is ----------------------------------------------------
+#
+# A request file used to be a bare fact — it exists — and a `.dropoff` press made
+# while the scanner was down was honoured whenever it came back, against
+# whatever was on the phone by then. `age` is what lets a reader refuse one; the
+# refusal itself is checked in test_scan_pi.py, which runs dropoff_requested.
+_agedir = tempfile.mkdtemp()
+_hadenv = os.environ.get(HO.ENV_DIR)
+os.environ[HO.ENV_DIR] = _agedir
+try:
+    for _p in HO.candidates(HO.DROPOFF):
+        try:
+            os.remove(_p)
+        except OSError:
+            pass
+    eq('no request has no age', HO.age(HO.DROPOFF), None)
+    _t = 1790000000.0
+    open(HO.path(HO.DROPOFF), 'w').close()
+    os.utime(HO.path(HO.DROPOFF), (_t - 40, _t - 40))
+    eq('a request reports how long ago it was written',
+       round(HO.age(HO.DROPOFF, now=_t), 3), 40.0)
+    # Written ahead of the clock reading it: the clock stepped back. Reported
+    # as it is, negative, so the reader can say which of the two it refused.
+    eq('...and one stamped ahead of the clock comes back negative',
+       round(HO.age(HO.DROPOFF, now=_t - 100), 3), -60.0)
+    # The freshest copy, because either place may hold the press just made.
+    #
+    # The checkout copy lives in HO.HERE, which is the real checkout; this was
+    # guarded to run only when that copy was separate and not already there,
+    # so a machine with a leftover .dropoff in its checkout skipped it without
+    # a word and only the suite's count would have noticed. HERE is pointed at
+    # a directory of its own instead, so the two copies are always two and the
+    # check always runs.
+    _agehere = tempfile.mkdtemp()
+    _realhere = HO.HERE
+    HO.HERE = _agehere
+    try:
+        _legacy = HO.legacy(HO.DROPOFF)
+        eq('...there are two copies to choose between',
+           len(HO.candidates(HO.DROPOFF)), 2)
+        open(_legacy, 'w').close()
+        os.utime(_legacy, (_t - 2, _t - 2))
+        eq('...taken from the freshest of its copies',
+           round(HO.age(HO.DROPOFF, now=_t), 3), 2.0)
+    finally:
+        HO.HERE = _realhere
+        shutil.rmtree(_agehere, ignore_errors=True)
+finally:
+    for _p in HO.candidates(HO.DROPOFF):
+        if _p.startswith(_agedir):
+            try:
+                os.remove(_p)
+            except OSError:
+                pass
+    if _hadenv is None:
+        os.environ.pop(HO.ENV_DIR, None)
+    else:
+        os.environ[HO.ENV_DIR] = _hadenv
+    shutil.rmtree(_agedir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d handoff checks passed' % ok)

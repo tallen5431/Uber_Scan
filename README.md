@@ -23,13 +23,22 @@ answer before you finish typing:
 | 🟠 | CLOSE CALL | within the near-miss band below target |
 | 🔴 | PASS | below the band |
 
-A fourth answer, on the rig only: where the reading cannot be trusted as a rate
-— a payout and a time that cannot both be true, or a card whose second leg the
-camera could not time — no number is shown at all, and the panel names which
-figure to check against the phone in your hand.
+A fourth answer, on this keypad as well as on `scan.html` and `live.html`: where
+the figures cannot be trusted as a rate, no number is shown at all — the
+headline, $/mile, $/min and net pay all read `--` — and the verdict names the
+figure to fix instead. Here that is the figure you just typed: **CHECK THE PAY**
+(a payout no offer makes), **CHECK THE TIME** (a duration no offer states),
+**CHECK THE DISTANCE** (more miles than those minutes can drive) or **CHECK PAY
+AND TIME** (the two together are a rate no offer pays — $11.84 typed as $118.40
+over 20 minutes is $355/hr). The two camera screens can say two more that
+typing cannot: **CHECK THE TIME** on a card whose second leg the camera could
+not time, and **NOT AN OFFER** on a screen that is not an offer at all — a
+route planner or an idle screen with a payout on it — where there is no figure
+to check.
 
 Other keys: **⌫** deletes (and on an empty field jumps back to the previous one),
-**CLR** resets, **LOG** saves the offer to history.
+**CLR** resets, **LOG** saves the offer to history — except an entry showing one
+of those four, which it refuses and tells you which figure to fix first.
 
 If haptics are on, each key gives a short buzz and the verdict gives a distinct
 one — a double-tap buzz for green, a long buzz for red — so you can feel the
@@ -63,12 +72,14 @@ may cost you more than it gains. Try split screen first.
 |---|---|
 | Target $/hour | The green line. Default $25 — but see **where to draw the line** on the offers page, which works out from your own offers what that line is costing you. |
 | Near-miss band | How far below target still counts as amber. Default 15%. |
-| Cost per mile | Gas and wear, subtracted from the offer before the rate is figured. Set it to `0` to see gross pay; the 2025 IRS rate is `0.70`. |
+| Cost per mile | Gas and wear, subtracted from the offer before the rate is figured. Set it to `0` to see gross pay; the 2025 IRS rate is `0.70`. Served by the rig, this is the rig's figure too: the box shows what the rig is costing a mile at, a change is sent to it when you leave the box, and the line under the box says whether it took. |
 | Pickup padding | Minutes added to every offer, since the quoted time usually ignores the drive to the rider. |
 | Haptics | Buzz on each key. |
 
-Settings and history are stored on the phone only — there is no account and no
-tracking. The one thing it talks to is the rig: served by the rig's own server,
+There is no account and no tracking. History is kept in the browser. The
+settings are too, and change this keypad, not the rig's panel — except cost
+per mile, which, served by the rig, is the rig's own figure as described above.
+The one thing it talks to is the rig: served by the rig's own server,
 **LOG** also hands the offer to the rig's journal so the offers page can count
 it, and says so in the history when that did not get through. Served from
 anywhere else (GitHub Pages, a file), it asks once whether a rig is there,

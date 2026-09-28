@@ -37,6 +37,7 @@ the worst of the available outcomes.
 """
 
 import os
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -110,6 +111,33 @@ def candidates(base):
     return found
 
 
+def age(base, now=None):
+    """Seconds since the freshest copy of a request was written, or None.
+
+    The file's own mtime is the stamp, the idiom `.viewing` already uses: the
+    kernel sets it at the write, off the same wall clock `time.time()` reads,
+    and a web server a `git pull` behind — which writes an empty file — stamps
+    it exactly the same way, so nothing about the request's format changes.
+    Measured on the development box, not the Pi: over 40,000 writes to
+    /dev/shm and /tmp the age read straight after ran 0.000003s to 0.0019s and
+    never came out negative. A negative age is therefore a
+    clock that moved, not a fresh press, and the caller should say so.
+
+    The freshest of the copies, because either may be the one the driver just
+    wrote — see `candidates` for why there are two.
+    """
+    now = time.time() if now is None else now
+    stamps = []
+    for candidate in candidates(base):
+        try:
+            stamps.append(os.stat(candidate).st_mtime)
+        except OSError:
+            continue
+    if not stamps:
+        return None
+    return now - max(stamps)
+
+
 def clear(base):
     """Drop the request everywhere it might be.
 
@@ -138,6 +166,13 @@ CROPBOX = '.cropbox.json'
 # showing a navigation screen is exactly what the motion gate calls "nothing
 # happening".
 DROPOFF = '.dropoff'
+# "A mile costs this much" — the one setting the driver can change from a
+# screen, written by POST /api/settings and taken by the scan loop within a
+# frame. ONE key, `costPerMile`, and nothing else is read out of it: the block
+# it lands in also holds `keepPlaces`, which decides whether addresses reach the
+# append-only journal at all, and `pad` and `secondsPerItem`, which move every
+# rate the rig prints and stores. See settings_requested in scan_pi.py.
+SETTINGS = '.settings.json'
 
 
 # The live picture is the fourth file the two sides share, and it moved here

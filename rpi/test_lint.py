@@ -173,14 +173,16 @@ for name in sorted(written):
 # ...and the fallback names handoff.py uses where there is no RAM disk, which
 # are built rather than written out as literals.
 import handoff as HO                                          # noqa: E402
-for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
+for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.SETTINGS,
+             HO.FRAME_LEGACY):
     ok_('the fallback %s is ignored' % base, is_ignored(base))
 
 # Every one of them is written through a temporary and renamed into place, and
 # the temporary names are not all `<name>.part`: the crop endpoint appends a pid
 # and a counter so two drags arriving together cannot interleave into one file.
 # Naming them exactly is what left three of these committable.
-for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.FRAME_LEGACY):
+for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.SETTINGS,
+             HO.FRAME_LEGACY):
     for suffix in ('.part', '.4321.7.part', '.tmp'):
         ok_('...and %s%s with it' % (base, suffix), is_ignored(base + suffix))
 
@@ -384,6 +386,106 @@ for _page in ('journal.html', 'map.html'):
         'Advice.DAY_STARTS_AT' in _src)
     ok_('...and keeps no copy of its own', not re.search(
         r'\bvar\s+DAY_STARTS_AT\s*=\s*[0-9]', _src))
+
+# ...and the same for how big the journal gets, which is a number in prose
+# rather than in code, and drifted the way prose does. Twenty-one places gave
+# it, with six figures between them and none measured — a year was "a few
+# megabytes", "single-digit megabytes", 19MB, 20MB or 68MB depending on the
+# file, and a shift was 50kB — while the one real measurement, 2.8 rows an
+# offer and 5.7MB a week, sat in a comment in test_sync.py. The 68MB already
+# sat past the 64MB cap it was being used to reason about, and the roll's own
+# warning called a season of ordinary driving a bug on the strength of the
+# smallest of them.
+#
+# `journal.WEEK_BYTES` holds the measurement now, and every other place quotes
+# it as "5.7MB a week" beside that name, so a reader can find where it came
+# from. What is held here is that every such quotation agrees with the
+# constant, points at it, and that the retired wording has not come back.
+# AUDITS.md is left out: it is a ledger of what was found, and quotes the old
+# figures on purpose.
+_jr_src = open(os.path.join(ROOT, 'rpi', 'journal.py')).read()
+_wb = re.search(r'(?m)^WEEK_BYTES\s*=\s*([0-9_]+)\s*$', _jr_src)
+ok_('WEEK_BYTES is a named constant in the journal', _wb is not None)
+_prose = {}
+for _dir, _subdirs, _names in os.walk(ROOT):
+    _subdirs[:] = [d for d in _subdirs
+                   if d not in ('.git', 'node_modules', 'vendor', '.claude')]
+    for _name in _names:
+        if not _name.endswith(('.py', '.js', '.html', '.md', '.sh', '.css')):
+            continue
+        _rel = os.path.relpath(os.path.join(_dir, _name), ROOT)
+        if _rel in ('AUDITS.md', os.path.join('rpi', 'test_lint.py')):
+            continue
+        with open(os.path.join(_dir, _name), encoding='utf-8',
+                  errors='replace') as _fh:
+            _prose[_rel] = _fh.read()
+# Across a comment's line break as well: "5.7MB\n  // a week" is still a
+# quotation, and a pattern that stopped at the newline missed one in server.js.
+# And in the other ways a week is written: this once needed the digits hard
+# against "MB" and the word "a", so "5.2 MB a week", "5.2MB per week" and
+# "5.2MB/week" all drifted past it unread.
+_WEEK_QUOTE = (r'(\d+(?:\.\d+)?)\s*(?:MB|megabytes?)'
+               r'(?:[\s/*#]+(?:a|per|each|every)[\s/*#]+|\s*/\s*)week')
+if _wb:
+    _week_mb = round(int(_wb.group(1).replace('_', '')) / 1e6, 1)
+    _quotes = [(_rel, _m) for _rel, _src in sorted(_prose.items())
+               for _m in re.finditer(_WEEK_QUOTE, _src)]
+    # More than a handful, or every check below passes on nothing.
+    ok_('the journal\'s size is quoted where it is argued with (%d places)'
+        % len(_quotes), len(_quotes) >= 10)
+    _wrong = ['%s says %sMB' % (_rel, _m.group(1)) for _rel, _m in _quotes
+              if float(_m.group(1)) != _week_mb]
+    ok_('...and every quotation is WEEK_BYTES\' %.1fMB a week%s'
+        % (_week_mb, ' (' + '; '.join(_wrong) + ')' if _wrong else ''),
+        not _wrong)
+    # Within a few lines of the figure, so the reader who doubts it has a name
+    # to look up rather than a number to take on trust.
+    _unsourced = ['%s:%d' % (_rel, _prose[_rel].count('\n', 0, _m.start()) + 1)
+                  for _rel, _m in _quotes
+                  if 'WEEK_BYTES' not in _prose[_rel][
+                      max(0, _m.start() - 300):_m.end() + 300]]
+    ok_('...and each one names WEEK_BYTES beside it%s'
+        % (' (not ' + ', '.join(_unsourced) + ')' if _unsourced else ''),
+        not _unsourced)
+# The retired wording, by its own shapes. A yearly figure is refused outright
+# rather than checked against 52 weeks: every one on file was the fault, and a
+# second unit is a second number to keep in step.
+_RETIRED = (
+    (r'\d+(?:\.\d+)?\s*MB[\s/*#]+a[\s/*#]+year', 'a size a year in MB'),
+    (r'megabytes[\s/*#]+(?:a|over[\s/*#]+a)[\s/*#]+year', 'megabytes a year'),
+    (r'year of driving[^.\n]{0,30}\d|MB on a year of driving',
+     'a year of driving in rows or MB'),
+    (r"shift's offers are about", 'a shift in kB'),
+)
+for _pat, _what in _RETIRED:
+    _back = sorted(_rel for _rel, _src in _prose.items() if re.search(_pat, _src))
+    ok_('no file gives the journal as %s any more%s'
+        % (_what, ' (' + ', '.join(_back) + ')' if _back else ''), not _back)
+# ...and how often it rolls, which is the same figure divided into the cap and
+# was answered three ways once the week was measured: "four a year" in sync.py,
+# "about four" in test_sync.py, "four or five" in journal.py and rpi/README.md.
+# 52 weeks over the cap's 11.7 is 4.43 at the floor, and the real rate is
+# higher, so the one true wording is a lower bound: "at least four".
+_ROLLS = (r'(?<!at least )\bfour(?:[\s/*#]+or[\s/*#]+five)?(?:[\s/*#]+rolls)?'
+          r'[\s/*#]+a[\s/*#]+year|rolls[\s/*#]+four[\s/*#]+or[\s/*#]+five'
+          r'|about[\s/*#]+four[\s/*#]+rolls')
+_rolls_back = sorted(_rel for _rel, _src in _prose.items()
+                     if re.search(_ROLLS, _src))
+ok_('no file gives the rolls a year as anything but "at least four"%s'
+    % (' (' + ', '.join(_rolls_back) + ')' if _rolls_back else ''),
+    not _rolls_back)
+
+# ...and how long a third of the live file takes to parse, which three pages and
+# rpi/README.md gave as the 150-265ms a desktop took over a 20MB file of fifty
+# thousand short rows — about 400 bytes a row, where the real week's average
+# 1,752, so a quarter as many rows per byte. That figure may be quoted only as
+# what it was: within reach of the words that say what file it timed.
+_bench = ['%s:%d' % (_rel, _src.count('\n', 0, _m.start()) + 1)
+          for _rel, _src in sorted(_prose.items())
+          for _m in re.finditer(r'150-265\s*ms', _src)
+          if 'fifty thousand' not in _src[max(0, _m.start() - 300):_m.end() + 300]]
+ok_('no file gives the fifty-thousand-row benchmark as a real journal\'s parse%s'
+    % (' (' + ', '.join(_bench) + ')' if _bench else ''), not _bench)
 
 # --- what a driver STARTS from, in the three places that seed it ------------
 #
@@ -676,6 +778,38 @@ for _what, _file, _pat, _want in _TABLES:
        sorted(_want - _named), [])
     eq('...and none it cannot: %s' % _what, sorted(_named - _want), [])
 
+# --- a request the scan loop takes sits under its own comment --------------
+#
+# The loop takes four requests from the screens one after another, each under
+# a paragraph saying what it is and why it is read at once. When the cost per
+# mile was added it went in BETWEEN the drawn box's paragraph and the code it
+# described, so "A box drawn on the live view ... fractions of the frame" sat
+# directly over the cost-per-mile block and the box's own code had no comment
+# at all. Nothing can check that a comment is true; this checks that each of
+# these is on top of the code it names.
+_scan_lines = open(os.path.join(ROOT, 'rpi/scan_pi.py'), encoding='utf-8').read().split('\n')
+
+
+def _comment_over(code):
+    """The comment block ending on the line right above `code`, as one string."""
+    at = [i for i, line in enumerate(_scan_lines) if line.strip() == code]
+    if len(at) != 1:
+        return None
+    above = []
+    i = at[0] - 1
+    while i >= 0 and _scan_lines[i].strip().startswith('#'):
+        above.insert(0, _scan_lines[i].strip().lstrip('#').strip())
+        i -= 1
+    return ' '.join(above)
+
+
+for _code, _says in (('drawn = CX.take_request()', 'A box drawn on the live view'),
+                     ('cost = settings_requested()', 'A cost per mile typed')):
+    _over = _comment_over(_code)
+    ok_('scan_pi.py: the comment right above `%s` is the one about it (%r)'
+        % (_code, (_over or '')[:50]),
+        _over is not None and _over.startswith(_says))
+
 # --- the record of what has already been looked at -------------------------
 #
 # AUDITS.md exists so the same ground is not dug twice: what was fixed, what is
@@ -693,6 +827,73 @@ _readme = open(os.path.join(ROOT, 'README.md')).read()
 
 ok_('the record of what has been audited is readable', len(_audits) > 500)
 ok_('...and the README points at it', 'AUDITS.md' in _readme)
+
+# The keypad's withheld verdict, in the one page that tells a driver how to use
+# the keypad. README said that answer came "on the rig only", while ui.js blanks
+# the headline and every figure under it on four reasons and refuses LOG on
+# the same four — so the screen the docs call the one to rely on could refuse
+# its own entry with its documentation saying it cannot. Held to ui.js's own
+# table, so a fifth label or a reworded one has to reach the README too.
+_ui_src = open(os.path.join(ROOT, 'ui.js'), encoding='utf-8').read()
+_ui_tbl = re.search(r"el\.verdictLabel\.textContent = r\.state === 'doubt'(.*?)\}\[r\.doubt\]",
+                    _ui_src, re.S)
+_ui_words = re.findall(r"[a-z]+: '([A-Z ]+)'", _ui_tbl.group(1)) if _ui_tbl else []
+ok_('the keypad names a figure for each typed reason (%d)' % len(_ui_words),
+    len(_ui_words) == len(_OP_L.TYPED_DOUBT_REASONS))
+_unsaid = [_w for _w in _ui_words if _w not in re.sub(r'\s+', ' ', _readme)]
+ok_('README says what the keypad shows when it withholds a rate%s'
+    % (' (not ' + ', '.join(_unsaid) + ')' if _unsaid else ''), not _unsaid)
+ok_('...and no longer says that answer is the rig\'s alone',
+    'on the rig only' not in _readme)
+# ...and the two the camera screens add, held to live.html's own table the same
+# way. The README called both of them a card "whose second leg the camera could
+# not time" that "name the figure to check", which is true of `leg` alone:
+# `screen` reads NOT AN OFFER, and there is no figure on a route planner to
+# check against anything.
+_live_tbl = re.search(r"el\.verdictLabel\.textContent =\s*\{(.*?)\}\[r\.doubt\]",
+                      open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read(), re.S)
+_cam = dict(re.findall(r"([a-z]+): '([A-Z ]+)'", _live_tbl.group(1))) if _live_tbl else {}
+_cam = {_k: _v for _k, _v in _cam.items() if _k not in _OP_L.TYPED_DOUBT_REASONS}
+_cam_unsaid = [_v for _v in _cam.values() if _v not in re.sub(r'\s+', ' ', _readme)]
+ok_('README names what the camera screens add (%d)%s'
+    % (len(_cam), ' (not ' + ', '.join(_cam_unsaid) + ')' if _cam_unsaid else ''),
+    len(_cam) == len(_OP_L.DOUBT_REASONS) - len(_OP_L.TYPED_DOUBT_REASONS)
+    and not _cam_unsaid)
+ok_('...and does not call a screen that is not an offer a figure to check',
+    'name the figure to check' not in _readme)
+
+# ...and the phone scanner's limits list, which said "Only Uber's current card
+# wording is handled" while the shared parser reads a DoorDash card that states
+# a deadline instead of a duration, and rates it — `$8.75 / Deliver by 7:15 PM
+# / 5.2 mi` read at 6:45 PM is 30 minutes, $14.38/hr, PASS. A driver told the
+# phone cannot read that card does not point it at one. Held while the parser
+# holds the grammar: the day it is dropped, the doc sentence goes with it.
+_scanning = open(os.path.join(ROOT, 'SCANNING.md'), encoding='utf-8').read()
+_limits = _scanning[_scanning.index('## Known limits'):]
+_limits = _limits[:_limits.index('\n## ', 1)]
+if 'deliverBy' in _js_src:
+    ok_('SCANNING.md\'s limits name the deadline card the parser reads',
+        'Deliver by' in _limits)
+    # ...and the two sentences that reasoned about a deadline card as if it were
+    # safe from the clock, or unanswerable from the card. doctor.py said "the
+    # money is protected and the clock is not": measured on the real parser, a
+    # $10.86 / 7.4 mi / Deliver by 9:15 PM card read at 8:30 PM is $11.52/hr
+    # PASS, and a confident $34.56/hr GO with no doubt reason when the clock is
+    # 30 minutes fast. advice.js gave "not one card in 836 stated a deadline"
+    # as why "in time" has nothing to be measured against — backwards for the
+    # one card shape where it is printed. Held as text, not as a test of the
+    # wrong GO: a case asserting that GO would be a record of what the rig
+    # does passed off as what it should do.
+    _doctor = open(os.path.join(ROOT, 'rpi', 'doctor.py'), encoding='utf-8').read()
+    ok_('doctor.py no longer says a wrong clock leaves the money protected',
+        'So the money is protected' not in _doctor)
+    ok_('advice.js no longer says a deadline card has nothing to measure against',
+        'has nothing on the card to be measured against' not in re.sub(
+            r'[\s*]+', ' ', open(os.path.join(ROOT, 'advice.js'),
+                                   encoding='utf-8').read()))
+    for _doc, _txt in (('SCANNING.md', _scanning), ('rpi/README.md', _readme_rpi)):
+        ok_('%s no longer says only Uber\'s wording is handled' % _doc,
+            'Only Uber\'s current card wording' not in _txt)
 
 # Every path it names in backticks is a path that exists. A doc naming a file
 # that was renamed a year ago is a doc nobody trusts the rest of.
@@ -727,6 +928,21 @@ if _math:
             ok_('...and it is the one offer-parser.js runs: %s = %s'
                 % (_rate, _line.group(1)),
                 _line.group(1) == _expr and _expr in _parser_js)
+
+# ...and the Targets section does not say the settings never leave the phone.
+# It did — "stored on the phone only" — in the same section whose table says
+# cost per mile, served by the rig, is sent to the rig; two answers in one
+# section, and the first one false once ui.js posts to /api/settings. Tied to
+# that post, so the claim may come back only if the posting goes.
+_targets = re.search(r'## Targets.*?(?=\n## )', _readme, re.S)
+_ui_js = open(os.path.join(ROOT, 'ui.js'), encoding='utf-8').read()
+ok_('the README has a Targets section', bool(_targets))
+if _targets and "'/api/settings'" in _ui_js:
+    _phone_only = re.findall(r'[Ss]ettings[^.]*?\bon the phone only',
+                             re.sub(r'\s+', ' ', _targets.group(0)))
+    ok_('...which does not say the settings stay on the phone while the '
+        'keypad sends cost per mile to the rig (%r)' % _phone_only[:1],
+        not _phone_only)
 
 # ...and the README's own table covers every file the repo ships at the top
 # level, so the next one added has to be written down rather than quietly left

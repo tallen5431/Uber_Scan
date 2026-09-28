@@ -627,6 +627,7 @@
     document.getElementById('setPad').value = settings.pad;
     document.getElementById('setHaptics').checked = settings.haptics;
     openSheet('settingsSheet');
+    askRig();
   });
 
   document.getElementById('openHistory').addEventListener('click', function () {
@@ -674,6 +675,106 @@
   bindSetting('setCost', 'costPerMile', parseFloat, 0, 10);
   bindSetting('setPad', 'pad', parseInt, 0, 120);
 
+  /* ---------- the rig's cost per mile ----------
+   *
+   * The one setting on this sheet the rig can be told. Every verdict on its
+   * panel is net of it, and until this it could only be changed by editing a
+   * file over SSH — so across the whole of the real week it was the factory
+   * 0.30 on every row, and this box changed the keypad and nothing the panel
+   * said. See /api/settings in server.js for why it is this key and no other.
+   *
+   * What the rig answers is what this keypad uses, so the two screens cost a
+   * mile the same way; where no rig answers, this box is this browser's alone,
+   * as it always was. Which of those is true is said under the box in words,
+   * and stays said — a toast is gone in a second and a half, and "it did not
+   * reach the rig" is the one thing here worth reading twice. */
+  var rigCost = null;           // the last answer, or null for none at all
+  var rigLine = document.getElementById('costRig');
+
+  function sayRig(extra) {
+    if (!rigLine) return;
+    var r = rigCost;
+    var text;
+    if (!r || r.ok === false && r.scanner === undefined) {
+      text = 'No rig answered, so this changes this keypad only.';
+    } else if (!r.scanner) {
+      text = 'No scanner runs on the machine serving this page, so this changes '
+           + 'this keypad only — set it on the rig.';
+    } else if (r.running === false) {
+      // The scanner is down — between restarts, wedged, stopped. A request
+      // waits in the handoff directory and is taken when it comes back, but
+      // "its next reading will say" is a promise about a reading that is not
+      // coming, and the figure the server last heard is from a process that
+      // has gone.
+      text = 'The rig\'s scanner is not running, so nothing on its panel is '
+           + 'priced right now' + (typeof r.pending === 'number'
+             ? ' — ' + money(r.pending, 2) + '/mi is waiting for it and is '
+               + 'used from its first reading when it starts.'
+             : '. A change here waits for it.');
+    } else if (typeof r.pending === 'number') {
+      text = 'Sent to the rig: its next reading will say "after '
+           + money(r.pending, 2) + '/mi costs".';
+    } else if (typeof r.costPerMile === 'number') {
+      text = 'The rig is costing a mile at ' + money(r.costPerMile, 2)
+           + ' too — a change here is sent to it.';
+    } else {
+      text = 'The rig has not said what it costs a mile at yet — a change here '
+           + 'is sent to it.';
+    }
+    rigLine.textContent = extra || text;
+    rigLine.hidden = false;
+  }
+
+  // Asked at load and again whenever the sheet opens, because the panel this
+  // page sits beside stays up for a whole shift and the figure can be changed
+  // from another screen in the meantime.
+  function askRig() {
+    return fetch('/api/settings')
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        rigCost = s;
+        var theirs = s && s.scanner
+          ? (typeof s.pending === 'number' ? s.pending : s.costPerMile) : null;
+        if (typeof theirs === 'number' && theirs !== settings.costPerMile) {
+          settings.costPerMile = theirs;
+          saveSettings();
+          render();
+          var box = document.getElementById('setCost');
+          if (box && document.activeElement !== box) box.value = theirs;
+        }
+        sayRig();
+      })
+      .catch(function () { rigCost = null; sayRig(); });
+  }
+
+  // On `change`, not on `input`: a cost typed a key at a time is 0, then 0.4,
+  // then 0.45, and every one of those would reach the rig and price whatever
+  // card was on the phone at that moment. `change` fires once, when the box is
+  // left — which pressing Done does.
+  document.getElementById('setCost').addEventListener('change', function () {
+    if (!rigCost || !rigCost.scanner) { sayRig(); return; }
+    var sent = settings.costPerMile;
+    var was = rigCost.costPerMile;
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ costPerMile: sent })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s && s.ok) { rigCost = s; sayRig(); return; }
+        rigCost = s && s.scanner !== undefined ? s : rigCost;
+        sayRig('The rig did not take it (' + ((s && s.error) || 'no reason given')
+               + ') — this keypad is using ' + money(sent, 2)
+               + (typeof was === 'number' ? ', the rig ' + money(was, 2) : '') + '.');
+      })
+      .catch(function () {
+        sayRig('Could not reach the rig — this keypad is using ' + money(sent, 2)
+               + (typeof was === 'number' ? ', the rig is still on ' + money(was, 2) : '')
+               + '.');
+      });
+  });
+
   document.getElementById('setHaptics').addEventListener('change', function (e) {
     settings.haptics = e.target.checked;
     saveSettings();
@@ -700,6 +801,9 @@
   render();
   // Anything logged while the rig was out of reach goes now, if it is back.
   flushUnsent();
+
+  // What the rig costs a mile at, if a rig is serving this page.
+  askRig();
 
   // Show the way to the rig's own screen, but only on the rig. Asked once; a
   // failure to answer leaves the link hidden, which is right for the phone
