@@ -1808,24 +1808,16 @@ try:
     # the second — so the raw list has Atlanta ahead of Marietta by $5.38 and
     # the true figure, at the same hours, is $2.45. A driver acting on the raw
     # list drives to Atlanta at six in the evening and finds the six-o'clock
-    # rate. This fixture's offers are ten minutes apart and so span several
-    # blocks, which is what makes the holding visible here at all.
-    ok_('the ranking says it holds the hour still (%r)'
-        % [n for n in (_m.get('note') or []) if 'held still' in n][:1],
-        'held still' in _notes)
-    ok_('...and says what that is worth, against what it looks like unheld',
-        re.search(r'best to worst is \$[\d.]+; unheld it looks like \$[\d.]+',
-                  _notes))
-    # ...and the row LEADS with that figure rather than with what the town
-    # earned. Leading with the median is the whole fault: it is the number that
-    # looks like a rate, it is four times the true margin on the owner's week,
-    # and a driver reads the first number on the row.
-    if _rows:
-        ok_('the row leads with what is left, not with what it paid (%r)'
-            % _rows[0]['text'][:44],
-            re.match(r'^[^\d]*[+\u2212]\$[\d.]+/hr', _rows[0]['text']))
-        ok_('...with what it paid beside it, being what was earned',
-            re.search(r'\$[\d.]+ median', _rows[0].get('support') or ''))
+    # rate.
+    #
+    # Checked at the end of this file, on the journal built for it, and NOT
+    # here. This fixture held the hour still only by accident of the clock:
+    # its two towns share a block only through o1, twenty minutes older than
+    # the Borealis rows, so for the first twenty minutes of every third hour
+    # o1 fell into the previous block, no block held two towns, and these four
+    # checks failed \u2014 20 minutes in every 180, found failing at 00:04 and
+    # 00:13 New York time, and the same suite passing whole at 00:23. A check that fails by the clock is a check nobody believes when it
+    # fails for a reason.
 
     # --- the box itself ----------------------------------------------------
     box = w.get('box')
@@ -2200,8 +2192,16 @@ const STUB = `
     note: [].slice.call(document.querySelectorAll('#sideBody > .note'))
       .map((n) => (n.textContent || '').replace(/\s+/g, ' ').trim()).join(' '),
     rows: [].slice.call(document.querySelectorAll('#sideBody .rankrow'))
-      .map((r) => ({ town: r.getAttribute('data-town'),
-                     lead: ((r.querySelector('.money') || {}).textContent || '').trim() })),
+      .map((r) => {
+        var sup = r.querySelector('.note');
+        return { town: r.getAttribute('data-town'),
+                 lead: ((r.querySelector('.money') || {}).textContent || '').trim(),
+                 text: (r.textContent || '').replace(/\s+/g, ' ').trim(),
+                 // Read as something a driver can SEE, as the first section
+                 // reads it: textContent walks hidden nodes happily.
+                 support: sup && sup.getClientRects().length
+                   ? (sup.textContent || '').replace(/\s+/g, ' ').trim() : null };
+      }),
   }));
 
   stage = 'place';
@@ -2275,6 +2275,26 @@ try:
     note3 = loaded.get('note') or ''
     ok_('a ranking of three towns that beats chance (%r)' % note3[:90],
         'is not a coin toss' in note3 and 'held still' in note3)
+
+    # --- and the hour, held still: moved here from the first section --------
+    #
+    # These four sat on the first journal, which holds the hour still only
+    # when the clock lets it — see the note there. This journal is built on
+    # _block_base, so it holds two shared blocks whatever hour it is run at.
+    ok_('the ranking says it holds the hour still', 'held still' in note3)
+    ok_('...and says what that is worth, against what it looks like unheld',
+        re.search(r'best to worst is \$[\d.]+; unheld it looks like \$[\d.]+',
+                  note3))
+    # ...and the row LEADS with that figure rather than with what the town
+    # earned. Leading with the median is the whole fault: it is the number that
+    # looks like a rate, it is four times the true margin on the owner's week,
+    # and a driver reads the first number on the row.
+    _rows3 = loaded.get('rows') or []
+    ok_('the row leads with what is left, not with what it paid (%r)'
+        % (_rows3[0]['text'][:44] if _rows3 else None),
+        _rows3 and re.match(r'^[^\d]*[+−]\$[\d.]+/hr', _rows3[0]['text']))
+    ok_('...with what it paid beside it, being what was earned',
+        _rows3 and re.search(r'\$[\d.]+ median', _rows3[0].get('support') or ''))
 
     # --- the lookups the server lost, said -----------------------------------
     #
