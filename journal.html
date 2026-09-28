@@ -1988,11 +1988,36 @@
   // the panel said, and they are all still on disk. The flag is absent on them
   // and true on rows written since. Absent is not "fine": it is the unknown,
   // and this page may not report an unknown as a word the panel used.
-  function saidWords(s, judged) {
-    if (!s) return 'no answer';
-    if (judged !== true) return 'not recorded';
-    return s.state === 'go' ? 'take it'
-         : s.state === 'warn' ? 'close call' : 'pass';
+  //
+  // `stackShown: false` is the row saying the pair line's colour was not on
+  // the panel when it was written. The colour came off because it painted
+  // "take both" green under a PASS headline, 45 times in the real week, and
+  // `stack.state` is still written — so on those rows it is arithmetic the
+  // driver never saw, and reading it here as "Called it: take it" would print
+  // the very green that was taken off the glass, on the page a driver grades
+  // the panel by. What they were shown is the headline, which the row carries
+  // as `said`. Absent `stackShown` is a row from before, when the colour WAS
+  // what the panel said.
+  //
+  // One answer for the tally, the dot and the row's own words, so the three
+  // cannot disagree: go, warn, no, `none` for no answer, `unjudged` for not
+  // kept.
+  function pairSaid(p) {
+    var s = p.stack || null;
+    if (p.stackShown === false) {
+      return p.said === 'go' || p.said === 'warn' || p.said === 'no' ? p.said
+           : p.said === 'doubt' ? 'none' : 'unjudged';
+    }
+    if (!s) return 'none';
+    return p.judged === true ? s.state : 'unjudged';
+  }
+
+  function saidWords(p) {
+    var k = pairSaid(p);
+    return k === 'none' ? 'no answer'
+         : k === 'unjudged' ? 'not recorded'
+         : k === 'go' ? 'take it'
+         : k === 'warn' ? 'close call' : 'pass';
   }
 
   function pairRow(p) {
@@ -2019,7 +2044,10 @@
     return '<details class="offer pair' + (s ? '' : ' aside')
       + (p.accepted === true ? ' mine' : '') + '">'
       + '<summary>'
-      + '<span class="dot ' + (s ? s.state : '') + '"></span>'
+      // The dot is the verdict in colour, so it is the same answer as
+      // "Called it" below and not the pair's arithmetic — see pairSaid.
+      + '<span class="dot ' + ((/^(go|warn|no)$/).test(pairSaid(p))
+                                 ? pairSaid(p) : '') + '"></span>'
       + '<span class="big">' + range + (s ? '<i class="unit">/hr</i>' : '') + '</span>'
       // Terse, in the offer log's own idiom, and in priority order.
       //
@@ -2043,7 +2071,11 @@
       + (p.accepted === true
          ? '<span class="took" title="you took this">✓</span>' : '')
       + (ends === 'ends elsewhere' ? '<span class="tag">elsewhere</span>' : '')
-      + (s ? '' : '<span class="tag">no answer</span>')
+      + (s ? '' : '<span class="tag">'
+         // On a row whose verdict is the headline's, a missing pair line is
+         // a missing range and not a missing answer: "no answer" beside
+         // "Called it: pass" would contradict itself.
+         + (p.stackShown === false ? 'no range' : 'no answer') + '</span>')
       + '<span class="when">' + when.toLocaleTimeString(undefined,
           { hour: 'numeric', minute: '2-digit' }) + '</span>'
       // Where the two jobs go, on the row rather than only inside it — the
@@ -2096,11 +2128,16 @@
       + row('Ends at', offer.dropoff ? esc(offer.dropoff) : 'not named on the card')
       + '</dl><h3>What the panel said</h3>'
       + '<dl class="facts">'
-      + row('Called it', saidWords(s, p.judged))
-      + (p.judged === true ? '' : row('', 'This pairing was recorded before the '
-          + 'panel\u2019s target reached the record, so what it advised at the '
-          + 'time was not kept. The figures below are the pair\u2019s own and '
-          + 'are unaffected.'))
+      + row('Called it', saidWords(p))
+      + ((p.stackShown === false ? pairSaid(p) !== 'unjudged' : p.judged === true)
+         ? ''
+         : row('', (p.stackShown === false
+             ? 'This pairing was recorded by a scanner that did not send its '
+               + 'verdict with the offer, '
+             : 'This pairing was recorded before the panel\u2019s target '
+               + 'reached the record, ')
+           + 'so what it advised at the time was not kept. The figures below '
+           + 'are the pair\u2019s own and are unaffected.'))
       + row('Both together', s ? money(s.pay, 2) : null)
       + row('Over', mins ? mins + ' min' : null)
       + row('Which is', s
@@ -2359,7 +2396,7 @@
       // A row whose verdict was never the panel's cannot be counted as one.
       // Counted in its own bucket instead of being dropped, because how many
       // of these there are is the measurement — see the comment on saidWords.
-      var k = !p.stack ? 'none' : p.judged === true ? p.stack.state : 'unjudged';
+      var k = pairSaid(p);
       said[k]++;
       if (p.accepted !== undefined) marked++;
       if (p.accepted === true) took[k]++;
@@ -2392,6 +2429,8 @@
     // that has not cleared anything — the range straddles the target and which
     // end it lands on is the geography — so counting it as cleared would turn
     // the one honest hedge on the panel into a recommendation after the fact.
+    // On a row with `stackShown: false` the `go` is the headline's ACCEPT,
+    // because that is the only verdict the panel drew — see pairSaid.
     var tookAll = took.go + took.warn + took.no + took.none;
     lead += marked
       ? 'You marked <b>' + marked + '</b> of them'

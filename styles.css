@@ -214,9 +214,11 @@ html, body {
  * string, so both were the first thing the ellipsis ate — measured on the rig's
  * own 800x480 panel, the text wanted 784px in a 750px box, and at 480x320 it
  * wanted 754 in 434. The words "ENDS ELSEWHERE" went first, leaving only amber
- * — and amber already means "the range straddles your target", so the driver
+ * — and amber then also meant "the range straddles your target", so the driver
  * was shown one colour standing for two different claims with the words that
- * told them apart cut off.
+ * told them apart cut off. (It no longer does: the row lost its verdict colours,
+ * above, and amber on it now means ENDS ELSEWHERE and nothing else. The words
+ * still have to survive, because the colour alone does not say it.)
  *
  * The link was worse. An inline-block child of an overflow:hidden box is laid
  * out past the edge and clipped, not wrapped: its box started 235px outside the

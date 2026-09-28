@@ -5903,6 +5903,17 @@ geography verdict. `held.scanned` is the other half — whether that destination
 came off the card or off the **⌖ Dropoff** scan, which is the difference that
 button exists to make and the thing most worth measuring.
 
+**The colour is no longer drawn, so `stack.state` is no longer what the panel
+said.** It came off because it painted "take both" green under a PASS headline
+45 times in the real week, off money the held job had already earned. It is
+still written, so the row keeps its shape, and every row from then on carries
+two more fields: `stackShown: false`, and `said`, the headline's verdict off the
+card's own offer line (null from a scanner that does not send one). The offers
+page reads `said` for "Called it", the tally and the dot on those rows, and
+`stack.state` only on rows without `stackShown`, which were written while the
+colour was on the glass. The journal is append-only; without the stamp the two
+kinds of row could not be told apart.
+
 **A null stack is recorded as null rather than skipped.** "How often can it say
 anything at all" is the question this feature lives or dies by, and a file that
 only contains the times it spoke would answer it wrong.
@@ -5937,9 +5948,11 @@ Three separate failures, one cause each.
 
 **Both of the things this line alone can say were at the END of the string,** so
 both were the first thing the ellipsis ate. `ENDS ELSEWHERE` went first, leaving
-amber — and amber already means "the range straddles your target". The driver
+amber — and amber then also meant "the range straddles your target". The driver
 was shown one colour standing for two different claims, with the words that tell
 them apart cut off. That is the claim that costs an hour when it is missed.
+(The row has since lost its verdict colours, so amber on it now means ENDS
+ELSEWHERE alone; the words still have to survive the ellipsis.)
 
 **An inline-block child of an `overflow: hidden` box is laid out past the edge,
 not wrapped.** So the link — the one thing on this panel a driver is meant to

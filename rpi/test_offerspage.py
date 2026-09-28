@@ -361,6 +361,24 @@ WITHHELD = dict(PAIR, id='r2', at=NOW - 900000,
 SAID_NO = dict(PAIR, id='r3', at=NOW - 1200000,
                stack=dict(PAIR['stack'], sure=False, worst=9.0, state='no'))
 
+# A pair row written after the pair line lost its colour. The panel stopped
+# drawing `stack.state` because it painted "take both" green under a PASS
+# headline, 45 times in the real week, off money the held job had already
+# earned — and recordPairing still writes it, so the row keeps its shape. This
+# is that exact case: the arithmetic says 'go', the headline the driver saw
+# said PASS, and the row says which of the two was on the glass.
+GREEN_UNDER_PASS = dict(PAIR, id='r5', at=NOW - 1500000,
+                        said='no', stackShown=False)
+# ...and one from a scanner that did not send the verdict with the offer, so
+# the headline it drew was not kept. Its arithmetic is 'go' as well, and must
+# not stand in for the missing verdict.
+NO_STATE_SENT = dict(PAIR, id='r6', at=NOW - 1800000,
+                     said=None, stackShown=False)
+# ...and one where the pair line had no range to show while the headline
+# answered. "no answer" on that row would contradict its own "Called it".
+NO_RANGE = dict(PAIR, id='r7', at=NOW - 2100000, stack=None,
+                said='go', stackShown=False)
+
 # Dots and rankings. The newest row was judged at a lower target than the
 # rest, so re-judging a row against "today's" target would colour it
 # differently from the verdict it records; and the misread every real journal
@@ -568,6 +586,14 @@ FEEDS = {
                     'hidden': 0, 'watched': {'saw': 12, 'kept': 12},
                     'unreadable': None,
                     'pairs': [PAIR, WITHHELD, SAID_NO], 'offers': TOOK_SIX},
+    # Rows written since the pair line lost its colour. Their own feed, for
+    # the same reason as the one above: 'took six' asserts its tally row by
+    # row.
+    'pair era': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
+                 'hidden': 0, 'watched': {'saw': 12, 'kept': 12},
+                 'unreadable': None,
+                 'pairs': [GREEN_UNDER_PASS, NO_STATE_SENT, NO_RANGE],
+                 'offers': TOOK_SIX},
     'verdicts': {'count': len(VERDICTS), 'total': len(VERDICTS),
                  'truncated': False, 'days': 7, 'hidden': 1,
                  'watched': {'saw': 8, 'kept': 8},
@@ -673,8 +699,12 @@ FEEDS = {
 
 DRIVER = r'''
 const { chromium } = require('playwright');
-const [base, feedsJson, queriesJson] = process.argv.slice(2);
-const FEEDS = JSON.parse(feedsJson);
+const [base, feedsPath, queriesJson] = process.argv.slice(2);
+// A file, not an argument. One argument to exec() may not exceed 131,072
+// bytes (MAX_ARG_STRLEN). The fixtures were 127,286 bytes of JSON and the
+// 'pair era' feed took them to 131,401: "Argument list too long", and not one
+// check ran.
+const FEEDS = JSON.parse(require('fs').readFileSync(feedsPath, 'utf8'));
 // Typed into the page's own search box, one after another, against the feed
 // built for them. The box re-renders on a 120ms timer, so each one is given
 // time to land before the sentence beside it is read back.
@@ -855,6 +885,13 @@ const TEXT = (sel) => {
             var said = (d.textContent || '').replace(/\s+/g, ' ').trim();
             d.open = was;
             return said;
+          }),
+        // ...and the verdict each row puts in colour, which is the same claim
+        // as its words and has to agree with them.
+        pairDots: [].slice.call(document.querySelectorAll('#pairs details'))
+          .map(function (d) {
+            var dot = d.querySelector('summary .dot');
+            return dot ? dot.className.replace('dot', '').trim() : null;
           }),
         // What the page opens on, before anybody presses anything. The driver's
         // own words: "I mostly need to see orders I have scanned today to see
@@ -1371,8 +1408,11 @@ try:
 
     driver = os.path.join(work, 'offerspage.js')
     open(driver, 'w').write(DRIVER)
+    feeds_path = os.path.join(work, 'feeds.json')
+    with open(feeds_path, 'w') as fh:
+        json.dump(FEEDS, fh)
     run = subprocess.run(
-        ['node', driver, base, json.dumps(FEEDS), json.dumps(QUERIES)],
+        ['node', driver, base, feeds_path, json.dumps(QUERIES)],
         env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
                  PW_EXES=json.dumps([
                      os.environ.get('CHROMIUM', ''),
@@ -1807,9 +1847,45 @@ try:
     # lost is the verdict, not the money.
     ok_('...while the pair\'s own figures are still shown',
         _unjudged and '17.4' in _unjudged[0])
+    # ...and its dot. It took `stack.state` straight, so the row whose words
+    # said "not recorded" sat under a green dot saying take it.
+    eq('...and no verdict colour on it either',
+       (took.get('pairDots') or ['', None])[1], '')
     for name in ('unreadable', 'all hidden', 'genuinely empty'):
         eq('...and staying away when there are none: %s' % name,
            got[name]['pairsHead'], None)
+
+    # --- a pair row written after the pair line lost its colour --------------
+    #
+    # recordPairing still writes `stack.state`, the pair's arithmetic against
+    # the target, and the panel no longer draws it. Read as what the panel
+    # said, the one row this fixture is built round — arithmetic 'go', a PASS
+    # on the glass — comes back as "Called it: take it" on the page the driver
+    # grades the panel by, which is the green under a PASS the colour came off
+    # for. The row's `stackShown: false` is what tells it apart from the rows
+    # before, on which the colour was what the panel said.
+    era = got['pair era']
+    _era = era.get('pairSaid') or []
+    eq('the three pairings of the new kind are listed', len(_era), 3)
+    ok_('a pair whose arithmetic was green under a PASS is called what the '
+        'panel said (%r)' % (_era[:1] and _era[0][_era[0].find('Called it'):][:30],),
+        _era and re.search(r'Called it\s*pass', _era[0]) is not None)
+    ok_('...not what the colour it no longer draws would have said',
+        _era and not re.search(r'Called it\s*take it', _era[0]))
+    ok_('...and the tally counts it as a pass (%r)' % (era['pairsLead'] or '')[:70],
+        re.search(r'pass (<b>)?1\b', era['pairsLead'] or '') is not None
+        # ...and the one "take it" is the row whose headline said it.
+        and re.search(r'take it (<b>)?1\b', era['pairsLead'] or '') is not None)
+    eq('...with its dot in the colour of what was said',
+       (era.get('pairDots') or [None])[0], 'no')
+    ok_('a pair from a scanner that sent no verdict says it was not kept',
+        len(_era) > 1 and re.search(r'Called it\s*not recorded', _era[1])
+        and 'did not send its verdict' in _era[1])
+    eq('...and its dot says nothing', (era.get('pairDots') or [None, None])[1], '')
+    ok_('a pair with no range under a headline that answered says what it said',
+        len(_era) > 2 and re.search(r'Called it\s*take it', _era[2]))
+    ok_('...and names the missing range rather than a missing answer',
+        len(_era) > 2 and 'no range' in _era[2] and 'no answer' not in _era[2])
 
     # --- the one claim on a pairing that is made without a hedge -------------
     #

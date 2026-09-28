@@ -660,21 +660,22 @@ if shutil.which('python3'):
     with open(fake, 'w') as fh:
         fh.write(
             'import json, sys, time\n'
-            'def say(i, minutes, pay):\n'
+            'def say(i, minutes, pay, state="go"):\n'
             '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
             '        "grossPerHour": 36.0, "pay": pay, "minutes": minutes, "miles": 5.0,\n'
             '        "cost": 1.75, "billedMinutes": minutes, "target": 25, "band": 15,\n'
             '        "costPerMile": 0.35, "at": int(time.time() * 1000),\n'
             '        "offer": {"id": i, "pay": pay, "minutes": minutes, "billedMinutes": minutes,\n'
             '                  "miles": 5.0, "cost": 1.75, "perHour": 30.0, "target": 25,\n'
-            '                  "band": 15, "costPerMile": 0.35}}), flush=True)\n'
+            '                  "band": 15, "costPerMile": 0.35, "state": state}}),\n'
+            '          flush=True)\n'
             'say("o-1", 0.01, 9.0)\n'
             'time.sleep(2.5)\n'
             'say("o-3", 30.0, 12.45)\n'
             'time.sleep(1.5)\n'
             'say("o-3", 30.0, 12.45)\n'
             'time.sleep(1.5)\n'
-            'say("o-4", 20.0, 11.0)\n'
+            'say("o-4", 20.0, 11.0, "no")\n'
             'time.sleep(600)\n')
     open(journal, 'w').close()
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
@@ -707,6 +708,16 @@ if shutil.which('python3'):
            [r['id'] for r in pairs if r['id'] == 'o-3'], [])
         eq('...and the next card is paired with it once',
            [r['id'] for r in pairs if r['id'] == 'o-4'], ['o-4'])
+        # The verdict the panel drew for that card, off its own offer line —
+        # its reading beside it says "go" here, so a row that took it from
+        # the reading would record the wrong one. The pair line's colour is no
+        # longer drawn, so its `stack.state` is not what the driver was shown,
+        # and the row says so in a field the rows before it do not have.
+        _o4 = [r for r in pairs if r['id'] == 'o-4'][:1] or [{}]
+        eq('...recording the verdict the panel showed for that card',
+           _o4[0].get('said'), 'no')
+        eq('...and that the pair line\'s own verdict was not on the panel',
+           _o4[0].get('stackShown'), False)
         before = get(base, '/api/status')
         ok_('the status carries the pair line while the order is held',
             (before.get('last') or {}).get('stack') is not None)

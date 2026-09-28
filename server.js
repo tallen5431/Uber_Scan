@@ -1122,8 +1122,17 @@ function recordPairing(offer, now, reading) {
       pay: numOrNull(offer.pay), minutes: numOrNull(offer.minutes),
       dropoff: offer.dropoff || null, pickup: offer.pickup || null
     },
-    // What the panel actually said. Null when it said nothing, which is a
-    // measurement in its own right and must not be dropped as "no data".
+    // What the pair line showed: the range, the span, the geography. Null
+    // when it said nothing, which is a measurement in its own right and must
+    // not be dropped as "no data".
+    //
+    // `state` inside it is the pair's arithmetic against the target, and it
+    // is NOT what the panel said. It was drawn as the pair line's colour until
+    // the colour came off, because it painted "take both" green under a PASS
+    // headline 45 times in the real week, off money the held job had already
+    // earned. It is still written, so a row keeps its shape and the offers
+    // page's buckets keep working over every row on disk; `said` below is the
+    // verdict the driver was shown.
     stack: s ? { pay: s.pay, worst: s.worst, best: s.best,
                  minMinutes: s.minMinutes, maxMinutes: s.maxMinutes,
                  leftMinutes: s.leftMinutes,
@@ -1141,9 +1150,20 @@ function recordPairing(offer, now, reading) {
                  sure: s.sure === null ? null : !!s.sure,
                  ends: s.ends || null } : null,
     // False when this row was written with no reading to take the driver's
-    // target from, so the state above is not what was on the panel. Absent
-    // from rows written before this existed, which is the same unknown.
-    judged: judged
+    // target from, so the state above is not the pair's arithmetic against
+    // the target in force. Absent from rows written before this existed,
+    // which is the same unknown.
+    judged: judged,
+    // The one verdict on the glass when this card arrived: its headline, off
+    // the offer line, which carries its own card's state. Not off `reading`,
+    // which is whatever reading came last and names no card; the offer line
+    // does. Null from a scanner that does not send the state with the offer.
+    said: typeof offer.state === 'string' ? offer.state : null,
+    // ...and the stamp that tells this row from the ones before it. The
+    // journal is append-only, and every pair row written while the colour was
+    // drawn has `stack.state` as a verdict the driver saw; every row from here
+    // on has it as one they did not. Absent means the colour was on the panel.
+    stackShown: false
   };
   appendLines(JSON.stringify(row) + '\n', function (err) {
     if (err) console.error('journal: could not record a pairing: ' + err.message);
