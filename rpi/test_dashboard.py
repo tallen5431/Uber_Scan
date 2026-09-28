@@ -1909,6 +1909,42 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  // ...and the rig between offers, which is where it spends most of a shift.
+  //
+  // The last read was thirty seconds ago and it found no card; the heartbeat
+  // is four seconds old. The connection line used to say "the loop is running
+  // but nothing has been read for 30s" here — a reader fault — under a detail
+  // line saying "scanner running, no offer on screen". Over the real week 774
+  // of 1,155 in-shift gaps between offers ran past the 16s it fired at.
+  {
+    stage = 'between offers, the connection line';
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } }).then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    const idle = { ready: false, state: 'empty', locked: false, text: '' };
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'scanning',
+        scanner: { enabled: true, running: true, error: null },
+        last: idle, lastAgeMs: 30000, heardAgeMs: 900, offer: null, holding: null }) }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 0, counted: 0, setAside: 0, took: 0,
+                             beforeClock: 0, unreadable: null, rolled: false, clockSet: true }) }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+    // A heartbeat: the loop is turning. No `ready`, so the read clock stays
+    // thirty seconds back.
+    await page.evaluate(() => window.__es.push({ alive: true, at: 1 }));
+    await page.waitForTimeout(150);
+    out.idleConn = await page.evaluate(() => ({
+      conn: document.getElementById('conn').textContent.trim(),
+      detail: document.getElementById('detail').textContent.trim(),
+      dot: document.getElementById('dot').classList.contains('on') }));
+    await page.close();
+  }
+
   // --- the phone view is for a picture of a phone ---------------------------
   //
   // On its first boot the rig writes a landscape scene while it aims, and the
@@ -3118,8 +3154,13 @@ try:
             else:
                 ok_('%s: ...with the diagnostics beside it' % where,
                     r['diag']['shown'])
-                ok_('%s: ...which say how long the read took' % where,
-                    'ms' in r['diag']['text'])
+                # ...but not the read time. "· 1517ms" is the rig's own
+                # telemetry, already on /api/status and in the CSV, and on this
+                # line it was a four-digit figure beside the one the driver
+                # uses. Matched as digits-then-ms, since "items" ends in ms.
+                no_('%s: ...which carry no read time (%r)'
+                    % (where, r['diag']['text']),
+                    re.search(r'\d+\s*ms\b', r['diag']['text']))
 
             ok_('%s: the panel still fits' % where, r['fits'])
 
@@ -3863,6 +3904,17 @@ try:
         ok_('with the scanner running, a replayed reading leaves the heartbeat clock alone (%r)'
             % ra.get('conn'), ra and 'nothing from the scanner' not in (ra.get('conn') or ''))
         ok_('...and the dot lit', ra.get('dot'))
+        # Between offers the reader is idle, not broken: a still screen
+        # submits no read. The line said "nothing has been read for 30s" over
+        # a detail line saying there was simply no card — for most of the time
+        # the driver spends waiting for work.
+        ic = got.get('idleConn') or {}
+        ok_('between offers the page says there is no card (%r)'
+            % ic.get('detail'), 'no offer on screen' in (ic.get('detail') or ''))
+        no_('...and the connection line does not call that a reader fault (%r)'
+            % ic.get('conn'), 'nothing has been read' in (ic.get('conn') or ''))
+        eq('...it says the scanner is up', ic.get('conn'), 'scanner reading')
+        ok_('...with the dot lit', ic.get('dot'))
         ok_('...but a heartbeat is (%r)' % sn['afterHeartbeat'].get('conn'),
             'not running' not in (sn['afterHeartbeat'].get('conn') or ''))
         ok_('...and lights the dot', sn['afterHeartbeat'].get('dot'))

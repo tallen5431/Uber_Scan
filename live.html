@@ -2260,8 +2260,9 @@
     // driving seat. `readAt` is set by every reading that carries a verdict, so
     // in this branch it is always a real moment.
     // Given its own element, because the rest of this line is diagnostics —
-    // how long the read took, how many frames it was merged from, whether the
-    // corners are being tracked — and set in the same grey at the same weight
+    // how many frames it was merged from, whether the corners are being
+    // tracked, and once how long the read took — and set in the same grey at
+    // the same weight
     // the age was one `·`-separated fragment among five, indistinguishable at
     // a glance from "1517ms". The age is the only part of it a driver acts on.
     var age = Math.max(0, Math.round((Date.now() - readAt) / 1000));
@@ -2281,9 +2282,14 @@
     // `max-height: 380px` block.
     var diag = document.createElement('span');
     diag.className = 'diag';
+    // No read time. "· 1800ms" sat here on every reading: how long the Pi
+    // took over the card, which is the rig's telemetry and nothing a driver
+    // can act on. It is on the reading /api/status serves and in the CSV's
+    // `ms` column, which is where anyone tuning the reader looks. On this
+    // line it was a four-digit number set beside the age, the one figure in
+    // the line that is for the driver.
     diag.appendChild(document.createTextNode(
       (deducted ? ' · after $' + Number(r.costPerMile).toFixed(2) + '/mi costs' : '')
-      + ' · ' + r.ms + 'ms'
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
       + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')
       + (r.items ? ' · ' + r.items + ' items' : '')
@@ -2345,14 +2351,23 @@
     } else if (quiet > STALE_MS) {
       el.conn.textContent = 'nothing from the scanner for '
         + Math.round(quiet / 1000) + 's';
-    } else if (Date.now() - readAt > READ_STALE_MS) {
-      // The loop is turning and the reader is not. Worth its own line: the two
-      // failures need different things done about them, and "scanner reading"
-      // is the one sentence that must not be printed over a verdict nothing
-      // has refreshed.
-      el.conn.textContent = 'the loop is running but nothing has been read for '
-        + Math.round((Date.now() - readAt) / 1000) + 's';
     } else {
+      // There was a branch above this: "the loop is running but nothing has
+      // been read for Ns", whenever the last READING was more than
+      // READ_STALE_MS old. That is not a fault, it is the rig between offers:
+      // a still screen moves the motion gate not at all, so no read is
+      // submitted until the next card — which is why STALE_MS was moved off
+      // readings and onto the heartbeat. Over the real week, 774 of the 1,155
+      // gaps between one offer and the next inside a shift ran past 16s, 18.9
+      // of their 23.3 hours, so this line read like a reader fault for most
+      // of the time the driver was waiting for work, while #detail said
+      // "scanner running, no offer on screen" over the same second.
+      //
+      // Deleted rather than gated. The case it was written for — a verdict
+      // nothing has refreshed — is already said where the verdict is: the
+      // pane dims on the same READ_STALE_MS and #detail prints its age. A
+      // reader that has gone for good stops the heartbeat at READ_STUCK_S in
+      // scan_pi.py, and the branch above says "nothing from the scanner".
       el.conn.textContent = 'scanner reading';
     }
     el.dot.classList.toggle('on', alive
