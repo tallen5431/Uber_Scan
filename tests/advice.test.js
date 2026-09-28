@@ -1806,6 +1806,24 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
       byLeft.groups[0].matched > byLeft.groups[1].matched);
   ok_('...even though it is not the one with the bigger median',
       byLeft.groups[0].median < byLeft.groups[1].median);
+  /* ...and how far apart the HOURS are, which is the page's reason for holding
+   * them still and was printed off `rawSpread`, the spread of the TOWNS. The
+   * two are different quantities and this fixture pulls them apart: worked out
+   * here from the rows, by definition, and not from anything areas returns. */
+  var hourOf = { late: [], early: [] };
+  crossed.forEach(function (o) { hourOf[HOUR(o)].push(o.perHour); });
+  var mid = function (xs) {
+    xs = xs.slice().sort(function (a, b) { return a - b; });
+    var n = xs.length;
+    return n % 2 ? xs[(n - 1) / 2] : (xs[n / 2 - 1] + xs[n / 2]) / 2;
+  };
+  var blocksApart = Math.round((mid(hourOf.late) - mid(hourOf.early)) * 100) / 100;
+  eq('the spread of the hours is the best hour against the worst (' + blocksApart + ')',
+     byLeft.hourSpread, blocksApart);
+  ok_('...which is not the towns\' spread (' + byLeft.rawSpread + ')',
+      Math.abs(byLeft.hourSpread - byLeft.rawSpread) > 1);
+  eq('...and nothing is said about hours that were not held still',
+     byPaid.hourSpread, null);
 
   // One hour is no hours to hold still. Once the driver has picked a block the
   // filter has already done it, every offer is measured against the same

@@ -1183,6 +1183,58 @@ function gaps(sent) {
   eq('a town level with the others is plus nothing, not a dash',
      MV.rankLead({ median: 15.8, matched: 0 }, true).text, '+$0.00');
 
+  /* ---- where a pin's town stands ---- */
+  //
+  // The popup quoted the POSITION from the hour-held order beside the RAW
+  // median, and the two orders are not the same list. These four are the
+  // owner's week, "any time", in the order Advice.areas returns them: Kennesaw
+  // is 3rd and paid $15.32, Woodstock 4th and paid $15.80. Tapping the two pins
+  // read "3 of 9, median $15.32" against "4 of 9, median $15.80" — the better
+  // position with the worse number, and nothing saying the hour was held.
+  var held = { real: true, matched: true, groups: [
+    { name: 'Atlanta', median: 19.95, matched: 3.28 },
+    { name: 'Mableton', median: 15.94, matched: 0.13 },
+    { name: 'Kennesaw', median: 15.32, matched: 0.13 },
+    { name: 'Woodstock', median: 15.8, matched: -0.13 },
+  ] };
+  var stood = MV.standings(held);
+  eq('a pin quotes its town\'s position with the figure it was ranked by',
+     stood.Kennesaw, 'Kennesaw is 3 of 4 towns here at +$0.13/hr once the hour '
+       + 'is held still; $15.32 median');
+  // ...and it is the sidebar's own lead, not a second formatting of it, so the
+  // popup and the row it quotes cannot come apart.
+  ok_('...the same figure the sidebar\'s row leads with',
+      stood.Woodstock.indexOf(MV.rankLead(held.groups[3], true).text + '/hr') >= 0);
+  // The whole claim, as a property: down the order, the figure beside the
+  // ordinal never goes UP. With the raw median beside it, Woodstock's $15.80
+  // under Kennesaw's $15.32 breaks exactly this.
+  var quoted = held.groups.map(function (g) {
+    var m = /at ([+−])\$([\d.]+)\/hr/.exec(stood[g.name] || '');
+    return m ? (m[1] === '−' ? -1 : 1) * Number(m[2]) : NaN;
+  });
+  ok_('...so a better position never quotes a worse figure (' + quoted.join(', ') + ')',
+      quoted.every(function (v, i) { return !isNaN(v) && (i === 0 || v <= quoted[i - 1]); }));
+  // A town with no hour-held figure is not IN the order — it is sorted last
+  // for having no place — so it gets no ordinal, and the count leaves it out.
+  var withLonely = { real: true, matched: true, groups: held.groups.concat(
+    [{ name: 'Lonely', median: 22.1, matched: null }]) };
+  var lonely = MV.standings(withLonely);
+  ok_('a town with nothing to be compared against is given no position (' + lonely.Lonely + ')',
+      !/ is \d+ of /.test(lonely.Lonely) && lonely.Lonely.indexOf('$22.10 median') >= 0);
+  ok_('...and is not counted among the towns that have one',
+      lonely.Atlanta.indexOf('1 of 4 towns') >= 0);
+  // Not held still, the median IS the figure the order was sorted by, and the
+  // plain line is right.
+  eq('a ranking not held still quotes the median it was ranked by',
+     MV.standings({ real: true, matched: false, groups: [
+       { name: 'Here', median: 21.3, matched: null },
+       { name: 'There', median: 12.4, matched: null }] }).There,
+     'There is 2 of 2 towns here, median $12.40/hr');
+  // ...and nothing at all off a ranking the page has called chance.
+  eq('a ranking that does not beat chance puts nothing on a pin',
+     Object.keys(MV.standings({ real: false, matched: true,
+                                groups: held.groups })).length, 0);
+
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' map-view checks passed');
   process.exit(fail ? 1 : 0);

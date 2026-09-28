@@ -511,7 +511,7 @@
     var shuffles = typeof opts.shuffles === 'number' ? opts.shuffles : AREA_SHUFFLES;
     var out = { groups: [], kept: 0, named: 0, unnamed: 0,
                 thin: 0, thinOffers: 0, p: null, real: false, spread: null,
-                rawSpread: null, matched: false,
+                rawSpread: null, hourSpread: null, matched: false,
                 floor: floor, days: needDays };
     if (typeof key !== 'function') return out;
 
@@ -707,6 +707,26 @@
       }
       out.rawSpread = Math.round((Math.max.apply(null, kept.map(function (g) { return g.median; }))
                                   - Math.min.apply(null, kept.map(function (g) { return g.median; }))) * 100) / 100;
+      /* ...and how far apart the HOURS are, which is a different number and
+       * was being printed as this one. map.html's sentence says "the best
+       * three-hour stretch and the worst are $X/hr apart" — its evidence for
+       * holding the hour still at all — and it quoted `rawSpread`, the spread
+       * of TOWN medians, which has no dependence on blocks whatever. On the
+       * full real week the two nearly agree ($6.33 against $6.95), which is
+       * how it read as right; on the newest day alone it printed $4.33 where
+       * the blocks are $8.72 apart, and on the newest two it printed $7.10
+       * where they are $5.91. Off by up to half, in either direction, on the
+       * windows a driver actually loads after a shift.
+       *
+       * Taken over the same kept pool and the same pens the figures above are
+       * held against, so it is the spread of exactly the hours being held
+       * still — not of every offer on the page, towns under the floor
+       * included. */
+      var penMedians = Object.keys(byPen).map(function (k) {
+        return median(byPen[k].map(function (i) { return flat[i]; }));
+      });
+      out.hourSpread = Math.round((Math.max.apply(null, penMedians)
+                                   - Math.min.apply(null, penMedians)) * 100) / 100;
     }
 
     var asGood = 0;

@@ -123,7 +123,7 @@ NOW = int(time.time() * 1000)
 
 
 def offer(i, pickup, dropoff, miles, at=None, where=None, minutes=25.0,
-          whole=True, suspect=False, corrected=False):
+          whole=True, suspect=False, corrected=False, rate=28.8):
     # `whole` and `suspect` are what say whether the distance beside them is a
     # yardstick — see judge() in map-view.js. Defaulted to a clean reading,
     # because that is what nearly every row is; the two rows below that are not
@@ -133,7 +133,7 @@ def offer(i, pickup, dropoff, miles, at=None, where=None, minutes=25.0,
     row = {'id': 'o%d' % i, 'seq': 1, 'at': at,
            'firstAt': at, 'pay': 12.0, 'minutes': minutes,
            'billedMinutes': minutes, 'miles': miles, 'cost': 1.5,
-           'costPerMile': 0.3, 'perHour': 28.8, 'whole': whole,
+           'costPerMile': 0.3, 'perHour': rate, 'whole': whole,
            'milesCorrected': corrected,
            'suspect': suspect, 'doubt': None, 'pickup': pickup,
            'dropoff': dropoff, 'places': [p for p in (pickup, dropoff) if p],
@@ -2083,6 +2083,223 @@ finally:
     except Exception:
         server2.kill()
     shutil.rmtree(work2, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# A ranking that beats chance, with pins in its towns.
+# ---------------------------------------------------------------------------
+#
+# Neither journal above can produce one: the first ranks two towns the geocoder
+# has never heard of, over one rate, and the second has four rows a town. So
+# the two sentences on this page that quote the hour-held ranking were never
+# read by any check — the sidebar's "the best three-hour stretch and the worst
+# are $X apart", and a pin's "<town> is N of M towns here". Both were wrong.
+#
+# Three towns, each out in the same two blocks on two days, three offers a
+# block a day. Kennesaw pays six over Marietta at any given hour and Atlanta
+# three, so the order is real and survives holding the hour still. The blocks
+# are twelve apart and the towns only six, so a sentence that quotes one of
+# those numbers as the other cannot pass by coincidence — on the full real
+# week the two are $6.33 and $6.95, near enough to read as right.
+RANK_TOWNS = (('Hill St, Kennesaw', 6.0), ('Main St, Marietta', 0.0),
+              ('Oak St, Atlanta', 3.0))
+RANK_BLOCKS = ((WBASE + 20 * 60000, 25.0), (WBASE - 2 * 3600000, 13.0))
+RANK_ROWS = []
+for _d in (0, 1):
+    for _b, (_start, _going) in enumerate(RANK_BLOCKS):
+        for _t, (_where, _lift) in enumerate(RANK_TOWNS):
+            for _k in range(3):
+                RANK_ROWS.append(offer(
+                    100 + len(RANK_ROWS), None, _where, 4.0,
+                    at=int(_start - _d * 86400000 + (_t * 3 + _k) * 60000),
+                    rate=_going + _lift + _k * 0.1))
+
+
+def _median(xs):
+    xs = sorted(xs)
+    n = len(xs)
+    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2.0
+
+
+# What the two spreads ARE, worked out here from the rows rather than read off
+# the page, so the check is against the definition and not against whatever
+# the page happened to compute.
+_by_block = [_median([r['perHour'] for i, r in enumerate(RANK_ROWS)
+                      if (i // 9) % 2 == b]) for b in (0, 1)]
+_by_town = [_median([r['perHour'] for r in RANK_ROWS if r['dropoff'] == t])
+            for t, _ in RANK_TOWNS]
+HOUR_SPREAD = round(max(_by_block) - min(_by_block), 2)
+TOWN_SPREAD = round(max(_by_town) - min(_by_town), 2)
+
+RANK_DRIVER = r'''
+const { chromium } = require('playwright');
+const base = process.argv[2];
+const KNOWN = { kennesaw: [34.023, -84.615], marietta: [33.952, -84.549],
+                atlanta: [33.749, -84.388] };
+const STUB = `
+  window.__pins = [];
+  window.L = {
+    map: function () { return { setView: function () { return this; },
+      removeLayer: function () {}, addLayer: function () {},
+      fitBounds: function () {} }; },
+    tileLayer: function () { return { addTo: function () { return this; } }; },
+    layerGroup: function () { return { addTo: function () { return this; } }; },
+    circleMarker: function () { return { bindPopup: function () { return this; },
+                                         addTo: function () { return this; } }; },
+    divIcon: function (o) { return o; },
+    marker: function (ll) {
+      var m = { ll: ll, bindPopup: function (h) { this.popup = h; return this; },
+                addTo: function () { window.__pins.push(this); return this; },
+                getLatLng: function () { return this.ll; },
+                openPopup: function () { return this; } };
+      return m; },
+    polyline: function () { return { bindPopup: function () { return this; },
+                                     addTo: function () { return this; } }; }
+  };
+`;
+
+(async () => {
+  let browser;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; }
+    catch (e) { /* try the next */ }
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  let stage = 'start';
+  setTimeout(() => { console.log(JSON.stringify({ __hung: stage })); process.exit(2); },
+             120000).unref();
+
+  const page = await browser.newContext({ viewport: { width: 1200, height: 820 } })
+    .then((c) => c.newPage());
+  await page.addInitScript(STUB);
+  await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
+    const q = decodeURIComponent(new URL(route.request().url())
+      .searchParams.get('q') || '').toLowerCase();
+    const key = Object.keys(KNOWN).filter((k) => q.indexOf(k) >= 0)[0];
+    await route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify(key
+        ? [{ lat: String(KNOWN[key][0]), lon: String(KNOWN[key][1]), display_name: key }]
+        : []) });
+  });
+  await page.route('**/tile.openstreetmap.org/**', (r) => r.fulfill({ status: 200, body: '' }));
+  await page.route('**/unpkg.com/**', (r) => r.fulfill({ status: 200, body: '' }));
+
+  const out = {};
+  stage = 'load';
+  await page.goto(base + '/map.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.waitForFunction(
+    () => /offers/.test(document.getElementById('status').textContent || ''),
+    null, { timeout: 30000 });
+  out.loaded = await page.evaluate(() => ({
+    status: document.getElementById('status').textContent || '',
+    note: [].slice.call(document.querySelectorAll('#sideBody > .note'))
+      .map((n) => (n.textContent || '').replace(/\s+/g, ' ').trim()).join(' '),
+    rows: [].slice.call(document.querySelectorAll('#sideBody .rankrow'))
+      .map((r) => ({ town: r.getAttribute('data-town'),
+                     lead: ((r.querySelector('.money') || {}).textContent || '').trim() })),
+  }));
+
+  stage = 'place';
+  await page.click('#place');
+  await page.waitForFunction(
+    () => /drawn end to end/.test(document.getElementById('status').textContent || ''),
+    null, { timeout: 60000 });
+  out.popups = await page.evaluate(() => window.__pins.map(function (m) {
+    return String(m.popup || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  }));
+
+  console.log(JSON.stringify(out));
+  await browser.close();
+})().catch((e) => { console.log(JSON.stringify({ __crashed: String((e && e.stack) || e) })); });
+'''
+
+work3 = tempfile.mkdtemp()
+journal3 = os.path.join(work3, 'journal.jsonl')
+with open(journal3, 'w') as fh:
+    for row in RANK_ROWS:
+        fh.write(json.dumps(row) + '\n')
+
+port3 = free_port()
+server3 = subprocess.Popen(
+    ['node', os.path.join(ROOT, 'server.js')],
+    env=dict(os.environ, SCANNER='0', PORT=str(port3), JOURNAL=journal3),
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+base3 = 'http://127.0.0.1:%d' % port3
+
+try:
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(base3 + '/api/status', timeout=1).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+    else:
+        raise RuntimeError('the third server never came up')
+
+    driver3 = os.path.join(work3, 'rankdrive.js')
+    open(driver3, 'w').write(RANK_DRIVER)
+    proc3 = subprocess.run(
+        ['node', driver3, base3],
+        env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                 PW_EXES=json.dumps([
+                     os.environ.get('CHROMIUM', ''),
+                     '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+                 ])),
+        capture_output=True, text=True, timeout=300)
+    line3 = (proc3.stdout or '').strip().split('\n')[-1] if proc3.stdout else ''
+    try:
+        r3 = json.loads(line3)
+    except Exception:
+        crashed(proc3.stderr)
+    if r3.get('__crashed'):
+        crashed(r3['__crashed'])
+    if r3.get('__hung'):
+        hung(r3['__hung'])
+    if r3.get('skip'):
+        skip(r3['skip'])
+
+    loaded = r3.get('loaded') or {}
+    note3 = loaded.get('note') or ''
+    ok_('a ranking of three towns that beats chance (%r)' % note3[:90],
+        'is not a coin toss' in note3 and 'held still' in note3)
+
+    # --- the spread of the HOURS, which is the reason for holding them ------
+    #
+    # "here the best three-hour stretch and the worst are $X/hr apart on their
+    # own" printed the spread of the TOWN medians, which does not depend on the
+    # blocks at all. On the newest day of the owner's week it said $4.33 where
+    # the blocks are $8.72 apart; on the newest two, $7.10 where they are $5.91.
+    _said = re.search(r'best three-hour stretch and the worst are \$(\d+\.\d\d)/hr',
+                      note3)
+    eq('the sentence about the hours quotes how far apart the hours are',
+       _said and _said.group(1), '%.2f' % HOUR_SPREAD)
+    # ...and the towns' own spread is still said, where it means towns.
+    _unheld = re.search(r'unheld it looks like \$(\d+\.\d\d)', note3)
+    eq('...and the towns unheld quote the towns (the two differ here: %.2f, %.2f)'
+       % (HOUR_SPREAD, TOWN_SPREAD),
+       _unheld and _unheld.group(1), '%.2f' % TOWN_SPREAD)
+
+    # --- a pin quotes its town's position with the figure it was ranked by ---
+    #
+    # It printed the position from the hour-held order beside the RAW median.
+    # On the owner's week that put Kennesaw 3rd at $15.32 above Woodstock 4th at
+    # $15.80 — two of 36 pairs backwards, six of 36 before the baseline stopped
+    # including the town itself — with nothing saying the hour was held.
+    leads = dict((r['town'], r['lead']) for r in (loaded.get('rows') or []))
+    pops = r3.get('popups') or []
+    eq('every town is pinned', len(pops), 3)
+    for _town, _lead in sorted(leads.items()):
+        _pop = [p for p in pops if (_town + ' is ') in p][:1]
+        _pop = _pop[0] if _pop else ''
+        ok_('%s\'s pin quotes the figure its row leads with, held still (%r)'
+            % (_town, _pop[:150]),
+            (_lead + ' once the hour is held still') in _pop)
+finally:
+    server3.terminate()
+    try:
+        server3.wait(timeout=5)
+    except Exception:
+        server3.kill()
+    shutil.rmtree(work3, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d map checks passed' % ok)

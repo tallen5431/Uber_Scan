@@ -581,6 +581,56 @@
                    + '$' + Math.abs(g.matched).toFixed(2), unit: true };
   }
 
+  /* Where each town stands, as the line a pin's popup quotes, keyed on the
+   * town's name. Empty when the ranking did not beat chance: a pin must not
+   * quote a position in a list the page has just called a coin toss.
+   *
+   * It printed "<town> is N of M towns here, median $X/hr" — the POSITION from
+   * the hour-held order and the NUMBER from the raw one, in one clause, under
+   * a sidebar that spends a paragraph saying those are different questions.
+   * On the owner's week, "any time", the default view: Kennesaw is 3rd at
+   * $15.32 and Woodstock 4th at $15.80, Acworth 5th at $14.01 and Marietta 6th
+   * at $14.62. Two of the 36 pairs read backwards, and a driver tapping two
+   * pins to compare towns reads an ordinal and a figure as one fact. (Six of
+   * 36 before the ranking's baseline stopped including the town itself; the
+   * pairing was wrong either way.)
+   *
+   * So the position is quoted with the figure it was ranked by — `rankLead`,
+   * the same one the sidebar's row leads with, so the popup cannot disagree
+   * with the list it is quoting — and the median beside it as what was earned,
+   * as the sidebar's row does. A town with no hour-held figure is not in the
+   * order at all (`Advice.areas` sorts it last because it has no place, not
+   * because it is worst), so it gets no ordinal, and M counts only the towns
+   * that have one.
+   *
+   * Looked up by the PIN's own town, not by the town its offers were counted
+   * under (`townFor` takes the dropoff first). Decided, not overlooked: the
+   * line is a claim about the town named on the pin, and it is true of that
+   * town whichever end put this pin's offers in some other group — which is
+   * what "that is the town, not this place" is there to say. */
+  function standings(rank) {
+    var out = {};
+    if (!rank || !rank.real || !rank.groups) return out;
+    var held = !!rank.matched;
+    var inOrder = rank.groups.filter(function (g) {
+      return !held || (g.matched !== null && g.matched !== undefined);
+    });
+    rank.groups.forEach(function (g) {
+      var lead = rankLead(g, held);
+      var median = '$' + Number(g.median).toFixed(2);
+      var at = inOrder.indexOf(g);
+      out[g.name] = at < 0
+        ? g.name + ' had no other town in its hours to be ranked against; '
+          + median + ' median'
+        : held
+          ? g.name + ' is ' + (at + 1) + ' of ' + inOrder.length + ' towns here at '
+            + lead.text + '/hr once the hour is held still; ' + median + ' median'
+          : g.name + ' is ' + (at + 1) + ' of ' + inOrder.length + ' towns here, '
+            + 'median ' + median + '/hr';
+    });
+    return out;
+  }
+
   function accused(p) {
     return !!(p && (p.impossible || p.fromStray || p.toStray));
   }
@@ -1148,7 +1198,7 @@
     townEndFor: townEndFor,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,
            judge: judge, statedBy: statedBy, unchecked: unchecked, ends: ends,
-           rankLead: rankLead,
+           rankLead: rankLead, standings: standings,
            accused: accused,
            byPlace: byPlace, chain: chain,
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,

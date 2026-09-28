@@ -715,13 +715,10 @@
        without every popup running the test again. Null when the window has no
        ranking worth quoting — and then the pins say nothing about it, rather
        than quoting a position in a list the page has just called chance. */
-    var rank = areaRanking();
-    var standing = {};
-    if (rank.real) {
-      rank.groups.forEach(function (g, i) {
-        standing[g.name] = { at: i + 1, of: rank.groups.length, median: g.median };
-      });
-    }
+    // The line itself is MV.standings', where it can be driven without a
+    // browser: it quoted the hour-held position beside the RAW median, and the
+    // two orders differ.
+    var standing = MV.standings(areaRanking());
 
     MV.byPlace(placed).forEach(function (place) {
       var out = strays[place.name] || null;
@@ -770,10 +767,8 @@
                    + (function () {
                        var t = standing[MV.townOf(place.name, Advice.area)];
                        return t
-                         ? '<br><span class="note">' + esc(MV.townOf(place.name, Advice.area))
-                           + ' is ' + t.at + ' of ' + t.of + ' towns here, '
-                           + 'median $' + t.median.toFixed(2) + '/hr — that is '
-                           + 'the town, not this place</span>'
+                         ? '<br><span class="note">' + esc(t)
+                           + ' — that is the town, not this place</span>'
                          : '';
                      }())
                    + '<br><span class="note">' + esc(when(place.jobs[0].offer.at))
@@ -1217,12 +1212,19 @@
      * "where should I go" — the median beside it answers "what did I earn
      * there", which is a different question a driver will otherwise read as
      * the first one. On the owner's week the two orders are not the same list:
-     * Marietta is 7th by median and 8th by this, Smyrna 6th and last. */
+     * Kennesaw is 4th by median and 3rd by this, Acworth 6th and 5th.
+     *
+     * Two spreads in one sentence, and they are two different quantities.
+     * `hourSpread` is how far apart the three-hour blocks are — the reason for
+     * holding the hour at all — and `rawSpread` is how far apart the towns look
+     * with the hour left in. The first clause printed `rawSpread` for both, so
+     * on the newest day of the owner's week it said the blocks were $4.33
+     * apart when they are $8.72 apart. See Advice.areas. */
     if (r.matched) {
       html += '<div class="note">Ranked by what is left <b>once the hour is '
         + 'held still</b>. When you are in a town is tangled up with what it '
         + 'pays — here the best three-hour stretch and the worst are $'
-        + (r.rawSpread).toFixed(2) + '/hr apart on their own — so the big '
+        + r.hourSpread.toFixed(2) + '/hr apart on their own — so the big '
         + 'figure is how much better or worse a town paid than the same hours '
         + 'paid elsewhere, and the median beside it is what it actually paid, '
         + 'hours and all. Held still, best to worst is $' + r.spread.toFixed(2)
