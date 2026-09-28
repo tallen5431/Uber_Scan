@@ -2261,10 +2261,10 @@
     // in this branch it is always a real moment.
     // Given its own element, because the rest of this line is diagnostics —
     // how many frames it was merged from, whether the corners are being
-    // tracked, and once how long the read took — and set in the same grey at
-    // the same weight
-    // the age was one `·`-separated fragment among five, indistinguishable at
-    // a glance from "1517ms". The age is the only part of it a driver acts on.
+    // tracked, and once how long the read took. Set in the same grey at the
+    // same weight, the age was one `·`-separated fragment among five,
+    // indistinguishable at a glance from "1517ms". The age is the only part of
+    // it a driver acts on.
     var age = Math.max(0, Math.round((Date.now() - readAt) / 1000));
     var when = document.createElement('b');
     when.className = 'age';
