@@ -81,13 +81,39 @@ MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'
 # stray marks that would happily glue an $8 offer into an $85 one — 60 of the
 # 420 texts on file change what they match if the gap is allowed to hold junk.
 
-# What a HEADLINE looks like, as against a figure that merely passed find_pay:
-# both apps print a payout to the cent. Asked only of the figures that could be
-# the NEXT card's headline, never of the payout being priced — on 41 of the
-# week's 1,165 stored texts that carry a payout, the one chosen lost its cents
-# to the reader (row 450's `$16` is one), and refusing those would refuse the
-# offer. See find_pay's `where`.
+# What a HEADLINE looks like, as against a figure that merely passed find_pay.
+# Asked only of the figures that could be the NEXT card's headline, never of
+# the payout being priced. See find_pay's `where`.
+#
+# A headline prints to the cent, or it is followed at once by what the card
+# prints after its headline: `Guaranteed` (DoorDash), `Includes expected tip`
+# (Uber Eats — the same two words PAY_SPLIT keys on), or the rider's star (an
+# Uber ride, `$18 * 5.00`). "Both apps print a payout to the cent" is what this
+# said first, and it is false: row 475 reads `$6 Guaranteed (incl. tip)` on all
+# seven frames, and rows 374, 479, 584, 602 and 604 print `$7` or `$6` the same
+# way; row 79's ride reads `$18 * 5.00` on all three. Cents alone let a
+# whole-dollar card below the one being priced run into it — its legs summed
+# on, its merchant and distance read as this card's — which is the fault the
+# boundary exists to stop, arriving by the door built to keep map glyphs out.
+#
+# Measured over every frame and stored text of the week (6,616 payouts read
+# off one figure): of the 124 figures find_pay accepted and did not choose, 121 print
+# no cents and NONE of those 121 is followed at once by a label or a star, so
+# the label keeps every map glyph and `$1` fragment out exactly as cents alone
+# did. Of the 208 chosen payouts without cents, 64 carry a label or a star
+# right after. The other 144 — cents lost AND something between the figure and
+# its label (`$19 | Guaranteed`, `$16 Kt 5 ns Lb *497`) — are the headlines this
+# still cannot see, and a second card printed that way below this one is still
+# summed into it. The gap cannot be widened to reach them: row 505's map glyph
+# reads `$5 | Guaranteed`, the same shape as row 314's real `$19 | Guaranteed`.
+# That residue errs long, which is the side to err on: `$22.03 12 min (6.6 mi)
+# 23 mins (13.1 mi) $16 19 min (12.8 mi)` reads 54 min / 32.5 mi, NO at
+# $13.64/hr, where the card is $27.63/hr — a good offer missed. Letting such a
+# figure cut the card instead is what put row 2's `$ 3` between its own two legs
+# and $188.10/hr on the panel. The week holds no second card without a label or
+# cents (row 410's `$6.53` is its only one).
 CENTS = re.compile(r'[.,]' + DC + r'{2}$', ASCII)
+HEADLINE_LABEL = re.compile(r'\s*(?:guarant|includ|\*)', re.IGNORECASE)
 
 PAY_SPLIT = re.compile(
     r'\$\s*(' + DC + r'{1,3})\s+(' + DC + r'{1,2}[.,]' + DC + r'{2})'
@@ -664,8 +690,11 @@ def find_pay(text, where=None):
     gave no minutes, no miles and no places — the Kroger disappeared with
     nothing saying so. Row 2's `$ 3`, between the $26.04 card's two legs, left
     only the 8-minute approach, and the panel read $188.10/hr for the first
-    two reads of that offer. The 2 that printed cents are row 410's `$6.53`, the one real
-    second card of the week, and they still bound it. See CENTS.
+    two reads of that offer. The 2 that printed cents are row 410's `$6.53`,
+    the one real second card of the week, and they still bound it. A figure
+    without cents still counts when the card's label or the rider's star
+    follows it at once, because whole-dollar offers are printed that way. See
+    CENTS and HEADLINE_LABEL.
     """
     chips = [m.span() for m in PAY_CHIP.finditer(text)]
     found = []
@@ -707,7 +736,9 @@ def find_pay(text, where=None):
         v = to_number(m.group(1).strip())
         # The offer headline is the largest dollar figure; promo lines are smaller.
         if v is not None and 0 < v < 2000:
-            found.append((v, m.start(), bool(CENTS.search(m.group(1)))))
+            found.append((v, m.start(),
+                          bool(CENTS.search(m.group(1))
+                               or HEADLINE_LABEL.match(text, m.end()))))
             if best is None or v > best:
                 best = v
 
@@ -735,8 +766,8 @@ def find_pay(text, where=None):
         # join built from it start at the same `$`.
         found.sort(key=lambda one: one[1])
         chosen = next((i for i, one in enumerate(found) if one[0] == best), None)
-        where.extend((v, at) for i, (v, at, cents) in enumerate(found)
-                     if cents or i == chosen)
+        where.extend((v, at) for i, (v, at, headline) in enumerate(found)
+                     if headline or i == chosen)
     return best
 
 
@@ -852,6 +883,10 @@ def find_legs(text):
             # read from the other side.
             'lostMiles': miles is None and (side is not None
                                             or bool(LEG_LOST_MILES.search(tail))),
+            # Whether the distance was printed AFTER the time — `14 min (3.7
+            # mi)`, the Uber layout — rather than before it, `8.3 mi + 36 min`,
+            # DoorDash's one-line summary of a whole job. See half_a_ride.
+            'milesAfter': m.group(4) is not None,
             # Where this leg sat in the text, so the address printed after it
             # can be found without searching the whole card again.
             'start': m.start(), 'end': m.end(),
@@ -2350,8 +2385,10 @@ def a_card_above(legs, top):
     25 min / 8.1 mi, $20.71/hr, American Deli. Row 450 is the same crop reached
     another way: the upper card's `24 min (3.6 mi) total` is the only TOTAL on
     the frame, so `used = totals or legs` priced the $16 card on its
-    neighbour's leg alone and threw its own `15 min (5.6 mi)` away — $37.30/hr
-    where the card is $57.28/hr.
+    neighbour's leg alone and threw its own `15 min (5.6 mi)` away — $37.30/hr,
+    whole and spoken. That leg is only the drive to the rider (the $16 card is
+    a ride cut off by the frame after its first leg), so the card is not
+    $57.28/hr either: see half_a_ride, which withholds it.
 
     A `total` above the payout, and a leg of the card's own below it, is the
     test. A total is a whole journey, and a card prints its payout before its
@@ -2484,6 +2521,55 @@ def card_span(where, legs=()):
     before = [at for at in starts if at < top]
     after = [at for at in starts if at > top]
     return (max(before) if before else 0, min(after) if after else None)
+
+
+def half_a_ride(used, where, legs):
+    """True when this card shares the frame with another and its journey is one
+    bare leg — the first leg of a ride, whose second is off the bottom edge.
+
+    `used` is the legs the reading is priced on, `where` find_pay's headlines
+    and `legs` every leg the frame read, the pair a_card_above is asked of.
+
+    A list on the phone is photographed through a window, and a window cuts
+    cards at BOTH edges. a_card_above is the top edge; this is the bottom. On
+    the owner's week two rows put a ride card under an Uber Eats card:
+
+        row 410   $6.53 ... 36 min (7.9 mi) total  Jason's Deli ...
+                  $24.05  * 4.91  Verified  14 min (3.7 mi)      <- frame ends
+        row 450   ... 24 min (3.6 mi) total  Main Street Eats Burgers ...
+                  $16  * 4.97  Verified  15 min (5.6 mi)
+                  Crestwind Rd & Crestwind Rd NW, Kennesaw       <- frame ends
+
+    A ride card prints the drive to the rider, the rider's corner, then the
+    trip and the destination (see laid_out_approach), so each of these is the
+    approach alone: $98.31/hr and $57.28/hr over the minutes it takes to reach
+    the rider. They were withheld only by accident — the Eats card's `total`
+    bracket read as a leg of THIS card that lost its minutes, which is the
+    mistake shortATime is no longer asked in a way that makes — and would have
+    gone out whole, spoken and green without this.
+
+    So it is answered as a leg the reading could not time and whose distance
+    it does not know: shortATime with no untimedMiles, which is the refusal
+    most_of_the_journey_missing already gives a missing piece of unknown size.
+    The rig keeps looking, and a frame scrolled far enough to show the second
+    leg reads two legs and clears it. Not asked of:
+
+      - a total, which is the whole journey in one line (row 908's card);
+      - a distance printed BEFORE its time, `8.3 mi + 36 min`, which is
+        DoorDash's summary of a whole job, and whose two-card frames the
+        corpus holds;
+      - a frame holding one card. One bare leg on a lone ride card is the same
+        question and is not answered here: on the week it is the approach of
+        rows 444 and 805 on frames where the trip leg did not read, and it is
+        also the Eats card whose `total` did not read (`tota`, `te al`) on
+        seven frames of six rows, every one a whole job. Telling those
+        apart is a question for the whole reader.
+
+    On the week this fires on 4 frames, rows 410 and 450, and on no other.
+    """
+    listed = len(where) >= 2 or bool(where and a_card_above(legs, where[0][1]))
+    return (listed and len(used) == 1 and not used[0]['isTotal']
+            and used[0]['milesAfter'])
 
 
 def only_card(text, span):
@@ -2783,10 +2869,30 @@ def parse(raw_text):
         # lost its minutes and took its miles with it. See
         # distance_without_a_time: this is not a number, it is the reason the
         # reading is not finished, and is_whole is where it is spent.
-        'shortATime': distance_without_a_time(text, legs),
+        #
+        # Asked of THIS card's words (`mine`) against EVERY leg the frame read
+        # (`found_legs`), not of the whole frame against the legs one_card
+        # kept. That pairing turned the card boundary into a lost leg: once
+        # a_card_above cut the upper card's `15 min (5.4 mi) total` from row
+        # 908's legs, its bracket was a distance no kept leg claimed, so both
+        # of the row's frames read shortATime, untimedMiles 5.4 and not whole
+        # in both ports — never spoken, never settled on the panel, journalled
+        # whole=0 and set aside — and no later frame could clear it, because
+        # every frame shows both cards. Where the neighbour's distance was the
+        # longer one the rate withheld with doubt `leg` and the panel said "a
+        # leg this reading could not time — 19.4 mi of it" about a card whose
+        # every leg was timed. A bracket some leg on the frame claimed is that
+        # leg's distance, whichever card it belongs to; one outside this card's
+        # span is the other card's business. On the week this moves `whole` on
+        # rows 450 and 908 only (see the commit) and no other frame or text.
+        #
+        # ...and a card cut off by the bottom edge after its first leg is short
+        # a timed leg too, one whose distance nobody read. See half_a_ride.
+        'shortATime': (distance_without_a_time(mine, found_legs)
+                       or half_a_ride(used, _where, found_legs)),
         # ...and how far that leg was, which is what decides whether this is a
         # reading to hedge or one to refuse outright. See untimed_miles.
-        'untimedMiles': untimed_miles(text, legs),
+        'untimedMiles': untimed_miles(mine, found_legs),
         'complete': is_complete(pay, minutes, deadline),
         # What the card says it is. None when the card did not say — the top
         # chip may simply not have been inside the crop — which is different

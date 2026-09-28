@@ -154,11 +154,21 @@
    * the 420 texts on file change what they match if the gap may hold junk.
    */
   // What a HEADLINE looks like, as against a figure that merely passed
-  // findPay: both apps print a payout to the cent. Asked only of the figures
-  // that could be the NEXT card's headline, never of the payout being priced —
-  // on 41 of the week's 1,165 stored texts that carry a payout, the one chosen
-  // lost its cents to the reader (row 450's `$16` is one). See findPay.
+  // findPay. Asked only of the figures that could be the NEXT card's headline,
+  // never of the payout being priced. See findPay.
+  //
+  // A headline prints to the cent, or it is followed at once by what the card
+  // prints after its headline: `Guaranteed` (DoorDash), `Includes expected tip`
+  // (Uber Eats — PAY_SPLIT's two words), or the rider's star (a ride, `$18 *
+  // 5.00`). "Both apps print a payout to the cent" is what this said first, and
+  // row 475 reads `$6 Guaranteed (incl. tip)` on all seven frames: cents alone
+  // let a whole-dollar card below this one run into it. On the week none of
+  // the 121 cents-less figures findPay accepted and did not choose is followed
+  // at once by a label or a star, so the map glyphs stay out. A second card
+  // with neither is still summed in, which errs long; the Python twin has the
+  // measurements.
   var CENTS = new RegExp('[.,]' + DC + '{2}$');
+  var HEADLINE_LABEL = /^\s*(?:guarant|includ|\*)/i;
 
   var PAY_SPLIT = new RegExp(
     '\\$\\s*(' + DC + '{1,3})\\s+(' + DC + '{1,2}[.,]' + DC + '{2})'
@@ -208,8 +218,11 @@
    * no cents — `$3`/`$4`/`$5` glyphs off the map; the `$1` fragment a split
    * headline is joined from armed it too, on 30 frames. Inside a card, one
    * cut it short: row 505's frame lost its minutes, miles and Kroger, and row
-   * 2's first two reads put $188.10/hr on the panel off an 8-minute approach. The 2 with cents are row 410's
-   * `$6.53`, the week's one real second card. The Python twin says the rest. */
+   * 2's first two reads put $188.10/hr on the panel off an 8-minute
+   * approach. The 2 with cents are row 410's `$6.53`, the week's one real
+   * second card. A figure without cents still counts when the card's label or
+   * the rider's star follows it at once — see HEADLINE_LABEL. The Python twin
+   * says the rest. */
   function findPay(text, where) {
     var chips = collect(text, PAY_CHIP);
     var units = collectSpans(text, PAY_IS_A_DURATION);
@@ -274,7 +287,9 @@
       var v = toNumber(all[i].value);
       if (v !== null && v > 0 && v < 2000) {
         found.push({ value: v, at: all[i].index,
-                     cents: !!all[i].halves || CENTS.test(all[i].value) });
+                     headline: !!all[i].halves || CENTS.test(all[i].value)
+                       || HEADLINE_LABEL.test(text.slice(all[i].index
+                                                         + all[i].match.length)) });
         if (best === null || v > best) best = v;
       }
     }
@@ -288,7 +303,7 @@
         if (found[i].value === best) { chosen = i; break; }
       }
       for (i = 0; i < found.length; i++) {
-        if (found[i].cents || i === chosen) {
+        if (found[i].headline || i === chosen) {
           where.push({ value: found[i].value, at: found[i].at });
         }
       }
@@ -305,7 +320,8 @@
    * summed both totals and named the neighbour's merchant — 40 min, $10.52/hr,
    * Little Caesars, whole — for a 25 min, $20.71/hr card from American Deli.
    * Row 450's only TOTAL was the cropped card's, so the $16 card was priced on
-   * the neighbour's leg alone: $37.30/hr for a $57.28/hr card.
+   * the neighbour's leg alone, $37.30/hr, whole — and its own leg is only the
+   * drive to the rider, so it is withheld instead: see halfARide.
    *
    * A `total` above the payout and a leg of the card's own below it. It has to
    * be a total: an unlabelled leg above a lone payout is the corpus's route
@@ -406,6 +422,26 @@
       if (where[i].at > top.at && (hi === null || where[i].at < hi)) hi = where[i].at;
     }
     return { lo: lo, hi: hi };
+  }
+
+  /* True when this card shares the frame with another and its journey is one
+   * bare leg: the first leg of a ride, whose second is off the bottom edge.
+   *
+   * A list is photographed through a window, and a window cuts cards at both
+   * edges; aCardAbove is the top one and this is the bottom. Rows 410 and 450
+   * of the owner's week put a ride card under an Uber Eats card, and each
+   * frame ends after the ride's first leg, the drive to the rider: $98.31/hr
+   * and $57.28/hr over the approach alone. They were withheld only because
+   * the Eats card's `total` bracket read as a leg of THIS card that lost its
+   * minutes. Answered as shortATime with no untimedMiles, the refusal a
+   * missing piece of unknown size already gets. Not asked of a total, of a
+   * distance printed before its time (DoorDash's `8.3 mi + 36 min`), or of a
+   * frame holding one card. Fires on 4 frames of the week, rows 410 and 450.
+   * See half_a_ride's twin. */
+  function halfARide(used, where, legs) {
+    var listed = where.length >= 2
+      || (where.length === 1 && aCardAbove(legs, where[0].at));
+    return listed && used.length === 1 && !used[0].isTotal && used[0].milesAfter;
   }
 
   /* `text` with everything outside the chosen card blanked out.
@@ -1502,6 +1538,10 @@
            and unflagged, a green $72.49/hr where the truth is $63.92. */
         lostMiles: miles === null && (side !== null && side !== undefined
                                       || LEG_LOST_MILES.test(tail)),
+        // Whether the distance was printed AFTER the time — `14 min (3.7 mi)`,
+        // the Uber layout — rather than before it, `8.3 mi + 36 min`,
+        // DoorDash's one-line summary of a whole job. See halfARide.
+        milesAfter: m[4] !== undefined && m[4] !== null,
         // Where this leg sat in the text, so the address printed after it can
         // be found without searching the whole card again.
         start: m.index, end: m.index + m[0].length
@@ -2240,10 +2280,20 @@
       // Whether the card printed a distance no leg claimed, which means a leg
       // lost its minutes and took its miles with it. See distanceWithoutATime:
       // not a number, but the reason the reading is not finished.
-      shortATime: distanceWithoutATime(text, legs),
+      //
+      // Asked of THIS card's words against every leg the frame read, not of
+      // the whole frame against the legs oneCard kept: that pairing read the
+      // bracket of a leg the card boundary had cut as a leg that lost its
+      // minutes, so row 908's frames went not whole with 5.4 untimed miles in
+      // both ports and nothing could clear it. The Python twin says the rest.
+      //
+      // ...and a card cut off by the bottom edge after its first leg is short
+      // a timed leg too, one whose distance nobody read. See halfARide.
+      shortATime: distanceWithoutATime(mine, foundLegs)
+        || halfARide(used, payWhere, foundLegs),
       // ...and how far that leg was, which is what decides whether this is a
       // reading to hedge or one to refuse outright. See untimedMiles.
-      untimedMiles: untimedMiles(text, legs),
+      untimedMiles: untimedMiles(mine, foundLegs),
       // Enough to act on: without pay and time there is no rate to show.
       complete: isComplete(pay, minutes, deadline),
       // Null when the card did not say — the top chip may simply not have been
