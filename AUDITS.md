@@ -1051,6 +1051,27 @@ the ranking prints while the rule lowercases in order to compare.
 
 **A drop row names the order the rig was holding, and with two jobs in the car that is the wrong one.** The hold is one slot and the last tick takes it. A Drop at the first delivery puts down, and writes a row naming, the second job, which is still in the car. The press at the second delivery then writes nothing. On week.csv, 12 of 31 ticks landed while an earlier tick was held, and 7 landed inside the earlier tick's stated minutes; in 6 of those 7 the earlier job was stated to end first. The server.js /api/delivered comment and rpi/README.md now say a drop row is one job's elapsed time only where no other tick overlaps it. Prose only. The row stays collection-only and nothing reads it.
 
+**A Took press from a panel that had fallen behind wrote a second pair row
+for the card on the phone.** The mark carries the panel's copy of the offer so
+a press after a server restart can still put the order in the car. That copy
+stood in whenever the ids differed, which is also the case where the panel is
+just behind: the socket drops, `/api/events` replays the last reading and never
+the offer, and the driver ticks the card they took while the server is on the
+next one. The older card took the slot, `/api/status` named it with the newer
+card on the phone, and the newer card's next re-read looked like a new card, so
+`recordPairing` wrote its row again. Reproduced against the real server: pair
+rows `['o-a', 'o-b']` became `['o-a', 'o-b', 'o-b']`.
+
+The copy now stands in only when nothing is on record. Otherwise the job the
+driver ticked still goes in the car, from the panel's copy, and the card on
+the slot is left alone. Only the panel sends that copy; the offers page's
+ticks carry no offer and cannot put an old job in the car. Pinned in
+`rpi/test_server.py`: '...and the card on record is still the one on the
+phone' and '...and the newer card read again is still one pair row, not two'
+fail against the old handler, and '...while the card the driver took is the
+order in the car' fails if the copy is dropped instead of used (it held the
+previous order, $10, not the ticked $12).
+
 ### The maps, again
 
 **The map could not say where the money was, and the obvious way to make it
@@ -1087,6 +1108,14 @@ suite, which was green. The ranking is now by what is left once each offer is
 measured against its own three-hour block, and the permutation is confined to
 shuffle WITHIN blocks so the test asks the question the number answers. Once a
 block is picked there is nothing left to hold still and the page says so.
+
+*Re-measured on the 13–20 Sep week (1,166 offers, 431 in towns with enough of
+them), and the conclusion moved.* 12–3am $20.94, 3–6pm $13.99; 65 of Atlanta's
+113 in the first, 43 of Marietta's 101 in the second. Raw lead $5.33, held lead
+$4.26, best-to-worst $6.33 → $4.98, four towns change places, p = 0.002. The
+correction is still needed — it reorders four towns — but on this week the hour
+is about a fifth of Atlanta's lead, not more than half. The figures above stay
+as the record of what was measured then; the code and README now quote these.
 
 *And that fix introduced a second error of its own, in the opposite direction.*
 The hour's baseline was the median over the whole kept pool with the town
@@ -3384,10 +3413,6 @@ never recovers (3.2% at n=30 and 0.7% still at n=60, against the median's 0.4%
 by n=30).
 
 ---
-
-**A panel mark for a card that is not the server's current offer replaces that offer and writes a second pair row for the newer card.** At server.js:2717-2723, the restart stand-in fires whenever note.id differs from scanner.offer.id and body.offer is present. It sets scanner.offer to the older card and keeps the newer card's offerAt. On the newer card's next re-read, sameCard (:330) is false, so :375 calls recordPairing again. The builder reproduced this against the real server.js: pair rows went ['a','b'] -> ['a','b','b'], and /api/status reported offer 'a' while 'b' was on the phone. It can happen today whenever the socket drops and the panel's onRecord falls behind, because /api/events replays scanner.last and never the offer. It has not been fixed. A fix should limit the stand-in to the case the comment describes, where nothing is on record (!scanner.offer). It should also be pinned by a check that posts a mark for an older id while a newer offer is current and asserts that exactly one pair row exists per card.
-
-**The Atlanta/Marietta figures that justify holding the hour still are stale in six places.** They are map.html areaRanking, advice.js:575, tests/advice.test.js:1697, rpi/test_map.py:1806, rpi/README.md:5056 and AUDITS.md:1066. They quote 12-3am $21.24 / 3-6pm $14.17, 57 of Atlanta's 98 and 40 of Marietta's 82, a raw lead of $5.38 and a held lead of $2.45, best-to-worst $6.47 -> $3.69, and 'three towns change places'. Measured today on week.json (1,166 offers, TZ=America/New_York, the kept pool of Advice.areas keyed on MV.townFor with Advice.blockOf strata): 12-3am $20.94 and 3-6pm $13.99; 65 of Atlanta's 113 in the first and 43 of Marietta's 101 in the second; raw lead $5.33 (19.95 - 14.62); held lead $4.26 (3.28 - -0.98); best-to-worst $6.33 -> $4.98; FOUR towns change places (Woodstock/Kennesaw and Marietta/Acworth swap); p 0.002. I did not change these. It is pre-existing, one of the six places is AUDITS.md (which this lane may not edit), and a partial update would put two sets of figures in the repo, which is fault class 3. They should be updated together.
 
 **One unlabelled bracketed leg on a lone card is called whole, and on a ride card that is the drive to the rider alone.** is_whole's single-leg clause says 'Uber labels every leg of a ride (away, trip, total)'. laid_out_approach measured 'away' on 0 of 1,166 rows. Measured on the week: rows 444 frame 0 and 805 frame 1 are ride frames whose trip leg did not read, and they read whole on the approach alone. Row 805's merge recovered; row 444's journal row is whole=0 for another reason. Not fixed, because the same shape is also an Eats card whose `total` did not read (`tota`, `te al`): 7 frames on 6 rows, all whole jobs. Telling them apart needs a text-level ride signal carried through the accumulator. half_a_ride answers it only where another card is in shot, and 'whole / one bare leg on a frame holding ONE card is left as it was' pins that boundary.
 

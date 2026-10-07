@@ -1138,13 +1138,14 @@
    */
   function areaRanking() {
     // `strata`, and the whole honesty of the answer is in it. A town's rate is
-    // tangled with WHEN the driver is in it: on the owner's own week 12–3am
-    // paid $21.24 and 3–6pm paid $14.17, and 57 of Atlanta's 98 offers are in
-    // the first while 40 of Marietta's 82 are in the second. Ranked raw,
-    // Atlanta leads Marietta by $5.38 and a driver would go there at six in
-    // the evening and find the six-o'clock rate. Held at the same hours the
-    // lead is $2.45, the gap from best to worst drops from $6.47 to $3.69, and
-    // three towns change places. See Advice.areas.
+    // tangled with WHEN the driver is in it. On the 13–20 Sep week, among the
+    // offers in towns with enough of them, 12–3am paid $20.94 and 3–6pm paid
+    // $13.99, and 65 of Atlanta's 113 offers are in the first while 43 of
+    // Marietta's 101 are in the second. Ranked raw, Atlanta leads Marietta by
+    // $5.33; held at the same hours it is $4.26, the gap from best to worst
+    // drops from $6.33 to $4.98, and four towns change places. On that week
+    // most of Atlanta's lead is the town, but not all of it, and on an
+    // earlier export the hour was more than half of it. See Advice.areas.
     return Advice.areas(shown(), {
       // The town rule lives in advice.js and is handed over, not copied.
       key: function (o) { return MV.townFor(o, Advice.area); },

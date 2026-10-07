@@ -2736,16 +2736,36 @@ function route(req, res) {
         // Dropoff never appeared and the next card was judged alone, on the
         // one path this feature exists for. The panel knows the offer it is
         // marking, so it says, and that stands in when nothing is on record.
-        if (note.kind === 'mark' && note.accepted !== undefined
-            && !(scanner.offer && scanner.offer.id === note.id)
-            && body.offer && typeof body.offer === 'object'
-            && body.offer.id === note.id && typeof note.id === 'string') {
-          scanner.offer = Object.assign({}, body.offer);
-          scanner.offerAt = scanner.offerAt || Date.now();
+        //
+        // ...ONLY when nothing is on record. It used to stand in whenever the
+        // mark named a different card, which is also the case where the panel
+        // is simply BEHIND: the socket dropped, /api/events replays the last
+        // reading and never the offer, and the driver ticks the card they
+        // took while the server has already moved on to the next one. The
+        // older card then replaced the newer one on the slot, /api/status said
+        // 'a' with 'b' on the phone, and b's next re-read was no longer the
+        // same card — so recordPairing wrote b's pair row a second time, into
+        // a file that cannot be corrected. Reproduced against this server:
+        // pair rows ['a', 'b'] became ['a', 'b', 'b'].
+        //
+        // The order still goes in the car — that is what the driver said —
+        // from the panel's copy of it, and the card on the slot is left alone.
+        var marked = null;
+        var offered = body.offer && typeof body.offer === 'object'
+            && body.offer.id === note.id && typeof note.id === 'string';
+        if (note.kind === 'mark' && note.accepted !== undefined) {
+          if (scanner.offer && scanner.offer.id === note.id) {
+            marked = scanner.offer;
+          } else if (offered && !scanner.offer) {
+            scanner.offer = Object.assign({}, body.offer);
+            scanner.offerAt = scanner.offerAt || Date.now();
+            marked = scanner.offer;
+          } else if (offered) {
+            marked = Object.assign({}, body.offer);
+          }
         }
-        if (note.kind === 'mark' && scanner.offer && scanner.offer.id === note.id
-            && note.accepted !== undefined) {
-          scanner.offer.accepted = note.accepted;
+        if (marked) {
+          marked.accepted = note.accepted;
           // ...and it becomes the order in the car, which is what the next
           // offer gets measured against. Taking the mark back puts it down
           // again: the driver pressed it twice because they did not take it,
@@ -2753,17 +2773,17 @@ function route(req, res) {
           // stacking onto one they already delivered.
           if (note.accepted) {
             setHolding({
-              id: scanner.offer.id,
-              pay: scanner.offer.pay,
-              minutes: typeof scanner.offer.billedMinutes === 'number'
-                ? scanner.offer.billedMinutes : scanner.offer.minutes,
-              miles: scanner.offer.miles,
-              cost: scanner.offer.cost,
+              id: marked.id,
+              pay: marked.pay,
+              minutes: typeof marked.billedMinutes === 'number'
+                ? marked.billedMinutes : marked.minutes,
+              miles: marked.miles,
+              cost: marked.cost,
               // Where this one ENDS, so the next offer can be judged on more
               // than the clock. See Advice.sameArea: two pickups on the same
               // block are ordinary, two dropoffs twenty miles apart is the
               // trap, and only the second is worth refusing over.
-              dropoff: scanner.offer.dropoff || null,
+              dropoff: marked.dropoff || null,
               // ...and whether that destination came off the CARD or off a scan
               // of the driver's screen. Carried, because it was being dropped
               // here and the loss was permanent.
@@ -2790,8 +2810,8 @@ function route(req, res) {
               // Measured against the real server, screening press then accept:
               // the card reads `dropoffScanned: true` and the held order read
               // `false`, with the address itself identical.
-              dropoffScanned: !!scanner.offer.dropoffScanned,
-              pickup: scanner.offer.pickup || null,
+              dropoffScanned: !!marked.dropoffScanned,
+              pickup: marked.pickup || null,
               // Whether this reading was one the rig would state a verdict
               // about. A doubted order in the car makes every pair judged
               // against it nonsense, and an uncosted one makes the pair's
@@ -2799,8 +2819,8 @@ function route(req, res) {
               // what it is handed. Carried rather than recomputed: rate()
               // decided both, and a second derivation is a second thing to
               // drift.
-              doubt: scanner.offer.doubt || null,
-              uncosted: !!scanner.offer.uncosted,
+              doubt: marked.doubt || null,
+              uncosted: !!marked.uncosted,
               // From when the card was on the screen, not from the press.
               // The panel keeps "Took?" for the last offer however old it
               // is, so a mark can be hours late — the driver ticking last

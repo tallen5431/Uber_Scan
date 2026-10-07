@@ -5094,15 +5094,17 @@ of the distance range separately it holds in all three (p = 0.0000 / 0.0020 /
 longer than the worst's: Atlanta $20.07/hr over 9.2 miles against Marietta
 $14.63 over 9.5.
 
-**And most of that spread is the clock.** A town's rate is tangled with *when*
-the driver is in it: on this week the 12–3am block paid $21.24 and 3–6pm paid
-$14.17, and **57 of Atlanta's 98 offers are in the first** while 40 of
-Marietta's 82 are in the second. Ranked raw, Atlanta leads Marietta by $5.38 —
-and a driver who drove there at six in the evening would get the six-o'clock
-rate. Held at the same hours the lead is $2.45, the gap from best to worst
-falls from **$6.47 to $3.69**, and three towns change places. The town still
-matters (the stratified test is p = 0.002) and it matters about half as much as
-it looks.
+**And some of that spread is the clock.** A town's rate is tangled with *when*
+the driver is in it: on the 13–20 Sep week the 12–3am block paid $20.94 and
+3–6pm paid $13.99, and **65 of Atlanta's 113 offers are in the first** while 43
+of Marietta's 101 are in the second. Ranked raw, Atlanta leads Marietta by
+$5.33; held at the same hours the lead is $4.26, the gap from best to worst
+falls from **$6.33 to $4.98**, and four towns change places (Woodstock and
+Kennesaw, Marietta and Acworth). The town matters (the stratified test is
+p = 0.002), and on that week most of Atlanta's lead is the town. On an earlier,
+smaller export the same correction took the lead from $5.38 to $2.45, more
+than half of it the hour — which is why the page computes this every time
+rather than trusting either week.
 
 So the ranking is by what is left once the hour is held still: each offer
 measured against what its own three-hour block paid across the whole list, and
@@ -7162,7 +7164,7 @@ python3 rpi/test_offerspage.py  # 451 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 166 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 233 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 239 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that

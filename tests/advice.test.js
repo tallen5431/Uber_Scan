@@ -1693,13 +1693,14 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   /* ---- holding the hour still ---- */
   //
   // The correction that makes this feature honest rather than flattering. A
-  // town's rate is tangled with WHEN the driver is in it: on the owner's own
-  // week 12-3am paid $21.24 and 3-6pm paid $14.17, and 57 of Atlanta's 98
-  // offers are in the first while 40 of Marietta's 82 are in the second. Raw,
-  // Atlanta leads Marietta by $5.38; with the hours held still it is $2.45,
-  // the best-to-worst gap drops from $6.47 to $3.69, and three towns change
-  // places. A driver reading the raw list would drive to Atlanta at six in the
-  // evening and find the six-o'clock rate.
+  // town's rate is tangled with WHEN the driver is in it: on the 13-20 Sep
+  // week 12-3am paid $20.94 and 3-6pm paid $13.99, and 65 of Atlanta's 113
+  // offers are in the first while 43 of Marietta's 101 are in the second. Raw,
+  // Atlanta leads Marietta by $5.33; with the hours held still it is $4.26,
+  // the best-to-worst gap drops from $6.33 to $4.98, and four towns change
+  // places. How much of a lead is the hour changes from week to week (on an
+  // earlier export it was more than half), which is why it is held still and
+  // not assumed.
   //
   // The fixture is that failure in its purest form: the two towns pay
   // IDENTICALLY at any given hour, and one of them is only ever visited during

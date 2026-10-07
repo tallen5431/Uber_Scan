@@ -579,19 +579,22 @@
      * took two independent readers to catch it.
      *
      * The rate a town pays is tangled with WHEN the driver is in it. Measured
-     * on the owner's week, on his clock: 12–3am pays $21.24 and 3–6pm pays
-     * $14.17, and 57 of Atlanta's 98 offers are in the 12–3am block while 41
-     * of Kennesaw's 69 and 40 of Marietta's 82 are in the 3–6pm one. So the
-     * raw ranking — Atlanta $20.01 against Marietta $14.63 — is partly a fact
-     * about the towns and partly a fact about the clock, and a driver reading
-     * it would go to Atlanta at six in the evening and find $14.
+     * on the 13–20 Sep week on the driver's clock, over the 431 offers in
+     * towns with enough of them: 12–3am pays $20.94 and 3–6pm pays $13.99, and
+     * 65 of Atlanta's 113 offers are in the 12–3am block while 47 of
+     * Kennesaw's 77 and 43 of Marietta's 101 are in the 3–6pm one. So the raw
+     * ranking — Atlanta $19.95 against Marietta $14.62 — is partly a fact about
+     * the towns and partly a fact about the clock.
      *
-     * With the hours held still the town still matters and matters LESS: the
-     * gap from top to fourth goes from **$4.20 to $1.09**, and the order moves
-     * (Mableton to the top, Smyrna from sixth to last at −$3.11). That is a
-     * number a driver acts on being four times larger than the truth, which is
-     * this project's first fault class, so it is not an enrichment — it is the
-     * correction that makes the feature honest.
+     * How much is the clock depends on the week, which is why it is computed
+     * and never assumed. On an earlier export holding the hour still took the
+     * gap from top to fourth from $4.20 to $1.09 and put Mableton on top: a
+     * figure four times larger than the truth, this project's first fault
+     * class. On the 13–20 Sep week Atlanta's lead over Marietta goes only from
+     * $5.33 to $4.26, best-to-worst from $6.33 to $4.98, and four towns change
+     * places (Woodstock and Kennesaw, Marietta and Acworth). Either way the
+     * raw list is a different answer, so this is not an enrichment — it is
+     * the correction that makes the feature honest.
      *
      * Two halves, and both are needed. `matched` below is how much of a town's
      * rate is left once each offer is measured against what its own hour paid;

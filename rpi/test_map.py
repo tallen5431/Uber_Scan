@@ -1803,12 +1803,11 @@ try:
     # --- and the hour, which is tangled up with every one of these figures --
     #
     # A town's rate is partly a fact about when the driver is in it. On the
-    # owner's own week 12-3am paid $21.24 and 3-6pm paid $14.17, and 57 of
-    # Atlanta's 98 offers are in the first while 40 of Marietta's 82 are in
-    # the second — so the raw list has Atlanta ahead of Marietta by $5.38 and
-    # the true figure, at the same hours, is $2.45. A driver acting on the raw
-    # list drives to Atlanta at six in the evening and finds the six-o'clock
-    # rate.
+    # 13-20 Sep week 12-3am paid $20.94 and 3-6pm paid $13.99, and 65 of
+    # Atlanta's 113 offers are in the first while 43 of Marietta's 101 are in
+    # the second — so the raw list has Atlanta ahead of Marietta by $5.33 and
+    # the figure at the same hours is $4.26, with four towns changing places.
+    # On an earlier export the hour was more than half the lead.
     #
     # Checked at the end of this file, on the journal built for it, and NOT
     # here. This fixture held the hour still only by accident of the clock:

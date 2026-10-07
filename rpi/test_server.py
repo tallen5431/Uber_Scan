@@ -732,6 +732,74 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- a mark from a panel that has fallen behind -------------------------------
+#
+# The socket drops, /api/events replays the last reading and never the offer,
+# and the driver ticks the card they took while the server is already on the
+# next one. The mark carries its offer, and that copy used to stand in for
+# whatever was on record whenever the ids differed — so the older card took
+# the slot, /api/status named it with the newer card on the phone, and the
+# newer card's next re-read looked like a new card and wrote its pair row a
+# second time. Measured against this server before the fix: pair rows
+# ['o-a', 'o-b', 'o-b'].
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'behind.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import json, time\n'
+            'def say(i, pay):\n'
+            '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
+            '        "grossPerHour": 36.0, "pay": pay, "minutes": 30.0, "miles": 5.0,\n'
+            '        "cost": 1.75, "billedMinutes": 30.0, "target": 25, "band": 15,\n'
+            '        "costPerMile": 0.35, "at": int(time.time() * 1000),\n'
+            '        "offer": {"id": i, "pay": pay, "minutes": 30.0, "billedMinutes": 30.0,\n'
+            '                  "miles": 5.0, "cost": 1.75, "perHour": 30.0, "target": 25,\n'
+            '                  "band": 15, "costPerMile": 0.35, "state": "go"}}),\n'
+            '          flush=True)\n'
+            'say("o-h", 10.0)\n'
+            'time.sleep(2.0)\n'
+            'say("o-a", 12.0)\n'
+            'time.sleep(1.5)\n'
+            'say("o-b", 14.0)\n'
+            'time.sleep(3.0)\n'
+            'say("o-b", 14.0)\n'
+            'time.sleep(600)\n')
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'HOLD_GRACE_MS': '0'}, journal)
+    try:
+        def offer_is(i, patience=6.0):
+            for _ in range(int(patience * 20)):
+                s = get(base, '/api/status')
+                if (s.get('offer') or {}).get('id') == i:
+                    return s
+                time.sleep(0.05)
+            return None
+
+        ok_('the first card is on record', offer_is('o-h') is not None)
+        post(base, '/api/offers/mark', {'id': 'o-h', 'accepted': True})
+        ok_('...and the newer card is on record behind it', offer_is('o-b') is not None)
+        _a = {'id': 'o-a', 'pay': 12.0, 'minutes': 30.0, 'billedMinutes': 30.0,
+              'miles': 5.0, 'cost': 1.75, 'state': 'go'}
+        code, reply = post(base, '/api/offers/mark',
+                           {'id': 'o-a', 'accepted': True, 'offer': _a})
+        eq('a mark for the card before the one on record is taken', code, 200)
+        _st = get(base, '/api/status')
+        eq('...and the card on record is still the one on the phone',
+           (_st.get('offer') or {}).get('id'), 'o-b')
+        # By its pay: the status shows the order in the car without its id.
+        eq('...while the card the driver took is the order in the car',
+           (_st.get('holding') or {}).get('pay'), 12.0)
+        time.sleep(3.5)
+        eq('...and the newer card read again is still one pair row, not two',
+           [r['id'] for r in lines(journal) if r.get('kind') == 'pair'],
+           ['o-a', 'o-b'])
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a card read twice, where only one reading saw the map --------------------
 #
 # The winner of the pay/minutes/miles vote is taken whole, and an address is not
