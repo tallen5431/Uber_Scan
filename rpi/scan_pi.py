@@ -697,19 +697,20 @@ def emit_settings(settings):
         flush=True)
 
 
-def use_manual_box(scanner, quad_px):
+def use_manual_box(scanner, quad_px, card=None):
     """Read exactly the box a person drew, and stop deriving one inside it.
 
     Three settings, and they only make sense together. The corners are the box.
-    The crop is pinned to all of it, because a crop derived from the box would
-    trim the top off the very thing the driver framed. And the card's share of
-    the quad is 1.0 — the box *is* the card — which keeps the warp at the height
-    the reader wants instead of twice it.
+    The crop is the card box the driver drew inside it, or all of the box when
+    they drew none — never one derived, because that would trim the top off the
+    very thing the driver framed. And the card's share of the quad is the card
+    box's height (1.0 when the box *is* the card), which keeps the warp at the
+    height the reader wants instead of twice it.
     """
     scanner.quad = np.array(quad_px, dtype=np.float32)
-    scanner.roi = list(CX.PIN_WHOLE)
-    scanner.fixed_card_share = 1.0
-    scanner.card_share = 1.0
+    scanner.roi = list(card) if card else list(CX.PIN_WHOLE)
+    scanner.fixed_card_share = CX.card_share(card)
+    scanner.card_share = CX.card_share(card)
 
 
 _watch_cache = (None, VIEW_SCENE)
@@ -1967,7 +1968,10 @@ def main():
         # warped twice as tall as the reader can use, then shrunk back down
         # against the pixel budget — same text, three times the work, smaller
         # by the time it is read.
-        card_share=1.0 if manual else None,
+        # ...or, when a card box was drawn inside it, the card box's share.
+        card_share=(CX.card_share(None if cfg.get('cropBox') == CX.PIN_WHOLE
+                                  else cfg.get('cropBox'))
+                    if manual else None),
         # No `settings=` here any more. The Scanner priced every frame from a
         # copy of this block taken at startup, and digest() replaced that rate
         # with its own before anything read it — so the copy decided nothing,
@@ -2173,7 +2177,7 @@ def main():
         log('journal: %s (%d journal row%s so far)%s'
             % (args.journal, kept, '' if kept == 1 else 's',
                ', still on the last one' if resumed else ''))
-    def digest(out, frame, read_at=None):
+    def digest(out, frame, read_at=None, whole=False):
         """Everything a read means, once the reading itself is done.
 
         On the loop's thread, always — the accumulator, the journal, the voice
@@ -2190,7 +2194,8 @@ def main():
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as
-        parsed = accumulator.add(out['parsed'])
+        # Not merged when it was a whole-screen read — see collect().
+        parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
         # a duration. Passed in rather than read inside the parser, which
         # has to stay a pure function of the text it was given so it can be
@@ -2508,6 +2513,12 @@ def main():
                 emit_dropoff(found, ms=out.get('ms'), asked=asked)
             log('destination read%s: %s'
                 % ('' if asked else ' (unprompted)', found.get('line')))
+        # A whole-screen read has answered the only question it was taken for.
+        # Everything below is about an offer — the failure count, the verdict,
+        # the health tally, the journal row — and this reading is of the card
+        # plus whatever surrounds it, so none of it may be judged from here.
+        if whole:
+            return False
         # Anything with a payout is worth a second look; anything without is
         # not an offer and should not hold the loop open.
         #
@@ -2886,10 +2897,17 @@ def main():
         # and a leg lost to glare in one frame is often present in the other.
         # Every frame but the chosen one, because digest() adds that one itself
         # and adding it twice would merge a card with a copy of itself.
-        for i, other in enumerate(batch):
-            if i != chosen:
-                accumulator.add(other['parsed'])
-        return digest(batch[chosen], done['frames'][0], done.get('at'))
+        #
+        # NONE of them from a whole-screen read. That is a question about a
+        # destination and nothing else: its text is the card AND the map round
+        # it, or a trip planner, and none of that is evidence about an offer's
+        # money. digest() answers the press from it and stops.
+        whole = bool(getattr(done.get('geom'), 'whole', False))
+        if not whole:
+            for i, other in enumerate(batch):
+                if i != chosen:
+                    accumulator.add(other['parsed'])
+        return digest(batch[chosen], done['frames'][0], done.get('at'), whole=whole)
 
     # What the server answers GET /api/settings with, from the moment the loop
     # runs. See emit_settings.
@@ -3105,11 +3123,12 @@ def main():
                 # A box drawn on the live view. It arrives as fractions of the
                 # frame, which is the only form that survives the trip: what the
                 # driver drew on was a 480px JPEG of a 2328px sensor frame.
-                drawn = CX.take_request()
-                if drawn is not None:
+                taken = CX.take_request()
+                if taken is not None:
+                    drawn, card = taken
                     manual = True
-                    use_manual_box(scanner, CX.in_pixels(drawn, capture_size))
-                    CX.apply_to_config(cfg, drawn, capture_size)
+                    use_manual_box(scanner, CX.in_pixels(drawn, capture_size), card)
+                    CX.apply_to_config(cfg, drawn, capture_size, card)
                     save_config(args.config, cfg)
                     tracker = None
                     # Read it now. The whole crop just changed, and the motion
@@ -3119,9 +3138,12 @@ def main():
                     # "read this box" does nothing visible until the picture next
                     # moves, which reads as the button not having worked.
                     moved = do_read = True
-                    log('crop box set by hand to [%s] of the frame: reading exactly '
-                        'that, with corner tracking off until re-find is pressed'
-                        % CX.describe(drawn))
+                    log('crop box set by hand to [%s] of the frame: %s, with corner '
+                        'tracking off until re-find is pressed'
+                        % (CX.describe(drawn),
+                           'offers read in the card box [%.2f %.2f %.2f %.2f] of it and '
+                           '⌖ reading all of it' % tuple(card) if card
+                           else 'reading exactly that'))
 
                 if tracker is not None and scanner.settled:
                     was = tracker.status()
@@ -3561,8 +3583,17 @@ def main():
             # the tracker may well have moved the corners, and a frame warped
             # against corners measured after it was captured lands the crop
             # somewhere the card is not.
+            #
+            # While a ⌖ press is open, all of the screen box rather than the
+            # card crop: the press asks "what is on this screen", and a trip
+            # planner's addresses are outside where the offer cards land. A
+            # card box drawn by hand made that a blind spot — see
+            # cropbox.parse_card. Only while asked: an unprompted read is
+            # hunting offers and keeps the card crop.
             reader.submit([frame] if partner is None else [frame, partner],
-                          time.time(), scanner.geometry())
+                          time.time(),
+                          scanner.geometry(whole=dropoff_asked
+                                           and time.time() < dropoff_until))
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.
             if args.json:

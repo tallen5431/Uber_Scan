@@ -138,7 +138,7 @@ def out_for(text, clipped=False):
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
         refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
-        clipped_for=None, dropoff_window=None):
+        clipped_for=None, dropoff_window=None, whole_text=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return. `handoff`: a directory to point the button-press files at, so a
@@ -165,12 +165,25 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     if cam_out is not None:
         cam_out.append(cam)
     calls = [0]
+    # Which reads were of the whole screen box (a ⌖ press) rather than the card
+    # crop, in order. `whole_text`, when given, is what those reads see — the
+    # map and planner round the card — so a check can tell which crop a
+    # reading came from by what it says.
+    wholes = []
+    # ...and the crop and warp share each read was taken against.
+    crops = []
 
     def look(self, frames, now=None, geom=None):
         calls[0] += 1
+        whole = bool(getattr(geom, 'whole', False))
+        wholes.append(whole)
+        crops.append((list(geom.roi) if geom is not None and geom.roi is not None else None,
+                      getattr(geom, 'fixed_card_share', None)))
         if hang_from is not None and calls[0] >= hang_from:
             while True:
                 real_sleep(0.05)
+        if whole and whole_text is not None:
+            return [out_for(whole_text) for _ in range(len(frames))]
         return [out_for(texts_for_call(calls[0], k),
                         clipped=bool(clipped_for and clipped_for(calls[0], k)))
                 for k in range(len(frames))]
@@ -252,7 +265,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
-                settings=said_settings, config=config)
+                settings=said_settings, config=config, wholes=wholes, crops=crops)
 
 
 FRAG = '$16.05 20 min (7.3 mi) trip'
@@ -481,6 +494,35 @@ ok_('the second press, with the card there, was honoured',
 said = [bool(b.get('refind_refused')) for b in r['alive']]
 ok_('...and took the refusal down with it, without waiting for it to age out',
     pressed_again[0] and said and not said[-1])
+
+# --- a card box inside the drawn box -------------------------------------------
+#
+# Offers are read in the card box and the warp is sized to IT, not to the
+# screen box round it: sized to the screen, the card would come out at half
+# the height the reader wants.
+_card = [0.0, 0.4, 1.0, 0.5]
+r10 = run(lambda n, k: WHOLE, seconds=3.0,
+          config_extra={'manualBox': True, 'cropBox': _card})
+eq('a card box saved from before is the crop the rig reads by',
+   r10['crops'][0], (_card, 0.5))
+
+# ...and one drawn on the panel mid-shift, arriving through the handoff file.
+_ho5 = tempfile.mkdtemp()
+
+
+def _draw_on_first_read(n, k):
+    if n == 1 and k == 0:
+        with open(os.path.join(_ho5, 'uberscan-cropbox.json'), 'w') as fh:
+            json.dump({'quad': [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                       'card': [0.0, 0.25, 1.0, 0.4]}, fh)
+    return WHOLE
+
+
+r11 = run(_draw_on_first_read, seconds=4.0, handoff=_ho5)
+ok_('a card box drawn mid-shift is taken (%r)' % r11['crops'][-1:],
+    any(c == ([0.0, 0.25, 1.0, 0.4], 0.4) for c in r11['crops']))
+ok_('...and said in the log',
+    any('card box' in l for l in r11['logs']))
 
 # --- a cost per mile typed on a screen prices the next reading ---------------
 #
@@ -742,12 +784,44 @@ ok_('a press that finds an address is answered with it (%r)'
     % ([(d[0] or {}).get('line') for d in r7['dropoffs']][:2],), len(_found) >= 1)
 eq('...and is not ALSO reported as having found nothing', _empty, [])
 
+# --- a ⌖ press reads the whole screen box, and only the destination off it --
+#
+# A tight card box drawn by hand kept the reader off the map, and blinded ⌖ to
+# the trip planner's addresses outside it. So while a press is open the read
+# takes all of the screen box. That reading is the card AND what surrounds it,
+# which is no evidence about the offer's money, so it answers the press and
+# nothing else.
+_ho3 = tempfile.mkdtemp()
+r8 = run(_press_on_first_read(_ho3, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
+         handoff=_ho3, dropoff_window=1.0, whole_text=NAV_ADDR)
+ok_('a ⌖ press reads the whole screen box (%r)' % r8['wholes'][:6], any(r8['wholes']))
+eq('...not before it was pressed', r8['wholes'][0], False)
+eq('...and goes back to the card box once it is answered', r8['wholes'][-1], False)
+ok_('...and the address outside the card box is the answer (%r)'
+    % [(d[0] or {}).get('line') for d in r8['dropoffs']][:2],
+    any(d[0] and 'Main St' in (d[0].get('line') or '') and d[1].get('asked')
+        for d in r8['dropoffs']))
+
+# The whole-screen read sees a DIFFERENT payout here — a card under a map, a
+# planner listing two orders' totals. If it reached the offer, the panel would
+# show a verdict for money no card on the phone offered.
+_ho4 = tempfile.mkdtemp()
+r9 = run(_press_on_first_read(_ho4, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
+         handoff=_ho4, dropoff_window=1.0,
+         whole_text='$99.00 20 min (5.0 mi) trip Dropoff 9 Elm St, Acworth, GA 30101')
+ok_('a press with a payout in the whole screen box was read whole', any(r9['wholes']))
+_pays = sorted(set((v[0][1] or {}).get('pay') for v in r9['verdicts']
+                   if len(v[0]) > 1 and isinstance(v[0][1], dict)), key=str)
+ok_('...and that payout never reached a verdict (%r)' % _pays, 99.0 not in _pays)
+ok_('...nor the journal', all(row.get('pay') != 99.0 for row in r9['rows']))
+
 # ...and a rig nobody pressed anything on says nothing. Without this the checks
 # above pass on a message that is simply always sent.
 r6 = run(lambda n, k: WHOLE, extra_argv=['--no-parallel'], seconds=6.0,
          handoff=tempfile.mkdtemp(), dropoff_window=1.0)
 eq('a rig nobody pressed says nothing about a dropoff',
    [d for d in r6['dropoffs'] if d[1].get('asked')], [])
+eq('...and reads only the card box', [w for w in r6['wholes'] if w], [])
 
 # --- what the phone showed after a card landed ------------------------------
 #

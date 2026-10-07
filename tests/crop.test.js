@@ -144,8 +144,8 @@ function waitForServer(tries) {
     eq('a dragged box is accepted', res.status, 200);
     eq('...and comes back as ordered corners', res.body.quad,
        [[0.1, 0.2], [0.6, 0.2], [0.6, 0.8], [0.1, 0.8]]);
-    eq('...and is what lands in the file for the scanner',
-       written(), { quad: [[0.1, 0.2], [0.6, 0.2], [0.6, 0.8], [0.1, 0.8]] });
+    eq('...and is what lands in the file for the scanner, with no card box',
+       written(), { quad: [[0.1, 0.2], [0.6, 0.2], [0.6, 0.8], [0.1, 0.8]], card: null });
 
     // Fractions, never pixels: the picture drawn on is a 480px JPEG of a
     // 2328px sensor frame, and corners measured against one size and read
@@ -166,8 +166,22 @@ function waitForServer(tries) {
     eq('a drag past the edge is clamped, not refused', res.body.quad,
        [[0.7, 0.7], [1, 0.7], [1, 1], [0.7, 1]]);
 
+    // The card box: where the offers land INSIDE the screen box, in fractions
+    // of the screen box. Offers are read there; a ⌖ press reads the whole
+    // screen box, which is where a trip planner's addresses are.
+    res = await post({ box: [0.1, 0.2, 0.5, 0.6], card: [0, 0.4, 1, 0.5] });
+    eq('a card box inside the screen box is accepted', res.status, 200);
+    eq('...and lands in the same file as the screen box it is a fraction of',
+       written().card, [0, 0.4, 1, 0.5]);
+    res = await post({ box: [0.1, 0.2, 0.5, 0.6], card: [0.2, 0.6, 1, 0.9] });
+    eq('a card box past the screen box\'s edge is clamped to it', res.body.card,
+       [0.2, 0.6, 0.8, 0.4]);
+
     clear();
     var refusals = [
+      ['a card box too small to read', { box: [0.1, 0.2, 0.5, 0.6], card: [0, 0.4, 1, 0.01] }],
+      ['a card box with three numbers', { box: [0.1, 0.2, 0.5, 0.6], card: [0, 0.4, 1] }],
+      ['a card box in text', { box: [0.1, 0.2, 0.5, 0.6], card: [0, '0.4', 1, 0.5] }],
       ['a mis-tap is not a box', { box: [0.5, 0.5, 0.01, 0.01] }],
       ['a box needs four numbers', { box: [0.1, 0.2, 0.5] }],
       ['a quad needs four corners', { quad: [[0.1, 0.2], [0.5, 0.6]] }],
@@ -184,14 +198,15 @@ function waitForServer(tries) {
 
     // The other half of the contract: what this server writes is what the
     // camera side parses. Skipped rather than failed where python3 is absent.
-    await post({ box: [0.12, 0.34, 0.5, 0.4] });
+    await post({ box: [0.12, 0.34, 0.5, 0.4], card: [0, 0.25, 1, 0.5] });
     var read = await pythonReadsIt();
     if (!read.ran) {
       console.log('note: python3 did not run (' + read.why
                   + '), skipped the cropbox.py round trip');
     } else {
-      eq('the scanner reads back the box this server wrote', read.value,
-         [[0.12, 0.34], [0.62, 0.34], [0.62, 0.74], [0.12, 0.74]]);
+      eq('the scanner reads back the box this server wrote, and the card box in it',
+         read.value, [[[0.12, 0.34], [0.62, 0.34], [0.62, 0.74], [0.12, 0.74]],
+                      [0, 0.25, 1, 0.5]]);
       eq('...and takes it away with it, so it is applied once', written(), null);
     }
   } catch (e) {

@@ -803,7 +803,7 @@ def _comment_over(code):
     return ' '.join(above)
 
 
-for _code, _says in (('drawn = CX.take_request()', 'A box drawn on the live view'),
+for _code, _says in (('taken = CX.take_request()', 'A box drawn on the live view'),
                      ('cost = settings_requested()', 'A cost per mile typed')):
     _over = _comment_over(_code)
     ok_('scan_pi.py: the comment right above `%s` is the one about it (%r)'

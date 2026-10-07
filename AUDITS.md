@@ -1072,6 +1072,37 @@ fail against the old handler, and '...while the card the driver took is the
 order in the car' fails if the copy is dropped instead of used (it held the
 previous order, $10, not the ticked $12).
 
+**One hand-drawn box had to be both the card and the screen, so a box tight
+enough to keep the reader off the map made ⌖ blind to the trip planner.** Asked
+for from the seat: after taking an offer the driver opens the trip planner,
+whose restaurant and dropoff addresses sit outside where the cards land. A box
+drawn by hand set the corners AND pinned the crop to all of them, and every
+read — the ⌖ window's included — went through that one crop.
+
+▣ Set box now asks for two: the screen, then the cards inside it (or **No card
+box**, which is the old single box). The card box is stored as fractions of the
+screen box in `cropBox`, the warp is sized to it (`cropbox.card_share`), and
+offers are read there. While a ⌖ press is open, reads take all of the screen box
+(`Geometry.whole`). Those reads answer the press and nothing else: they are the
+card plus the map or planner round it, so they are never merged into the offer,
+never priced and never journalled, and they do not steer the next card read's
+crop or ink polarity. The request file carries both boxes, so the card box
+cannot reach the rig without the screen box it is a fraction of, and a card box
+too small to read refuses the whole request rather than being dropped.
+
+Checks and mutations: routing every read to the card box fails 'a ⌖ press reads
+the whole screen box' and '...and the address outside the card box is the
+answer'; feeding whole-screen reads to the offer fails '...and that payout never
+reached a verdict' (a $99 off the screen round the card reached the panel and
+the journal); reading the whole box always fails eight offer checks; dropping
+the card box from the server's file fails three named checks in
+`tests/crop.test.js`; sending it in frame fractions fails '...the card box as
+fractions of the SCREEN box, clamped to it'.
+
+*Not built yet:* reading EVERY stop off the trip planner. The ⌖ answer is still
+one destination. A reader for the planner page needs real screenshots of it to
+be built and held against, and none are on file.
+
 ### The maps, again
 
 **The map could not say where the money was, and the obvious way to make it

@@ -254,6 +254,10 @@ def main():
                                   'Reads exactly that box and stops looking for the '
                                   'screen — the same thing ▣ Set box does on /live.html, '
                                   'for when you would rather type it than draw it')
+    ap.add_argument('--card', help='with --box: where the offer cards sit INSIDE that box, '
+                                   'as x,y,w,h fractions of the box. Offers are read there '
+                                   'and a ⌖ press reads the whole box — the card box ▣ Set '
+                                   'box asks for second')
     ap.add_argument('--full-screen', action='store_true',
                     help='pin the crop to the whole visible screen instead of '
                          'letting the scanner place it per read')
@@ -288,13 +292,18 @@ def main():
     # crop and is recorded as their choice; corners in pixels are still a
     # correction to where the *screen* is, and the crop is placed inside them
     # per read as usual.
-    drawn = None
+    drawn = card = None
+    if args.card and not args.box:
+        sys.exit('--card is a box inside --box, so it needs one')
     if args.box:
         try:
             drawn = CX.parse_request(
                 {'box': [float(n) for n in args.box.replace(' ', '').split(',')]})
+            if args.card:
+                card = CX.parse_card(
+                    {'card': [float(n) for n in args.card.replace(' ', '').split(',')]})
         except ValueError as e:
-            sys.exit('--box: %s' % e)
+            sys.exit('--box/--card: %s' % e)
         quad = __import__('numpy').array(CX.in_pixels(drawn, (width, height)),
                                          dtype='float32')
     elif args.corners:
@@ -308,8 +317,9 @@ def main():
             sys.exit('no screen found — is the phone lit and in frame? '
                      'else pass --corners, or --box to read a box of your own')
 
-    pin = CX.PIN_WHOLE if drawn else (WHOLE_VIEW if args.full_screen else DEFAULT_ROI)
-    share = 1.0 if drawn else None
+    pin = ((card or CX.PIN_WHOLE) if drawn
+           else (WHOLE_VIEW if args.full_screen else DEFAULT_ROI))
+    share = CX.card_share(card) if drawn else None
     was = load_existing(args.config)
     # A --from-image run has no camera to find focus with, so it has no focus to
     # write — and writing None over a measured one is worse than writing
@@ -328,7 +338,7 @@ def main():
     config = calibrated_config(was, quad, pin,
                                args.card_height, (width, height), lens_position)
     if drawn:
-        CX.apply_to_config(config, drawn, (width, height))
+        CX.apply_to_config(config, drawn, (width, height), card)
     else:
         config.pop(CX.MANUAL_KEY, None)
     write_config(args.config, config)

@@ -532,6 +532,15 @@
     pointer-events: none;
   }
   #drawn[hidden] { display: none; }
+  /* The screen box, held on the picture while the card box is drawn inside it.
+     Dashed and untinted, so the two boxes cannot be mistaken for each other. */
+  #drawnScreen {
+    position: absolute;
+    border: 2px dashed #17c964;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+  #drawnScreen[hidden] { display: none; }
   #drawTools { display: none; gap: 8px; padding: 8px 0 0; }
   #viewWrap.drawing #drawTools { display: flex; }
   /* .linkbtn is only styled inside .bottombar, and these two are not there. */
@@ -549,6 +558,7 @@
   }
   #drawTools #drawUse:not([disabled]) { background: #0d5c31; border-color: #17c964; color: #d7ffe6; }
   #drawTools button[disabled] { opacity: .45; }
+  #drawTools button[hidden] { display: none; }
   #drawHint { font-size: 12px; color: var(--muted); text-align: center; padding: 6px 0 0; }
   /* A label that does not fit is allowed a second line.
    *
@@ -704,11 +714,13 @@
          on the map page. -->
     <div id="liveMap" hidden></div>
     <!-- Where the driver says the card is, when the scanner cannot find it. -->
+    <div id="drawnScreen" hidden></div>
     <div id="drawn" hidden></div>
     <figcaption id="viewNote">camera view · inset is what the reader sees</figcaption>
-    <div id="drawHint" hidden>drag a box around the offer card on the phone</div>
+    <div id="drawHint" hidden>drag a box around the whole phone screen</div>
     <div id="drawTools">
-      <button type="button" class="linkbtn" id="drawUse" disabled>✓ Read this box</button>
+      <button type="button" class="linkbtn" id="drawUse" disabled>Next: card box</button>
+      <button type="button" class="linkbtn" id="drawSkip" hidden>No card box</button>
       <button type="button" class="linkbtn" id="drawCancel">✕ Cancel</button>
     </div>
   </figure>
@@ -3585,10 +3597,44 @@
   var setBox = document.getElementById('setBox');
   var drawn = document.getElementById('drawn');
   var drawUse = document.getElementById('drawUse');
+  var drawSkip = document.getElementById('drawSkip');
   var drawCancel = document.getElementById('drawCancel');
   var drawHint = document.getElementById('drawHint');
+  var drawnScreen = document.getElementById('drawnScreen');
   var box = null;             // {x, y, w, h} as fractions, or null
   var dragFrom = null;
+  // TWO boxes, one after the other. The first is the whole phone screen; the
+  // second is where the offer cards land, inside it. Offers are read in the
+  // card box, and a ⌖ press reads all of the screen box — because one tight
+  // box round the cards, which is what this used to ask for, also blinded ⌖ to
+  // the trip planner's addresses outside it. `screenBox` is the first box once
+  // Next is pressed, and null while it is still being drawn.
+  var screenBox = null;
+  var STEP_SCREEN = 'drag a box around the whole phone screen';
+  var STEP_CARD = 'now drag a box around where offer cards appear, inside the '
+    + 'dashed screen box — or press No card box to read all of it';
+
+  // The card box as fractions of the SCREEN box, which is what the scanner
+  // crops by: the warp turns the screen box into the picture it reads.
+  function cardInScreen(b, sb) {
+    var x0 = Math.max(b.x, sb.x), y0 = Math.max(b.y, sb.y);
+    var x1 = Math.min(b.x + b.w, sb.x + sb.w), y1 = Math.min(b.y + b.h, sb.y + sb.h);
+    if (x1 <= x0 || y1 <= y0) return null;
+    return { x: (x0 - sb.x) / sb.w, y: (y0 - sb.y) / sb.h,
+             w: (x1 - x0) / sb.w, h: (y1 - y0) / sb.h };
+  }
+  function cardOk() {
+    var c = box && screenBox ? cardInScreen(box, screenBox) : null;
+    return bigEnough(c);
+  }
+  function placeBox(el, b) {
+    var r = view.getBoundingClientRect();
+    var wrap = viewWrap.getBoundingClientRect();
+    el.style.left = (r.left - wrap.left + b.x * r.width) + 'px';
+    el.style.top = (r.top - wrap.top + b.y * r.height) + 'px';
+    el.style.width = (b.w * r.width) + 'px';
+    el.style.height = (b.h * r.height) + 'px';
+  }
 
   // Which mode the scene is on loan FROM for a drawing, or null. It was a
   // boolean while the phone was the only other thing this pane could show;
@@ -3631,10 +3677,12 @@
     // height mid-drag moves the picture out from under the finger.
     setBox.classList.toggle('on', on);
     if (!on) {
-      box = dragFrom = null;
+      box = dragFrom = screenBox = null;
       drawn.hidden = true;
+      drawnScreen.hidden = true;
+      drawSkip.hidden = true;
       drawUse.disabled = true;
-      drawUse.textContent = '✓ Read this box';
+      drawUse.textContent = 'Next: card box';
     }
   }
 
@@ -3648,17 +3696,17 @@
   }
 
   function showBox() {
-    if (!box) { drawn.hidden = true; return; }
     // Positioned against the picture rather than the figure, which also holds
     // the caption and the buttons.
-    var r = view.getBoundingClientRect();
-    var wrap = viewWrap.getBoundingClientRect();
-    drawn.style.left = (r.left - wrap.left + box.x * r.width) + 'px';
-    drawn.style.top = (r.top - wrap.top + box.y * r.height) + 'px';
-    drawn.style.width = (box.w * r.width) + 'px';
-    drawn.style.height = (box.h * r.height) + 'px';
+    if (screenBox) placeBox(drawnScreen, screenBox);
+    drawnScreen.hidden = !screenBox;
+    if (!box) { drawn.hidden = true; return; }
+    placeBox(drawn, box);
     drawn.hidden = false;
   }
+
+  // What the green button may do now: move on from the screen box, or send.
+  function canUse() { return screenBox ? cardOk() : bigEnough(box); }
 
   // 5% each way, the same floor the server and the scanner apply: at 5% of a
   // 2328px frame the card would be 116px tall against a 380px floor, so there
@@ -3685,16 +3733,19 @@
       w: Math.abs(p.x - dragFrom.x), h: Math.abs(p.y - dragFrom.y)
     };
     showBox();
-    drawUse.disabled = !bigEnough(box);
+    drawUse.disabled = !canUse();
   });
 
   function endDrag() {
     if (!dragFrom) return;
     dragFrom = null;
-    drawUse.disabled = !bigEnough(box);
-    drawHint.textContent = bigEnough(box)
-      ? 'drag again to change it, or read this box'
-      : 'that box is too small to read — drag a bigger one';
+    drawUse.disabled = !canUse();
+    drawHint.textContent = canUse()
+      ? (screenBox ? 'drag again to change the card box, or read both boxes'
+                   : 'drag again to change it, or go on to the card box')
+      : (screenBox ? 'that card box is too small, or outside the screen box — '
+                     + 'drag a bigger one inside the dashed box'
+                   : 'that box is too small to read — drag a bigger one');
   }
   view.addEventListener('pointerup', endDrag);
   view.addEventListener('pointercancel', endDrag);
@@ -3742,7 +3793,7 @@
     }
     drawingMode(on);
     if (on) {
-      drawHint.textContent = 'drag a box around the offer card on the phone';
+      drawHint.textContent = STEP_SCREEN;
       viewWrap.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   });
@@ -3750,14 +3801,38 @@
   drawCancel.addEventListener('click', function () { drawingMode(false); });
 
   drawUse.addEventListener('click', function () {
-    if (!bigEnough(box)) return;
-    var sent = box;
-    drawUse.disabled = true;
+    if (!screenBox) {
+      // Step one done: hold the screen box on the picture and draw the cards.
+      if (!bigEnough(box)) return;
+      screenBox = box;
+      box = null;
+      showBox();
+      drawUse.disabled = true;
+      drawUse.textContent = '✓ Read both boxes';
+      drawSkip.hidden = false;
+      drawHint.textContent = STEP_CARD;
+      return;
+    }
+    if (!cardOk()) return;
+    sendBoxes(cardInScreen(box, screenBox));
+  });
+
+  // The screen box alone: offers are read in all of it, as before there were
+  // two boxes.
+  drawSkip.addEventListener('click', function () {
+    if (screenBox) sendBoxes(null);
+  });
+
+  function sendBoxes(card) {
+    var sent = screenBox;
+    var body = { box: [sent.x, sent.y, sent.w, sent.h] };
+    if (card) body.card = [card.x, card.y, card.w, card.h];
+    drawUse.disabled = drawSkip.disabled = true;
     drawUse.textContent = '✓ sending…';
     ask('/api/crop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ box: [sent.x, sent.y, sent.w, sent.h] })
+      body: JSON.stringify(body)
     }).then(function (r) {
       return r.json().catch(function () { return { ok: r.ok }; });
     }).then(function (out) {
@@ -3766,15 +3841,19 @@
       // No confirmation dialog: the green outline in the picture below moves
       // onto the box within a second or two, which is the same news and is the
       // thing worth looking at anyway.
+      drawSkip.disabled = false;
       drawHint.hidden = false;
-      drawHint.textContent = 'box sent — the green outline moves onto it in a moment';
+      drawHint.textContent = card
+        ? 'boxes sent — offers are read in the card box, and ⌖ reads the whole screen box'
+        : 'box sent — the green outline moves onto it in a moment';
       setTimeout(function () { drawHint.hidden = true; }, 6000);
     }).catch(function (e) {
       drawUse.disabled = false;
-      drawUse.textContent = '✓ Read this box';
+      drawSkip.disabled = false;
+      drawUse.textContent = '✓ Read both boxes';
       drawHint.textContent = 'could not set the box: ' + e.message;
     });
-  });
+  }
 
   connect();
   // Keeps the "last seen" counter honest, and — since silence is exactly the

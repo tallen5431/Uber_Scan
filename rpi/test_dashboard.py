@@ -1763,6 +1763,62 @@ const framed = (page) => page.waitForFunction(
       // ...and given back once the drawing ends, or the button is simply
       // broken from then on.
       viewEnabled: !document.getElementById('viewMode').disabled }));
+
+    // --- two boxes: the screen, then the cards inside it ----------------
+    //
+    // One tight box round the cards was the only way to keep the reader off
+    // the map, and it blinded ⌖ to the trip planner's addresses outside it.
+    // So the screen is drawn first and the cards inside it, and what goes to
+    // the rig is the screen in frame fractions and the cards in fractions of
+    // the SCREEN box — the crop the scanner applies after the warp.
+    stage = 'snap: two boxes';
+    const cropBodies = [];
+    await page.route('**/api/crop', async (r) => {
+      cropBodies.push(r.request().postDataJSON());
+      await r.fulfill({ status: 200, contentType: 'application/json',
+                        body: JSON.stringify({ ok: true }) });
+    });
+    const twoState = () => page.evaluate(() => ({
+      label: document.getElementById('drawUse').textContent,
+      disabled: document.getElementById('drawUse').disabled,
+      skip: !document.getElementById('drawSkip').hidden,
+      screen: !document.getElementById('drawnScreen').hidden,
+      hint: document.getElementById('drawHint').textContent }));
+    const dragOn = async (x0, y0, x1, y1) => {
+      const vb = await page.locator('#view').boundingBox();
+      if (!vb) return false;
+      await page.mouse.move(vb.x + vb.width * x0, vb.y + vb.height * y0);
+      await page.mouse.down();
+      await page.mouse.move(vb.x + vb.width * x1, vb.y + vb.height * y1, { steps: 6 });
+      await page.mouse.up();
+      await page.waitForTimeout(120);
+      return true;
+    };
+    out.snap.two = {};
+    await page.click('#setBox');
+    await page.waitForTimeout(200);
+    out.snap.two.start = await twoState();
+    out.snap.two.dragged = await dragOn(0.2, 0.1, 0.8, 0.9);
+    await page.click('#drawUse');
+    await page.waitForTimeout(100);
+    out.snap.two.next = await twoState();
+    // Wider than the screen box on both sides: a drag past the edge of the
+    // box is an ordinary way to say "out to the edge".
+    await dragOn(0.1, 0.5, 0.9, 0.7);
+    out.snap.two.carded = await twoState();
+    await page.click('#drawUse');
+    await page.waitForTimeout(250);
+    // ...and the screen box alone, for a driver who wants every read to see
+    // all of it.
+    await page.click('#setBox');
+    await page.waitForTimeout(200);
+    await dragOn(0.2, 0.1, 0.8, 0.9);
+    await page.click('#drawUse');
+    await page.waitForTimeout(100);
+    await page.click('#drawSkip');
+    await page.waitForTimeout(250);
+    out.snap.two.bodies = cropBodies;
+    await page.unroute('**/api/crop');
     await page.close();
   }
   // --- a connection that opens and never closes ---------------------------
@@ -1844,6 +1900,15 @@ const framed = (page) => page.waitForFunction(
       await page.mouse.move(wrap.x + wrap.width * 0.3, wrap.y + wrap.height * 0.3);
       await page.mouse.down();
       await page.mouse.move(wrap.x + wrap.width * 0.7, wrap.y + wrap.height * 0.7,
+                            { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      // Two boxes now: that was the screen, Next holds it, and the card box is
+      // drawn inside it. Sending is the second press.
+      await press('#drawUse');
+      await page.mouse.move(wrap.x + wrap.width * 0.35, wrap.y + wrap.height * 0.45);
+      await page.mouse.down();
+      await page.mouse.move(wrap.x + wrap.width * 0.65, wrap.y + wrap.height * 0.6,
                             { steps: 8 });
       await page.mouse.up();
       await page.waitForTimeout(150);
@@ -3972,6 +4037,36 @@ try:
         # "Read this box" re-checked only that the box was big enough. A box
         # accepted, a quad moved, the scanner reading a patch of car door, and
         # a green "box sent" on the glass.
+        # Two boxes. The screen first, then the cards inside it; offers are
+        # read in the card box and ⌖ reads the whole screen box.
+        two = sn.get('two') or {}
+        ok_('the two-box drawing was driven', two.get('dragged'))
+        if two.get('dragged'):
+            st, nx, cd = two.get('start') or {}, two.get('next') or {}, two.get('carded') or {}
+            ok_('Set box asks for the whole screen first (%r)' % st.get('hint'),
+                'whole phone screen' in (st.get('hint') or ''))
+            ok_('...and moves on to the card box rather than sending (%r)' % st.get('label'),
+                'card box' in (st.get('label') or ''))
+            ok_('after Next the screen box stays on the picture', nx.get('screen'))
+            ok_('...the card box is asked for (%r)' % nx.get('hint'),
+                'offer cards' in (nx.get('hint') or ''))
+            eq('...nothing can be sent until one is drawn', nx.get('disabled'), True)
+            ok_('...and the screen box alone is offered instead', nx.get('skip'))
+            eq('a card box drawn inside it can be sent', cd.get('disabled'), False)
+            bodies = two.get('bodies') or []
+            eq('each press sent one request', len(bodies), 2)
+            near = lambda a, b: (isinstance(a, list) and len(a) == len(b)
+                                 and all(abs(x - y) < 0.02 for x, y in zip(a, b)))
+            if len(bodies) == 2:
+                ok_('the screen box goes as fractions of the camera frame (%r)'
+                    % bodies[0].get('box'), near(bodies[0].get('box'), [0.2, 0.1, 0.6, 0.8]))
+                ok_('...the card box as fractions of the SCREEN box, clamped to it (%r)'
+                    % bodies[0].get('card'),
+                    near(bodies[0].get('card'), [0.0, 0.5, 1.0, 0.25]))
+                ok_('the screen box alone goes with no card box (%r)' % bodies[1],
+                    near(bodies[1].get('box'), [0.2, 0.1, 0.6, 0.8])
+                    and 'card' not in bodies[1])
+
         lw = sn.get('lockedWhileDrawing') or {}
         ok_('the drawing starts on the scene', lw.get('phoneBefore') is False)
         eq('...and the view cannot be switched back while a box is being drawn',

@@ -115,6 +115,30 @@ eq('the driver\'s money is not calibration and is not touched',
    config['settings'], lived_in['settings'])
 eq('nor is the exposure this phone was measured at', config['exposureTime'], 33333)
 
+# --- a card box inside it ----------------------------------------------------
+#
+# A tight box round the cards stopped the reader wandering onto the map, and
+# blinded the ⌖ read to the rest of the screen. So the driver draws the screen
+# and then the cards inside it, in fractions of the SCREEN box.
+eq('no card box drawn is no card box', CX.parse_card({'box': [0, 0, 1, 1]}), None)
+eq('a card box is fractions of the screen box', CX.parse_card({'card': [0, 0.4, 1, 0.5]}),
+   [0.0, 0.4, 1.0, 0.5])
+eq('...clamped to it, like a drag past the edge of the picture',
+   CX.parse_card({'card': [0.2, 0.6, 1.0, 0.9]}), [0.2, 0.6, 0.8, 0.4])
+for _bad, _why in (([0, 0.4, 1], 'x, y, w, h'), ([0, 0.4, 1, 0.01], 'too small'),
+                   ([0, 0.4, 'a', 0.5], 'numbers'), ([0, 0.97, 1, 0.5], 'too small')):
+    try:
+        CX.parse_card({'card': _bad})
+        ok_('a card box of %r is refused' % (_bad,), False)
+    except ValueError as e:
+        ok_('a card box of %r is refused, saying %s' % (_bad, _why), _why in str(e))
+eq('the warp is sized to the card box, not the screen', CX.card_share([0, 0.4, 1, 0.5]), 0.5)
+eq('...and to the whole box when it is all card', CX.card_share(None), 1.0)
+carded = CX.apply_to_config(dict(lived_in), quad, (2328, 1748), [0.0, 0.4, 1.0, 0.5])
+eq('a card box becomes the crop inside the drawn corners',
+   (carded['quad'], carded['cropBox']), (CX.in_pixels(quad, (2328, 1748)), [0.0, 0.4, 1.0, 0.5]))
+ok_('...and is still a person\'s choice', carded[CX.MANUAL_KEY])
+
 cleared = CX.clear_in_config(dict(config))
 ok_('re-finding drops the flag', CX.MANUAL_KEY not in cleared)
 ok_('...and the pin with it, or the derived crop never comes back',
@@ -130,7 +154,7 @@ try:
     eq('no request is not an error', CX.take_request(path), None)
 
     CX.write_request(quad, path)
-    eq('a written request comes back as it went in', CX.take_request(path), quad)
+    eq('a written request comes back as it went in', CX.take_request(path), (quad, None))
     ok_('...and is gone once taken', not os.path.exists(path))
     eq('...so it is applied once, not on every frame forever',
        CX.take_request(path), None)
@@ -144,6 +168,17 @@ try:
     with open(path, 'w') as fh:
         json.dump({'box': [0.5, 0.5, 0.001, 0.001]}, fh)
     eq('a mis-tap that reached the file is ignored too', CX.take_request(path), None)
+
+    # The card box rides in the same file, so it cannot be applied without the
+    # screen box it is a fraction of, nor lost on the way.
+    CX.write_request(quad, path, card=[0.0, 0.4, 1.0, 0.5])
+    eq('a card box comes back with the screen box it sits in',
+       CX.take_request(path), (quad, [0.0, 0.4, 1.0, 0.5]))
+    with open(path, 'w') as fh:
+        json.dump({'box': [0.1, 0.1, 0.5, 0.8], 'card': [0, 0.5, 1, 0.001]}, fh)
+    eq('...and a card box too small to read refuses the whole request, rather '
+       'than reading the screen box as if no card box had been drawn',
+       CX.take_request(path), None)
 finally:
     shutil.rmtree(work, ignore_errors=True)
 

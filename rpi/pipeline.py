@@ -1264,6 +1264,10 @@ def ocr_lines(image, config=OCR_CONFIG):
 CROP_SLACK = 0.20
 
 
+# All of the quad: the crop a ⌖ read takes. See Geometry.whole.
+WHOLE_SCREEN = (0.0, 0.0, 1.0, 1.0)
+
+
 def centred_roi(card_share, slack=CROP_SLACK):
     """The box to read, given how much of the quad the card takes up.
 
@@ -1327,13 +1331,18 @@ class Geometry:
     """
 
     __slots__ = ('quad', 'roi', 'fixed_card_share', 'card_share',
-                 'card_height', 'ocr_height', 'dark_mode')
+                 'card_height', 'ocr_height', 'dark_mode', 'whole')
 
     def __init__(self, quad=None, roi=None, fixed_card_share=None,
                  card_share=CARD_SHARE, card_height=CARD_HEIGHT,
-                 ocr_height=OCR_CARD_HEIGHT, dark_mode=None):
+                 ocr_height=OCR_CARD_HEIGHT, dark_mode=None, whole=False):
         self.quad = quad
         self.roi = roi
+        # Read ALL of the screen box, not the card crop inside it: what a ⌖
+        # press asks for, because a trip planner's addresses sit outside where
+        # the offer cards land. The warp is unchanged — the same pixels per
+        # letter as a card read — so only the crop differs.
+        self.whole = whole
         self.fixed_card_share = fixed_card_share
         self.card_share = card_share
         self.card_height = card_height
@@ -1342,6 +1351,8 @@ class Geometry:
 
     @property
     def crop_box(self):
+        if self.whole:
+            return list(WHOLE_SCREEN)
         return self.roi if self.roi else centred_roi(self.card_share)
 
     @property
@@ -1443,14 +1454,19 @@ class Scanner:
         self.locked = False
         self.last = None
 
-    def geometry(self):
-        """A frozen copy of everything a read is taken against. See Geometry."""
+    def geometry(self, whole=False):
+        """A frozen copy of everything a read is taken against. See Geometry.
+
+        `whole`: read the whole screen box rather than the card crop — see
+        Geometry.whole.
+        """
         return Geometry(quad=self.quad, roi=self.roi,
                         fixed_card_share=self.fixed_card_share,
                         card_share=self.card_share,
                         card_height=self.card_height,
                         ocr_height=self.ocr_height,
-                        dark_mode=self.dark_mode)
+                        dark_mode=self.dark_mode,
+                        whole=whole)
 
     @property
     def crop_box(self):
@@ -1649,7 +1665,10 @@ class Scanner:
         # one measured a minute ago. The read itself is unaffected either way:
         # _look measures the share from the frame it was given before it sizes
         # anything, so a reading is always self-consistent.
-        if geom is not None:
+        # Nothing comes back from a whole-screen read: it was of the screen
+        # round the card — a map, a trip planner — and which way up THAT ink
+        # is says nothing about the next card.
+        if geom is not None and not geom.whole:
             if (geom.roi is self.roi
                     and geom.fixed_card_share == self.fixed_card_share):
                 self.card_share = geom.card_share

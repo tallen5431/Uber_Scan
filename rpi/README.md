@@ -2092,9 +2092,31 @@ of. The rig reads a strip of the car indefinitely, reports `corners held` while
 it does, and the fix used to be ssh and eight pixel coordinates guessed off a
 photograph — which is not a fix anyone makes at the roadside.
 
-So say where the card is instead. On **`/live.html`**, press **▣ Set box**, drag
-a box around the offer card in the camera view, and press **✓ Read this box**.
-The green outline moves onto it within a second or two, which is the
+So say where the phone is instead. On **`/live.html`**, press **▣ Set box** and
+draw two boxes, one after the other:
+
+1. **the whole phone screen** — drag round it and press **Next: card box**. It
+   stays on the picture as a dashed outline;
+2. **where the offer cards appear**, inside it — drag and press **✓ Read both
+   boxes**. Or press **No card box** to read all of the screen box, which is
+   what a single box always did.
+
+Offers are read in the card box. **A ⌖ press reads the whole screen box** for
+the length of its window, because the addresses the driver wants after taking a
+job — the trip planner's restaurants and dropoffs — sit outside where the cards
+land. One tight box round the cards was the only way to keep the reader off the
+map, and it made ⌖ blind to all of that. A read of the whole screen box answers
+the press and nothing else: it is the card plus whatever surrounds it, so it is
+never merged into the offer, never priced, and never written as an offer row.
+With no box drawn the same holds for the screen the rig found itself: offers
+are read in the crop it places, and ⌖ reads all of the screen.
+
+The card box is stored as fractions of the screen box (`cropBox` in
+`config.json`), and the warp is sized to the card box rather than the screen
+round it, so a card comes out at the height the reader wants either way. From a
+terminal: `calibrate.py --box x,y,w,h --card x,y,w,h`.
+
+The green outline moves onto the boxes within a second or two, which is the
 confirmation worth having.
 
 It works during aiming as well as while scanning, and that is the point: when
@@ -2104,7 +2126,8 @@ so a box drawn there is what gets the rig calibrated and scanning at all.
 Three things change together, and they only make sense together:
 
 - the corners become the box you drew;
-- **`cropBox` is pinned to all of it** — the automatic path derives a crop
+- **`cropBox` is the card box, or all of the box when none was drawn** — never a
+  crop derived inside it. The automatic path derives one
   *inside* the quad, because it knows the quad is a whole phone screen and cards
   differ in height. Nothing knows that about a hand-drawn box, and a derived
   crop would take 15% off the top, which is where the payout is;
@@ -7076,7 +7099,7 @@ The Pi parser is a port of the browser one, and both run the same corpus:
 node tests/corpus.test.js       # 865 checks, the shared corpus
 node tests/parser.test.js       #  98 on the browser side alone
 node tests/advice.test.js       # 424 on what line to tell a driver to draw
-node tests/crop.test.js         #  16 on the trip from a drag to a crop box
+node tests/crop.test.js         #  22 on the trip from a drag to a crop box
 node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
@@ -7106,7 +7129,7 @@ python3 rpi/test_repeats.py     #  54 on one card read many times
 python3 rpi/test_calibrate.py   #  75 on what calibration may overwrite,
                                 #     which frame it is allowed to write from,
                                 #     and the focus that frame was taken at
-python3 rpi/test_cropbox.py     #  32 on a box drawn by hand
+python3 rpi/test_cropbox.py     #  45 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
@@ -7131,7 +7154,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 288 on the faults that only surface when a
+python3 rpi/test_lint.py        # 289 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #  67 on the three files the browser and the
@@ -7149,7 +7172,7 @@ python3 rpi/test_doctor.py      # 119 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 645 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 657 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -7186,7 +7209,7 @@ node tests/mapview.test.js      # 232 on the deciding behind both maps, with
                                 #     cases — two walks in a row, a cache hit
                                 #     mid-walk, a hotspot that drops — cost
                                 #     milliseconds instead of seconds
-python3 rpi/test_loop.py        #  86 on the scan loop re-telling a card once
+python3 rpi/test_loop.py        #  97 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused

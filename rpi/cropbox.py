@@ -99,6 +99,44 @@ def parse_request(payload):
     return quad
 
 
+def parse_card(payload):
+    """The card box inside the drawn box, as [x, y, w, h] of THAT box, or None.
+
+    The second box. A tight box round the offer cards was the only way to stop
+    the reader wandering onto the map, and it also blinded the ⌖ read to the
+    rest of the screen — the trip planner's restaurant and dropoff addresses
+    sit outside where the cards land. So the driver draws the screen, and then
+    the cards inside it: offers are read in this box, a ⌖ press reads all of
+    the screen box (see scan_pi's dropoff window).
+
+    In fractions of the screen box, not of the frame, because that is what the
+    warp produces and what `cropBox` has always meant: the crop inside the
+    corners. Clamped to the box, like a drag past the edge of the picture.
+    """
+    if not isinstance(payload, dict) or payload.get('card') is None:
+        return None
+    card = payload['card']
+    if not isinstance(card, (list, tuple)) or len(card) != 4:
+        raise ValueError('card box needs x, y, w, h')
+    x, y, w, h = [_fraction(n) for n in card]
+    w, h = min(w, 1.0 - x), min(h, 1.0 - y)
+    if w < MIN_SIDE or h < MIN_SIDE:
+        raise ValueError('card box is too small to read anything from '
+                         '(needs %d%% of the screen box each way)'
+                         % round(MIN_SIDE * 100))
+    return [x, y, w, h]
+
+
+def card_share(card):
+    """How much of the screen box's height the card box is: what sizes the warp.
+
+    The warp is sized so the CARD comes out at the height the reader wants, the
+    same rule `use_manual_box` states for a box that is all card. Without a card
+    box the drawn box is all card, which is 1.0.
+    """
+    return float(card[3]) if card else 1.0
+
+
 def _fraction(n):
     if isinstance(n, bool) or not isinstance(n, (int, float)):
         raise ValueError('corners must be numbers')
@@ -154,7 +192,11 @@ def describe(quad):
 
 
 def take_request(path=None):
-    """The pending box, removed as it is read. None when there is not one.
+    """The pending (quad, card) pair, removed as it is read. None when there is not one.
+
+    `card` is None when only the screen was drawn. One function returning both,
+    not a second reader for the card: a caller that took the quad and not the
+    card would drop the driver's card box with nothing saying so.
 
     Removed first, so a request that cannot be parsed is not retried on every
     frame for the rest of the shift, and never fatal: this runs inside the
@@ -188,12 +230,13 @@ def take_request(path=None):
     if raw is None:
         return None
     try:
-        return parse_request(json.loads(raw))
+        payload = json.loads(raw)
+        return parse_request(payload), parse_card(payload)
     except (ValueError, TypeError):
         return None
 
 
-def write_request(quad, path=None):
+def write_request(quad, path=None, card=None):
     """Leave a box for the camera side to pick up.
 
     The counterpart of the writer in server.js, for a rig being driven from a
@@ -211,20 +254,20 @@ def write_request(quad, path=None):
     path = path or HO.path(HO.CROPBOX)
     tmp = path + '.part'
     with open(tmp, 'w') as fh:
-        json.dump({'quad': quad}, fh)
+        json.dump({'quad': quad, 'card': card}, fh)
     os.replace(tmp, path)
 
 
-def apply_to_config(config, quad, size):
+def apply_to_config(config, quad, size, card=None):
     """Put a hand-drawn box into a config dict, in place, and return it.
 
     Three things move together and they have to stay together: the corners, the
-    pin that says read all of what was drawn, and the flag that says a person
-    chose it. `trackedQuad` goes, because it is where the screen had drifted to
-    relative to corners that no longer exist.
+    crop — all of what was drawn, or the card box inside it — and the flag that
+    says a person chose it. `trackedQuad` goes, because it is where the screen
+    had drifted to relative to corners that no longer exist.
     """
     config['quad'] = in_pixels(quad, size)
-    config['cropBox'] = list(PIN_WHOLE)
+    config['cropBox'] = list(card) if card else list(PIN_WHOLE)
     config[MANUAL_KEY] = True
     config.pop('trackedQuad', None)
     return config

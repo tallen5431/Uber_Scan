@@ -109,8 +109,10 @@ def aim(as_json, port, timeout, min_card=None):
 
     Returns (source, drawn) once the frame has been big enough and sharp enough
     for several readings in a row — or as soon as the driver draws the box
-    themselves, which is `drawn` and which skips the wait entirely. (None, None)
-    if the camera never came good.
+    themselves, which is `drawn` and which skips the wait entirely. `drawn` is
+    cropbox's (screen quad, card box) pair, kept as a pair so the card box
+    cannot be dropped on the way to the config. (None, None) if the camera
+    never came good.
 
     The hand-drawn box has to work from *here*, not only once scanning: the
     failure it exists for is a detector that never finds the phone, and this is
@@ -438,11 +440,13 @@ def calibrate_from(source, as_json, drawn=None, floor=None):
     nothing good enough, it writes nothing at all and says so, because a wrong
     quad here is not one bad read, it is every read until someone re-aims.
 
-    `drawn` is a box a person put on the live view, as fractions of the frame.
-    Given one, nothing is detected: those corners are the calibration, the crop
-    is pinned to all of them, and the file records that a person chose it so the
+    `drawn` is a box a person put on the live view, as fractions of the frame,
+    paired with the card box they drew inside it (or None). Given one, nothing
+    is detected: those corners are the calibration, the crop is the card box or
+    all of the screen box, and the file records that a person chose it so the
     scanner does not track the box back onto whatever it thinks the screen is.
     """
+    drawn, card = drawn if drawn is not None else (None, None)
     import cv2
     import cropbox as CX
     import pipeline as PL
@@ -496,8 +500,8 @@ def calibrate_from(source, as_json, drawn=None, floor=None):
     roi = DEFAULT_ROI
     share = None
     if drawn is not None:
-        CX.apply_to_config(config, drawn, source.capture_size)
-        roi, share = CX.PIN_WHOLE, 1.0
+        CX.apply_to_config(config, drawn, source.capture_size, card)
+        roi, share = (card or CX.PIN_WHOLE), CX.card_share(card)
     else:
         config.pop(CX.MANUAL_KEY, None)
     from calibrate import write_config
@@ -518,9 +522,11 @@ def calibrate_from(source, as_json, drawn=None, floor=None):
 
     # How much of the sensor the text sits on. Half a screen is the card when
     # the detector found a screen; all of it is the card when a person drew the
-    # box round one, and putting the same halving on both would report a
-    # hand-drawn box as half the size it is.
-    card_px = int(round((PL.screen_height_px(quad, frame.shape) if drawn is not None
+    # box round one — or the card box's share of it, when one was drawn inside —
+    # and putting the same halving on both would report a hand-drawn box as
+    # half the size it is.
+    card_px = int(round((PL.screen_height_px(quad, frame.shape) * CX.card_share(card)
+                         if drawn is not None
                          else card_source_pixels(quad, frame.shape)) * scale))
 
     # Say whether the calibration can actually read, while the driver is still

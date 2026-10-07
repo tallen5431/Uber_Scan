@@ -180,12 +180,12 @@ try:
 
     # Written where the current rule says: read, and gone afterwards.
     CX.write_request(box)
-    eq('a box left in the new place is read', CX.take_request(), box)
+    eq('a box left in the new place is read', CX.take_request(), (box, None))
     eq('...and only once', CX.take_request(), None)
 
     # Written by a server that has not been restarted since the last pull.
     CX.write_request(box, path=HO.legacy(HO.CROPBOX))
-    eq('a box left in the old place is read too', CX.take_request(), box)
+    eq('a box left in the old place is read too', CX.take_request(), (box, None))
     eq('...and is gone afterwards as well', CX.take_request(), None)
     ok_('...actually removed rather than merely ignored',
         not os.path.exists(HO.legacy(HO.CROPBOX)))
@@ -194,7 +194,7 @@ try:
     # adopted hours later when the scanner next restarts.
     CX.write_request(box)
     CX.write_request(box, path=HO.legacy(HO.CROPBOX))
-    ok_('a box in both places is still read', CX.take_request() == box)
+    ok_('a box in both places is still read', CX.take_request() == (box, None))
     eq('...and nothing is left in either',
        [os.path.exists(p) for p in HO.candidates(HO.CROPBOX)], [False, False])
 

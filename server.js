@@ -1359,6 +1359,26 @@ function fractionOrNull(v) {
   return Math.min(1, Math.max(0, v));
 }
 
+// The card box drawn INSIDE the screen box, as [x, y, w, h] fractions of the
+// screen box — null when none was drawn — or a string saying what was wrong.
+// The same rule as rpi/cropbox.py's parse_card, which checks it again on the
+// way in: offers are read in this box, and a ⌖ press reads the whole screen
+// box, because a trip planner's addresses sit outside where the cards land.
+function cropCard(body) {
+  if (body.card === undefined || body.card === null) return null;
+  if (!Array.isArray(body.card) || body.card.length !== 4) {
+    return 'a card box needs x, y, w, h';
+  }
+  var c = body.card.map(fractionOrNull);
+  if (c.indexOf(null) !== -1) return 'card box corners must be numbers';
+  c[2] = Math.min(c[2], 1 - c[0]);
+  c[3] = Math.min(c[3], 1 - c[1]);
+  if (c[2] < MIN_CROP_SIDE || c[3] < MIN_CROP_SIDE) {
+    return 'that card box is too small to read anything from — drag a bigger one';
+  }
+  return c;
+}
+
 // A crop request as four corners in fractions of the frame, ordered top-left,
 // top-right, bottom-right, bottom-left — or a string saying what was wrong
 // with it. Takes a dragged rectangle (`box`) or four corners (`quad`), for a
@@ -3643,6 +3663,8 @@ function route(req, res) {
       if (err || !body) return bad('bad body');
       var quad = cropQuad(body);
       if (typeof quad === 'string') return bad(quad);
+      var card = cropCard(body);
+      if (typeof card === 'string') return bad(card);
       // Written to a temporary name and renamed, because the scanner may be
       // reading this exact path at this exact moment and half a JSON object
       // parses as nothing at all.
@@ -3659,11 +3681,11 @@ function route(req, res) {
              { 'Content-Type': 'application/json; charset=utf-8' });
         console.error('crop box: ' + err.message);
       };
-      fs.writeFile(tmp, JSON.stringify({ quad: quad }), function (writeErr) {
+      fs.writeFile(tmp, JSON.stringify({ quad: quad, card: card }), function (writeErr) {
         if (writeErr) return failed(writeErr);
         fs.rename(tmp, CROP_PATH, function (renameErr) {
           if (renameErr) return failed(renameErr);
-          send(res, 200, JSON.stringify({ ok: true, quad: quad }),
+          send(res, 200, JSON.stringify({ ok: true, quad: quad, card: card }),
                { 'Content-Type': 'application/json; charset=utf-8' });
         });
       });
