@@ -186,6 +186,45 @@ for base in (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.SETTINGS,
     for suffix in ('.part', '.4321.7.part', '.tmp'):
         ok_('...and %s%s with it' % (base, suffix), is_ignored(base + suffix))
 
+# ...and what the web server writes, which the scan above never read.
+#
+# It reads rpi/*.py, and the rig has a second writer: server.js keeps its own
+# files beside the journal, and the journal is rpi/journal.jsonl unless JOURNAL
+# moves it — so by default every one of them lands in the checkout. Three did
+# and nothing ignored them: holding.json, which is the order in the car and
+# where it is going; places.json, the places read off the cards with a pin on
+# each, some of them where customers live; and config-backup.json, the rig's
+# calibration as the sync delivers it. `git add -A` in that checkout would
+# commit all three, the way it once committed the camera lock.
+#
+# Derived from the code for the reason the rule above is: the next file joined
+# onto the journal's directory is named in server.js and nowhere else. Two of
+# the three are written through a pid-suffixed temporary, so that shape is
+# asked about too.
+SERVER_WRITES = re.compile(
+    r"path\.join\(\s*path\.dirname\(JOURNAL_PATH\)\s*,\s*'([^']+)'")
+_server = open(os.path.join(ROOT, 'server.js'), encoding='utf-8').read()
+beside = sorted(set(SERVER_WRITES.findall(_server)))
+ok_('the scan found what server.js writes beside the journal (%s)'
+    % ', '.join(beside), len(beside) >= 3)
+for name in beside:
+    ok_('rpi/%s, which server.js keeps beside the journal, is ignored' % name,
+        is_ignored(name))
+    # A file, that is. A directory is made with mkdir and has no temporary.
+    if '.' in name:
+        ok_('...and its temporary rpi/%s.4321.7.part with it' % name,
+            is_ignored(name + '.4321.7.part'))
+# A directory among them — 📷 Snap's folders are one — is only ignored if what
+# goes INSIDE it is, which a pattern match on the bare name cannot say. Asked
+# of git itself, which is the only authority on what `git add -A` would take.
+_git = shutil.which('git')
+for name in beside:
+    if '.' in name or not _git:
+        continue
+    _inside = 'rpi/%s/2026-10-07_21-14-03/panel.png' % name
+    ok_('%s, inside a directory server.js makes, is ignored by git' % _inside,
+        subprocess.run([_git, '-C', ROOT, 'check-ignore', '-q', _inside]).returncode == 0)
+
 # ...and the rule the paragraph above STATES is now the rule this file ENFORCES,
 # which it did not. It asserted that both name shapes are gitignored — a fact
 # about `.gitignore` — and said in prose that the crop endpoint appends a pid
