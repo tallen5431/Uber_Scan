@@ -253,6 +253,14 @@ class FakePhone(object):
             for chunk in self.script:
                 if self._stop.is_set():
                     return
+                # An Event in the script is a gate: nothing after it is sent
+                # until the test sets it, rather than after a sleep it hopes
+                # is long enough.
+                if isinstance(chunk, threading.Event):
+                    while not chunk.wait(0.05):
+                        if self._stop.is_set():
+                            return
+                    continue
                 conn.sendall(chunk if isinstance(chunk, bytes) else chunk.encode())
                 sent += 1
                 if self.drop_after is not None and sent >= self.drop_after:
@@ -487,18 +495,38 @@ try:
 finally:
     flood.close()
 
-# Two fixes: the later one wins, and the earlier one is not still hanging about
-# inside the dict the caller was handed.
-phone = FakePhone(script=[RMC + '\r\n',
+# Two fixes: the later one wins, and the dict the caller was handed for the
+# earlier one stays as it was handed. fix() writes the age into what it
+# returns, on every call; were that the stored dict rather than a copy, the
+# next frame's call would rewrite the age of a fix this caller still holds.
+#
+# Compared whole against itself as handed, not its latitude against 34.0117.
+# The thread stores each fix as a new dict, so the latitude never moves. Over
+# 1,000 repeats of this block that comparison failed 8 with the stored dict
+# handed out and 10 with the copy, every one a `held` that was already the
+# later fix (got 34.02836666666667): the second sentence, sent 20ms after the
+# first, parsed before `held` was taken. This form fails 1,000 of 1,000 with
+# the stored dict and 0 with the copy.
+#
+# The gate holds the second sentence until the next frame has asked. Without
+# it, a slow moment after `held` lets the later fix be the stored one by then
+# and take that age instead: 0.2s there, and the stored dict passed 3 runs in 3.
+gate = threading.Event()
+clock = Clock()
+phone = FakePhone(script=[RMC + '\r\n', gate,
                           '$GPRMC,182100.00,A,3401.7020,N,08436.6300,W,0.0,0.0,120926,,,A*47\r\n'])
 try:
-    it = G.Phone(phone.address).start()
+    it = G.Phone(phone.address, clock=clock).start()
     ok_('the first fix arrives', waited(lambda: it.fix() is not None))
     held = it.fix()
+    was = dict(held)
+    clock.now += 1.0
+    it.fix()                                    # the next frame, a second on
+    gate.set()
     ok_('...and then a later one',
         waited(lambda: (it.fix() or {}).get('lat', 0) > 34.02, seconds=5.0))
-    close_to('the dict handed out earlier is not rewritten underneath the caller',
-             held['lat'], 34.0117)
+    eq('the dict handed out earlier is not rewritten underneath the caller',
+       held, was)
     it.stop()
 finally:
     phone.close()
