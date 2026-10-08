@@ -1354,7 +1354,14 @@
       // memory, so after a restart mid-shift it has none — while this page
       // still shows "Took $10.00?" for it. Sent along, the server can put
       // the order in the car from what this page knows.
-      body: JSON.stringify({ id: onRecord.id, accepted: want, offer: onRecord })
+      //
+      // Pressed again it takes the tick back with `null`, not `false`: "that
+      // was wrong", pressed at the wheel, is not "I passed on it", which is
+      // an answer of its own now (Passed, on the offers page) and one the
+      // advice reads as a fact. `via` names this screen — see MARK_VIA in
+      // server.js.
+      body: JSON.stringify({ id: onRecord.id, accepted: want ? true : null,
+                             via: 'panel', offer: onRecord })
     }).then(function (r) {
       if (!r.ok) { tookFailed = true; return null; }
       tookFailed = false;

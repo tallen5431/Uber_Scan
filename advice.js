@@ -1110,6 +1110,16 @@
                  // the row it is about. Nothing in the replay reads it.
                  id: o.id,
                  took: o.accepted === true,
+                 // ...and the driver's word that they did NOT take it, which
+                 // is not the same as no word at all. `false` is now written
+                 // by one press only — Passed, in "Close the shift" on the
+                 // offers page — and an offer nobody answered for carries no
+                 // field. Before that press existed a ✓ taken back wrote
+                 // `false` too; on the owner's week that is one row, a PASS
+                 // card, which nothing below asks about. Read by ifCleared and
+                 // labels, and by nothing that works out when the driver was
+                 // busy: a pass occupies nobody.
+                 passed: o.accepted === false,
                  // What the panel said about it, for one question only: how
                  // far the two figures that rest on the ticks could move if
                  // cards nobody ticked had been taken. See ifCleared.
@@ -1456,7 +1466,8 @@
    *
    * Both of those figures rest on the ticks and on nothing else, and the ticks
    * are a floor on what was taken, not a count of it: a card passed on and a
-   * job taken and never ticked are the same row. On the owner's real week the
+   * job taken and never ticked are the same row, unless the driver has said
+   * which (see `passed` below). On the owner's real week the
    * two figures over the 31 ticks are $30.20/hr kept and 48.3% of the clock
    * empty; with every ACCEPT and CLOSE CALL card counted as taken as well (222
    * rows) they are $24.90/hr and 11.3%. The page printed the first pair as
@@ -1501,12 +1512,19 @@
    * were. Nothing says it was not cleared, and leaving it out would let a
    * window of old rows look settled precisely because nothing could be
    * checked. A `doubt` row is not added: the panel withheld its verdict, so it
-   * cleared nothing. */
+   * cleared nothing.
+   *
+   * Nor is a card the driver marked Passed. That is the one thing about an
+   * unticked row the record could not say until "Close the shift" asked, and
+   * it is a fact, not a guess: a pass is never counted as a take at either
+   * end. Each one answered is a card fewer that could go either way — `added`
+   * falls by one and the kept range can only narrow, since dropping a value
+   * from `extra` removes mixes and adds none. On the owner's week this moves
+   * nothing yet: the one row carrying `false` is a PASS card. */
   function ifCleared(rows, breakMinutes) {
     var added = 0, unjudged = 0, extra = [];
     var alt = (rows || []).map(function (r) {
-      if (r.took) return r;
-      if (r.said !== 'go' && r.said !== 'warn' && r.said !== null) return r;
+      if (r.took || r.passed || !clearedByPanel(r)) return r;
       added++;
       if (r.said === null) unjudged++;
       extra.push(r.perHour);
@@ -1521,6 +1539,49 @@
     return { added: added, unjudged: unjudged,
              kept: keptRange(ticked, extra),
              idle: idleIn(runs(alt, breakMinutes), breakMinutes, alt) };
+  }
+
+  /* Whether the panel cleared a card, as far as the record can say: ACCEPT or
+   * CLOSE CALL, or no verdict on record at all (ifCleared says why that one
+   * counts). One rule, because ifCleared mixes these cards in and the offers
+   * page's "Close the shift" asks the driver about the same cards; two rules
+   * would be one question answered twice, and the count the review prints as
+   * still unlabelled would drift from the `added` the advice note prints. */
+  function clearedByPanel(r) {
+    return r.said === 'go' || r.said === 'warn' || r.said === null;
+  }
+
+  /* The cards "Close the shift" asks about, and how the asking stands.
+   *
+   * Every usable card the panel cleared, split three ways by the driver's own
+   * word on it — `took`, `passed`, or `open` for nothing yet. `open` is by
+   * construction the pile ifCleared counts as `added` over the same offers, so
+   * on a window that is one day the review and the advice note cannot name
+   * different numbers. `unjudged` is how many of the open ones carry no
+   * verdict at all, so the page does not call them cards the panel cleared
+   * without saying so.
+   *
+   * The journal's OWN rows come back, in the order they were handed, not
+   * usable()'s digest of them: the page has to show the payout, the distance
+   * and the pickup, and has to post the mark by the row's id. Each row is put
+   * through usable() alone, so what counts as usable is still decided there.
+   *
+   * Over whatever rows it is handed. Which rows make a shift is the offers
+   * page's day — journal.html's dayOf, on Advice.DAY_STARTS_AT — and is not
+   * decided a second time here. */
+  function labels(offers) {
+    var out = { took: [], passed: [], open: [], unjudged: 0 };
+    (offers || []).forEach(function (o) {
+      var r = usable([o])[0];
+      if (!r || !clearedByPanel(r)) return;
+      if (r.took) out.took.push(o);
+      else if (r.passed) out.passed.push(o);
+      else {
+        out.open.push(o);
+        if (r.said === null) out.unjudged++;
+      }
+    });
+    return out;
   }
 
   /* The lowest and highest median of `ticked` plus any subset of `extra`,
@@ -2025,6 +2086,7 @@
            // THRESHOLDS below is: a page that says "eight offers on two days"
            // in words must read the number it is describing.
            waitFor: waitFor, keptLine: keptLine, idleIn: idleIn, ifCleared: ifCleared,
+           labels: labels,
            areas: areas, AREA_FLOOR: AREA_FLOOR, AREA_DAYS: AREA_DAYS,
            AREA_ALPHA: AREA_ALPHA, AREA_SHUFFLES: AREA_SHUFFLES,
            outingsIn: outingsIn,

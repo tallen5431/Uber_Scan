@@ -59,6 +59,47 @@
   .advice p { margin: 0; font-size: 14px; line-height: 1.5; }
   .advice b { font-variant-numeric: tabular-nums; }
   .advice .note { margin-top: 8px; }
+  /* Close the shift. Folded to its one line until pressed, because it can hold
+     a whole evening of cards — 86 unanswered on the owner's Saturday — and the
+     log under it is what this page is opened for: the driver's own complaint
+     was having to scroll past everything else to reach the scans. The line
+     itself carries the three counts, so folded is not the same as hidden. */
+  .review { border: 1px solid var(--line); border-radius: 12px;
+            background: var(--panel); margin: 4px 0 8px; }
+  .review[hidden] { display: none; }
+  .review > summary { display: flex; align-items: center; gap: 8px;
+                      min-height: 52px; padding: 6px 14px; cursor: pointer;
+                      list-style: none; font-size: 14px; line-height: 1.35;
+                      font-variant-numeric: tabular-nums; }
+  .review > summary::-webkit-details-marker { display: none; }
+  .review > summary span { flex: 1 1 auto; min-width: 0; }
+  .review > summary em { font-style: normal; color: var(--muted); }
+  /* The same chevron the log's rows carry, for the same reason: a fold with
+     no sign that it opens is a fold nobody opens. */
+  .review > summary::after { content: '\203A'; flex: none; font-size: 17px;
+                             line-height: 1; color: var(--muted);
+                             transform: rotate(90deg); }
+  .review[open] > summary::after { transform: rotate(-90deg); }
+  .review > .note { margin: 0 14px 8px; font-size: 13px; line-height: 1.5;
+                    color: var(--muted); }
+  /* One row per card: what a driver remembers a job by on the left, and the
+     two answers on the right at the 52px every control on this page keeps. */
+  .review .ask { display: flex; align-items: center; gap: 8px;
+                 padding: 4px 14px; border-top: 1px solid var(--line);
+                 font-variant-numeric: tabular-nums; }
+  .review .ask .what { flex: 1 1 0; min-width: 0; font-size: 13px;
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .review .ask .what b { margin-right: 6px; }
+  .review .ask .what em { display: block; font-style: normal; font-size: 11px;
+                          color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .review .ask button { flex: none; min-width: 72px; min-height: 52px; padding: 0 10px;
+                        font: inherit; font-size: 13px; font-weight: 700;
+                        color: var(--muted); background: var(--panel-2);
+                        border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  .review .ask button[aria-pressed="true"] { color: var(--text); border-color: var(--text); }
+  .review .ask button[data-review="took"][aria-pressed="true"] {
+    color: var(--go); border-color: var(--go); }
+  .review .ask button:disabled { opacity: .5; }
   .advice #adviceCost p { margin-top: 10px; }
   /* The wait table. Small, tabular numerals, and the driver's own line picked
      out — the row that is theirs should not have to be counted to. It has to
@@ -435,6 +476,11 @@
 
     .rangebtns button, #showHidden, #runsAll, .acts button, #undo, #undoGo,
     .chips button { font-size: 17px; }
+    /* Close the shift, at the same driving-seat sizes as the log beneath it:
+       its rows name the same cards and are read from the same distance. */
+    .review > summary, .review .ask .what, .review .ask button { font-size: 17px; }
+    .review > .note { font-size: 16px; }
+    .review .ask .what em { font-size: 15px; }
     #nothing { font-size: 17px; }
     #nothing b { font-size: 20px; }
     #nothing code { font-size: 16px; }
@@ -549,6 +595,18 @@
        to chart *with*. Three labelled empty axes and an 11px sentence is a
        page that looks broken; so is a stale one with a grey line under it. -->
   <div id="nothing" hidden></div>
+
+  <!-- Close the shift: the newest day's ACCEPT and CLOSE CALL cards that
+       nobody has answered for, each with Took and Passed. Every figure on this
+       page about the driver's own decisions rests on the ticks, and on the
+       owner's week that is 31 of 1,166 offers, chosen by whatever got
+       remembered. This asks about all of a day's cleared cards instead,
+       parked, one press each. See showReview. -->
+  <details class="review" id="review" hidden>
+    <summary><span id="reviewSays"></span></summary>
+    <p class="note" id="reviewLead"></p>
+    <div id="reviewList"></div>
+  </details>
 
   <h2>Every offer <em id="recentNote">· tap one to see everything that was read</em></h2>
   <!-- The reason to open this list is to find one particular offer and check it
@@ -728,6 +786,7 @@
    'find', 'findNote', 'live', 'nothing', 'ladder',
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
    'pairs', 'pairsHead', 'pairsLead', 'runsAll',
+   'review', 'reviewSays', 'reviewLead', 'reviewList',
    'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
    'sheetNote', 'sheetOut'].forEach(function (id) {
     el[id] = document.getElementById(id);
@@ -1042,6 +1101,17 @@
   // What "this card" means for a hide-every rule. Taken from the row's own data
   // attributes rather than parsed back out of the text, which would break the
   // moment the wording changed.
+  // The driver's word on an offer, as an attribute and back again. Three values
+  // because `accepted` has three: true, false, and no field at all — which goes
+  // back over the wire as `null`, the server's word for "no answer".
+  function saidOf(r) {
+    return r.accepted === true ? 'true' : r.accepted === false ? 'false' : '';
+  }
+  function saidFrom(node) {
+    var s = node.getAttribute('data-accepted');
+    return s === 'true' ? true : s === 'false' ? false : null;
+  }
+
   function cardOf(offer) {
     var pay = parseFloat(offer.getAttribute('data-pay'));
     var minutes = parseFloat(offer.getAttribute('data-minutes'));
@@ -1109,6 +1179,11 @@
     return '<details class="offer' + (aside ? ' aside' : '')
       + (r.hidden ? ' hiddenrow' : '')
       + (r.accepted ? ' mine' : '') + '" data-id="' + (r.id || '') + '"'
+      // What the driver had said about this offer before any press here, for
+      // Undo to put back exactly: taken, passed, or nothing. The ✓ only draws
+      // two of those, and an Undo that restored "not ticked" as `false` filed
+      // a pass the driver never made.
+      + ' data-accepted="' + saidOf(r) + '"'
       + ' data-pay="' + (r.pay === null ? '' : r.pay) + '"'
       + ' data-minutes="' + (r.minutes === null ? '' : r.minutes) + '"'
       + ' data-miles="' + (r.miles === null ? '' : r.miles) + '">'
@@ -1726,14 +1801,16 @@
      *
      * The line kept and the share of the clock spent empty are made of the
      * same rows: the ticks. A card passed on and a job taken and never ticked
-     * are the same row, so the ticks are a floor on what was taken, and
-     * Advice.ifCleared works both figures out again with the cards the panel
-     * cleared in play. On the owner's real week the ticks alone say $30.20/hr
-     * kept and 48.3% empty; every cleared card counted as taken says $24.90
-     * and 11.3%. At $30.20 this paragraph told the driver they were too picky;
-     * at $24.90 its own rule says the line they keep is the line they set. It
-     * was the only sentence on any page telling somebody to accept more, and
-     * 31 rows cannot say which of the two is true.
+     * are the same row — unless the driver marked it Passed under Close the
+     * shift, and then it is out of the mix — so the ticks are a floor on what
+     * was taken, and Advice.ifCleared works both figures out again with the
+     * cards the panel cleared in play. On the owner's real week the ticks
+     * alone say $30.20/hr kept and 48.3% empty; every cleared card counted as
+     * taken says $24.90 and 11.3%. At $30.20 this paragraph told the driver
+     * they were too picky; at $24.90 its own rule says the line they keep is
+     * the line they set. It was the only sentence on any page telling
+     * somebody to accept more, and 31 rows cannot say which of the two is
+     * true.
      *
      * So three strengths, and the tick count decides which:
      *   - nothing ticked: no line kept, and no share of the clock (below);
@@ -1784,8 +1861,12 @@
             // Said every time, because 31 decisions is not many and this is
             // the figure most likely to be quoted back as a fact about how
             // somebody drives.
+            //
+            // "A job taken", not "a decision": a Passed under Close the shift
+            // is a decision on record too, and on this branch it may be most
+            // of them — it is what lets the figure be one figure.
             + ' <span class="note">Off the ' + k.n + ' you ticked; the ✓ on a '
-            + 'row is the only record of a decision this has.</span></p>';
+            + 'row is the only record of a job taken this has.</span></p>';
     } else if (k.n && k.median !== null && typeof target === 'number') {
       var agree = side(c.kept.lo) === side(c.kept.hi);
       html += '<p>You set <b>' + money(target) + '/hr</b>, and the line you '
@@ -1868,18 +1949,23 @@
             + (k.n === 1 ? 'tick' : 'ticks') + '. '
             + (judged ? judged + (judged === 1 ? ' card' : ' cards')
                         + ' the panel cleared ' + (judged === 1 ? 'has' : 'have')
-                        + ' none' : '')
+                        + ' no answer from you' : '')
             + (judged && c.unjudged ? ', and ' : '')
             + (c.unjudged ? c.unjudged + (c.unjudged === 1 ? ' row' : ' rows')
                             + ' with no verdict on record '
                             + (c.unjudged === 1 ? 'is' : 'are')
                             + ' counted in case' : '')
-            + '. A card you passed on looks exactly like a job you took and '
-            + 'did not tick. The line kept covers every mix of those cards; the '
-            + 'empty clock is only its two ends, because a job taken can join '
-            + 'two stretches of scanning and put the gap between them on the '
-            + 'clock, so a mix can land outside them. Every ✓ you add is one '
-            + 'card fewer that could go either way.</p>';
+            // "Passed on and never marked", not "passed on": a card the driver
+            // marked Passed under Close the shift is a known pass, and
+            // Advice.ifCleared no longer mixes it in. Left as it was, this
+            // sentence would deny the one press that settles a card.
+            + '. A card you passed on and never marked looks exactly like a job '
+            + 'you took and did not tick. The line kept covers every mix of those '
+            + 'cards; the empty clock is only its two ends, because a job taken '
+            + 'can join two stretches of scanning and put the gap between them on '
+            + 'the clock, so a mix can land outside them. Every card you answer — '
+            + 'a ✓ here, or Took and Passed under Close the shift — is one card '
+            + 'fewer that could go either way.</p>';
     }
 
     /* ...and what the whole answer above is resting on, which is not the line.
@@ -2891,6 +2977,10 @@
       view = { kept: kept, target: t0, band: b0, busyBy: busyBy,
                pairedBy: pairedBy, data: data };
       renderList();
+      // Nothing here could be counted, so nothing here is a card the panel
+      // cleared that could be asked about — and the previous window's
+      // questions must not stand over this one.
+      showReview(null);
       return;
     }
     showUnits(true);
@@ -3150,6 +3240,12 @@
              pairedBy: pairedBy, data: data };
     renderList();
 
+    // --- close the shift ---
+    // The day of `newest`, the most recent row not stamped in the future,
+    // for the reason that variable exists: one row from a wrong clock would
+    // otherwise make a day nobody drove the shift being closed.
+    showReview(newest);
+
     // `offers`, not `kept`: the rows the figures above are actually made of.
     //
     // This handed over `kept`, which is every row in the window including the
@@ -3290,6 +3386,104 @@
     }
   }
 
+  /* --- Close the shift ---------------------------------------------------
+   *
+   * Every figure on this page about what the driver DID rests on the ticks,
+   * and the ticks are a sample: 31 of the owner's 1,166 offers, ticked
+   * whenever the driver remembered to, 24 of them on ACCEPT cards. A card
+   * passed on and a job taken and never ticked are the same row, so the
+   * advice below has to print the line kept as a range over every mix of the
+   * 191 cleared cards nobody marked. Each of those is a question only the
+   * driver can answer, and parked is the time to ask it.
+   *
+   * So this asks — about the newest day's cards the panel cleared, Took or
+   * Passed, newest first, one press each — and says how the asking stands:
+   * ticked, passed, still unlabelled.
+   *
+   * THE DAY IS THE LOG'S DAY. dayOf/dayKey on Advice.DAY_STARTS_AT, read out
+   * of the same byDay the day headers below are drawn from, so the shift
+   * being closed and the day header over its rows are one grouping. Advice.runs
+   * would be the other candidate and is not one: it breaks at every silence of
+   * half an hour, and the owner's Saturday is three runs. Nor is the 4am line
+   * perfect, and the page says where it cut: on that same week the last night
+   * ran 6:34pm to 4:43am, so a review opened at the end of it would have been
+   * the 29 offers after 4am. The first and last card's times are printed for
+   * exactly that reason.
+   *
+   * WHICH CARDS is Advice.labels, which is the pile Advice.ifCleared mixes in,
+   * by construction: on a one-day window "still unlabelled" here and the
+   * cards the advice note says have no answer are the same number.
+   *
+   * A card answered here stays on the list until the page is left, with its
+   * answer pressed, rather than vanishing under the thumb — the next card
+   * moving into the place just pressed is how a second press lands on the
+   * wrong job. Pressing an answer again takes it back. */
+  var reviewedHere = {};
+
+  function showReview(newest) {
+    if (!newest || !view) {
+      el.review.hidden = true;
+      el.reviewList.innerHTML = '';
+      return;
+    }
+    var key = dayKey(newest.at);
+    var dayRows = (view.byDay || (view.byDay = groupByDay(view.kept)))[key] || [];
+    var lb = Advice.labels(dayRows);
+    var dayName = dayOf(newest.at).toLocaleDateString(undefined,
+      { weekday: 'short', month: 'short', day: 'numeric' });
+    var clock = function (at) {
+      return new Date(at).toLocaleTimeString(undefined,
+        { hour: 'numeric', minute: '2-digit' });
+    };
+    el.review.hidden = false;
+    var asked = lb.took.length + lb.passed.length + lb.open.length;
+    if (!asked) {
+      el.reviewSays.innerHTML = 'Close the shift <em>· ' + dayName + '</em> — '
+        + 'the panel cleared nothing that day, so there is nothing to ask.';
+      el.reviewLead.textContent = '';
+      el.reviewList.innerHTML = '';
+      return;
+    }
+    el.reviewSays.innerHTML = 'Close the shift <em>· ' + dayName + '</em> — <b>'
+      + lb.took.length + '</b> ticked, <b>' + lb.passed.length + '</b> passed, <b>'
+      + lb.open.length + '</b> still unlabelled';
+    // The rows the day header below counts, first card to last, so a review
+    // opened just after 4am can be seen to be the tail of a night.
+    var span = dayRows.map(function (r) { return r.at; })
+      .filter(function (t) { return typeof t === 'number' && isFinite(t); });
+    // The boundary in words off the same constant dayOf uses, so the sentence
+    // cannot name an hour the grouping does not.
+    var starts = dayOf(newest.at);
+    starts.setHours(DAY_STARTS_AT);
+    el.reviewLead.innerHTML = 'The cards the panel said ACCEPT or CLOSE CALL to on '
+      + dayName + ' (cards from ' + clock(Math.min.apply(null, span)) + ' to '
+      + clock(Math.max.apply(null, span)) + ', the day starting at '
+      + clock(starts.getTime()) + ')'
+      + (lb.unjudged
+         ? ', and <b>' + lb.unjudged + '</b> with no verdict on record that it may have'
+         : '')
+      + ', newest first. A card you passed on and never marked looks exactly like a '
+      + 'job you took and never ticked, and the advice further down has to allow '
+      + 'for every mix of them; each one answered here is one fewer. Press an '
+      + 'answer again to take it back.';
+    var shown = lb.open.concat(lb.took.concat(lb.passed).filter(function (r) {
+      return reviewedHere[r.id];
+    })).sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+    el.reviewList.innerHTML = shown.map(function (r) {
+      var when = clock(r.at);
+      return '<div class="ask" data-id="' + esc(r.id) + '" data-accepted="' + saidOf(r)
+        + '" data-card="' + esc(when + ', ' + money(r.pay, 2)) + '">'
+        + '<span class="what"><b>' + when + '</b>' + money(r.pay, 2) + ' · '
+        + (r.minutes === null || r.minutes === undefined ? '--' : Math.round(r.minutes))
+        + ' min' + (typeof r.miles === 'number' ? ' · ' + num(r.miles) + ' mi' : '')
+        + (r.pickup ? '<em>' + esc(r.pickup) + '</em>' : '') + '</span>'
+        + '<button type="button" data-review="took" aria-pressed="'
+        + (r.accepted === true) + '">Took</button>'
+        + '<button type="button" data-review="passed" aria-pressed="'
+        + (r.accepted === false) + '">Passed</button></div>';
+    }).join('');
+  }
+
   // "Today" has to mean today where the driver is. A trailing 24 hours folds
   // last night's shift into this morning's percentiles and puts its offers in
   // the wrong time-of-day block — and the Pi cannot work out when the day began
@@ -3352,6 +3546,9 @@
         // the scanner".
         view = null;
         showPairs([]);
+        // ...and the questions about the last window's day, whose buttons
+        // would post marks against rows this page can no longer show.
+        showReview(null);
         el.blockScale.innerHTML = '';
         el.findNote.hidden = true;
         // The three figures the page exists for, which this did not clear.
@@ -3651,8 +3848,13 @@
     var was, undo, what;
     if (act === 'took') {
       was = button.classList.contains('on');
-      body = { id: id, accepted: !was };
-      undo = { id: id, accepted: was };
+      // Pressed again, the ✓ takes the tick back — `null`, not `false`. A
+      // pass is an answer of its own now (Close the shift's Passed), and
+      // "that tick was wrong" is not the same statement as "I passed on it".
+      body = { id: id, accepted: was ? null : true };
+      // ...and Undo puts back what was there, which the ✓ alone cannot say:
+      // it draws a pass and a card nobody answered for the same way.
+      undo = { id: id, accepted: saidFrom(offer) };
       what = was ? 'Unmarked as taken.' : 'Marked as taken.';
     } else if (act === 'hide') {
       body = { id: id, hidden: true };
@@ -3677,6 +3879,9 @@
     } else {
       return;
     }
+    // Which surface made the press — see MARK_VIA in server.js. The Undo
+    // carries the same one: it is this page taking back this page's press.
+    body.via = undo.via = 'offers';
 
     Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
       b.disabled = true;
@@ -3698,6 +3903,39 @@
         button.textContent = 'could not save';
       }
       Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
+        b.disabled = false;
+      });
+    });
+  });
+
+  // Took and Passed, under Close the shift. Two toggles over one three-way
+  // answer: pressing the one not pressed gives that answer, pressing the one
+  // that is takes it back (`null`), and Undo restores whatever was there.
+  // Through mark(), the same door as the ✓, and marked via:'review'.
+  el.reviewList.addEventListener('click', function (e) {
+    var button = e.target.closest('button[data-review]');
+    if (!button) return;
+    var row = button.closest('.ask');
+    var id = row.getAttribute('data-id');
+    var prev = saidFrom(row);
+    var want = button.getAttribute('data-review') === 'took';
+    var next = prev === want ? null : want;
+    var body = { id: id, accepted: next, via: 'review' };
+    var undo = { id: id, accepted: prev, via: 'review' };
+    var what = (next === true ? 'Marked as taken: '
+                : next === false ? 'Marked as passed: ' : 'Answer taken back: ')
+             + row.getAttribute('data-card') + '.';
+    // Kept on the list from here on, whatever the answer — see showReview.
+    reviewedHere[id] = true;
+    Array.prototype.forEach.call(row.querySelectorAll('button'), function (b) {
+      b.disabled = true;
+    });
+    mark(body).then(function () {
+      offerUndo(what, undo);
+      load();
+    }).catch(function () {
+      sayOnly('Could not save that answer. Press it again to retry.');
+      Array.prototype.forEach.call(row.querySelectorAll('button'), function (b) {
         b.disabled = false;
       });
     });

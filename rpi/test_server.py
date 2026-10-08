@@ -646,6 +646,117 @@ finally:
     stop(proc)
     shutil.rmtree(work, ignore_errors=True)
 
+# --- where a mark was pressed, a pass, and an answer taken back -------------
+#
+# The end-of-shift review on the offers page asks Took or Passed about every
+# card the panel cleared that day, and a pass is now a fact the advice reads:
+# Advice.ifCleared stops counting a passed card as one that might have been
+# taken. So three things have to hold at this door, and each is asked of the
+# file and of the fold separately, because the fold is what every page reads
+# and the file is what cannot be corrected.
+#
+#   * `via` says which of the three surfaces made the press, and only those
+#     three. This endpoint has no field for free text; a `via` taken as given
+#     would be one.
+#   * `false` folds to `false`, and a card nobody marked to NO FIELD. Those are
+#     different answers and the page counts them apart.
+#   * `null` takes an answer back, newest-wins like the other two, and folds to
+#     no field: a ✓ mis-tapped and undone must not become a pass nobody made.
+work = tempfile.mkdtemp()
+journal = os.path.join(work, 'journal.jsonl')
+write(journal, [offer(i, NOW - (10 - i) * 60000) for i in range(1, 9)] + [
+    # A pairing for off7, so the outcome the offers page's Second jobs section
+    # reads off the same marks is asked too.
+    {'v': 1, 'kind': 'pair', 'id': 'off7', 'at': NOW - 3 * 60000,
+     'held': {'pay': 12.0, 'minutes': 30}, 'offer': {'pay': 17.0, 'minutes': 20},
+     'stack': None}])
+proc, base = start({'SCANNER': '0'}, journal)
+
+
+def _folded(i):
+    return {o['id']: o for o in get(base, '/api/journal?days=0')
+            .get('offers', [])}.get('off%d' % i, {})
+
+
+try:
+    _before = len(lines(journal))
+    _said = {}
+    for _i, _via in ((1, 'panel'), (2, 'offers'), (3, 'review')):
+        _said[_via] = post(base, '/api/offers/mark',
+                           {'id': 'off%d' % _i, 'accepted': True, 'via': _via})[0]
+    eq('a mark says where it was pressed, for each of the three places one can '
+       'be (%r)' % _said, _said, {'panel': 200, 'offers': 200, 'review': 200})
+    eq('...and the journal row carries it, as sent',
+       [(r.get('id'), r.get('via')) for r in lines(journal) if r.get('kind') == 'mark'],
+       [('off1', 'panel'), ('off2', 'offers'), ('off3', 'review')])
+    # Anything else is refused, and refused BEFORE the append. Dropped quietly,
+    # a page that misspelt its own name would go on writing marks with no
+    # provenance and look as though it worked.
+    _bad = [post(base, '/api/offers/mark',
+                 {'id': 'off4', 'accepted': True, 'via': _v})[0]
+            for _v in ('phone', 'Review', '', None, 7)]
+    eq('a mark naming anywhere else is refused (%r)' % _bad, _bad, [400] * 5)
+    eq('...and nothing of it is written', len(lines(journal)), _before + 3)
+    no_('...so the offer it named is still unmarked', 'accepted' in _folded(4))
+    # Absent is legal: every mark already in a journal was written without it.
+    eq('a mark that names no surface is still taken',
+       post(base, '/api/offers/mark', {'id': 'off4', 'accepted': True})[0], 200)
+    no_('...and stored with no `via` rather than a guessed one',
+        'via' in lines(journal)[-1])
+
+    # A pass, then the driver changing their mind twice. Newest wins, and
+    # `false` is an answer, not a blank.
+    post(base, '/api/offers/mark', {'id': 'off5', 'accepted': False, 'via': 'review'})
+    _o5 = _folded(5)
+    ok_('a Passed press folds to accepted:false, not to unmarked (%r)'
+        % _o5.get('accepted', 'absent'), 'accepted' in _o5 and _o5['accepted'] is False)
+    post(base, '/api/offers/mark', {'id': 'off5', 'accepted': True, 'via': 'review'})
+    eq('...a Took pressed after it wins', _folded(5).get('accepted'), True)
+    post(base, '/api/offers/mark', {'id': 'off5', 'accepted': False, 'via': 'offers'})
+    _o5 = _folded(5)
+    ok_('...and a pass after that wins back, whichever surface made it (%r)'
+        % _o5.get('accepted', 'absent'), 'accepted' in _o5 and _o5['accepted'] is False)
+    no_('an offer nobody marked carries no accepted field at all',
+        'accepted' in _folded(8))
+
+    # Taking an answer back. A tick, then the same ✓ pressed again: the row
+    # must come out as it went in — no field — and not as a pass.
+    post(base, '/api/offers/mark', {'id': 'off6', 'accepted': True, 'via': 'offers'})
+    _code = post(base, '/api/offers/mark',
+                 {'id': 'off6', 'accepted': None, 'via': 'offers'})[0]
+    eq('a withdrawal is taken', _code, 200)
+    eq('...and written as one', lines(journal)[-1].get('accepted', 'absent'), None)
+    _o6 = _folded(6)
+    no_('...and a tick taken back folds to no field at all, not to a pass (%r)'
+        % _o6.get('accepted', 'absent'), 'accepted' in _o6)
+    # ...and from a pass, which is the other thing it can be taking back.
+    post(base, '/api/offers/mark', {'id': 'off5', 'accepted': None, 'via': 'review'})
+    no_('...and so does a pass taken back', 'accepted' in _folded(5))
+    # The withdrawal is the newest word on the pairing too, or Second jobs
+    # counts it among the ones "marked either way".
+    post(base, '/api/offers/mark', {'id': 'off7', 'accepted': False, 'via': 'review'})
+    _p7 = [p for p in get(base, '/api/journal?days=0').get('pairs', [])
+           if p.get('id') == 'off7']
+    eq('a pass reaches the pairing it was about', [p.get('accepted') for p in _p7], [False])
+    post(base, '/api/offers/mark', {'id': 'off7', 'accepted': None, 'via': 'review'})
+    _p7 = [p for p in get(base, '/api/journal?days=0').get('pairs', [])
+           if p.get('id') == 'off7']
+    eq('...and taken back, leaves it unmarked', [('accepted' in p) for p in _p7], [False])
+
+    # ...and on the order in the car, a withdrawal puts it down as a pass
+    # does: the driver pressed Took again because they did not take it.
+    _, _reply = post(base, '/api/offers/mark', {
+        'id': 'off8', 'accepted': True, 'via': 'panel',
+        'offer': {'id': 'off8', 'pay': 18.0, 'minutes': 20.0, 'billedMinutes': 20.0,
+                  'miles': 4.0, 'cost': 1.2}})
+    ok_('a Took press puts the order in the car', _reply.get('holding') is True)
+    _, _reply = post(base, '/api/offers/mark',
+                     {'id': 'off8', 'accepted': None, 'via': 'panel'})
+    no_('...and pressing it again puts it down', _reply.get('holding'))
+finally:
+    stop(proc)
+    shutil.rmtree(work, ignore_errors=True)
+
 # --- the order in the car, on a scanner that reads cards again ---------------
 #
 # The scanner reads a card several times while it sits on the phone, and again

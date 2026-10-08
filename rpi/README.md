@@ -530,6 +530,10 @@ Three things it does not do:
   announces again.
 
 Pressing it again unmarks it, which is a note of its own rather than a deletion.
+That note is `accepted: null` — the tick taken back, which the fold in
+`server.js` turns into no field at all — and not `false`, which is a PASS and
+is written by one press only (Close the shift's Passed, below). Every press here
+also names this screen, `via: "panel"`.
 The mark belongs to the offer and not to the button: when a new card is
 announced the button goes back to unmarked, so a mark left set cannot be
 inherited by whatever arrives next — the same failure the address line avoids by
@@ -539,11 +543,42 @@ The other route is after the shift, on the offers page, and it is one press a
 row too: the ✓ on the folded row **is** the control — faint and outlined on a
 row nobody has marked, solid green on one that is — and pressing it posts the
 same `{id, accepted}` the old "I took this" button inside the opened row did,
-with the same Undo. The ACCEPT chip narrows the list to the cards the panel
-cleared (106 on the real week, carrying 24 of its 31 ticks), so a pass down that
-list is the one way to add ticks that involves no inference at all: the driver
-says so, and the rig writes nothing it was not told. It stays off `live.html`,
-which is read at a glance.
+with the same Undo, and `via: "offers"`. The ACCEPT chip narrows the list to the
+cards the panel cleared (106 on the real week, carrying 24 of its 31 ticks), so a
+pass down that list is the one way to add ticks that involves no inference at
+all: the driver says so, and the rig writes nothing it was not told. It stays
+off `live.html`, which is read at a glance.
+
+**Close the shift** is the same idea turned round: instead of the driver finding
+the rows they took, the page asks about the rows nobody has answered for. One
+line at the top of the offers list — *Close the shift · Sat, Sep 19 — 12 ticked,
+0 passed, 86 still unlabelled* on the owner's Saturday — opens into that day's
+ACCEPT and CLOSE CALL cards with no mark, newest first, each with **Took** and
+**Passed**, posting `{id, accepted: true | false, via: "review"}`. Passed is the
+one press that writes `false`, and `Advice.ifCleared` reads it as a known pass:
+the card leaves the pile the line kept is ranged over, so each answer narrows
+the range and none can widen it. Pressing an answer again takes it back
+(`null`), and Undo restores exactly what was there — for a card nobody had
+answered for, no answer, not a pass.
+
+- **The shift is the offers list's own day**, `dayOf` on
+  `Advice.DAY_STARTS_AT`, read out of the same grouping the day headers are
+  drawn from, of the newest row not stamped in the future. `Advice.runs` was
+  the other candidate and breaks at every half-hour silence — the owner's
+  Saturday is three runs. The 4am line is not perfect either: that night ran
+  6:34pm to 4:43am, so the 29 offers after 4am are a day of their own, and the
+  line inside the section prints the first and last card it covers so that is
+  visible.
+- **Which cards is `Advice.labels`**, built on the same rule `ifCleared` mixes
+  in (`clearedByPanel`), so on a one-day window "still unlabelled" and the
+  advice note's count of unanswered cards are the same number.
+- **A card answered stays on the list** with its answer pressed until the page
+  is left. The next card sliding into the place just pressed is how a second
+  press lands on the wrong job.
+- **`via` is collection only**: one of `panel`, `offers`, `review`, refused
+  with a 400 otherwise, absent on every mark written before it. Nothing folds
+  it onto an offer and no figure reads it; it is there so the panel's ticks and
+  the review's answers — two different samples — can be counted apart later.
 
 ### Collecting the evidence for a tick the rig could make itself
 
@@ -5103,8 +5138,12 @@ The far end is never a reading of what happened. Nothing is counted as taken
 and nothing is written; it is how far the answer could move, and the answer is
 withheld when that is far enough to reverse it. A row with no verdict on record
 (written before `state` was) counts at the far end, because nothing says the
-panel did not clear it. `rpi/test_offerspage.py` asserts the strength at 0, 31
-and 222 ticks of one market, not merely that a paragraph renders.
+panel did not clear it. A card the driver marked **Passed** under Close the
+shift does not: that is the one thing about an unticked row the record could
+not say before, and it is a fact. On the owner's week nothing moves yet — the
+one row carrying `false` is an old ✓ taken back on a PASS card.
+`rpi/test_offerspage.py` asserts the strength at 0, 31 and 222 ticks of one
+market, not merely that a paragraph renders.
 
 #### Two rules that were tested and do not work
 

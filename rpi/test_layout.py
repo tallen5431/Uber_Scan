@@ -1168,6 +1168,55 @@ const FRAMES = JSON.parse(framesJson);
             pageWide: d.scrollWidth > d.clientWidth + 1,
           };
         });
+
+        /* Close the shift, opened. Folded it is one line and the checks above
+         * already see that line; what they cannot see is inside, where every
+         * row carries two answers at 52px beside the payout, the distance and
+         * a place — the most the page asks of one row's width — and nothing
+         * inside a closed <details> has a box to measure. */
+        out[panel[0] + ' review'] = await page.evaluate(async () => {
+          const d = document.documentElement;
+          const box = document.getElementById('review');
+          if (!box || box.hidden) return { shown: false };
+          box.open = true;
+          await new Promise((r) => requestAnimationFrame(() => r()));
+          const rows = [].slice.call(box.querySelectorAll('.ask'));
+          const buttons = [].slice.call(box.querySelectorAll('.ask button'));
+          const wide = (el) => {
+            const r = el.getBoundingClientRect();
+            return r.right > d.clientWidth + 1 || r.left < -1;
+          };
+          let smallest = null, smallestIn = '';
+          const walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+          let n;
+          while ((n = walk.nextNode())) {
+            if (!(n.nodeValue || '').trim()) continue;
+            const el = n.parentElement;
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            const px = parseFloat(getComputedStyle(el).fontSize);
+            if (smallest === null || px < smallest) {
+              smallest = px;
+              smallestIn = (el.id || el.className || el.tagName).toString().slice(0, 30);
+            }
+          }
+          const result = {
+            shown: true, rows: rows.length,
+            says: (document.getElementById('reviewSays').textContent || '')
+              .replace(/\s+/g, ' ').trim(),
+            lineH: box.querySelector('summary').getBoundingClientRect().height,
+            shortest: buttons.length
+              ? Math.min.apply(null, buttons.map((b) => b.getBoundingClientRect().height)) : 0,
+            outside: rows.filter(wide).length + buttons.filter(wide).length,
+            clipped: buttons.filter((b) => b.scrollWidth > Math.ceil(b.getBoundingClientRect().width) + 1)
+                            .map((b) => b.textContent),
+            smallest: smallest, smallestIn: smallestIn,
+            leadW: document.getElementById('reviewLead').getBoundingClientRect().width,
+            pageWide: d.scrollWidth > d.clientWidth + 1,
+          };
+          box.open = false;
+          return result;
+        });
       }
       await page.close();
     }
@@ -1220,6 +1269,23 @@ for i in range(20):
     second['perHour'] = round(second['pay'] / (second['minutes'] / 60.0), 1)
     second['grossPerHour'] = second['perHour']
     rows.append(second)
+# ...and three cards a minute ago that nobody has answered for, so Close the
+# shift has rows to lay out. A minute back and a second apart, so all three are
+# the newest counted cards and fall on one driver's day whatever the hour this
+# runs at; the last carries a long place, because the place is the part of the
+# row that has to give way to the two answers.
+for k, (state, place) in enumerate([
+        ('go', 'Chick-fil-A, 2500 Cobb Pkwy SE, Kennesaw'),
+        ('warn', 'Zaxbys'),
+        ('go', 'The Varsity, 61 North Avenue NW at Spring Street, Atlanta')]):
+    at = now - 60000 - k * 1000
+    rows.append({
+        'id': 'rv%d' % k, 'at': at, 'firstAt': at, 'pay': 14.5 + k, 'minutes': 22,
+        'miles': 7.3, 'perHour': round((14.5 + k) / (22 / 60.0), 1),
+        'grossPerHour': round((14.5 + k) / (22 / 60.0), 1), 'cost': 2.56,
+        'costPerMile': 0.35, 'target': 25, 'band': 15, 'legs': 2, 'whole': True,
+        'state': state, 'pickup': place,
+    })
 # ...and the pairings, so the "Second jobs" section is measured with something
 # in it. One of each answer the panel can give, including the one where it
 # declines to answer, because that row is drawn differently and its own width
@@ -1774,6 +1840,33 @@ try:
                    pairs['outside'], 0)
                 eq('...and the page still not scrolling sideways at %s' % panel,
                    pairs['pageWide'], False)
+
+            # Close the shift, opened, on every panel: two answers a row at the
+            # 52px every control on this page keeps, beside a payout, a
+            # distance and a place, and nothing pushed off the glass for it.
+            rvw = got.get('%s review' % panel)
+            if name == 'journal.html':
+                ok_('Close the shift is on the page at %s (%r)'
+                    % (panel, ((rvw or {}).get('says') or '')[:70]),
+                    rvw and rvw.get('shown'))
+            if name == 'journal.html' and rvw and rvw.get('shown'):
+                eq('...asking about the three cards nobody answered for at %s'
+                   % panel, rvw['rows'], 3)
+                ok_('...its one line a target to press at %s (%.0fpx)'
+                    % (panel, rvw['lineH']), rvw['lineH'] >= 51.5)
+                ok_('...and each answer too at %s (%.0fpx)' % (panel, rvw['shortest']),
+                    rvw['shortest'] >= 51.5)
+                eq('...with nothing pushed off the glass at %s' % panel,
+                   rvw['outside'], 0)
+                eq('...no answer\'s label wider than its button at %s' % panel,
+                   rvw['clipped'], [])
+                _floor = (15 if h >= 400 else 12) if dashboard else 9
+                ok_('...nothing in it smaller than %dpx at %s (%.4gpx in %s)'
+                    % (_floor, panel, rvw['smallest'] or 0, rvw['smallestIn']),
+                    (rvw['smallest'] or 0) >= _floor)
+                ok_('...its sentence a readable width at %s (%.0fpx)'
+                    % (panel, rvw['leadW']), rvw['leadW'] <= 900)
+                eq('...and no sideways scroll at %s' % panel, rvw['pageWide'], False)
 
             # The map sheet. See the driver for why it is opened by hand.
             sheet = got.get('%s sheet' % panel)

@@ -1875,7 +1875,13 @@ function latestPerOfferUncached(rows) {
     }
     if (r.kind === 'rule') { rules.push(r); return; }
     if (r.kind === 'seen') { seen.push(r); return; }
-    if (r.kind === 'pair') { pairs.push(r); return; }
+    // A copy, for the reason the offers below are copied: `accepted` is
+    // written onto it further down and the rows readJournal hands over live
+    // across requests. Pushed as itself, the outcome written by one fold was
+    // still on the cached row at the next, so an answer taken back left the
+    // pairing saying "passed" for as long as the process ran — measured
+    // through this server: pass, withdraw, and the pair still read false.
+    if (r.kind === 'pair') { pairs.push(Object.assign({}, r)); return; }
     if (r.kind) return;                       // something newer than this reader
     // Copies, because `hidden` and `accepted` are written onto these below
     // and the rows readJournal hands over now live across requests.
@@ -1935,7 +1941,15 @@ function latestPerOfferUncached(rows) {
     if (winner) o.hidden = winner.hidden;
     var mark = o.id && marks[o.id];
     if (mark) {
-      if (mark.accepted !== undefined) o.accepted = mark.accepted;
+      // Three answers, and the page needs all three kept apart: `true` taken,
+      // `false` passed, and NO FIELD for a card nobody has answered for. A
+      // withdrawal (`null`, see the mark handler) takes part in the newest-wins
+      // fold above like either answer — a ✓ taken back at 11:00 beats the ✓
+      // made at 10:00 — and then copies nothing, so the row comes out exactly
+      // as an unmarked one does. Nothing else could have put the field there:
+      // rpi/journal.py and journal-client.js never write `accepted` onto a
+      // reading.
+      if (mark.accepted === true || mark.accepted === false) o.accepted = mark.accepted;
       if (mark.hidden !== undefined) o.hidden = mark.hidden;   // an id beats a rule
       // A destination the driver revealed beats one the card never gave — and
       // beats one it DID give, too, because a card's own dropoff is what the
@@ -1972,10 +1986,13 @@ function latestPerOfferUncached(rows) {
   // offer the window's own filters have already dropped — hidden, or older
   // than the range — and a pairing whose outcome silently became "no" would be
   // worse than one that says nothing. `undefined` means unmarked, which is a
-  // third answer and not a "no".
+  // third answer and not a "no" — and a withdrawn answer is that third one too,
+  // or the offers page counts it as "marked either way".
   pairs.forEach(function (p) {
     var mark = p.id && marks[p.id];
-    if (mark && mark.accepted !== undefined) p.accepted = mark.accepted;
+    if (mark && (mark.accepted === true || mark.accepted === false)) {
+      p.accepted = mark.accepted;
+    }
   });
   out.pairs = pairs;
   return out;
@@ -2696,6 +2713,34 @@ function handler(req, res) {
   }
 }
 
+/* Where a mark was pressed: the only three places one can be.
+ *
+ *   panel   the driving screen's Took, pressed in the car, about the last
+ *           offer on record;
+ *   offers  the ✓ and the hide buttons on the offers page, pressed parked, on
+ *           whichever row the driver went looking for;
+ *   review  "Close the shift" on the same page, which asks about every card
+ *           the panel cleared on the newest day that nobody has answered for.
+ *
+ * Kept because the ticks are a sample and HOW it was chosen is where it
+ * leans. On the owner's week 31 of 1,166 offers carry a tick, and the advice
+ * rests every figure about the driver's own decisions on those 31: 24 ACCEPT,
+ * 5 CLOSE CALL, 2 PASS — whichever cards the driver remembered to tick, and
+ * nothing on file says where each press was made. The review asks about all
+ * of a day's cleared cards instead, so the two kinds of answer will not be the
+ * same population, and a row that cannot say which it is cannot be counted
+ * apart from the other later.
+ *
+ * Collection only. Nothing folds `via` onto an offer and no figure reads it.
+ *
+ * A fixed set, and anything else is REFUSED before a byte is written, never
+ * stored and never dropped. Stored, it would be the free-text field the
+ * handler below promises this unauthenticated endpoint does not have. Dropped
+ * quietly, a page that misspelt its own name would go on writing marks with
+ * no provenance and look as though it worked. Absent stays legal, because
+ * every mark already in a journal was written without it. */
+var MARK_VIA = ['panel', 'offers', 'review'];
+
 function route(req, res) {
   // Noting what happened to an offer: which ones were taken, and which to hide.
   //
@@ -2731,11 +2776,38 @@ function route(req, res) {
         return send(res, 400, JSON.stringify({ ok: false, error: 'no offer named' }),
                     { 'Content-Type': 'application/json; charset=utf-8' });
       }
-      if (typeof body.accepted === 'boolean') note.accepted = body.accepted;
+      // Two answers and a way of taking either back.
+      //
+      // `true` is "I took this" and `false` is "I passed on this" — a KNOWN
+      // pass, which Advice.ifCleared stops counting as a card that might have
+      // been taken. `null` is neither: it withdraws whatever was said, and the
+      // fold below leaves the offer with no `accepted` at all, which is what
+      // an offer nobody marked carries.
+      //
+      // The third one is needed because there are presses that undo an
+      // answer rather than give the opposite one: the ✓ pressed again, the
+      // panel's Took pressed again ("Press again if that was wrong"), and the
+      // offers page's Undo. Before a pass meant anything those wrote `false`,
+      // and false and absent were read alike everywhere, so it did not matter.
+      // It matters now: a ✓ mis-tapped onto the wrong row and undone at once
+      // would have been filed as a pass the driver never made, and the review
+      // would have stopped asking about that card.
+      if (typeof body.accepted === 'boolean' || body.accepted === null) {
+        note.accepted = body.accepted;
+      }
       if (typeof body.hidden === 'boolean') note.hidden = body.hidden;
       if (note.accepted === undefined && note.hidden === undefined) {
         return send(res, 400, JSON.stringify({ ok: false, error: 'nothing to note' }),
                     { 'Content-Type': 'application/json; charset=utf-8' });
+      }
+      // Which surface the press came from: one of MARK_VIA or absent, and
+      // anything else refused here, before the append.
+      if (body.via !== undefined) {
+        if (MARK_VIA.indexOf(body.via) === -1) {
+          return send(res, 400, JSON.stringify({ ok: false, error: 'unknown via' }),
+                      { 'Content-Type': 'application/json; charset=utf-8' });
+        }
+        note.via = body.via;
       }
       appendLines(JSON.stringify(note) + '\n', function (writeErr) {
         if (writeErr) return send(res, 500, JSON.stringify({ ok: false, error: writeErr.message }),

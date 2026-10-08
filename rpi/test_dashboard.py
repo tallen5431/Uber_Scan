@@ -3390,11 +3390,20 @@ try:
         # By id every time, and each mark against the offer that was on record
         # when it was pressed. Marking by pay-and-minutes would be a rule
         # catching every offer paying that to the cent.
+        # The third is the press that takes the tick back, and it says so with
+        # `null`. `false` is a PASS now — the offers page's Passed, which the
+        # advice reads as a card known not to have been taken — and "that was
+        # wrong", pressed at the wheel, is not that. Asked with 'absent' as
+        # the default so a note with no `accepted` at all cannot pass as null.
         eq('...and every note names one offer by id, in order',
-           [{'id': n.get('id'), 'accepted': n.get('accepted')} for n in posted],
+           [{'id': n.get('id'), 'accepted': n.get('accepted', 'absent')} for n in posted],
            [{'id': 'o1', 'accepted': True},
             {'id': 'o2', 'accepted': True},
-            {'id': 'o2', 'accepted': False}])
+            {'id': 'o2', 'accepted': None}])
+        # ...and says it came from the panel, which is one of the three places
+        # server.js will take a mark from and the only one in a moving car.
+        eq('...each saying it was pressed on the panel',
+           [n.get('via') for n in posted], ['panel', 'panel', 'panel'])
         # ...and carries the offer it names, so a server that has restarted
         # and forgotten the offer can still put the order in the car.
         eq('...each carrying the offer it names',
