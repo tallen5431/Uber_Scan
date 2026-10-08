@@ -360,10 +360,10 @@ def main():
         # The floor is four weeks at journal.WEEK_BYTES' measured 5.7MB a week,
         # 22.9MB. A week of room would clear the busiest measured day, 2.3MB,
         # two and a half times over, but the week is a floor on the rate — it
-        # was measured by a replay that writes no seen, screen, pair or mark
-        # rows — and this script is run now and then rather than before every
-        # shift, so what it warns about should still be weeks away when it is
-        # read. The free figure is printed either way, so a card that is
+        # was measured by a replay that writes no seen, screen, promo, pair or
+        # mark rows — and this script is run now and then rather than before
+        # every shift, so what it warns about should still be weeks away when
+        # it is read. The free figure is printed either way, so a card that is
         # merely filling can be watched filling.
         if writable:
             try:

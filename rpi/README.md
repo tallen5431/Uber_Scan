@@ -615,6 +615,11 @@ What decides whether a row is written:
   naming an offer they did not take, indistinguishable from a real one. Any
   payout that is not the armed card's now drops the slate, and the cost is a
   missing row instead of a wrong one.
+- **Not the app's zone prompt.** "Switch to this zone with peak pay!" has no
+  payout once its `+$1.00/order` bonus is refused (see "A third screen" below),
+  so it reaches this branch — and filed here it would take the one clean row a
+  card is allowed and turn the navigation screen after it away. The reader can
+  already name it, so it is written as a `kind: "promo"` row instead.
 
 Two things it deliberately does **not** decide, and both were wrong in the first
 version:
@@ -3448,6 +3453,40 @@ would lose the row and leave a hole nothing could account for later.
 Three of 272 cards change. All three are phantoms. All three previously produced
 a confident verdict.
 
+**A third screen, and this one is refused at the figure.** The app's zone prompt
+reached the panel five times in the owner's week of 1,166 offers:
+
+    GA: Marietta North
+    Switch to this zone
+    with peak pay!
+    +$1.00/order until 8:20 PM
+    Avg. offer wait
+    1min
+    Don't switch
+
+The bonus became the payout and the zone's average wait the job's duration: $1
+over 5 minutes at $12.00/hr PASS, $1 over 3 at $20.00/hr twice, $1 over 1
+withheld as `time`, $2 over 11 at $10.91/hr — each journalled as an offer and
+counted in its day. `PAY_IS_PER_ORDER` refuses the figure the way
+`PAY_IS_A_DURATION` refuses a route time: a payout is never glued to a unit,
+and `/order` is one. It is the only money on all 29 frames of the five prompts
+and on no other frame or text of the week, so the prompt is left with no payout
+— no verdict, no row, the panel still saying WAITING FOR AN OFFER, which is
+what the app is doing.
+
+Refused rather than withheld, and the reason above does not apply here: that
+rule matches a screen's words, and a screen's words can sit over a real card.
+This one can only ever take away a number that was not a payout. The fourteen
+real offers that week under a "Busy + Peak Pay" banner print no amount and no
+`/order`, and none of them moves; seven are in the shared corpus to keep it so.
+Replayed over the whole week in both ports, five rows move — the five prompts —
+and nothing else.
+
+It does not vanish either. `parse()` says `promo: true`, and the loop writes a
+`kind: "promo"` row — `id`, `seq`, `at` and the reading as it was read — once
+per bonus per five minutes, instead of filing the prompt as the screen that
+followed a card. Collected, synced, read by nothing.
+
 ### What a read really costs
 
 The same export settles a number that had been estimated rather than measured.
@@ -4041,9 +4080,9 @@ at most about twelve weeks of driving, so a rig on the road all year rolls at
 least four times. The line used to call a second roll a bug rather than a
 season, against a yearly figure nobody had measured; it now prints the most
 weeks the rolls can amount to. That is a ceiling, because the week is a floor
-on the rate — a real rig writes `seen`, `screen`, `pair` and `mark` rows the
-replay did not — so a card rolling sooner is ordinary; rolls days apart are the
-bug.
+on the rate — a real rig writes `seen`, `screen`, `promo`, `pair` and `mark`
+rows the replay did not — so a card rolling sooner is ordinary; rolls days apart
+are the bug.
 
 ### A recovery that had never once fired
 

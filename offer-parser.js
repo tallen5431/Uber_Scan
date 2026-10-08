@@ -202,6 +202,28 @@
     '\\$\\s*(?:' + DC + '{1,4}(?:[.,]' + DC + '{1,2})?)\\s*'
     + '(?:m[il1|]ns?|mi)\\b', 'gi');
 
+  /* ...and a number that is a bonus on every order, wearing a dollar sign.
+   *
+   * The app asks the driver to change zones with a prompt of its own — "GA:
+   * Marietta North / Switch to this zone / with peak pay! / +$1.00/order until
+   * 8:20 PM / Avg. offer wait / 1min / Don't switch" — and five of them on the
+   * owner's week were journalled as offers: the bonus read as the payout and
+   * the zone's average wait as the job's duration, $12.00/hr PASS, $20.00/hr
+   * twice, one withheld as `time`, $10.91/hr. A verdict on the panel for a
+   * screen that offers no job.
+   *
+   * Refused by the grammar above: a payout is never glued to a unit, and
+   * "/order" is one. It is the only money on all 29 of the prompt's frames on
+   * file and on no other frame or text of the week, so refusing it leaves no
+   * payout and the prompt reads as a screen with no offer on it. The FIGURE is
+   * refused, not the screen: anchoring on "Switch to this zone" would refuse a
+   * card in the same crop too. The fourteen real offers with a "Busy + Peak
+   * Pay" banner print no amount and no "/order" and do not move. The Python
+   * twin, PAY_IS_PER_ORDER, has the rows. */
+  var PAY_IS_PER_ORDER = new RegExp(
+    '\\$\\s*(?:' + DC + '{1,4}(?:[.,]' + DC + '{1,2})?)\\s*'
+    + '/\\s*order\\b', 'gi');
+
   /* The offer's headline payout, and — if asked — where every headline was.
    *
    * `where` is filled with {value, at} for the chosen payout and every other
@@ -225,7 +247,8 @@
    * says the rest. */
   function findPay(text, where) {
     var chips = collect(text, PAY_CHIP);
-    var units = collectSpans(text, PAY_IS_A_DURATION);
+    var units = collectSpans(text, PAY_IS_A_DURATION)
+      .concat(collectSpans(text, PAY_IS_PER_ORDER));
     var all = collect(text, MONEY_STRICT);
     if (!all.length) all = collect(text, MONEY_LOOSE);
 
@@ -256,7 +279,8 @@
       }
       if (inChip) continue;
       // ...and a figure that is really a duration or a distance is not a
-      // candidate either. See PAY_IS_A_DURATION.
+      // candidate either, nor a bonus per order. See PAY_IS_A_DURATION and
+      // PAY_IS_PER_ORDER.
       var inUnit = false;
       for (var u = 0; u < units.length; u++) {
         if (units[u].index <= all[i].index
@@ -2239,6 +2263,16 @@
       // Reported, not acted on here: parse() says what it read and rate()
       // decides what to do about it, the same division the other doubts keep.
       notAnOffer: NOT_AN_OFFER.test(text || ''),
+      // Whether this is the app's zone prompt — a bonus per order, which
+      // findPay has already refused as a payout. See PAY_IS_PER_ORDER. Not a
+      // doubt: with the bonus refused there is no payout and nothing for
+      // rate() to withhold. It only lets the Pi's loop file the frame as a
+      // prompt rather than as the screen after a card.
+      //
+      // `search` and not `test`: the pattern is global for findPay, and a
+      // global pattern's test() starts from wherever the last one stopped.
+      // search() always starts at the beginning and leaves lastIndex alone.
+      promo: (text || '').search(PAY_IS_PER_ORDER) !== -1,
       // Whether the card REFUSED a destination, as opposed to the reader
       // simply not finding one. Uber prints "Customer dropoff" where the
       // address will be, so the address exists and the driver has not earned

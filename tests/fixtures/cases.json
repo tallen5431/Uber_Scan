@@ -1577,6 +1577,134 @@
     "minutes": 35,
     "miles": 19.7
    }
+  },
+  {
+   "name": "the app's zone prompt is not an offer: its money is a bonus per order",
+   "_why": "Row 71 of the owner's week. `+$1.00/order` was read as the payout and the zone's `Avg offer wait / 5 min` as the job's duration: $1 over 5 minutes, $12.00/hr PASS, journalled as an offer and counted in the day. A payout is never per order. With that figure refused the prompt has no payout left, so it is no offer at all, the same as a navigation screen.",
+   "text": "A a = 2\neast:\n3A: Hiram\nSwitch to this zone\nwith peak pay!\n+$1.00/order until 5:29 PM\nAvg offer wait\n5 min\nDon't switch\ni QD < <",
+   "expect": {
+    "pay": null,
+    "complete": false,
+    "promo": true
+   }
+  },
+  {
+   "name": "...the same prompt twenty minutes later, read as $20.00/hr",
+   "_why": "Row 74: $1 over the zone's 3-minute wait, $20.00/hr PASS. The headline reads `gi Switch to this zone` and the button `i Don't switch`; the bonus line is clean on every frame of all five prompts.",
+   "text": "on\n: Lo E\ni ca\n9A: Hiram\ngi Switch to this zone\nwith peak pay!\n+$1.00/order until 5:29 PM\nAvg. offer wait\n3 min\ni Don't switch\n~\nwn O ek",
+   "expect": {
+    "pay": null,
+    "complete": false,
+    "promo": true
+   }
+  },
+  {
+   "name": "...the same zone with its bonus running to 7:29 PM, read as $20.00/hr again",
+   "_why": "Row 100: `+$1.00/order until 7:29 PM`, $1 over 3 minutes, $20.00/hr PASS.",
+   "text": "-\na. = \u00a9\n~f 3 >.\nGA: Hiram\nSwitch to this zone\nwith peak pay!\n+$1.00/order until 7:29 PM\nAvg. offer wait\n3 min\n\u2018 Don't switch\nm oO Ge xk",
+   "expect": {
+    "pay": null,
+    "complete": false,
+    "promo": true
+   }
+  },
+  {
+   "name": "...one withheld for its one-minute wait rather than refused for what it is",
+   "_why": "Row 565: $1 over 1 minute was $60.00/hr, withheld as `time`. The panel said the time could not be true, about a screen that offers no job and has no time to be wrong about.",
+   "text": "GA: Marietta North\nSwitch to this zone\nwith peak pay!\n+$1.00/order until 8:20 PM\nAvg. offer wait\n1min\nDon't switch",
+   "expect": {
+    "pay": null,
+    "complete": false,
+    "promo": true
+   }
+  },
+  {
+   "name": "...and a two-dollar bonus read as a $10.91/hr PASS",
+   "_why": "Row 806: `+$2.00/order`, and the zone's `1Imin` read as 11 minutes. $2 over 11 minutes, $10.91/hr PASS.",
+   "text": "a me Vv\n\" an nt\nAtlanta\nfe) 3S\n~~ we\n= @\nGA: Midtown Atlanta\nSwitch to this zone\nwith peak pay!\n+$2.00/order until 3:10 AM\nAvg. offer wait\n1Imin\nDon't switch",
+   "expect": {
+    "pay": null,
+    "complete": false,
+    "promo": true
+   }
+  },
+  {
+   "name": "a real offer under a Busy + Peak Pay banner is still an offer",
+   "_why": "Row 25, `Busy + Peak Pa` cut by the crop. Fourteen real offers in the week carry this banner; it prints no amount and no `/order`, so the rule that refuses the zone prompt's bonus cannot reach them. These seven hold it there, PASS and ACCEPT both.",
+   "text": "| aa\n| | 1| Busy + Peak Pa\nvt Delivery Exclusive x\n$7.08\n|\n} Guaranteed (incl. tip)\n|\n} | \u00a9 21min (69 mi) total\n2 |\n. || Hooters (Old 41 Hwy NW &N\n| Roberts Rd)\nGeorgia State Route 5 N &I-575 N,\n| Cobb County\na of By\nSe ee\na ey POS",
+   "expect": {
+    "pay": 7.08,
+    "minutes": 21,
+    "miles": 6.9,
+    "complete": true,
+    "promo": false
+   }
+  },
+  {
+   "name": "...a long one, $24.06 for 49 minutes",
+   "text": "ark\n| Busy + Peak Pa)\nvv Delivery (2) Exclusive x\n$24.06\nGuaranteed (incl. tip)\n\u00a9 49 min (23.6 mi) total\nI Sugar Shane's\nHawthorn Dr & Shady Gin, Dallas\nx mw Acce;\nos L\n\\ :",
+   "expect": {
+    "pay": 24.06,
+    "minutes": 49,
+    "miles": 23.6,
+    "complete": true,
+    "promo": false
+   }
+  },
+  {
+   "name": "...a short one, $5.43 for 16 minutes",
+   "text": "Behe wT...\n-\u2122\n| | Busy + Peak Pay\nWORD ccs ~ y\n$5.43\nGuaranteed (incl. tip)\n) \u00a9 16 min (5.5 mi) total\n| Taco Bel! (8876 Dallas Acworth Hwy)\nPoint Way, Dal",
+   "expect": {
+    "pay": 5.43,
+    "minutes": 16,
+    "miles": 5.5,
+    "complete": true,
+    "promo": false
+   }
+  },
+  {
+   "name": "...a ride, its banner half read as `iSy + Peak Pay`",
+   "text": "me\niSy + Peak Pay se e\na\n| $7.01\n: *% 493 \u00a9 Verified\n18 min (8.8 mi) 4\nGeorgia State Route 6 &Jimm\nSmith Pkwy, Hiram\n7 mins (16 mi) |\n. Cleburne Pkwy, Hiram\n4, 9 mi from fast charger\n= 7 , .",
+   "expect": {
+    "pay": 7.01,
+    "minutes": 25,
+    "miles": 10.4,
+    "complete": true,
+    "promo": false
+   }
+  },
+  {
+   "name": "...an ACCEPT, `tery busy + Peak Pay`",
+   "text": "Uber\n>\nI\nft\ntery busy + Peak Pay\na\n\u00a5f Delivery Exclusive x\n$8.02\nGuaranteed (incl. tip)\n\u00a9 15min (2.8 mi) total\n1 Anytime Breakfast Burritos (349\nDecatur St SE)\nConnected for charging only. Tap the USB\nnotification to use USB for transferring files.\n00 ( mewst a",
+   "expect": {
+    "pay": 8.02,
+    "minutes": 15,
+    "miles": 2.8,
+    "complete": true,
+    "promo": false
+   }
+  },
+  {
+   "name": "...an ACCEPT under `Very busy + Peak Pay`",
+   "text": "giv '\npee Se\nce (Rae\nane .\nak =eX, ul] Very busy + Peak Pay\n-\n: \u00a5f Delivery Exclusive x\n,\n* \u00a7\u2014 $15.06\nGuaranteed (incl. tip)\n\u00a9 31min (7.0 mi) total\nCafe Intermezzo (Dunwoody)\nI Brookhaven Way NE & Caldwell Rd\nNE, Atlanta\n. i\noD i }",
+   "expect": {
+    "pay": 15.06,
+    "minutes": 31,
+    "miles": 7,
+    "complete": true,
+    "promo": false
+   }
+  },
+  {
+   "name": "...and one more ACCEPT, `Jery busy + Peak Pay`",
+   "text": "ae\n\u201c )\nJery busy + Peak Pay\nE we\n\u00a5? Delivery Exclusive x\n| $16.01\nGuaranteed (incl. tip)\n\u00a9 27 min (3.5 mi) total\nMcDonald's\u00ae (Atlanta, Ga -\n| Northside)\n8th St NW & Spring St NW, Atlanta",
+   "expect": {
+    "pay": 16.01,
+    "minutes": 27,
+    "miles": 3.5,
+    "complete": true,
+    "promo": false
+   }
   }
  ],
  "rate": [

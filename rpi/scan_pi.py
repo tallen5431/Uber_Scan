@@ -2415,9 +2415,17 @@ def main():
         # the offer row it names and make `afterMs` short by a whole read.
         if offer_log is not None and not out.get('clipped'):
             if shot.get('pay') is None:
-                if offer_log.note_screen(out.get('text'),
-                                         places=shot.get('places'),
-                                         card_was_up=card_on_screen):
+                # ...unless the reader can already say what the screen is. The
+                # app's zone prompt has no payout once its per-order bonus is
+                # refused (see OP.PAY_IS_PER_ORDER), so it arrives here — and
+                # filed as a screen it would take the one row a card is allowed
+                # and turn the navigation screen after it away. It is written
+                # as what it is instead. See note_promo.
+                if shot.get('promo'):
+                    offer_log.note_promo(out.get('text'))
+                elif offer_log.note_screen(out.get('text'),
+                                           places=shot.get('places'),
+                                           card_was_up=card_on_screen):
                     health.screens_kept += 1
             else:
                 # ...and a card in front of the camera that is NOT the one the

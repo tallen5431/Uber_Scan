@@ -1015,6 +1015,53 @@ ok_('a card landed before the crop slipped',
 eq('a clipped read is not recorded as the screen after a card',
    [x for x in r2['rows'] if x.get('kind') == 'screen'], [])
 
+# --- the app's zone prompt is not an offer -----------------------------------
+#
+# "Switch to this zone with peak pay! +$1.00/order ... Avg. offer wait 1min"
+# reached the panel five times on the owner's week as an offer — $12.00/hr
+# PASS, $20.00/hr twice, $10.91/hr, one withheld for its one minute — and the
+# journal five times as a row the offers page counted. The parser refuses the
+# bonus as a payout now (OP.PAY_IS_PER_ORDER); these are the end of that, driven
+# through main(): what the panel was sent, and what reached the file.
+#
+# Verbatim, row 565's stored frame.
+PROMPT = ('GA: Marietta North\nSwitch to this zone\nwith peak pay!\n'
+          '+$1.00/order until 8:20 PM\nAvg. offer wait\n1min\nDon\'t switch')
+rp1 = run(lambda n, k: PROMPT, extra_argv=['--no-parallel'], seconds=12.0,
+          until=lambda rows, ann, calls: calls >= 3
+          or any(x.get('kind') == 'promo' for x in rows))
+ok_('the prompt was read (%d reads)' % rp1['calls'], rp1['calls'] >= 1)
+eq('no offer row is written for the zone prompt',
+   [x.get('pay') for x in rp1['rows'] if not x.get('kind')], [])
+eq('...nor any verdict sent to the panel for it',
+   [v[0][0].get('state') for v in rp1['verdicts']
+    if v[0] and isinstance(v[0][0], dict) and v[0][0].get('ready')], [])
+eq('...nor an offer announced off it', rp1['announced'], [])
+eq('it is written as a prompt instead',
+   [x.get('kind') for x in rp1['rows']], ['promo'])
+if rp1['rows']:
+    ok_('...the prompt as it was read, line breaks and all',
+        rp1['rows'][0].get('text') == PROMPT)
+
+# ...and after a card, it is not the screen that followed the card. The slate a
+# landed card arms takes ONE clean screen, and a prompt filed there would turn
+# the navigation screen after it away. The card is read six times before the
+# prompt, two more than the navigation-screen run above needs, because a run on
+# a loaded machine that has not landed the card by then tests nothing here.
+rp2 = run(lambda n, k: WHOLE if n <= 6 else PROMPT,
+          extra_argv=['--no-parallel'], seconds=30.0,
+          until=lambda rows, ann, calls: any(
+              x.get('kind') in ('promo', 'screen') for x in rows))
+ok_('a card landed before the prompt (%d reads)' % rp2['calls'],
+    any(not x.get('kind') for x in rp2['rows']))
+eq('the prompt after a card is not recorded as the screen after it',
+   [x.get('text') for x in rp2['rows'] if x.get('kind') == 'screen'], [])
+eq('...it is recorded as a prompt',
+   len([x for x in rp2['rows'] if x.get('kind') == 'promo']), 1)
+eq('...and no offer row carries its bonus as a payout',
+   [x.get('pay') for x in rp2['rows'] if not x.get('kind')
+    and x.get('pay') != 16.05], [])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)
 sys.exit(1 if bad else 0)

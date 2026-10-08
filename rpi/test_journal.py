@@ -1517,6 +1517,113 @@ eq('a card seen with no slate armed is not an event',
 
 shutil.rmtree(_sc_dir, ignore_errors=True)
 
+# --- the app's zone prompt is kept as a prompt, never as an offer -----------
+#
+# "Switch to this zone with peak pay! +$1.00/order" was read as a $1 offer five
+# times on the owner's week. The parser now refuses the bonus as a payout, so
+# the loop writes no offer for it, and this is the row it writes instead —
+# collected, synced, read by nothing. Verbatim frames of rows 565 and 806.
+_PROMO = ('GA: Marietta North\nSwitch to this zone\nwith peak pay!\n'
+          '+$1.00/order until 8:20 PM\nAvg. offer wait\n1min\nDon\'t switch')
+# The same prompt, read again: a different text with the same bonus on it.
+_PROMO_AGAIN = ('i Be Mariel Da\n@ as\nSo: Oo\nGA: Marietta North\n'
+                'Switch to this zone\nwith peak pay!\n'
+                '+$1.00/order until 8:20 PM\n'
+                'Avg. offer wait\nITmin\nDon\'t switch')
+_PROMO_TWO = ('GA: Midtown Atlanta\nSwitch to this zone\nwith peak pay!\n'
+              '+$2.00/order until 3:10 AM\nAvg. offer wait\n1Imin\n'
+              'Don\'t switch')
+ok_('the zone prompt reads as a prompt and as no offer',
+    P.parse(_PROMO)['promo'] and P.parse(_PROMO)['pay'] is None)
+
+_pr_dir = tempfile.mkdtemp()
+_pr_log = JR.OfferLog(JR.Journal(os.path.join(_pr_dir, 'promo.jsonl')))
+_pr_row = _pr_log.note_promo(_PROMO, now=1_700_000_000.0)
+ok_('a zone prompt is recorded', _pr_row is not None)
+if _pr_row:
+    eq('...under a kind of its own, promo', _pr_row.get('kind'), 'promo')
+    # syncKey in server.js drops a kind row without an id AND a seq, quietly,
+    # under a `malformed` count nobody reads.
+    eq('...with an id from its own stamp', _pr_row.get('id'),
+       'promo-1700000000000')
+    eq('...and a seq beside it, which is what carries a prompt over the sync',
+       _pr_row.get('seq'), 1)
+    eq('...stamped when it was read', _pr_row.get('at'), 1_700_000_000_000)
+    eq('...at the schema every row carries', _pr_row.get('v'), JR.SCHEMA)
+    eq('...keeping the prompt as it was read, line breaks and all',
+       _pr_row.get('text'), _PROMO)
+    # Collection only. Nothing an offer has — no pay, no verdict, no rate —
+    # so nothing that counts offers or reads figures can take it for one.
+    eq('...and carrying nothing but that',
+       sorted(_pr_row), ['at', 'id', 'kind', 'seq', 'text', 'v'])
+eq('the file holds the prompt and no offer',
+   [r.get('kind') for r in _pr_log.journal.rows()], ['promo'])
+
+# ONCE inside the window, for the same bonus as the last prompt written. The
+# prompt is not a card, so no beat paces its reads: it is read whenever the
+# picture moves, and as a different text every time.
+eq('the same prompt read again a minute later is not recorded again',
+   _pr_log.note_promo(_PROMO_AGAIN, now=1_700_000_060.0), None)
+ok_('...though it read as a different text',
+    _PROMO_AGAIN != _PROMO and P.parse(_PROMO_AGAIN)['promo'])
+eq('...nor just inside the window',
+   _pr_log.note_promo(_PROMO, now=1_700_000_000.0
+                      + JR.PROMO_WINDOW_MS / 1000.0 - 1), None)
+# The window is measured from the row that was WRITTEN, and the far edge is
+# open: a prompt still up is written again once per window, which is the bound.
+ok_('...but it is, exactly at the far edge of the window',
+    _pr_log.note_promo(_PROMO, now=1_700_000_000.0
+                       + JR.PROMO_WINDOW_MS / 1000.0) is not None)
+ok_('a different bonus inside the window is a different prompt',
+    _pr_log.note_promo(_PROMO_TWO, now=1_700_000_310.0) is not None)
+# Compared with the LAST prompt written, not with every one before it — the
+# app shows one prompt at a time, and the docstring says so.
+ok_('...and the prompt after that is compared with it, not with the one before',
+    _pr_log.note_promo(_PROMO_AGAIN, now=1_700_000_320.0) is not None)
+# Against a real number of minutes as well as the constant: the week's two
+# closest prompts with the same bonus were 10.8 minutes apart, and a window
+# past that would fold two of the five into one row.
+eq('the window is five minutes', JR.PROMO_WINDOW_MS, 5 * 60 * 1000)
+eq('...so the file holds four prompt rows and still no offer',
+   [r.get('kind') for r in _pr_log.journal.rows()], ['promo'] * 4)
+
+# What a prompt IS is the parser's rule, asked again here rather than taken on
+# the caller's word: a navigation screen or a card handed in by mistake is not
+# filed as a prompt.
+_pr_other = JR.OfferLog(JR.Journal(os.path.join(_pr_dir, 'other.jsonl')))
+for _why, _not in (('a navigation screen', 'Deliver to Daria I.\n8 min 4.8 mi'),
+                   ('an offer card', _CARD),
+                   # Row 749's lines, without the map around them.
+                   ('a Busy + Peak Pay card',
+                    'Busy + Peak Pay\nDelivery Exclusive\n$8.02\n'
+                    'Guaranteed (incl. tip)\n15min (2.8 mi) total'),
+                   ('nothing', ''), ('not a string at all', None),
+                   # ...including one whose str() carries the bonus: a row's
+                   # `text` is a string or the row is not written.
+                   ('a list of the prompt\'s lines', _PROMO.split('\n'))):
+    eq('%s is not recorded as a prompt' % _why,
+       _pr_other.note_promo(_not, now=1_700_000_000.0), None)
+eq('...so no prompt row was written for any of them',
+   _pr_other.journal.rows(), [])
+
+# A journal that cannot be written leaves the prompt unrecorded rather than
+# marking it recorded, or the next read of it would be refused for a row that
+# never reached the file.
+_pr_dead = JR.OfferLog(JR.Journal(os.path.join(_pr_dir, 'nope', 'j.jsonl')))
+eq('a prompt that could not be appended is not reported as written',
+   _pr_dead.note_promo(_PROMO, now=1_700_000_000.0), None)
+eq('...and is not remembered as said', _pr_dead.promo_said, None)
+
+# ...and capped at the same length a reading is.
+_pr_long = JR.OfferLog(JR.Journal(os.path.join(_pr_dir, 'long.jsonl')))
+_pr_long = _pr_long.note_promo(_PROMO + 'x' * 4000, now=1_700_000_000.0)
+ok_('a prompt that read the whole phone is recorded', _pr_long is not None)
+if _pr_long:
+    eq('...its text capped at the same length a reading is',
+       len(_pr_long['text']), JR.TEXT_KEPT)
+
+shutil.rmtree(_pr_dir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)
