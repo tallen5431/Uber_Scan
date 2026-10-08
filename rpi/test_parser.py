@@ -401,5 +401,22 @@ eq('...a blank line and a CRLF each one break, and no start before the first lin
    P.line_starts('Jimmy\n\n  Atlanta \r\nPverel'), [6, 14])
 
 
+# --- which leg a deadline line's places came off ------------------------------
+#
+# None: the Est. delivery card's merchant and destination are read off the end
+# of its deadline line, which is no leg, and find_places says so the way it
+# does for a place off the Pickup label. place_ends and laid_out_approach are
+# the two readers of this record and both stand aside unless the card printed
+# exactly two legs, which this card does not, so nothing in parse() can show
+# the value — this is where it is held to what the comment beside it claims.
+# tests/parser.test.js carries the mirror.
+_est = next(c['text'] for c in cases['places']
+            if c['name'].startswith("Uber's Est. delivery card names both ends"))
+_whose = []
+P.find_places(P.normalize(_est), [], P.line_starts(_est), _whose)
+eq("find_places records the Est. delivery card's two places against no leg",
+   _whose, [None, None])
+
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)

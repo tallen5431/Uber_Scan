@@ -197,15 +197,31 @@ PAY_CHIP = re.compile(
 # line, which is what keeps "$16.05 Promo 4.8 mi 25 min away" from claiming the
 # promo's distance. Brackets are excluded from the glue because a distance the
 # card closed a bracket on belonged to what came before it.
+#
+# A distance followed by the map's charger badge is the badge's, not the job's:
+# "4 mi from fast charger". Written once, for LEG and LONE_MILES both. It was
+# `(?!\s*from)` in each, which refuses ANY word that begins "from" — and an Uber
+# Eats card prints the merchant on the line under its distance, so an Est.
+# delivery card from `From The Earth Brewing` lost its distance, and with it
+# its mileage cost and its wholeness: $28.96/hr uncosted and never spoken,
+# where the card is $23.80/hr. Measured, the badge is the only thing
+# that follows a distance and "from" anywhere in the owner's 6,657 frames and
+# stored texts or the corpus's texts: 476 readings, every one `from f…` —
+# `from fast charger` 471 times, `from fast g` 3, `from f 5` and `from fast
+# charging` once each, and never with a capital F. So `from f` is the badge,
+# and a name that begins "From F…" right under the distance is the one shape
+# this still refuses.
+NOT_THE_CHARGER = r'(?!\s*from\s+f)'
 LEG = re.compile(
     r'(?:(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
     r'\s*[^\s\w()]{1,3}\s*)?'
     r'(?:(' + DC + r'{1,2})\s*h(?:r|rs|our|ours)?\s*)?'
     r'(' + DC + r'{1,3})\s*m[il1|]n(?:s|ute|utes)?\b'
     # ...and the trailing distance is not a badge's: "20 min trip 4 mi from
-    # fast charger" with the trip's bracket lost. LONE_MILES has refused
-    # "from" since it was written; this window did not.
-    r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b(?!\s*from)\s*\)?)?',
+    # fast charger" with the trip's bracket lost. LONE_MILES has refused the
+    # badge since it was written; this window did not. See NOT_THE_CHARGER.
+    r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
+    + NOT_THE_CHARGER + r'\s*\)?)?',
     re.IGNORECASE | ASCII)
 
 # ...and the number in front of it has to contain a real digit. "SI min" is two
@@ -282,10 +298,12 @@ ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 # So this rule is widened rather than joined by a second one: two rules for
 # "when is this due" would answer differently the first time either was
 # touched. The OCR variants are the ones this reader already makes of the same
-# glyphs elsewhere — the full stop after "Est" lost ("Est delivery") or read as
-# a comma ("Est, delivery"), the space before PM lost, the colon read as a
-# dot — and the rig's own reading of the card was "Est. delivery 4:15 PM- 8.6
-# mi". What it must not read: the "Delivery" badge on its own, which prints no
+# glyphs elsewhere — the full stop after "Est" lost ("Est delivery"), read as
+# a comma ("Est, delivery") or with the space after it lost ("Est.delivery"),
+# which on the same cards' "incl. tip" happens on 289, 20 and 21 of the week's
+# 5,116 readings; the space before PM lost; the colon read as a dot — and the
+# rig's own reading of the card was "Est. delivery 4:15 PM- 8.6 mi". What it
+# must not read: the "Delivery" badge on its own, which prints no
 # time; a word that merely ends in "est" ("Fastest delivery"), which is what
 # the \b is for; and any other clock time on a card. The only clock times in
 # the owner's week, 29 of its 6,657 frames and stored texts, are the zone
@@ -294,18 +312,32 @@ ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 # ...and the distance on the same line, as the fourth group. Uber glues it on
 # with its own bullet, "4:15 PM • 8.6 mi", which is where that line ENDS: both
 # ends of the job are printed after it the way they are printed after a total
-# leg, and find_places reads them from there. It is never taken as the
-# distance — LONE_MILES already finds the same figure — only as where the line
-# stops. The glue is LEG's, one to three glyphs that are neither space nor
-# word. DoorDash never prints a distance there: it puts it before the deadline
-# ("9.8 mi Deliver by 7:15 PM") or after the merchant ("Deliver by 6:39 PM
-# Cherry Cricket 4 items 0.6 mi"), so the group is absent on every DoorDash
-# card and that card's merchant is read as it always was.
+# leg, and find_places reads them from there. It is not read as the distance —
+# that is LONE_MILES's question, and on this card it finds the same figure —
+# only as where the line stops. The decimal is optional because the reader
+# drops it: row 92 of the week reads its leg `(7.7 mi)` on one frame and
+# `(77 mi)` on another.
+#
+# The glue is LEG's, one to three glyphs that are neither space nor word, and
+# it is measured on this card's own bullet, the one in "Early look • Order in
+# progress": 104 of the week's 110 readings of that line render it as a glyph
+# (`-` 69, `«` 16, `+` 15, `»` 2, `.` and `:` once each), and 6, on 4 rows, lose
+# it to a bare space. A bare space is not glue, here as in LEG: a frame that
+# lost the bullet reads the deadline and the distance and names no place, and
+# the window's other frames name them. DoorDash never prints a distance there:
+# it puts it before the deadline ("9.8 mi Deliver by 7:15 PM") or after the
+# merchant ("Deliver by 6:39 PM Cherry Cricket 4 items 0.6 mi"), so the group is
+# absent on every DoorDash card and that card's merchant is read as it always
+# was.
+#
+# No charger-badge lookahead on it. One was copied from LONE_MILES, and the
+# badge never follows a deadline; what follows this distance is the merchant's
+# name, so a merchant called `From The Earth Brewing` cost the card both ends.
 DELIVER_BY = re.compile(
     r'(?:deliver(?:ed|y)?\s*by|\best\s*[.,]?\s*delivery)'
     r'\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?'
     r'(?:\s*[^\s\w()]{1,3}\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)'
-    r'\s*mi(?:les?)?\b(?!\s*from))?', re.IGNORECASE | ASCII)
+    r'\s*mi(?:les?)?\b)?', re.IGNORECASE | ASCII)
 
 # A decimal point inside a distance token, either way OCR renders it. Kept
 # because the fact is lost the moment the string becomes a float: "10.0 mi" and
@@ -317,8 +349,8 @@ LONE_DECIMAL = re.compile(r'[.,]', ASCII)
 # so it cannot double-count an Uber card — and never the "4 mi from fast
 # charger" badge, which is a fact about the map rather than about the job.
 LONE_MILES = re.compile(
-    r'(?<![\d.])(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*mi(?:les?)?\b(?!\s*from)',
-    re.IGNORECASE | ASCII)
+    r'(?<![\d.])(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*mi(?:les?)?\b'
+    + NOT_THE_CHARGER, re.IGNORECASE | ASCII)
 
 # Where the job goes. Two shapes, both anchored to something the card prints
 # rather than guessed from free text: what follows "Pickup" on a delivery card,
@@ -363,6 +395,9 @@ PLACE_STREET = re.compile(r'\b(?:%s)\b' % STREET_WORD, re.IGNORECASE | ASCII)
 PLACE_JUNCTION = re.compile(r'[A-Za-z]{3}.*\s&\s.*[A-Za-z]{3}', ASCII)
 PLACE_TOWN = re.compile(r',\s*[A-Z][A-Za-z]{2,}', ASCII)
 PLACE_WORD = re.compile(r'[A-Za-z]{3}', ASCII)
+# The last line of an address the card wrapped: its last word and its town.
+# See _the_route_line.
+PLACE_LAST_LINE = re.compile(r'[A-Za-z]{1,4}\s*' + PLACE_TOWN.pattern, ASCII)
 
 
 def looks_like_a_place(value):
@@ -418,22 +453,29 @@ PLACE_JUNK = re.compile(
 # ...and it had been deciding where a piece split. With the chip on, two
 # pieces were over the cap and the junction seam below cut them: row 914 inside
 # its address (`Kennesaw` / `State University Rd NW & …`), which now stores
-# whole, and row 86 at its merchant's bracket, which now stores the bracket and
-# the destination as one place — the shape rows 92, 293, 643, 891 and 904
-# already have, where the card's route line reads as a pipe in front of a
-# wrapped branch and splits the merchant's name from it. That is its own fault,
-# and the chip was only ever hiding it on row 86.
+# whole, and row 86 at its merchant's bracket. Without the chip row 86 stored
+# `(Dallas) Bone Creek Xing & River Run Dr, Dallas` as its PICKUP — the shape
+# the panel's first reads of rows 643, 891 and 904 already had, where the
+# card's route line reads as a pipe in front of the merchant's branch. That
+# pipe is no longer a divider; see _the_route_line.
 #
 # `match` is the same card's accept button, which `accept` is on every other
 # card. No frame of the week reads it, and the rig's own reading of the Est.
 # delivery card has an `o` where it stands, but the phone shows it directly
 # under the chip.
+#
+# `includes` and `early look` are the rest of that card's furniture, which
+# the Est. delivery card prints above its deadline line: "Includes expected
+# tip", which `included` never matched, and the "Early look" badge. No reading
+# of the week puts either after a place, so they move nothing there; a reader
+# that scrambles the line order — row 6's did — would have stored
+# `…, Marietta Includes` and `…, Marietta Early` as the town.
 PLACE_TAIL = re.compile(
     r'(?:\|'
     r'|\bfast\s*charg'
     r'|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline'
-    r'|verified|exclusive|guaranteed|included|customer|dropoff|orders?'
-    r'|match(?:ing)?)\b)',
+    r'|verified|exclusive|guaranteed|includ(?:ed|es)|customer|dropoff|orders?'
+    r'|match(?:ing)?|early\s*look)\b)',
     re.IGNORECASE | ASCII)
 
 # The card's bottom bar — a row of icons — comes back as one and two character
@@ -532,22 +574,39 @@ PLACE_JUNCTION_AT = re.compile(
 #
 # So the second name is its own group, and find_places asks where the reader
 # put it: an address that has reached its town, by PLACE_TOWN, does not take a
-# name that begins the next line unless that line is itself address-shaped,
-# by looks_like_a_place — the parser's one test for that. Measured on the
-# owner's 6,657 frames and stored texts it refuses a second name on 91 of them,
-# 50 rows, every one of them furniture: `Atlanta Pele`, `Marietta Ill`,
-# `Dallas Mbit`, `Woodstock Uber`, `Kennesaw Leg`. It refuses none of the
-# corpus's. Two-word towns DO wrap — "Springs" begins a line on 56 of the 133
-# readings of Powder Springs, "County" on 5 of 22 of Cobb County and all 7 of
-# Bartow County — and every one is kept, because those are words
+# name that begins the next line — right after the town's first name — unless
+# that line is itself address-shaped, by looks_like_a_place, the parser's one
+# test for that. Measured on the owner's 6,657 frames and stored texts it
+# refuses a second name on 97 of them, 53 rows, and every one is furniture or
+# the next field: `Uber`, a bag count, `Long trip (45+ min)`, the next leg's
+# `Umins (6.5 mi)`, the icon row (`Atlanta Pele`, `Dallas Mbit`, `Marietta
+# Ill`), and once the next merchant, `Kennesaw` / `Little Caesars (1600 …`. Of
+# the corpus it refuses only the two cases written for it. Two-word towns DO
+# wrap — "Springs" begins a line on 56 of the 137 readings that print
+# `, Powder Springs`, "County" on 5 of the 22 that print `, Cobb County` and on
+# all 7 of `, Bartow County` — and every one is kept, because those are words
 # looks_like_a_place already calls a street.
 #
 # What it still takes is a next line the test calls address-shaped that is not
 # the town's: `…, USA` / `Buckley Way NE & Pacer Pl, Atlanta` on row 590,
 # `…, Dallas` / `Five Guys (3450 Cobb Pkwy. NW)` on row 504, `…, Marietta` /
-# `On the way` on row 815 — six rows (466, 504, 590, 757, 815, 943), which read
-# exactly as they did. It is the test the rule was asked for, and a tighter one
-# is a different change with a replay of its own.
+# `On the way` on row 815, `…, Cumberl` / `SE, Atlanta` on row 813 — seven rows
+# (466, 504, 590, 757, 813, 815, 943), which read exactly as they did. It is the
+# test the rule was asked for, and a tighter one is a different change with a
+# replay of its own.
+#
+# ...and scraps between the comma and the town. The map behind the card ends
+# the address's line and begins the town's with icon-row scraps, so the town
+# did not follow its comma and the rule above never matched: the whole reading
+# was kept, scraps, trailing furniture and all — `Peach Ct NW & Peach Ter NW,
+# . Acworth`, `Evian Ct NW & Evian Xing NW, 7 Kennesaw lstop`. Two readings
+# of one address with different scraps are two places to merge_place, and the
+# offers page joins places with an arrow: row 423 drew a two-stop route out of
+# `…, 28 kt Kennesaw` and `…, ps ? ys ti Kennesaw`. Where the town did not
+# follow the comma, the scraps after it come out first — see _town_past_scraps
+# — on 321 of the week's readings, 121 rows. Published rows that show one
+# address twice go from 15 to 9, and published ends with a scrap before the
+# town from 71 to 12.
 PLACE_TOWN_NAME = r"[A-Z][A-Za-z]+(?:'s)?"
 PLACE_ENDS_AT_TOWN = re.compile(
     r"^(.*?,\s*%s)(\s+(%s))?\b" % (PLACE_TOWN_NAME, PLACE_TOWN_NAME), ASCII)
@@ -1828,6 +1887,64 @@ def _inside_a_bracket(value, at):
     return value.find(')', at) >= 0
 
 
+def _the_route_line(value, at):
+    """Is the pipe at `at` the card's route line, at the head of a line that
+    finishes the place above it?
+
+    An Uber Eats card draws a line down its left edge from the pickup's dot to
+    the destination's, and the reader returns it as a pipe at the head of
+    whichever lines it crosses. Where that line STARTS a place — the
+    destination, after the merchant — the pipe is a divider and is split on,
+    as it always was. Where it FINISHES one, it is the drawing, and two such
+    lines are what this reads:
+
+        Los Portales Mexican Restaurant      Nova sushi bar Asian bistro
+        | (Dallas)                           | (Buckhead)
+        Bone Creek Xing & River Run Dr,      Frontenac Ct NE & Woodrow Way
+        Dallas                               | NE, Brookhaven
+
+    The merchant's bracketed branch: split there, the merchant's name — which
+    names no street — was not kept, and the branch was read fused to the
+    destination, `(Dallas) Bone Creek Xing & River Run Dr, Dallas`, as the
+    PICKUP with no dropoff. On the owner's week that was every reading of rows
+    86, 643, 891 and 904 that caught the line as a pipe — the panel's first
+    reads of 643, 891 and 904, and the journal row of 86 once the Matching
+    chip stopped pushing it over MAX_PLACE — and readings of 92 and 293; the
+    fused entry went into each row's places. The bracket has to close, for
+    _inside_a_bracket's reason.
+
+    And the address's own last word and its town, wrapped onto the line below:
+    split there, `NE, Brookhaven` was stored as a place of its own, and on rows
+    61, 277 and 309 it was the published DROPOFF — `Ln, Powder Springs`, `NW,
+    Kennesaw`, `SW, Marietta` — with the street it belongs to filed beside it.
+    A word of one to four letters (a compass point, `Ln`, `Way`, the reader's
+    `Tri` for Trl), a comma, and a town by PLACE_TOWN: the parser's one rule
+    for what a town is. Row 277 now publishes its whole address. Row 309 does
+    not: the reader put an `i` and an `F` between its pipe and `SW, Marietta`,
+    which this does not read through. Row 61 publishes no place at all — its
+    joined merchant and address, `Sugar Shane's I Georgia State Route 360 &
+    Line Tree Ln, Powder Springs`, is over MAX_PLACE with no seam the junction
+    rule can find — where it published a merchant fused to half a street as
+    the pickup and `Ln, Powder Springs` as the dropoff.
+
+    Measured on the owner's 6,657 frames and stored texts: the branch on 42
+    readings of 12 rows, the last line on 22 readings of 16.
+    """
+    rest = value[at + 1:].lstrip()
+    if rest.startswith('('):
+        return rest.find(')') > 0
+    return bool(PLACE_LAST_LINE.match(rest))
+
+
+def _a_border(value, at):
+    """Is the pipe at `at` part of the card's drawing rather than a divider?
+
+    One question, asked by both the stopper and the split below, so the two
+    cannot disagree about which pipes end a place.
+    """
+    return _inside_a_bracket(value, at) or _the_route_line(value, at)
+
+
 def _cut_at_tail(value):
     """Cut a place at the first stopper, with the card's border marks removed.
 
@@ -1836,7 +1953,7 @@ def _cut_at_tail(value):
     """
     out, at = [], 0
     for m in PLACE_TAIL.finditer(value):
-        if m.group(0) == '|' and _inside_a_bracket(value, m.start()):
+        if m.group(0) == '|' and _a_border(value, m.start()):
             out.append(value[at:m.start()])
             at = m.end()
             continue
@@ -1853,7 +1970,7 @@ def _divider_bar(value):
     """
     at = value.find('|')
     while at >= 0:
-        if not _inside_a_bracket(value, at):
+        if not _a_border(value, at):
             return at
         at = value.find('|', at + 1)
     return -1
@@ -1889,6 +2006,37 @@ def _closes_what_it_never_opened(value):
     return False
 
 
+def _scrap(token, keep):
+    """One token of the icon row or the map's edge: nothing but marks, or one
+    or two characters that are not in `keep`. See PLACE_TRAIL_KEEP."""
+    core = PLACE_EDGE.sub('', token)
+    return not core or (len(core) <= 2 and core.lower() not in keep)
+
+
+def _town_past_scraps(value):
+    """`value` with the scraps between its last comma and what follows taken
+    out, where what comes before that comma is an address. See ends_at_town,
+    which asks it only when the town did not follow the comma, and
+    PLACE_ENDS_AT_TOWN for what it does to the owner's week.
+
+    A scrap is trim_place's: marks, or one or two characters that are not a
+    word an address ends on (PLACE_TRAIL_KEEP), so `…Ct, ; St Marys` keeps its
+    `St`.
+
+    Only an address's comma: the reader puts commas in the middle of a
+    merchant's line too, and row 397 of the owner's week reads `Come-N-Get It
+    1 ' , ' Farm Ridge Dr NE & Farm Valley Dr`, where skipping to the first
+    capitalised word took `Farm Ridge` for a town and cut the street off.
+    """
+    head, comma, rest = value.rpartition(',')
+    if not comma or not looks_like_a_place(head):
+        return value
+    words = rest.split()
+    while words and _scrap(words[0], PLACE_TRAIL_KEEP):
+        words.pop(0)
+    return head + ', ' + ' '.join(words)
+
+
 def trim_place(value):
     """One address, with the card's furniture taken off both ends.
 
@@ -1901,17 +2049,13 @@ def trim_place(value):
     "Dollar General (925 Shiloh Rd Nw)" — and taking the closing one off leaves
     a dangling bracket and a name that reads as truncated.
     """
-    def scrap(token, keep):
-        core = PLACE_EDGE.sub('', token)
-        return not core or (len(core) <= 2 and core.lower() not in keep)
-
     # The front first, and the tail after. Order matters: a pipe ends a place,
     # but `oN | Cobb Pkwy NW, Kennesaw 'a` is a pipe with the sludge on the
     # *near* side of it, and cutting there first threw the address away and
     # kept the "oN".
     parts = (value or '').split()
     while True:
-        while parts and scrap(parts[0], PLACE_LEAD_KEEP):
+        while parts and _scrap(parts[0], PLACE_LEAD_KEEP):
             parts.pop(0)
         # Two prefixes happen — "total Pickup Papa John's" — and the second is
         # only at the front once the first has gone.
@@ -1921,7 +2065,7 @@ def trim_place(value):
         parts = shorter
 
     parts = _cut_at_tail(' '.join(parts)).split()
-    while parts and scrap(parts[-1], PLACE_TRAIL_KEEP):
+    while parts and _scrap(parts[-1], PLACE_TRAIL_KEEP):
         parts.pop()
     return ' '.join(parts).strip(' .,-;:|')
 
@@ -2365,7 +2509,7 @@ def find_pickup(places, ends=None):
     return None
 
 
-def find_places(text, legs, whose=None, lines=()):
+def find_places(text, legs, lines, whose=None):
     """Where the job goes, as the card writes it. Never invented.
 
     `whose`, when a list is passed, is filled beside the return value with the
@@ -2376,8 +2520,8 @@ def find_places(text, legs, whose=None, lines=()):
     could disagree with it. See laid_out_approach, which is the rule it feeds.
 
     `lines` is where the reader began each line, as offsets into `text` — see
-    line_starts. Empty, the text is one line, which is how this read every
-    text before it asked.
+    line_starts. Required: its one caller, parse(), always has them, and a
+    default for a caller that does not exist was a branch no input reached.
 
     Three anchors, each something the card prints. What follows "Pickup" on a
     delivery card is the merchant; what follows a deadline is the merchant on
@@ -2429,27 +2573,36 @@ def find_places(text, legs, whose=None, lines=()):
     def ends_at_town(value):
         """`value` up to its town. See PLACE_ENDS_AT_TOWN.
 
+        Where the town did not follow the comma, the scraps between them come
+        out first (_town_past_scraps) and the rule is asked again; where it
+        still finds no town, `value` is returned as it came.
+
         A second name is kept unless the reader began a line with it and that
         line is not address-shaped. Asked of the reader's lines rather than by
-        searching for `value` in the text: the town as `value` spells it, from
-        its comma, is looked for at each line start, sitting so that its second
-        name is the first thing on that line. A line start where it does not
-        sit asks nothing, so a town the text spells differently keeps both
-        names, which is what this did before it asked.
+        searching for `value` in the text: a line start counts only where the
+        town's FIRST name and a space sit right before it and the second name
+        right after. Any line beginning with the name would not do — the
+        merchant's line can begin with it (`City Barbeque (Peachtree City)`
+        over `…, Peachtree City`), and the town would lose a name it printed
+        on one line. A line start where the town does not sit asks nothing, so
+        a town the text spells differently keeps both names, which is what this
+        did before it asked.
         """
         m = PLACE_ENDS_AT_TOWN.match(value)
         if not m:
-            return value
+            m = PLACE_ENDS_AT_TOWN.match(_town_past_scraps(value))
+            if not m:
+                return value
+            value = m.string
         town = value[value.rindex(',', 0, m.end(1)):m.end()]
         # Only an address that has already reached a town, by the parser's own
         # rule for one, PLACE_TOWN — three letters or more. Row 304 of the
         # owner's week reads `Ridgewood Dr & Stockwood Ct, Dy` / `Woodstock 7`:
         # `Dy` is the icon row and `Woodstock`, on the next line, is the town.
         if m.group(2) and PLACE_TOWN.match(town):
-            name = m.group(3)
-            lead = len(town) - len(name)
+            first, name = town[1:].split()[0], m.group(3)
             for n, at in enumerate(lines):
-                if text[at - lead:at + len(name)] != town:
+                if text[at - len(first) - 1:at + len(name)] != first + ' ' + name:
                     continue
                 below = lines[n + 1] if n + 1 < len(lines) else len(text)
                 if not looks_like_a_place(text[at:below]):
@@ -2979,7 +3132,7 @@ def parse(raw_text):
     _whose = []
     # The reader's own line breaks go with it, as offsets into `text` — which
     # are offsets into `mine` too, because only_card blanks rather than slices.
-    places = find_places(mine, legs, _whose, line_starts(raw_text))
+    places = find_places(mine, legs, line_starts(raw_text), _whose)
     # Which end of the job the card printed each name against, from this same
     # pass's record of where they sat. Asked before the two ends, because it is
     # what decides them when the card stated it.

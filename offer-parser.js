@@ -602,6 +602,15 @@
    * never by a bare space - a bare space is two things next to each other
    * rather than one printed line. Brackets are excluded because a distance the
    * card closed a bracket on belonged to what came before it. */
+  /* A distance followed by the map's charger badge is the badge's, not the
+     job's: "4 mi from fast charger". Written once, for LEG and LONE_MILES both.
+     It was `(?!\s*from)` in each, which refuses ANY word beginning "from" - and
+     an Uber Eats card prints the merchant on the line under its distance, so
+     an Est. delivery card from `From The Earth Brewing` lost its distance. The
+     badge is the only thing that follows a distance and "from" in the owner's
+     6,657 frames and stored texts or the corpus: 476 readings, every one
+     `from f...`, never a capital F. See NOT_THE_CHARGER in offer_parser.py. */
+  var NOT_THE_CHARGER = '(?!\\s*from\\s+f)';
   var LEG = new RegExp(
     '(?:(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b' +
     '\\s*[^\\s\\w()]{1,3}\\s*)?' +                 // distance, then the card's bullet
@@ -610,9 +619,10 @@
     // ...and the trailing distance is not a badge's. "20 min trip 4 mi from
     // fast charger": with the trip's own bracket lost to glare, the charger
     // badge's 4 miles sat six characters past "min" and was charged as the
-    // trip. LONE_MILES has refused "from" since it was written; this
-    // window did not.
-    '(?:[^(\\d]{0,6}\\(?\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b(?!\\s*from)\\s*\\)?)?',
+    // trip. LONE_MILES has refused the badge since it was written; this
+    // window did not. See NOT_THE_CHARGER.
+    '(?:[^(\\d]{0,6}\\(?\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b'
+    + NOT_THE_CHARGER + '\\s*\\)?)?',
     'gi'
   );
 
@@ -737,15 +747,23 @@
    * "until 8:20 PM". See DELIVER_BY in offer_parser.py for the whole card.
    *
    * The fourth group is the distance Uber glues onto that line with its own
-   * bullet, "4:15 PM • 8.6 mi" — never read as the distance (LONE_MILES finds
-   * the same figure), only as where the line ends, because both ends of the
-   * job are printed after it. The glue is LEG's. DoorDash never prints a
-   * distance there, so the group is absent on every DoorDash card. */
+   * bullet, "4:15 PM • 8.6 mi" - not read as the distance (that is
+   * LONE_MILES's question, and on this card it finds the same figure), only as
+   * where the line ends, because both ends of the job are printed after it.
+   * The decimal is optional because the reader drops it (row 92: `(7.7 mi)`
+   * on one frame, `(77 mi)` on another). The glue is LEG's, one to three
+   * glyphs, and measured on this card's own bullet in "Early look • Order in
+   * progress": a glyph on 104 of the week's 110 readings, a bare space on 6 -
+   * and a bare space is not glue, so that frame names no place and the
+   * window's other frames name them. DoorDash never prints a distance there,
+   * so the group is absent on every DoorDash card. No charger-badge lookahead:
+   * the badge never follows a deadline, and what does is the merchant's name -
+   * `From The Earth Brewing` cost the card both ends. */
   var DELIVER_BY = new RegExp(
     '(?:deliver(?:ed|y)?\\s*by|\\best\\s*[.,]?\\s*delivery)'
     + '\\s*(\\d{1,2})\\s*[:.]\\s*(\\d{2})\\s*([ap])\\.?\\s*m\\.?'
     + '(?:\\s*[^\\s\\w()]{1,3}\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)'
-    + '\\s*mi(?:les?)?\\b(?!\\s*from))?', 'i');
+    + '\\s*mi(?:les?)?\\b)?', 'i');
 
   // A decimal point inside a distance token, either way OCR renders it. Kept
   // because the fact is lost the moment the string becomes a number: "10.0 mi"
@@ -757,7 +775,8 @@
      it cannot double-count a ride card — and never the "4 mi from fast charger"
      badge, which is a fact about the map rather than about the job. */
   var LONE_MILES = new RegExp(
-    '(?:^|[^\\d.])(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*mi(?:les?)?\\b(?!\\s*from)', 'i');
+    '(?:^|[^\\d.])(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*mi(?:les?)?\\b'
+    + NOT_THE_CHARGER, 'i');
 
   /* What kind of job the card is offering, from the words it prints rather
      than inferred from its numbers. The offers page split "Rides" from "Shop"
@@ -803,6 +822,9 @@
   var PLACE_JUNCTION = /[A-Za-z]{3}.*\s&\s.*[A-Za-z]{3}/;
   var PLACE_TOWN = /,\s*[A-Z][A-Za-z]{2,}/;
   var PLACE_WORD = /[A-Za-z]{3}/;
+  // The last line of an address the card wrapped: its last word and its town.
+  // See theRouteLine.
+  var PLACE_LAST_LINE = new RegExp('^[A-Za-z]{1,4}\\s*' + PLACE_TOWN.source);
 
   /* Words a card puts near a place that are not part of its name.
 
@@ -834,9 +856,12 @@
      the owner's week was journalled with its dropoff as `Hwy NW &N @ Matching
      may take longer`; riding along, it made destinations on six rows too long
      to keep. `match` is the same card's accept button, which `accept` is on
-     every other card. See PLACE_TAIL in offer_parser.py for what the chip had
-     been doing to the seam below. */
-  var PLACE_TAIL = /(?:\||\bfast\s*charg|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline|verified|exclusive|guaranteed|included|customer|dropoff|orders?|match(?:ing)?)\b)/i;
+     every other card. `includes` and `early look` are the rest of that card's
+     furniture - "Includes expected tip", which `included` never matched, and
+     the badge - which a reader that scrambles the line order would have
+     stored as the town's second name. See PLACE_TAIL in offer_parser.py for
+     what the chip had been doing to the seam below. */
+  var PLACE_TAIL = /(?:\||\bfast\s*charg|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline|verified|exclusive|guaranteed|includ(?:ed|es)|customer|dropoff|orders?|match(?:ing)?|early\s*look)\b)/i;
 
   /* The commonest delivery card puts BOTH ends of the job after one total leg:
    *
@@ -914,8 +939,14 @@
    * its town does not take a name that begins the next line unless that line
    * is address-shaped by looksLikeAPlace. A town that wraps survives it
    * because its second line is a place word: `Sequoia Cir SE, Bartow` /
-   * `County`, and "Springs" on 56 readings of Powder Springs. See
-   * PLACE_ENDS_AT_TOWN in offer_parser.py for the week's measurement. */
+   * `County`, and "Springs" on 56 of the 137 readings that print `, Powder
+   * Springs`.
+   *
+   * ...and where the town did not follow its comma - icon-row scraps between,
+   * `..., 28 kt Kennesaw` - the scraps come out first (townPastScraps), so two
+   * readings of one address are one place and not a two-stop route on the
+   * offers page. See PLACE_ENDS_AT_TOWN in offer_parser.py for the week's
+   * measurement. */
   var PLACE_TOWN_NAME = "[A-Z][A-Za-z]+(?:'s)?";
   var PLACE_ENDS_AT_TOWN = new RegExp(
     '^(.*?,\\s*' + PLACE_TOWN_NAME + ')(\\s+(' + PLACE_TOWN_NAME + '))?\\b');
@@ -996,6 +1027,30 @@
     return open > close && value.indexOf(')', at) >= 0;
   }
 
+  /* Is the pipe at `at` the card's route line, at the head of a line that
+   * finishes the place above it? An Uber Eats card draws a line down its left
+   * edge from the pickup's dot to the destination's, and the reader returns
+   * it as a pipe at the head of whichever lines it crosses. Where that line
+   * starts a place it is a divider, as it always was; where it finishes one it
+   * is the drawing - the merchant's bracketed branch (`Los Portales Mexican
+   * Restaurant` / `| (Dallas)`, which split there read the branch fused to the
+   * destination as the PICKUP), or the address's last word and
+   * its town wrapped onto the line below (`| NE, Brookhaven`, which split there
+   * was published as the DROPOFF on rows 61, 277 and 309). See
+   * _the_route_line in offer_parser.py. */
+  function theRouteLine(value, at) {
+    var rest = value.slice(at + 1).replace(/^\s+/, '');
+    if (rest.charAt(0) === '(') return rest.indexOf(')') > 0;
+    return PLACE_LAST_LINE.test(rest);
+  }
+
+  /* Is the pipe at `at` part of the card's drawing rather than a divider? One
+     question, asked by both the stopper and the split, so the two cannot
+     disagree about which pipes end a place. */
+  function aBorder(value, at) {
+    return insideABracket(value, at) || theRouteLine(value, at);
+  }
+
   /* Cut a place at the first stopper, with the card's border marks removed.
    *
    * `split(PLACE_TAIL)[0]` was what this replaced, and it cannot tell a
@@ -1012,7 +1067,7 @@
     var flags = PLACE_TAIL.flags.replace(/g/g, '') + 'g';
     var re = new RegExp(PLACE_TAIL.source, flags), out = '', at = 0, m;
     while ((m = re.exec(value)) !== null) {
-      if (m[0] === '|' && insideABracket(value, m.index)) {
+      if (m[0] === '|' && aBorder(value, m.index)) {
         out += value.slice(at, m.index);
         at = m.index + m[0].length;
         re.lastIndex = at;
@@ -1031,7 +1086,7 @@
   function dividerBar(value) {
     var at = value.indexOf('|');
     while (at >= 0) {
-      if (!insideABracket(value, at)) return at;
+      if (!aBorder(value, at)) return at;
       at = value.indexOf('|', at + 1);
     }
     return -1;
@@ -1072,11 +1127,28 @@
     return false;
   }
 
+  /* One token of the icon row or the map's edge: nothing but marks, or one or
+     two characters that are not in `keep`. */
+  function scrap(token, keep) {
+    var core = String(token).replace(PLACE_EDGE, '');
+    return !core || (core.length <= 2 && keep.indexOf(core.toLowerCase()) < 0);
+  }
+
+  /* `value` with the scraps between its last comma and what follows taken
+     out, where what comes before that comma is an address - a merchant's
+     line has commas in it too: row 397's `Come-N-Get It 1 ' , ' Farm Ridge Dr
+     NE & ...` lost its street to a "town" called Farm Ridge. Asked by
+     endsAtTown only when the town did not follow the comma. See
+     _town_past_scraps in offer_parser.py. */
+  function townPastScraps(value) {
+    var comma = value.lastIndexOf(',');
+    if (comma < 0 || !looksLikeAPlace(value.slice(0, comma))) return value;
+    var words = value.slice(comma + 1).split(/\s+/).filter(Boolean);
+    while (words.length && scrap(words[0], PLACE_TRAIL_KEEP)) words.shift();
+    return value.slice(0, comma) + ', ' + words.join(' ');
+  }
+
   function trimPlace(value) {
-    function scrap(token, keep) {
-      var core = String(token).replace(PLACE_EDGE, '');
-      return !core || (core.length <= 2 && keep.indexOf(core.toLowerCase()) < 0);
-    }
     // The front first, and the tail after. Order matters: a pipe ends a place,
     // but `oN | Cobb Pkwy NW, Kennesaw 'a` is a pipe with the sludge on the
     // *near* side of it, and cutting there first threw the address away and
@@ -1410,10 +1482,9 @@
      could disagree with it. See laidOutApproach, the rule it feeds.
 
      `lines` is where the reader began each line, as offsets into `text` - see
-     lineStarts. Absent, the text is one line, which is how this read every
-     text before it asked. */
-  function findPlaces(text, legs, whose, lines) {
-    lines = lines || [];
+     lineStarts. Required: its one caller, parse, always has them, and a
+     default for a caller that does not exist was a branch no input reached. */
+  function findPlaces(text, legs, lines, whose) {
     var out = [], foundOn = [];
     function keep(value, leg) {
       value = trimPlace(value);
@@ -1447,26 +1518,30 @@
       keep(after.split(AFTER_DEADLINE_STOP)[0]);
     }
 
-    /* `value` up to its town - see PLACE_ENDS_AT_TOWN. A second name is kept
-       unless the reader began a line with it and that line is not
-       address-shaped. Asked of the reader's lines rather than by searching
-       for `value` in the text: the town as `value` spells it, from its comma,
-       is looked for at each line start, sitting so that its second name is
-       the first thing on that line. See ends_at_town in offer_parser.py. */
+    /* `value` up to its town - see PLACE_ENDS_AT_TOWN, and ends_at_town in
+       offer_parser.py for the measurements. Scraps between the comma and the
+       town come out first, where the town did not follow the comma. A second
+       name is kept unless the reader began a line with it, right after the
+       town's first name, and that line is not address-shaped. */
     function endsAtTown(value) {
       value = String(value || '');
       var m = value.match(PLACE_ENDS_AT_TOWN);
-      if (!m) return value;
+      if (!m) {
+        var cleaned = townPastScraps(value);
+        m = cleaned.match(PLACE_ENDS_AT_TOWN);
+        if (!m) return value;
+        value = cleaned;
+      }
       var town = value.slice(value.lastIndexOf(',', m[1].length - 1), m[0].length);
       // Only an address that has already reached a town, by the parser's own
       // rule for one, PLACE_TOWN - three letters or more. Row 304 of the
       // owner's week reads `Ridgewood Dr & Stockwood Ct, Dy` / `Woodstock 7`:
       // `Dy` is the icon row and `Woodstock`, on the next line, is the town.
       if (m[2] && PLACE_TOWN.test(town)) {
-        var name = m[3], lead = town.length - name.length;
+        var first = town.slice(1).trim().split(/\s+/)[0], name = m[3];
         for (var n = 0; n < lines.length; n++) {
           var at = lines[n];
-          if (text.slice(at - lead, at + name.length) !== town) continue;
+          if (text.slice(at - first.length - 1, at + name.length) !== first + ' ' + name) continue;
           var below = n + 1 < lines.length ? lines[n + 1] : text.length;
           if (!looksLikeAPlace(text.slice(at, below))) return m[1];
         }
@@ -2323,7 +2398,7 @@
     var whose = [];
     // The reader's own line breaks go with it, as offsets into `text` - which
     // are offsets into `mine` too, because onlyCard blanks rather than slices.
-    var places = findPlaces(mine, legs, whose, lineStarts(rawText));
+    var places = findPlaces(mine, legs, lineStarts(rawText), whose);
     /* Which end of the job the card printed each name against, from this same
        pass's record of where they sat. Asked before the two ends, because it
        is what decides them when the card stated it. */

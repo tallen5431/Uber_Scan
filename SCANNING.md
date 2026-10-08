@@ -232,8 +232,10 @@ does not have to carry a browser to run `bash tools/test.sh`.
   that prints `Est. delivery H:MM AM/PM • D.D mi` where its others print a
   total leg, with the merchant and the destination under it. `rate()` turns the
   deadline into minutes against the phone's clock, so that card's rate moves
-  while it sits on screen, and it is wrong exactly when the phone's clock is
-  wrong. None of this driver's 1,166 recorded offers stated a deadline; the
+  while it sits on screen, and it is wrong when the phone's clock is wrong — or,
+  on Uber's card, when Uber moves its estimate while the card is on screen,
+  which the rig's vote across frames is slow to follow (rpi/README.md has the
+  measurement). None of this driver's 1,166 recorded offers stated a deadline; the
   first Uber one reached the rig on 8 October and could not be read until the
   rule learned its wording. Both grammars are held by the corpus
   (`tests/fixtures/cases.json`, `deadline`), and rpi/README.md "Delivery cards,

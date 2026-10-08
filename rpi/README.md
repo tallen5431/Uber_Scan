@@ -2634,6 +2634,25 @@ the offers page or the journal row was DoorDash-only: the panel's `min left`,
 the offers page's "Time from: the delivery deadline" and the row's
 `fromDeadline` say the same of this card as of a DoorDash one.
 
+What this card can still get wrong, and how it shows. The minutes are the
+printed time less the Pi's clock, so they are only as good as either: Uber's
+time is an estimate, and if Uber moves it while the card sits on screen the
+window votes on the readings (`_consensus` in rpi/accumulate.py) and the time
+read most often wins — the earlier one, until the newer one has been read as
+often. Run through the real accumulator, five reads of `4:15 PM` and then
+`4:17 PM` with the clock moving a minute every three reads keep 4:15 for four
+more reads, and three of them publish $25.50/hr GO where the card then said
+$23.80/hr CLOSE CALL. Nobody has seen Uber move one; it is a limit of the
+vote, not a measured fault, and it is left as it is. A frame that loses the
+bullet between the time and the distance reads the deadline and names no
+place; the window's other frames name them. A
+merchant printed without a bracketed branch is stored fused to the
+destination, as it is after a total leg — readings of 18 of the week's rows do
+that, Taj Mahal Grill's among them. And the distance under the time is the
+card's own: a merchant whose name begins with "From" no longer costs the card
+its distance, because the charger badge the parser refuses is `from f…` on all
+476 of its readings, not any word beginning "from".
+
 | card | reads as |
 |---|---|
 | `$41.11 … 9.8 mi … Deliver by 7:15 PM … Pickup Papa John's Store 3317` | $41.11, 9.8 mi, 46 min left, *Papa John's Store 3317* |
@@ -3328,13 +3347,36 @@ same measurement:
   as `Pverel 8) 4 P` and the dropoff went to the journal as `Shadowood Pkwy SE,
   Atlanta Pverel`. A town now takes a second name that begins the next line
   only when that line is address-shaped — `Bartow` / `County` and `Powder` /
-  `Springs` wrap and are kept — which refuses it on 91 of the week's 6,657
-  frames and texts, 50 rows, all of them furniture. And `Matching may take
-  longer`, the chip under an Early look card's destination, ends a place the
-  way `Avg. wait time` does: on row 6 it had gone into the journal as the
-  dropoff `Hwy NW &N @ Matching may take longer`, and on six rows it made the
-  destination too long to keep — on three of them on every frame, so the row
-  went to the journal with nowhere to go.
+  `Springs` wrap and are kept — which refuses it on 97 of the week's 6,657
+  frames and texts, 53 rows, all of them furniture or the next field. And
+  `Matching may take longer`, the chip under an Early look card's destination,
+  ends a place the way `Avg. wait time` does: on row 6 it had gone into the
+  journal as the dropoff `Hwy NW &N @ Matching may take longer`, and on six rows
+  it made the destination too long to keep — on three of them on every frame,
+  so the row went to the journal with nowhere to go. That card's other
+  furniture, `Includes expected tip` and the `Early look` badge, ends one too.
+- **Scraps between the comma and the town are not part of the address.** The
+  map behind the card ends one line and begins the next with icon-row scraps,
+  so `…, 28 kt Kennesaw` never matched the town rule and was kept whole, and
+  two readings of one address with different scraps were two places: the
+  offers page drew them as a two-stop route. Where the town does not follow
+  the comma of something address-shaped, the scraps after it come out first.
+  On the week, published rows showing one address twice go from 15 to 9, and
+  published ends with a scrap before the town from 71 to 12.
+- **The card's route line is not a divider.** An Uber Eats card draws a line
+  from the pickup's dot to the destination's, and the reader returns it as a
+  pipe at the head of the lines it crosses. In front of the merchant's
+  bracketed branch (`| (Dallas)`) it had cut the merchant's name off — the
+  branch was read fused to the destination as the PICKUP, on the panel's
+  first reads of rows 643, 891 and 904 and in row 86's journal row — and in
+  front of an address's wrapped last line
+  (`| NE, Brookhaven`) it had made that line a place, published as the dropoff
+  on rows 61, 277 and 309. It is a divider only where it starts a place. Row
+  309 still publishes `SW, Marietta`: the reader put scraps between its pipe
+  and the town, and this does not read through them. Row 61 now publishes no
+  place: joined, its merchant and address are over the 60-character cap with
+  no seam to split them, where before it published the merchant fused to half
+  a street as the pickup and `Ln, Powder Springs` as the dropoff.
 - **The leg-tail window is 130 characters, not 80.** With merchant and address
   sharing one tail, 80 cut the town off the end of the half that matters:
   `Double Branches Ln & Sagamore Ct. Dal`.

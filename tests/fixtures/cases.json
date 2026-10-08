@@ -1728,6 +1728,17 @@
     "deliverBy": 975,
     "complete": false
    }
+  },
+  {
+   "name": "...and from a merchant whose name begins with From, the card keeps its distance",
+   "_why": "The merchant's name is printed on the line under the distance, and the charger-badge lookahead copied onto this rule and already on LONE_MILES refused any word beginning 'from': this card parsed to no distance, not whole and uncosted, $28.96/hr where the truth is $23.80. Every distance followed by 'from' in the week and the corpus, 476 readings, is the badge's `from f…`, so the lookahead is `from f` now. The card around the merchant is the 8 October one.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nFrom The Earth Brewing (1570\nHolcomb Bridge Rd)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": {
+    "pay": 14.48,
+    "miles": 8.6,
+    "deliverBy": 975,
+    "complete": true
+   }
   }
  ],
  "rate": [
@@ -2780,7 +2791,7 @@
    "name": "...and a bracket the camera invented does not disarm it for the rest of the line",
    "text": "\u00a9 22min(@smi total a\nAsian Garden a\n. | I Elderberry Dr NW & Ruby Lee Dr,\n} Acworth 4\n| O \"",
    "expect": [
-    "Elderberry Dr NW & Ruby Lee Dr, } Acworth"
+    "Elderberry Dr NW & Ruby Lee Dr, Acworth"
    ]
   },
   {
@@ -3058,7 +3069,131 @@
    "text": "ee\na Trip Radar @ a\n: Q Early look - Order in progress\n\\ A\n,\niu ye\nmm $10.18 b:\nfy\nincludes expected tip\nB:\n© 29 min (8.3 mi) total 7}\n: Panda Express (COBB PKWY & A\nMARS) ' ¥\nyl\n: Creekstone Dr & Salem Woods Dr, a\nAcworth\n@ Matching may take longer | om\n—— ————\nR\n. itt 6 ‘\nIos trPir. ” ULL",
    "expect": [
     "Panda Express (COBB PKWY & A MARS)",
-    "Creekstone Dr & Salem Woods Dr, a Acworth"
+    "Creekstone Dr & Salem Woods Dr, Acworth"
+   ]
+  },
+  {
+   "name": "Uber's Est. delivery card from a merchant whose name begins with From names both ends",
+   "_why": "The deadline rule's distance group carried a copy of LONE_MILES' `(?!\\s*from)`. The badge never follows a deadline; the merchant does.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nFrom The Earth Brewing (1570\nHolcomb Bridge Rd)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": [
+    "From The Earth Brewing (1570 Holcomb Bridge Rd)",
+    "Foothill Trl & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "...but a bullet the reader lost is not the line's glue, and that frame names no place",
+   "_why": "The bullet in `Early look • Order in progress` is read as a glyph on 104 of the week's 110 readings and lost to a bare space on 6. A bare space is not glue, as in LEG: the frame keeps its deadline and distance, and the window's other frames name the places.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": []
+  },
+  {
+   "name": "...while two glyphs of it are",
+   "_why": "`+-` is how the reader writes a leg's bullet on 25 of the week's readings.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM +- 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Trl & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "...and three",
+   "_why": "`-+-` on 4 readings of the week's legs; three is LEG's own limit.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM -+- 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Trl & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "...and four are not one printed line",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM -+-+ 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": []
+  },
+  {
+   "name": "...and a distance whose decimal point the reader dropped still ends the line",
+   "_why": "Row 92 of the week reads its leg `(7.7 mi)` on one frame and `(77 mi)` on another.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 86 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Trl & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "...and Includes expected tip, read onto the town's line, is not part of the town",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr, Marietta Includes expected tip",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Trl & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "...nor is the Early look badge",
+   "text": "Delivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr, Marietta Early look • Order in progress",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Trl & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "the card's route line in front of the merchant's branch does not divide the merchant from it",
+   "_why": "Week row 86, frame 0, verbatim. The pipe is the line Uber draws from the pickup's dot to the destination's. Split there, the name was not kept and the branch went to the journal fused to the destination as the pickup: `(Dallas) Bone Creek Xing & River Run Dr, Dallas`, no dropoff.",
+   "text": "Q Early look «Arder in progress |\nY? Delivery x\n§ $7.09\nincludes expected tip\n© 23 min (76 mi) total\nLos Portales Mexican Restaurant\n| (Dallas)\nBone Creek Xing & River Run Dr,\nDallas\n@ Matching may take longer\n= }\n>\n:",
+   "expect": [
+    "Los Portales Mexican Restaurant (Dallas)",
+    "Bone Creek Xing & River Run Dr, Dallas"
+   ]
+  },
+  {
+   "name": "...nor an address from its last line",
+   "_why": "Week row 643, frame 1, verbatim: the route line again, at the head of the destination's wrapped town. Split there, `NE, Brookhaven` is a place of its own, and on rows 61, 277 and 309 that shape was the published dropoff.",
+   "text": "| .\n$ pie\nes\n#f Delivery Exclusive x\n$11.02\n© Guaranteed (incl. tip)\n© 17min 38 mi) total\nNova sushi bar Asian bistro\n| (Buckhead)\nFrontenac Ct NE & Woodrow Way\n| NE, Brookhaven\nom Accept a |\nCai |\nBe ie aa dl\n=",
+   "expect": [
+    "Nova sushi bar Asian bistro (Buckhead)",
+    "Frontenac Ct NE & Woodrow Way NE, Brookhaven"
+   ]
+  },
+  {
+   "name": "...whose last word can be a street's, not only a compass point",
+   "_why": "Week row 1078, frame 3, verbatim: `| Way, Woodstock` on a ride card.",
+   "text": "esd\nat\nile a\nse\n: a Exclusive\n$29.08\n% 500 © Verified\n)\n4 @ +$2.25included\n5 min (16 mi)\nCentral Ave SW & Ralph David\nAbernathy Blvd SW, Atlanta\n41 mins (32.7 mi)\nCanton Roswell Rd & Kuykendall\n| Way, Woodstock\n: 4, 6 mi from fast charger\n| as\nll O < *",
+   "expect": [
+    "Central Ave SW & Ralph David Abernathy Blvd SW, Atlanta",
+    "Canton Roswell Rd & Kuykendall Way, Woodstock"
+   ]
+  },
+  {
+   "name": "...but a bracket the camera invented after a divider does not make it the route line",
+   "_why": "Built on the shape of the corpus's own `22min(@smi` frame: the branch's bracket has to close, for the reason a border pipe's does.",
+   "text": "© 22 min (8.3 mi) total\nAsian Garden\n| (@ Elderberry Dr NW & Ruby Lee Dr,\nAcworth",
+   "expect": [
+    "Elderberry Dr NW & Ruby Lee Dr, Acworth"
+   ]
+  },
+  {
+   "name": "scraps between an address's comma and its town are not part of it, so two readings of it are one",
+   "_why": "Week row 423, frame 1, verbatim. Frame 0 of the same row reads `..., 28 / kt Kennesaw`; with the scraps kept, the two readings were two places and the offers page drew a two-stop route that never happened.",
+   "text": "rs EE\n< atermational py .\nA a Airport - ee $f\nx = Collum Field os oF.\naay é Trip Radar BS2:\nNY $ =e Bi?\ncy Q Early look - Order in progress a\nNN cd 7\nLl C= Be\nee Bd\n1 / S bas?\na cat,\n. $10.56 ts\nx Bhs 3\naU Includes expected tip pty\nx\n‘x x © 25 min (4.9 mi) total =}\nx he ta\n' Taj Mahal Grill ob,\nt I Anmore Xing NW & Westover Ln NW, ps\n? ys\nti Kennesaw x\ni a\n\\ 5\nMatching may take longer a\n9 4\n, r\n\\ f\n\\.\nUE\nI O aoe Kk",
+   "expect": [
+    "Taj Mahal Grill",
+    "Anmore Xing NW & Westover Ln NW, Kennesaw"
+   ]
+  },
+  {
+   "name": "...but a comma in a merchant's line is not an address's, and the street after it is not cut down to a town",
+   "_why": "Week row 397, frame 3, verbatim. Skipping the scraps after this comma took `Farm Ridge` for a town and stored `Come-N-Get It 1 ' , Farm Ridge`. What it stores is the merchant fused to the street, which is the unbracketed-merchant fault this does not touch.",
+   "text": "ee NS\nSao Nore\n= Uber\nI ae\nee i\nei | RE\nye tier ean) ag oo i\n‘ a bs a os A\nmy A A 5\nahh! ) Le 5 min Td ae\nAa a $e\nae | a5\nPea. . ¢ rf\n> ¥? Delivery x x 7 we\na ee\nmf $10.42 :\na Guaranteed (incl. tip) x\na “\nx © 37 min (11.2 mi) total i\n‘3 I Come-N-Get It 1\n‘ , ’ Farm Ridge Dr NE & Farm Valley Dr, |\nyt Woodstock\n% .\na z\nHS mw Accept =",
+   "expect": [
+    "Come-N-Get It 1 ' , ' Farm Ridge Dr NE & Farm Valley Dr"
+   ]
+  },
+  {
+   "name": "...and a line that begins with a town's second name elsewhere on the card does not cut it",
+   "_why": "The line has to start right after the town's FIRST name. Built on the Uber Eats total-leg shape, with a merchant whose line begins with the second name of the destination's town.",
+   "text": "$11.40\nIncludes expected tip\n© 22 min (7.9 mi) total\nCity Barbeque (Peachtree City)\nWillowbend Rd & Robinson Rd, Peachtree City\nAccept",
+   "expect": [
+    "City Barbeque (Peachtree City)",
+    "Willowbend Rd & Robinson Rd, Peachtree City"
    ]
   }
  ],
@@ -3168,6 +3303,12 @@
    "name": "the zone prompt's bonus runs until a time, which is not a deadline",
    "text": "GA: Marietta North\nSwitch to this zone\nwith peak pay!\n+$1.00/order until 8:20 PM\nAvg. offer wait\n1min\nDon't switch",
    "expect": null
+  },
+  {
+   "name": "...with the space after its full stop lost",
+   "_why": "Measured on the same card's `incl. tip` over the week's 5,116 readings of it: the full stop lost 289 times, read as a comma 20, and the space after it lost 21. Est. delivery's variants are those three.",
+   "text": "Est.delivery 4:15 PM",
+   "expect": 975
   }
  ],
  "_until_comment": "Minutes left, wrapping midnight. A deadline already past is a stale card, not a short job, and the sanity bounds refuse what wrapping turns it into.",
@@ -3507,6 +3648,11 @@
    "name": "Uber's Est. delivery card with its distance is finished, as a DoorDash one is",
    "_why": "The panel says `still reading` and the voice waits until a reading is whole. A deadline card is whole with a payout, a deadline and a distance; this card has all three, and it is held to the same rule as the DoorDash cards above it.",
    "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": true
+  },
+  {
+   "name": "...and so is one from a merchant whose name begins with From",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nFrom The Earth Brewing (1570\nHolcomb Bridge Rd)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
    "expect": true
   }
  ]

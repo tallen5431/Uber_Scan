@@ -353,5 +353,20 @@ check('largest dollar figure wins over a promo line',
      P.lineStarts('Jimmy\n\n  Atlanta \r\nPverel').join(','), '6,14');
 })();
 
+/* ---- which leg a deadline line's places came off ---- */
+/* The mirror of rpi/test_parser.py's check of the same name: null, because
+   the Est. delivery card's places are read off its deadline line, which is no
+   leg. placeEnds and laidOutApproach, the two readers of the record, stand
+   aside unless a card printed exactly two legs, so parse() cannot show it. */
+(function () {
+  var est = require('./fixtures/cases.json').places.filter(function (c) {
+    return c.name.indexOf("Uber's Est. delivery card names both ends") === 0;
+  })[0].text;
+  var whose = [];
+  P.findPlaces(P.normalize(est), [], P.lineStarts(est), whose);
+  eq("find_places records the Est. delivery card's two places against no leg",
+     JSON.stringify(whose), '[null,null]');
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');
 process.exit(fail ? 1 : 0);
