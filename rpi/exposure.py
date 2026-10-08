@@ -433,6 +433,10 @@ class AutoGain:
         # nothing at all about why.
         self.too_bright = False
         self.too_dim = False
+        # Whether the last beat found a lit screen to aim at — the tracker's
+        # word where there is one, the brightness against LIT_ENOUGH where
+        # there is not. None until a beat has run. See update().
+        self.lit = None
 
     def update(self, gray, now, has_screen=None):
         """The camera controls to apply, or {} to leave the camera alone.
@@ -483,12 +487,21 @@ class AutoGain:
         self.last = now
 
         bright = self.bright = brightness(gray)
-        if bright <= 0:
-            return {}
 
         # Whether there is a screen to aim at. The tracker's answer where there
         # is one; the brightness as a last resort where there is not.
-        lit_screen = has_screen if has_screen is not None else bright >= LIT_ENOUGH
+        #
+        # Kept as `lit`, and worked out ABOVE the return for a black window
+        # rather than below it, because the scan loop asks it too: on a rig
+        # with nothing tracking the corners it is the one answer to "is there
+        # a lit screen in the box at all", and scan_pi's "nothing in view" is
+        # that answer staying no. Below the return, a box reading exactly 0 —
+        # the darkest case there is — left `lit` saying whatever the last
+        # beat said.
+        lit_screen = self.lit = (has_screen if has_screen is not None
+                                 else bright >= LIT_ENOUGH)
+        if bright <= 0:
+            return {}
 
         light = self.gain * (self.exposure or 1.0)
 

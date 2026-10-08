@@ -486,6 +486,24 @@ for i in range(1, 31):
     g.update(lit_card(g.gain, dim=VERY_DIM), 100.0 + i * 6.0)
 eq('...and held on darkness alone when nothing is tracking', g.gain, 1.5)
 
+# ...and that answer is kept as `lit`, because the scan loop asks it too: on a
+# rig with nothing tracking the corners — the owner's, whose box is drawn by
+# hand — "nothing in view" is this staying no, so the panel and the gain cannot
+# disagree about whether the box holds a lit screen.
+eq('...and says so as `lit`, for the loop to ask', g.lit, False)
+g = EX.AutoGain(gain=1.5, every=6.0)
+eq('a controller that has not looked has no answer yet', g.lit, None)
+g.update(lit_card(1.5), 100.0)
+eq('a lit card with nothing tracking is lit', g.lit, True)
+# A box reading exactly nothing is the darkest case there is, and it used to
+# return before the answer was worked out — so `lit` said whatever the beat
+# before it had.
+g.update(np.zeros((60, 40), np.uint8), 106.0)
+eq('...and a box of pure black, after it, is not', g.lit, False)
+g.update(lit_card(1.5, dim=VERY_DIM), 112.0, has_screen=True)
+eq('the tracker\'s word is believed over the brightness, here as for the gain',
+   g.lit, True)
+
 # --- running out of light, and saying so -----------------------------------
 #
 # `too_bright` has always been reported: gain on its floor, no shorter rung,
@@ -500,6 +518,10 @@ for i in range(1, 31):
 eq('...and it spends everything it has first', g.gain, EX.GAIN_LIMITS[1])
 ok_('a phone the camera cannot make up for is reported', g.too_dim)
 ok_('...and not as the opposite complaint', not g.too_bright)
+# ...nor as nothing in view, which is the scan loop's word for `lit` staying
+# false: too dim is a lit screen the camera has run out of light for, and the
+# two are told apart by that one answer.
+eq('...and as a lit screen, which nothing in view is not', g.lit, True)
 
 # It clears when the light does, or it is a notice the driver learns to ignore.
 for i in range(31, 61):

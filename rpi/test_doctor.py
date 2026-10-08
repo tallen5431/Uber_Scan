@@ -655,6 +655,82 @@ for _n, _rows in (('one.jsonl', [_crow(0, _cnow)]), ('none.jsonl', [])):
        findings(run(JOURNAL=_clock_journal(_n, _rows)).stdout)
        .get("the journal's stamps run forwards"), True)
 
+# --- whether the camera can see, by the rig's own last word -------------------
+#
+# The owner's rig read once in 9.4 days, beating all the while, and nothing on
+# any screen said so. The scanner now writes `camera` rows when it cannot see —
+# a stalled feed, a box with nothing lit in it — and when it can again; the
+# preflight is what a driver runs when nothing works, so it says which.
+def _cam(run, n, at, state, lasted, **extra):
+    row = _uprow(run, n, at, 'camera', state)
+    row.update(forSeconds=lasted, **extra)
+    return row
+
+
+_r1 = '7a1b2c3d4e5f'
+# Taken here rather than reusing the clock section's: preflights have run since
+# it was, and an age in whole minutes is what is being checked.
+_camnow = int(time.time() * 1000)
+_seeing_rows = [_uprow(_r1, 1, _camnow - 3600000, 'rig', 'start'),
+                _crow(700, _camnow - 3000000)]
+_ok_run = run(JOURNAL=_clock_journal('cam_ok.jsonl', _seeing_rows))
+eq('a rig that has said nothing about its camera passes',
+   findings(_ok_run.stdout).get('the camera can see'), True)
+
+_stalled = run(JOURNAL=_clock_journal('cam_stalled.jsonl', _seeing_rows + [
+    _cam(_r1, 2, _camnow - 7200000 + 6000, 'stalled', 6)]))
+eq('a camera the rig last called stalled fails',
+   findings(_stalled.stdout).get('the camera can see'), False)
+_stline = [l for l in _stalled.stdout.splitlines() if 'camera can see' in l]
+ok_('...saying stalled, and for how long (%r)' % _stline[:1],
+    any('stalled' in l and 'for 2.0 hours' in l for l in _stline))
+ok_('...with the cable as the fix if it keeps coming back',
+    'ribbon cable' in _stalled.stdout)
+eq('...and blocks nothing: the rig restarts a stalled camera itself',
+   blocking_count(_stalled.stdout), blocking_count(_ok_run.stdout))
+
+# Written a minute after the box went dark, which is the hold: ten minutes ago
+# by the row, eleven by the dark.
+_darkj = _clock_journal('cam_dark.jsonl', _seeing_rows + [
+    _cam(_r1, 2, _camnow - 600000, 'dark', 60, bright=1.6)])
+_dark = run(JOURNAL=_darkj)
+eq('a box the rig last called dark fails',
+   findings(_dark.stdout).get('the camera can see'), False)
+_dkline = [l for l in _dark.stdout.splitlines() if 'camera can see' in l]
+ok_('...saying nothing is in view, what it read, and for how long — from when '
+    'it began, not when it was written (%r)' % _dkline[:1],
+    any('nothing in view' in l and '1.6 of 255' in l and 'for 11 min' in l
+        for l in _dkline))
+eq('...and blocks nothing either: a phone in a pocket is not a broken rig',
+   blocking_count(_dark.stdout), blocking_count(_ok_run.stdout))
+
+eq('a camera that can see again passes',
+   findings(run(JOURNAL=_clock_journal('cam_back.jsonl', _seeing_rows + [
+       _cam(_r1, 2, _camnow - 600000, 'stalled', 6),
+       _cam(_r1, 3, _camnow - 500000, 'seeing', 0)])).stdout).get('the camera can see'),
+   True)
+# The word is the PROCESS's. A stalled camera ends in a restart, and the new
+# run's start is where the old run's account stops — its camera has not been
+# called stalled by anything still running.
+eq('...and so does one whose run has ended since: the word was that process\'s',
+   findings(run(JOURNAL=_clock_journal('cam_restarted.jsonl', _seeing_rows + [
+       _cam(_r1, 2, _camnow - 600000, 'stalled', 6),
+       _uprow(_r1, 3, _camnow - 590000, 'rig', 'restart'),
+       _uprow('0f9e8d7c6b5a', 1, _camnow - 560000, 'rig', 'start')])).stdout)
+   .get('the camera can see'), True)
+eq('...as does one stopped cleanly since',
+   findings(run(JOURNAL=_clock_journal('cam_stopped.jsonl', _seeing_rows + [
+       _cam(_r1, 2, _camnow - 600000, 'dark', 60, bright=1.0),
+       _uprow(_r1, 3, _camnow - 500000, 'rig', 'stop')])).stdout)
+   .get('the camera can see'), True)
+# An age only off a clock that was set: a row written before NTP is not "for
+# 29,000 days".
+_preclock = run(JOURNAL=_clock_journal('cam_preclock.jsonl', [
+    _uprow(_r1, 1, 25000, 'rig', 'start'), _cam(_r1, 2, 31000, 'stalled', 6)]))
+_pcline = [l for l in _preclock.stdout.splitlines() if 'camera can see' in l]
+ok_('a stall stamped before the clock was set says so rather than an age (%r)'
+    % _pcline[:1], any('clock cannot place' in l for l in _pcline))
+
 import shutil as _shutil
 _shutil.rmtree(_clock_dir, ignore_errors=True)
 _shutil.rmtree(_work, ignore_errors=True)

@@ -329,6 +329,11 @@ READABILITY = [
     ('--warn', '--warn-dim', 4.5, 'the words CLOSE CALL'),
     ('--no', '--no-dim', 4.5, 'the word PASS'),
     ('--doubt', '--doubt-dim', 4.5, 'the word on a refused reading'),
+    # A rig that cannot see: the word where the verdict goes and the line under
+    # it, both red on the page's own black — live.html's `.verdict.blind`. The
+    # line is ordinary-sized text, so it is held to 4.5 and not to the 3:1 the
+    # big word would be allowed.
+    ('--no', '--bg', 4.5, 'the words on a rig that cannot see, and the line under them'),
 ]
 
 palette = dict(re.findall(r'(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;',

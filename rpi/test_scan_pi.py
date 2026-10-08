@@ -64,6 +64,9 @@ import track as TR                                            # noqa: E402
 ok = bad = 0
 LORES = (640, 480)
 CAP = (2328, 1748)
+# Two scatterings of one level of sensor noise, taken in turn. See FakeCam._lores.
+DITHER = [np.random.RandomState(seed).randint(0, 2, LORES[0] * LORES[1]).astype(np.uint8)
+          for seed in (11, 12)]
 
 
 def eq(name, got, want):
@@ -133,11 +136,22 @@ class FakeCam(object):
         if self.spoil is not None:
             self.frame = self.spoil(self.frame, self.frames)
         self.frames += 1
-        grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
+        self.lores = self._lores(self.frame)
+
+    def _lores(self, frame):
+        """The preview stream's buffer for `frame`, with a sensor's noise.
+
+        YUV420 puts the Y plane first, which is all the loop reads. The noise
+        is the lowest bit of a scattering of pixels, flipped by one of two
+        patterns in turn: a real camera never hands over the same picture
+        twice, these frames are renders that would, and the loop reads a
+        repeated picture as a stalled camera (scan_pi.STALL_SAY). See the same
+        thing in test_loop.py, which says what it measured.
+        """
+        grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
-        # YUV420 puts the Y plane first, which is all the loop reads.
-        self.lores = np.concatenate([small.ravel(),
-                                     np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
+        return np.concatenate([small.ravel() ^ DITHER[self.frames % 2],
+                               np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
 
     def capture_request(self):
         self._show()
@@ -595,10 +609,8 @@ class SwappingCam(FakeCam):
             self.frame = self.empty
         else:
             self.frame = self.second if t >= self.swap_at else self.offer
-        grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-        small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
-        self.lores = np.concatenate([small.ravel(),
-                                     np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
+        self.frames += 1
+        self.lores = self._lores(self.frame)
 
 
 def run_swap(seconds=120.0):
@@ -1087,10 +1099,8 @@ class BlinkCam(FakeCam):
     def _show(self):
         t = time.time() - self.started
         self.frame = self.offer if (t % self.period) < self.period / 2 else self.empty
-        grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-        small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
-        self.lores = np.concatenate([small.ravel(),
-                                     np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
+        self.frames += 1
+        self.lores = self._lores(self.frame)
 
 
 def worst_frame_gap(extra_argv, hold, seconds=9.0):
@@ -1997,6 +2007,14 @@ eq('a beat with a working journal says nothing about it',
 eq('...and carries the whole sentence when there is one',
    beat(not_saving='Offers are NOT being saved: read-only').get('notSaving'),
    'Offers are NOT being saved: read-only')
+# ...and what the camera cannot see, which has no other channel at all: a rig
+# that cannot see sends no readings. A word, for the page to put where the
+# verdict goes; null, not absent, while it can see, so the page clears it.
+eq('a beat from a camera that can see says so as null',
+   ('blind' in beat(), beat().get('blind')), (True, None))
+eq('...and carries the camera\'s word when it cannot',
+   (beat(blind='stalled').get('blind'), beat(blind='dark').get('blind')),
+   ('stalled', 'dark'))
 
 # ...and the sentence itself, built from the journal rather than from a flag.
 import journal as JR                                            # noqa: E402
@@ -2040,7 +2058,7 @@ eq('...and the panel stops being told',
 # that silently stops appearing.
 page = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), 'live.html')).read()
-for field in ('tooBright', 'tooDim', 'refindRefused', 'notSaving',
+for field in ('tooBright', 'tooDim', 'refindRefused', 'notSaving', 'blind',
               'gps', 'cpuC', 'throttled'):
     ok_('live.html reads %s off the heartbeat' % field,
         'msg.%s' % field in page)
@@ -2294,6 +2312,82 @@ eq('...and no GPS row is written', os.path.exists(_off_path), False)
 # ...and --no-journal is no rows at all, quietly.
 eq('with no journal there is nothing to write and nothing raised',
    SP.UpDown(None, asked_gps=True).start(True, 1), False)
+
+# --- what the camera can see -------------------------------------------------
+#
+# The owner's rig read once in 9.4 days with the heartbeat beating throughout.
+# The loop now says when it cannot see: a feed handing over one picture for
+# ever, or a box with nothing lit in it. What it does with the frames is driven
+# through the real main() in test_loop.py; here is the word and its rows.
+eq('a frozen picture is a stall, whatever the box\'s light',
+   [SP.sight_now(True, lit, False) for lit in (None, False, True)],
+   ['stalled'] * 3)
+eq('...and a stall is still a stall on a pass a read went out — the verify '
+   'beat re-reads a frozen card',
+   SP.sight_now(True, True, True), 'stalled')
+eq('a box with no lit screen and no read in flight is dark',
+   SP.sight_now(False, False, False), 'dark')
+eq('...but not on a pass a read went out: the motion gate saw something move',
+   SP.sight_now(False, False, True), 'seeing')
+eq('...nor where nothing asked the box\'s light — a tracked rig, or fixed gain',
+   SP.sight_now(False, None, False), 'seeing')
+eq('a lit box is seen', SP.sight_now(False, True, False), 'seeing')
+
+# One state, two kinds of bad news with holds of their own.
+_hc = SP.Held('seeing', 60.0, quick=('seeing',), holds={'stalled': 6.0})
+eq('a stall is not said before its own hold',
+   (_hc.update('stalled', 0.0), _hc.update('stalled', 5.9)), (None, None))
+eq('...and is at it, long before the dark hold', _hc.update('stalled', 6.0),
+   ('stalled', 6.0))
+eq('...while the dark still waits the whole of its own',
+   (_hc.update('dark', 7.0), _hc.update('dark', 66.9), _hc.update('dark', 67.0)),
+   (None, None, ('dark', 60.0)))
+eq('seeing again is taken at once', _hc.update('seeing', 67.5), ('seeing', 0.0))
+
+_cam_path = os.path.join(tempfile.mkdtemp(), 'j.jsonl')
+_cam = SP.UpDown(JR.Journal(_cam_path), asked_gps=False, phone_hold=60.0,
+                 stall_say=6.0)
+
+
+def _cam_rows():
+    return [r for r in (json.loads(l) for l in open(_cam_path) if l.strip())
+            if r.get('about') == 'camera'] if os.path.exists(_cam_path) else []
+
+
+_gps0 = SP.gps_now(None)
+eq('a camera that can see says nothing on the beat', _cam.blind(), None)
+_said_cam = [_cam.watch(0.0, None, _gps0, 'stalled'),
+             _cam.watch(5.9, None, _gps0, 'stalled')]
+eq('a stall shorter than its hold is not a row', (_said_cam, _cam_rows()),
+   ([None, None], []))
+eq('...and at its hold, the watch says so', _cam.watch(6.0, None, _gps0, 'stalled'),
+   'stalled')
+_st_row = (_cam_rows() or [{}])[-1]
+eq('...with a camera row saying how long it had lasted (%r)' % (_st_row,),
+   (_st_row.get('kind'), _st_row.get('state'), _st_row.get('forSeconds')),
+   ('up', 'stalled', 6))
+eq('...and the beat carries the word', _cam.blind(), 'stalled')
+eq('...and when it began, for the restart to say how long it lasted',
+   _cam.camera_since, 0.0)
+_cam.watch(6.5, None, _gps0, 'seeing')
+eq('seeing again is a row at once and clears the beat',
+   ((_cam_rows() or [{}])[-1].get('state'), _cam.blind()), ('seeing', None))
+_cam.watch(10.0, None, _gps0, 'dark', 1.64)
+_cam.watch(69.9, None, _gps0, 'dark', 1.6)
+eq('a dark box is not a row before the phone\'s hold',
+   [r['state'] for r in _cam_rows()], ['stalled', 'seeing'])
+_cam.watch(70.0, None, _gps0, 'dark', 1.64)
+_dk_row = (_cam_rows() or [{}])[-1]
+eq('...and is one at it, with what the box read (%r)' % (_dk_row,),
+   (_dk_row.get('state'), _dk_row.get('forSeconds'), _dk_row.get('bright')),
+   ('dark', 60, 1.6))
+eq('...and the beat says dark', _cam.blind(), 'dark')
+_cam.restart('the camera has handed over the same picture for 9s — it has stalled')
+_rs = [json.loads(l) for l in open(_cam_path) if l.strip()][-1]
+eq('a restart the loop asked for is a rig row saying why (%r)' % (_rs,),
+   (_rs.get('about'), _rs.get('state'), _rs.get('why')),
+   ('rig', 'restart',
+    'the camera has handed over the same picture for 9s — it has stalled'))
 
 
 # The words gps.Phone.state() uses, in the beat's. A stub, because the real

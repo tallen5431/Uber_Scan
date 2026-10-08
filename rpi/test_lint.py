@@ -819,6 +819,28 @@ for _what, _file, _pat, _want in _TABLES:
        sorted(_want - _named), [])
     eq('...and none it cannot: %s' % _what, sorted(_named - _want), [])
 
+# --- every word for a camera that cannot see is named where it is read ------
+#
+# The scanner's `blind` is a word, and the driving screen turns it into the
+# label that stands where the verdict goes and the line saying what to do.
+# A word the scan loop learns and the page does not reads CANNOT SEE with no
+# line under it — honest, and no help to a driver who needs to know whether to
+# reseat a cable or put the phone back. Read out of sight_now() itself, so a
+# third word added there is a word this asks for.
+_sp_src = open(os.path.join(ROOT, 'rpi/scan_pi.py'), encoding='utf-8').read()
+_sight_body = _sp_src[_sp_src.index('\ndef sight_now('):]
+_sight_body = _sight_body[:_sight_body.index('\ndef ', 1)]
+_blind_words = set(re.findall(r"return '([a-z]+)'", _sight_body)) - {'seeing'}
+ok_('sight_now() can say the camera cannot see (%r)' % sorted(_blind_words),
+    len(_blind_words) >= 2)
+_live_src = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
+for _table in ('BLIND_LABEL', 'BLIND_NOTE'):
+    _m = re.search(r'var %s = \{(.*?)\};' % _table, _live_src, re.S)
+    _named = set(re.findall(r'(?:\A|[{,])\s*([a-z]+)\s*:', _m.group(1))) if _m else set()
+    eq('live.html\'s %s names every word the scanner can send' % _table,
+       sorted(_blind_words - _named), [])
+    eq('...and none it cannot: %s' % _table, sorted(_named - _blind_words), [])
+
 # --- a request the scan loop takes sits under its own comment --------------
 #
 # The loop takes four requests from the screens one after another, each under

@@ -305,6 +305,59 @@ def main():
                   'follows it. Give the Pi a network before a shift and let NTP '
                   'land before scanning starts.' % worst)
 
+            # ...and whether the camera can see, by the rig's own last word.
+            #
+            # The rig was blind for a whole shift and nothing said so: one
+            # read in 9.4 days, the heartbeat beating throughout, the panel
+            # saying "scanner reading". The scanner now writes `camera` up rows
+            # when it stops being able to see — a stalled feed, or a box with
+            # nothing lit in it — and when it can again, and this reads the
+            # newest of them. Only the newest RUN's: a start or a stop ends what
+            # the run before it said, because the camera's word is about a
+            # process and that process is gone. Not blocking: nothing in view
+            # can as well be a phone in the driver's pocket as a fault, and a
+            # stalled camera is restarted by the rig itself.
+            said = None
+            for r in rows:
+                if not isinstance(r, dict) or r.get('kind') != 'up':
+                    continue
+                if r.get('about') == 'camera':
+                    said = r
+                elif r.get('about') == 'rig' and r.get('state') in ('start', 'stop'):
+                    said = None
+            state = (said or {}).get('state')
+            blind = state in ('stalled', 'dark')
+            when = ''
+            if blind:
+                at, lasted = said.get('at'), said.get('forSeconds')
+                now_ms = JR.now_ms()
+                began = (at - lasted * 1000
+                         if isinstance(at, (int, float)) and isinstance(lasted, int)
+                         else None)
+                # An age only off two readings of a clock that was set — the
+                # same floor as the check above, and for the same reason.
+                if (began is None or began < _SY.CLOCK_BELIEVABLE_AFTER
+                        or now_ms < _SY.CLOCK_BELIEVABLE_AFTER or began > now_ms):
+                    when = ', since a time the clock cannot place'
+                else:
+                    mins = (now_ms - began) / 60000.0
+                    when = (', for %d min' % round(mins) if mins < 90
+                            else ', for %.1f hours' % (mins / 60))
+            check('the camera can see', not blind,
+                  'stalled — the same picture, byte for byte%s' % when
+                  if state == 'stalled' else
+                  'nothing in view — the box held no lit screen (it read %s of '
+                  '255)%s' % (said.get('bright'), when) if state == 'dark' else
+                  'nothing on record says it cannot',
+                  'the camera is handing over one picture over and over. The rig '
+                  'restarts it on its own; if this keeps coming back, power down '
+                  'and reseat the camera\'s ribbon cable at both ends.'
+                  if state == 'stalled' else
+                  'nothing lit is in the box the rig reads: put the phone in the '
+                  'mount with its screen on, and bright enough to see. If it is '
+                  'there and lit, the box is drawn somewhere else — press ▣ Set '
+                  'box on the driving screen and draw it again.')
+
         # ...and whether a row can still be ADDED to it, which is a different
         # question and the one the rig actually depends on.
         #
@@ -535,7 +588,8 @@ def main():
     blocking = [r for r in failed
                 if 'espeak' not in r[0] and 'calibration' not in r[0] and 'focus' not in r[0]
                 and 'autofocus' not in r[0] and 'reading engine' not in r[0]
-                and 'scratch space' not in r[0] and 'backed up' not in r[0]]
+                and 'scratch space' not in r[0] and 'backed up' not in r[0]
+                and 'can see' not in r[0]]
 
     print()
     # The next step is the autopilot, which aims, calibrates and scans on its

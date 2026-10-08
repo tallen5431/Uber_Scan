@@ -90,18 +90,41 @@ class Request(object):
         pass
 
 
+# A sensor's noise, as far as the stall watch can tell: the lowest bit of a
+# scattering of pixels, flipped by one of two patterns taken in turn.
+#
+# A real camera never hands over the same picture twice — every pixel carries
+# its own noise — and these are renders, which do: replayed at this fake's own
+# pace, a capture every 10ms for 12 seconds, 1,199 of 1,200 consecutive pairs
+# of frames were identical, the one exception being the card arriving. The loop now reads a repeated picture as a stalled camera
+# (scan_pi.STALL_SAY), so without this every fake here would be a camera that
+# stalled the moment its card stopped moving. One level of difference is all
+# it takes and nothing else can see it: measured on this suite's card, its
+# empty cabin and a black one, the two patterns move the motion gate by 0.50 at
+# most, against the 2.0 it calls still.
+DITHER = [np.random.RandomState(seed).randint(0, 2, LORES[0] * LORES[1]).astype(np.uint8)
+          for seed in (11, 12)]
+
+
 class FakeCam(object):
     """A card that appears in the mount shortly after the loop starts.
 
     `fail_after`: from that capture on, raise this exception instead of
     answering — a RuntimeError is a camera that died, SystemExit is the
-    supervisor's SIGTERM as _stop_on_sigterm turns it into one."""
+    supervisor's SIGTERM as _stop_on_sigterm turns it into one.
+    `freeze_at`: from this many seconds in, hand over the very same picture
+    on every capture — a stalled camera, which is what the dither above
+    exists to tell apart from a still one. `noise=False` leaves the dither
+    off, for the one picture that repeats on a working camera: a flat one."""
 
-    def __init__(self, offer, empty, appear_at=0.4, fail_after=None):
+    def __init__(self, offer, empty, appear_at=0.4, fail_after=None, freeze_at=None,
+                 noise=True):
         self.offer, self.empty = offer, empty
         self.appear_at = appear_at
         self.started = time.time()
         self.fail_after = fail_after
+        self.freeze_at = freeze_at
+        self.noise = noise
         self.captures = 0
         self._show()
 
@@ -109,15 +132,22 @@ class FakeCam(object):
         t = time.time() - self.started
         self.frame = self.offer if t >= self.appear_at else self.empty
         grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-        small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
-        self.lores = np.concatenate([small.ravel(),
+        small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA).ravel()
+        if self.noise:
+            small = small ^ DITHER[self.captures % 2]
+        self.lores = np.concatenate([small,
                                      np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
+
+    def frozen(self):
+        return (self.freeze_at is not None
+                and time.time() - self.started >= self.freeze_at)
 
     def capture_request(self):
         self.captures += 1
         if self.fail_after is not None and self.captures >= self.fail_after[0]:
             raise self.fail_after[1]
-        self._show()
+        if not self.frozen():
+            self._show()
         time.sleep(0.01)
         return Request(self)
 
@@ -150,7 +180,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
         clipped_for=None, dropoff_window=None, whole_text=None, fitted=None,
         fitted_for=None, hang_on_loop=True,
-        fail_after=None, phone_hold=None, gps_hold=None, phone=None):
+        fail_after=None, phone_hold=None, gps_hold=None, phone=None,
+        freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -159,6 +190,11 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     request written here cannot be eaten by a scanner running on the same
     machine, nor this one eat theirs. `fail_after`: (n, exception) for the
     camera — see FakeCam. `phone`: what gps.Phone hands back, for a --gps run.
+    `freeze_at`: the camera stalls this many seconds in — see FakeCam — and
+    `stall_say` stands in for scan_pi.STALL_SAY. `empty`: what the mount
+    shows with no card in it, TC.blank() unless a check needs it darker.
+    `offer_dim`: the card at that share of its brightness — lit, and short of
+    the full well that makes the gain look again at once.
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
     it began, and the exception main() raised, if any."""
@@ -174,7 +210,10 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     cfg.update(config_extra or {})
     with open(config, 'w') as fh:
         json.dump(cfg, fh)
-    cam = FakeCam(offer, TC.blank(), appear_at=appear_at, fail_after=fail_after)
+    if offer_dim is not None:
+        offer = (offer.astype(np.float32) * offer_dim).astype(np.uint8)
+    cam = FakeCam(offer, TC.blank() if empty is None else empty, appear_at=appear_at,
+                  fail_after=fail_after, freeze_at=freeze_at, noise=noise)
     # Handed out so a check can ask what is really in the mount right now. The
     # stubbed reader answers with whatever text the check asked for whether or
     # not there is a card in front of it, so an announced offer is NOT evidence
@@ -260,11 +299,13 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     was_refind_s = SP.REFIND_NOTICE_S
     if refind_notice_s is not None:
         SP.REFIND_NOTICE_S = refind_notice_s
-    was_holds = (SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone)
+    was_holds = (SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY)
     if phone_hold is not None:
         SP.PHONE_HOLD = phone_hold
     if gps_hold is not None:
         SP.GPS_HOLD = gps_hold
+    if stall_say is not None:
+        SP.STALL_SAY = stall_say
     if phone is not None:
         SP.GPS.Phone = lambda address: phone
     deadline = time.time() + seconds
@@ -301,7 +342,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.REFIND_NOTICE_S = was_refind_s
-        SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone = was_holds
+        SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY = was_holds
         if handoff:
             if was_handoff is None:
                 os.environ.pop(HO.ENV_DIR, None)
@@ -470,6 +511,13 @@ ok_('...and stopped beating once the read was stuck (last beat %.1fs ago)'
     % (last_gap or 0), last_gap is not None and last_gap > 6.0)
 ok_('...saying why, once',
     sum(1 for l in r['logs'] if 'stuck' in l) == 1)
+# ...and in the journal, where it is the only account the run gets: the SIGKILL
+# that answers the silence leaves no stop row, so without this a stuck reader
+# reads afterwards exactly as a crash does.
+_stuck_rs = [x.get('why') for x in r['rows']
+             if x.get('kind') == 'up' and x.get('state') == 'restart']
+ok_('...and the journal says the rig asked to be restarted, and why (%r)' % _stuck_rs,
+    len(_stuck_rs) == 1 and 'stuck' in (_stuck_rs[0] or ''))
 
 # --- a Re-find the rig cannot honour has to say so on the beat ---------------
 # Pressing Re-find is the driver saying the outline is wrong, so from that press
@@ -831,6 +879,156 @@ eq('four seconds out of sight is not a row at the real hold',
 ok_('...over a run that did lose the phone for them (%r)'
     % [l for l in _ph60['logs'] if 'screen' in l][:2],
     any('not visible' in l for l in _ph60['logs']))
+
+
+# --- a camera that hands over one picture for ever ---------------------------
+#
+# The owner's rig read once in 9.4 days with the heartbeat beating every four
+# seconds and the panel saying "scanner reading". Whether the camera's feed had
+# stalled or the box was dark is not known, so both are driven here.
+#
+# The stall first: the camera freezes 1.5s in, on the card, and from then on
+# every capture is the same picture byte for byte. The stub reader goes on
+# answering the card, which is what the verify beat re-reading a frozen card
+# looks like — readings that look fresh, about a card long gone.
+_sl = run(lambda n, k: WHOLE, seconds=8.0, freeze_at=1.5, stall_say=1.0,
+          alive_every=0.5)
+_slups = _ups(_sl['rows'])
+ok_('a camera handing over the same picture is written as stalled (%r)' % _slups,
+    ('camera', 'stalled') in _slups)
+ok_('...and the beat carries it, for the panel',
+    any(b.get('blind') == 'stalled' for b in _sl['alive']))
+_sl_rs = [x.get('why') for x in _sl['rows']
+          if x.get('kind') == 'up' and x.get('state') == 'restart']
+ok_('...then the journal says the rig asked to be restarted, and why (%r)' % _sl_rs,
+    len(_sl_rs) == 1 and 'stalled' in (_sl_rs[0] or ''))
+# A stalled camera is not cured by waiting — the owner's ran 9.4 days that way,
+# and a restart cured it at once — so it takes the stuck reader's way out: no
+# more beats, and the supervisor's silence watchdog restarts it, counting it
+# where a wedge is counted. At a half-second beat a loop still beating has its
+# last beat under a second old.
+_sl_gap = time.time() - _sl['beats'][-1] if _sl['beats'] else None
+ok_('...and it goes quiet, the way a stuck read does, so the supervisor restarts '
+    'it (last beat %.1fs ago)' % (_sl_gap or 0), _sl_gap is not None and _sl_gap > 3.0)
+eq('...the last beat it sent being the one that told the panel why',
+   _sl['alive'][-1].get('blind') if _sl['alive'] else None, 'stalled')
+eq('...said once in the log', sum(1 for l in _sl['logs']
+                                  if 'going quiet' in l and 'stalled' in l), 1)
+# ...and nothing more is read off the frozen picture once the stall is said.
+# Frozen on a card, the verify beat re-read it every few seconds, each verdict
+# as fresh-looking as a real one — and server.js counts a reading as the loop
+# speaking, so the silence its watchdog restarts on never came.
+_sl_told = [t for t, b in zip(_sl['beats'], _sl['alive']) if b.get('blind') == 'stalled'][:1]
+_sl_after = [round(t - _sl_told[0], 1) for a, k, t in _sl['verdicts']
+             if _sl_told and t > _sl_told[0] + 0.5]
+eq('...and no reading of the frozen card comes after it, to keep the loop '
+   'sounding alive', (bool(_sl_told), _sl_after), (True, []))
+
+# ...and a still card is not a stall. A sensor's noise differs from frame to
+# frame however still the picture, which is what the fakes' dither stands for,
+# and this card sits still for 8.6s at the real STALL_SAY.
+_still = run(lambda n, k: WHOLE, seconds=9.0, alive_every=0.5)
+eq('a card sitting still past the stall\'s hold is not a stall',
+   [u for u in _ups(_still['rows']) if u[0] == 'camera'], [])
+eq('...and no beat says it cannot see',
+   [b.get('blind') for b in _still['alive'] if b.get('blind')], [])
+ok_('...on a run long enough to have said so (%d beats)' % len(_still['beats']),
+    _still['beats'] and _still['beats'][-1] - _still['beats'][0] > SP.STALL_SAY)
+
+# ...nor is a picture that is one flat value all over, repeated. Two of those
+# match whatever the camera is doing — a box of black, a sensor at full well —
+# so a repeat of one is no evidence. Noise off, and nothing but the empty
+# cabin, which is uniform.
+_flat = run(lambda n, k: '', seconds=5.0, appear_at=1e9, noise=False,
+            stall_say=1.0, alive_every=0.5)
+eq('a flat picture repeated is not a stall',
+   [u for u in _ups(_flat['rows']) if u[0] == 'camera'], [])
+
+# --- a box with nothing lit in it ---------------------------------------------
+#
+# The other half: the owner's screen read 1-2 of 205 in the reads either side of
+# the blind week. The box drawn by hand — --no-track here, the other rig with
+# nothing tracking the corners — holds the dark cabin until the card arrives
+# four seconds in. Reads answer nothing until there is a card in the mount, so
+# the rig is not reading a card it cannot see. A long beat, so the beats that
+# come are the ones a change sends.
+_dkcam = []
+_DARK = np.full((CAP[1], CAP[0], 3), 1, np.uint8)
+
+
+def _dk_text(n, k):
+    return WHOLE if _dkcam and _dkcam[0].frame is _dkcam[0].offer else ''
+
+
+_dk = run(_dk_text, extra_argv=['--no-track'], seconds=14.0, appear_at=4.0,
+          empty=_DARK, phone_hold=1.0, alive_every=30.0, cam_out=_dkcam,
+          until=lambda rows, ann, calls: ('camera', 'seeing') in _ups(rows) and ann)
+_dkups = _ups(_dk['rows'])
+ok_('a box with nothing lit in it is written as dark, with nothing tracking (%r)'
+    % _dkups, ('camera', 'dark') in _dkups)
+_dkrow = [x for x in _dk['rows'] if x.get('about') == 'camera'
+          and x.get('state') == 'dark'][:1] or [{}]
+ok_('...with what the box read, under what a lit screen reads (%r)'
+    % (_dkrow[0].get('bright'),),
+    isinstance(_dkrow[0].get('bright'), (int, float))
+    and _dkrow[0]['bright'] < SP.EX.LIT_ENOUGH)
+_dkbeats = [(t, b) for t, b in zip(_dk['beats'], _dk['alive'])]
+ok_('...the beat carries it, at once rather than on the next beat',
+    any(b.get('blind') == 'dark' for _, b in _dkbeats))
+eq('...and never as too dim, which is a lit screen out of light',
+   [b.get('tooDim') for _, b in _dkbeats if b.get('blind') == 'dark' and b.get('tooDim')],
+   [])
+ok_('...and the card arriving is seeing again (%r)' % _dkups,
+    ('camera', 'seeing') in _dkups
+    and _dkups.index(('camera', 'dark')) < _dkups.index(('camera', 'seeing')))
+# The page puts the blind word where the verdict goes, so a card arriving as
+# the phone goes back in has to be cleared for at once — not on the next beat,
+# which this run has set thirty seconds away, and not on the gain's next look
+# at the box, up to six seconds on.
+_dk_card = [t for a, k, t in _dk['verdicts'] if a and a[0].get('ready')]
+_dk_dark_at = [t for t, b in _dkbeats if b.get('blind') == 'dark'][:1]
+_dk_clear = [t for t, b in _dkbeats
+             if _dk_dark_at and t > _dk_dark_at[0] and b.get('blind') is None][:1]
+ok_('...cleared on the beat within a second of the card\'s first reading '
+    '(%r after it)' % ((round(_dk_clear[0] - _dk_card[0], 2),)
+                       if _dk_card and _dk_clear else None,),
+    _dk_card and _dk_clear and abs(_dk_clear[0] - _dk_card[0]) < 1.0)
+
+
+def _cleared_after_card(r):
+    """Seconds from the card's first reading to the beat that cleared the
+    dark, or None."""
+    beats = list(zip(r['beats'], r['alive']))
+    card = [t for a, k, t in r['verdicts'] if a and a[0].get('ready')]
+    dark = [t for t, b in beats if b.get('blind') == 'dark'][:1]
+    clear = [t for t, b in beats if dark and t > dark[0] and b.get('blind') is None][:1]
+    return round(clear[0] - card[0], 2) if card and clear else None
+
+
+# ...and the same with the read on the loop's own thread, where it has been
+# done and collected before the camera's word is next asked — so "a read is in
+# flight" is never true at the moment it is asked, and only the read having
+# been handed over says the box moved. A card at half its brightness: one at
+# full well makes the gain look again within a second whatever the reader
+# did, and this is about the reader.
+_dkcam[:] = []
+_dkn = run(_dk_text, extra_argv=['--no-track', '--no-thread'], seconds=14.0,
+           appear_at=4.0, empty=_DARK, phone_hold=1.0, alive_every=30.0,
+           cam_out=_dkcam, offer_dim=0.5,
+           until=lambda rows, ann, calls: ('camera', 'seeing') in _ups(rows) and ann)
+_dkn_gap = _cleared_after_card(_dkn)
+ok_('...and cleared as quickly with --no-thread (%r after it)' % (_dkn_gap,),
+    _dkn_gap is not None and abs(_dkn_gap) < 1.0)
+
+# ...and where the tracker runs, the same dark box is its answer — the phone
+# gone — and not a second row about the same absence. Long enough for the
+# gain's second look, the first that can see the tracker has lost the phone.
+_dkt = run(lambda n, k: '', seconds=9.0, appear_at=1e9, empty=_DARK, phone_hold=1.0)
+_dktups = _ups(_dkt['rows'])
+ok_('a tracked rig answers a dark box with the phone gone (%r)' % _dktups,
+    ('phone', 'gone') in _dktups)
+eq('...and writes nothing about the camera for it',
+   [u for u in _dktups if u[0] == 'camera'], [])
 
 
 # --- the GPS, through the real loop ------------------------------------------
@@ -1355,6 +1553,8 @@ ok_('...and the flags the last heartbeat carried, the refused Re-find among them
     '--no-track' in (_beat.get('refindRefused') or '')
     and (_beat.get('tooBright'), _beat.get('tooDim'), _beat.get('notSaving')) == (False, False, None)
     and isinstance(_beat.get('ageMs'), int))
+eq('...the camera\'s word among them, null while it can see',
+   (_beat or {}).get('blind', 'absent'), None)
 eq('...and "gps off", with no --gps given', _said.get('gps'), 'gps off')
 ok_('the request is taken, so it is answered once',
     _sreq[0] is not None and not os.path.exists(_sreq[0]))

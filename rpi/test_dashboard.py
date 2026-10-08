@@ -3306,6 +3306,108 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  // --- a rig that cannot see -------------------------------------------------
+  //
+  // The owner's rig read once in 9.4 days: the heartbeat came every four
+  // seconds and this page said "scanner reading" throughout. The beat now says
+  // when the camera cannot see, and the page puts it where the verdict goes, in
+  // red. Measured on the three panels the rig is bolted to, in the phone layout
+  // that is the one in the car, against the bar as it stood before: the bar
+  // holds six and nothing about this may move it.
+  out.blind = {};
+  const BLINDLOOK = () => {
+    const v = document.getElementById('verdict');
+    const lab = document.getElementById('verdictLabel');
+    const warn = document.getElementById('warn');
+    const vr = v.getBoundingClientRect();
+    const inside = (r) => r.width > 0 && r.height > 0
+      && r.top >= vr.top - 0.5 && r.bottom <= vr.bottom + 0.5
+      && r.left >= vr.left - 0.5 && r.right <= vr.right + 0.5
+      && r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5;
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return [r.left, r.top, r.width, r.height].map((n) => Math.round(n * 10) / 10)
+        .concat([getComputedStyle(el).display]);
+    };
+    const cs = getComputedStyle(v), ls = getComputedStyle(lab);
+    const d = document.documentElement;
+    return {
+      cls: v.className, label: lab.textContent.trim(),
+      glyph: getComputedStyle(lab, '::before').content,
+      note: warn.hidden ? '' : warn.textContent.trim(),
+      labelColor: ls.color, noteColor: getComputedStyle(warn).color,
+      border: cs.borderTopStyle, borderColor: cs.borderTopColor,
+      fill: cs.backgroundColor,
+      labelIn: inside(lab.getBoundingClientRect()),
+      noteIn: !warn.hidden && inside(warn.getBoundingClientRect()),
+      noteWhole: warn.scrollHeight <= warn.clientHeight + 1,
+      rate: getComputedStyle(document.querySelector('#verdict .rate')).display === 'none'
+        ? '' : document.getElementById('perHour').textContent.trim(),
+      detail: document.getElementById('detail').textContent.trim(),
+      conn: document.getElementById('conn').textContent.trim(),
+      bar: JSON.stringify([].slice.call(document.querySelector('.bottombar').children).map(box)),
+      fits: d.scrollWidth <= d.clientWidth + 1 && d.scrollHeight <= d.clientHeight + 1,
+      phone: document.body.classList.contains('phoneview'),
+    };
+  };
+  for (const panel of [['800x480', 800, 480], ['1024x600', 1024, 600], ['480x320', 480, 320]]) {
+    stage = 'a rig that cannot see: ' + panel[0];
+    const page = await browser.newContext({
+      viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+    }).then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'scanning',
+        scanner: { enabled: true, running: true, error: null },
+        last: { ready: false, state: 'empty', locked: false, text: '' },
+        lastAgeMs: 30000, heardAgeMs: 900, offer: null, holding: null }) }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 0, counted: 0, setAside: 0, took: 0,
+                             beforeClock: 0, unreadable: null, rolled: false, clockSet: true }) }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await framed(page);
+    await page.waitForTimeout(600);
+    await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+    const beat = async (blind) => {
+      await page.evaluate((b) => window.__es.push({ alive: true, at: 1, tooBright: false,
+        tooDim: false, refindRefused: null, notSaving: null, blind: b }), blind);
+      await page.waitForTimeout(150);
+      return page.evaluate(BLINDLOOK);
+    };
+    const push = async (msg) => {
+      await page.evaluate((m) => window.__es.push(m), msg);
+      await page.waitForTimeout(150);
+      return page.evaluate(BLINDLOOK);
+    };
+    const slot = {};
+    await push({ phase: 'scanning', message: '' });
+    // A card on the panel, the verdict a driver acts on, and the bar as it is.
+    slot.seeing = await push(Object.assign({}, READINGS.deducted));
+    slot.seeingBeat = await beat(null);
+    // The camera freezes on that card. The verify beat goes on reading the
+    // frozen card, and each reading looks as fresh as a real one.
+    slot.stalled = await beat('stalled');
+    slot.frozenRead = await push(Object.assign({}, READINGS.deducted));
+    slot.dark = await beat('dark');
+    slot.back = await beat(null);
+    // ...and between offers, with no reading on the panel at all.
+    await push(Object.assign({}, READINGS.deducted, { ready: false, state: 'empty',
+                                                      perHour: null }));
+    slot.idleDark = await beat('dark');
+    // A word this page was not taught still takes the verdict's place.
+    slot.unknown = await beat('smoke');
+    // The supervisor restarts a stalled camera, and the autopilot speaks for the
+    // new process before the scanner's first beat does.
+    await beat('stalled');
+    slot.restarted = await push({ phase: 'check', message: 'checking the camera and the reader' });
+    out.blind[panel[0]] = slot;
+    await page.close();
+  }
+
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -5273,6 +5375,86 @@ try:
        '%s: %s' % (_sreply.get('name'), _sreply.get('said')))
     eq('...and the list then has the new one at the top',
        ((sp.get('after') or [{}])[0] or {}).get('when'), sp.get('freshWhen'))
+
+    # --- a rig that cannot see ----------------------------------------------
+    #
+    # The owner's rig read once in 9.4 days with the heartbeat beating and this
+    # page saying "scanner reading" throughout. The camera's word rides the beat
+    # now, and the page puts it where the verdict goes: red, and not PASS.
+    _pal = dict(re.findall(r'(--[a-z0-9-]+):\s*#([0-9a-fA-F]{6})\s*;',
+                           open(os.path.join(ROOT, 'styles.css')).read()))
+
+    def _rgb(var):
+        h = _pal.get(var, '000000')
+        return 'rgb(%d, %d, %d)' % tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+    _red, _black = _rgb('--no'), _rgb('--bg')
+
+    def _panel(d):
+        # The panel's state, without `novalue`: that is the rate's box standing
+        # down, which the `rate` field says on its own.
+        return ' '.join(c for c in (d.get('cls') or '').split() if c != 'novalue')
+
+    bl = got.get('blind') or {}
+    eq('a rig that cannot see was measured on the three panels it is bolted to',
+       sorted(bl), ['1024x600', '480x320', '800x480'])
+    for _pn in ('800x480', '1024x600', '480x320'):
+        _b = bl.get(_pn) or {}
+        _see, _st = _b.get('seeing') or {}, _b.get('stalled') or {}
+        _sb = _b.get('seeingBeat') or {}
+        ok_('[%s] measured in the phone layout, over a PASS on the panel (%r)'
+            % (_pn, _see.get('cls')),
+            _see.get('phone') and 'no' in (_see.get('cls') or '').split())
+        eq('[%s] a beat saying the camera can see changes nothing' % _pn,
+           (_sb.get('cls'), _sb.get('label'), _sb.get('rate'), _sb.get('conn')),
+           (_see.get('cls'), _see.get('label'), _see.get('rate'), 'scanner reading'))
+        eq('[%s] a stalled camera takes the verdict\'s place, by name' % _pn,
+           (_panel(_st), _st.get('label')), ('verdict blind', 'CAMERA STALLED'))
+        eq('[%s] ...in red where PASS is not: the word, and a dashed border on black'
+           % _pn,
+           (_st.get('labelColor'), _st.get('border'), _st.get('borderColor'),
+            _st.get('fill')), (_red, 'dashed', _red, _black))
+        eq('[%s] ...a warning sign where PASS has its cross' % _pn,
+           _st.get('glyph'), '"⚠ "')
+        ok_('[%s] ...and the line saying what to do, red as well (%r)'
+            % (_pn, _st.get('note')),
+            'same picture' in (_st.get('note') or '') and _st.get('noteColor') == _red)
+        ok_('[%s] ...the word and the line whole, inside the card, on the glass'
+            % _pn, _st.get('labelIn') and _st.get('noteIn') and _st.get('noteWhole'))
+        eq('[%s] ...and no rate: the frozen card\'s figure is not vouched for' % _pn,
+           _st.get('rate'), '')
+        eq('[%s] ...the connection line no longer saying it is reading' % _pn,
+           _st.get('conn'), 'scanner running, cannot see')
+        eq('[%s] ...and the bar where it was, every control the same' % _pn,
+           _st.get('bar'), _see.get('bar'))
+        ok_('[%s] ...nor the page grown past the glass' % _pn, _st.get('fits'))
+        eq('[%s] a fresh-looking reading of the frozen card does not take the '
+           'place back' % _pn, (_b.get('frozenRead') or {}).get('label'),
+           'CAMERA STALLED')
+        _dk = _b.get('dark') or {}
+        eq('[%s] a box with nothing lit is named for what it means' % _pn,
+           (_panel(_dk), _dk.get('label')), ('verdict blind', 'NOTHING IN VIEW'))
+        ok_('[%s] ...with its own line, whole inside the card (%r)'
+            % (_pn, _dk.get('note')),
+            'Nothing lit' in (_dk.get('note') or '') and _dk.get('noteIn')
+            and _dk.get('noteWhole') and _dk.get('labelIn'))
+        eq('[%s] ...and the bar where it was' % _pn, _dk.get('bar'), _see.get('bar'))
+        _bk = _b.get('back') or {}
+        eq('[%s] seeing again gives the verdict back' % _pn,
+           (_bk.get('cls'), _bk.get('label'), _bk.get('rate'), _bk.get('conn')),
+           (_see.get('cls'), _see.get('label'), _see.get('rate'), 'scanner reading'))
+        _id = _b.get('idleDark') or {}
+        eq('[%s] between offers it is said in place of WAITING FOR AN OFFER' % _pn,
+           (_panel(_id), _id.get('label')), ('verdict blind', 'NOTHING IN VIEW'))
+        eq('[%s] ...with no line claiming there is no offer on a screen it cannot see'
+           % _pn, _id.get('detail'), '')
+        eq('[%s] a word this page was not taught still takes the place' % _pn,
+           (_panel(_b.get('unknown') or {}), (_b.get('unknown') or {}).get('label')),
+           ('verdict blind', 'CANNOT SEE'))
+        _rs = _b.get('restarted') or {}
+        eq('[%s] the process that said it is gone once the autopilot speaks for '
+           'the next one' % _pn, (_panel(_rs), _rs.get('label')),
+           ('verdict empty', 'CHECKING'))
 
 finally:
     proc.terminate()

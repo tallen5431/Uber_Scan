@@ -118,6 +118,14 @@ would get. `SCANNER_SILENT_MS` moves the window. `/api/status` carries a
 correctly goes back to null once the replacement is up, and these are what is
 left to tell you whether tonight was the first time or the fourth.
 
+The same silence, and the same count, cover two ways of being up and useless
+that the camera driver does not block on: a read stuck past `READ_STUCK_S`, and
+a camera that keeps handing over **the very same picture**. The scanner goes
+quiet on purpose for either, once it has said why — in its log and as a
+`restart` row in the journal, since the SIGKILL that follows leaves no stop
+row — and the watchdog does the rest. See *A rig that was blind for a whole
+shift* below.
+
 ### Or as its own service
 
 ```sh
@@ -4015,8 +4023,10 @@ one.
 |---|---|---|
 | `rig` | `start` | as the scan loop starts, with `gps` (whether `--gps` was given) and `uptime` (seconds since the Pi booted) |
 | `rig` | `stop` | on a clean exit — ctrl-c, the supervisor's SIGTERM, the display window closed |
+| `rig` | `restart` | the scan loop has gone quiet so the supervisor restarts it, with `why`: a read stuck past `READ_STUCK_S`, or a stalled camera |
 | `phone` | `gone` / `back` | the camera has not found the screen for a minute (`PHONE_HOLD`) / it has again |
 | `gps` | `ok` / `stale` / `lost` | the same words the panel reads, settled the same way, with `ageSeconds` and gps.py's own `why` |
+| `camera` | `stalled` / `dark` / `seeing` | the same picture byte for byte for `STALL_SAY` / nothing lit in the box for `PHONE_HOLD`, with nothing tracking the corners, and `bright`, what it read / either of those over — see the next section |
 
 **A start with no stop before it marks a run that ended without one** — a
 crash, server.js's SIGKILL of a wedged camera, or the Pi losing power — and
@@ -4043,7 +4053,8 @@ and refused — see `worth_recording` and AUDITS.md — and a phone glanced at f
 twenty seconds, or a fix lost for thirty, is not a row either: bad news has to
 last its hold, good news is written at once, so however the phone or the GPS
 flickers, each costs at most two rows a minute. Nothing about the phone is
-written with nothing tracking it (`--no-track`, or a box drawn by hand).
+written with nothing tracking it (`--no-track`, or a box drawn by hand); there,
+the camera's `dark` row is what says the box went empty.
 
 The `seen` rows — still one per two-minute window **with cards in it** — now
 carry the rest of that window's health line too: `reads`, `failed`,
@@ -4062,6 +4073,82 @@ into a verdict.
 already speaks gpsd's protocol, so the expected route is gpsd on the Pi and
 `--gps 127.0.0.1` — untried here — and AUDITS.md's note on it stands: it wants
 a fix-quality gate before anything on the panel uses its position.
+
+### A rig that was blind for a whole shift, and nothing said so
+
+Measured on the owner's own rig, from its own log: one scanner process ran
+from 27 Sep to 8 Oct with no restart — its read counter went from 1092 to 1093
+— and made **one read in 814,077 seconds, 9.4 days**, a full shift of offers on
+7 Oct among them, with the screen reading 1-2 of 205 in the reads either side.
+The heartbeat beat every four seconds, the panel said *scanner reading*, and
+nothing was journalled. A restart at 02:38 brought reading straight back.
+Whether the phone was out of the mount or the camera's feed had stalled is not
+known, so the scanner now watches for both, and both are one word — what the
+camera can see — on the heartbeat as `blind`, in the journal as `camera` rows,
+and on the panel where the verdict goes.
+
+**Stalled** is the camera handing over the same picture, byte for byte, frame
+after frame. Not a still picture — the same one: a live sensor's noise moves
+pixels on every frame however still the scene. Measured with the suites' own
+sensor model (sigma 3 a pixel, drawn fresh per frame, shrunk to the 640x480
+preview the loop compares), in two cabins as dark as the owner's — their box
+read 2 and 3 of 205 — and in the suites' lit empty one, none of 59 consecutive
+pairs of frames matched in any of the three, and the fewest pixels that
+differed between two frames was 102,285 of 307,200. The suites' own fake
+cameras did the opposite — a still render, the same bytes every capture — so
+they now carry a frame-to-frame dither of their own, which moves the motion
+gate by 0.50 at most against the 2.0 it calls still. A picture that is one flat
+value all over is the exception, since two of those match on a working camera,
+and does not count. One repeat is proof already; it is said after `STALL_SAY`,
+which is `VERIFY_MAX`, because a camera frozen on an offer card goes on
+re-reading that card and painting a live-looking verdict about it, and
+`VERIFY_MAX` is how long this rig already lets a verdict outlive its card.
+Comparing a frame with the last costs 0.056ms on the development machine.
+
+**A stalled camera is not cured by waiting** — the owner's ran 9.4 days that way
+— so once a heartbeat has told the panel, the scanner goes quiet exactly as a
+stuck read does: no more beats, a `restart` row with the reason, and
+`server.js`'s silence watchdog kills and restarts it after `SCANNER_SILENT_MS`,
+counting it in `wedged` on `/api/status`. It also stops reading the frozen
+picture the moment the stall is said. Frozen on a card, the verify beat went on
+re-reading it with every verdict looking fresh, and the watchdog counts a
+reading as the loop speaking — so without that the silence never came.
+
+**Dark** is the box the rig reads holding no lit screen for a minute
+(`PHONE_HOLD`), with no read going out in it — a read is the motion gate saying
+something there moved. Asked only where nothing tracks the
+corners — a box drawn by hand, which is the owner's rig, or `--no-track` —
+because the tracker's `phone gone` row already answers it everywhere else.
+"No lit screen" is AutoGain's own answer (`lit`: the box's brightness against
+`exposure.LIT_ENOUGH`), the one the gain already refuses to brighten an empty
+mount on, so the panel and the gain cannot disagree about whether the box is
+empty. Which is what keeps it apart from *too dim*: that is a lit screen the
+camera has run out of light for, and this is no lit screen at all. It can only
+see darkness — an empty mount in daylight reads as lit — and a rig run with a
+fixed `--gain` has no brightness beat and so no `dark`.
+
+**On the panel** the word takes the verdict's place, in red: the label, a
+dashed red border on the page's black, a ⚠ where PASS has its ✕, and the line
+saying what to do. Red and still not PASS, which is solid-bordered on a red
+fill under a cross. It takes the place with a reading on hand too, because a
+frozen camera's readings look as fresh as real ones. The connection line says
+*scanner running, cannot see* instead of *scanner reading*. Measured at
+800x480, 1024x600 and 480x320 in the phone layout: the word and the line whole
+inside the card, and every control on the bar exactly where it was.
+
+| the panel says | when | what to do |
+|---|---|---|
+| **CAMERA STALLED** | the same picture for `STALL_SAY` | nothing, at first: the rig restarts it itself — six seconds to say it, then the watchdog's thirty of silence, then however long the restart takes. If it keeps coming back, power down and reseat the camera's ribbon cable |
+| **NOTHING IN VIEW** | nothing lit in the box for a minute, on a rig with nothing tracking the corners | put the phone in the mount, screen on; if it is there and lit, the box is drawn somewhere else — ▣ Set box |
+
+A word the beat sends that the page was not taught reads **CANNOT SEE**. A
+phase message — the autopilot speaking for a restarted process — clears it,
+since the word belonged to the process before.
+
+`doctor.py` reads the newest `camera` row of the newest run and fails *the
+camera can see* while it says stalled or dark, with how long — without
+blocking, since nothing in view can as well be a phone in a pocket as a fault.
+`📷 Snap`'s reader.json carries `blind` with the rest of the last beat.
 
 ### A page nothing linked to, five buttons one press from dead, and a backup with a hole in it
 
