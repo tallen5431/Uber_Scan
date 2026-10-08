@@ -2065,7 +2065,7 @@ connection dot, just above the bar of buttons — not on the bar, which holds si
 | `panel.png` | the Pi's display, taken by the desktop's own screenshot tool |
 | `camera.jpg` | the live picture the scanner last wrote, with its age |
 | `status.json` | what `/api/status` would have answered at the press: the reading on the panel, the reader's text when the reading carries it, the offer on record and the order in the car |
-| `reader.jpg` | the crop the scanner last handed to tesseract — the greyscale card as it came off the warp |
+| `reader.jpg` | the card the scanner last read — the greyscale crop as it came off the warp, which `preprocess()` then turned into tesseract's input |
 | `reader.json` | the scanner's own account of that read: when, and how long before it answered; the text, the parse and the rate; whether it was a ⌖ read of the whole screen; the offer it has on record and the card's episode; its health counters as they stand; the flags its last heartbeat carried; and the phone's GPS state and fix, or "gps off" |
 | `snap.json` | which of those it kept, and for each one it did not, why |
 
@@ -2076,8 +2076,8 @@ read, the health counters reached a log line every two minutes, and the GPS
 state was reported nowhere. So a press leaves a request for the scanner in the
 handoff directory (`uberscan-snap.json` in `/dev/shm`, naming the folder), and
 the scan loop answers into the folder once — with the crop it **kept from its
-last read**, never a new one, so the picture is the last one tesseract was
-handed (a ⌖ read of the whole screen included, and said to be one). The server
+last read**, never a new one, so the picture is the last one the reader cut
+out (a ⌖ read of the whole screen included, and said to be one). The server
 waits up to four seconds, polling, and then says
 what is missing and why: the scanner is not running, it did not answer in 4s,
 or it has not read anything yet. A request older than three seconds is cleared
@@ -2085,19 +2085,35 @@ and logged by the scanner, never answered later, so nothing lands in a folder
 whose `snap.json` already says it is not there. Two presses at once are asked
 in turn, so one cannot overwrite the other's request.
 
-**When the reader and the panel disagree about the card**, the control says so
+**When the reader and the panel name different cards**, the control says so
 first: **📷 saved — reader and panel on different cards: reader <id>, panel
 <id>**. The reader's offer on record is held against the one `/api/status` had
-at the press; when they differ, the verdict on the panel may be another card's,
-which is the thing a snap is most often taken to show. On the copy at home,
-which runs no scanner, the two reader files are recorded as not applicable,
-with that reason, and are not called missing.
+at the press. Both are the scanner's record of the last card that landed, seen
+at two moments, so they differ when a card landed between the press and the
+answer — `reader.jpg` and `reader.json` are then a read made after the press,
+not the one behind `status.json`'s offer — or when the scanner restarted onto
+another card. Either way the snap's own pictures and records are of two cards,
+and laying `reader.jpg` beside `status.json`'s number would mislead. It cannot
+see a card that has not landed yet: a verdict for one leaves both on the card
+before. Nothing is said when one side has no card on record — a scanner
+restarted after its last card was too old to resume, or a server started under
+a scanner that resumed one — because that is not a second card; both ids are
+in `snap.json` regardless.
 
-**Each press leaves a row in the journal**, `kind: "snap"`, naming the folder,
-the files it kept, the ones missing and why, and the ones that do not apply —
-so a snap can be found from the shift it was taken in after its folder has
-been pruned. Collection only: the offers page, the CSV and the sync's offer
-count all pass over it, and nothing reads it into a rate.
+**On the copy at home**, which runs no scanner, the camera picture and the two
+reader files are recorded as not applying there, with that reason — not as
+missing, not in the control's line and not among the problems on `snaps.html`.
+
+**Each press that keeps anything leaves a row in the journal**, `kind:
+"snap"`, naming the folder, the files it kept, the ones missing and why, and
+the ones that do not apply — so a snap can be found from the shift it was taken
+in after its folder has been pruned. A press that keeps nothing leaves no folder
+and no row; it is answered as the failure it was. The row is stamped when it is
+written, once the slowest part is in, like every other row the server writes —
+the press's own moment is the folder's name — so the journal's stamps still run
+forwards past a screenshot that took seconds. Collection only: the offers page,
+the CSV and the sync's offer count all pass over it, and nothing reads it into
+a rate.
 
 The control answers in place: **📷 saved**, or **📷 saved — no screenshot: grim
 is not installed**. It never says "saved" over less than it kept. A camera
@@ -2129,9 +2145,10 @@ The tool is given eight seconds, well inside the panel's twenty, and killed
 after that; a file it leaves has to open and end the way a PNG does, or it is
 not kept. Whatever is missing is named in the reply: no tool installed, no
 desktop session found, the tool's own error, a picture that is not one or is
-cut short, no camera picture yet, the scanner not running, no scanner on this
-machine, a card too full to write to. The copy at home, with no desktop and no
-camera, keeps `status.json` and says why it kept nothing else.
+cut short, no camera picture yet, the scanner not running, a card too full to
+write to. The copy at home, with no desktop and no scanner, keeps `status.json`,
+says why there is no screenshot, and records the camera's and the reader's
+files as not applying there.
 
 **Getting them off the rig.** **▤ Offers → 📷 Snaps** (`snaps.html`) lists every
 snap, newest first, with its pictures — the panel, the camera's and the

@@ -2595,10 +2595,16 @@ try:
     _snaprows = [r for r in _jrows(os.path.join(os.path.dirname(_snaps), 'journal.jsonl'))
                  if r.get('kind') == 'snap']
     eq('a press leaves one snap row in the journal, naming its folder and what it kept',
-       [(r.get('v'), r.get('id'), r.get('seq'), r.get('at'), r.get('folder'), r.get('parts'))
+       [(r.get('v'), r.get('id'), r.get('seq'), r.get('folder'), r.get('parts'))
         for r in _snaprows],
-       [(1, 'snap-%d' % _rep.get('at', 0), 1, _rep.get('at'), _name,
+       [(1, 'snap-%s' % (_snaprows[0].get('at') if _snaprows else '?'), 1, _name,
          ['panel.png', 'camera.jpg', 'status.json', 'snap.json'])])
+    # Stamped as it is written: after the press, and before the reply that
+    # waited for it.
+    ok_('...stamped when it was written, between the press and the reply (%r, pressed %r)'
+        % ([r.get('at') for r in _snaprows], _rep.get('at')),
+        len(_snaprows) == 1 and isinstance(_snaprows[0].get('at'), int)
+        and _rep.get('at', 0) <= _snaprows[0]['at'] <= _after * 1000)
     eq('...with nothing missing, and the reader\'s files as not applying here, with why',
        [(r.get('missing'), r.get('notApplicable')) for r in _snaprows],
        [({}, {'reader.jpg': 'no scanner runs on this machine',
@@ -2734,6 +2740,34 @@ try:
 finally:
     stop(_p)
 
+# --- no scanner on this machine: the camera does not apply, like the reader ---
+#
+# One reason, "no scanner runs on this machine", for the camera picture and the
+# reader's two files alike, and it was filed two ways: the camera as missing,
+# in the journal row, the panel's line and the problems snaps.html lists, and
+# the reader's two as not applying. A desktop and grim here, so the screenshot
+# is kept and nothing else has a reason to be said — and not gated on an X
+# server like the case below, because none of this is about the display.
+_p, _u, _snaps, _log = _snapper('home', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
+                                         'FRAME': os.path.join(_pdir, 'no-frame.jpg')})
+try:
+    _code, _rep = _snap(_u)
+    eq('on a machine with no scanner the camera picture does not apply, for the reader\'s reason',
+       [(_piece(_rep, w).get('saved'), _piece(_rep, w).get('applies'), _piece(_rep, w).get('why'))
+        for w in ('camera', 'crop', 'reader')],
+       [(False, False, 'no scanner runs on this machine')] * 3)
+    eq('...so the line the panel shows is plain "saved"', _rep.get('said'), 'saved')
+    eq('...and the journal row files all three as not applying, none as missing',
+       (_snaprow(_snaps).get('parts'), _snaprow(_snaps).get('missing'),
+        _snaprow(_snaps).get('notApplicable')),
+       (['panel.png', 'status.json', 'snap.json'], {},
+        dict.fromkeys(['camera.jpg', 'reader.jpg', 'reader.json'],
+                      'no scanner runs on this machine')))
+    eq('...and snaps.html lists no problem with it',
+       _listed(_u, _rep.get('name')).get('problems'), [])
+finally:
+    stop(_p)
+
 # --- no desktop at all: the NucBox, which has no scanner either ---------------
 if _x0:
     print('  (this machine has an X server at /tmp/.X11-unix/X0, so "no display '
@@ -2752,11 +2786,11 @@ else:
            (_panel.get('why'), _panel.get('tool')), ('no display session found', None))
         ok_('...and where it looked (%r)' % _panel.get('detail'),
             _nodesk in (_panel.get('detail') or ''))
-        eq('...and that no scanner runs here to have taken a picture',
-           _piece(_rep, 'camera').get('why'), 'no scanner runs on this machine')
-        eq('...all of it in the line the panel shows', _rep.get('said'),
-           'saved — no screenshot: no display session found; '
-           'no camera picture: no scanner runs on this machine')
+        eq('...and that the camera picture does not apply, no scanner running here to take one',
+           (_piece(_rep, 'camera').get('applies'), _piece(_rep, 'camera').get('why')),
+           (False, 'no scanner runs on this machine'))
+        eq('...the screenshot\'s reason alone in the line the panel shows', _rep.get('said'),
+           'saved — no screenshot: no display session found')
         eq('...and grim, though installed, was never run, there being nothing to photograph',
            _ran(_nucgrim), None)
     finally:
@@ -3102,9 +3136,11 @@ finally:
 # real scan_pi.py — snap_requested, reader_record, answer_snap — so what the
 # server reads is what the rig writes. rpi/test_loop.py drives the same three
 # through the real scan loop. Each answer is one line of the plan: agreeing
-# with the panel about the card, disagreeing, before any read, and a
-# reader.json that is not one. It takes a request every 0.6s, slowly enough
-# that two presses together are both written before it looks.
+# with the panel about the card, disagreeing, before any read, a reader.json
+# that is not one, and no card on record at all. It takes a request every
+# 0.6s, slowly enough that two presses together are both written before it
+# looks. SNAP_TEST_UNTOLD starts it without telling the server of its card,
+# the way a server started under a scanner that resumed one is.
 try:
     import numpy                                              # noqa: F401
     import cv2                                                # noqa: F401
@@ -3118,7 +3154,7 @@ if _have_reader:
     os.makedirs(_rho)
     _rplan = os.path.join(_pdir, 'reader-plan.txt')
     with open(_rplan, 'w') as _fh:
-        _fh.write('agree disagree noread garbage agree agree')
+        _fh.write('agree disagree noread garbage none agree agree')
     _rfake = os.path.join(_pdir, 'answers.py')
     with open(_rfake, 'w') as _fh:
         _fh.write('import json, os, sys, time\n'
@@ -3128,10 +3164,13 @@ if _have_reader:
                   'class OnRecord(object):\n'
                   '    def __init__(self, i):\n'
                   '        self.id = self.landed_id = i\n'
-                  'print(json.dumps({"ready": True, "state": "go", "perHour": 31.6, "pay": 16.05, '
+                  'told = {"ready": True, "state": "go", "perHour": 31.6, "pay": 16.05, '
                   '"minutes": 23.0, "miles": 8.4, "offer": {"id": "o-snap", "pay": 16.05, '
                   '"minutes": 23.0, "billedMinutes": 23.0, "miles": 8.4, "cost": 2.94, '
-                  '"state": "go"}}), flush=True)\n'
+                  '"state": "go"}}\n'
+                  'if os.environ.get("SNAP_TEST_UNTOLD"):\n'
+                  '    del told["offer"]\n'
+                  'print(json.dumps(told), flush=True)\n'
                   'last = {"at": time.time(), "fitted": np.full((60, 40), 90, np.uint8), '
                   '"wholeScreen": False, "crop": [0.0, 0.3, 1.0, 0.5], "text": "UberX $16.05", '
                   '"parsed": {"pay": 16.05, "episode": 2}, "rate": {"ready": True, "state": "go"}}\n'
@@ -3147,9 +3186,9 @@ if _have_reader:
                   '            open(os.path.join(folder, "reader.json"), "w").write("not json")\n'
                   '        else:\n'
                   '            read = None if how == "noread" else last\n'
+                  '            card = {"disagree": "o-other", "none": None}.get(how, "o-snap")\n'
                   '            SP.answer_snap(folder, read, SP.reader_record(read, now, '
-                  'offer_log=OnRecord("o-other" if how == "disagree" else "o-snap"), '
-                  'counters=SP.Health().counters(now)))\n'
+                  'offer_log=OnRecord(card), counters=SP.Health().counters(now)))\n'
                   '    time.sleep(0.6)\n' % (os.path.join(ROOT, 'rpi'), _rplan))
     _p, _u, _snaps, _log = _snapper('reader', {
         'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
@@ -3189,8 +3228,8 @@ if _have_reader:
             {'camera.jpg': 'no camera picture yet'}, {}))
 
         # The reader on another card from the panel: said FIRST, because the
-        # line is cut from the end and this is the one thing a snap can say
-        # that means the verdict on the panel may be another card's.
+        # line is cut from the end and it says the snap's own reader files
+        # and status.json are of two cards.
         _code, _rep = _snap(_u)
         _reader = _piece(_rep, 'reader')
         eq('a reader on another card from the panel is said first, briefly, on the panel\'s line',
@@ -3215,6 +3254,15 @@ if _have_reader:
            [(_piece(_rep, w).get('saved'), _piece(_rep, w).get('why')) for w in ('crop', 'reader')],
            [(False, 'the scanner kept no reader.jpg and did not say why'),
             (True, 'reader.json cannot be read')])
+
+        # A reader with no card on record beside a panel with one: a scanner
+        # restarted after its last card was too old to resume, while this
+        # server kept the one it was told about. Not a second card.
+        _code, _rep = _snap(_u)
+        _reader = _piece(_rep, 'reader')
+        eq('a reader with no card on record, beside a panel with one, is not called another card',
+           (_reader.get('offer'), _reader.get('panelOffer'), _reader.get('warn'), _rep.get('said')),
+           (None, 'o-snap', None, 'saved — no camera picture: no camera picture yet'))
 
         # Two presses together. One request file: written for both at once,
         # the second would replace the first before the scanner looked, and
@@ -3261,6 +3309,26 @@ if _have_reader:
            ([_piece(_rep, w).get('saved') for w in ('crop', 'reader')],
             os.path.isfile(os.path.join(_rel, 'snaps', _rep.get('name') or '?', 'reader.json'))),
            ([True, True], True))
+    finally:
+        stop(_p)
+
+    # ...and the other way about: a server started under a scanner that had
+    # resumed a card, and so never told of it. The panel has no card on record
+    # and the reader has one, which is not two cards either.
+    _p, _u, _snaps, _log = _snapper('untold', {
+        'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'], 'SNAP_TEST_UNTOLD': '1',
+        'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _rfake,
+        'UBERSCAN_HANDOFF_DIR': _rho, 'FRAME': os.path.join(_pdir, 'no-frame.jpg')})
+    try:
+        for _ in range(400):
+            if (get(_u, '/api/status').get('last') or {}).get('perHour') == 31.6:
+                break
+            time.sleep(0.05)
+        _code, _rep = _snap(_u)
+        _reader = _piece(_rep, 'reader')
+        eq('a panel with no card on record, beside a reader with one, is not called another card',
+           (_reader.get('offer'), _reader.get('panelOffer'), _reader.get('warn'), _rep.get('said')),
+           ('o-snap', None, None, 'saved — no camera picture: no camera picture yet'))
     finally:
         stop(_p)
 
@@ -3327,6 +3395,31 @@ try:
     eq('...as it was written', _jrows(_hj), _krows)
 finally:
     stop(_hp)
+
+# ...and stamped when it is written, not at the press. It is written once the
+# slowest part is in, and the scan loop goes on appending offers meanwhile: a
+# row stamped at the press lands behind them, which rpi/doctor.py reads as NTP
+# stepping the clock back mid-shift. A screenshot that takes a second, and an
+# offer landing half way through it.
+_p, _u, _snaps, _log = _snapper('forwards', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['slow']})
+_fj = os.path.join(os.path.dirname(_snaps), 'journal.jsonl')
+try:
+    def _lands():
+        time.sleep(0.5)
+        write(_fj, [offer(81, int(time.time() * 1000))], mode='a')
+
+    _lt = threading.Thread(target=_lands)
+    _lt.start()
+    _code, _rep = _snap(_u)
+    _lt.join()
+    _frows = _jrows(_fj)
+    eq('a snap whose screenshot took a second is written after the offer that landed during it',
+       [r.get('kind') for r in _frows], [None, 'snap'])
+    ok_('...and stamped after it, so the journal\'s stamps still run forwards (%r, pressed %r)'
+        % ([r.get('at') for r in _frows], _rep.get('at')),
+        len(_frows) == 2 and _frows[0]['at'] <= _frows[1]['at'])
+finally:
+    stop(_p)
 
 # --- newest first, and the oldest go, out loud --------------------------------
 _p, _u, _snaps, _log = _snapper('prune', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
@@ -3552,13 +3645,16 @@ _p, _u, _snaps, _log = _snapper('nothing', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bin
                                             'NODE_OPTIONS': '--require ' + _full})
 try:
     _code, _rep = _snap(_u)
+    # Every reason of a part that applies here: no scanner runs on this
+    # machine, so the camera's and the reader's are not among them.
     eq('a press that keeps nothing at all is a failure that gives every reason',
        (_code, _rep.get('ok'), _rep.get('error')),
-       (500, False, 'nothing could be kept: grim is not installed; '
-                    'no scanner runs on this machine; could not write it: ENOSPC'))
+       (500, False, 'nothing could be kept: grim is not installed; could not write it: ENOSPC'))
     eq('...and leaves no empty folder behind to list as a snap',
        (os.listdir(_snaps) if os.path.isdir(_snaps) else [], get(_u, '/api/snaps')['snaps']),
        ([], []))
+    eq('...and no snap row in the journal, there being no folder for one to name',
+       _snaprow(_snaps), {})
 finally:
     stop(_p)
 

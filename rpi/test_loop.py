@@ -34,6 +34,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -139,13 +140,16 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
         refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
         clipped_for=None, dropoff_window=None, whole_text=None, fitted=None,
-        fitted_for=None):
+        fitted_for=None, hang_on_loop=True):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
-    return. `handoff`: a directory to point the button-press files at, so a
+    return — on the reader's thread only, with `hang_on_loop` False, so a read
+    the loop's own thread makes is answered and counted rather than hanging
+    the suite. `handoff`: a directory to point the button-press files at, so a
     request written here cannot be eaten by a scanner running on the same
     machine, nor this one eat theirs. Returns the journal rows, the
-    announcements, the alive beats and what rode them, and the log lines."""
+    announcements, the alive beats and what rode them, the log lines, and how
+    many reads were asked of the reader and how many it began."""
     offer = TC.mount(TC.uberx_screen(), 1200)
     quad = PL.detect_screen_quad(offer)
     work = tempfile.mkdtemp()
@@ -180,7 +184,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         wholes.append(whole)
         crops.append((list(geom.roi) if geom is not None and geom.roi is not None else None,
                       getattr(geom, 'fixed_card_share', None)))
-        if hang_from is not None and calls[0] >= hang_from:
+        if hang_from is not None and calls[0] >= hang_from and (
+                hang_on_loop or threading.current_thread() is not threading.main_thread()):
             while True:
                 real_sleep(0.05)
         if whole and whole_text is not None:
@@ -197,8 +202,17 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     said_settings = []
     real = (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
             PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
-            SP.emit_reading, SP.emit_dropoff, SP.emit_settings)
+            SP.emit_reading, SP.emit_dropoff, SP.emit_settings, SP.Reader.submit)
     real_sleep = real[6]
+    # Every read handed to the reader, begun or not: one asked of a reader
+    # stuck on the read before it never starts, so `calls` cannot count it.
+    submitted = [0]
+
+    def submit(self, frames, now, geom):
+        submitted[0] += 1
+        return real[12](self, frames, now, geom)
+
+    SP.Reader.submit = submit
     # What the loop tells the server it is pricing a mile at, as a copy: the
     # loop hands over its live dict, which is exactly the thing that changes.
     SP.emit_settings = lambda settings: said_settings.append(dict(settings or {}))
@@ -259,7 +273,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     finally:
         (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
          PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
-         SP.emit_reading, SP.emit_dropoff, SP.emit_settings) = real
+         SP.emit_reading, SP.emit_dropoff, SP.emit_settings, SP.Reader.submit) = real
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.REFIND_NOTICE_S = was_refind_s
@@ -269,6 +283,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             else:
                 os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
+                submitted=submitted[0],
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops)
 
@@ -1022,8 +1037,8 @@ eq('a clipped read is not recorded as the screen after a card',
 
 # --- 📷 Snap: the reader says what it last read, into the folder named ---------
 #
-# status.json is what the panel knew. What the READER was looking at — the crop
-# handed to tesseract, what it made of it, its counters, its last beat, the
+# status.json is what the panel knew. What the READER was looking at — the card
+# it cut out last, what it made of it, its counters, its last beat, the
 # phone's GPS — never left this loop, so POST /api/snap leaves a request naming
 # its folder and the loop answers into it once. Driven through main() the way
 # the dropoff and crop-box requests are, with the request written as server.js
@@ -1054,8 +1069,12 @@ def _json_or_none(path):
 
 # A crop of its own for each read, flat grey at 20 times the read's number, so
 # the picture kept says which read it came from. Read 4 never comes back: the
-# reader is stuck on it, so read 3 is the last one there is, and an answer that
-# went back to the camera for a fresh one could never arrive at all.
+# reader's thread is stuck on it, so read 3 is the last one there is. An answer
+# that went back for a fresh read shows as a fifth: asked of the reader, it is
+# counted as handed over though it never starts, and made on the loop's own
+# thread, it is answered (hang_on_loop=False) — with read 5's crop — rather
+# than hanging the suite where no check could see it. Every snap run below
+# that strands the reader does the same, for the same reason.
 def _crop_of(n):
     return np.full((120, 80), 20 * n, np.uint8)
 
@@ -1075,8 +1094,8 @@ def _snap_once_stuck(rows, ann, calls):
 
 
 r14 = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=20.0, handoff=_snho,
-          alive_every=0.05, stuck_after=60.0, hang_from=4, fitted_for=_crop_of,
-          until=_snap_once_stuck)
+          alive_every=0.05, stuck_after=60.0, hang_from=4, hang_on_loop=False,
+          fitted_for=_crop_of, until=_snap_once_stuck)
 _said = _json_or_none(os.path.join(_snfold, 'reader.json')) or {}
 _jpg = cv2.imread(os.path.join(_snfold, 'reader.jpg'), cv2.IMREAD_GRAYSCALE)
 ok_('a snap request is answered into the folder it names, reader.json and reader.jpg (%r)'
@@ -1084,8 +1103,8 @@ ok_('a snap request is answered into the folder it names, reader.json and reader
 ok_('reader.jpg is the crop the last read handed the reader, kept from it (mean %r, read 3 is 60)'
     % (None if _jpg is None else round(float(_jpg.mean()), 1)),
     _jpg is not None and _jpg.shape == (120, 80) and abs(float(_jpg.mean()) - 60) < 2)
-eq('...answered while the reader is stuck on the next one, so no read was asked for it',
-   r14['calls'], 4)
+eq('...answered while the reader is stuck on the next one, so no read was asked for it '
+   '(reads handed to the reader, reads begun)', (r14['submitted'], r14['calls']), (4, 4))
 _read = _said.get('read') or {}
 eq('reader.json says what that read saw, as text and as figures',
    (_read.get('text'), (_read.get('parsed') or {}).get('pay'),
@@ -1130,7 +1149,8 @@ def _snap_first_thing(rows, ann, calls):
 
 
 run(lambda n, k: WHOLE, extra_argv=['--no-journal'], seconds=15.0, handoff=_snho2,
-    hang_from=1, stuck_after=60.0, fitted_for=_crop_of, until=_snap_first_thing)
+    hang_from=1, hang_on_loop=False, stuck_after=60.0, fitted_for=_crop_of,
+    until=_snap_first_thing)
 _said2 = _json_or_none(os.path.join(_snfold2, 'reader.json')) or {}
 eq('a scanner that has not read anything yet answers with no read and says why',
    (_said2.get('read', '?'), _said2.get('noCrop')), (None, 'no read yet'))
@@ -1138,7 +1158,7 @@ eq('...and leaves no reader.jpg', sorted(os.listdir(_snfold2)), ['reader.json'])
 eq('...and says no journal keeps an offer on record, rather than naming none',
    _said2.get('offer'), 'not kept: --no-journal')
 
-# ...and a ⌖ read is a read: the last thing tesseract was handed was the whole
+# ...and a ⌖ read is a read: the last thing the reader cut out was the whole
 # screen box, and reader.json says that is what it was. Pressed in read 1, so
 # read 2 is the whole-screen one; read 3 never comes back, so read 2 stays the
 # last there is.
@@ -1163,8 +1183,8 @@ def _snap_after_the_press(rows, ann, calls):
 
 
 _r15 = run(_press_dropoff_in_read_1, seconds=15.0, handoff=_snho3,
-           whole_text=_SNAP_NAV, hang_from=3, stuck_after=60.0, fitted_for=_crop_of,
-           until=_snap_after_the_press)
+           whole_text=_SNAP_NAV, hang_from=3, hang_on_loop=False, stuck_after=60.0,
+           fitted_for=_crop_of, until=_snap_after_the_press)
 _read3 = (_json_or_none(os.path.join(_snfold3, 'reader.json')) or {}).get('read') or {}
 _jpg3 = cv2.imread(os.path.join(_snfold3, 'reader.jpg'), cv2.IMREAD_GRAYSCALE)
 eq('the last read being ⌖\'s, reader.json says it read the whole screen, and what it saw (%r)'

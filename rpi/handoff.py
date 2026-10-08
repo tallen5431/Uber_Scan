@@ -51,7 +51,7 @@ RAM = '/dev/shm'
 
 # One machine, more than one rig.
 #
-# The three filenames are fixed and the directory is shared with everything else
+# The filenames are fixed and the directory is shared with everything else
 # on the box, so two copies of this project running at once — a second rig, a
 # development checkout beside the live one, a test suite while the scanner is up
 # — write to and consume each other's requests. A crop drawn on one screen moves
@@ -178,15 +178,15 @@ DROPOFF = '.dropoff'
 SETTINGS = '.settings.json'
 # "What was the reader looking at?" — written by POST /api/snap while a press
 # fills its folder, and the only request answered INTO somewhere: it names the
-# snap folder, and the scan loop writes reader.jpg (the crop it last handed to
-# tesseract) and reader.json (what it made of it) there, once. Aged like
-# `.dropoff`, because /dev/shm outlives a scanner restart and a folder the
+# snap folder, and the scan loop writes reader.jpg (the card it last read, as
+# it came off the warp) and reader.json (what it made of it) there, once. Aged
+# like `.dropoff`, because /dev/shm outlives a scanner restart and a folder the
 # server has stopped waiting on must not be written into later. See
 # snap_requested in scan_pi.py and askReader in server.js.
 SNAP = '.snap.json'
 
 
-# The live picture is the fourth file the two sides share, and it moved here
+# The live picture is the seventh file the two sides share, and it moved here
 # first — twenty-five frames a second at ~50kB while somebody is watching, all
 # of it stale two frames later, none of it worth the one part of a Pi that
 # wears out. Its names predate this module and are kept exactly: server.js

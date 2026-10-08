@@ -571,10 +571,11 @@ def dropoff_requested(now=None):
     arriving then is the late contradiction the ⌖ button's handling was built
     to avoid.
     """
-    try:
-        pressed = HO.age(HO.DROPOFF, now)
-    except OSError:
-        return None
+    # No `except OSError` round this, which there was and nothing could reach:
+    # HO.age catches the one call in it that can fail, the stat of each copy,
+    # and the rest — the environment, isdir and access, which answer False
+    # rather than raise, and the clock — cannot.
+    pressed = HO.age(HO.DROPOFF, now)
     if pressed is None:
         return None
     HO.clear(HO.DROPOFF)
@@ -726,10 +727,9 @@ def snap_requested(now=None):
     and one that has gone was removed by a press that kept nothing; writing
     into a fresh one of that name would be a snap with no record of its own.
     """
-    try:
-        pressed = HO.age(HO.SNAP, now)
-    except OSError:
-        return None
+    # Unguarded: HO.age catches the stat that can fail, and nothing else in
+    # it raises. See dropoff_requested.
+    pressed = HO.age(HO.SNAP, now)
     if pressed is None:
         return None
     raw = None
@@ -785,8 +785,10 @@ def reader_record(last, now, offer_log=None, counters=None, beat=None,
 
     `offer` is the card on record and whether it reached the journal, or a
     sentence when there is no journal to have one. server.js holds its id
-    against the offer /api/status had at the press: the panel and the reader
-    disagreeing about which card it is is the thing a snap exists to catch.
+    against the offer /api/status had at the press, and says so when both name
+    a card and not the same one: a card landed between the press and this
+    answer, or this process restarted onto another, and the crop here is not
+    the read behind status.json's offer. See readerAnswered there.
 
     `heartbeat` is the last beat as the wire carried it, and how long ago —
     not the conditions worked out again now, which could disagree with what
@@ -2362,8 +2364,8 @@ def main():
     last_alive = 0.0
     # What 📷 Snap asks this process for — see reader_record. The read digest()
     # took last, crop and all, and the last beat with when it went. Kept, not
-    # made again on request: the crop is the one tesseract was handed, and the
-    # beat is what the panel was told.
+    # made again on request: the crop is the one tesseract's input was made
+    # from, and the beat is what the panel was told.
     last_read = None
     last_beat = None
     # The card currently being watched, and what has become of it. See
@@ -2453,9 +2455,10 @@ def main():
         # it in - the driver who took a moment to get the destination up is
         # exactly the driver whose address arrives at the end of the window.
         started = read_at if read_at is not None else time.time()
-        # ...and kept for 📷 Snap, ⌖ reads included: whatever tesseract was
-        # handed last is what "what was the reader looking at?" asks about.
-        # A reference, not a copy — the reader makes a new crop every read.
+        # ...and kept for 📷 Snap, ⌖ reads included: the last card the reader
+        # cut out — `fitted`, before preprocess() made tesseract's input from
+        # it — is what "what was the reader looking at?" asks about. A
+        # reference, not a copy — the reader makes a new crop every read.
         last_read = {'at': started, 'fitted': out.get('fitted'),
                      'wholeScreen': bool(whole), 'crop': out.get('crop'),
                      'text': out.get('text'), 'parsed': parsed, 'rate': rate}

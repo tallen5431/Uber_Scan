@@ -2781,7 +2781,8 @@ function statusNow() {
  *   status.json  what /api/status would have answered at the press: the
  *                reading on the panel, the reader's text when the reading
  *                carries it, the offer on record and the order in the car
- *   reader.jpg   the crop the scanner last handed to tesseract, which nothing
+ *   reader.jpg   the card the scanner last read, as it came off the warp —
+ *                the picture tesseract's input was made from — which nothing
  *                else keeps: the camera picture is the whole scene, and a
  *                misread is a question about the few hundred pixels read
  *   reader.json  the scanner's own account of that read — its time, text,
@@ -3095,10 +3096,17 @@ function takePanel(out, done) {
 
 /* Why no scanner can have anything for a snap, or null when one is running.
  * One answer for the camera picture and the reader's crop alike, which were
- * two questions asked of the same two facts. */
+ * two questions asked of the same two facts — and one answer to whether that
+ * is a part missing or a part that does not apply here. A scanner that is not
+ * running is a part missing. A machine that runs none, the copy at home, has
+ * no camera picture to keep any more than a reader to ask, and the camera was
+ * filed as missing there while the reader's two were filed as not applying:
+ * one reason, two classes, in the journal row, the panel's line and the
+ * problems snaps.html lists. Given as the fields a part takes, so the reason
+ * and its class cannot travel apart. */
 function scannerAbsent() {
-  if (!scannerEnabled()) return 'no scanner runs on this machine';
-  if (!scanner.proc) return 'the scanner is not running';
+  if (!scannerEnabled()) return { why: 'no scanner runs on this machine', applies: false };
+  if (!scanner.proc) return { why: 'the scanner is not running' };
   return null;
 }
 
@@ -3114,12 +3122,12 @@ function scannerAbsent() {
  * written down would belong to the other one. */
 function keepCamera(out, done) {
   var part = { what: 'camera', file: 'camera.jpg', saved: false };
-  var why = function () { return scannerAbsent() || 'no camera picture yet'; };
+  var none = function () { return scannerAbsent() || { why: 'no camera picture yet' }; };
   fs.open(framePath(), 'r', function (openErr, fd) {
-    if (openErr) return done(Object.assign(part, { why: why() }));
+    if (openErr) return done(Object.assign(part, none()));
     fs.fstat(fd, function (statErr, st) {
       if (statErr || !st.isFile() || !st.size) {
-        return fs.close(fd, function () { done(Object.assign(part, { why: why() })); });
+        return fs.close(fd, function () { done(Object.assign(part, none())); });
       }
       fs.readFile(fd, function (readErr, data) {
         fs.close(fd, function () {
@@ -3156,7 +3164,7 @@ function keepCamera(out, done) {
             if (part.stale) {
               var absent = scannerAbsent();
               part.why = 'camera picture ' + spellAge(part.ageMs) + ' old'
-                       + (absent ? ', ' + absent : '');
+                       + (absent ? ', ' + absent.why : '');
             }
             done(part);
           });
@@ -3169,8 +3177,9 @@ function keepCamera(out, done) {
 /* reader.jpg and reader.json: what only the scanner has, asked of it.
  *
  * status.json says what the panel showed; it cannot say what the reader was
- * looking at. The crop handed to tesseract is made, read and dropped inside
- * the scan loop, the health counters reach a log line every two minutes, and
+ * looking at. The card cropped off the warp — what preprocess() turns into
+ * tesseract's input — is made, read and dropped inside the scan loop, the
+ * health counters reach a log line every two minutes, and
  * the phone's GPS is reported nowhere — so the one process holding them is
  * asked. A press writes a request into the handoff directory naming its
  * folder, through a temporary of its own and a rename like every request
@@ -3189,20 +3198,23 @@ function keepCamera(out, done) {
  * answer" said of a scanner that did. The second waits its turn instead.
  *
  * Where no scanner runs — the copy at home — neither part applies, and they
- * are recorded as that, with the reason, rather than as parts that failed. */
+ * are recorded as that, with the reason, rather than as parts that failed:
+ * scannerAbsent's answer, the camera's too. */
 var SNAP_READER_MS = 4000;
 var SNAP_READER_POLL_MS = 100;
 var readerAsks = [];
 
-function readerMissing(why, extra) {
-  return [Object.assign({ what: 'crop', file: 'reader.jpg', saved: false, why: why }, extra),
-          Object.assign({ what: 'reader', file: 'reader.json', saved: false, why: why }, extra)];
+/* Both reader parts, missing for one reason: `{why}`, or scannerAbsent()'s
+ * answer, which says whether they apply here at all. */
+function readerMissing(absent) {
+  return [Object.assign({ what: 'crop', file: 'reader.jpg', saved: false }, absent),
+          Object.assign({ what: 'reader', file: 'reader.json', saved: false }, absent)];
 }
 
 /* `done([crop, reader])`, once. `panelOffer` is the offer id /api/status had
  * at the press, which the reader's own is held against. */
 function askReader(dir, panelOffer, done) {
-  if (!scannerEnabled()) return done(readerMissing(scannerAbsent(), { applies: false }));
+  if (!scannerEnabled()) return done(readerMissing(scannerAbsent()));
   readerAsks.push({ dir: dir, panelOffer: panelOffer, done: done });
   if (readerAsks.length === 1) askNextReader();
 }
@@ -3222,7 +3234,7 @@ function askNextReader() {
   var tmp = partName(SNAP_ASK_PATH);
   var failed = function (err) {
     fs.unlink(tmp, function () {});
-    finish(readerMissing('could not ask the scanner: ' + (err.code || err.message)));
+    finish(readerMissing({ why: 'could not ask the scanner: ' + (err.code || err.message) }));
   };
   fs.writeFile(tmp, JSON.stringify({ folder: ask.dir }), function (writeErr) {
     if (writeErr) return failed(writeErr);
@@ -3239,8 +3251,8 @@ function askNextReader() {
             return readerAnswered(ask, text, finish);
           }
           if (gaveUp) {
-            return finish(readerMissing('the scanner did not answer in '
-                                        + spellAge(SNAP_READER_MS)));
+            return finish(readerMissing({ why: 'the scanner did not answer in '
+                                               + spellAge(SNAP_READER_MS) }));
           }
           setTimeout(look, SNAP_READER_POLL_MS);
         });
@@ -3261,12 +3273,26 @@ function readerAnswered(ask, text, finish) {
     reader.why = 'reader.json cannot be read';
   } else {
     // Which card the reader has on record, against the one the panel had at
-    // the press. They are two processes' records of one card, and when they
-    // differ the verdict on the panel may be another card's — said first in
-    // the line the panel shows (see snapSaid).
+    // the press. Both are the scanner's record of the last card that landed —
+    // this server's copy, off the scanner's offer line, as it stood at the
+    // press, and the scanner's own as it stands at its answer — so they name
+    // two cards when one landed in between, and reader.jpg and reader.json
+    // are then a read made after the press, not the one status.json's offer
+    // came from; or when the scanner was restarted and resumed another than
+    // the one this server kept. Either way the snap's own two accounts are of
+    // different cards, and that is said first (see snapSaid). Not a card that
+    // has not landed: a verdict for one leaves both on the card before it.
+    //
+    // Both, or nothing is said. A side with no card on record is not a second
+    // card: a scanner restarted after its last card was too old to resume
+    // (RESUME_WINDOW_MS in rpi/journal.py) has none while this server keeps
+    // the one it was told about, and a server started under a scanner that
+    // resumed one has none of its own. Each was said as "reader none, panel
+    // o-1" on every press until the next card landed. The two ids are in
+    // snap.json either way.
     reader.offer = said.offer && typeof said.offer === 'object' ? said.offer.id || null : null;
     reader.panelOffer = ask.panelOffer;
-    if (reader.offer !== reader.panelOffer) {
+    if (reader.offer && reader.panelOffer && reader.offer !== reader.panelOffer) {
       reader.warn = 'reader and panel on different cards: reader '
                   + (reader.offer || 'none') + ', panel ' + (reader.panelOffer || 'none');
     }
@@ -3292,9 +3318,10 @@ var SNAP_NOUN = { panel: 'screenshot', camera: 'camera picture', status: 'status
  * line, and the summary the snaps page shows under each one. Written once so
  * the three cannot word the same snap three ways. The screenshot first,
  * because it is what the press was for and the line is cut from the end —
- * after one thing only: the reader and the panel disagreeing about which card
- * is up, which is the one thing a snap can say that means a number on the
- * panel may be another card's.
+ * after one thing only: the reader and the panel on different cards (see
+ * readerAnswered), which says the snap's own pictures and records do not
+ * belong together, and anybody laying reader.jpg beside status.json's number
+ * would be laying two cards side by side.
  *
  * Parts missing for one reason are said once, so a scanner that is down is
  * "no camera picture, reader crop or reader record: the scanner is not
@@ -3477,8 +3504,9 @@ function takeSnap(done) {
       // would list as a snap with a reason for every part and no picture, so it goes,
       // and the press is answered as the failure it was — once it is gone,
       // so a list asked for straight after the answer cannot still show it.
-      // The reasons of the parts that apply here: the reader's two say "no
-      // scanner runs on this machine" where the camera has said it already.
+      // The reasons of the parts that apply here: "no scanner runs on this
+      // machine" is not why nothing could be kept, three times over. And no
+      // journal row, there being no folder left for one to name.
       var e = new Error(parts.filter(function (p) { return p.applies !== false; })
         .map(function (p) { return p.why; }).join('; '));
       e.code = 'NOTHING';
@@ -3538,8 +3566,16 @@ function takeSnap(done) {
  * journal.py's last(), which the scanner resumes from — and rpi/test_server.py
  * asks each of them. syncKey carries it to the copy at home on its id and seq,
  * which is why both are here: a kind row without them is dropped by the sync.
- * `snap-<at>`, the press's own millisecond, with the caveat the sighting rows
- * carry: two presses in one millisecond would be one key to the sync.
+ *
+ * Stamped when it is written, like a mark, a pair or a sighting, and not at
+ * the press. It is written once the slowest part has landed — up to
+ * SNAP_TOOL_MS for the screenshot — and the scan loop goes on appending
+ * offers meanwhile, so a row stamped at the press landed behind the one
+ * before it: the backwards step rpi/doctor.py reads as NTP correcting the
+ * clock mid-shift, and tells the driver to give the Pi a network. The press's
+ * own moment is the folder's name, and `at` in its snap.json. `snap-<at>`,
+ * with the caveat the sighting rows carry: two rows written in one
+ * millisecond would be one key to the sync.
  *
  * Files rather than parts, because a file is what somebody goes looking for:
  * which were kept, which are missing and why, and which do not apply on this
@@ -3555,7 +3591,8 @@ function snapRow(record, sealErr) {
   });
   if (sealErr) missing['snap.json'] = 'could not write it: ' + (sealErr.code || sealErr.message);
   else kept.push('snap.json');
-  return { v: 1, kind: 'snap', id: 'snap-' + record.at, seq: 1, at: record.at,
+  var at = Date.now();
+  return { v: 1, kind: 'snap', id: 'snap-' + at, seq: 1, at: at,
            folder: record.name, parts: kept, missing: missing, notApplicable: notHere };
 }
 
