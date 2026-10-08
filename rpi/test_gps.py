@@ -360,6 +360,31 @@ try:
     # from the driver.
     eq('...and the state says it went stale rather than never arriving',
        it.state()['state'], 'stale')
+    # ...and how stale. The scan loop reads this for the panel's "no fix for
+    # 12 min" and the journal's gps rows; the word alone said only that the
+    # fix had gone, not since when.
+    eq('...and how old the newest fix is, on the same clock',
+       it.state()['ageSeconds'], 21.0)
+    it.stop()
+finally:
+    phone.close()
+
+# The word and the position must not disagree about a fix right at the limit.
+# state() reports the age rounded to a tenth; judged on that rounded figure,
+# 20.04s became 20.0, "fixed", while fix() — on the true figure — had already
+# handed back None. The panel and the row would then say a GPS was fine that
+# the offer rows were already going without.
+clock = Clock()
+phone = FakePhone(script=[RMC + '\r\n'])
+try:
+    it = G.Phone(phone.address, stale_after=20.0, clock=clock).start()
+    ok_('a fix arrives for the boundary', waited(lambda: it.fix() is not None))
+    clock.now += 20.04
+    eq('at 20.04s the position is gone', it.fix(), None)
+    eq('...and the word says so too, judged on the same unrounded age',
+       it.state()['state'], 'stale')
+    eq('...while the age it reports is rounded for reading',
+       it.state()['ageSeconds'], 20.0)
     it.stop()
 finally:
     phone.close()
@@ -375,6 +400,11 @@ try:
     ok_('a fix arrives before the clock jumps', waited(lambda: it.fix() is not None))
     clock.now -= 3600.0
     eq('a fix from the future is not a fix', it.fix(), None)
+    # ...and has no age to give. "No fix for -60 min" is the nonsense this
+    # rule exists to keep off the panel; None is the honest answer and the
+    # page says "no fix" without a duration for it.
+    eq('...and has no age, rather than a negative one',
+       it.state()['ageSeconds'], None)
     it.stop()
 finally:
     phone.close()
@@ -403,6 +433,7 @@ try:
     ok_('...and the reader survives it',
         waited(lambda: it.state()['error'] is not None, seconds=5.0))
     eq('...and is still looking', it.state()['state'], 'looking')
+    eq('...with no fix to give an age for', it.state()['ageSeconds'], None)
     # The scan loop calls this between frames. It has to be free.
     started = time.time()
     for _ in range(2000):

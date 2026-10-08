@@ -90,12 +90,18 @@ class Request(object):
 
 
 class FakeCam(object):
-    """A card that appears in the mount shortly after the loop starts."""
+    """A card that appears in the mount shortly after the loop starts.
 
-    def __init__(self, offer, empty, appear_at=0.4):
+    `fail_after`: from that capture on, raise this exception instead of
+    answering — a RuntimeError is a camera that died, SystemExit is the
+    supervisor's SIGTERM as _stop_on_sigterm turns it into one."""
+
+    def __init__(self, offer, empty, appear_at=0.4, fail_after=None):
         self.offer, self.empty = offer, empty
         self.appear_at = appear_at
         self.started = time.time()
+        self.fail_after = fail_after
+        self.captures = 0
         self._show()
 
     def _show(self):
@@ -107,6 +113,9 @@ class FakeCam(object):
                                      np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
 
     def capture_request(self):
+        self.captures += 1
+        if self.fail_after is not None and self.captures >= self.fail_after[0]:
+            raise self.fail_after[1]
         self._show()
         time.sleep(0.01)
         return Request(self)
@@ -138,13 +147,16 @@ def out_for(text, clipped=False, fitted=None):
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
         refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
-        clipped_for=None, dropoff_window=None, whole_text=None, fitted=None):
+        clipped_for=None, dropoff_window=None, whole_text=None, fitted=None,
+        fail_after=None, phone_hold=None, gps_hold=None, phone=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return. `handoff`: a directory to point the button-press files at, so a
     request written here cannot be eaten by a scanner running on the same
-    machine, nor this one eat theirs. Returns the journal rows, the
-    announcements, the alive beats and what rode them, and the log lines."""
+    machine, nor this one eat theirs. `fail_after`: (n, exception) for the
+    camera — see FakeCam. `phone`: what gps.Phone hands back, for a --gps run.
+    Returns the journal rows, the announcements, the alive beats and what rode
+    them, the log lines, and the exception main() raised, if any."""
     offer = TC.mount(TC.uberx_screen(), 1200)
     quad = PL.detect_screen_quad(offer)
     work = tempfile.mkdtemp()
@@ -157,7 +169,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     cfg.update(config_extra or {})
     with open(config, 'w') as fh:
         json.dump(cfg, fh)
-    cam = FakeCam(offer, TC.blank(), appear_at=appear_at)
+    cam = FakeCam(offer, TC.blank(), appear_at=appear_at, fail_after=fail_after)
     # Handed out so a check can ask what is really in the mount right now. The
     # stubbed reader answers with whatever text the check asked for whether or
     # not there is a card in front of it, so an announced offer is NOT evidence
@@ -229,6 +241,13 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     was_refind_s = SP.REFIND_NOTICE_S
     if refind_notice_s is not None:
         SP.REFIND_NOTICE_S = refind_notice_s
+    was_holds = (SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone)
+    if phone_hold is not None:
+        SP.PHONE_HOLD = phone_hold
+    if gps_hold is not None:
+        SP.GPS_HOLD = gps_hold
+    if phone is not None:
+        SP.GPS.Phone = lambda address: phone
     deadline = time.time() + seconds
 
     def rows():
@@ -247,10 +266,15 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     time.sleep = bounded
     sys.argv = ['scan_pi', '--config', config, '--json', '--snapshot', '',
                 '--journal', journal] + list(extra_argv)
+    raised = None
     try:
         SP.main()
     except KeyboardInterrupt:
         pass
+    except RuntimeError as e:
+        # A camera that died, from fail_after. main() lets it out, which is
+        # what a crash is; the supervisor would restart it.
+        raised = e
     finally:
         (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
          PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
@@ -258,6 +282,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.REFIND_NOTICE_S = was_refind_s
+        SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone = was_holds
         if handoff:
             if was_handoff is None:
                 os.environ.pop(HO.ENV_DIR, None)
@@ -265,7 +290,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
-                settings=said_settings, config=config, wholes=wholes, crops=crops)
+                settings=said_settings, config=config, wholes=wholes, crops=crops,
+                raised=raised)
 
 
 FRAG = '$16.05 20 min (7.3 mi) trip'
@@ -339,6 +365,29 @@ eq('one card on disk', len(set(x['id'] for x in offers)), 1)
 eq('...counted as one card seen (%r)' % [(x['saw'], x['kept']) for x in seen],
    sum(x['saw'] for x in seen), 1)
 eq('...and as one recorded', sum(x['kept'] for x in seen), 1)
+# ...and each tally carries how the reading went in its window, which until now
+# was a health line on the Pi and nothing more. Asked of the real row the real
+# loop wrote, because the fault this guards is note_tally dropping what the
+# tally carried — `reads` and `failed` were in it all along and never reached
+# the file.
+_first = seen[0] if seen else {}
+eq('a seen row carries the window\'s reads and how they went (%r)'
+   % dict((k, _first.get(k)) for k in ('reads', 'complete', 'medianMs', 'corners')),
+   [k for k in ('reads', 'failed', 'complete', 'noPay', 'clipped', 'medianMs',
+                'tooDim', 'tooBright', 'corners', 'relocks')
+    if k not in _first], [])
+ok_('...with the reads counted, not a placeholder',
+    isinstance(_first.get('reads'), int) and _first.get('reads') >= 1)
+eq('...and the corners in the health line\'s own word', _first.get('corners') in
+   ('held', 'lost', 'stuck'), True)
+# This machine has no thermal zone and no vcgencmd, so both are null — and the
+# row has to say why rather than leave a null that reads as never asked.
+eq('...and the Pi\'s temperature and throttling, each with its reason when it '
+   'cannot be read', [k for k in ('cpuC', 'cpuCWhy', 'throttled', 'throttledWhy')
+                      if k not in _first], [])
+ok_('...a null always beside a reason (%r)' % ((_first.get('cpuC'), _first.get('cpuCWhy')),),
+    (_first.get('cpuC') is not None) != bool(_first.get('cpuCWhy'))
+    and (_first.get('throttled') is not None) != bool(_first.get('throttledWhy')))
 
 # --- a glare frame is not a card either --------------------------------------
 #
@@ -666,12 +715,190 @@ ok_('...naming the reason, because on a Pi the errno is the diagnosis',
 ok_('...while the rig goes on reading and announcing as if nothing were wrong',
     _dead['announced'])
 
+# An OFFER, not any row: the rig's start row lands before anything is read, so
+# "the journal has a row in it" stopped being evidence that an offer was stored.
 _fine = run(lambda n, k: WHOLE, alive_every=0.05, seconds=10.0,
-            until=lambda rows, ann, calls: rows and calls >= 4)
+            until=lambda rows, ann, calls: any(not x.get('kind') for x in rows)
+            and calls >= 4)
 eq('a journal that is taking rows says nothing about itself',
    any(b.get('not_saving') for b in _fine['alive']), False)
 ok_('...having actually stored something, so that is not a silence of its own',
-    _fine['rows'])
+    [x for x in _fine['rows'] if not x.get('kind')])
+
+# --- the rig says when it starts and when it stops ---------------------------
+#
+# It never did. A run that crashed, one the watchdog killed and one the driver
+# stopped all left the same thing in the journal — nothing — and the counters
+# that knew the difference were server.js's, which start again at nought on
+# every restart. The rows are written by the real main(), so these drive it;
+# what the rows say is UpDown's, and test_scan_pi.py checks that.
+def _journal_of(path):
+    return ([json.loads(l) for l in open(path) if l.strip()]
+            if os.path.exists(path) else [])
+
+
+def _ups(rows):
+    return [(x.get('about'), x.get('state')) for x in rows if x.get('kind') == 'up']
+
+
+_upj = os.path.join(tempfile.mkdtemp(), 'offers.jsonl')
+_clean = run(lambda n, k: WHOLE, extra_argv=('--journal', _upj), seconds=8.0,
+             alive_every=0.05, until=lambda rows, ann, calls: calls >= 2)
+_crows = _journal_of(_upj)
+eq('a run that is stopped writes a start and a stop, and nothing else of its '
+   'own (%r)' % _ups(_crows), _ups(_crows), [('rig', 'start'), ('rig', 'stop')])
+_cstart = [x for x in _crows if x.get('kind') == 'up'][:1] or [{}]
+eq('...the start saying --gps was not given', _cstart[0].get('gps'), False)
+ok_('...and how long the machine had been up (%r)' % (_cstart[0].get('uptime'),),
+    isinstance(_cstart[0].get('uptime'), int) and _cstart[0]['uptime'] > 0)
+ok_('...ahead of every offer the run wrote',
+    _crows and _crows[0].get('kind') == 'up')
+# The beat, from the same run: the loop has to hand the GPS and the Pi to it.
+# Without --gps the word is 'off' — said on the beat, where the page decides to
+# say nothing about it, rather than left out.
+_cb = [b for b in _clean['alive'] if 'gps' in b]
+ok_('the loop puts the GPS on the beat (%d of %d beats)' % (len(_cb), len(_clean['alive'])),
+    _cb and len(_cb) == len(_clean['alive']))
+eq('...as off, for a rig not asked for a position',
+   _cb[-1].get('gps') if _cb else None, {'state': 'off', 'ageSeconds': None})
+eq('...and the Pi, with all four of its fields',
+   sorted((_clean['alive'][-1].get('pi') or {}).keys()) if _clean['alive'] else [],
+   ['cpuC', 'cpuCWhy', 'throttled', 'throttledWhy'])
+
+# A camera that dies mid-run, then the supervisor's restart onto the same
+# journal. The first run leaves a start and no stop; that unpaired start IS the
+# record of the crash, because the process that crashed cannot write one.
+_crashj = os.path.join(tempfile.mkdtemp(), 'offers.jsonl')
+_crash = run(lambda n, k: WHOLE, extra_argv=('--journal', _crashj), seconds=8.0,
+             fail_after=(40, RuntimeError('the camera stopped answering')))
+ok_('the camera really did die mid-run (%r)' % (_crash['raised'],),
+    isinstance(_crash['raised'], RuntimeError))
+eq('a run that crashed leaves its start and no stop',
+   _ups(_journal_of(_crashj)), [('rig', 'start')])
+run(lambda n, k: WHOLE, extra_argv=('--journal', _crashj), seconds=8.0,
+    until=lambda rows, ann, calls: calls >= 2)
+eq('...so after the restart the journal reads start, start, stop: the run '
+   'with no stop of its own is the one that crashed',
+   _ups(_journal_of(_crashj)), [('rig', 'start'), ('rig', 'start'), ('rig', 'stop')])
+
+# ...and the supervisor's SIGTERM, which _stop_on_sigterm turns into SystemExit,
+# is a stop and not a crash. Raised from the camera, where a real signal lands
+# most of the time: the loop spends its life waiting on capture_request().
+_termj = os.path.join(tempfile.mkdtemp(), 'offers.jsonl')
+_term = run(lambda n, k: WHOLE, extra_argv=('--journal', _termj), seconds=8.0,
+            fail_after=(40, SystemExit(0)))
+eq('a SIGTERM is a clean stop, written as one',
+   (_term['raised'], _ups(_journal_of(_termj))), (None, [('rig', 'start'), ('rig', 'stop')]))
+
+# --- the phone out of sight --------------------------------------------------
+#
+# The mount is empty for the first four seconds, and the tracker calls the
+# screen lost. With the hold cut to 0.6s that is a 'gone' row, and the card
+# arriving is a 'back' row.
+_ph = run(lambda n, k: WHOLE, seconds=20.0, appear_at=4.0, phone_hold=0.6,
+          until=lambda rows, ann, calls: ('phone', 'back') in _ups(rows))
+_pups = _ups(_ph['rows'])
+ok_('a phone the camera cannot find is written as gone, then back when it '
+    'is (%r)' % _pups,
+    ('phone', 'gone') in _pups and ('phone', 'back') in _pups
+    and _pups.index(('phone', 'gone')) < _pups.index(('phone', 'back')))
+# ...and with the real hold, the same four seconds are nothing. Without this
+# the check above passes on a loop that writes a row on every lost frame — the
+# very quiet-window row the gate at worth_recording was written to refuse.
+_ph60 = run(lambda n, k: WHOLE, seconds=7.0, appear_at=4.0)
+eq('four seconds out of sight is not a row at the real hold',
+   [u for u in _ups(_ph60['rows']) if u[0] == 'phone'], [])
+ok_('...over a run that did lose the phone for them (%r)'
+    % [l for l in _ph60['logs'] if 'screen' in l][:2],
+    any('not visible' in l for l in _ph60['logs']))
+
+
+# --- the GPS, through the real loop ------------------------------------------
+#
+# A phone whose GPS app answers, hands over positions, and then stops — the
+# app's timer running out, which is the ordinary way a shift loses its fix.
+# Timed from the first time the loop asks rather than from start(): start()
+# runs before the camera opens, and a clock started there would have the phone
+# answering before the loop ever looked.
+class _StubPhone(object):
+    host, port = 'phone', 2947
+
+    def __init__(self):
+        self.t0 = None
+
+    def start(self):
+        return self
+
+    def stop(self):
+        pass
+
+    def fix(self):
+        return None
+
+    def state(self):
+        if self.t0 is None:
+            self.t0 = time.time()
+        t = time.time() - self.t0
+        # Under the 0.5s hold the run uses, so 'looking' can never last long
+        # enough to be written as lost before the first fix arrives.
+        if t < 0.4:
+            return {'state': 'looking', 'ageSeconds': None,
+                    'error': 'ConnectionRefusedError: [Errno 111] Connection refused'}
+        if t < 2.0:
+            return {'state': 'fixed', 'ageSeconds': 0.4, 'error': None}
+        return {'state': 'stale', 'ageSeconds': round(t - 1.6, 1),
+                'error': 'OSError: the phone closed the connection'}
+
+
+def _and_then(seen, extra=0.5):
+    """Stop `extra` seconds after `seen(rows)` first holds, not at once: the
+    row is written mid-pass and the beat that carries the same word comes on
+    a later one, so a run halted at the row never sees the beat."""
+    first = []
+
+    def until(rows, ann, calls):
+        if not first and seen(rows):
+            first.append(time.time())
+        return bool(first) and time.time() - first[0] > extra
+    return until
+
+
+_g = run(lambda n, k: WHOLE, extra_argv=('--gps', 'phone'), seconds=15.0,
+         alive_every=0.05, gps_hold=0.5, phone=_StubPhone(),
+         until=_and_then(lambda rows: ('gps', 'stale') in _ups(rows)))
+_gups = [x for x in _g['rows'] if x.get('kind') == 'up']
+eq('a rig asked for a position says so on its start row',
+   ([x.get('gps') for x in _gups if x.get('state') == 'start'] or [None])[0], True)
+eq('the GPS coming up and then going stale are two rows, in that order (%r)'
+   % _ups(_g['rows']),
+   [u for u in _ups(_g['rows']) if u[0] == 'gps'], [('gps', 'ok'), ('gps', 'stale')])
+_gst = [x for x in _gups if x.get('about') == 'gps' and x.get('state') == 'stale'][:1] or [{}]
+ok_('...the stale one saying how old the fix was and why (%r)'
+    % ((_gst[0].get('ageSeconds'), _gst[0].get('why')),),
+    isinstance(_gst[0].get('ageSeconds'), float) and _gst[0]['ageSeconds'] > 0.4
+    and 'closed the connection' in (_gst[0].get('why') or ''))
+_gwords = [b['gps']['state'] for b in _g['alive'] if b.get('gps')]
+_gseq = [w for i, w in enumerate(_gwords) if i == 0 or w != _gwords[i - 1]]
+eq('the beat said nothing until the first fix, then ok, then stale (%r)' % (_gseq,),
+   _gseq, [None, 'ok', 'stale'])
+ok_('...and, stale, how old the fix is, which is what the panel prints',
+    any(b['gps']['state'] == 'stale' and (b['gps']['ageSeconds'] or 0) > 0.4
+        for b in _g['alive'] if b.get('gps')))
+
+# --gps given and unusable: the rig was asked for a position and will never
+# get one. It must not read as a rig nobody asked — that is the panel keeping
+# quiet about the very thing the flag was typed for.
+_gr = run(lambda n, k: WHOLE, extra_argv=('--gps', 'phone:notaport'), seconds=10.0,
+          alive_every=0.05, gps_hold=0.3,
+          until=_and_then(lambda rows: ('gps', 'lost') in _ups(rows)))
+_grl = [x for x in _gr['rows'] if x.get('kind') == 'up' and x.get('about') == 'gps']
+eq('a --gps that cannot be used is written as lost (%r)' % _ups(_gr['rows']),
+   [x.get('state') for x in _grl], ['lost'])
+ok_('...with the reason it could not be used (%r)' % ((_grl or [{}])[0].get('why'),),
+    'could not use --gps' in ((_grl or [{}])[0].get('why') or ''))
+ok_('...and the beat says lost, not off',
+    any((b.get('gps') or {}).get('state') == 'lost' for b in _gr['alive'])
+    and not any((b.get('gps') or {}).get('state') == 'off' for b in _gr['alive']))
 
 # --- the Health object's own account of a Re-find ---------------------------
 # Reachable directly, and worth reaching: the loop above can only ever show one
@@ -1037,11 +1264,14 @@ eq('...nor any verdict sent to the panel for it',
    [v[0][0].get('state') for v in rp1['verdicts']
     if v[0] and isinstance(v[0][0], dict) and v[0][0].get('ready')], [])
 eq('...nor an offer announced off it', rp1['announced'], [])
+# The rig's own start and stop rows bracket every run now and are not about the
+# screen, so they are set aside here; everything else the run wrote is asked.
+_rp1 = [x for x in rp1['rows'] if x.get('kind') != 'up']
 eq('it is written as a prompt instead',
-   [x.get('kind') for x in rp1['rows']], ['promo'])
-if rp1['rows']:
+   [x.get('kind') for x in _rp1], ['promo'])
+if _rp1:
     ok_('...the prompt as it was read, line breaks and all',
-        rp1['rows'][0].get('text') == PROMPT)
+        _rp1[0].get('text') == PROMPT)
 
 # ...and after a card, it is not the screen that followed the card. It is one
 # prompt in one place, a `promo` row with its own stamp, whether or not a card

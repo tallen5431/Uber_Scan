@@ -1271,6 +1271,11 @@ class Health:
                 'above for what went wrong' % (now - self.since, self.failed))
             tally = {'over': int(now - self.since), 'saw': self.saw,
                      'kept': self.kept, 'reads': 0, 'failed': self.failed}
+            # Reachable on the journal and not only in the log: `saw` is
+            # counted after the read that saw it, so a window can open on a
+            # card it inherited and then fail every read it makes — and that
+            # is the window whose diagnostics are most worth having.
+            tally.update(self._window(None, tracker))
             self.reset(now)
             return tally
         median = sorted(self.ms)[len(self.ms) // 2]
@@ -1348,13 +1353,9 @@ class Health:
             # Both numbers, because they answer different questions and the
             # reassuring one can be reassuring while the corners are nowhere
             # near the phone: drift is against the last save, which moves.
-            # Three states, not two. "Held" used to cover being frozen beside
-            # the screen as well as tracking it, because a candidate was found
-            # on every check either way and only `misses` was being reported.
-            where = ('lost' if status['lost']
-                     else 'stuck' if status.get('stalled') else 'held')
             bits.append('corners %s, %.0fpx from calibration (%.0fpx since last save)'
-                        % (where, status.get('wander', status['drift']), status['drift']))
+                        % (corners_word(status), status.get('wander', status['drift']),
+                           status['drift']))
             if self.relocks:
                 bits.append('re-locked %dx since start' % self.relocks)
             if self.rebaselines:
@@ -1371,8 +1372,44 @@ class Health:
                  # Run totals, not window totals — see __init__.
                  'streetNoAddress': self.street_seen_no_address,
                  'addressAsOffer': self.address_refused_as_offer}
+        tally.update(self._window(median, tracker))
         self.reset(now)
         return tally
+
+    def _window(self, median, tracker):
+        """The rest of what the line above just said, as fields for the row.
+
+        All of it was already worked out here and printed, into a log on a
+        machine in a car. The `seen` row is the one thing this tally reaches
+        that leaves the Pi, so a window with cards in it — the only kind that
+        is written, see worth_recording — now carries how the reading went
+        while those cards were in front of it, not just how many there were.
+        The same numbers as the log line, from the same counters, so the row
+        and the line cannot disagree about a window.
+
+        `relocks` is a run total, like the two address counts beside it and
+        for the same reason the line says "since start". `corners` is None
+        with nothing tracking — --no-track, or a box drawn by hand — which is
+        not the same answer as 'held'.
+        """
+        return {'complete': self.complete, 'noPay': self.no_pay,
+                'clipped': self.clipped,
+                'medianMs': None if median is None else int(round(median)),
+                'tooDim': bool(self.too_dim), 'tooBright': bool(self.too_bright),
+                'corners': (None if tracker is None
+                            else corners_word(tracker.status())),
+                'relocks': self.relocks}
+
+
+def corners_word(status):
+    """'lost', 'stuck' or 'held', for the health line and the `seen` row alike.
+
+    Three states, not two. "Held" used to cover being frozen beside the screen
+    as well as tracking it, because a candidate was found on every check either
+    way and only `misses` was being reported.
+    """
+    return ('lost' if status['lost']
+            else 'stuck' if status.get('stalled') else 'held')
 
 
 def worth_recording(tally):
@@ -1505,7 +1542,7 @@ def not_saving_notice(log):
 
 
 def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
-               not_saving=None):
+               not_saving=None, gps=None, pi=None):
     """The beat, and the conditions that have to reach the driver without one.
 
     `tooBright` rides here rather than on a reading because the state it
@@ -1530,12 +1567,27 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
     own rows through a request and can answer 500, and the driver's tick
     already reports that way, but the offers themselves are written from inside
     this loop with nobody to answer.
+
+    `gps` and the Pi's own health are the last two, and they ride here for the
+    reason `notSaving` does: the readings go on looking perfect while either is
+    wrong. A phone whose GPS app has timed out costs every row from then on its
+    position, and a rig with no `--gps` wrote rows exactly like it — 0 of the
+    1,166 on the owner's week carry one, and nothing anywhere said whether that
+    was a choice or a fault. A Pi that is throttling reads slower and says so
+    nowhere. `gps` is `{state, ageSeconds}` — the word UpDown has settled on,
+    which is the same word the journal is told, and how old the newest fix is.
+    `pi` is PiHealth.sample()'s four fields, spread onto the beat as names of
+    their own the way the four above are: the page reads `cpuC` and
+    `throttled`, and the reason beside each null goes on to /api/status.
     """
-    print(json.dumps({'alive': True, 'at': int(time.time() * 1000),
-                      'tooBright': bool(too_bright),
-                      'tooDim': bool(too_dim),
-                      'refindRefused': refind_refused or None,
-                      'notSaving': not_saving or None}), flush=True)
+    beat = {'alive': True, 'at': int(time.time() * 1000),
+            'tooBright': bool(too_bright),
+            'tooDim': bool(too_dim),
+            'refindRefused': refind_refused or None,
+            'notSaving': not_saving or None,
+            'gps': gps}
+    beat.update(pi or {})
+    print(json.dumps(beat), flush=True)
 
 
 def emit_reading():
@@ -1554,6 +1606,282 @@ def emit_reading():
     """
     print(json.dumps({'reading': True, 'at': int(time.time() * 1000)}),
           flush=True)
+
+
+# --- the rig's own account of itself: up, down, the phone, the GPS, the Pi ----
+#
+# The rig never said when it stopped, crashed, lost sight of the phone or lost
+# its GPS. Every one of those was either a line in a log on a headless box or a
+# counter in server.js that dies with the server — `fell` and `wedged` start
+# again at nought on every restart — so a shift could not be asked afterwards
+# whether the rig was running through it. A silence in the journal reads the
+# same whether the driver was between offers or the camera was dead.
+#
+# What is written is CHANGES and nothing else. A row every quiet two minutes
+# was proposed and refused (AUDITS.md, "What else the rig could collect", and
+# the gate at worth_recording): a quiet window is not evidence and would bury
+# the windows that are. So each of these is a row when something became true,
+# once it has stayed true long enough to be news, and nothing in between.
+#
+# Collection only. Nothing divides by these and nothing reads them into a
+# verdict; the offer rows, the advice and the panel's figures are untouched by
+# any of it.
+
+# How long the camera has to have lost the phone's screen before the journal is
+# told it has gone.
+#
+# The state already existed — the tracker's `lost`, logged as "screen not
+# visible — is the phone lit and in frame?" — and went only to that log. A
+# driver lifting the phone to look at a card loses it for a few seconds, many
+# times a shift, and a row for every one of those is the quiet-window row above
+# under another name. A minute outlasts a glance and still puts a phone left on
+# the seat, a screen gone dark or a mount knocked out of line on record within
+# a minute of it happening.
+PHONE_HOLD = 60.0
+
+# ...and the same for the GPS. gps.py already rides out twenty seconds of a
+# hotspot stumbling before a fix counts as stale (STALE_AFTER); this is how long
+# it has to stay that way beyond that before it is a row, and a word on the
+# panel. What usually ends a fix is the phone's own app, which runs on a timer
+# and does not come back by itself — so this is a wait for the stumble to
+# clear, not for the fault to.
+GPS_HOLD = 60.0
+
+# How often to ask the Pi how hot it is and whether it is throttling. The
+# temperature is a file read; the throttling is a process (vcgencmd), which is
+# not worth starting on every four-second beat — and need not be, because the
+# firmware's own since-boot bits remember a dip between two samples. Thirty
+# seconds can lose WHEN a supply sagged, never WHETHER it did.
+PI_EVERY = 30.0
+
+# The words gps.Phone.state() uses, in the words the beat and the journal use.
+# `looking` is a phone asked for that has not handed over one position since the
+# rig started — lost from the start, as far as the rows are concerned; `stale`
+# is one that did and has not since. gps.py's own test says why those two are
+# kept apart: "the phone stopped talking" and "there is no phone" want
+# different answers from the driver.
+GPS_WORDS = {'fixed': 'ok', 'stale': 'stale', 'looking': 'lost', 'off': 'off'}
+
+# vcgencmd get_throttled, bit by bit. The low four are NOW and the same four
+# sixteen places up are SINCE BOOT — so a Pi that dipped once at 6pm still
+# says so at midnight, which is what makes the rows worth keeping, and only the
+# low four ever put anything on the panel.
+#
+# Listed cause first: under-voltage and the (soft) temperature limit are WHY, a
+# capped or throttled clock is what the firmware did about it. The panel has
+# room for one word beside the GPS note on the 3.5" hat — measured, the full
+# list for a weak supply ("under-voltage, throttled") and a stale GPS together
+# ran 370px into the 315px the row has there — so it takes the first, and the
+# first is the one with a remedy: the power lead, or shade. "temp limit" and
+# not "soft temp limit" for the same 315px: with a GPS two hours stale beside
+# it the longer word was cut by 2px.
+THROTTLE_BITS = ((0, 'under-voltage'), (3, 'temp limit'), (2, 'throttled'),
+                 (1, 'capped'))
+
+THERMAL = '/sys/class/thermal/thermal_zone0/temp'
+
+
+def gps_now(phone, refused=None):
+    """(word, ageSeconds, why) for the GPS as it is this moment, unsettled.
+
+    `refused` is the reason `--gps` was given and could not be used — an
+    address that would not parse. That rig asked for a position and will never
+    get one, and saying 'off' for it would be the panel keeping quiet about the
+    very fault the flag was typed to avoid. It reads as lost, with the reason.
+    """
+    if phone is None:
+        return ('lost', None, refused) if refused else ('off', None, None)
+    s = phone.state()
+    return GPS_WORDS[s['state']], s.get('ageSeconds'), s.get('error')
+
+
+def cpu_temp(path=THERMAL):
+    """(degrees C, None) or (None, why). One file, millidegrees in it."""
+    try:
+        with open(path) as fh:
+            return round(int(fh.read().strip()) / 1000.0, 1), None
+    except (OSError, ValueError) as e:
+        return None, str(e) or e.__class__.__name__
+
+
+def throttling(run=subprocess.run):
+    """({now, sinceBoot}, None) or (None, why).
+
+    `run` is injected so the suite can hand it what a real Pi answers. On
+    anything that is not a Pi there is no vcgencmd, and the answer is None
+    with that said rather than an empty list, which would read as "checked,
+    and fine".
+    """
+    try:
+        done = run(['vcgencmd', 'get_throttled'], capture_output=True,
+                   text=True, timeout=1.0)
+    except FileNotFoundError:
+        return None, 'no vcgencmd on this machine'
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, 'vcgencmd: %s' % (str(e) or e.__class__.__name__)
+    found = re.search(r'throttled=(0x[0-9a-fA-F]+)', done.stdout or '')
+    if done.returncode != 0 or not found:
+        return None, 'vcgencmd said %r' % ((done.stdout or done.stderr or '')
+                                           .strip()[:80])
+    bits = int(found.group(1), 16)
+    return {'now': [w for b, w in THROTTLE_BITS if bits >> b & 1],
+            'sinceBoot': [w for b, w in THROTTLE_BITS if bits >> (b + 16) & 1]}, None
+
+
+class PiHealth(object):
+    """The Pi's temperature and throttling, asked at most every PI_EVERY.
+
+    Four fields, each figure beside the reason it is missing when it is: a
+    null that does not say why reads the same as a Pi that was never asked.
+    """
+
+    def __init__(self, every=PI_EVERY, temp=cpu_temp, throttle=throttling):
+        self.every, self._temp, self._throttle = every, temp, throttle
+        self.at = None
+        self.last = None
+
+    def sample(self, now):
+        if self.at is None or now - self.at >= self.every:
+            cpu, cpu_why = self._temp()
+            thr, thr_why = self._throttle()
+            self.last = {'cpuC': cpu, 'cpuCWhy': cpu_why,
+                         'throttled': thr, 'throttledWhy': thr_why}
+            self.at = now
+        return dict(self.last)
+
+
+def uptime(path='/proc/uptime'):
+    """Seconds since the machine booted, or None where there is no such file.
+
+    On the start row because "started with no stop before it" has two causes
+    that want different answers: the scanner died and the Pi carried on (a
+    crash, or server.js's SIGKILL of a wedged camera), or the Pi itself went
+    down — its power cut, or a reboot. A start soon after boot is the second;
+    one hours into the Pi's uptime is the first. Read off the kernel rather than
+    the wall clock, which on a Pi boots in 1970 and cannot say how long anything
+    has been running until the network arrives.
+    """
+    try:
+        with open(path) as fh:
+            return int(float(fh.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+class Held(object):
+    """A word that only changes once the new one has lasted.
+
+    `quick` names the words that are taken at once: the good news. A phone
+    back in view or a fix back is true the moment it is seen, and holding it a
+    minute would leave the panel complaining about a GPS that is working. Bad
+    news has to last `hold` seconds first. Each change is at least `hold` apart
+    from the next bad one, so however a state flickers the journal gains at
+    most two rows a `hold`.
+    """
+
+    def __init__(self, word, hold, quick=()):
+        self.word = word
+        self.hold = hold
+        self.quick = quick
+        self._next = None
+        self._since = None
+
+    def update(self, raw, now):
+        """Returns (new word, seconds it had lasted) on a change, else None."""
+        if raw == self.word:
+            self._next = None
+            return None
+        if raw != self._next:
+            self._next, self._since = raw, now
+        lasted = now - self._since
+        if raw in self.quick or lasted >= self.hold:
+            self.word, self._next = raw, None
+            return raw, lasted
+        return None
+
+
+class UpDown(object):
+    """The rig's `kind: 'up'` rows: start, stop, the phone, the GPS.
+
+        {v, kind: 'up', id: 'up-<at>', seq: 1, at, about, state, ...}
+
+    `about` is 'rig', 'phone' or 'gps', so 'lost' on its own is never asked to
+    say what was lost.
+
+      rig    start   once the loop is about to run, with `gps` (whether --gps
+                     was given) and `uptime` (seconds since the Pi booted)
+             stop    on a clean exit: ctrl-c, the supervisor's SIGTERM, or the
+                     display window closed. NOT on a crash and not on SIGKILL,
+                     which is the point — a start with no stop before it marks
+                     a run that ended without one, and `uptime` on that start
+                     says whether the Pi went down with it.
+      phone  gone    the camera has not found the screen for PHONE_HOLD
+             back    it has again
+      gps    ok / stale / lost, settled over GPS_HOLD, with `ageSeconds` (the
+                     newest fix's age) and `why` (gps.py's own error, if any)
+
+    Every change carries `forSeconds`: how long the new state had already
+    lasted when it was written, so a 'gone' says when it really began.
+
+    Nothing about the phone is written while nothing is looking for it — a rig
+    run with --no-track, or one reading a box drawn by hand. The last phone row
+    then stands until the stop, so a box drawn while the phone was out of sight
+    leaves a 'gone' with no 'back'; the stop row is where that run's account
+    ends.
+
+    `at` is made strictly increasing within the run, because the id is built
+    from it and the sync keys on id and seq: two rows in one millisecond would
+    be one row to the copy at home, and the second would be dropped there.
+    """
+
+    def __init__(self, journal, asked_gps, phone_hold=None, gps_hold=None):
+        self.journal = journal
+        # Read here rather than as defaults, so a check that shortens the module
+        # constant reaches the loop's own instance.
+        self.phone = Held('back', PHONE_HOLD if phone_hold is None else phone_hold,
+                          quick=('back',))
+        # None, not 'ok', before the phone has said anything: the beat would
+        # otherwise say 'ok' about a GPS that has not produced a position, and
+        # the page and the status endpoint would both repeat it.
+        self.gps = Held(None if asked_gps else 'off',
+                        GPS_HOLD if gps_hold is None else gps_hold, quick=('ok',))
+        self.gps_age = None
+        self._last_at = 0
+
+    def _write(self, about, state, **extra):
+        if self.journal is None:
+            return False
+        at = max(JR.now_ms(), self._last_at + 1)
+        self._last_at = at
+        row = {'v': JR.SCHEMA, 'kind': 'up', 'id': 'up-%d' % at, 'seq': 1,
+               'at': at, 'about': about, 'state': state}
+        row.update(extra)
+        return self.journal.append(row)
+
+    def start(self, gps, booted):
+        return self._write('rig', 'start', gps=bool(gps), uptime=booted)
+
+    def stop(self):
+        return self._write('rig', 'stop')
+
+    def watch(self, now, lost, gps):
+        """`lost`: the tracker's word, or None with nothing tracking.
+        `gps`: gps_now()'s (word, ageSeconds, why)."""
+        if lost is not None:
+            moved = self.phone.update('gone' if lost else 'back', now)
+            if moved:
+                self._write('phone', moved[0], forSeconds=int(moved[1]))
+        word, age, why = gps
+        self.gps_age = age
+        moved = self.gps.update(word, now)
+        if moved:
+            self._write('gps', moved[0], forSeconds=int(moved[1]),
+                        ageSeconds=age, why=why)
+
+    def beat(self):
+        """What the heartbeat says about the GPS: the settled word, and the
+        newest fix's age as it is now."""
+        return {'state': self.gps.word, 'ageSeconds': self.gps_age}
 
 
 def emit_dropoff(address, ms=None, asked=True):
@@ -1929,7 +2257,9 @@ def main():
                          'car was, which is what lets the map page resolve a '
                          'place near you rather than near anywhere. Off unless '
                          'given, and a phone that is not answering costs '
-                         'nothing but the absence of the stamp.')
+                         'nothing but the absence of the stamp — which the '
+                         'driving panel and the journal now say, once it has '
+                         'lasted a minute.')
     ap.add_argument('--no-track', action='store_true',
                     help='never re-find the phone; use the calibrated corners exactly')
     ap.add_argument('--screen-fps', type=float, default=1.0 / SNAPSHOT_SCREEN,
@@ -2027,14 +2357,22 @@ def main():
     # anything knows where it is doing it. See rpi/gps.py, which is most
     # concerned with not answering.
     phone = None
+    # ...and why not, when it was asked for and cannot be. Kept rather than
+    # only printed: stderr becomes server.js's `error`, which the next line
+    # anything prints there replaces, and a rig that was asked for a position
+    # and will never get one has to keep saying so — see gps_now.
+    gps_refused = None
     if args.gps:
         try:
             phone = GPS.Phone(args.gps).start()
             log('asking %s:%d for a position' % (phone.host, phone.port))
         except (ValueError, OSError) as e:
-            print('could not use --gps %r (%s) — carrying on without a '
-                  'position on each offer' % (args.gps, e), file=sys.stderr)
+            gps_refused = 'could not use --gps %r (%s)' % (args.gps, e)
+            print('%s — carrying on without a position on each offer'
+                  % gps_refused, file=sys.stderr)
             phone = None
+    # The rig's own account of itself, and the Pi's. See UpDown and PiHealth.
+    pi = PiHealth()
 
     # Calibration already found focus with autofocus; reuse it rather than
     # making the driver rediscover a number that cannot change on a fixed mount.
@@ -2208,6 +2546,11 @@ def main():
         log('journal: %s (%d journal row%s so far)%s'
             % (args.journal, kept, '' if kept == 1 else 's',
                ', still on the last one' if resumed else ''))
+    # Into the same file as the offers, through the same Journal, so a card
+    # gone read-only stops these exactly when it stops them and `notSaving`
+    # says so for both. --no-journal writes none of them, which is what it asks.
+    updown = UpDown(offer_log.journal if offer_log is not None else None,
+                    asked_gps=bool(args.gps))
     def digest(out, frame, read_at=None, whole=False):
         """Everything a read means, once the reading itself is done.
 
@@ -2901,6 +3244,19 @@ def main():
             # adding them up.
             'streetNoAddress': tally.get('streetNoAddress'),
             'addressAsOffer': tally.get('addressAsOffer'),
+            # ...and how the reading went in the window, which was the rest of
+            # the health line and went no further than the log. See
+            # Health._window. `reads` and `failed` were in the tally all along
+            # and were the two fields of it this row dropped.
+            'reads': tally.get('reads'), 'failed': tally.get('failed'),
+            'complete': tally.get('complete'), 'noPay': tally.get('noPay'),
+            'clipped': tally.get('clipped'), 'medianMs': tally.get('medianMs'),
+            'tooDim': tally.get('tooDim'), 'tooBright': tally.get('tooBright'),
+            'corners': tally.get('corners'), 'relocks': tally.get('relocks'),
+            # ...and how hot the Pi was and whether it was throttling while
+            # these cards went past: a throttled Pi reads slower, and the
+            # median above is where that would show.
+            **pi.sample(time.monotonic()),
         })
 
     def collect():
@@ -2968,12 +3324,30 @@ def main():
     if args.json:
         emit_settings(cfg.get('settings'))
 
+    # Whether the loop ended the way a person ends it. Only then is a stop row
+    # written: a crash, and the SIGKILL server.js gives a wedged camera, leave
+    # the start with nothing after it, which is the whole of how a reader of
+    # the journal tells the two apart. See UpDown.
+    clean = False
     try:
+        # Here, inside the try, rather than when the journal opens: from this
+        # line on, every way out of the loop either writes the stop or is a
+        # stop that was not clean, so start and stop bracket exactly the
+        # stretch the rig was scanning.
+        updown.start(bool(args.gps), uptime())
         while True:
             # A read that finished while the camera kept running. Taken here,
             # at the top, because everything below can `continue` past it.
             if collect():
                 break
+
+            # The phone and the GPS, every pass, on the monotonic clock: the
+            # wall clock jumps by decades when NTP arrives, and a hold timed
+            # across that would write a minute's absence about a phone that was
+            # never gone. Both reads are a lock and a dict.
+            updown.watch(time.monotonic(),
+                         tracker.status()['lost'] if tracker is not None else None,
+                         gps_now(phone, gps_refused))
 
             # ...and a word to say the loop is turning, on a beat the driving
             # page's staleness test comfortably clears. See ALIVE_EVERY: a
@@ -3000,7 +3374,9 @@ def main():
                     emit_alive(too_bright=health.too_bright,
                                too_dim=health.too_dim,
                                refind_refused=health.refind_notice(now_alive),
-                               not_saving=not_saving_notice(offer_log))
+                               not_saving=not_saving_notice(offer_log),
+                               gps=updown.beat(),
+                               pi=pi.sample(time.monotonic()))
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate
@@ -3654,10 +4030,20 @@ def main():
                 emit_reading()
             if not reader.threaded and collect():
                 break
-
+        # Out of the loop by its own `break`: the display window was closed,
+        # which is a person ending it.
+        clean = True
     except (KeyboardInterrupt, SystemExit):
-        pass
+        # ctrl-c, or the supervisor's SIGTERM turned into SystemExit by
+        # _stop_on_sigterm. Anything else that gets here is a crash and is
+        # left to say so by having no stop row.
+        clean = True
     finally:
+        # Written before anything below that can hang on the way out. Once
+        # the loop has agreed to stop, a camera that will not close is a
+        # different fault from one that never stopped.
+        if clean:
+            updown.stop()
         reader.close()
         if phone is not None:
             phone.stop()

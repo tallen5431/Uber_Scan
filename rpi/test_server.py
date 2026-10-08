@@ -2418,6 +2418,114 @@ finally:
     stop(_sproc)
     shutil.rmtree(_sdir, ignore_errors=True)
 
+# --- the heartbeat's GPS and Pi, relayed -------------------------------------
+#
+# The scanner puts the GPS's state and the Pi's temperature and throttling on
+# its heartbeat. The stream carries a heartbeat whole, which is how tooBright
+# and notSaving have always reached the panel; /api/status carried none of it,
+# so the status link beside the connection dot — the one place a person
+# diagnosing a rig is sent — could not say whether the GPS had a fix. The
+# heartbeat is a fact about the process that sent it, so a restarted scanner
+# that has not beaten yet has none to report.
+_bdir = tempfile.mkdtemp()
+_bjournal = os.path.join(_bdir, 'journal.jsonl')
+open(_bjournal, 'w').close()
+_bfake = os.path.join(_bdir, 'beats.py')
+_bonce = os.path.join(_bdir, 'ran-once')
+with open(_bfake, 'w') as fh:
+    fh.write(
+        'import json, os, sys, time\n'
+        'if os.path.exists(%r):\n'
+        '    time.sleep(600)\n'
+        'open(%r, "w").close()\n'
+        'time.sleep(1.5)\n'
+        'print(json.dumps({"alive": True, "at": 5, "tooBright": False,\n'
+        '    "tooDim": False, "refindRefused": None, "notSaving": None,\n'
+        '    "gps": {"state": "stale", "ageSeconds": 312.0},\n'
+        '    "cpuC": 71.4, "cpuCWhy": None,\n'
+        '    "throttled": {"now": ["under-voltage"], "sinceBoot": ["under-voltage"]},\n'
+        '    "throttledWhy": None}), flush=True)\n'
+        'time.sleep(4.0)\n'
+        'sys.exit(1)\n' % (_bonce, _bonce))
+_bproc, _bbase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': _bfake}, _bjournal)
+try:
+    _bheard = listen(_bbase, 5.0)
+    _bs = None
+    for _ in range(100):
+        _bs = get(_bbase, '/api/status')
+        if _bs.get('beat'):
+            break
+        time.sleep(0.05)
+    _bb = (_bs or {}).get('beat') or {}
+    eq('the status carries the heartbeat\'s GPS word and fix age',
+       _bb.get('gps'), {'state': 'stale', 'ageSeconds': 312.0})
+    eq('...and the Pi\'s temperature and throttling',
+       (_bb.get('cpuC'), _bb.get('throttled')),
+       (71.4, {'now': ['under-voltage'], 'sinceBoot': ['under-voltage']}))
+    eq('...and the notices that already rode it', _bb.get('notSaving', 'absent'), None)
+    # An age, never a timestamp — the rule for everything on this endpoint,
+    # because whatever reads it does not share this server's clock.
+    ok_('...with its own age instead of a timestamp (%r)'
+        % ((_bb.get('ageMs'), _bb.get('at')),),
+        isinstance(_bb.get('ageMs'), int) and 0 <= _bb['ageMs'] < 10000
+        and 'at' not in _bb and 'alive' not in _bb)
+    time.sleep(0.5)
+    _bstream = [m for m in _bheard if m.get('alive')]
+    ok_('the stream carries the same heartbeat to the panel (%d)' % len(_bstream),
+        _bstream and _bstream[0].get('gps') == {'state': 'stale', 'ageSeconds': 312.0}
+        and _bstream[0].get('cpuC') == 71.4
+        and (_bstream[0].get('throttled') or {}).get('now') == ['under-voltage'])
+    # The fake exits four seconds after its beat and is started again; the
+    # second run says nothing. What the first one said is not the second's.
+    _bgone = None
+    for _ in range(300):
+        _s = get(_bbase, '/api/status')
+        if (_s.get('scanner') or {}).get('fell', 0) >= 1 \
+                and (_s.get('scanner') or {}).get('running'):
+            _bgone = _s
+            break
+        time.sleep(0.05)
+    ok_('the scanner was restarted', _bgone is not None)
+    eq('...and a restarted scanner that has not beaten has no heartbeat to report',
+       (_bgone or {}).get('beat', 'absent'), None)
+finally:
+    stop(_bproc)
+    shutil.rmtree(_bdir, ignore_errors=True)
+
+# --- the rig's up rows are carried, and counted as nothing -------------------
+#
+# Collection only: a start, a stop, a phone gone and a GPS gone stale say when
+# the rig was watching, and nothing may read them as offers or fold them into a
+# figure. And they have to reach the copy at home, which is what the sync is
+# for — a kind this build knows nothing about crosses on its id and seq.
+_udir = tempfile.mkdtemp()
+_ujournal = os.path.join(_udir, 'journal.jsonl')
+_ups = [{'v': 1, 'kind': 'up', 'id': 'up-%d' % (NOW - 5000 + i), 'seq': 1,
+         'at': NOW - 5000 + i, 'about': about, 'state': state}
+        for i, (about, state) in enumerate([('rig', 'start'), ('gps', 'stale'),
+                                            ('phone', 'gone'), ('rig', 'stop')])]
+write(_ujournal, [offer(i, NOW - 60000 * (i + 1)) for i in range(3)] + _ups)
+_uproc, _ubase = start({'SCANNER': '0'}, _ujournal)
+try:
+    _uj = get(_ubase, '/api/journal?days=0')
+    eq('up rows in the journal are not offers', _uj.get('count'), 3)
+    _ut = get(_ubase, '/api/today?since=%d' % (NOW - 3600000))
+    eq('...nor counted in the shift line', _ut.get('offers'), 3)
+    _uing = json.loads(urllib.request.urlopen(urllib.request.Request(
+        _ubase + '/api/journal/ingest',
+        data=''.join(json.dumps(dict(r, id=r['id'] + 'x')) + '\n' for r in _ups).encode(),
+        headers={'Content-Type': 'application/x-ndjson'}), timeout=10).read().decode())
+    eq('the sync carries up rows it has not seen', _uing.get('added'), 4)
+    _uing2 = json.loads(urllib.request.urlopen(urllib.request.Request(
+        _ubase + '/api/journal/ingest',
+        data=''.join(json.dumps(r) + '\n' for r in _ups).encode(),
+        headers={'Content-Type': 'application/x-ndjson'}), timeout=10).read().decode())
+    eq('...and recognises the ones it has', _uing2.get('added'), 0)
+finally:
+    stop(_uproc)
+    shutil.rmtree(_udir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

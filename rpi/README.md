@@ -3712,7 +3712,10 @@ nothing to say: rows carry no position, `map.html` searches on the typed hint
 the way it always did, and **◍ Where you were** draws nothing and reports "none
 carry a position". That last sentence is the one to look for when the feature
 seems to be doing nothing — it is the page saying the rows never knew, not the
-page failing to draw them.
+page failing to draw them. The scanner's start row in the journal says which
+it was (`gps: false`). *With* it, a fix that stops arriving is said on the
+driving panel and written to the journal — see *Keeping the phone's position
+coming* below.
 
 `map.html` then searches each place inside a box around where the car was, using
 Nominatim's `viewbox` with `bounded=1`. Sixty miles: generous enough that no
@@ -3812,6 +3815,96 @@ fails its own checksum, knots stored as metres per second, `ddmm.mmmm` read as
 a decimal, a boolean where a latitude should be, a sentence split across two
 packets, a sender with no line endings at all, and a stopped reader still
 showing a green light.
+
+### Keeping the phone's position coming, and hearing when it stops
+
+**0 of the 1,166 offers on the owner's week carry a position.** Nothing on any
+screen said whether that was a rig never given `--gps` or a phone whose GPS app
+had stopped — the two wrote identical rows. Both are now said, and the route
+to a position that lasts a shift is this:
+
+1. **On the rig**, `SCANNER_ARGS="--gps <the phone's address>"` (see above for
+   where that goes under `npm start` and systemd). The port is 2947 unless the
+   app says otherwise.
+2. **On the phone**, a GPS server app that listens on TCP port 2947 and speaks
+   either gpsd's JSON or plain NMEA — `gps.py` takes both and tells them apart
+   by what arrives. It has to run **without a time limit**: the app this was
+   written against showed "Runtime Left 4:48", which is a free tier stopping
+   itself, and that is the ordinary way a shift loses its fix.
+3. **Samsung's battery rules**, on the Fold6 or any One UI phone: Settings →
+   Apps → the GPS app → Battery → **Unrestricted**, and Settings → Battery →
+   Background usage limits → **Never sleeping apps** (*Never auto sleeping
+   apps* on some versions) → add it. One UI puts background apps it judges
+   idle to sleep, and a server app nobody is looking at is exactly that. Give
+   it location *Allow all the time*, with precise location on.
+4. **One network.** Put the Pi on the phone's own hotspot, so the stream
+   crosses the car and not the internet. With the Tailscale address,
+   `tailscale ping <phone>` from the Pi should answer *via* a local address;
+   *via DERP(…)* means it is being relayed through a server elsewhere, which
+   is slower and is gone whenever the phone's data is.
+5. **Check it before driving**: `python3 rpi/gps.py --from <address>` prints
+   positions, or says why there are none.
+
+**What the rig says when it stops.** On the driving panel, on the connection
+row beside *scanner reading*:
+
+| the row says | when |
+|---|---|
+| *GPS: no fix for 12 min* | a fix arrived and none has since — gps.py calls a fix stale at 20 seconds, and the rig waits a further minute (`GPS_HOLD`) before saying so, so a hotspot stumble is not news. Minutes rounded down. |
+| *GPS: no fix since start* | `--gps` was given and nothing usable has arrived in the minute since the scanner started — the app not running, the wrong address, or an address that would not parse |
+| *Pi under-voltage 61°C*, *Pi temp limit 85°C* | `vcgencmd get_throttled` says it is happening **now** — one word, the cause, which is the one with a remedy: the power lead, or shade |
+| nothing | the fix is good, or there is no `--gps` at all |
+
+Nothing for a rig run without `--gps`, on purpose: that is a choice, and a line
+saying so on every glance of every shift would be furniture — the reason
+*Offers are NOT being saved* says nothing under `--no-journal`. The choice is
+recorded instead, on the start row below. Nothing for a working GPS either:
+"GPS ok" at every glance is a word the driver learns to skip, and then skips
+the one that is not ok. The Pi's temperature on its own is never a warning;
+the firmware has its own limits and the row repeats them, it does not invent
+one.
+
+**In the journal**, `kind: "up"` rows, written only when something CHANGES:
+
+| `about` | `state` | written |
+|---|---|---|
+| `rig` | `start` | as the scan loop starts, with `gps` (whether `--gps` was given) and `uptime` (seconds since the Pi booted) |
+| `rig` | `stop` | on a clean exit — ctrl-c, the supervisor's SIGTERM, the display window closed |
+| `phone` | `gone` / `back` | the camera has not found the screen for a minute (`PHONE_HOLD`) / it has again |
+| `gps` | `ok` / `stale` / `lost` | the same words the panel reads, settled the same way, with `ageSeconds` and gps.py's own `why` |
+
+**A start with no stop before it marks a run that ended without one** — a
+crash, server.js's SIGKILL of a wedged camera, or the Pi losing power — and
+its `uptime` says which: a start soon after boot is the Pi going down, one
+hours into its uptime is the scanner. server.js's `fell` and `wedged`
+counters say the same things and start again at nought on every restart; these
+are in the one file that is kept. Every change carries `forSeconds`, how long
+it had already lasted when written, so a `gone` says when it really began.
+
+No row for a quiet stretch, ever. A row every quiet two minutes was proposed
+and refused — see `worth_recording` and AUDITS.md — and a phone glanced at for
+twenty seconds, or a fix lost for thirty, is not a row either: bad news has to
+last its hold, good news is written at once, so however the phone or the GPS
+flickers, each costs at most two rows a minute. Nothing about the phone is
+written with nothing tracking it (`--no-track`, or a box drawn by hand).
+
+The `seen` rows — still one per two-minute window **with cards in it** — now
+carry the rest of that window's health line too: `reads`, `failed`,
+`complete`, `noPay`, `clipped`, `medianMs`, `tooDim`, `tooBright`, `corners`
+and `relocks`, and the Pi's `cpuC` and `throttled`. Each Pi figure that cannot
+be read is null **beside its reason** (`cpuCWhy`, `throttledWhy`), so a machine
+with no `vcgencmd` — anything that is not a Pi — is not mistaken for a Pi that
+never throttles. `/api/status` carries the last
+heartbeat as `beat`, with its age, so the status link beside the connection dot
+can say all of this too.
+
+All of it is collection. Nothing divides by these rows and nothing reads them
+into a verdict.
+
+**The phone-free alternative, not built:** a USB GPS receiver on the Pi. gps.py
+already speaks gpsd's protocol, so the expected route is gpsd on the Pi and
+`--gps 127.0.0.1` — untried here — and AUDITS.md's note on it stands: it wants
+a fix-quality gate before anything on the panel uses its position.
 
 ### A page nothing linked to, five buttons one press from dead, and a backup with a hole in it
 
@@ -4166,8 +4259,8 @@ at most about twelve weeks of driving, so a rig on the road all year rolls at
 least four times. The line used to call a second roll a bug rather than a
 season, against a yearly figure nobody had measured; it now prints the most
 weeks the rolls can amount to. That is a ceiling, because the week is a floor
-on the rate — a real rig writes `seen`, `screen`, `promo`, `pair` and `mark`
-rows the replay did not — so a card rolling sooner is ordinary; rolls days apart
+on the rate — a real rig writes `seen`, `screen`, `promo`, `pair`, `mark` and
+`up` rows the replay did not — so a card rolling sooner is ordinary; rolls days apart
 are the bug.
 
 ### A recovery that had never once fired

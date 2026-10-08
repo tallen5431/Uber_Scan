@@ -3002,6 +3002,95 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  // --- what the rig says about itself, on the connection row ---------------
+  //
+  // The GPS and the Pi ride the heartbeat, and the page says something about
+  // them only when something is wrong. Measured on the two panels the rig
+  // ships on, in the phone layout, with a shift line on the row beside it —
+  // because the shift line is what the note has to win the width from, and a
+  // row measured empty measures nothing.
+  out.health = {};
+  for (const panel of [['800x480', 800, 480], ['480x320', 480, 320]]) {
+    stage = 'health note: ' + panel[0];
+    const page = await browser.newContext({
+      viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+    }).then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'scanning',
+        scanner: { enabled: true, running: true, error: null },
+        last: { ready: false, state: 'empty', locked: false, text: '' },
+        lastAgeMs: 30000, heardAgeMs: 900, offer: null, holding: null }) }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 9, counted: 8, setAside: 1, took: 2, median: 21,
+                             earned: 48.4, earnedCost: 12.0, beforeClock: 0,
+                             unreadable: null, rolled: false, clockSet: true }) }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await framed(page);
+    await page.waitForTimeout(600);
+    await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+    const row = () => page.evaluate(() => {
+      const m = (id) => {
+        const e = document.getElementById(id);
+        const r = e.getBoundingClientRect();
+        const cs = getComputedStyle(e);
+        return { text: (e.textContent || '').trim(), hidden: e.hidden,
+                 shown: r.width > 0 && r.height > 0 && cs.display !== 'none'
+                        && r.left >= 0 && r.right <= window.innerWidth + 1
+                        && r.top >= 0 && r.bottom <= window.innerHeight + 1,
+                 // Whole: nothing ellipsised off the end.
+                 whole: e.scrollWidth <= e.clientWidth + 1,
+                 w: Math.round(r.width), sw: e.scrollWidth };
+      };
+      const d = document.documentElement;
+      return { conn: m('conn'), health: m('health'), shift: m('shift'),
+               fits: d.scrollWidth <= d.clientWidth + 1 && d.scrollHeight <= d.clientHeight + 1,
+               phone: document.body.classList.contains('phoneview') };
+    });
+    const say = async (beat) => {
+      await page.evaluate((b) => window.__es.push(Object.assign({ alive: true, at: 1,
+        tooBright: false, tooDim: false, refindRefused: null, notSaving: null }, b)), beat);
+      await page.waitForTimeout(150);
+      return row();
+    };
+    const NOPI = { cpuC: null, cpuCWhy: 'no thermal zone', throttled: null,
+                   throttledWhy: 'no vcgencmd on this machine' };
+    const slot = {};
+    slot.off = await say(Object.assign({ gps: { state: 'off', ageSeconds: null } }, NOPI));
+    slot.notYet = await say(Object.assign({ gps: { state: null, ageSeconds: null } }, NOPI));
+    // A dip in the supply at 6pm that is over: since-boot only, nothing now.
+    slot.ok = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 52.1, cpuCWhy: null,
+                          throttled: { now: [], sinceBoot: ['under-voltage'] }, throttledWhy: null });
+    slot.stale = await say(Object.assign({ gps: { state: 'stale', ageSeconds: 119.6 } }, NOPI));
+    slot.noAge = await say(Object.assign({ gps: { state: 'stale', ageSeconds: null } }, NOPI));
+    slot.lost = await say(Object.assign({ gps: { state: 'lost', ageSeconds: null } }, NOPI));
+    slot.hot = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
+                           throttled: { now: ['temp limit', 'throttled', 'capped'],
+                                        sinceBoot: ['temp limit', 'throttled', 'capped'] },
+                           throttledWhy: null });
+    // The widest the row is asked to hold: the longest cause, and a GPS two
+    // hours stale, so three digits of minutes.
+    slot.both = await say({ gps: { state: 'stale', ageSeconds: 7380 }, cpuC: 84.6, cpuCWhy: null,
+                            throttled: { now: ['temp limit', 'throttled', 'capped'],
+                                         sinceBoot: ['temp limit'] }, throttledWhy: null });
+    // ...and the shape a weak car supply gives, the commonest of them.
+    slot.weak = await say({ gps: { state: 'stale', ageSeconds: 734 }, cpuC: 61.0, cpuCWhy: null,
+                           throttled: { now: ['under-voltage', 'throttled'],
+                                        sinceBoot: ['under-voltage', 'throttled'] },
+                           throttledWhy: null });
+    // The socket drops. The note is a word off a heartbeat, and with no
+    // heartbeat it is a word about a minute that has passed.
+    await page.evaluate(() => { if (window.__es && window.__es.onerror) window.__es.onerror(); });
+    await page.waitForTimeout(150);
+    slot.dropped = await row();
+    out.health[panel[0]] = slot;
+    await page.close();
+  }
+
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -3957,6 +4046,76 @@ try:
             and on_reading.index('NOT being saved') < on_reading.index('too bright'))
         ok_('...and goes when the journal takes a row again',
             'NOT being saved' not in ((dd.get('cleared') or {}).get('text') or ''))
+
+    # --- the GPS and the Pi, on the connection row --------------------------
+    #
+    # A rig started with --gps whose phone app had timed out wrote rows with no
+    # position exactly as a rig without --gps did, and nothing anywhere said
+    # so; a throttling Pi read slower and said so nowhere. The row beside the
+    # connection dot says both now, and only when something is wrong.
+    hl = got.get('health') or {}
+    ok_('the connection row was measured on both panels (%r)' % sorted(hl),
+        sorted(hl) == ['480x320', '800x480'])
+    for _pn in ('800x480', '480x320'):
+        _h = hl.get(_pn) or {}
+
+        def _note(key):
+            return ((_h.get(key) or {}).get('health') or {})
+
+        ok_('[%s] measured in the phone layout, which is the one in the car' % _pn,
+            (_h.get('both') or {}).get('phone'))
+        # Nothing for a rig run without --gps: the driver's choice, and a line
+        # saying so on every glance of every shift would be furniture.
+        eq('[%s] a rig without --gps says nothing about it' % _pn,
+           (_note('off').get('hidden'), _note('off').get('text')), (True, ''))
+        eq('[%s] ...nor one whose phone has not answered yet' % _pn,
+           _note('notYet').get('hidden'), True)
+        # ...and nothing for a working fix, nor for a Pi that dipped earlier
+        # and is fine now: only the Pi's NOW bits are news.
+        eq('[%s] a working fix beside a dip that is over says nothing' % _pn,
+           _note('ok').get('hidden'), True)
+        # Whole minutes, rounded down: 119.6 seconds is "1 min", and "2 min"
+        # would claim a minute that has not passed.
+        eq('[%s] a fix gone stale says for how long, rounded down' % _pn,
+           _note('stale').get('text'), 'GPS: no fix for 1 min')
+        ok_('[%s] ...on the glass, and whole' % _pn,
+            _note('stale').get('shown') and _note('stale').get('whole'))
+        eq('[%s] a stale fix with no honest age gives no duration' % _pn,
+           _note('noAge').get('text'), 'GPS: no fix')
+        eq('[%s] a GPS that has never answered says so' % _pn,
+           _note('lost').get('text'), 'GPS: no fix since start')
+        eq('[%s] a hot Pi names the cause, with its temperature' % _pn,
+           _note('hot').get('text'), 'Pi temp limit 85°C')
+        # The widest the row is asked to hold, and it has to hold it whole: a
+        # cut here falls on the GPS's minutes.
+        eq('[%s] the Pi and the GPS together, the Pi first' % _pn,
+           _note('both').get('text'), 'Pi temp limit 85°C · GPS: no fix for 123 min')
+        ok_('[%s] ...whole on this panel (%dpx of %dpx)'
+            % (_pn, _note('both').get('w') or 0, _note('both').get('sw') or 0),
+            _note('both').get('whole') and _note('both').get('shown'))
+        # ...because the shift line beside it gave way first. Asked as a fact
+        # about this row, not assumed: the note is whole AND the shift line is
+        # the one that is cut.
+        ok_('[%s] ...the shift line giving way to it (%dpx of its %dpx)'
+            % (_pn, ((_h.get('both') or {}).get('shift') or {}).get('w') or 0,
+               ((_h.get('both') or {}).get('shift') or {}).get('sw') or 0),
+            not ((_h.get('both') or {}).get('shift') or {}).get('whole'))
+        eq('[%s] ...with the connection state beside it, also whole' % _pn,
+           (((_h.get('both') or {}).get('conn') or {}).get('text'),
+            ((_h.get('both') or {}).get('conn') or {}).get('whole')),
+           ('scanner reading', True))
+        ok_('[%s] ...and the page still fits the glass' % _pn,
+            (_h.get('both') or {}).get('fits'))
+        eq('[%s] a weak supply and a stale fix, the commonest pair' % _pn,
+           _note('weak').get('text'), 'Pi under-voltage 61°C · GPS: no fix for 12 min')
+        ok_('[%s] ...whole as well' % _pn, _note('weak').get('whole'))
+        # The note is a word off a heartbeat. With the socket gone there is no
+        # heartbeat, and the row says so instead of a GPS state from before.
+        eq('[%s] a dropped socket takes the note down with it (%r)'
+           % (_pn, ((_h.get('dropped') or {}).get('conn') or {}).get('text')),
+           (_note('dropped').get('hidden'),
+            (((_h.get('dropped') or {}).get('conn') or {}).get('text') or '')
+            .startswith('reconnecting')), (True, True))
 
     # --- the snapshot at load is a snapshot ------------------------------
     sn = got.get('snap') or {}

@@ -70,7 +70,7 @@ import offer_parser as OP                                     # noqa: E402
 #
 # A floor, not an average: a replay has only the texts each row kept — two to
 # eight, de-duplicated — rather than every read the car made, and it writes no
-# `seen`, `screen`, `promo`, `pair` or `mark` rows. Before this, twenty-one
+# `seen`, `screen`, `promo`, `pair`, `mark` or `up` rows. Before this, twenty-one
 # places in the repository gave the journal's size, with six figures between
 # them and none measured: a year was "a few" or "single-digit" megabytes in this
 # file and rpi/README.md, 19MB in sync.py, server.js, live.html, rpi/README.md

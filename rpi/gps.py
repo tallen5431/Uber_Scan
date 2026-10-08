@@ -312,20 +312,34 @@ class Phone(object):
         'looking'    started, nothing received yet, or trying to reconnect
         'fixed'      a position arrived within stale_after
         'stale'      a position arrived, and it is too old to use
+
+        `ageSeconds` is how long ago the newest position arrived, by the local
+        clock, or None when none has — and None too when the clock has run
+        backwards past it, because a negative age is not a duration anyone can
+        be told. It is what lets the panel say "no fix for 12 min" rather than
+        only "stale": the scan loop used to have the word and nothing else,
+        and this method was read by this file's own command line and nowhere
+        on the rig at all.
         """
         with self._lock:
             word, why, fix, at, lines = (self._state, self._error, self._fix,
                                          self._at, self._lines)
+        since = None if fix is None else self._clock() - at
         # 'off' outranks the fix. A position stays usable for `stale_after`
         # after the reader is stopped — `fix()` will rightly still hand it over
         # — but the word here answers "is anything reading the phone", and
         # after stop() the answer is no. Letting the leftover fix paint it
         # 'fixed' would put a green light on a subsystem that is not running,
         # which is this project's own worst failure shape in miniature.
+        #
+        # Judged on the unrounded age, the same comparison fix() makes, so the
+        # word and the position can never disagree about the last tenth of a
+        # second before a fix goes stale.
         if fix is not None and word != 'off':
-            age = self._clock() - at
-            word = 'fixed' if 0 <= age <= self.stale_after else 'stale'
+            word = 'fixed' if 0 <= since <= self.stale_after else 'stale'
         return {'state': word, 'error': why, 'lines': lines,
+                'ageSeconds': (round(since, 1)
+                               if since is not None and since >= 0 else None),
                 'address': '%s:%d' % (self.host, self.port)}
 
     # --- the thread --------------------------------------------------------

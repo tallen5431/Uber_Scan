@@ -219,6 +219,7 @@ function startScanner() {
   scanner.error = null;
   scanner.heardAt = null;          // nothing from the scan loop yet
   scanner.costPerMile = null;      // ...and nothing about its settings either
+  scanner.beat = null;             // ...nor a heartbeat. See /api/status.
   // What is NOT cleared here, and why.
   //
   // `started`, `error` and `heardAt` are facts about the PROCESS, and a new
@@ -662,6 +663,14 @@ function startScanner() {
         if (read.ready !== undefined || read.alive || read.reading) {
           scanner.heardAt = Date.now();
         }
+        // The heartbeat itself, kept for /api/status. It goes to the panel
+        // the way it always has — broadcast whole, below, which is how
+        // tooBright and notSaving reach it and now the GPS and the Pi's
+        // temperature and throttling too — and this is only the copy the raw
+        // status link beside the connection dot can show afterwards. The page
+        // does not seed itself from it: like tooBright, it waits for the next
+        // beat, which is ALIVE_EVERY (four seconds) away at most.
+        if (read.alive) scanner.beat = read;
         broadcast(read);
       } catch (e) {
         console.log('scanner: ' + line);   // not JSON, so it is a log line
@@ -3895,6 +3904,27 @@ function route(req, res) {
         ? Math.max(0, Date.now() - scanner.last.at) : null,
       heardAgeMs: scanner.heardAt
         ? Math.max(0, Date.now() - scanner.heardAt) : null,
+      // The last heartbeat, as the scanner sent it: the GPS's state and the
+      // age of its newest fix, the Pi's temperature and throttling with the
+      // reason for either one that could not be read, and the four notices
+      // that already rode it. Without this every one of them was on the event
+      // stream and nowhere else, so the status link — the one place a person
+      // diagnosing a rig is sent — could not say whether the GPS had a fix or
+      // the Pi was throttling.
+      //
+      // Its age rather than the `at` this server stamped it with on arrival:
+      // the same duration-not-timestamp rule as everything above, because
+      // whatever reads this does not share this machine's clock. Cleared with
+      // the process, because every word in it is about that process.
+      beat: (function () {
+        if (!scanner.beat) return null;
+        var b = Object.assign({}, scanner.beat);
+        var at = b.at;
+        delete b.at;
+        delete b.alive;
+        b.ageMs = Math.max(0, Date.now() - at);
+        return b;
+      }()),
       status: scanner.status
     }), { 'Content-Type': 'application/json; charset=utf-8' });
   }

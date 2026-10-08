@@ -473,6 +473,23 @@
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #shift[hidden] { display: none; }
+  /* What the rig says about itself — the GPS, a throttling Pi — between the
+     two. Same one-line rule as the shift line, and it outranks it: the shift
+     line gives way first and this one only once that is gone. An ellipsis,
+     never a clip, so a note cut on a narrow screen still says that something
+     was cut. Muted like the rest of the row — a fact for the next stop, not
+     something to drive by.
+
+     The shrink is a weight, not a priority, and it is weighted by width: at
+     equal weights a 209px note gave up 1px of itself beside a 370px shift line
+     on the 800x480 panel, and an ellipsis took its last letter. A million to
+     one leaves this note under a thousandth of a pixel of any overflow the
+     shift line can still absorb, which no renderer draws. */
+  #health {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #health[hidden] { display: none; }
+  #shift { flex-shrink: 1000000; }
   .dot.on { background: var(--go); }
   #viewWrap { margin: 0; }
   #viewWrap img {
@@ -750,7 +767,7 @@
        it is nearly free. It also outlives a card, which is the point — the
        address above clears when the offer goes because it belongs to that
        offer, and a shift does not. -->
-  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="shift" hidden></span></div>
+  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="health" hidden></span><span id="shift" hidden></span></div>
 
   <nav class="bottombar">
     <!-- The one thing the rig cannot see: whether the driver pressed Accept.
@@ -909,7 +926,8 @@
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'working', 'places', 'spoken', 'took', 'shift', 'stack', 'drop', 'dest']
+   'working', 'places', 'spoken', 'took', 'shift', 'stack', 'drop', 'dest',
+   'health']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -1075,6 +1093,17 @@
   // written from inside the scan loop with nobody to answer, which is why this
   // rides the heartbeat.
   var notSaving = null;
+
+  // The GPS, as the scanner has settled it, and the Pi's own report on itself.
+  // Off the heartbeat like the four above, for the same reason: every reading
+  // goes on arriving perfect while either is wrong. A phone whose GPS app has
+  // timed out costs every offer row from then on its position, and on the
+  // owner's week 0 of 1,166 rows carried one with nothing anywhere saying
+  // whether that was a choice or a fault. A throttling Pi reads slower and
+  // said so nowhere. See healthNote() for what reaches the glass.
+  var gpsNow = null;
+  var cpuNow = null;
+  var throttledNow = null;
 
   // A card is under the reader right now. The gap this fills is the one the
   // driver actually notices: a read is about 1.8 seconds on a Pi 4 and this
@@ -2363,6 +2392,10 @@
     // it is the only cue that what is on screen is a photograph of the past.
     var img = document.getElementById('view');
     if (img) img.classList.toggle('stalefeed', quiet > STALE_MS);
+    // Set in one branch only, below. Every other branch is the scanner not
+    // being heard from, and a GPS word off a heartbeat that has stopped is a
+    // word about a minute that has passed.
+    var note = '';
     if (!socketUp) {
       el.conn.textContent = 'reconnecting to the server…';
     } else if (scannerState && !scannerState.enabled) {
@@ -2391,9 +2424,59 @@
       // reader that has gone for good stops the heartbeat at READ_STUCK_S in
       // scan_pi.py, and the branch above says "nothing from the scanner".
       el.conn.textContent = 'scanner reading';
+      note = healthNote();
     }
+    el.health.textContent = note;
+    el.health.hidden = !note;
     el.dot.classList.toggle('on', alive
       && !(scannerState && (!scannerState.enabled || !scannerState.running)));
+  }
+
+  // What the rig has to say about itself, on the connection line rather than
+  // on a control or in the verdict: none of it changes what the offer in front
+  // of the driver is worth, and every one of it has a remedy that can wait for
+  // the next stop. Said only when something is wrong, the way trackNote is.
+  //
+  // NOTHING for a rig run without --gps. That is a choice the driver made, and
+  // a line about it would stand for the whole of every shift and become
+  // furniture — the same reason `notSaving` says nothing for --no-journal.
+  // The scanner's start row in the journal is where that choice is recorded.
+  // Nothing for a working GPS either: "GPS ok" on every glance is a word the
+  // driver learns to skip, and then skips the one that is not ok.
+  //
+  // The Pi first, because it is about the readings — a throttled Pi reads
+  // slower — and the GPS is about the rows. Only what the Pi itself reports
+  // as happening NOW: its temperature alone is not a warning, because no
+  // threshold here would be the Pi's, and the firmware already acts on its
+  // own. The words are the scanner's; this page does not know the bits.
+  //
+  // ONE word of them, the first, which the scanner lists cause first (see
+  // THROTTLE_BITS). Every word was tried and does not fit: a weak supply says
+  // "under-voltage, throttled", and with a stale GPS beside it the note needed
+  // 370px where the 3.5" hat has 315 and the rig's own panel, beside the
+  // phone, 357 — so the tail was cut, and the tail is the GPS's minutes. The
+  // rest are on the status link and in every `seen` row.
+  function healthNote() {
+    var bits = [];
+    var t = throttledNow;
+    if (t && t.now && t.now.length) {
+      bits.push('Pi ' + t.now[0]
+                + (cpuNow !== null ? ' ' + Math.round(cpuNow) + '\u00b0C' : ''));
+    }
+    var g = gpsNow;
+    if (g && g.state === 'stale') {
+      // Whole minutes, rounded DOWN: "no fix for 1 min" at 80 seconds is true
+      // and "2 min" would not be. The scanner only settles on stale a minute
+      // after gps.py calls it so, so in practice this is never under one. No
+      // age is a clock that ran backwards past the fix, and then there is no
+      // honest duration to give.
+      bits.push(typeof g.ageSeconds === 'number'
+        ? 'GPS: no fix for ' + Math.max(1, Math.floor(g.ageSeconds / 60)) + ' min'
+        : 'GPS: no fix');
+    } else if (g && g.state === 'lost') {
+      bits.push('GPS: no fix since start');
+    }
+    return bits.join(' \u00b7 ');
   }
 
   function connect() {
@@ -2445,6 +2528,10 @@
       // channel that rode a reading would be carried by messages that
       // contradict it.
       if (msg.notSaving !== undefined) notSaving = msg.notSaving || null;
+      // ...and the GPS and the Pi, which only ever ride the beat.
+      if (msg.gps !== undefined) gpsNow = msg.gps || null;
+      if (msg.cpuC !== undefined) cpuNow = typeof msg.cpuC === 'number' ? msg.cpuC : null;
+      if (msg.throttled !== undefined) throttledNow = msg.throttled || null;
       // A new offer on the record. `tookState` resets with it — the mark
       // belongs to the offer, not to the button.
       //
