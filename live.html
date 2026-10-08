@@ -557,12 +557,20 @@
      equal weights a 209px note gave up 1px of itself beside a 370px shift line
      on the 800x480 panel, and an ellipsis took its last letter. A million to
      one leaves this note under a thousandth of a pixel of any overflow the
-     shift line can still absorb, which no renderer draws. */
+     shift line can still absorb, which no renderer draws.
+
+     The million is put on THIS note's resistance, not on the shift line's
+     eagerness. Set as `#shift { flex-shrink: 1000000 }` it also made the shift
+     line give way to the connection text beside it, which it had shared with
+     at equal weight, and on a phone held upright the median lost a pixel —
+     measured, -1px at 390x844 with the 📷 control not drawn, against 4px to
+     spare before. With the weight here, the shift line and the connection
+     text share as they always did, and only this note holds out. */
   #health {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #health[hidden] { display: none; }
-  #shift { flex-shrink: 1000000; }
+  #health { flex-shrink: 0.000001; }
   .dot.on { background: var(--go); }
   #viewWrap { margin: 0; }
   #viewWrap img {
