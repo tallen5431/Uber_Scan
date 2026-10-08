@@ -473,6 +473,65 @@
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #shift[hidden] { display: none; }
+  /* 📷 Snap, on the status row — the markup says why it is here. It is drawn
+     as a quiet outlined camera in the row's own grey and size, because it is a
+     thing for a parked driver and must not compete with the verdict.
+
+     IT COSTS THE ROW NO HEIGHT, and that is the property the placement rests
+     on. The boundary is an inset shadow rather than a border, so it takes no
+     room; the padding that makes it a target taller than its own text is
+     handed straight back by an equal negative margin, so the row is laid out
+     as if the button were bare text. The extra height lands in the row's own
+     padding, which is there anyway. rpi/test_layout.py measures the row and
+     every control on the bar with this and without it, at all six panels.
+
+     WHAT IT DOES COST IS WIDTH, and it comes out of the shift line, which is
+     the item on this row that gives way. The first thing on the shift line is
+     its median — "-$17/hr an offer", ellipsised from the tail on a budget
+     already measured to the character (see showShift) — so the question is
+     whether those digits still reach the glass. rpi/test_layout.py measures
+     it with the widest real shift line beside the longest connection line
+     the row says in ordinary use ("nothing from the scanner for 300s"), with
+     its phone picture in the other column: at 800x480 the whole label
+     "📷 Snap" cuts the digits by 16px, and the camera alone leaves them 22px
+     to spare. So the word is not painted. It is still in the button, for a
+     screen reader, and on its title for a mouse resting on it. */
+  #snap {
+    appearance: none; font: inherit; color: inherit; background: transparent;
+    border: 0; box-shadow: inset 0 0 0 1px var(--line); border-radius: 8px;
+    padding: 4px 8px; margin: -4px 0; line-height: inherit;
+    flex: none; white-space: nowrap; cursor: pointer;
+  }
+  #snap .word { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+                overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* What the press kept, said on the control itself. It can be a sentence —
+     "saved — no screenshot: grim is not installed" — so while it shows, the
+     shift line stands down to give it the row, and what still does not fit
+     ends in an ellipsis rather than widening the page. The whole of it is on
+     the control's title, and every snap's full account is on snaps.html. */
+  #snap.said { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .connbar:has(#snap.said) #shift { display: none; }
+  #snap.failed { color: var(--no); box-shadow: inset 0 0 0 1px var(--no); }
+  #snap[disabled] { cursor: progress; }
+  /* ...and not drawn at all on the two narrow rows, the 3.5" hat and a phone.
+
+     The same measurement there: without this control the median's digits
+     reach the glass with 22px to spare on the hat and 4 on a phone. Even the
+     camera alone cuts them, by 19px on the hat and 34 on a phone. A figure
+     cut to make room for a camera button is this project's first fault class
+     bought for a convenience, so the row keeps its figure.
+
+     Every landscape panel 400px tall or more keeps the digits 22px or more to
+     spare with the camera drawn (800x480; 1024x768 keeps 80, 1024x600 174,
+     1280x800 220), which is where the line is. A phone is the
+     remote end anyway — it is not the screen being photographed — and
+     snaps.html carries the same press for it, reached from the offers page. */
+  @media (orientation: landscape) and (max-height: 380px) {
+    #snap { display: none; }
+  }
+  @media (orientation: portrait) {
+    #snap { display: none; }
+  }
   .dot.on { background: var(--go); }
   #viewWrap { margin: 0; }
   #viewWrap img {
@@ -750,7 +809,39 @@
        it is nearly free. It also outlives a card, which is the point — the
        address above clears when the offer goes because it belongs to that
        offer, and a shift does not. -->
-  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="shift" hidden></span></div>
+  <!-- 📷 Snap: a picture of this screen, kept on the rig to be shown to
+       someone. See takeSnap in server.js for what one holds.
+
+       HERE, and not on the bar. The bar holds six and a seventh sheds one —
+       AUDITS.md's Settled has that, and styles.css does the arithmetic — so a
+       control there would cost the driver ⌨ Type or ▣ Set box in states where
+       they have them today. The two other places with room were measured and
+       are worse. The caption under the picture (#viewNote) is `display: none`
+       on every landscape panel unless the map is up, when it is the map's own
+       two-row line with a budget already measured to the word; and the whole
+       pane, caption and all, is gone on a machine with no camera picture. A
+       control in it would be on the rig's own glass only while the map is.
+       The diagnostics line (#detail) is emptied and rebuilt by render(),
+       which runs on every message from the scanner and on this page's
+       one-second tick, so a control inside it would be thrown away and made
+       again every second — mid-press, as like as not — and the diagnostics
+       half of it is hidden on the 3.5" hat.
+
+       This row is on the glass on every panel, in every view and with or
+       without a camera picture, nothing rewrites it but its own text, and it
+       already holds the one other thing on this page that is about the rig
+       rather than the offer: the status link. It costs the row no height — see #snap in the stylesheet — so
+       nothing on the bar moves and nothing is shed, which rpi/test_layout.py
+       holds at all six panels by measuring the bar with this control and
+       without it. What it does cost is width, out of the shift line beside
+       it, and on the 3.5" hat and a phone there is none to give: there it is
+       not drawn, for the measured reason given in the stylesheet, and
+       snaps.html carries the same press.
+
+       Not 52px, which every control on the bar is held to. Those are pressed
+       at a red light; this is pressed parked, with the mouse, to keep a
+       picture, and the status link beside it is the same kind of target. -->
+  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of this screen on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button></div>
 
   <nav class="bottombar">
     <!-- The one thing the rig cannot see: whether the driver pressed Accept.
@@ -2893,6 +2984,77 @@
           resetBtn.disabled = false;
           resetBtn.textContent = '⟳ Re-find';
         }, 2500);
+      });
+  });
+
+  // --- 📷 Snap ------------------------------------------------------------
+  //
+  // A picture of this screen, the camera's last picture and what /api/status
+  // says, kept on the rig in a folder to be shared — see takeSnap in server.js.
+  // The screenshot is taken by the rig's desktop, not by this page, so it is
+  // the panel as it was painted: including this control saying "📷 …", which
+  // is the honest picture of the moment it was pressed.
+  //
+  // The answer is said on the control, and it is the server's own line, not a
+  // second wording of it: "saved", or "saved — no screenshot: grim is not
+  // installed". A press that keeps less than it was asked to and says only
+  // "saved" is the second fault class, met on the one control whose whole job
+  // is to keep evidence.
+  //
+  // Through ask(), so a request that hangs comes back. Every control on the bar
+  // learned that the hard way (see POST_TIMEOUT_MS); this one starts with it.
+  var snapBtn = document.getElementById('snap');
+  // The label as the markup writes it — the word in a span of its own, which
+  // the stylesheet does not paint and a screen reader still reads. See #snap.
+  function snapLabel() {
+    var word = document.createElement('span');
+    word.className = 'word';
+    word.textContent = ' Snap';
+    snapBtn.textContent = '📷';
+    snapBtn.appendChild(word);
+  }
+  // How long the answer stays before the label comes back. Re-find gives its
+  // one word 2.5s; this can be a sentence, read from the driving seat. The
+  // last answer stays on the title after the words go, so a mouse resting on
+  // the control can still ask what the last press kept.
+  var SNAP_SAID_MS = 8000;
+  var snapBack = null;
+  snapBtn.addEventListener('click', function () {
+    if (snapBtn.disabled) return;
+    clearTimeout(snapBack);
+    snapBtn.disabled = true;
+    snapBtn.classList.remove('said', 'failed');
+    snapBtn.textContent = '📷 …';
+    ask('/api/snap', { method: 'POST' })
+      .then(function (r) {
+        return r.json().then(function (body) { return { ok: r.ok, body: body || {} }; },
+                             function () { return { ok: false, body: {} }; });
+      })
+      .then(function (got) {
+        if (got.ok && got.body.ok && typeof got.body.said === 'string') {
+          return { text: '📷 ' + got.body.said, failed: false };
+        }
+        return { text: '📷 not saved: ' + (got.body.error || 'the rig refused it'),
+                 failed: true };
+      }, function () {
+        // The deadline, or no network at all. Whether the rig kept anything is
+        // exactly what this page cannot know, so it says the one thing it can:
+        // nothing answered. "Not saved" would be a guess, and a wrong one
+        // whenever the rig was merely slow to reply.
+        return { text: '📷 no answer from the rig', failed: true };
+      })
+      .then(function (said) {
+        snapBtn.textContent = said.text;
+        snapBtn.title = said.text;
+        snapBtn.classList.add('said');
+        snapBtn.classList.toggle('failed', said.failed);
+        snapBtn.disabled = false;
+        snapBack = setTimeout(function () {
+          snapLabel();
+          snapBtn.classList.remove('said', 'failed');
+          snapBtn.title = '📷 Snap: keep a picture of this screen on the rig. Last time: '
+                        + said.text.replace(/^📷 /, '');
+        }, SNAP_SAID_MS);
       });
   });
 

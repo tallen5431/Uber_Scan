@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Uber Scan — Snaps</title>
+<meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* Every 📷 Snap the rig has kept, newest first, for getting them off it.
+     Read parked and usually on the phone, so it scrolls like the offers page
+     and lets text be selected — a folder name is a thing to copy. */
+  #app { height: auto; min-height: 100dvh; max-width: 900px; margin: 0 auto; }
+  body { user-select: text; -webkit-user-select: text; overscroll-behavior: auto; }
+  h1 { font-size: 20px; margin: 4px 0 0; }
+  #lead { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  #lead code, .why code { font-size: 12px; color: var(--text); background: var(--panel-2);
+                          padding: 1px 5px; border-radius: 4px; word-break: break-all; }
+  #shelf { display: flex; flex-direction: column; gap: 12px; }
+  .snap { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+          padding: 10px 12px; }
+  .snap h2 { margin: 0; font-size: 16px; font-variant-numeric: tabular-nums; }
+  /* Quieter in colour and weight, never in size: `small` is five-sixths of
+     its parent, which put the sizes under the 15px floor on a panel and the
+     12px floor on the hat. */
+  .snap h2 small { font-size: inherit; font-weight: 400; color: var(--muted); }
+  .said { margin: 4px 0 0; font-size: 13px; line-height: 1.45; }
+  /* A part that is missing, said in the colour this project uses for a figure
+     withheld — not the PASS red, because nothing here was refused. */
+  .why { margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px;
+         line-height: 1.45; color: var(--doubt); }
+  .pics { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .pics a { display: block; flex: 0 1 auto; min-width: 0; }
+  .pics img { display: block; height: 160px; max-width: 100%; object-fit: contain;
+              border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+  /* Links a thumb hits on a phone: 44px, the floor both platform guidelines
+     give, for a page that is read parked. */
+  .files { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0;
+           list-style: none; }
+  .files a { display: inline-flex; align-items: center; min-height: 44px; padding: 4px 10px;
+             border: 1px solid var(--line); border-radius: 8px; color: var(--text);
+             text-decoration: none; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .files a small { font-size: inherit; margin-left: 6px; color: var(--muted); }
+  #empty { margin: 0; font-size: 14px; line-height: 1.5; }
+  #empty[hidden] { display: none; }
+  /* The same press as 📷 Snap on the driving screen, for the screens that do
+     not draw it there: a phone, and the 3.5" hat, whose status rows have no
+     width to give (see #snap in live.html). From here it photographs the
+     rig's own display, whatever it is showing — which from a phone is the
+     point: the phone is not the screen being shared. */
+  #snapNow { align-self: flex-start; min-height: 52px; padding: 6px 16px; font: inherit;
+             font-size: 15px; font-weight: 700; color: var(--text);
+             background: var(--panel); border: 1px solid var(--line);
+             border-radius: 10px; cursor: pointer; }
+  #snapNow[disabled] { cursor: progress; opacity: .7; }
+  #snapSaid { margin: 0; font-size: 14px; line-height: 1.45; }
+  #snapSaid[hidden] { display: none; }
+  #snapSaid.failed { color: var(--no); }
+  .bottombar { position: sticky; bottom: 0; z-index: 6; background: var(--bg);
+               padding: 8px 0 calc(env(safe-area-inset-bottom) + 4px); margin-top: auto; }
+  /* Sized for the panel as well as the phone: the rig's own screen is read
+     from twice as far as a phone is, and rpi/test_layout.py holds every page
+     to 15px there and 12px on the 3.5" hat. */
+  @media (orientation: landscape) {
+    h1 { font-size: 22px; }
+    #lead, .said, .why, .files a, #empty, #snapSaid { font-size: 15px; }
+    #lead code, .why code { font-size: 15px; }
+    .snap h2 { font-size: 18px; }
+  }
+  @media (orientation: landscape) and (max-height: 380px) {
+    #lead, .said, .why, .files a, #empty, #snapSaid, #lead code, .why code { font-size: 12px; }
+    #snapNow { min-height: 44px; font-size: 13px; }
+    .snap h2 { font-size: 14px; }
+    .pics img { height: 110px; }
+  }
+</style>
+</head>
+<body data-page="snaps">
+<main id="app">
+  <h1>📷 Snaps</h1>
+  <p id="lead">Asking the rig…</p>
+  <button type="button" id="snapNow">📷 Snap the rig's screen now</button>
+  <p id="snapSaid" hidden></p>
+  <p id="empty" hidden></p>
+  <div id="shelf"></div>
+  <nav class="bottombar">
+    <a class="linkbtn" href="live.html">◂ Live</a>
+    <a class="linkbtn" href="journal.html">▤ Offers</a>
+  </nav>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var lead = document.getElementById('lead');
+  var empty = document.getElementById('empty');
+  var shelf = document.getElementById('shelf');
+  var snapNow = document.getElementById('snapNow');
+  var snapSaid = document.getElementById('snapSaid');
+
+  // The same deadline the driving screen puts on every request, for the same
+  // reason: a connection that opens and never answers would otherwise leave
+  // "Asking the rig…" on this page for as long as it is open.
+  var ASK_MS = 20000;
+
+  function ask(url, method) {
+    var opts = { cache: 'no-store', method: method || 'GET' };
+    if (typeof AbortController !== 'function') return fetch(url, opts);
+    var stop = new AbortController();
+    var timer = setTimeout(function () { stop.abort(); }, ASK_MS);
+    opts.signal = stop.signal;
+    return fetch(url, opts).then(function (r) {
+      clearTimeout(timer);
+      return r;
+    }, function (e) {
+      clearTimeout(timer);
+      throw e;
+    });
+  }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  // 2026-10-07_21-14-03 is the folder; 2026-10-07 21:14:03 is the time. A
+  // second snap in the same second is `-02`, said as "(2)".
+  function when(name) {
+    var m = /^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-(\d{2}))?$/.exec(name);
+    if (!m) return name;
+    return m[1] + ' ' + m[2] + ':' + m[3] + ':' + m[4] + (m[5] ? ' (' + Number(m[5]) + ')' : '');
+  }
+
+  // An age off the rig's own clock — the server sends a duration, not a time,
+  // because this phone's clock is not the rig's.
+  function ago(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms)) return 'age unknown';
+    var s = Math.round(ms / 1000);
+    if (s < 90) return s + 's ago';
+    if (s < 90 * 60) return Math.round(s / 60) + ' min ago';
+    if (s < 48 * 3600) return (s / 3600).toFixed(1) + 'h ago';
+    return Math.round(s / 86400) + ' days ago';
+  }
+
+  function size(bytes) {
+    if (bytes < 1000) return bytes + ' B';
+    if (bytes < 1000000) return Math.round(bytes / 1000) + ' kB';
+    return (bytes / 1000000).toFixed(1) + ' MB';
+  }
+
+  // Each path segment encoded on its own: the server only ever answers a
+  // folder name it made and a file it wrote, but the page does not get to
+  // assume that about what it is handed.
+  function fileUrl(name, file) {
+    return '/api/snaps/' + encodeURIComponent(name) + '/' + encodeURIComponent(file);
+  }
+
+  function draw(snap) {
+    var box = el('article', 'snap');
+    var head = el('h2', null, when(snap.name) + ' ');
+    head.appendChild(el('small', null, '· ' + ago(snap.ageMs)));
+    box.appendChild(head);
+    box.appendChild(el('p', 'said', snap.said || ''));
+    var files = (snap.files || []).map(function (f) { return f.file; });
+    var pics = el('div', 'pics');
+    ['panel.png', 'camera.jpg'].forEach(function (file) {
+      if (files.indexOf(file) === -1) return;
+      var a = el('a');
+      a.href = fileUrl(snap.name, file);
+      a.target = '_blank';
+      a.rel = 'noopener';
+      var img = el('img');
+      img.loading = 'lazy';
+      img.src = fileUrl(snap.name, file);
+      img.alt = file === 'panel.png' ? 'the rig\'s screen' : 'the camera\'s last picture';
+      a.appendChild(img);
+      pics.appendChild(a);
+    });
+    if (pics.childNodes.length) box.appendChild(pics);
+    // What is missing, each with the instruction that fixes it where there is
+    // one. The line above already says it; this is the part a person acts on.
+    var problems = (snap.problems || []).filter(function (p) { return p && p.why; });
+    if (problems.length) {
+      var why = el('ul', 'why');
+      problems.forEach(function (p) {
+        var li = el('li', null, p.file + ': ' + p.why + (p.detail ? ' (' + p.detail + ')' : ''));
+        if (p.fix) {
+          li.appendChild(document.createTextNode(' — '));
+          li.appendChild(el('code', null, p.fix));
+        }
+        why.appendChild(li);
+      });
+      box.appendChild(why);
+    }
+    var list = el('ul', 'files');
+    (snap.files || []).forEach(function (f) {
+      var li = el('li');
+      var a = el('a', null, f.file);
+      a.href = fileUrl(snap.name, f.file);
+      // Saved under the folder's name as well as its own, so four panel.png
+      // in a Downloads folder are still four snaps.
+      a.setAttribute('download', snap.name + '-' + f.file);
+      a.appendChild(el('small', null, size(f.bytes)));
+      li.appendChild(a);
+      list.appendChild(li);
+    });
+    box.appendChild(list);
+    return box;
+  }
+
+  function load() {
+    return ask('/api/snaps').then(function (r) {
+      if (!r.ok) throw new Error('the rig answered ' + r.status);
+      return r.json();
+    }).then(function (got) {
+      var snaps = got.snaps || [];
+      lead.textContent = 'What the rig\'s screen looked like each time 📷 Snap was '
+        + 'pressed, newest first. It keeps the newest ' + got.keep
+        + ' and the oldest go first. On the rig they are in ';
+      lead.appendChild(el('code', null, got.where || '?'));
+      lead.appendChild(document.createTextNode('.'));
+      shelf.textContent = '';
+      empty.hidden = true;
+      // An unreadable folder and an empty one are different answers.
+      if (got.unreadable) {
+        empty.textContent = 'The rig could not read its snaps folder (' + got.unreadable
+          + '), so this list says nothing about what is in it.';
+        empty.hidden = false;
+        return;
+      }
+      if (!snaps.length) {
+        empty.textContent = 'No snaps yet. Press 📷 above, or 📷 Snap on the rig\'s own '
+          + 'screen, in the row with the connection dot.';
+        empty.hidden = false;
+        return;
+      }
+      snaps.forEach(function (s) { shelf.appendChild(draw(s)); });
+    }).catch(function (e) {
+      lead.textContent = 'Could not get the list from the rig: '
+        + (e && e.name === 'AbortError' ? 'no answer in 20 seconds' : (e && e.message) || 'no answer')
+        + '. Snaps are served by the rig itself, so this page needs it reachable.';
+    });
+  }
+
+  // The rig's own line, as the driving screen shows it — see snapSaid in
+  // server.js — and the list again, so the new one is at the top of it.
+  snapNow.addEventListener('click', function () {
+    if (snapNow.disabled) return;
+    snapNow.disabled = true;
+    snapNow.textContent = '📷 …';
+    snapSaid.hidden = true;
+    ask('/api/snap', 'POST').then(function (r) {
+      return r.json().then(function (body) { return { ok: r.ok, body: body || {} }; },
+                           function () { return { ok: false, body: {} }; });
+    }).then(function (got) {
+      if (got.ok && got.body.ok && typeof got.body.said === 'string') {
+        return { text: got.body.name + ': ' + got.body.said, failed: false };
+      }
+      return { text: 'Not saved: ' + (got.body.error || 'the rig refused it'), failed: true };
+    }, function () {
+      return { text: 'No answer from the rig, so whether it kept anything is not known.',
+               failed: true };
+    }).then(function (said) {
+      snapSaid.textContent = said.text;
+      snapSaid.classList.toggle('failed', said.failed);
+      snapSaid.hidden = false;
+      snapNow.textContent = '📷 Snap the rig\'s screen now';
+      snapNow.disabled = false;
+      return load();
+    });
+  });
+
+  load();
+}());
+</script>
+</body>
+</html>

@@ -61,3 +61,9 @@ rpi/config-backup.json*
 # driver's phone, with the addresses on it. They are written only when the
 # scanner is asked for them (`--keep-scans`), and never into a commit.
 rpi/scans/
+
+# ...and what 📷 Snap keeps beside them: a screenshot of the panel, the
+# camera's last picture of the phone, and the status that went with it. The
+# same fact as the scans, taken on purpose to be shown to someone — which is a
+# decision about one picture, not about a public remote.
+rpi/snaps/

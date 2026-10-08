@@ -23,7 +23,7 @@
  * install would not have put it back: a phone with no signal would have lost
  * the scanner entirely, in the name of shipping a scanner fix.
  */
-var SHELL = 'uberscan-shell-v51';   // v51: map.html joined the shell
+var SHELL = 'uberscan-shell-v52';   // v52: snaps.html joined the shell
 
 /* Bumped only when the vendored engine itself changes, which is rare and
  * deliberate. Held apart from the shell so that shipping app code never costs
@@ -58,6 +58,10 @@ var ASSETS = [
   // says so; opening at all is a different question, and the answer to it was
   // the wrong page rather than an honest one.
   'map.html',
+  // The list of 📷 Snaps. Nothing to show offline — the pictures are on the
+  // rig — but it opens as itself and says it cannot reach the rig, rather
+  // than as the offline notice for a page this build has never heard of.
+  'snaps.html',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

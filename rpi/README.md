@@ -2052,6 +2052,78 @@ proxy that buffers it, a browser that will not render it — and a still that
 arrives slowly beats a picture that never appears; the page switches over on its
 own after four seconds without a frame.
 
+### 📷 Snap: keeping what the screen looked like, to share it
+
+The panel is a browser on the Pi's own display, driven with a mouse, so there
+was no way to keep a picture of it short of a phone held up to the glass. **📷**
+on the driving screen keeps one. It sits at the end of the row with the
+connection dot, just above the bar of buttons — not on the bar, which holds six
+— and one press keeps a folder named for the moment on the rig's clock:
+
+| | |
+|---|---|
+| `panel.png` | the Pi's display, taken by the desktop's own screenshot tool |
+| `camera.jpg` | the live picture the scanner last wrote, with its age |
+| `status.json` | what `/api/status` would have answered at the press: the reading on the panel, the reader's text when the reading carries it, the offer on record and the order in the car |
+| `snap.json` | which of those it kept, and for each one it did not, why |
+
+The control answers in place: **📷 saved**, or **📷 saved — no screenshot: grim
+is not installed**. It never says "saved" over less than it kept. A camera
+picture more than twelve seconds old — the panel's own window for a scanner
+that has gone quiet — is kept but called old ("camera picture 10 min old"),
+because a picture of the phone from before the press is not a picture of the
+press. If the rig does not answer within twenty seconds the control says so and
+offers itself again.
+
+**The screenshot needs a tool the Pi does not have by default.** Raspberry Pi OS
+Bookworm on a Pi 4 runs a Wayland desktop (wayfire, or labwc on newer images),
+which `grim` photographs:
+
+```sh
+sudo apt install grim
+```
+
+An older image running X11 wants `scrot` (`sudo apt install scrot`), or
+ImageMagick's `import` if that is already there. The server runs under systemd
+with no desktop session of its own, so it finds the one the desktop account is
+logged into — the `wayland-*` socket in `/run/user/<uid>`, or X display `:0` —
+which works because the service runs as that account (`User=` in
+`install-service.sh`). The tool is given eight seconds, well inside the
+panel's twenty, and killed after that; whatever is missing is named in the
+reply: no tool installed, no desktop session found, no camera picture yet, the
+scanner not running, no scanner on this machine. The copy at home, with no
+desktop and no camera, keeps `status.json` and says why it kept nothing else.
+
+**Getting them off the rig.** **▤ Offers → 📷 Snaps** (`snaps.html`) lists every
+snap, newest first, with the two pictures and a link to open or save each file
+— under the snap's own name, so four `panel.png` in a Downloads folder are
+still four snaps. It has its own 📷 press as well, which is the one to use from
+a phone: it photographs the rig's display, not the phone's. Underneath it are
+`GET /api/snaps` and `GET /api/snaps/<folder>/<file>`, which serve only the
+folders this server makes and the four files it writes, and refuse a link that
+points out of the folder. On the rig the folders are in `rpi/snaps/`, beside the
+journal (wherever `JOURNAL` puts it), which `.gitignore` covers and
+`test_lint.py` holds it to — a picture of a phone with an address on it does not
+belong in a commit.
+
+**It keeps the newest forty, and the oldest go first.** Measured, a snap is
+110–135kB — an 82kB PNG of the panel at 800x480 out of Chromium's encoder, a
+23–50kB camera picture and a 1.9kB status — so forty is under 5.5MB, a third of
+what `--keep-scans` is allowed. When one goes, the reply names it and the
+server's log says `snap: removed the oldest 1 to keep 40: <folder>`. A press
+never removes the folder it just made, which matters on a Pi that booted before
+the network set its clock: that snap is named for 1970, sorts as the oldest, and
+the reply says the clock was not set. `SNAPS_KEEP` changes the count.
+
+**Not drawn on the 3.5" hat or a phone.** Its width comes out of the shift line
+beside it, whose first figure is the shift's median, and on those two rows
+there is none to give: measured beside the longest line the connection shows
+in ordinary use ("nothing from the scanner for 300s"), even the bare 📷 pushes
+the median's digits 19px off the hat and 34px off a phone, where without it
+they have 22px and 4px to spare. The row keeps its figure; the phone has
+`snaps.html`. On every landscape panel 400px tall or more the digits keep 22px
+or more with 📷 drawn.
+
 ## Calibrate
 
 Put a live offer — or any bright screen — on the phone, then:
