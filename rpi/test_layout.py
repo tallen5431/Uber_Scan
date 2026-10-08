@@ -50,7 +50,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # A map needs the network for tiles and lookups and says so when it has none;
 # whether the page FITS is a different question, and the answer to it was
 # unmeasured.
-PAGES = ['index.html', 'live.html', 'journal.html', 'scan.html', 'map.html']
+PAGES = ['index.html', 'live.html', 'journal.html', 'scan.html', 'map.html',
+         # ...and the list of 📷 Snaps, measured with two in it — one whole and
+         # one with the longest reason a part can be missing — so its widest
+         # line is on the page when it is asked whether the page fits.
+         'snaps.html']
 
 # The panels this thing actually gets bolted to, plus a phone for comparison.
 PANELS = [
@@ -65,7 +69,9 @@ PANELS = [
 # journal.html is one continuous list — a week of offers is fourteen thousand
 # pixels of it — so it scrolls by design and only its width is held to the
 # glass. Everything else is a screen glanced at while driving and must fit.
-SCROLLS = {'journal.html'}
+SCROLLS = {'journal.html',
+           # A list of pictures, two to a snap, read parked on a phone.
+           'snaps.html'}
 
 ok = bad = 0
 
@@ -246,6 +252,7 @@ COLLECTORS = [
     ('journal.html', 'journal.html'),
     ('scan.html', 'scan.js'),
     ('index.html', 'ui.js'),
+    ('snaps.html', 'snaps.html'),
 ]
 for page, where in COLLECTORS:
     markup = open(os.path.join(ROOT, page)).read()
@@ -602,6 +609,37 @@ _age, _tally = _detour.find('from where you were'), _detour.find(' not asked')
 ok_('the detour line states the age of the fix ahead of the count of '
     'unplaced pins (%d, %d)' % (_age, _tally), 0 <= _age < _tally)
 
+# --- 📷 Snap, and the row it shares --------------------------------------------
+#
+# What the status row is given to carry while 📷 Snap's place on it is
+# measured. The shift line is the widest real one — the shape
+# rpi/test_dashboard.py stages for the hat, as live.html writes it — and the
+# connection line is the longest that row says in ordinary use: five minutes
+# of silence from the scanner. Longer is possible ("for 3000s", or "scanner not
+# running:" with an error after it) and cuts the median with or without this
+# control; that is the row's own documented trade, not this control's.
+SNAP_FIXTURE = {
+    'shift': '· ✓ 10 for $141 net · -$17/hr an offer · 435 offers · 7 set aside',
+    'figure': '-$17/hr',
+    'conn': 'nothing from the scanner for 300s',
+    # The longest line a press answers with: the tool failing with what it
+    # said (the message rpi/test_server.py stages for grim on a compositor
+    # without screencopy), a scanner that is down, and a clock nobody has set.
+    # 202 characters, which runs off the glass uncut at 800x480, 1024x600 and
+    # 1024x768 (it fits 1280x800), so what is measured there is whether it is
+    # cut short rather than whether it happens to fit. The NucBox's own line,
+    # 101, fits every row that draws the control with no cutting at all, which
+    # is how a check on it alone passed with the cutting taken out.
+    'said': '📷 saved — no screenshot: grim failed (exit 1): compositor doesn\'t '
+            'support wlr-screencopy-unstable-v1; no camera picture: the scanner is '
+            'not running; the rig\'s clock is not set, so it is filed under 1970',
+}
+# ...and the two strings that fixture copies have to still be the page's, or it
+# measures a line the page no longer writes.
+ok_('live.html still writes the median as "/hr an offer"', "'/hr an offer'" in live_src)
+ok_('...and still says "nothing from the scanner for"',
+    "'nothing from the scanner for '" in live_src)
+
 spoken = caption_strings(live_src)
 ok_('live.html still reads as a page with a map caption in it', len(spoken) > 15)
 said = ' ## '.join(row[1] for row in CAPTION_LINES)
@@ -624,8 +662,10 @@ if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
 
 DRIVER = r'''
 const { chromium } = require('playwright');
-const [base, panelsJson, pagesJson, framesJson, captionJson] = process.argv.slice(2);
+const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson] = process.argv.slice(2);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
+// What 📷 Snap's measurement puts on the status row; see SNAP_FIXTURE.
+const SNAP_FIXTURE = JSON.parse(snapJson);
 // The caption sentences, passed in rather than written here: the Python side
 // reads them back out of live.html to check that none has been added without
 // being measured, and two copies of that list is the fault this file is for.
@@ -967,6 +1007,96 @@ const FRAMES = JSON.parse(framesJson);
           return { plain: plain, before: before, full: full, crowded: crowded,
                    over: d.scrollWidth > d.clientWidth + 1 };
         });
+        // 📷 Snap, on the status row and off the bar — measured with the bar at
+        // its fullest, which is where the block above leaves it.
+        //
+        // Three questions, and the third is the one that decided where it may
+        // be drawn. Does it fit, with its label inside its own box? Does the
+        // bar or the row it sits in move by so much as a tenth of a pixel for
+        // its being there — with its label, and with the longest answer it
+        // gives? And does the shift line beside it, which is the item on that
+        // row that gives way, still get the median's digits onto the glass
+        // when the connection line is at its longest? That last is measured
+        // on every panel, drawn or not, so the panels that do not draw it are
+        // held to the reason they do not.
+        shown.snap = await page.evaluate((fixture) => {
+          const snap = document.getElementById('snap');
+          const bar = document.querySelector('.bottombar');
+          const row = document.querySelector('.connbar');
+          const d = document.documentElement;
+          const box = (el) => {
+            const r = el.getBoundingClientRect();
+            return [r.left, r.top, r.width, r.height].map((n) => Math.round(n * 10) / 10);
+          };
+          const layout = () => JSON.stringify({ row: box(row),
+                                               bar: [].slice.call(bar.children).map(box) });
+          const over = () => d.scrollWidth > d.clientWidth + 1
+                             || d.scrollHeight > d.clientHeight + 1;
+          // Every glyph of the label inside the control's own box.
+          const spilt = () => {
+            const r = snap.getBoundingClientRect();
+            const n = snap.firstChild;
+            if (!n) return '';
+            const rg = document.createRange();
+            let out = '';
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (c.width === 0 && c.height === 0) continue;
+              if (c.left < r.left - 0.5 || c.right > r.right + 0.5
+                  || c.top < r.top - 0.5 || c.bottom > r.bottom + 0.5) out += n.data[i];
+            }
+            return out;
+          };
+          const r = snap.getBoundingClientRect();
+          const out = {
+            drawn: getComputedStyle(snap).display !== 'none' && r.width > 0 && r.height > 0,
+            inRow: !!snap.closest('.connbar'), inBar: !!snap.closest('.bottombar'),
+            onGlass: r.left >= -0.5 && r.top >= -0.5 && r.right <= d.clientWidth + 0.5
+                     && r.bottom <= d.clientHeight + 0.5,
+            label: (snap.textContent || '').trim(), spilt: spilt(),
+            height: Math.round(r.height), over: over(),
+          };
+          const withIt = layout();
+          snap.style.display = 'none';
+          out.same = withIt === layout();
+          snap.style.display = '';
+          // The longest line it says: the screenshot missing and why. Put back
+          // as markup, not as text — the label's word is a span of its own, and
+          // flattening it into the text node would paint it.
+          const was = snap.innerHTML;
+          snap.textContent = fixture.said;
+          snap.classList.add('said');
+          out.sameSaid = withIt === layout();
+          out.overSaid = over();
+          // ...and the answer itself on the glass, beside the connection line
+          // rather than over it. Overflow alone cannot see this: #app clips, so
+          // a line that runs off the right edge leaves nothing to scroll.
+          const rs = snap.getBoundingClientRect();
+          const rc = document.getElementById('conn').getBoundingClientRect();
+          out.saidOnGlass = rs.left >= rc.right - 0.5 && rs.right <= d.clientWidth + 0.5;
+          snap.innerHTML = was;
+          snap.classList.remove('said');
+          // The median, beside the longest connection line the page writes.
+          const shift = document.getElementById('shift');
+          const conn = document.getElementById('conn');
+          const keep = [shift.textContent, shift.hidden, conn.textContent];
+          shift.textContent = fixture.shift;
+          shift.hidden = false;
+          conn.textContent = fixture.conn;
+          const node = shift.firstChild;
+          const at = node.nodeValue.indexOf(fixture.figure);
+          const rg = document.createRange();
+          rg.setStart(node, at);
+          rg.setEnd(node, at + fixture.figure.length);
+          out.figureSpare = Math.round(shift.getBoundingClientRect().right
+                                       - rg.getBoundingClientRect().right);
+          shift.textContent = keep[0];
+          shift.hidden = keep[1];
+          conn.textContent = keep[2];
+          return out;
+        }, SNAP_FIXTURE);
         // Bounded, and the result kept rather than thrown.
         //
         // A layout fault that puts the picture over the controls does not make
@@ -1284,6 +1414,29 @@ def _jpeg(size, colour):
 FRAMES = {'scene': _jpeg((640, 480), (44, 48, 56)),
           'screen': _jpeg((573, 1000), (238, 240, 244))}
 
+# Two 📷 Snaps for snaps.html to lay out, in the folder the server keeps them
+# in — beside the journal. One whole, at the panel's own size; one with no
+# screenshot and the longest reason the server gives for that, so the widest
+# line the page can draw is on it.
+_shelf = os.path.join(work, 'snaps')
+for _name, _whole in (('2026-10-07_21-14-03', True), ('2026-10-07_21-15-40', False)):
+    os.makedirs(os.path.join(_shelf, _name))
+    if _whole:
+        Image.new('RGB', (800, 480), (11, 15, 20)).save(os.path.join(_shelf, _name, 'panel.png'))
+    Image.new('RGB', (480, 1040), (238, 240, 244)).save(
+        os.path.join(_shelf, _name, 'camera.jpg'), quality=60)
+    with open(os.path.join(_shelf, _name, 'status.json'), 'w') as _fh:
+        _fh.write('{}\n')
+    _missing = [] if _whole else [{
+        'what': 'panel', 'file': 'panel.png', 'saved': False,
+        'why': 'no display session found',
+        'detail': 'no wayland-* socket in /run/user/1000, no X display'}]
+    with open(os.path.join(_shelf, _name, 'snap.json'), 'w') as _fh:
+        json.dump({'v': 1, 'name': _name, 'at': now,
+                   'contents': _missing, 'notes': [],
+                   'said': 'saved' if _whole else
+                           'saved — no screenshot: no display session found'}, _fh)
+
 port = free_port()
 proc = subprocess.Popen(
     ['node', os.path.join(ROOT, 'server.js')],
@@ -1311,7 +1464,7 @@ try:
                ]))
     proc2 = subprocess.run(
         ['node', driver, base, json.dumps(PANELS), json.dumps(PAGES),
-         json.dumps(FRAMES), json.dumps(CAPTION_LINES)],
+         json.dumps(FRAMES), json.dumps(CAPTION_LINES), json.dumps(SNAP_FIXTURE)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -1503,6 +1656,37 @@ try:
                 if (crowded.get('width') or 0) >= 470:
                     eq('...with every label inside its own button at %s'
                        % panel, crowded.get('spilling'), [])
+
+                # --- 📷 Snap ------------------------------------------------
+                #
+                # Off the bar, which holds six — AUDITS.md's Settled — and on
+                # the status row, where it costs nothing: not a tenth of a pixel
+                # of the bar or the row, with its label or with the longest
+                # answer it gives. Drawn on every landscape panel with 400px of
+                # height; not on the 3.5" hat or a phone, where the row's width
+                # is the shift line's median and there is none to give.
+                sn = phone.get('snap') or {}
+                ok_('📷 Snap was measured at %s' % panel, 'drawn' in sn)
+                wide = w > h and h >= 400
+                eq('📷 Snap is drawn at %s exactly where the row has room for it'
+                   % panel, bool(sn.get('drawn')), wide)
+                ok_('...on the status row, never on the bar, at %s' % panel,
+                    sn.get('inRow') and not sn.get('inBar'))
+                if wide:
+                    ok_('...on the glass at %s' % panel, sn.get('onGlass'))
+                    eq('...saying what it is at %s' % panel, sn.get('label'), '📷 Snap')
+                    eq('...with its label inside its own box at %s' % panel,
+                       sn.get('spilt'), '')
+                    ok_('...and its longest answer on the glass, clear of the '
+                        'connection line, at %s' % panel, sn.get('saidOnGlass'))
+                ok_('...moving nothing on the bar or the row at %s' % panel, sn.get('same'))
+                ok_('...nor with its longest answer on it at %s' % panel, sn.get('sameSaid'))
+                ok_('...and the page still fits, label or answer, at %s' % panel,
+                    not sn.get('over') and not sn.get('overSaid'))
+                ok_('...while the shift line\'s median reaches the glass beside the '
+                    'longest connection line at %s (%spx to spare)'
+                    % (panel, sn.get('figureSpare')),
+                    (sn.get('figureSpare') if sn.get('figureSpare') is not None else -1) >= 0)
                 # ...which is a weaker claim than it looks, and was the one
                 # being made. #app clips, so a picture drawn taller than its
                 # row is trimmed rather than overflowed and every fits-check

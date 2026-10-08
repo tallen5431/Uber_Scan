@@ -47,8 +47,23 @@ ssl/
 rpi/journal.jsonl
 rpi/journal.jsonl.*
 
+# ...and what the web server keeps beside the journal, which is rpi/ unless
+# JOURNAL moves it: the order in the car and where it is going, the places read
+# off the cards with a pin on each — some of them where customers live — and
+# the copy of the rig's calibration the sync delivers. Globs, because two of
+# them are written through a pid-suffixed `.part`.
+rpi/holding.json*
+rpi/places.json*
+rpi/config-backup.json*
+
 # ...and the pictures those offers were read from, which sit beside the journal
 # by default and are the same fact in a stronger form: a photograph of the
 # driver's phone, with the addresses on it. They are written only when the
 # scanner is asked for them (`--keep-scans`), and never into a commit.
 rpi/scans/
+
+# ...and what 📷 Snap keeps beside them: a screenshot of the panel, the
+# camera's last picture of the phone, and the status that went with it. The
+# same fact as the scans, taken on purpose to be shown to someone — which is a
+# decision about one picture, not about a public remote.
+rpi/snaps/

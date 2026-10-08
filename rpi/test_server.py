@@ -2284,6 +2284,648 @@ finally:
     stop(_sproc)
     shutil.rmtree(_sdir, ignore_errors=True)
 
+# --- 📷 Snap: what the rig keeps, and what it says it could not ---------------
+#
+# One press keeps a screenshot of the Pi's display, the camera's last picture
+# and what /api/status said, in a folder beside the journal. Every way a part
+# can be missing has to come back as a reason, because a folder with no
+# panel.png and nothing saying why is the second fault class in the shape of a
+# directory — and the NucBox, with no desktop and no camera, has to answer that
+# honestly too rather than pretend.
+#
+# The desktop is faked the way the server finds a real one: a Wayland socket in
+# an XDG_RUNTIME_DIR, and a `grim` on PATH. Each fake tool is a script that
+# writes a real PNG to the path it is handed, or fails in one particular way.
+# The server is started with nothing of this machine's own desktop in its
+# environment, and PATH holding only the fakes — `node` is run by its full
+# path — so a grim installed here cannot stand in for a missing one.
+import http.client                                            # noqa: E402
+import socket as _socket                                      # noqa: E402
+import struct                                                 # noqa: E402
+import zlib                                                   # noqa: E402
+
+_pdir = tempfile.mkdtemp()
+_node = shutil.which('node')
+
+
+def _png(w, h):
+    """A real PNG, made here so no imaging library is needed to make one."""
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack('>I', len(data)) + body + struct.pack('>I', zlib.crc32(body) & 0xffffffff)
+    rows = b''.join(b'\x00' + bytes([40, 60, 80]) * w for _ in range(h))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
+
+
+_PNG = _png(8, 4)
+_pngfile = os.path.join(_pdir, 'shot.png')
+with open(_pngfile, 'wb') as _fh:
+    _fh.write(_PNG)
+
+
+def _tool(where, name, body):
+    """A fake screenshot tool: `body` runs with `out` the path it was handed."""
+    os.makedirs(where, exist_ok=True)
+    path = os.path.join(where, name)
+    with open(path, 'w') as fh:
+        fh.write('#!%s\nimport json, os, shutil, sys, time\nout = sys.argv[-1]\n' % sys.executable
+                 + 'open(%r, "w").write(json.dumps({"argv": sys.argv[1:], "pid": os.getpid(), '
+                   '"env": {k: os.environ.get(k) for k in ("WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", '
+                   '"DISPLAY")}}))\n' % (path + '.ran')
+                 + body + '\n')
+    os.chmod(path, 0o755)
+    return path
+
+
+def _ran(tool):
+    try:
+        return json.load(open(tool + '.ran'))
+    except (OSError, ValueError):
+        return None
+
+
+def _size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None
+
+
+_WRITES = 'shutil.copy(%r, out)' % _pngfile
+_bins = {
+    'grim': os.path.join(_pdir, 'bin-grim'),
+    'none': os.path.join(_pdir, 'bin-none'),
+    'both': os.path.join(_pdir, 'bin-both'),
+    'scrot': os.path.join(_pdir, 'bin-scrot'),
+    'import': os.path.join(_pdir, 'bin-import'),
+    'fails': os.path.join(_pdir, 'bin-fails'),
+    'junk': os.path.join(_pdir, 'bin-junk'),
+    'hangs': os.path.join(_pdir, 'bin-hangs'),
+    'nuc': os.path.join(_pdir, 'bin-nuc'),
+}
+_grim = _tool(_bins['grim'], 'grim', _WRITES)
+_nucgrim = _tool(_bins['nuc'], 'grim', _WRITES)
+os.makedirs(_bins['none'])
+_tool(_bins['both'], 'grim', _WRITES)
+_tool(_bins['both'], 'scrot', _WRITES)
+_scrot = _tool(_bins['scrot'], 'scrot', _WRITES)
+_import = _tool(_bins['import'], 'import', _WRITES)
+_tool(_bins['fails'], 'grim',
+      'sys.stderr.write("compositor doesn\'t support wlr-screencopy-unstable-v1\\n"); sys.exit(1)')
+_tool(_bins['junk'], 'grim', 'open(out, "w").write("not a picture")')
+_hangs = _tool(_bins['hangs'], 'grim', 'open(out, "wb").write(b"\\x89PNG"); time.sleep(600)')
+
+# A desktop: a real socket where a compositor puts one. A path under 108 bytes,
+# which is all a unix socket's address can hold.
+_wl = tempfile.mkdtemp(prefix='wl')
+_wsock = _socket.socket(_socket.AF_UNIX)
+_wsock.bind(os.path.join(_wl, 'wayland-1'))
+# ...and the lock file every compositor leaves beside it, which is not a socket.
+open(os.path.join(_wl, 'wayland-1.lock'), 'w').close()
+_nodesk = tempfile.mkdtemp(prefix='nd')
+_x0 = os.path.exists('/tmp/.X11-unix/X0')
+
+# The live picture, as the scanner leaves it.
+_frame = os.path.join(_pdir, 'live.jpg')
+with open(_frame, 'wb') as _fh:
+    _fh.write(b'\xff\xd8\xff\xe0' + os.urandom(2000) + b'\xff\xd9')
+_frame_bytes = open(_frame, 'rb').read()
+
+
+def _snapper(case, env):
+    """A server for one case: its own journal, so its own snaps folder."""
+    home = os.path.join(_pdir, case)
+    os.makedirs(home, exist_ok=True)
+    jpath = os.path.join(home, 'journal.jsonl')
+    if not os.path.exists(jpath):
+        open(jpath, 'w').close()
+    log = os.path.join(home, 'server.log')
+    full = {k: v for k, v in os.environ.items()
+            if k not in ('DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XAUTHORITY',
+                         'PATH')}
+    port = free_port()
+    full.update(PORT=str(port), HTTPS_PORT='0', JOURNAL=jpath, SCANNER='0',
+                PATH=_bins['none'], XDG_RUNTIME_DIR=_nodesk, FRAME=_frame)
+    full.update(env)
+    # None takes a name out altogether, the way systemd starts the service.
+    full = {k: v for k, v in full.items() if v is not None}
+    proc = subprocess.Popen([_node, os.path.join(ROOT, 'server.js')], env=full,
+                            stdout=open(log, 'w'), stderr=subprocess.STDOUT)
+    url = 'http://127.0.0.1:%d' % port
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(url + '/api/status', timeout=1).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+    return proc, url, os.path.join(home, 'snaps'), log
+
+
+def _snap(url, timeout=20):
+    req = urllib.request.Request(url + '/api/snap', data=b'', method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read().decode('utf-8') or '{}')
+    except Exception as e:
+        # No answer at all — a hung tool with nothing bounding it. A result,
+        # so the check that names it fails, rather than the suite.
+        return None, {'error': repr(e)}
+
+
+def _piece(reply, what):
+    return ([p for p in (reply.get('contents') or []) if p.get('what') == what] or [{}])[0]
+
+
+def _fetch(url, path):
+    """Status and body, with the path sent exactly as written — urllib would
+    tidy a `..` away before the server ever saw it."""
+    u = urllib.parse.urlparse(url)
+    c = http.client.HTTPConnection(u.hostname, u.port, timeout=5)
+    c.request('GET', path)
+    r = c.getresponse()
+    body = r.read()
+    c.close()
+    return r.status, body, r.getheader('Content-Type')
+
+
+import urllib.parse                                           # noqa: E402
+
+# --- the whole thing, on a desktop with grim ---------------------------------
+#
+# In a folder with a space in its name, which is what makes "an argument of its
+# own, not a shell line" a claim with teeth: a command line pasted together and
+# handed to a shell splits there, and the tool is given two arguments, neither
+# of them the path.
+_p, _u, _snaps, _log = _snapper('whole rig', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim']})
+try:
+    _before = time.time()
+    _code, _rep = _snap(_u)
+    _after = time.time()
+    eq('a snap is answered ok', (_code, _rep.get('ok')), (200, True))
+    _name = _rep.get('name') or ''
+    # The folder is the local time of the press, which this suite reads in the
+    # driver's zone (TZ=America/New_York) like every other suite that reads a
+    # clock.
+    _stamps = {time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(t))
+               for t in (int(_before), int(_before) + 1, int(_after))}
+    ok_('the folder is named for the local time of the press (%r)' % _name,
+        _name in _stamps)
+    _dir = os.path.join(_snaps, _name)
+    ok_('...and is made beside the journal, in snaps/', os.path.isdir(_dir))
+    _panel = _piece(_rep, 'panel')
+    eq('the screenshot is taken by grim, found on PATH, under a Wayland desktop',
+       (_panel.get('saved'), _panel.get('tool'), _panel.get('session')),
+       (True, 'grim', 'wayland'))
+    _got = open(os.path.join(_dir, 'panel.png'), 'rb').read() if os.path.exists(
+        os.path.join(_dir, 'panel.png')) else b''
+    eq('...and panel.png is the PNG the tool wrote, byte for byte', _got, _PNG)
+    eq('...with its size in the reply', _panel.get('bytes'), len(_PNG))
+    # Found the way a systemd service has to find it: nothing in this server's
+    # own environment named the session, only the runtime directory did.
+    _r = _ran(_grim) or {}
+    eq('...run with the desktop session the server found, not its own',
+       ((_r.get('env') or {}).get('WAYLAND_DISPLAY'),
+        (_r.get('env') or {}).get('XDG_RUNTIME_DIR')),
+       ('wayland-1', _wl))
+    eq('...handed the output path as an argument of its own, not a shell line',
+       _r.get('argv'), [os.path.join(_dir, 'panel.png')])
+    _cam = _piece(_rep, 'camera')
+    _cgot = open(os.path.join(_dir, 'camera.jpg'), 'rb').read() if os.path.exists(
+        os.path.join(_dir, 'camera.jpg')) else b''
+    eq('the camera\'s last picture is kept, byte for byte', _cgot, _frame_bytes)
+    ok_('...with its age, and called current (%r ms)' % _cam.get('ageMs'),
+        isinstance(_cam.get('ageMs'), (int, float)) and _cam.get('ageMs') < 12000
+        and _cam.get('stale') is False)
+    def _json_in(folder, name):
+        try:
+            return json.load(open(os.path.join(folder, name)))
+        except (OSError, ValueError):
+            return None
+    _status = _json_in(_dir, 'status.json')
+    eq('status.json is what /api/status answers', _status, get(_u, '/api/status'))
+    eq('the reply says all three were kept and nothing is missing',
+       ([p.get('what') for p in _rep.get('contents') or [] if p.get('saved')], _rep.get('said')),
+       (['panel', 'camera', 'status'], 'saved'))
+    _record = _json_in(_dir, 'snap.json') or {}
+    eq('...and snap.json in the folder says the same',
+       (_record.get('said'), _record.get('contents')), (_rep.get('said'), _rep.get('contents')))
+    # Listed and served.
+    _list = get(_u, '/api/snaps')
+    eq('the list names it, with the files it holds and their sizes',
+       [(s['name'], sorted((f['file'], f['bytes']) for f in s['files'])) for s in _list['snaps']],
+       [(_name, sorted([('panel.png', len(_PNG)), ('camera.jpg', len(_frame_bytes)),
+                        ('status.json', _size(os.path.join(_dir, 'status.json'))),
+                        ('snap.json', _size(os.path.join(_dir, 'snap.json')))]))])
+    eq('...and says where they are on the rig', _list.get('where'), _snaps)
+    _st, _body, _type = _fetch(_u, '/api/snaps/%s/panel.png' % _name)
+    eq('panel.png is served from the list, as a PNG', (_st, _body, _type), (200, _PNG, 'image/png'))
+    _st, _body, _type = _fetch(_u, '/api/snaps/%s/camera.jpg' % _name)
+    eq('...and so is camera.jpg', (_st, _body == _frame_bytes), (200, True))
+
+    # --- nothing outside the snaps folder comes out through it ---------------
+    #
+    # The journal sits one directory above snaps/, and this server's own source
+    # one above that: the two things a traversal would be after.
+    _journal_text = b'{"v": 1, "id": "secret-offer"}\n'
+    with open(os.path.join(os.path.dirname(_snaps), 'journal.jsonl'), 'wb') as _fh:
+        _fh.write(_journal_text)
+    with open(os.path.join(_dir, 'notes.txt'), 'w') as _fh:
+        _fh.write('not one of the four')
+    _tries = [
+        '/api/snaps/../journal.jsonl',
+        '/api/snaps/%s/../../journal.jsonl' % _name,
+        '/api/snaps/%s/..%%2F..%%2Fjournal.jsonl' % _name,
+        '/api/snaps/%2e%2e/journal.jsonl',
+        '/api/snaps/%s/%%2e%%2e%%2fstatus.json' % _name,
+        '/api/snaps//etc/passwd',
+        '/api/snaps/%2Fetc%2Fpasswd/panel.png',
+        '/api/snaps/%s/%%2Fetc%%2Fpasswd' % _name,
+        '/api/snaps/%s/notes.txt' % _name,
+        '/api/snaps/%s/' % _name,
+        '/api/snaps/not-a-snap/panel.png',
+    ]
+    for _path in _tries:
+        _st, _body, _type = _fetch(_u, _path)
+        ok_('%s is refused (%d)' % (_path, _st),
+            _st in (403, 404) and b'secret-offer' not in _body and b'root:' not in _body)
+    # A real folder inside snaps/ that this server did not make — copied there
+    # by hand, or left by something else — holding a real picture. Inside the
+    # folder, so no path check refuses it; only the rule that a folder is one
+    # of the names a press makes does.
+    os.mkdir(os.path.join(_snaps, 'by-hand'))
+    shutil.copy(_pngfile, os.path.join(_snaps, 'by-hand', 'panel.png'))
+    _st, _body, _type = _fetch(_u, '/api/snaps/by-hand/panel.png')
+    eq('a folder in snaps/ not named the way a press names one is not served from',
+       _st, 404)
+    # A name that is right and a link that is not: panel.png in a snap folder
+    # replaced by a link to the journal. Refused after following it.
+    _evil = os.path.join(_snaps, '2026-01-01_00-00-00')
+    os.mkdir(_evil)
+    os.symlink(os.path.join(os.path.dirname(_snaps), 'journal.jsonl'),
+               os.path.join(_evil, 'panel.png'))
+    _st, _body, _type = _fetch(_u, '/api/snaps/2026-01-01_00-00-00/panel.png')
+    eq('a panel.png that is a link out of the snaps folder is refused',
+       (_st, b'secret-offer' in _body), (403, False))
+    # ...and a whole folder that is a link out of it is neither listed nor served.
+    _out = os.path.join(_pdir, 'outside')
+    os.makedirs(_out)
+    with open(os.path.join(_out, 'status.json'), 'w') as _fh:
+        _fh.write('{"secret-offer": true}')
+    os.symlink(_out, os.path.join(_snaps, '2026-01-02_00-00-00'))
+    _st, _body, _type = _fetch(_u, '/api/snaps/2026-01-02_00-00-00/status.json')
+    eq('a snap folder that is a link out of the snaps folder is refused',
+       (_st, b'secret-offer' in _body), (403, False))
+    no_('...and is not listed as a snap',
+        '2026-01-02_00-00-00' in [s['name'] for s in get(_u, '/api/snaps')['snaps']])
+finally:
+    stop(_p)
+
+# --- no screenshot tool, and the reason --------------------------------------
+_p, _u, _snaps, _log = _snapper('notool', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['none']})
+try:
+    _code, _rep = _snap(_u)
+    _panel = _piece(_rep, 'panel')
+    eq('a desktop with no grim on PATH still keeps a snap', (_code, _rep.get('ok')), (200, True))
+    eq('...saying the screenshot is missing because grim is not installed',
+       (_panel.get('saved'), _panel.get('why'), _panel.get('fix')),
+       (False, 'grim is not installed', 'sudo apt install grim'))
+    eq('...in the one line the panel shows',
+       _rep.get('said'), 'saved — no screenshot: grim is not installed')
+    no_('...with no panel.png in the folder',
+        os.path.exists(os.path.join(_snaps, _rep.get('name') or '?', 'panel.png')))
+    _listed = get(_u, '/api/snaps')['snaps'][0]
+    eq('...and the list carries the reason with it',
+       [(p.get('what'), p.get('why')) for p in _listed.get('problems') or []],
+       [('panel', 'grim is not installed')])
+finally:
+    stop(_p)
+
+# --- no desktop at all: the NucBox, which has no scanner either ---------------
+if _x0:
+    print('  (this machine has an X server at /tmp/.X11-unix/X0, so "no display '
+          'session" cannot be staged here — skipping those checks)')
+else:
+    _p, _u, _snaps, _log = _snapper('nucbox', {'PATH': _bins['nuc'],
+                                               'FRAME': os.path.join(_pdir, 'no-frame.jpg')})
+    try:
+        _code, _rep = _snap(_u)
+        eq('a machine with no desktop and no scanner still answers ok, keeping the status',
+           (_code, _rep.get('ok'), [p.get('what') for p in _rep.get('contents') or []
+                                    if p.get('saved')]),
+           (200, True, ['status']))
+        _panel = _piece(_rep, 'panel')
+        eq('...saying there is no display session rather than blaming a tool',
+           (_panel.get('why'), _panel.get('tool')), ('no display session found', None))
+        ok_('...and where it looked (%r)' % _panel.get('detail'),
+            _nodesk in (_panel.get('detail') or ''))
+        eq('...and that no scanner runs here to have taken a picture',
+           _piece(_rep, 'camera').get('why'), 'no scanner runs on this machine')
+        eq('...all of it in the line the panel shows', _rep.get('said'),
+           'saved — no screenshot: no display session found; '
+           'no camera picture: no scanner runs on this machine')
+        eq('...and grim, though installed, was never run, there being nothing to photograph',
+           _ran(_nucgrim), None)
+    finally:
+        stop(_p)
+
+    # ...and started the way systemd starts the service, with no runtime
+    # directory named at all: the server has to look where this uid's desktop
+    # session would be. Here there is none, so what is checked is where it
+    # looked — the place a Pi's desktop puts its socket.
+    _run = '/run/user/%d' % os.getuid()
+    _occupied = os.path.isdir(_run) and any(
+        n.startswith('wayland-') for n in os.listdir(_run))
+    if _occupied:
+        print('  (%s has a Wayland session on this machine, so the service\'s own '
+              'search cannot be staged as finding nothing — skipping that check)' % _run)
+    else:
+        _p, _u, _snaps, _log = _snapper('service', {'PATH': _bins['nuc'],
+                                                    'XDG_RUNTIME_DIR': None})
+        try:
+            _code, _rep = _snap(_u)
+            ok_('a server with no XDG_RUNTIME_DIR looks for the desktop in %s (%r)'
+                % (_run, _piece(_rep, 'panel').get('detail')),
+                'no wayland-* socket in ' + _run in (_piece(_rep, 'panel').get('detail') or ''))
+        finally:
+            stop(_p)
+
+# --- X11, and Wayland chosen over it ------------------------------------------
+_p, _u, _snaps, _log = _snapper('x11', {'DISPLAY': ':99', 'PATH': _bins['scrot']})
+try:
+    _code, _rep = _snap(_u)
+    _panel = _piece(_rep, 'panel')
+    eq('an X desktop is photographed with scrot',
+       (_panel.get('saved'), _panel.get('tool'), _panel.get('session')), (True, 'scrot', 'x11'))
+    eq('...on the display it was given', ((_ran(_scrot) or {}).get('env') or {}).get('DISPLAY'),
+       ':99')
+finally:
+    stop(_p)
+_p, _u, _snaps, _log = _snapper('import', {'DISPLAY': ':99', 'PATH': _bins['import']})
+try:
+    _code, _rep = _snap(_u)
+    eq('...or with ImageMagick\'s import when that is what there is, whole screen',
+       (_piece(_rep, 'panel').get('tool'), ((_ran(_import) or {}).get('argv') or [])[:2]),
+       ('import', ['-window', 'root']))
+finally:
+    stop(_p)
+_p, _u, _snaps, _log = _snapper('prefer', {'DISPLAY': ':0', 'XDG_RUNTIME_DIR': _wl,
+                                           'PATH': _bins['both']})
+try:
+    _code, _rep = _snap(_u)
+    eq('a Wayland desktop that also offers an X display is taken with grim',
+       _piece(_rep, 'panel').get('tool'), 'grim')
+finally:
+    stop(_p)
+
+# --- a tool that fails, lies, or hangs ----------------------------------------
+_p, _u, _snaps, _log = _snapper('fails', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['fails']})
+try:
+    _code, _rep = _snap(_u)
+    eq('a screenshot tool that fails is named, with what it said',
+       _piece(_rep, 'panel').get('why'),
+       'grim failed (exit 1): compositor doesn\'t support wlr-screencopy-unstable-v1')
+finally:
+    stop(_p)
+_p, _u, _snaps, _log = _snapper('junk', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['junk']})
+try:
+    _code, _rep = _snap(_u)
+    eq('a tool that exits 0 over something that is not a PNG is not believed',
+       _piece(_rep, 'panel').get('why'), 'grim wrote something that is not a PNG')
+    no_('...and what it wrote is not left behind as panel.png',
+        os.path.exists(os.path.join(_snaps, _rep.get('name') or '?', 'panel.png')))
+finally:
+    stop(_p)
+_p, _u, _snaps, _log = _snapper('hangs', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['hangs'],
+                                          'SNAP_TOOL_MS': '600'})
+try:
+    _t0 = time.time()
+    _code, _rep = _snap(_u, timeout=10)
+    _took = time.time() - _t0
+    eq('a tool that never finishes is given up on, and the snap kept without it',
+       (_code, _rep.get('ok'), _piece(_rep, 'panel').get('why')),
+       (200, True, 'grim did not finish in 1s'))
+    ok_('...on its deadline rather than the panel\'s (%.1fs)' % _took, _took < 5)
+    _pid = (_ran(_hangs) or {}).get('pid')
+    _alive = True
+    for _ in range(40):
+        try:
+            os.kill(_pid, 0)
+        except (OSError, TypeError):
+            _alive = False
+            break
+        time.sleep(0.05)
+    no_('...and it is killed, not left running', _alive)
+    no_('...taking its half-written file with it',
+        os.path.exists(os.path.join(_snaps, _rep.get('name') or '?', 'panel.png')))
+finally:
+    stop(_p)
+
+# --- a camera picture too old to be the one at the press ----------------------
+_old = os.path.join(_pdir, 'old.jpg')
+shutil.copy(_frame, _old)
+os.utime(_old, (time.time() - 600, time.time() - 600))
+_p, _u, _snaps, _log = _snapper('stale', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
+                                          'FRAME': _old})
+try:
+    _code, _rep = _snap(_u)
+    _cam = _piece(_rep, 'camera')
+    eq('a ten-minute-old camera picture is kept, but called stale, with why',
+       (_cam.get('saved'), _cam.get('stale'), _cam.get('why')),
+       (True, True, 'camera picture 10 min old, no scanner runs on this machine'))
+    eq('...and said so in the line the panel shows, never as plain "saved"',
+       _rep.get('said'), 'saved — camera picture 10 min old, no scanner runs on this machine')
+finally:
+    stop(_p)
+
+# --- what was on the panel: the reading, its text, the offer, the order -------
+_reading_text = 'UberX\n$16.05\n3 min (1.1 mi) away\n20 min (7.3 mi) trip'
+_sfake2 = os.path.join(_pdir, 'reads.py')
+with open(_sfake2, 'w') as _fh:
+    _fh.write('import json, time\nprint(json.dumps({"ready": True, "state": "go", '
+              '"perHour": 31.6, "grossPerHour": 41.9, "pay": 16.05, "minutes": 23.0, '
+              '"miles": 8.4, "cost": 2.94, "billedMinutes": 23.0, "target": 25, "band": 15, '
+              '"costPerMile": 0.35, "text": %r, "offer": {"id": "o-snap", "pay": 16.05, '
+              '"minutes": 23.0, "billedMinutes": 23.0, "miles": 8.4, "cost": 2.94, '
+              '"state": "go"}}), flush=True)\ntime.sleep(600)\n' % _reading_text)
+_p, _u, _snaps, _log = _snapper('reading', {
+    'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _sfake2,
+    'UBERSCAN_HANDOFF_DIR': _pdir, 'FRAME': os.path.join(_pdir, 'no-frame.jpg')})
+try:
+    for _ in range(100):
+        if (get(_u, '/api/status').get('offer') or {}).get('id') == 'o-snap':
+            break
+        time.sleep(0.05)
+    post(_u, '/api/offers/mark', {'id': 'o-snap', 'accepted': True})
+    _code, _rep = _snap(_u)
+    _status = _json_in(os.path.join(_snaps, _rep.get('name') or '?'), 'status.json') or {}
+    eq('status.json carries the reading on the panel, and the reader\'s text',
+       ((_status.get('last') or {}).get('perHour'), (_status.get('last') or {}).get('text')),
+       (31.6, _reading_text))
+    eq('...the offer on record', (_status.get('offer') or {}).get('id'), 'o-snap')
+    eq('...and the order in the car', (_status.get('holding') or {}).get('pay'), 16.05)
+    eq('a running scanner that has written no picture says so',
+       _piece(_rep, 'camera').get('why'), 'no camera picture yet')
+finally:
+    stop(_p)
+
+# ...and one that has stopped. It is restarted after three seconds, so the
+# press is made the moment the status says it is down.
+_sfake3 = os.path.join(_pdir, 'dies.py')
+with open(_sfake3, 'w') as _fh:
+    _fh.write('import sys\nsys.exit(1)\n')
+_p, _u, _snaps, _log = _snapper('dead', {
+    'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _sfake3,
+    'UBERSCAN_HANDOFF_DIR': _pdir, 'FRAME': os.path.join(_pdir, 'no-frame.jpg')})
+try:
+    for _ in range(100):
+        if not get(_u, '/api/status')['scanner']['running']:
+            break
+        time.sleep(0.02)
+    _code, _rep = _snap(_u)
+    eq('a scanner that is not running is named as the reason there is no picture',
+       _piece(_rep, 'camera').get('why'), 'the scanner is not running')
+finally:
+    stop(_p)
+
+# --- newest first, and the oldest go, out loud --------------------------------
+_p, _u, _snaps, _log = _snapper('prune', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
+                                          'SNAPS_KEEP': '3'})
+try:
+    # A second apart, so this is about pruning and not about two presses in
+    # one second, which has its own case below.
+    _made = []
+    for _ in range(3):
+        _made.append(_snap(_u)[1].get('name') or '')
+        time.sleep(1.05)
+    eq('three presses are three snaps', len(set(_made)), 3)
+    eq('the list is newest first', [s['name'] for s in get(_u, '/api/snaps')['snaps']],
+       sorted(_made, reverse=True))
+    _code, _rep = _snap(_u)
+    eq('a fourth with three kept removes the oldest, and the reply names it',
+       _rep.get('pruned'), [sorted(_made)[0]])
+    eq('...which is gone from disk',
+       sorted(os.listdir(_snaps)), sorted(sorted(_made)[1:] + [_rep.get('name')]))
+    _logged = open(_log).read()
+    ok_('...and the server log says so (%r)'
+        % [l for l in _logged.splitlines() if 'removed' in l][:1],
+        'snap: removed the oldest 1 to keep 3: %s' % sorted(_made)[0] in _logged)
+    # A snap named for a time BEFORE every one already there — a Pi that booted
+    # in 1970 and has not heard from the network yet — is the oldest folder
+    # there is, and the press that made it must not be the press that deletes
+    # it. Staged with three from 2099, so the new one is the oldest by name.
+    for _n in os.listdir(_snaps):
+        shutil.rmtree(os.path.join(_snaps, _n))
+    for _future in ('2099-01-01_00-00-00', '2099-01-01_00-00-01', '2099-01-01_00-00-02'):
+        os.mkdir(os.path.join(_snaps, _future))
+    _code, _rep = _snap(_u)
+    eq('a new snap that sorts oldest is never the one removed to make room',
+       (os.path.isdir(os.path.join(_snaps, _rep.get('name') or '?')), _rep.get('pruned')),
+       (True, ['2099-01-01_00-00-00']))
+finally:
+    stop(_p)
+
+# --- two presses in one second -------------------------------------------------
+#
+# Forced rather than hoped for: the folders for this second and the next few
+# are already there, so the press has to land on a name that is taken.
+_p, _u, _snaps, _log = _snapper('collide', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim']})
+try:
+    os.makedirs(_snaps, exist_ok=True)
+    _now = time.time()
+    _taken = [time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(_now + i)) for i in range(6)]
+    for _n in _taken:
+        os.mkdir(os.path.join(_snaps, _n))
+    _code, _rep = _snap(_u)
+    _n = _rep.get('name') or ''
+    ok_('a second snap in a second already taken is numbered -02 (%r)' % _n,
+        _n.endswith('-02') and _n[:-3] in _taken)
+    _order = [s['name'] for s in get(_u, '/api/snaps')['snaps']]
+    ok_('...and lists as newer than the first one of that second, older than the next',
+        _n in _order and _n[:-3] in _order
+        and _order.index(_n) + 1 == _order.index(_n[:-3]))
+finally:
+    stop(_p)
+
+# --- a rig whose clock the network has not set yet ----------------------------
+#
+# A Pi has no real-time clock. Until the network answers it believes it is
+# 1970, so a snap taken then is named for 1970 — which is the oldest name there
+# is. Staged by winding this server's Date.now back to two days after the epoch
+# before server.js loads — two, so the local date is 1970 in any zone — and the
+# name, the note and the pruning are the real code's, on the clock a cold Pi
+# actually has.
+_clock = os.path.join(_pdir, 'cold-boot.js')
+with open(_clock, 'w') as _fh:
+    _fh.write('var real = Date.now;\nvar back = real() - 2 * 86400000;\n'
+              'Date.now = function () { return real() - back; };\n')
+_p, _u, _snaps, _log = _snapper('clock', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
+                                          'SNAPS_KEEP': '1',
+                                          'NODE_OPTIONS': '--require ' + _clock})
+try:
+    os.makedirs(_snaps, exist_ok=True)
+    os.mkdir(os.path.join(_snaps, '2026-10-01_12-00-00'))
+    _code, _rep = _snap(_u)
+    ok_('a snap on a clock nobody has set is named for the year that clock says (%r)'
+        % _rep.get('name'), (_rep.get('name') or '').startswith('1970-01-0'))
+    ok_('...and says so, rather than filing it in 1970 in silence (%r)' % _rep.get('said'),
+        'the rig\'s clock is not set, so it is filed under 1970' in (_rep.get('said') or ''))
+    eq('...and, sorting oldest, it is the one kept when only one may be',
+       (sorted(os.listdir(_snaps)), _rep.get('pruned')),
+       ([_rep.get('name')], ['2026-10-01_12-00-00']))
+finally:
+    stop(_p)
+
+# --- nowhere to put it --------------------------------------------------------
+_p, _u, _snaps, _log = _snapper('blocked', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim']})
+try:
+    with open(_snaps, 'w') as _fh:
+        _fh.write('a file where the folder goes')
+    _code, _rep = _snap(_u)
+    ok_('a snaps folder that cannot be made is a failure that says where (%r)'
+        % _rep.get('error'),
+        _code == 500 and _rep.get('ok') is False
+        and 'could not make a folder for it in ' + _snaps in (_rep.get('error') or ''))
+finally:
+    stop(_p)
+
+# ...and a folder made with nothing to go in it: no screenshot tool, no camera
+# picture, and a card that refuses the status as it is written. Staged the way
+# the cold clock is, by failing this server's own fs.writeFile for status.json
+# before server.js loads — this suite runs as root, which no permission bit
+# stops — so the folder, the three reasons and the clean-up are the real code's.
+_full = os.path.join(_pdir, 'card-full.js')
+with open(_full, 'w') as _fh:
+    _fh.write("var fs = require('fs');\nvar real = fs.writeFile;\n"
+              "fs.writeFile = function (p, data, cb) {\n"
+              "  if (/status\\.json$/.test(String(p))) {\n"
+              "    var e = new Error('no space left on device'); e.code = 'ENOSPC';\n"
+              "    return setImmediate(cb, e);\n"
+              "  }\n"
+              "  return real.apply(fs, arguments);\n"
+              "};\n")
+_p, _u, _snaps, _log = _snapper('nothing', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['none'],
+                                            'FRAME': os.path.join(_pdir, 'no-frame.jpg'),
+                                            'NODE_OPTIONS': '--require ' + _full})
+try:
+    _code, _rep = _snap(_u)
+    eq('a press that keeps nothing at all is a failure that gives every reason',
+       (_code, _rep.get('ok'), _rep.get('error')),
+       (500, False, 'nothing could be kept: grim is not installed; '
+                    'no scanner runs on this machine; could not write it: ENOSPC'))
+    eq('...and leaves no empty folder behind to list as a snap',
+       (os.listdir(_snaps) if os.path.isdir(_snaps) else [], get(_u, '/api/snaps')['snaps']),
+       ([], []))
+finally:
+    stop(_p)
+
+_wsock.close()
+shutil.rmtree(_pdir, ignore_errors=True)
+shutil.rmtree(_wl, ignore_errors=True)
+shutil.rmtree(_nodesk, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

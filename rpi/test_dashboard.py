@@ -3002,6 +3002,188 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  // --- 📷 Snap: the control, what it says, and a press nothing answers -----
+  //
+  // The rig's answers are staged here — the server suite holds what it actually
+  // keeps — so every line the control can say is reached on purpose, including
+  // the one where nothing comes back at all. The page's clock is the fake one
+  // the bar's own hung-connection block uses, so the twenty-second deadline
+  // and the eight seconds the answer stays are real timers, not waited out.
+  stage = '📷 Snap: the control, what it says, and a press nothing answers';
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
+    const replies = [];
+    const posted = [];
+    // The shift line up, so "it stands down while the answer shows" is a
+    // claim about a line that is there to stand down.
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 435, counted: 428, setAside: 7, took: 10,
+                             median: -17, earned: 140.5, earnedCost: 31.0,
+                             beforeClock: 0, unreadable: null, rolled: false,
+                             clockSet: true }) }));
+    await page.route('**/api/snap', (route) => {
+      posted.push(route.request().method());
+      const next = replies.shift();
+      if (!next || next === 'hang') return;      // never fulfilled, never aborted
+      route.fulfill({ status: next.status || 200, contentType: 'application/json',
+                      body: JSON.stringify(next.body) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await framed(page);
+    await page.waitForFunction("/\\/hr an offer/.test((document.getElementById('shift') || {}).textContent || '')",
+                               null, { timeout: 8000 }).catch(() => {});
+    const snapState = () => page.evaluate(() => {
+      const b = document.getElementById('snap');
+      if (!b) return { there: false };
+      const r = b.getBoundingClientRect();
+      const shift = document.getElementById('shift');
+      return { there: true, text: (b.textContent || '').trim(), off: !!b.disabled,
+               title: b.title || '', failed: b.classList.contains('failed'),
+               inBar: !!b.closest('.bottombar'), inRow: !!b.closest('.connbar'),
+               shiftShown: !shift.hidden && getComputedStyle(shift).display !== 'none'
+                           && shift.getBoundingClientRect().width > 0,
+               shown: r.width > 0 && r.height > 0 && r.top >= 0
+                      && r.bottom <= window.innerHeight + 1
+                      && getComputedStyle(b).display !== 'none' };
+    });
+    const press = () => page.click('#snap', { timeout: 4000 }).then(() => true, () => false);
+    out.snapControl = { before: await snapState() };
+    replies.push({ body: { ok: true, name: '2026-10-07_21-14-03', said: 'saved' } });
+    out.snapControl.pressed = await press();
+    await page.waitForTimeout(300);
+    out.snapControl.saved = await snapState();
+    await page.clock.runFor(8500);
+    await page.waitForTimeout(200);
+    out.snapControl.back = await snapState();
+    replies.push({ body: { ok: true, name: '2026-10-07_21-15-00',
+                           said: 'saved — no screenshot: grim is not installed' } });
+    await press();
+    await page.waitForTimeout(300);
+    out.snapControl.partial = await snapState();
+    await page.clock.runFor(8500);
+    replies.push({ status: 500, body: { ok: false,
+      error: 'could not make a folder for it in /home/pi/Uber_Scan/rpi/snaps: EACCES' } });
+    await press();
+    await page.waitForTimeout(300);
+    out.snapControl.refused = await snapState();
+    await page.clock.runFor(8500);
+    // ...and a connection that opens and never answers.
+    replies.push('hang');
+    await press();
+    await page.waitForTimeout(300);
+    out.snapControl.busy = await snapState();
+    await page.clock.runFor(20500);
+    await page.waitForTimeout(300);
+    out.snapControl.hungAfter = await snapState();
+    await page.clock.runFor(8500);
+    await page.waitForTimeout(200);
+    out.snapControl.hungBack = await snapState();
+    out.snapControl.posted = posted;
+    await page.close();
+    await ctx.close();
+  }
+
+  // ...and one press against the real server, nothing staged: whatever this
+  // machine has by way of a desktop, the line that comes back is the server's.
+  stage = '📷 Snap: one press against the real server';
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    const answered = page.waitForResponse((r) => r.url().endsWith('/api/snap'), { timeout: 15000 })
+      .then((r) => r.json(), () => null);
+    await page.click('#snap', { timeout: 4000 }).catch(() => {});
+    out.snapControlReal = { reply: await answered };
+    await page.waitForTimeout(200);
+    out.snapControlReal.text = await page.evaluate(
+      () => (document.getElementById('snap').textContent || '').trim());
+    await page.close();
+    await ctx.close();
+  }
+
+  // --- 📷 Snaps, the page that gets them off the rig -------------------------
+  //
+  // On a phone, which is where it is read, against the real server: the two
+  // snaps the Python side left in the folder, the one the press above made,
+  // and one more made from this page.
+  stage = '📷 Snaps: the list, its pictures and links, and a press from the phone';
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 390, height: 844 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    const shelf = () => page.evaluate(async () => {
+      const arts = [].slice.call(document.querySelectorAll('#shelf .snap'));
+      const imgs = [].slice.call(document.querySelectorAll('#shelf img'));
+      // Every picture decoded, or as far as it will get.
+      await Promise.all(imgs.map((i) => i.decode().catch(() => {})));
+      return arts.map((a) => ({
+        when: (a.querySelector('h2').firstChild.nodeValue || '').trim(),
+        said: (a.querySelector('.said').textContent || '').trim(),
+        why: [].slice.call(a.querySelectorAll('.why li')).map((l) => l.textContent.trim()),
+        fix: [].slice.call(a.querySelectorAll('.why code')).map((c) => c.textContent),
+        pics: [].slice.call(a.querySelectorAll('img')).map((i) => ({
+          src: i.getAttribute('src'), loaded: i.naturalWidth > 0 })),
+        links: [].slice.call(a.querySelectorAll('.files a')).map((l) => ({
+          href: l.getAttribute('href'), download: l.getAttribute('download'),
+          text: l.firstChild.nodeValue })),
+      }));
+    });
+    // Reached the way a driver reaches it: from the offers page, by its link.
+    await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    out.snapsPage = {};
+    out.snapsPage.followed = await Promise.all([
+      page.waitForURL('**/snaps.html', { timeout: 8000 }),
+      page.click('a[href="snaps.html"]', { timeout: 4000 }),
+    ]).then(() => true, () => false);
+    if (!out.snapsPage.followed) {
+      await page.goto(base + '/snaps.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    }
+    await page.waitForFunction("document.querySelectorAll('#shelf .snap').length >= 3",
+                               null, { timeout: 10000 }).catch(() => {});
+    out.snapsPage.first = await shelf();
+    // A link that opens a file, followed rather than read off the attribute.
+    const one = (out.snapsPage.first.find((s) => s.links.length) || { links: [] }).links[0];
+    out.snapsPage.opened = one ? await page.evaluate(async (href) => {
+      const r = await fetch(href);
+      return { status: r.status, type: r.headers.get('Content-Type') };
+    }, one.href) : null;
+    const answered = page.waitForResponse((r) => r.url().endsWith('/api/snap'), { timeout: 15000 })
+      .then((r) => r.json(), () => null);
+    out.snapsPage.pressed = await page.click('#snapNow', { timeout: 4000 }).then(() => true, () => false);
+    out.snapsPage.reply = await answered;
+    // The folder name as the page writes it: 2026-10-07_21-14-03 is shown as
+    // 2026-10-07 21:14:03.
+    const fresh = out.snapsPage.reply && out.snapsPage.reply.name;
+    // A second press in the same second as the one above is `-02`, "(2)".
+    out.snapsPage.freshWhen = fresh ? fresh.slice(0, 10) + ' ' + fresh.slice(11, 13) + ':'
+                                      + fresh.slice(14, 16) + ':' + fresh.slice(17, 19)
+                                      + (fresh.length > 19 ? ' (' + Number(fresh.slice(20)) + ')' : '')
+                                    : null;
+    await page.waitForFunction((w) => {
+      const h = document.querySelector('#shelf .snap h2');
+      return !!h && !!w && h.textContent.indexOf(w) === 0;
+    }, out.snapsPage.freshWhen, { timeout: 10000 }).catch(() => {});
+    out.snapsPage.said = await page.evaluate(() => ({
+      text: document.getElementById('snapSaid').textContent,
+      shown: !document.getElementById('snapSaid').hidden }));
+    out.snapsPage.after = await shelf();
+    await page.close();
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -3062,6 +3244,29 @@ try:
         # picture to send they would be measured in the scene layout instead,
         # which is not the one in the car.
         skip('no PIL, so there is no frame to put the page in the phone layout')
+
+    # Two 📷 Snaps for snaps.html to list, in the folder the server keeps them
+    # in — beside the journal — dated well before anything this run will make,
+    # so "the new one is at the top" is a claim about the press. One whole, and
+    # one with no screenshot, carrying the reason the server gives for that.
+    for _name, _whole in (('2026-01-02_09-00-00', True), ('2026-01-02_09-05-00', False)):
+        _dir = os.path.join(work, 'snaps', _name)
+        os.makedirs(_dir)
+        if _whole:
+            Image.new('RGB', (800, 480), (11, 15, 20)).save(os.path.join(_dir, 'panel.png'))
+        Image.new('RGB', (480, 1040), (238, 240, 244)).save(
+            os.path.join(_dir, 'camera.jpg'), quality=60)
+        with open(os.path.join(_dir, 'status.json'), 'w') as _fh:
+            _fh.write('{}\n')
+        _missing = [] if _whole else [{
+            'what': 'panel', 'file': 'panel.png', 'saved': False,
+            'why': 'grim is not installed', 'fix': 'sudo apt install grim',
+            'session': 'wayland'}]
+        with open(os.path.join(_dir, 'snap.json'), 'w') as _fh:
+            json.dump({'v': 1, 'name': _name, 'at': time.time() * 1000 - 86400000,
+                       'contents': _missing, 'notes': [],
+                       'said': 'saved' if _whole
+                               else 'saved — no screenshot: grim is not installed'}, _fh)
     driver = os.path.join(work, 'dashboard.js')
     open(driver, 'w').write(DRIVER)
     readings = READINGS
@@ -4732,6 +4937,100 @@ try:
         'Scene' in (off.get('label') or ''))
     ok_('...with the map put away', not off.get('mapShown'))
     ok_('...and the picture back', off.get('imgShown'))
+
+    # --- 📷 Snap ----------------------------------------------------------
+    #
+    # A press that keeps evidence of the screen, so the one thing it may not do
+    # is say "saved" over less than it kept — and the other is sit at "…" for
+    # the rest of the shift because the car's wifi swallowed the answer.
+    snap = got.get('snapControl') or {}
+    before = snap.get('before') or {}
+    ok_('the 📷 Snap control is on the panel', before.get('shown'))
+    ok_('...in the status row, not on the bar of controls',
+        before.get('inRow') and not before.get('inBar'))
+    eq('...saying what it does', before.get('text'), '📷 Snap')
+    ok_('...and it can be pressed', snap.get('pressed'))
+    eq('pressing it posts to /api/snap, once a press', snap.get('posted'),
+       ['POST', 'POST', 'POST', 'POST'])
+    eq('a snap that kept everything says so on the control',
+       (snap.get('saved') or {}).get('text'), '📷 saved')
+    eq('...and the label comes back', (snap.get('back') or {}).get('text'), '📷 Snap')
+    ok_('...with what the last press kept still on its title (%r)'
+        % (snap.get('back') or {}).get('title'),
+        'Last time: saved' in ((snap.get('back') or {}).get('title') or ''))
+    # The server's own line, word for word: a second wording of it on the page
+    # is a second place for the reason to go missing.
+    eq('a snap with no screenshot says why, on the control',
+       (snap.get('partial') or {}).get('text'),
+       '📷 saved — no screenshot: grim is not installed')
+    no_('...which is not a failure: the rest was kept',
+        (snap.get('partial') or {}).get('failed'))
+    _refused = snap.get('refused') or {}
+    ok_('a snap the rig could not keep at all says not saved, with its reason (%r)'
+        % _refused.get('text'),
+        (_refused.get('text') or '').startswith('📷 not saved: could not make a folder')
+        and _refused.get('failed'))
+    _busy = snap.get('busy') or {}
+    eq('pressing it while nothing answers puts it to work',
+       (_busy.get('text'), _busy.get('off')), ('📷 …', True))
+    _after = snap.get('hungAfter') or {}
+    eq('...and at the deadline it says nothing answered, rather than sitting there',
+       (_after.get('text'), _after.get('off'), _after.get('failed')),
+       ('📷 no answer from the rig', False, True))
+    eq('...and then offers itself again', (snap.get('hungBack') or {}).get('text'),
+       '📷 Snap')
+
+    real = got.get('snapControlReal') or {}
+    _reply = real.get('reply') or {}
+    ok_('a press against the real server is answered (%r)' % (_reply.get('said'),),
+        _reply.get('ok') is True and bool(_reply.get('name')))
+    eq('...and the control says the server\'s own line',
+       real.get('text'), '📷 ' + (_reply.get('said') or '?'))
+    ok_('...and the folder it names is on disk beside the journal',
+        os.path.isdir(os.path.join(work, 'snaps', _reply.get('name') or '?')))
+    # The row the answer is said on is the shift line's too, and the answer
+    # is the longer of the two — so the shift line stands down while it shows
+    # and comes back with the label.
+    ok_('the shift line was on the status row before the press',
+        (snap.get('before') or {}).get('shiftShown'))
+    no_('...stands down while the answer is on the control',
+        (snap.get('partial') or {}).get('shiftShown'))
+    ok_('...and comes back with the label', (snap.get('back') or {}).get('shiftShown'))
+
+    # --- 📷 Snaps, the page ------------------------------------------------
+    sp = got.get('snapsPage') or {}
+    first = sp.get('first') or []
+    ok_('the offers page links to 📷 Snaps, and the link opens it', sp.get('followed'))
+    _whens = [s.get('when') for s in first]
+    ok_('📷 Snaps lists the snaps on the rig, the two left there among them (%r)'
+        % (_whens,), {'2026-01-02 09:00:00', '2026-01-02 09:05:00'} <= set(_whens))
+    eq('...newest first', _whens, sorted(_whens, reverse=True))
+    _whole = ([s for s in first if s.get('when') == '2026-01-02 09:00:00'] or [{}])[0]
+    eq('...showing a whole one\'s panel and camera picture, both loaded',
+       [(p.get('src'), p.get('loaded')) for p in _whole.get('pics') or []],
+       [('/api/snaps/2026-01-02_09-00-00/panel.png', True),
+        ('/api/snaps/2026-01-02_09-00-00/camera.jpg', True)])
+    eq('...with a link to save each file under the snap\'s own name',
+       [(l.get('href'), l.get('download')) for l in _whole.get('links') or []],
+       [('/api/snaps/2026-01-02_09-00-00/' + f, '2026-01-02_09-00-00-' + f)
+        for f in ('panel.png', 'camera.jpg', 'status.json', 'snap.json')])
+    eq('...and a link that opens what it names',
+       (sp.get('opened') or {}).get('status'), 200)
+    _short = ([s for s in first if s.get('when') == '2026-01-02 09:05:00'] or [{}])[0]
+    ok_('...and says why a part is missing, with the command that fixes it (%r)'
+        % (_short.get('why'),),
+        any('grim is not installed' in w for w in _short.get('why') or [])
+        and _short.get('fix') == ['sudo apt install grim'])
+    eq('...under the line the driving screen said for it',
+       _short.get('said'), 'saved — no screenshot: grim is not installed')
+    _sreply = sp.get('reply') or {}
+    ok_('pressing 📷 on 📷 Snaps keeps a snap of the rig\'s screen (%r)'
+        % (_sreply.get('said'),), sp.get('pressed') and _sreply.get('ok') is True)
+    eq('...saying what the rig kept, in its own words',
+       (sp.get('said') or {}).get('text'),
+       '%s: %s' % (_sreply.get('name'), _sreply.get('said')))
+    eq('...and the list then has the new one at the top',
+       ((sp.get('after') or [{}])[0] or {}).get('when'), sp.get('freshWhen'))
 
 finally:
     proc.terminate()
