@@ -1572,8 +1572,15 @@ finally:
 eq('a snap\'s counters are the window as it stands', (_mid['reads'], _mid['over']), (2, 10))
 eq('...and asking for them does not end the window: the health line still has both reads',
    (_tally or {}).get('reads'), 2)
-eq('...the line\'s tally being the same counters, at its own moment',
-   sorted((_tally or {}).keys()), sorted(_mid.keys()))
+# ...plus the one thing counters() cannot know, the corners' state, which the
+# `seen` row carries and report() alone is handed the tracker for. This holds
+# the field names only: the tally is counters() and `corners`, and nothing
+# else. Whether `_window` re-states a counter under the same name is held by
+# the next check, which asks it for its keys.
+eq('...the line\'s tally being the same counters, at its own moment, and the corners',
+   sorted((_tally or {}).keys()), sorted(list(_mid.keys()) + ['corners']))
+eq('...the window adding only the corners, never a second copy of a counter',
+   sorted(_h._window(None).keys()), ['corners'])
 
 # A crop that cannot be written is said in reader.json, and reader.json itself
 # still goes; a folder that cannot take reader.json is said in the log.
