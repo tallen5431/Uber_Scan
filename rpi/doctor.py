@@ -274,6 +274,20 @@ def main():
                 # The threshold is `rpi/sync.py`'s, not a fourth copy of the date.
                 if at < _SY.CLOCK_BELIEVABLE_AFTER:
                     continue
+                # ...and the scanner's own up rows are not asked either. The
+                # start row is written the moment the loop starts, on every
+                # boot, which on a Pi whose engine cut its power is before NTP
+                # and on fake-hwclock's restored time — the last hourly save,
+                # earlier than the rows the shift before it ended on. Asked,
+                # it failed this check after every such boot and the remedy
+                # blamed the EARLIER offers, which were right. Measured on a
+                # journal whose last save was 22:17 and last offer 22:25: "no
+                # row is stamped before one written earlier" without the start
+                # row, "1 row stamped before a row written earlier, by up to
+                # 0.1 hours" with it. The question here is the offers' times,
+                # and an up row is not an offer.
+                if r.get('kind') == 'up':
+                    continue
                 if peak and at < peak - 1000:
                     back += 1
                     worst = max(worst, (peak - at) / 3600000.0)
@@ -360,10 +374,10 @@ def main():
         # The floor is four weeks at journal.WEEK_BYTES' measured 5.7MB a week,
         # 22.9MB. A week of room would clear the busiest measured day, 2.3MB,
         # two and a half times over, but the week is a floor on the rate — it
-        # was measured by a replay that writes no seen, screen, pair or mark
-        # rows — and this script is run now and then rather than before every
-        # shift, so what it warns about should still be weeks away when it is
-        # read. The free figure is printed either way, so a card that is
+        # was measured by a replay that writes no seen, screen, promo, pair or
+        # mark rows — and this script is run now and then rather than before
+        # every shift, so what it warns about should still be weeks away when
+        # it is read. The free figure is printed either way, so a card that is
         # merely filling can be watched filling.
         if writable:
             try:

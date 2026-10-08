@@ -241,6 +241,20 @@ So the Pi scanner keeps one line per offer it was confident about, in
   touches it, so it cannot know — but you can tell it, and once you do the page
   shows what you actually worked against what you were offered, per day and
   overall.
+* **close the shift.** One line at the top of the list — *Close the shift · Sun,
+  Sep 20 — 1 ticked, 0 passed, 6 still unlabelled · 185 more on 4 other days*
+  — that opens into the newest day's ACCEPT and CLOSE CALL cards nobody has
+  answered for, newest first, each with **Took** and **Passed**. A card you
+  passed on and never marked looks exactly like a job you took and never
+  ticked, so the advice further down has to allow for every mix of them; each
+  card answered here is one fewer. Press an answer again to take it back. The
+  day is the list's own day, starting at 4am, and a night that runs past 4am
+  is two of them: on that week Saturday ran to 4:43am, so the newest day is
+  its last 29 offers. Two buttons under the line step to the day before or
+  after, each naming that day and how many it still has unlabelled (*‹ Sat,
+  Sep 19 · 86 unlabelled*), and the section stays on the day you stepped to
+  while you answer. "Ticked" is the same count as the ✓ on that day's header
+  in the list, a PASS card you took included.
 * **hide the ones that were not offers.** The test card you present to check the
   rig still works is not a job you were given, and left in it drags every median
   toward whatever that card says. Hide one, or hide *every* reading of that card
@@ -275,16 +289,20 @@ Nothing is ever deleted. Ticking and hiding are appended as their own lines, the
 same way the offers are, so a mis-tap on a phone in a moving car costs an entry
 in a list rather than a row of data that took a shift to collect. Hidden offers
 are out of every figure and every export; **show hidden offers** at the foot of
-the list brings them back, and an **Undo** bar follows every tick and every
-hide for a minute, for the mis-tap.
+the list brings them back, and an **Undo** bar follows every tick, every answer
+and every hide for a minute, for the mis-tap. Undo puts back exactly what was
+there, which for a card nobody had answered for is no answer at all — not a
+pass.
 * a **CSV** of everything, for a spreadsheet.
 
 Two things it is careful about:
 
 * **it is a record of offers, not of trips.** The scanner cannot see the Accept
   button and never touches it, so nothing it writes knows which offers you took.
-  What you ticked yourself is kept separately, as its own line naming the offer,
-  and is the only thing here that claims to know.
+  What you ticked or marked passed yourself is kept separately, as its own line
+  naming the offer and which screen it was pressed on — the driving screen, the
+  offers list, or Close the shift — and is the only thing here that claims to
+  know.
 * **it stores where an offer went, and you can turn that off.** The merchant
   behind a "Pickup" label and the address printed after a leg are kept, because
   an offer read months ago is otherwise a row of figures that cannot be matched

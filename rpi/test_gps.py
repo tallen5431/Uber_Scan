@@ -360,6 +360,31 @@ try:
     # from the driver.
     eq('...and the state says it went stale rather than never arriving',
        it.state()['state'], 'stale')
+    # ...and how stale. The scan loop reads this for the panel's "no fix for
+    # 12 min" and the journal's gps rows; the word alone said only that the
+    # fix had gone, not since when.
+    eq('...and how old the newest fix is, on the same clock',
+       it.state().get('ageSeconds', 'absent'), 21.0)
+    it.stop()
+finally:
+    phone.close()
+
+# The word and the position must not disagree about a fix right at the limit.
+# state() reports the age rounded to a tenth; judged on that rounded figure,
+# 20.04s became 20.0, "fixed", while fix() — on the true figure — had already
+# handed back None. The panel and the row would then say a GPS was fine that
+# the offer rows were already going without.
+clock = Clock()
+phone = FakePhone(script=[RMC + '\r\n'])
+try:
+    it = G.Phone(phone.address, stale_after=20.0, clock=clock).start()
+    ok_('a fix arrives for the boundary', waited(lambda: it.fix() is not None))
+    clock.now += 20.04
+    eq('at 20.04s the position is gone', it.fix(), None)
+    eq('...and the word says so too, judged on the same unrounded age',
+       it.state()['state'], 'stale')
+    eq('...while the age it reports is rounded for reading',
+       it.state().get('ageSeconds', 'absent'), 20.0)
     it.stop()
 finally:
     phone.close()
@@ -375,6 +400,12 @@ try:
     ok_('a fix arrives before the clock jumps', waited(lambda: it.fix() is not None))
     clock.now -= 3600.0
     eq('a fix from the future is not a fix', it.fix(), None)
+    # ...and has no age to give. "No fix for -60 min" is the nonsense this
+    # rule exists to keep off the panel, and None is the honest answer. Only a
+    # clock handed in can do this: the default is monotonic (see the end of
+    # this file), so the panel has no branch for a stale fix without an age.
+    eq('...and has no age, rather than a negative one',
+       it.state().get('ageSeconds', 'absent'), None)
     it.stop()
 finally:
     phone.close()
@@ -403,6 +434,8 @@ try:
     ok_('...and the reader survives it',
         waited(lambda: it.state()['error'] is not None, seconds=5.0))
     eq('...and is still looking', it.state()['state'], 'looking')
+    eq('...with no fix to give an age for',
+       it.state().get('ageSeconds', 'absent'), None)
     # The scan loop calls this between frames. It has to be free.
     started = time.time()
     for _ in range(2000):
@@ -486,6 +519,38 @@ try:
     ok += 1
 finally:
     phone.close()
+
+# The wall clock leaping, as NTP makes it do at the start of every shift on a
+# Pi that booted in 1970. Every other check here hands Phone a clock; this one
+# leaves it the default, because the default is what the rig runs on and the
+# fault was in the default. With the wall clock, a fix taken before the leap
+# was put 1,791,454,807 seconds old once the app stopped — and the panel would
+# have said "GPS: no fix for 29857580 min".
+#
+# The module is loaded again with time.time already leaping, so a default
+# bound to the wall clock would be bound to this one; restored either way.
+import importlib                                              # noqa: E402
+
+_real_time = time.time
+_leap = [0.0]
+time.time = lambda: _real_time() + _leap[0]
+try:
+    G2 = importlib.reload(G)
+    phone = FakePhone(script=[RMC + '\r\n'])
+    try:
+        it = G2.Phone(phone.address).start()
+        ok_('a fix arrives on the default clock', waited(lambda: it.fix() is not None))
+        _leap[0] = 56 * 365.25 * 86400
+        _aged = it.state().get('ageSeconds', 'absent')
+        ok_('...and the wall clock leaping 56 years does not age it (%r)' % (_aged,),
+            isinstance(_aged, (int, float)) and _aged < 5)
+        eq('...nor turn a fresh fix stale', it.state()['state'], 'fixed')
+        it.stop()
+    finally:
+        phone.close()
+finally:
+    time.time = _real_time
+    importlib.reload(G)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d gps checks passed' % ok)

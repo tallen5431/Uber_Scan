@@ -1329,6 +1329,78 @@ const SNAP_MEASURE = (fixture) => {
             pageWide: d.scrollWidth > d.clientWidth + 1,
           };
         });
+
+        /* Close the shift, opened. Folded it is one line and the checks above
+         * already see that line; what they cannot see is inside, where every
+         * row carries two answers at 52px beside the payout, the distance and
+         * a place — the most the page asks of one row's width — and nothing
+         * inside a closed <details> has a box to measure. */
+        out[panel[0] + ' review'] = await page.evaluate(async () => {
+          const d = document.documentElement;
+          const box = document.getElementById('review');
+          if (!box || box.hidden) return { shown: false };
+          box.open = true;
+          await new Promise((r) => requestAnimationFrame(() => r()));
+          const rows = [].slice.call(box.querySelectorAll('.ask'));
+          const buttons = [].slice.call(box.querySelectorAll('.ask button'));
+          // The day either side: the one that can be pressed (the newest day
+          // has nothing after it, and that end is kept in place unseen).
+          const steps = [].slice.call(box.querySelectorAll('.days button'))
+            .filter((b) => !b.disabled && b.getBoundingClientRect().width);
+          const wide = (el) => {
+            const r = el.getBoundingClientRect();
+            return r.right > d.clientWidth + 1 || r.left < -1;
+          };
+          // Every figure on a row — the pay, the minutes, the miles — inside
+          // the box it is drawn in. A box edge check cannot see this: the
+          // figures used to run under an ellipsis INSIDE a box that fitted,
+          // and at 390px the miles of the owner's 4:43am card read "49.".
+          const cut = rows.map((a) => {
+            const what = a.querySelector('.what'), figs = a.querySelector('.figs');
+            if (!figs) return 'no figures on ' + a.getAttribute('data-id');
+            const edge = what.getBoundingClientRect();
+            const range = document.createRange();
+            range.selectNodeContents(figs);
+            return [].slice.call(range.getClientRects())
+              .some((q) => q.right > edge.right + 1 || q.left < edge.left - 1)
+              ? figs.textContent : null;
+          }).filter(Boolean);
+          let smallest = null, smallestIn = '';
+          const walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+          let n;
+          while ((n = walk.nextNode())) {
+            if (!(n.nodeValue || '').trim()) continue;
+            const el = n.parentElement;
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            const px = parseFloat(getComputedStyle(el).fontSize);
+            if (smallest === null || px < smallest) {
+              smallest = px;
+              smallestIn = (el.id || el.className || el.tagName).toString().slice(0, 30);
+            }
+          }
+          const result = {
+            shown: true, rows: rows.length,
+            says: (document.getElementById('reviewSays').textContent || '')
+              .replace(/\s+/g, ' ').trim(),
+            lineH: box.querySelector('summary').getBoundingClientRect().height,
+            shortest: buttons.length
+              ? Math.min.apply(null, buttons.map((b) => b.getBoundingClientRect().height)) : 0,
+            steps: steps.map((b) => ({ text: b.textContent,
+                                       h: b.getBoundingClientRect().height })),
+            outside: rows.filter(wide).length + buttons.filter(wide).length
+                     + steps.filter(wide).length,
+            clipped: buttons.concat(steps)
+                            .filter((b) => b.scrollWidth > Math.ceil(b.getBoundingClientRect().width) + 1)
+                            .map((b) => b.textContent),
+            cut: cut,
+            smallest: smallest, smallestIn: smallestIn,
+            leadW: document.getElementById('reviewLead').getBoundingClientRect().width,
+            pageWide: d.scrollWidth > d.clientWidth + 1,
+          };
+          box.open = false;
+          return result;
+        });
       }
       await page.close();
     }
@@ -1399,6 +1471,26 @@ for i in range(20):
     second['perHour'] = round(second['pay'] / (second['minutes'] / 60.0), 1)
     second['grossPerHour'] = second['perHour']
     rows.append(second)
+# ...and three cards a minute ago that nobody has answered for, so Close the
+# shift has rows to lay out. A minute back and a second apart, so all three are
+# the newest counted cards and fall on one driver's day whatever the hour this
+# runs at; the last carries a long place, because the place is the part of the
+# row that has to give way to the two answers. The first carries the owner's
+# own 4:43am figures, $41.02 for 63 minutes and 49.3 miles — the top card of
+# the newest day of the real week, whose distance was cut to "49." at 390px
+# when the figures ran under an ellipsis.
+for k, (state, place, pay, mins, miles) in enumerate([
+        ('go', 'Chick-fil-A, 2500 Cobb Pkwy SE, Kennesaw', 41.02, 63, 49.3),
+        ('warn', 'Zaxbys', 15.5, 22, 7.3),
+        ('go', 'The Varsity, 61 North Avenue NW at Spring Street, Atlanta', 16.5, 22, 7.3)]):
+    at = now - 60000 - k * 1000
+    rows.append({
+        'id': 'rv%d' % k, 'at': at, 'firstAt': at, 'pay': pay, 'minutes': mins,
+        'miles': miles, 'perHour': round(pay / (mins / 60.0), 1),
+        'grossPerHour': round(pay / (mins / 60.0), 1), 'cost': round(miles * 0.35, 2),
+        'costPerMile': 0.35, 'target': 25, 'band': 15, 'legs': 2, 'whole': True,
+        'state': state, 'pickup': place,
+    })
 # ...and the pairings, so the "Second jobs" section is measured with something
 # in it. One of each answer the panel can give, including the one where it
 # declines to answer, because that row is drawn differently and its own width
@@ -2021,6 +2113,42 @@ try:
                    pairs['outside'], 0)
                 eq('...and the page still not scrolling sideways at %s' % panel,
                    pairs['pageWide'], False)
+
+            # Close the shift, opened, on every panel: two answers a row at the
+            # 52px every control on this page keeps, beside a payout, a
+            # distance and a place, and nothing pushed off the glass for it.
+            rvw = got.get('%s review' % panel)
+            if name == 'journal.html':
+                ok_('Close the shift is on the page at %s (%r)'
+                    % (panel, ((rvw or {}).get('says') or '')[:70]),
+                    rvw and rvw.get('shown'))
+            if name == 'journal.html' and rvw and rvw.get('shown'):
+                eq('...asking about the three cards nobody answered for at %s'
+                   % panel, rvw['rows'], 3)
+                ok_('...its one line a target to press at %s (%.0fpx)'
+                    % (panel, rvw['lineH']), rvw['lineH'] >= 51.5)
+                ok_('...and each answer too at %s (%.0fpx)' % (panel, rvw['shortest']),
+                    rvw['shortest'] >= 51.5)
+                eq('...with nothing pushed off the glass at %s' % panel,
+                   rvw['outside'], 0)
+                eq('...no answer\'s label wider than its button at %s' % panel,
+                   rvw['clipped'], [])
+                # The pay, the minutes and the miles of every row, whole:
+                # wrapped between figures if they must, never cut at the edge.
+                eq('...every figure on every card shown whole at %s' % panel,
+                   rvw['cut'], [])
+                # The fixture spans a fortnight, so there is a day before the
+                # newest to step to, and the step is a control like the rest.
+                ok_('...the day before a 52px press at %s (%r)'
+                    % (panel, [(s['text'], round(s['h'])) for s in rvw['steps']]),
+                    len(rvw['steps']) == 1 and rvw['steps'][0]['h'] >= 51.5)
+                _floor = (15 if h >= 400 else 12) if dashboard else 9
+                ok_('...nothing in it smaller than %dpx at %s (%.4gpx in %s)'
+                    % (_floor, panel, rvw['smallest'] or 0, rvw['smallestIn']),
+                    (rvw['smallest'] or 0) >= _floor)
+                ok_('...its sentence a readable width at %s (%.0fpx)'
+                    % (panel, rvw['leadW']), rvw['leadW'] <= 900)
+                eq('...and no sideways scroll at %s' % panel, rvw['pageWide'], False)
 
             # The map sheet. See the driver for why it is opened by hand.
             sheet = got.get('%s sheet' % panel)

@@ -862,6 +862,23 @@ when a folder reaches its cap. Removing the keep fails 'a card the reader
 corrected the miles on keeps its picture, with no flag asked'; keeping every
 read fails '...one picture per doubtful offer' (2 for 1).
 
+**The app's zone prompt was journalled as an offer, and the panel gave it a
+verdict.** "Switch to this zone with peak pay! +$1.00/order ... Avg. offer wait
+1min ... Don't switch" had its bonus read as the payout and the zone's wait as
+the job's time: five times in the owner's week, three of them a confident PASS
+($12.00/hr, $20.00/hr twice, $10.91/hr), one withheld, all counted in their
+day. `PAY_IS_PER_ORDER`, in both ports beside `PAY_IS_A_DURATION`, refuses a
+dollar figure followed by `/order`: the only money on all 29 of the prompts'
+frames, and on no other frame of the week's 5,491 or text of the corpus's 340.
+Refused at the figure rather than the screen, because anchoring on the
+headline would also wipe a real card's payout in a crop that held both; the 14
+real offers under a "Busy + Peak Pay" banner do not move, and seven are corpus
+negatives. The prompt is written as a collection-only `kind: 'promo'` row, once
+per bonus per five minutes. A skeptic found the first version left the card's
+screen slate armed, so a navigation screen after the prompt was filed against
+the card before it (reproduced through main(), 18s after); the slate is now
+dropped on every read of a prompt.
+
 ### The order in the car
 
 **A destination scanned while SCREENING lost its provenance the moment the card
@@ -2153,6 +2170,32 @@ backup inside the clone, next to a `git clean`. It names the installer now.
 
 **Persistent=true on the backup timer did nothing while its comment credited it with catching up missed runs.** systemd.timer(5): Persistent= 'only has an effect on timers configured with OnCalendar='. tools/install-sync.sh writes OnBootSec=2min + OnUnitActiveSec=10min, so OnBootSec is what runs a missed backup two minutes into the next boot. The line is deleted and its comment moved to OnBootSec. A rig installed earlier keeps the inert line until the installer is re-run. Checks: 'the sync timer runs at boot, which is what catches up a missed run', '...and sets no Persistent= on a timer with no OnCalendar= to obey it'.
 
+**The rig never said when it stopped, crashed, lost the phone or lost its
+GPS.** A rig whose phone GPS app had timed out wrote rows with no position,
+exactly like one never given `--gps` (0 of 1,166 week rows carried one); the
+server's crash counters reset on every restart; the health line's diagnostics
+never left the Pi. The scanner now writes `kind: 'up'` rows on changes only — a
+start (with GPS on or off and the Pi's uptime), a clean stop, the phone gone or
+back after 60s, the GPS fix ok, stale or lost after 60s more — so a start with no
+stop before it marks a crash or a power loss. The heartbeat carries the GPS
+state and the Pi's temperature and throttling, `/api/status` carries the last
+beat, and the panel's connection row says "GPS: no fix for N min" or "Pi
+under-voltage" only when something is wrong. A skeptic found the first build
+stamped up rows after a backwards NTP step hours wrong and could repeat ids
+across boots (ids are now a random per-run token and a count), and doctor's
+"stamps run forwards" failing on the start row a power-cut boot writes before
+NTP (up rows are now set aside there).
+
+Merged onto 📷 Snap, two answers had to become one. Snap had moved the status
+answer into `statusNow()`, which a snap's status.json shares, so the heartbeat
+went there rather than back into a second copy. And the health line's new
+`seen` fields were a second computation of figures `counters()` already gave
+Snap's reader.json from the same counters; `counters()` is now the one source
+(with the median rounded and the flags plain booleans, as the row wanted), and
+the health side adds only what it alone knows, the corners' state. A snap's
+reader.json now carries the GPS and Pi fields of the last beat too, so it says
+all of what the panel was told.
+
 ### The panel
 
 **A health window whose only news was "a card reached the journal" was thrown
@@ -2827,6 +2870,22 @@ pinned against the outcome instead.
 **The offers page printed the line kept as 'somewhere between' two ends that do not bound it.** Plan 4.4 withholds the too-picky / not-deciding instruction while 31 ticks cannot settle it. The first build printed the range as the ticked median and the all-cleared median ($30.20 and $24.90 on the real week), with 'the truth is somewhere between the two ends' under it. The driver took the ticks and SOME of the 191 unticked cleared cards. Measured with week.csv through Advice.advise, target $25, TZ=America/New_York: the median over the ticks plus any subset runs from $21.79 (the 24 cheapest added) to $36.02 (the 18 dearest), and $21.79 is on the other side of the $2 rule. Fix: Advice.ifCleared returns kept:{lo,hi} from a prefix/suffix scan (for fixed k the cheapest k give the lowest median, the dearest the highest), with ranks picked from two sorted lists. It is exact against brute force on 3,000 random markets, and 20,000 rows run in 11 ms. `agree` is asked of lo and hi. Trap: the empty clock is NOT bounded by its ends either, contrary to the verifier. runs() reads the ticks, so a taken job can join two runs and put the gap between them on the clock, and one cleared card lifts 48.3% to 48.7%. It is printed as its two named ends, never 'between'. Checks: '...the kept range at 31 ticks is the lowest and highest median any mix of the unticked cleared cards gives', 'the line kept runs from the cheapest mix … not between the two ends', '...and those are exactly the lowest and highest median any subset gives, on 400 small markets', '...and no sentence says the truth lies between the two ends'.
 
 **The offers-page tick on a TICKED row was checked by nothing.** After plan 2.3 made the folded row's ✓ the control, every check pressed an unticked row. Drawing every tick unticked passed all 439 checks. On that page the driver's ticks vanished from the folded list, and a press on a ticked row re-posted accepted:true instead of unmarking. Fix: a pointer press on ticked row r3 asserts aria-pressed 'true' with class 'on', a post of {id, accepted:false}, and 'Unmarked as taken.'. Also, a refused mark no longer writes 'could not save' into the 52px ✓ (measured: 127px wide in the folded summary, under an aria-label still reading 'I took this'). The Undo bar says it with no Undo button, the aria-label says it, and the buttons are enabled again for a retry. Checks: 'a ticked row draws its tick pressed', '...and one press on it unmarks that row, and nothing else', 'a refused mark leaves the tick a ✓, the width it was', '...with no Undo offered for a mark never made', '...tells a screen reader too', '...and can be pressed again', '...with its Undo offered, after a refused mark hid it'.
+
+**Nothing let the driver record a pass, so the ticks could only ever be a
+sample.** 31 of 1,166 offers carried a tick, and a card passed on looked exactly
+like a job taken and never ticked, so the advice had to range the line kept over
+every mix of 191 unanswered cleared cards ($21.79 to $36.02, either side of where
+it flips). "Close the shift" on the offers page lists a day's unanswered ACCEPT
+and CLOSE CALL cards, parked, with Took and Passed posting `via: 'review'`; the
+day is the log's own 4am day, and the counts it prints come from the same rule
+the advice uses, so its total is the advice note's 191. A skeptic found three
+faults in the first build: a night that ran past 4am left Saturday's 86 cards
+(45%) unreachable (the section now steps to any day in the window); an old
+panel's take-back, which sent `false`, folded as a pass (take-backs now send
+`null`, and a `false` with no `via` folds as a take-back, because live.html never
+reloads itself); and the row's distance was ellipsised away at 360px (it now
+wraps). The app's end-of-session summary was not built: a row written on the
+NucBox has no path back to the rig.
 
 ### The advice
 

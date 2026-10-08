@@ -37,10 +37,19 @@ network arrives, so its wall clock cannot be compared against the GPS's own
 timestamps to decide whether a fix is fresh — the two clocks disagree by
 decades at boot. Staleness is therefore measured entirely against the local
 clock: when WE received the line, against what the local clock says now. Both
-readings come from the same wrong clock, so the error cancels and the answer is
-right even while the rig thinks it is 1970. The GPS's own time is kept
-alongside, because it is the true one and is worth having, but nothing here
-decides anything with it.
+readings come from the same clock, so its error cancels and the answer is right
+even while the rig thinks it is 1970. The GPS's own time is kept alongside,
+because it is the true one and is worth having, but nothing here decides
+anything with it.
+
+...and that local clock is the MONOTONIC one, because "the same clock" was not
+enough. Both readings came off the wall clock, so the error cancelled only
+until the wall clock moved between them — which is what NTP does once, by
+decades, at the start of every shift. Measured through Phone with that clock
+injected: a fix taken at boot, the app stopping, NTP arriving, and state() put
+the fix 1,791,454,807 seconds old — "GPS: no fix for 29857580 min" on the
+driving panel. The monotonic clock does not jump, and an age is all it is used
+for here.
 
 TWO PROTOCOLS, BECAUSE PORT 2947 IS NOT A PROMISE. Real gpsd greets a client
 with a JSON VERSION banner and then says nothing until it is asked to WATCH.
@@ -268,12 +277,13 @@ class Phone(object):
     """
 
     def __init__(self, address, stale_after=STALE_AFTER,
-                 connect=None, clock=time.time):
+                 connect=None, clock=time.monotonic):
         self.host, self.port = parse_host(address)
         self.stale_after = stale_after
         # Injected so the suite can drive this against a socket it controls
         # without opening one, and so the staleness rules can be tested without
-        # spending twenty real seconds on each case.
+        # spending twenty real seconds on each case. Monotonic by default — see
+        # THE CLOCK at the top of this file for what the wall clock did.
         self._connect = connect or (
             lambda h, p: socket.create_connection((h, p), timeout=READ_TIMEOUT))
         self._clock = clock
@@ -312,20 +322,35 @@ class Phone(object):
         'looking'    started, nothing received yet, or trying to reconnect
         'fixed'      a position arrived within stale_after
         'stale'      a position arrived, and it is too old to use
+
+        `ageSeconds` is how long ago the newest position arrived, by the local
+        clock, or None when none has — and None too for a clock that has run
+        backwards past it (the monotonic default cannot; one handed in can),
+        because a negative age is not a duration anyone can be told. It is
+        what lets the panel say "no fix for 12 min" rather than
+        only "stale": the scan loop used to have the word and nothing else,
+        and this method was read by this file's own command line and nowhere
+        on the rig at all.
         """
         with self._lock:
             word, why, fix, at, lines = (self._state, self._error, self._fix,
                                          self._at, self._lines)
+        since = None if fix is None else self._clock() - at
         # 'off' outranks the fix. A position stays usable for `stale_after`
         # after the reader is stopped — `fix()` will rightly still hand it over
         # — but the word here answers "is anything reading the phone", and
         # after stop() the answer is no. Letting the leftover fix paint it
         # 'fixed' would put a green light on a subsystem that is not running,
         # which is this project's own worst failure shape in miniature.
+        #
+        # Judged on the unrounded age, the same comparison fix() makes, so the
+        # word and the position can never disagree about the last tenth of a
+        # second before a fix goes stale.
         if fix is not None and word != 'off':
-            age = self._clock() - at
-            word = 'fixed' if 0 <= age <= self.stale_after else 'stale'
+            word = 'fixed' if 0 <= since <= self.stale_after else 'stale'
         return {'state': word, 'error': why, 'lines': lines,
+                'ageSeconds': (round(since, 1)
+                               if since is not None and since >= 0 else None),
                 'address': '%s:%d' % (self.host, self.port)}
 
     # --- the thread --------------------------------------------------------

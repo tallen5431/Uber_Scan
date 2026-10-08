@@ -51,6 +51,7 @@ Three things this deliberately does not do:
 
 import json
 import os
+import re
 import sys
 import time
 
@@ -69,15 +70,21 @@ import offer_parser as OP                                     # noqa: E402
 #
 # A floor, not an average: a replay has only the texts each row kept — two to
 # eight, de-duplicated — rather than every read the car made, and it writes no
-# `seen`, `screen`, `pair` or `mark` rows. Before this, twenty-one places in the
-# repository gave the journal's size, with six figures between them and none
-# measured: a year was "a few" or "single-digit" megabytes in this file and
-# rpi/README.md, 19MB in sync.py, server.js, live.html, rpi/README.md and
-# rpi/test_sync.py, 20MB elsewhere in server.js, and 68MB in `last()` below and
-# four places that quoted it — past the cap, so this file contradicted itself
-# about whether its own backstop can fire — while tools/install-sync.sh put a
-# shift at 50kB. The one measured figure sat in a comment in rpi/test_sync.py.
-# The real year, at 52 of these weeks, is 297MB: nearly sixteen times the 19MB.
+# `seen`, `screen`, `promo`, `pair`, `mark` or `up` rows. Before this, twenty-one
+# places in the repository gave the journal's size, with six figures between
+# them and none measured: a year was "a few" or "single-digit" megabytes in this
+# file and rpi/README.md, 19MB in sync.py, server.js, live.html, rpi/README.md
+# and rpi/test_sync.py, 20MB elsewhere in server.js, and 68MB in `last()` below
+# and four places that quoted it — past the cap, so this file contradicted
+# itself about whether its own backstop can fire — while tools/install-sync.sh
+# put a shift at 50kB. The one measured figure sat in a comment in
+# rpi/test_sync.py. The real year, at 52 of these weeks, is 297MB: nearly
+# sixteen times the 19MB.
+#
+# The week's five zone prompts went through that replay as offers. Their bonus
+# is refused as a payout now (OP.PAY_IS_PER_ORDER), and replayed the same way on
+# the code before and after that change they were 10 rows and 12,494 bytes of
+# it, 0.2%. 5.7MB stands, and the figure below is left as it was measured.
 #
 # Quoted as "5.7MB a week" everywhere else, pointing here; rpi/test_lint.py
 # holds every one of them to this number and refuses the wording it replaced.
@@ -135,6 +142,44 @@ SANE_MINUTES = OP.SANE_MINUTES
 # it that screen would be filed against a card from an hour ago, which is a
 # pairing the data does not support and the shape this collection is for.
 SCREEN_WINDOW_MS = 180 * 1000
+
+# How long the same zone prompt goes unrecorded after it has been recorded once.
+# See note_promo.
+#
+# The prompt is not a card, so nothing paces the reads of it the way the verify
+# beat paces a card's — it is read whenever the picture moves, and the map
+# behind it moves the whole time the car does. Without a bound a prompt left up
+# for a few minutes of driving is a row per read in a file that is only ever
+# appended to.
+#
+# Five minutes, against the week's own prompts. The two closest that offered
+# the same bonus were 10.8 minutes apart (rows 74 and 100, both Hiram, both
+# $1.00/order) and were two prompts, not one: the first ran until 5:29 PM and
+# the second until 7:29 PM, so they are told apart by PROMO_ENDS below and the
+# window never has to. The closest pair that were the same prompt — same bonus,
+# same end — were 20.7 minutes apart (rows 71 and 74). A window under 10.8
+# minutes would have kept all five as five rows even keyed on the bonus alone;
+# this one is under half of that. A prompt still up past it is written again,
+# once per window, which is the bound.
+PROMO_WINDOW_MS = 5 * 60 * 1000
+
+# When the zone's bonus runs out, as the prompt prints it straight after the
+# bonus: "+$1.00/order until 8:20 PM". Part of what makes two prompts the same
+# prompt. See note_promo.
+#
+# The bonus alone does not say it. Rows 74 and 100 on the owner's week are the
+# same zone (Hiram) offering the same +$1.00/order, 10.8 minutes apart, and they
+# are two prompts: one until 5:29 PM, the next until 7:29 PM. Keyed on the bonus
+# alone, two such prompts inside the window would have been one row with nothing
+# saying the second was ever asked. The end time read the same on every one of
+# the 29 frames of the five prompts on file — `5:29 PM`, `5:29 PM`, `7:29 PM`,
+# `8:20 PM`, `3:10 AM` — so it splits no prompt that the bonus kept whole.
+#
+# Only the printed grammar, digits and AM/PM. A frame whose end time does not
+# read has the bonus alone for its key, and is written as a prompt of its own;
+# that is a row too many, in a kind nothing reads, rather than a prompt lost.
+PROMO_ENDS = re.compile(r'\s*until\s*\d{1,2}\s*:\s*\d{2}\s*[ap]\s*m\b',
+                        re.IGNORECASE | re.ASCII)
 
 # How much of the tail to read at a time when walking backwards for the last
 # offer. Big enough that the ordinary case — an offer within a few rows of the
@@ -490,9 +535,9 @@ class Journal:
             # So it says what the rolls add up to at the measured rate, and
             # leaves the judgement to the one person who knows how long this
             # card has been in the car. As a CEILING: WEEK_BYTES is a floor on
-            # the rate (above — the replay writes no seen, screen, pair or mark
-            # rows), so a real rig always rolls sooner than it says, and a
-            # message calling "fewer weeks than that" a fault — which this one
+            # the rate (above — the replay writes no seen, screen, promo, pair
+            # or mark rows), so a real rig always rolls sooner than it says, and
+            # a message calling "fewer weeks than that" a fault — which this one
             # did, the first time it was given the figure — would raise the
             # false alarm it was written to retire. What is a fault is a roll
             # in days: 64MB is 29 of the busiest day measured, 2.3MB.
@@ -604,6 +649,11 @@ class OfferLog:
         # when a screen has been written against it, and every path that reads
         # it has to look at the same value.
         self.screen_wanted = None
+        # The last zone prompt written, as `(its bonus and when that runs out,
+        # when it was written)`, or None. See note_promo. Like `screen_wanted`,
+        # deliberately not restored by resume(): a scanner that comes back
+        # mid-prompt writes it once more.
+        self.promo_said = None
 
     def resume(self, now=None):
         """Adopt the last row if it is recent enough to be the card on screen.
@@ -1010,6 +1060,87 @@ class OfferLog:
         if not self.journal.append(row):
             return None
         self.screen_wanted = (after, landed_at, bool(card_was_up))
+        return row
+
+    def note_promo(self, text, now=None):
+        """The app's zone prompt was in front of the camera. Returns the row,
+        or None.
+
+        A record, and never an offer. The prompt — "Switch to this zone
+        with peak pay! +$1.00/order ... Don't switch" — has no payout once
+        find_pay refuses its bonus (see OP.PAY_IS_PER_ORDER), so the loop writes
+        no offer for it. Five of them were offers on the owner's week; this is
+        where they go instead, so the driver's record still says the app asked
+        and when, rather than the prompt disappearing with nothing saying so.
+
+        And it ENDS the window of the card before it, which is the one thing
+        here that is not just a record. note_screen files the next payout-free
+        frame against the last card that landed, for the accept detector to be
+        measured on; saw_card drops that slate when a different payout is read,
+        because whatever the phone shows after a second card is not the first
+        card's screen. The prompt is the same case without a payout. Before the
+        bonus was refused it WAS a payout, $1, and saw_card dropped the slate on
+        it; refused, it would have left the slate armed, and a navigation
+        screen read inside three minutes of the card would have been written
+        `after: <that card>`, with the app's own prompt read in between. On
+        the week that card was never the one taken: all five cards read just
+        before the five prompts went unticked, 10.6 to 818.5 seconds before
+        them, and three were inside SCREEN_WINDOW_MS. So the slate goes, as for any other
+        screen that is not the card's: a missing row rather than a wrong one.
+        It goes on every read of a prompt, written or not — a prompt that the
+        window keeps out of the file is still on the phone.
+
+        The prompt is not itself filed as the card's screen. It is written
+        here, once, with `at`, so a card and the prompt after it can be paired
+        by time by whoever builds the detector; writing it under both kinds
+        would be the one prompt in two places, and whether it landed in one or
+        the other would depend on whether a card had happened to land first.
+
+        Not written again while the last prompt written offered the same bonus,
+        ending at the same time, and is less than PROMO_WINDOW_MS old. The LAST
+        one, not every one: the app shows one prompt at a time, so a prompt
+        that comes back after another is asked again. Keyed on the bonus as the
+        parser reads it — `$1.00/order` — and when it runs out (PROMO_ENDS),
+        and not on the whole frame. Row 71's one prompt was kept as six
+        different texts, its zone line reading "9A", ">A", "SA" and "3A" over a
+        map that read differently every time, so a key on the frame would have
+        written it six times at the least; the bonus and its end read the same
+        on every kept frame of all five prompts.
+        """
+        text = text if isinstance(text, str) else ''
+        flat = OP.normalize(text)
+        bonus = OP.PAY_IS_PER_ORDER.search(flat)
+        # Not a prompt, whatever the caller thought. One rule for what the
+        # prompt is, and it is the parser's.
+        if bonus is None:
+            return None
+        # Before the window and before the append: the prompt on the phone is
+        # what ends the card's window, not whether this row of it was written.
+        self.screen_wanted = None
+        ends = PROMO_ENDS.match(flat, bonus.end())
+        key = ''.join((flat[bonus.start():ends.end()] if ends
+                       else bonus.group(0)).split()).lower()
+        at = now_ms(now)
+        if (self.promo_said is not None and self.promo_said[0] == key
+                and at - self.promo_said[1] < PROMO_WINDOW_MS):
+            return None
+        row = {
+            'v': SCHEMA,
+            'kind': 'promo',
+            # Stamped from the clock and keyed on it, with the seq the sync
+            # needs beside it: server.js's syncKey drops a kind row without
+            # both. Two in one millisecond cannot happen here — one call per
+            # read, on the loop's own thread.
+            'id': 'promo-%d' % at,
+            'seq': 1,
+            'at': at,
+            # As read, line breaks and all, and capped like every other text
+            # this file keeps.
+            'text': text[:TEXT_KEPT],
+        }
+        if not self.journal.append(row):
+            return None
+        self.promo_said = (key, at)
         return row
 
 

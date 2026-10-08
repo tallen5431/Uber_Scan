@@ -646,6 +646,140 @@ finally:
     stop(proc)
     shutil.rmtree(work, ignore_errors=True)
 
+# --- where a mark was pressed, a pass, and an answer taken back -------------
+#
+# The end-of-shift review on the offers page asks Took or Passed about every
+# card the panel cleared that day, and a pass is now a fact the advice reads:
+# Advice.ifCleared stops counting a passed card as one that might have been
+# taken. So three things have to hold at this door, and each is asked of the
+# file and of the fold separately, because the fold is what every page reads
+# and the file is what cannot be corrected.
+#
+#   * `via` says which of the three surfaces made the press, and only those
+#     three. This endpoint has no field for free text; a `via` taken as given
+#     would be one.
+#   * `false` folds to `false`, and a card nobody marked to NO FIELD. Those are
+#     different answers and the page counts them apart.
+#   * `null` takes an answer back, newest-wins like the other two, and folds to
+#     no field: a ✓ mis-tapped and undone must not become a pass nobody made.
+#   * `false` with NO `via` is that same take-back. Every page before Passed
+#     existed wrote it for the ✓ pressed again, and a page loaded before an
+#     upgrade still does (live.html never reloads; sw.js serves the cached
+#     copy first). Read as a pass, it took the card out of the review's list
+#     and out of Advice.ifCleared's mix with nobody having passed on it.
+work = tempfile.mkdtemp()
+journal = os.path.join(work, 'journal.jsonl')
+write(journal, [offer(i, NOW - (12 - i) * 60000) for i in range(1, 11)] + [
+    # A pairing for off7, so the outcome the offers page's Second jobs section
+    # reads off the same marks is asked too.
+    {'v': 1, 'kind': 'pair', 'id': 'off7', 'at': NOW - 3 * 60000,
+     'held': {'pay': 12.0, 'minutes': 30}, 'offer': {'pay': 17.0, 'minutes': 20},
+     'stack': None},
+    # ...and a tick taken back the way every journal before this branch holds
+    # one: `true`, then `false` a minute later, neither naming a surface.
+    {'v': 1, 'kind': 'mark', 'id': 'off10', 'at': NOW - 90000, 'accepted': True},
+    {'v': 1, 'kind': 'mark', 'id': 'off10', 'at': NOW - 30000, 'accepted': False}])
+proc, base = start({'SCANNER': '0'}, journal)
+
+
+def _folded(i):
+    return {o['id']: o for o in get(base, '/api/journal?days=0')
+            .get('offers', [])}.get('off%d' % i, {})
+
+
+try:
+    _before = len(lines(journal))
+    _said = {}
+    for _i, _via in ((1, 'panel'), (2, 'offers'), (3, 'review')):
+        _said[_via] = post(base, '/api/offers/mark',
+                           {'id': 'off%d' % _i, 'accepted': True, 'via': _via})[0]
+    eq('a mark says where it was pressed, for each of the three places one can '
+       'be (%r)' % _said, _said, {'panel': 200, 'offers': 200, 'review': 200})
+    eq('...and the journal row carries it, as sent',
+       [(r.get('id'), r.get('via')) for r in lines(journal)[_before:]
+        if r.get('kind') == 'mark'],
+       [('off1', 'panel'), ('off2', 'offers'), ('off3', 'review')])
+    # Anything else is refused, and refused BEFORE the append. Dropped quietly,
+    # a page that misspelt its own name would go on writing marks with no
+    # provenance and look as though it worked.
+    _bad = [post(base, '/api/offers/mark',
+                 {'id': 'off4', 'accepted': True, 'via': _v})[0]
+            for _v in ('phone', 'Review', '', None, 7)]
+    eq('a mark naming anywhere else is refused (%r)' % _bad, _bad, [400] * 5)
+    eq('...and nothing of it is written', len(lines(journal)), _before + 3)
+    no_('...so the offer it named is still unmarked', 'accepted' in _folded(4))
+    # Absent is legal: every mark already in a journal was written without it.
+    eq('a mark that names no surface is still taken',
+       post(base, '/api/offers/mark', {'id': 'off4', 'accepted': True})[0], 200)
+    no_('...and stored with no `via` rather than a guessed one',
+        'via' in lines(journal)[-1])
+
+    # A pass, then the driver changing their mind twice. Newest wins, and
+    # `false` is an answer, not a blank.
+    post(base, '/api/offers/mark', {'id': 'off5', 'accepted': False, 'via': 'review'})
+    _o5 = _folded(5)
+    ok_('a Passed press folds to accepted:false, not to unmarked (%r)'
+        % _o5.get('accepted', 'absent'), 'accepted' in _o5 and _o5['accepted'] is False)
+    post(base, '/api/offers/mark', {'id': 'off5', 'accepted': True, 'via': 'review'})
+    eq('...a Took pressed after it wins', _folded(5).get('accepted'), True)
+    post(base, '/api/offers/mark', {'id': 'off5', 'accepted': False, 'via': 'offers'})
+    _o5 = _folded(5)
+    ok_('...and a pass after that wins back, whichever surface made it (%r)'
+        % _o5.get('accepted', 'absent'), 'accepted' in _o5 and _o5['accepted'] is False)
+    no_('an offer nobody marked carries no accepted field at all',
+        'accepted' in _folded(8))
+
+    # Taking an answer back. A tick, then the same ✓ pressed again: the row
+    # must come out as it went in — no field — and not as a pass.
+    post(base, '/api/offers/mark', {'id': 'off6', 'accepted': True, 'via': 'offers'})
+    _code = post(base, '/api/offers/mark',
+                 {'id': 'off6', 'accepted': None, 'via': 'offers'})[0]
+    eq('a withdrawal is taken', _code, 200)
+    eq('...and written as one', lines(journal)[-1].get('accepted', 'absent'), None)
+    _o6 = _folded(6)
+    no_('...and a tick taken back folds to no field at all, not to a pass (%r)'
+        % _o6.get('accepted', 'absent'), 'accepted' in _o6)
+    # ...and from a pass, which is the other thing it can be taking back.
+    post(base, '/api/offers/mark', {'id': 'off5', 'accepted': None, 'via': 'review'})
+    no_('...and so does a pass taken back', 'accepted' in _folded(5))
+
+    # The same take-back from a page older than Passed: `false`, no `via`.
+    # Sent through the door, as a panel or offers page still running the old
+    # code sends it after the server is upgraded...
+    post(base, '/api/offers/mark', {'id': 'off9', 'accepted': True})
+    post(base, '/api/offers/mark', {'id': 'off9', 'accepted': False})
+    _o9 = _folded(9)
+    no_('a ✓ taken back by a page older than Passed (false, no via) folds to no '
+        'field, not to a pass (%r)' % _o9.get('accepted', 'absent'), 'accepted' in _o9)
+    # ...and as it already sits in every journal written before this branch.
+    _o10 = _folded(10)
+    no_('...and one already in the journal file reads the same (%r)'
+        % _o10.get('accepted', 'absent'), 'accepted' in _o10)
+    # The withdrawal is the newest word on the pairing too, or Second jobs
+    # counts it among the ones "marked either way".
+    post(base, '/api/offers/mark', {'id': 'off7', 'accepted': False, 'via': 'review'})
+    _p7 = [p for p in get(base, '/api/journal?days=0').get('pairs', [])
+           if p.get('id') == 'off7']
+    eq('a pass reaches the pairing it was about', [p.get('accepted') for p in _p7], [False])
+    post(base, '/api/offers/mark', {'id': 'off7', 'accepted': None, 'via': 'review'})
+    _p7 = [p for p in get(base, '/api/journal?days=0').get('pairs', [])
+           if p.get('id') == 'off7']
+    eq('...and taken back, leaves it unmarked', [('accepted' in p) for p in _p7], [False])
+
+    # ...and on the order in the car, a withdrawal puts it down as a pass
+    # does: the driver pressed Took again because they did not take it.
+    _, _reply = post(base, '/api/offers/mark', {
+        'id': 'off8', 'accepted': True, 'via': 'panel',
+        'offer': {'id': 'off8', 'pay': 18.0, 'minutes': 20.0, 'billedMinutes': 20.0,
+                  'miles': 4.0, 'cost': 1.2}})
+    ok_('a Took press puts the order in the car', _reply.get('holding') is True)
+    _, _reply = post(base, '/api/offers/mark',
+                     {'id': 'off8', 'accepted': None, 'via': 'panel'})
+    no_('...and pressing it again puts it down', _reply.get('holding'))
+finally:
+    stop(proc)
+    shutil.rmtree(work, ignore_errors=True)
+
 # --- the order in the car, on a scanner that reads cards again ---------------
 #
 # The scanner reads a card several times while it sits on the phone, and again
@@ -3675,6 +3809,114 @@ _wsock.close()
 shutil.rmtree(_pdir, ignore_errors=True)
 shutil.rmtree(_wl, ignore_errors=True)
 shutil.rmtree(_nodesk, ignore_errors=True)
+
+# --- the heartbeat's GPS and Pi, relayed -------------------------------------
+#
+# The scanner puts the GPS's state and the Pi's temperature and throttling on
+# its heartbeat. The stream carries a heartbeat whole, which is how tooBright
+# and notSaving have always reached the panel; /api/status carried none of it,
+# so the status link beside the connection dot — the one place a person
+# diagnosing a rig is sent — could not say whether the GPS had a fix. The
+# heartbeat is a fact about the process that sent it, so a restarted scanner
+# that has not beaten yet has none to report.
+_bdir = tempfile.mkdtemp()
+_bjournal = os.path.join(_bdir, 'journal.jsonl')
+open(_bjournal, 'w').close()
+_bfake = os.path.join(_bdir, 'beats.py')
+_bonce = os.path.join(_bdir, 'ran-once')
+with open(_bfake, 'w') as fh:
+    fh.write(
+        'import json, os, sys, time\n'
+        'if os.path.exists(%r):\n'
+        '    time.sleep(600)\n'
+        'open(%r, "w").close()\n'
+        'time.sleep(1.5)\n'
+        'print(json.dumps({"alive": True, "at": 5, "tooBright": False,\n'
+        '    "tooDim": False, "refindRefused": None, "notSaving": None,\n'
+        '    "gps": {"state": "stale", "ageSeconds": 312.0},\n'
+        '    "cpuC": 71.4, "cpuCWhy": None,\n'
+        '    "throttled": {"now": ["under-voltage"], "sinceBoot": ["under-voltage"]},\n'
+        '    "throttledWhy": None}), flush=True)\n'
+        'time.sleep(4.0)\n'
+        'sys.exit(1)\n' % (_bonce, _bonce))
+_bproc, _bbase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': _bfake}, _bjournal)
+try:
+    _bheard = listen(_bbase, 5.0)
+    _bs = None
+    for _ in range(100):
+        _bs = get(_bbase, '/api/status')
+        if _bs.get('beat'):
+            break
+        time.sleep(0.05)
+    _bb = (_bs or {}).get('beat') or {}
+    eq('the status carries the heartbeat\'s GPS word and fix age',
+       _bb.get('gps'), {'state': 'stale', 'ageSeconds': 312.0})
+    eq('...and the Pi\'s temperature and throttling',
+       (_bb.get('cpuC'), _bb.get('throttled')),
+       (71.4, {'now': ['under-voltage'], 'sinceBoot': ['under-voltage']}))
+    eq('...and the notices that already rode it', _bb.get('notSaving', 'absent'), None)
+    # An age, never a timestamp — the rule for everything on this endpoint,
+    # because whatever reads it does not share this server's clock.
+    ok_('...with its own age instead of a timestamp (%r)'
+        % ((_bb.get('ageMs'), _bb.get('at')),),
+        isinstance(_bb.get('ageMs'), int) and 0 <= _bb['ageMs'] < 10000
+        and 'at' not in _bb and 'alive' not in _bb)
+    time.sleep(0.5)
+    _bstream = [m for m in _bheard if m.get('alive')]
+    ok_('the stream carries the same heartbeat to the panel (%d)' % len(_bstream),
+        _bstream and _bstream[0].get('gps') == {'state': 'stale', 'ageSeconds': 312.0}
+        and _bstream[0].get('cpuC') == 71.4
+        and (_bstream[0].get('throttled') or {}).get('now') == ['under-voltage'])
+    # The fake exits four seconds after its beat and is started again; the
+    # second run says nothing. What the first one said is not the second's.
+    _bgone = None
+    for _ in range(300):
+        _s = get(_bbase, '/api/status')
+        if (_s.get('scanner') or {}).get('fell', 0) >= 1 \
+                and (_s.get('scanner') or {}).get('running'):
+            _bgone = _s
+            break
+        time.sleep(0.05)
+    ok_('the scanner was restarted', _bgone is not None)
+    eq('...and a restarted scanner that has not beaten has no heartbeat to report',
+       (_bgone or {}).get('beat', 'absent'), None)
+finally:
+    stop(_bproc)
+    shutil.rmtree(_bdir, ignore_errors=True)
+
+# --- the rig's up rows are carried, and counted as nothing -------------------
+#
+# Collection only: a start, a stop, a phone gone and a GPS gone stale say when
+# the rig was watching, and nothing may read them as offers or fold them into a
+# figure. And they have to reach the copy at home, which is what the sync is
+# for — a kind this build knows nothing about crosses on its id and seq.
+_udir = tempfile.mkdtemp()
+_ujournal = os.path.join(_udir, 'journal.jsonl')
+_ups = [{'v': 1, 'kind': 'up', 'id': 'up-0f3a9c21b7d4-%d' % (i + 1), 'seq': 1,
+         'at': NOW - 5000 + i, 'about': about, 'state': state}
+        for i, (about, state) in enumerate([('rig', 'start'), ('gps', 'stale'),
+                                            ('phone', 'gone'), ('rig', 'stop')])]
+write(_ujournal, [offer(i, NOW - 60000 * (i + 1)) for i in range(3)] + _ups)
+_uproc, _ubase = start({'SCANNER': '0'}, _ujournal)
+try:
+    _uj = get(_ubase, '/api/journal?days=0')
+    eq('up rows in the journal are not offers', _uj.get('count'), 3)
+    _ut = get(_ubase, '/api/today?since=%d' % (NOW - 3600000))
+    eq('...nor counted in the shift line', _ut.get('offers'), 3)
+    _uing = json.loads(urllib.request.urlopen(urllib.request.Request(
+        _ubase + '/api/journal/ingest',
+        data=''.join(json.dumps(dict(r, id=r['id'] + 'x')) + '\n' for r in _ups).encode(),
+        headers={'Content-Type': 'application/x-ndjson'}), timeout=10).read().decode())
+    eq('the sync carries up rows it has not seen', _uing.get('added'), 4)
+    _uing2 = json.loads(urllib.request.urlopen(urllib.request.Request(
+        _ubase + '/api/journal/ingest',
+        data=''.join(json.dumps(r) + '\n' for r in _ups).encode(),
+        headers={'Content-Type': 'application/x-ndjson'}), timeout=10).read().decode())
+    eq('...and recognises the ones it has', _uing2.get('added'), 0)
+finally:
+    stop(_uproc)
+    shutil.rmtree(_udir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)

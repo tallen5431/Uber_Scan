@@ -530,6 +530,10 @@ Three things it does not do:
   announces again.
 
 Pressing it again unmarks it, which is a note of its own rather than a deletion.
+That note is `accepted: null` — the tick taken back, which the fold in
+`server.js` turns into no field at all — and not `false`, which is a PASS and
+is written by one press only (Close the shift's Passed, below). Every press here
+also names this screen, `via: "panel"`.
 The mark belongs to the offer and not to the button: when a new card is
 announced the button goes back to unmarked, so a mark left set cannot be
 inherited by whatever arrives next — the same failure the address line avoids by
@@ -539,11 +543,66 @@ The other route is after the shift, on the offers page, and it is one press a
 row too: the ✓ on the folded row **is** the control — faint and outlined on a
 row nobody has marked, solid green on one that is — and pressing it posts the
 same `{id, accepted}` the old "I took this" button inside the opened row did,
-with the same Undo. The ACCEPT chip narrows the list to the cards the panel
-cleared (106 on the real week, carrying 24 of its 31 ticks), so a pass down that
-list is the one way to add ticks that involves no inference at all: the driver
-says so, and the rig writes nothing it was not told. It stays off `live.html`,
-which is read at a glance.
+with the same Undo, and `via: "offers"`. The ACCEPT chip narrows the list to the
+cards the panel cleared (106 on the real week, carrying 24 of its 31 ticks), so a
+pass down that list is the one way to add ticks that involves no inference at
+all: the driver says so, and the rig writes nothing it was not told. It stays
+off `live.html`, which is read at a glance.
+
+**Close the shift** is the same idea turned round: instead of the driver finding
+the rows they took, the page asks about the rows nobody has answered for. One
+line at the top of the offers list — on the owner's week, *Close the shift ·
+Sun, Sep 20 — 1 ticked, 0 passed, 6 still unlabelled · 185 more on 4 other
+days* — opens into that day's ACCEPT and CLOSE CALL cards with no mark, newest
+first, each with **Took** and **Passed**, posting `{id, accepted: true | false,
+via: "review"}`. Passed is the one press that writes `false`, and
+`Advice.ifCleared` reads it as a known pass: the card leaves the pile the line
+kept is ranged over, so each answer narrows the range and none can widen it.
+Pressing an answer again takes it back (`null`), and Undo restores exactly what
+was there — for a card nobody had answered for, no answer, not a pass.
+
+- **The shift is the offers list's own day**, `dayOf` on
+  `Advice.DAY_STARTS_AT`, read out of the same grouping the day headers are
+  drawn from. `Advice.runs` was the other candidate and breaks at every
+  half-hour silence — the owner's Saturday is three runs.
+- **It opens on the newest day and steps to any other in the window.** The
+  4am line is where a newest-day-only review failed: Saturday ran 6:34pm to
+  4:43am, scanning straight through 4am (a 14-minute gap, 3:53 to 4:07), so
+  the newest day of that week is the 29 offers after 4am, and Saturday's 86
+  unanswered cards — 45% of the 191 — could not be asked about from any
+  window. So the folded line says how many more wait on other days, and two
+  buttons under it name the day before and after with their own counts (*‹
+  Sat, Sep 19 · 86 unlabelled*). The day stepped to is kept across the reload
+  every answer causes. The newest day is the day of the newest row not stamped
+  in the future, and it is also the latest day a step can reach, so a row from
+  a wrong clock is never a shift to close. The line inside still prints the
+  first and last card of the day it covers, so a tail shows as one.
+- **Which cards is `Advice.labels`**, built on the same rule `ifCleared` mixes
+  in (`clearedByPanel`), so "still unlabelled" summed over the window's days is
+  the advice note's count of unanswered cards: 6 + 185 = 191 on the week.
+  **"Ticked" is the day header's ✓**, through one function (`ticksIn`): it
+  counted only the ticks on cleared cards and so said 5 where the header said
+  ✓ 7 on Sun 13 Sep, the two PASS cards the driver took that day being the
+  difference.
+- **A card answered stays on the list** with its answer pressed until the page
+  is left. The next card sliding into the place just pressed is how a second
+  press lands on the wrong job.
+- **The figures on a row wrap, and are never cut.** Each row's pay, minutes and
+  miles run on one line that breaks between figures, not inside one; the place
+  under them is the part that may end in an ellipsis. Under one ellipsis for the
+  whole row, all six rows of the week's newest day lost their distance at
+  360px, and four of the six showed "49." for 49.3 mi at 390px.
+- **`via` names the surface**: one of `panel`, `offers`, `review`, refused
+  with a 400 otherwise, absent on every mark written before it. Nothing folds
+  it onto an offer and no figure reads which surface it names; it is there so
+  the panel's ticks and the review's answers — two different samples — can be
+  counted apart later. The fold reads one thing about it, its absence: a
+  `false` with no `via` was written by a page from before Passed existed — the
+  ✓ pressed again, the panel's Took pressed again, the offers page's Undo — and
+  is folded as the take-back it was, not as a pass. A page loaded before an
+  upgrade keeps writing those (live.html never reloads itself, and `sw.js`
+  serves the cached copy first); read as passes, one such take-back took the
+  card out of the review's list and out of `ifCleared`'s mix at once.
 
 ### Collecting the evidence for a tick the rig could make itself
 
@@ -615,6 +674,20 @@ What decides whether a row is written:
   naming an offer they did not take, indistinguishable from a real one. Any
   payout that is not the armed card's now drops the slate, and the cost is a
   missing row instead of a wrong one.
+- **Not the app's zone prompt, nor anything after it.** "Switch to this zone
+  with peak pay!" has no payout once its `+$1.00/order` bonus is refused (see
+  "A third screen" below), so it reaches this branch. It is not the screen
+  after the card before it, and it ends that card's window the way a second
+  card does: whatever the phone shows after the app's own prompt is not
+  evidence about a card read before it. While the bonus read as a $1 payout it
+  dropped the slate like any other payout; refused, it left the slate armed,
+  and a navigation screen read after it was written `after:` the card before
+  the prompt, which `rpi/test_loop.py` reproduces through `main()`. On the week
+  that card was never the one taken: all five cards read just before the five
+  prompts went unticked, and three were inside the three-minute window. So every read of a prompt drops the
+  slate, whether or not it is written, and the prompt is written once as a
+  `kind: "promo"` row with its own `at` rather than as a screen — one prompt in
+  one place, which a detector can still pair with the card before it by time.
 
 Two things it deliberately does **not** decide, and both were wrong in the first
 version:
@@ -3584,6 +3657,58 @@ would lose the row and leave a hole nothing could account for later.
 Three of 272 cards change. All three are phantoms. All three previously produced
 a confident verdict.
 
+**A third screen, and this one is refused at the figure.** The app's zone prompt
+reached the panel five times in the owner's week of 1,166 offers:
+
+    GA: Marietta North
+    Switch to this zone
+    with peak pay!
+    +$1.00/order until 8:20 PM
+    Avg. offer wait
+    1min
+    Don't switch
+
+The bonus became the payout and the zone's average wait the job's duration: $1
+over 5 minutes at $12.00/hr PASS, $1 over 3 at $20.00/hr twice, $1 over 1
+withheld as `time`, $2 over 11 at $10.91/hr — each journalled as an offer and
+counted in its day. `PAY_IS_PER_ORDER` refuses the figure the way
+`PAY_IS_A_DURATION` refuses a route time: a payout is never glued to a unit,
+and `/order` is one. It is the only money on all 29 frames of the five prompts
+and on no other frame or text of the week, so the prompt is left with no payout
+— no verdict, no offer row, the panel still saying WAITING FOR AN OFFER, which
+is what the app is doing.
+
+One anchor, and it is not widened for misreads nobody has seen. `/order` read
+cleanly on all 29 frames. Nothing else on the week's 5,491 frames prints a unit
+after a slash, so there is no other printed slash to learn this reader's
+mistakes from. The eleven other places a figure is followed by a slash and a
+letter are stray glyphs, and one is a real payout: `$20.02 /` over
+`Guaranteed`, row 997. A looser pattern, a dollar figure, then up to four
+characters of anything, then `order` (with `0` for `o` and `3` for `e`),
+matches the same 34 texts in the week and the corpus and nothing else. If
+`/order` ever misreads, the prompt comes back as the old $1 or $2 offer. That
+frame will be the evidence for a wider rule, the same way `NOT_AN_OFFER` takes
+a new phrase only when a card arrives that needs it.
+
+Refused rather than withheld, and the reason above does not apply here: that
+rule matches a screen's words, and a screen's words can sit over a real card.
+This one can only ever take away a number that was not a payout. The fourteen
+real offers that week under a "Busy + Peak Pay" banner print no amount and no
+`/order`, and none of them moves; seven are in the shared corpus to keep it so.
+Replayed over the whole week in both ports, five rows move — the five prompts —
+and nothing else.
+
+It does not vanish either. `parse()` says `promo: true`, and the loop writes a
+`kind: "promo"` row — `id`, `seq`, `at` and the reading as it was read —
+instead of filing the prompt as the screen that followed a card, and drops that
+card's screen slate (see "Not the app's zone prompt" above). It is not written
+again while the last prompt written had the same bonus running to the same
+time and is under five minutes old. That is compared with the last prompt only,
+so a prompt that comes back after a different one is written again. The end
+time is part of the key because the bonus alone does not tell two prompts apart:
+rows 74 and 100 are both Hiram at +$1.00/order, 10.8 minutes apart, one until
+5:29 PM and the other until 7:29 PM. Collected, synced, read by nothing.
+
 ### What a read really costs
 
 The same export settles a number that had been estimated rather than measured.
@@ -3723,7 +3848,10 @@ nothing to say: rows carry no position, `map.html` searches on the typed hint
 the way it always did, and **◍ Where you were** draws nothing and reports "none
 carry a position". That last sentence is the one to look for when the feature
 seems to be doing nothing — it is the page saying the rows never knew, not the
-page failing to draw them.
+page failing to draw them. The scanner's start row in the journal says which
+it was (`gps: false`). *With* it, a fix that stops arriving is said on the
+driving panel and written to the journal — see *Keeping the phone's position
+coming* below.
 
 `map.html` then searches each place inside a box around where the car was, using
 Nominatim's `viewbox` with `bounded=1`. Sixty miles: generous enough that no
@@ -3799,10 +3927,19 @@ holds a lock across the network, and reconnects quietly for ever.
 answers, so the GPS's own timestamps cannot be compared against the Pi's wall
 clock to decide freshness — the two disagree by decades at boot. Staleness is
 measured entirely against the local clock: when we received the line, against
-what the local clock says now. Both readings come from the same wrong clock, so
-the error cancels and the answer is right while the rig still thinks it is 1970.
+what the local clock says now. Both readings come from the same clock, so its
+error cancels and the answer is right while the rig still thinks it is 1970.
 A clock that jumps *backwards* mid-shift yields a negative age, and negative is
 refused too rather than reading as fresh.
+
+*The same clock was not enough, and the local clock is now the monotonic one.*
+Both readings came off the wall clock, so the error cancelled only until the
+wall clock moved between them — which NTP does once, by decades, at the start
+of every shift. Measured: a fix taken at boot, the app stopping, NTP arriving,
+and the fix was 1,791,454,807 seconds old. Close to harmless while the only
+reader was `fix()`, which refuses anything over twenty seconds and is put right
+by the next sentence a second later; the driving panel now prints the age as
+*GPS: no fix for N min*, and N would have been 29,857,580.
 
 **Two protocols, because port 2947 is not a promise.** Real gpsd greets with a
 JSON VERSION banner and says nothing until it is asked to WATCH; several phone
@@ -3823,6 +3960,108 @@ fails its own checksum, knots stored as metres per second, `ddmm.mmmm` read as
 a decimal, a boolean where a latitude should be, a sentence split across two
 packets, a sender with no line endings at all, and a stopped reader still
 showing a green light.
+
+### Keeping the phone's position coming, and hearing when it stops
+
+**0 of the 1,166 offers on the owner's week carry a position.** Nothing on any
+screen said whether that was a rig never given `--gps` or a phone whose GPS app
+had stopped — the two wrote identical rows. Both are now said, and the route
+to a position that lasts a shift is this:
+
+1. **On the rig**, `SCANNER_ARGS="--gps <the phone's address>"` (see above for
+   where that goes under `npm start` and systemd). The port is 2947 unless the
+   app says otherwise.
+2. **On the phone**, a GPS server app that listens on TCP port 2947 and speaks
+   either gpsd's JSON or plain NMEA — `gps.py` takes both and tells them apart
+   by what arrives. It has to run **without a time limit**: the app this was
+   written against showed "Runtime Left 4:48", which is a free tier stopping
+   itself, and that is the ordinary way a shift loses its fix.
+3. **Samsung's battery rules**, on the Fold6 or any One UI phone: Settings →
+   Apps → the GPS app → Battery → **Unrestricted**, and Settings → Battery →
+   Background usage limits → **Never sleeping apps** (*Never auto sleeping
+   apps* on some versions) → add it. One UI puts background apps it judges
+   idle to sleep, and a server app nobody is looking at is exactly that. Give
+   it location *Allow all the time*, with precise location on.
+4. **One network.** Put the Pi on the phone's own hotspot, so the stream
+   crosses the car and not the internet. With the Tailscale address,
+   `tailscale ping <phone>` from the Pi should answer *via* a local address;
+   *via DERP(…)* means it is being relayed through a server elsewhere, which
+   is slower and is gone whenever the phone's data is.
+5. **Check it before driving**: `python3 rpi/gps.py --from <address>` prints
+   positions, or says why there are none.
+
+**What the rig says when it stops.** On the driving panel, on the connection
+row beside *scanner reading*:
+
+| the row says | when |
+|---|---|
+| *GPS: no fix for 12 min* | a fix arrived and none has since — gps.py calls a fix stale at 20 seconds, and the rig waits a further minute (`GPS_HOLD`) before saying so, so a hotspot stumble is not news. Minutes rounded down. |
+| *GPS: no fix since start* | `--gps` was given and nothing usable has arrived in the minute since the scanner started — the app not running, the wrong address, or an address that would not parse |
+| *Pi under-voltage*, *Pi temp limit 85°C* | `vcgencmd get_throttled` says it is happening **now** — one word, the cause, which is the one with a remedy: the power lead, or shade. The temperature beside every word but *under-voltage*, whose remedy it has nothing to do with: beside it, on the 3.5" hat, it pushed the GPS's "min" off the end of the row |
+| nothing | the fix is good, or there is no `--gps` at all |
+
+Nothing for a rig run without `--gps`, on purpose: that is a choice, and a line
+saying so on every glance of every shift would be furniture — the reason
+*Offers are NOT being saved* says nothing under `--no-journal`. The choice is
+recorded instead, on the start row below. Nothing for a working GPS either:
+"GPS ok" at every glance is a word the driver learns to skip, and then skips
+the one that is not ok. The Pi's temperature on its own is never a warning;
+the firmware has its own limits and the row repeats them, it does not invent
+one.
+
+**In the journal**, `kind: "up"` rows, written only when something CHANGES:
+
+| `about` | `state` | written |
+|---|---|---|
+| `rig` | `start` | as the scan loop starts, with `gps` (whether `--gps` was given) and `uptime` (seconds since the Pi booted) |
+| `rig` | `stop` | on a clean exit — ctrl-c, the supervisor's SIGTERM, the display window closed |
+| `phone` | `gone` / `back` | the camera has not found the screen for a minute (`PHONE_HOLD`) / it has again |
+| `gps` | `ok` / `stale` / `lost` | the same words the panel reads, settled the same way, with `ageSeconds` and gps.py's own `why` |
+
+**A start with no stop before it marks a run that ended without one** — a
+crash, server.js's SIGKILL of a wedged camera, or the Pi losing power — and
+its `uptime` says which: a start soon after boot is the Pi going down, one
+hours into its uptime is the scanner. server.js's `fell` and `wedged`
+counters say the same things and start again at nought on every restart; these
+are in the one file that is kept. Every change carries `forSeconds`, how long
+it had already lasted when written, so a `gone` says when it really began.
+
+Each row's `at` is the clock's, untouched, and its id is `up-<run>-<n>`: a
+random token for the run and the row's number in it. Not `up-<at>`, which is
+what it was: keeping those apart pushed `at` past the run's last row, and after
+NTP stepped a fast clock back seven hours a GPS gone stale three hours later
+was stamped 3.98 hours from when it happened — and, replayed, two boots that
+reached the loop in the same millisecond before NTP both wrote `up-25123`, of
+which the copy at home keeps one. `n` orders a run's rows
+when the clock cannot. `doctor.py`'s *stamps run forwards* sets these rows
+aside: the start row is written at every boot, which after a power cut is on
+fake-hwclock's restored time, earlier than the shift before, and it failed that
+check after every such boot while blaming the offers before it.
+
+No row for a quiet stretch, ever. A row every quiet two minutes was proposed
+and refused — see `worth_recording` and AUDITS.md — and a phone glanced at for
+twenty seconds, or a fix lost for thirty, is not a row either: bad news has to
+last its hold, good news is written at once, so however the phone or the GPS
+flickers, each costs at most two rows a minute. Nothing about the phone is
+written with nothing tracking it (`--no-track`, or a box drawn by hand).
+
+The `seen` rows — still one per two-minute window **with cards in it** — now
+carry the rest of that window's health line too: `reads`, `failed`,
+`complete`, `noPay`, `clipped`, `medianMs`, `tooDim`, `tooBright`, `corners`
+and `relocks`, and the Pi's `cpuC` and `throttled`. Each Pi figure that cannot
+be read is null **beside its reason** (`cpuCWhy`, `throttledWhy`), so a machine
+with no `vcgencmd` — anything that is not a Pi — is not mistaken for a Pi that
+never throttles. `/api/status` carries the last
+heartbeat as `beat`, with its age, so the status link beside the connection dot
+can say all of this too.
+
+All of it is collection. Nothing divides by these rows and nothing reads them
+into a verdict.
+
+**The phone-free alternative, not built:** a USB GPS receiver on the Pi. gps.py
+already speaks gpsd's protocol, so the expected route is gpsd on the Pi and
+`--gps 127.0.0.1` — untried here — and AUDITS.md's note on it stands: it wants
+a fix-quality gate before anything on the panel uses its position.
 
 ### A page nothing linked to, five buttons one press from dead, and a backup with a hole in it
 
@@ -4177,9 +4416,9 @@ at most about twelve weeks of driving, so a rig on the road all year rolls at
 least four times. The line used to call a second roll a bug rather than a
 season, against a yearly figure nobody had measured; it now prints the most
 weeks the rolls can amount to. That is a ceiling, because the week is a floor
-on the rate — a real rig writes `seen`, `screen`, `pair` and `mark` rows the
-replay did not — so a card rolling sooner is ordinary; rolls days apart are the
-bug.
+on the rate — a real rig writes `seen`, `screen`, `promo`, `pair`, `mark` and
+`up` rows the replay did not — so a card rolling sooner is ordinary; rolls days apart
+are the bug.
 
 ### A recovery that had never once fired
 
@@ -5173,8 +5412,14 @@ The far end is never a reading of what happened. Nothing is counted as taken
 and nothing is written; it is how far the answer could move, and the answer is
 withheld when that is far enough to reverse it. A row with no verdict on record
 (written before `state` was) counts at the far end, because nothing says the
-panel did not clear it. `rpi/test_offerspage.py` asserts the strength at 0, 31
-and 222 ticks of one market, not merely that a paragraph renders.
+panel did not clear it. A card the driver marked **Passed** under Close the
+shift does not: that is the one thing about an unticked row the record could
+not say before, and it is a fact. On the owner's week nothing moves yet — the
+one mark in the file carrying `false` is an old ✓ taken back on a PASS card,
+and the server reads every `false` that names no surface (`via`) as exactly
+that, a take-back, so it reaches the page as no answer at all.
+`rpi/test_offerspage.py` asserts the strength at 0, 31 and 222 ticks of one
+market, not merely that a paragraph renders.
 
 #### Two rules that were tested and do not work
 

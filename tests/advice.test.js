@@ -1519,6 +1519,71 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
      A.usable([{ at: T0, pay: 10, minutes: 20, billedMinutes: 20, cost: 0,
                  whole: 1, suspect: 0, hidden: 0, state: 'warn' }])[0].said, 'warn');
   eq('...and advise() asks it', a.ifCleared && typeof a.ifCleared.added, 'number');
+
+  /* --- a card the driver says they passed on --- */
+  //
+  // "Close the shift" asks Took or Passed about every card the panel cleared,
+  // and Passed is the one thing about an unticked row the record could not say
+  // before. A known pass is never mixed in as a take. Asked as a pair against
+  // the SAME two cards left unanswered, so the check can fail: whatever the
+  // unanswered pair moves, the passed pair may not.
+  var cheap = said(240, 5, 'warn'), dear = said(250, 90, 'go');
+  var asPassed = function (o) { return Object.assign({}, o, { passed: true }); };
+  var asPass = function (o) { return Object.assign({}, o, { said: 'no' }); };
+  var base = A.ifCleared(six, 30);
+  var open2 = A.ifCleared(six.concat([cheap, dear]), 30);
+  var passed2 = A.ifCleared(six.concat([asPassed(cheap), asPassed(dear)]), 30);
+  eq('two cleared cards nobody answered for are mixed in (the control)',
+     open2.added, base.added + 2);
+  ok_('...and move both edges of the line kept (the control: '
+      + JSON.stringify(base.kept) + ' -> ' + JSON.stringify(open2.kept) + ')',
+      open2.kept.lo < base.kept.lo && open2.kept.hi > base.kept.hi);
+  eq('the same two marked Passed leave `added` where it was',
+     passed2.added, base.added);
+  eq('...and move neither edge of the line kept',
+     JSON.stringify(passed2.kept), JSON.stringify(base.kept));
+  // Not "leave the empty clock where it was": a passed card was still on the
+  // screen, so the rig was scanning then and the clock runs through it. What
+  // it may not be is a JOB. So the clock has to come out exactly as it does
+  // for the same two cards the panel had turned down itself.
+  eq('...and count on the clock exactly as two cards the panel said PASS to',
+     passed2.idle.share,
+     A.ifCleared(six.concat([asPass(cheap), asPass(dear)]), 30).idle.share);
+
+  /* --- what "Close the shift" asks about --- */
+  //
+  // The same pile, from the journal's own rows: usable, cleared by the panel
+  // (or with no verdict on record, named as such), split by the driver's word.
+  function journalRow(m, pay, state, accepted, extra) {
+    var o = Object.assign(offer(m, pay, 30), { id: 'c' + m }, extra || {});
+    if (state !== undefined) o.state = state;
+    if (accepted !== undefined) o.accepted = accepted;
+    return o;
+  }
+  var dayRows = [journalRow(0, 20, 'go', true), journalRow(5, 15, 'go', false),
+                 journalRow(10, 14, 'warn'), journalRow(15, 13, 'go'),
+                 journalRow(20, 4, 'no'), journalRow(22, 3, 'no', false),
+                 journalRow(25, 30, 'doubt', undefined, { suspect: 1 }),
+                 journalRow(30, 6)];
+  eq('a row marked Passed reaches advise() as a pass',
+     A.usable(dayRows).filter(function (r) { return r.passed; })
+       .map(function (r) { return r.id; }).join(','), 'c5,c22');
+  eq('...and a row nobody answered for does not',
+     A.usable([journalRow(40, 9, 'go')])[0].passed, false);
+  var lb = A.labels(dayRows);
+  var ids = function (rs) { return rs.map(function (r) { return r.id; }).join(','); };
+  eq('the review counts the cleared cards the driver ticked', ids(lb.took), 'c0');
+  eq('...and the ones they passed, not a PASS card they passed as well',
+     ids(lb.passed), 'c5');
+  eq('...and asks about the rest, in the order they came, and nothing the '
+     + 'panel turned down or doubted', ids(lb.open), 'c10,c15,c30');
+  // The journal's own rows, not usable()'s digest: the page shows the payout
+  // and the distance off them and posts the mark by the row's id.
+  ok_('...handing back the rows themselves, payout and all',
+      lb.open[0] === dayRows[2] && lb.open[0].pay === 14);
+  eq('...naming the one it asks about with no verdict on record', lb.unjudged, 1);
+  eq('...and asks about exactly the cards the advice note counts as unanswered',
+     lb.open.length, A.ifCleared(A.usable(dayRows), 30).added);
 })();
 
 /* ---- which areas paid, and whether that may be said at all ---- */

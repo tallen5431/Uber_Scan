@@ -88,7 +88,7 @@ NOW = 1700000000000
 # gap is unmissable: $2.00 of cost against $10.00 of pay, six times over, is
 # $48.00 net against $60.00 gross — and across all twelve, $96.00 against
 # $120.00.
-def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
+def offer(i, accepted=None, cost=2.0, pay=10.0, minutes=20.0, state=None,
           places=None, hidden=False, suspect=False, text=None, per_mile=0.33,
           pickup=None, dropoff=None, scanned=False, shop=False, items=None,
           legs=None):
@@ -98,8 +98,16 @@ def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
         'perHour': round((pay - cost) / (minutes / 60.0), 2),
         'grossPerHour': round(pay / (minutes / 60.0), 2),
         'cost': cost, 'costPerMile': per_mile, 'target': 25, 'band': 15,
-        'legs': 2, 'whole': True, 'accepted': accepted,
+        'legs': 2, 'whole': True,
     }
+    # The driver's word, as the server's fold hands it over: `true` for a
+    # tick, `false` for a Passed, and NO FIELD for a card nobody answered for.
+    # These fixtures wrote `false` on every unticked row, which was harmless
+    # while false and absent were read alike and is not now — every one of
+    # them would be a pass, and the 191 cards STRENGTH leaves open would be
+    # none.
+    if accepted is not None:
+        row['accepted'] = accepted
     # What the panel printed in the car at the time, which is what "What you
     # took" groups by. Left off entirely by default, because rows written
     # before the field existed are exactly the case the fourth bar is for —
@@ -138,7 +146,7 @@ def offer(i, accepted=False, cost=2.0, pay=10.0, minutes=20.0, state=None,
     return row
 
 
-TOOK_SIX = [offer(i, accepted=(i < 6)) for i in range(12)]
+TOOK_SIX = [offer(i, accepted=(True if i < 6 else None)) for i in range(12)]
 
 # What the panel said about the jobs that were actually worked. Every group has
 # its own median so a bar built from the wrong pile cannot land on the right
@@ -533,7 +541,7 @@ def wobbly(seed=73, n=120, step=8.0):
                      'perHour': round(pay / (mins / 60.0), 2),
                      'grossPerHour': round(pay / (mins / 60.0), 2),
                      'cost': 0.0, 'costPerMile': 0.0, 'target': 25, 'band': 15,
-                     'legs': 2, 'whole': True, 'accepted': False})
+                     'legs': 2, 'whole': True})
     return rows
 
 
@@ -555,14 +563,15 @@ WOBBLY = wobbly()
 TICKED = [dict(r) for r in wobbly(seed=91)]
 for _i, _r in enumerate(TICKED):
     _r['id'] = 't%d' % _i
-    _r['accepted'] = bool(_r['perHour'] >= 40 and _i % 2 == 0)
+    if _r['perHour'] >= 40 and _i % 2 == 0:
+        _r['accepted'] = True
     # ...and the panel's verdicts set so that every card it cleared is one
     # that was ticked. That is the one state in which the line kept and the
     # empty clock stand on the ticks alone and are printed as figures rather
     # than ranges — see STRENGTH below for the other two — and it is the state
     # the checks on this feed read. Left without a verdict, each of these rows
     # counts as one the panel may have cleared, and the page prints ranges.
-    _r['state'] = 'go' if _r['accepted'] else 'no'
+    _r['state'] = 'go' if _r.get('accepted') else 'no'
     # ...and a silence in the middle of it, which is the state the caveat under
     # the idle figure exists for. A stretch longer than the break that no
     # ticked trip accounts for is either a break or a trip nobody ticked, and
@@ -623,8 +632,7 @@ def strength(ticks, agreeing=False):
                      'grossPerHour': round(pay / (mins / 60.0), 2),
                      'cost': 0.0, 'costPerMile': 0.0, 'target': 25, 'band': 15,
                      'legs': 2, 'whole': True,
-                     'state': 'no' if agreeing and k == 'warn' else k,
-                     'accepted': False})
+                     'state': 'no' if agreeing and k == 'warn' else k})
     cleared = [r for r in rows if r['state'] in ('go', 'warn')]
     for r in (sorted(cleared, key=lambda r: -r['perHour'])[:ticks]
               if ticks < len(cleared) else cleared):
@@ -640,6 +648,47 @@ STRENGTH = {n: strength(n) for n in (0, 31, 222)}
 # still a range, but every point of it gives the same instruction, and
 # withholding it there would be refusing an answer the record does support.
 AGREEING = strength(31, agreeing=True)
+
+
+# Close the shift: one day with every kind of card the review has to tell
+# apart, the day before it, and a row from a clock far ahead. NOW is 17:13 in
+# New York, so q7 to q1 are 16:03 to 17:03 on one driver's day and p1, thirty
+# hours back, is the day before. What it must ask about is q1, q2 and q7 —
+# newest first — and nothing else:
+#
+#   q3 ticked and q4 passed      answered already; counted, not asked
+#   q5 a PASS card               the panel cleared nothing
+#   q8 a PASS card, ticked       not asked either, and still a tick: the line's
+#                                "N ticked" is the day header's "✓ N", 2 here,
+#                                where the cleared cards alone carry 1
+#   q6 an ACCEPT card set aside  not a reading anything counts
+#   q7 no verdict on record      asked, and named as such
+#   p1 the day before            another day of the log, a step back
+#   qz stamped in 2096           not "the newest day": a clock that is wrong
+#                                must not choose which shift is being closed,
+#                                nor be a day the section can step to
+#
+# `__fold` makes the stub fold each mark into the feed as the server would, so
+# what the page shows after a press is what it would show for real.
+def asked(name, minutes_ago, **kw):
+    row = offer(0, **kw)
+    at = NOW - minutes_ago * 60000
+    row.update(id=name, at=at, firstAt=at)
+    return row
+
+
+REVIEW = [
+    asked('p1', 30 * 60, state='go', pickup='Yesterday Grill'),
+    asked('q7', 70, pay=9.0, pickup='Old Row Diner'),
+    asked('q6', 60, state='go', suspect=True),
+    asked('q5', 50, state='no'),
+    asked('q8', 45, pay=13.0, state='no', accepted=True),
+    asked('q4', 40, state='go', accepted=False),
+    asked('q3', 30, state='go', accepted=True),
+    asked('q2', 20, pay=11.0, state='warn', pickup='Waffle House, Cobb Pkwy'),
+    asked('q1', 10, pay=14.0, minutes=25.0, state='go', pickup='Zaxbys, Canton Rd'),
+    dict(asked('qz', 0, state='go'), at=4000000000000, firstAt=4000000000000),
+]
 
 
 FEEDS = {
@@ -718,6 +767,11 @@ FEEDS = {
                            'watched': {'saw': len(rows), 'kept': len(rows)},
                            'unreadable': None, 'pairs': [], 'offers': rows}
        for n, rows in STRENGTH.items()},
+    'close the shift': {'count': len(REVIEW), 'total': len(REVIEW),
+                        'truncated': False, 'days': 7, 'hidden': 0,
+                        'watched': {'saw': len(REVIEW), 'kept': len(REVIEW)},
+                        'unreadable': None, 'pairs': [], 'offers': REVIEW,
+                        '__fold': True},
     'strength 31 agreeing': {'count': len(AGREEING), 'total': len(AGREEING),
                              'truncated': False, 'days': 7, 'hidden': 0,
                              'watched': {'saw': len(AGREEING), 'kept': len(AGREEING)},
@@ -855,6 +909,9 @@ const STUB = (feed) => `
   // the car drives out of range.
   window.__failNext = false;
   const REAL = window.fetch;
+  // The feed, held once, and handed out as a fresh copy on every load so
+  // nothing the page does to its rows can reach the next answer.
+  const FEED = ${JSON.stringify(feed)};
   window.fetch = function (url, opts) {
     window.__asked.push(String(url));
     if (String(url).indexOf('/api/journal') === 0) {
@@ -864,8 +921,28 @@ const STUB = (feed) => `
       }
       return Promise.resolve({
         ok: true, status: 200,
-        json: () => Promise.resolve(${JSON.stringify(feed)}),
-        text: () => Promise.resolve(${JSON.stringify(JSON.stringify(feed))}),
+        json: () => Promise.resolve(JSON.parse(JSON.stringify(FEED))),
+        text: () => Promise.resolve(JSON.stringify(FEED)),
+      });
+    }
+    // A mark, on a feed that asks for it: answered by the REAL server — which
+    // is what refuses a \`via\` it does not know — and then folded into this
+    // feed the way the server folds it into the journal, the newest word on
+    // the offer winning and \`null\` leaving no field. Every other feed is a
+    // fixed answer and stays one. Recorded as sent, for the checks to read.
+    if (FEED.__fold && String(url).indexOf('/api/offers/mark') === 0) {
+      const sent = JSON.parse(opts.body);
+      window.__marks = window.__marks || [];
+      window.__marks.push(sent);
+      return REAL.call(window, url, opts).then(function (r) {
+        if (r.ok) {
+          (FEED.offers || []).forEach(function (o) {
+            if (o.id !== sent.id) return;
+            if (sent.accepted === null) delete o.accepted;
+            else if (typeof sent.accepted === 'boolean') o.accepted = sent.accepted;
+          });
+        }
+        return r;
       });
     }
     if (String(url).indexOf('nominatim') !== -1) {
@@ -993,6 +1070,8 @@ const TEXT = (sel) => {
         firstAsked: ((window.__asked || []).filter(
           (u) => String(u).indexOf('/api/journal?') === 0)[0]) || '',
         rows: document.querySelectorAll('#log details.offer').length,
+        // Close the shift as it lands: absent, or the one line it folds to.
+        review: document.getElementById('review').hidden ? null : text('#reviewSays'),
         asked: window.__asked.length,
         // What the panel had said about the jobs that were worked.
         tookHead: document.getElementById('tookHead').hidden
@@ -1290,6 +1369,150 @@ const TEXT = (sel) => {
       await page.waitForTimeout(1200);
       out[name].unjudged = await page.evaluate(sheet);
     }
+    /* --- Close the shift ---------------------------------------------------
+     *
+     * Every press by the pointer, at the place it is drawn, and every answer
+     * read back three ways: what was POSTED (which is what reaches the
+     * journal), what the line says, and what the list shows. The feed folds
+     * each mark into itself the way the server would, so a press is followed
+     * by the page the driver would really see next. */
+    if (name === 'close the shift') {
+      stage = name + ' — the review';
+      const look = () => page.evaluate(() => {
+        const d = document.getElementById('review');
+        const flat = (id) => (document.getElementById(id).textContent || '')
+          .replace(/\s+/g, ' ').trim();
+        return {
+          hidden: d.hidden, open: d.open,
+          says: flat('reviewSays'), lead: flat('reviewLead'),
+          rows: [].slice.call(document.querySelectorAll('#reviewList .ask')).map((r) => ({
+            id: r.getAttribute('data-id'),
+            text: (r.querySelector('.what').textContent || '').replace(/\s+/g, ' ').trim(),
+            figs: r.querySelector('.figs') ? r.querySelector('.figs').textContent : '',
+            took: r.querySelector('[data-review="took"]').getAttribute('aria-pressed'),
+            passed: r.querySelector('[data-review="passed"]').getAttribute('aria-pressed'),
+            h: Math.min(r.querySelector('[data-review="took"]').getBoundingClientRect().height,
+                        r.querySelector('[data-review="passed"]').getBoundingClientRect().height),
+          })),
+          marks: (window.__marks || []).slice(),
+          undo: document.getElementById('undo').hidden ? ''
+            : (document.getElementById('undoWhat').textContent || '').trim(),
+          // The day either side: what each button says, whether it can be
+          // pressed, and whether the pair is up at all.
+          steps: document.getElementById('reviewDays').hidden ? null
+            : ['reviewBack', 'reviewOn'].map((id) => {
+              const b = document.getElementById(id);
+              return { text: (b.textContent || '').trim(), off: b.disabled,
+                       h: b.getBoundingClientRect().height,
+                       w: b.getBoundingClientRect().width,
+                       seen: getComputedStyle(b).visibility !== 'hidden' };
+            }),
+        };
+      });
+      const press = async (id, which) => {
+        await page.evaluate(() => { window.__marks = []; });
+        const at = await page.evaluate((a) => {
+          const b = document.querySelector('#reviewList .ask[data-id="' + a[0]
+                                           + '"] [data-review="' + a[1] + '"]');
+          if (!b) return null;
+          b.scrollIntoView({ block: 'center' });
+          const r = b.getBoundingClientRect();
+          const x = r.left + r.width / 2, y = r.top + r.height / 2;
+          const hit = document.elementFromPoint(x, y);
+          return { x: x, y: y, onTop: !!(hit && hit.closest('[data-review]') === b) };
+        }, [id, which]);
+        if (at && at.onTop) {
+          await page.mouse.click(at.x, at.y);
+          await page.waitForTimeout(900);
+        }
+        return at;
+      };
+      // Bounded, and a missing bar recorded rather than waited on: a page
+      // that never offered Undo is a result, and an unbounded click on it
+      // spends the whole driver's budget and reports nothing.
+      const undo = async () => {
+        await page.evaluate(() => { window.__marks = []; });
+        await page.click('#undoGo', { timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(900);
+      };
+      const rv = out[name].review = {};
+      rv.folded = await look();
+      // The clock times of the day's first and last card, as the page's own
+      // locale writes them, for the lead to be held against.
+      rv.clock = await page.evaluate((ats) => ats.map((t) => new Date(t)
+        .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })),
+        [feed.offers.filter((o) => o.id === 'q7')[0].at,
+         feed.offers.filter((o) => o.id === 'q1')[0].at]);
+      // ...and the names of p1's day and q1's, as the page's own locale writes
+      // a day that starts at 4am.
+      rv.names = await page.evaluate((ats) => ats.map((t) => {
+        const d = new Date(t);
+        d.setHours(d.getHours() - 4);
+        return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      }), [feed.offers.filter((o) => o.id === 'p1')[0].at,
+           feed.offers.filter((o) => o.id === 'q1')[0].at]);
+      // Opened by the pointer on its one line, which is the only way in.
+      const line = await page.evaluate(() => {
+        const s = document.querySelector('#review > summary');
+        s.scrollIntoView({ block: 'center' });
+        const b = s.getBoundingClientRect();
+        return { x: b.left + 24, y: b.top + b.height / 2, h: b.height };
+      });
+      await page.mouse.click(line.x, line.y);
+      await page.waitForTimeout(300);
+      rv.lineH = line.h;
+      rv.opened = await look();
+      rv.passAt = await press('q2', 'passed');
+      rv.passed = await look();
+      await press('q2', 'passed');
+      rv.withdrawn = await look();
+      await press('q1', 'took');
+      rv.took = await look();
+      await undo();
+      rv.undone = await look();
+      await press('q2', 'passed');
+      await press('q2', 'took');
+      rv.switched = await look();
+      await undo();
+      rv.switchUndone = await look();
+      // A day back, by the pointer on the button that names it; a Passed
+      // there, whose reload must leave the section on the day stepped to;
+      // and forward again.
+      const step = async (id) => {
+        const at = await page.evaluate((i) => {
+          const b = document.getElementById(i);
+          b.scrollIntoView({ block: 'center' });
+          const r = b.getBoundingClientRect();
+          const x = r.left + r.width / 2, y = r.top + r.height / 2;
+          const hit = document.elementFromPoint(x, y);
+          return { x: x, y: y, onTop: !!(hit && hit.closest('#' + i)) };
+        }, id);
+        if (at.onTop) {
+          await page.mouse.click(at.x, at.y);
+          await page.waitForTimeout(300);
+        }
+        return at;
+      };
+      rv.backAt = await step('reviewBack');
+      rv.back = await look();
+      await press('p1', 'passed');
+      rv.backPassed = await look();
+      rv.onAt = await step('reviewOn');
+      rv.forward = await look();
+      // ...and the log's own hide, on a row of the day before, which the
+      // review never lists: one more surface, and its name on the note.
+      await page.evaluate(() => { window.__marks = []; });
+      rv.hideAt = await page.evaluate(() => {
+        const d = document.querySelector('#log details.offer[data-id="p1"]');
+        if (!d) return false;
+        d.open = true;
+        const b = d.querySelector('[data-act="hide"]');
+        if (b) b.click();
+        return !!b;
+      });
+      await page.waitForTimeout(900);
+      rv.hid = await look();
+    }
     if (name === 'took six') {
       // The tick pressed on a FOLDED row, by the pointer, at the place it is
       // drawn. The end-of-shift pass down the ACCEPT list is this, a row at
@@ -1336,6 +1559,15 @@ const TEXT = (sel) => {
                    undo: (document.getElementById('undoWhat').textContent || '').trim() };
         });
         return Object.assign({ where: where }, after);
+      })();
+      // ...and Undo straight after it. r10 had no answer before the press, so
+      // Undo has to put back NO answer — `null` — and not `false`, which is a
+      // pass now, and one the driver never made.
+      out[name].foldedUndo = await (async () => {
+        await page.evaluate(() => { window.__marks = []; });
+        await page.click('#undoGo').catch(() => {});
+        await page.waitForTimeout(900);
+        return page.evaluate(() => window.__marks || []);
       })();
       // The same pointer press on a row the driver DID tick ('r3' is ticked
       // in the feed). Nothing else asked what a ticked row's control looks
@@ -1454,6 +1686,8 @@ const TEXT = (sel) => {
           .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-days'));
         window.fetch = feedFetch;
         return { pressed: pressed,
+                 review: !document.getElementById('review').hidden,
+                 reviewRows: document.querySelectorAll('#reviewList .ask').length,
                  rows: document.querySelectorAll('#log details.offer').length,
                  days: document.querySelectorAll('#log .day').length,
                  nothing: document.getElementById('nothing').hidden ? null
@@ -1474,6 +1708,7 @@ const TEXT = (sel) => {
         await new Promise((r) => setTimeout(r, 400));
         const withRows = { pairs: !document.getElementById('pairsHead').hidden,
                            note: !document.getElementById('findNote').hidden,
+                           review: !document.getElementById('review').hidden,
                            scale: (document.getElementById('blockScale').textContent || '').trim() };
         window.fetch = function (url, opts) {
           if (String(url).indexOf('/api/journal?') === 0) return Promise.reject(new Error('down'));
@@ -1483,6 +1718,8 @@ const TEXT = (sel) => {
         await new Promise((r) => setTimeout(r, 400));
         const down = { pairs: !document.getElementById('pairsHead').hidden,
                        note: !document.getElementById('findNote').hidden,
+                       review: !document.getElementById('review').hidden,
+                       reviewRows: document.querySelectorAll('#reviewList .ask').length,
                        scale: (document.getElementById('blockScale').textContent || '').trim(),
                        nothing: (document.getElementById('nothing').textContent || '').slice(0, 25) };
         document.querySelector('#chips button[data-pick="go"]').click();
@@ -1833,8 +2070,9 @@ try:
                   r'median of \$\d+/hr', _tc))
     ok_('...as a share of everything that came past',
         re.search(r'the top [\d.]+% of everything that came past', _tc))
+    # "A job taken", not "a decision": a Passed is a decision on record too.
     ok_('...naming what it rests on, 32 decisions being not many',
-        'the only record of a decision this has' in _tc)
+        'the only record of a job taken this has' in _tc)
 
     # --- how strongly the ticks let those two be said ------------------------
     #
@@ -1910,9 +2148,9 @@ try:
         return v[h] if len(v) % 2 else (v[h - 1] + v[h]) / 2.0
 
     _rows = STRENGTH[31]
-    _t = [r['pay'] / (r['minutes'] / 60.0) for r in _rows if r['accepted']]
+    _t = [r['pay'] / (r['minutes'] / 60.0) for r in _rows if r.get('accepted')]
     _x = sorted(r['pay'] / (r['minutes'] / 60.0) for r in _rows
-                if not r['accepted'] and r['state'] in ('go', 'warn'))
+                if not r.get('accepted') and r['state'] in ('go', 'warn'))
     _lo = min(_med(_t + _x[:k]) for k in range(len(_x) + 1))
     _hi = max(_med(_t + _x[len(_x) - k:]) for k in range(len(_x) + 1))
     _whole = lambda v: '%d' % int(round(v, 2) + 0.5)
@@ -1981,18 +2219,27 @@ try:
         (fw.get('h') or 0) >= 51.5)
     eq('...saying it is not pressed on a row nobody ticked',
        fw.get('pressed'), 'false')
-    eq('one press on it marks that row taken, and nothing else',
-       fd.get('marks'), [{'id': 'r10', 'accepted': True}])
+    eq('one press on it marks that row taken, and nothing else, as pressed on '
+       'the offers page', fd.get('marks'), [{'id': 'r10', 'accepted': True,
+                                             'via': 'offers'}])
     ok_('...says so (%r)' % fd.get('undo'), 'taken' in (fd.get('undo') or ''))
     no_('...and leaves the row folded', fd.get('open'))
+    # r10 had no answer before the press. `false` would be a pass now — one
+    # the driver never made, which Close the shift would then stop asking
+    # about and the advice would count as known.
+    eq('...and Undo puts back no answer, not a pass',
+       got['took six'].get('foldedUndo'),
+       [{'id': 'r10', 'accepted': None, 'via': 'offers'}])
     # A row the driver ticked: the solid ✓ they are reading down the list for,
     # and a press that takes it back.
     tk = got['took six'].get('ticked') or {}
     tb = tk.get('before') or {}
     eq('a ticked row draws its tick pressed (%r)' % tb,
        [tb.get('pressed'), tb.get('on')], ['true', True])
+    # Unmarks, with `null`: "that tick was wrong" is not "I passed on it",
+    # which is Close the shift's Passed and a fact the advice reads.
     eq('...and one press on it unmarks that row, and nothing else',
-       tk.get('marks'), [{'id': 'r3', 'accepted': False}])
+       tk.get('marks'), [{'id': 'r3', 'accepted': None, 'via': 'offers'}])
     ok_('...says so (%r)' % tk.get('undo'), 'Unmarked' in (tk.get('undo') or ''))
     # A press the server refuses: the ✓ stays a ✓ the width it was, and the
     # failure is said where the Undo is said, and to a screen reader.
@@ -2020,6 +2267,146 @@ try:
     ok_('...and still on screen (top %r of %r)' % (mk.get('top'), mk.get('inner')),
         mk.get('top') is not None and 0 <= mk['top'] < (mk.get('inner') or 0))
 
+    # --- Close the shift --------------------------------------------------
+    #
+    # 31 of the owner's 1,166 offers carry a tick, and a card passed on is the
+    # same row as a job taken and never ticked — so the advice has to print
+    # the line kept as a range over every mix of the 191 cleared cards nobody
+    # marked. This asks about them, parked: the newest day's ACCEPT and CLOSE
+    # CALL cards with no answer, Took or Passed. See REVIEW for the feed.
+    rv = (got.get('close the shift') or {}).get('review') or {}
+    r0 = rv.get('folded') or {}
+    STANDS = '%d ticked, %d passed, %d still unlabelled'
+    no_('Close the shift is up on a day with cleared cards', r0.get('hidden'))
+    ok_('...folded to one line until pressed, so the log stays where it was',
+        r0.get('open') is False)
+    ok_('...and that line says how the asking stands (%r)' % r0.get('says'),
+        STANDS % (2, 1, 3) in (r0.get('says') or ''))
+    # "Ticked" is the day header's ✓, a PASS card the driver took included:
+    # two lines on one page about one day's ticks give one number.
+    _hdr = [d for d in (got.get('close the shift') or {}).get('days') or []
+            if (rv.get('names') or ['?', '?'])[1] in d]
+    _said = re.search(r'(\d+) ticked', r0.get('says') or '')
+    _tick = re.search('✓ (\\d+)', _hdr[0] if _hdr else '')
+    eq('...its "ticked" the day header\'s ✓ for the same day (%r)' % (_hdr[:1],),
+       [_said and _said.group(1), _tick and _tick.group(1)], ['2', '2'])
+    # The rest of the window's unanswered cards: p1, the day before. Said on
+    # the folded line, so a day that is the tail of a night cannot pass for
+    # all there is to ask.
+    ok_('...and how many more wait on other days in the window (%r)' % r0.get('says'),
+        '· 1 more on another day' in (r0.get('says') or ''))
+    r1 = rv.get('opened') or {}
+    _p1day, _qday = rv.get('names') or ['?', '?']
+    eq('...with the day before a press away, named with how many it still has open',
+       [(s['text'], s['off']) for s in r1.get('steps') or []][:1],
+       [('‹ %s · 1 unlabelled' % _p1day, False)])
+    eq('...and no later day to step to from the newest, the 2096 row\'s included',
+       [(s['text'], s['off']) for s in r1.get('steps') or []][1:], [('', True)])
+    ok_('...the step a 52px target (%r)' % [s['h'] for s in r1.get('steps') or []],
+        r1.get('steps') and r1['steps'][0]['h'] >= 51.5)
+    # Kept in its place, unseen, so the step beside it does not widen into the
+    # space and move under a thumb pressing it again.
+    _ends = [(s['seen'], round(s['w'])) for s in r1.get('steps') or []]
+    ok_('...the end with no day beyond it holding its half of the row, unseen (%r)' % _ends,
+        len(_ends) == 2 and _ends[0][0] and not _ends[1][0]
+        and _ends[1][1] > 0 and abs(_ends[0][1] - _ends[1][1]) <= 1)
+    ok_('...opens on a press of that line', r1.get('open'))
+    ok_('...which is a 52px target (%r)' % rv.get('lineH'), (rv.get('lineH') or 0) >= 51.5)
+    eq('it asks about the newest day\'s unanswered ACCEPT and CLOSE CALL cards, '
+       'newest first, and nothing else',
+       [r['id'] for r in r1.get('rows') or []], ['q1', 'q2', 'q7'])
+    _q1 = ((r1.get('rows') or [{}])[0].get('text')) or ''
+    ok_('...each saying when, what it paid, how long, how far and where from (%r)'
+        % _q1, all(s in _q1 for s in ((rv.get('clock') or ['?', '?'])[1], '$14.00',
+                                       '25 min', '6.0 mi', 'Zaxbys, Canton Rd')))
+    # Each figure one unbreakable piece, so a narrow screen wraps the line
+    # between figures and never leaves "25" at the end of one line and "min"
+    # at the start of the next. (test_layout holds the figures to the box.)
+    _f1 = (r1.get('rows') or [{}])[0].get('figs') or ''
+    ok_('...each figure kept in one piece when the line wraps (%r)' % _f1,
+        '25 min' in _f1 and '6.0 mi' in _f1)
+    eq('...with neither answer pressed on a card nobody answered for',
+       [(r['took'], r['passed']) for r in r1.get('rows') or []], [('false', 'false')] * 3)
+    ok_('...each answer 52px tall (%r)' % [r['h'] for r in r1.get('rows') or []],
+        r1.get('rows') and all(r['h'] >= 51.5 for r in r1['rows']))
+    _lead = r1.get('lead') or ''
+    ok_('...naming the card it asks about that carries no verdict (%r)' % _lead[:160],
+        '1 with no verdict on record' in _lead)
+    ok_('...and the first and last card of the day it covers (%r)' % (rv.get('clock'),),
+        rv.get('clock') and all(c in _lead for c in rv['clock']))
+
+    r2 = rv.get('passed') or {}
+    eq('Passed posts a pass for that card and says the review made it',
+       r2.get('marks'), [{'id': 'q2', 'accepted': False, 'via': 'review'}])
+    ok_('...counted as passed (%r)' % r2.get('says'), STANDS % (2, 2, 2) in (r2.get('says') or ''))
+    # Kept on the list with its answer showing. The next card moving into the
+    # place just pressed is how a second press lands on the wrong job.
+    eq('...and the card stays where it was, with Passed pressed',
+       [(r['id'], r['took'], r['passed']) for r in r2.get('rows') or []],
+       [('q1', 'false', 'false'), ('q2', 'false', 'true'), ('q7', 'false', 'false')])
+    ok_('...and the bar names the card (%r)' % r2.get('undo'),
+        'passed' in (r2.get('undo') or '') and '$11.00' in (r2.get('undo') or ''))
+    r3 = rv.get('withdrawn') or {}
+    eq('Passed pressed again takes the answer back, rather than repeating it',
+       r3.get('marks'), [{'id': 'q2', 'accepted': None, 'via': 'review'}])
+    ok_('...back to unlabelled (%r)' % r3.get('says'), STANDS % (2, 1, 3) in (r3.get('says') or ''))
+    r4 = rv.get('took') or {}
+    eq('Took posts a tick for that card',
+       r4.get('marks'), [{'id': 'q1', 'accepted': True, 'via': 'review'}])
+    ok_('...counted as ticked (%r)' % r4.get('says'), STANDS % (3, 1, 2) in (r4.get('says') or ''))
+    r5 = rv.get('undone') or {}
+    eq('Undo after a first answer puts back no answer, not a pass',
+       r5.get('marks'), [{'id': 'q1', 'accepted': None, 'via': 'review'}])
+    ok_('...and the counts are what they were (%r)' % r5.get('says'),
+        STANDS % (2, 1, 3) in (r5.get('says') or ''))
+    r6 = rv.get('switched') or {}
+    eq('Took on a card marked Passed changes the answer',
+       r6.get('marks'), [{'id': 'q2', 'accepted': True, 'via': 'review'}])
+    r7 = rv.get('switchUndone') or {}
+    eq('...and Undo puts the pass back exactly',
+       r7.get('marks'), [{'id': 'q2', 'accepted': False, 'via': 'review'}])
+
+    # A day back. On the owner's week the newest day was the 29 offers after
+    # 4am, and the 86 cards of the night they ended could not be reached from
+    # any window; a step back is how they are.
+    ok_('the day before is pressed by the pointer where it is drawn',
+        (rv.get('backAt') or {}).get('onTop'))
+    rbk = rv.get('back') or {}
+    eq('a step back asks about that day\'s unanswered cards instead',
+       [r['id'] for r in rbk.get('rows') or []], ['p1'])
+    ok_('...its line naming that day and how the asking stands there, and what '
+        'is still open on the newest (%r)' % rbk.get('says'),
+        all(s in (rbk.get('says') or '') for s in (
+            _p1day, STANDS % (0, 0, 1), '· 2 more on another day')))
+    eq('...with no day before it, and the newest a press away',
+       [(s['text'], s['off']) for s in rbk.get('steps') or []],
+       [('', True), ('%s · 2 unlabelled ›' % _qday, False)])
+    # Every answer reloads the window. A section that went back to the newest
+    # day each time would put another day's card under the next press.
+    rp = rv.get('backPassed') or {}
+    eq('Passed there posts a pass for that card',
+       rp.get('marks'), [{'id': 'p1', 'accepted': False, 'via': 'review'}])
+    ok_('...and the reload leaves the section on the day stepped to (%r)' % rp.get('says'),
+        _p1day in (rp.get('says') or '') and STANDS % (0, 1, 0) in (rp.get('says') or '')
+        and [(r['id'], r['passed']) for r in rp.get('rows') or []] == [('p1', 'true')])
+    ok_('the newest day is pressed by the pointer where it is drawn',
+        (rv.get('onAt') or {}).get('onTop'))
+    rfw = rv.get('forward') or {}
+    ok_('...and a step forward comes back to it (%r)' % rfw.get('says'),
+        _qday in (rfw.get('says') or '')
+        and [r['id'] for r in rfw.get('rows') or []] == ['q1', 'q2', 'q7'])
+    # ...and the log's hide, which is the offers page's own surface.
+    ok_('the log\'s hide was pressed on the day before', rv.get('hideAt'))
+    eq('...and says it was pressed on the offers page',
+       (rv.get('hid') or {}).get('marks'), [{'id': 'p1', 'hidden': True, 'via': 'offers'}])
+
+    # Where there is nothing to ask, it says so rather than vanishing; where
+    # nothing in the window can be counted, it is not there at all.
+    ok_('a day the panel cleared nothing on says so (%r)' % got['leg'].get('review'),
+        'cleared nothing' in (got['leg'].get('review') or ''))
+    eq('a window with nothing countable has no Close the shift',
+       got['all aside'].get('review'), None)
+
     # --- the later window wins ------------------------------------------
     rc = got['took six'].get('race') or {}
     eq('after 7 days then Today, Today is the window pressed', rc.get('pressed'), ['1'])
@@ -2028,6 +2415,10 @@ try:
     ok_('...and the empty state, not the week\'s headline (%r)' % (rc.get('headline') or '')[:40],
         rc.get('nothing') is not None and 'cleared the line' not in (rc.get('headline') or ''))
     eq('...and no chart scale left over', rc.get('scale'), '')
+    # 'took six' put Close the shift up; an empty window must take it down,
+    # or the week's questions stand over a day with no offers in it.
+    eq('...and no Close the shift left over from the week',
+       [rc.get('review'), rc.get('reviewRows')], [False, 0])
 
     # --- a window that cannot be fetched leaves nothing of the last one -----
     fl = got['took six'].get('failed') or {}
@@ -2038,6 +2429,10 @@ try:
     ok_('the apology is up (%r)' % dn.get('nothing'), 'Cannot reach' in (dn.get('nothing') or ''))
     ok_('...with no pairing under it', not dn.get('pairs'))
     ok_('...no search sentence', not dn.get('note'))
+    # Its buttons post marks by id against rows this page can no longer show.
+    ok_('...no Close the shift, where it was up with the rows (%r -> %r, %r rows)'
+        % (wr.get('review'), dn.get('review'), dn.get('reviewRows')),
+        wr.get('review') and not dn.get('review') and dn.get('reviewRows') == 0)
     eq('...no chart scale', dn.get('scale'), '')
     eq('...and a chip brings nothing back', fl.get('chipped'), 0)
 

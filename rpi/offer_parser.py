@@ -665,6 +665,43 @@ PAY_IS_A_DURATION = re.compile(
     r'(?:m[il1|]ns?|mi)\b',
     re.IGNORECASE | ASCII)
 
+# ...and a number that is a bonus on every order, wearing a dollar sign.
+#
+# The app asks the driver to change zones with a prompt of its own, and five of
+# them on the owner's week were journalled as offers. Row 565 in full:
+#
+#     GA: Marietta North / Switch to this zone / with peak pay! /
+#     +$1.00/order until 8:20 PM / Avg. offer wait / 1min / Don't switch
+#
+# find_pay took the bonus as the payout and the zone's average wait as the job's
+# duration: $1 over 5 minutes, $12.00/hr PASS (row 71); $1 over 3, $20.00/hr
+# PASS (rows 74 and 100); $1 over 1, withheld as `time` (row 565); $2 over 11,
+# $10.91/hr PASS (row 806). A verdict and a rate on the panel for a screen that
+# offers no job, and five offers in the day's count that were never offered.
+#
+# Refused by the same grammar as the duration above: a payout is never glued to
+# a unit, and "/order" is a unit. It is the only money on every one of the
+# prompt's 29 frames on file — the 24 kept scans and the 5 stored texts — so
+# refusing it leaves no payout, and the prompt reads as what it is: a screen
+# with no offer on it, the same as a navigation screen. "/order" appears on no
+# other frame of the week's 5,491 or text of its 1,166, and in none of the 340
+# texts the shared corpus held before the prompt's own five were added.
+#
+# The FIGURE is refused, not the screen. The headline ("Switch to this zone")
+# and the button ("Don't switch") also read on all 29 frames, and anchoring on
+# either would refuse every payout in a crop that held a card beside the prompt.
+# This can only ever take away a number that was not a payout. Fourteen real
+# offers in the week carry a "Busy + Peak Pay" banner; it prints no amount and
+# no "/order", so none of them moves — they are offers, and the corpus holds
+# seven of them to it.
+#
+# `parse()` reports `promo` off the same pattern, so the loop can file the
+# prompt as a prompt rather than as the screen after a card. See note_promo in
+# journal.py.
+PAY_IS_PER_ORDER = re.compile(
+    r'\$\s*(?:' + DC + r'{1,4}(?:[.,]' + DC + r'{1,2})?)\s*/\s*order\b',
+    re.IGNORECASE | ASCII)
+
 
 def find_pay(text, where=None):
     """The offer's headline payout, and — if asked — where every headline was.
@@ -699,6 +736,7 @@ def find_pay(text, where=None):
     chips = [m.span() for m in PAY_CHIP.finditer(text)]
     found = []
     units = [m.span() for m in PAY_IS_A_DURATION.finditer(text)]
+    units += [m.span() for m in PAY_IS_PER_ORDER.finditer(text)]
 
     def in_chip(m):
         # A figure inside a "+$0.50 included" chip is part of the payout, not a
@@ -728,7 +766,8 @@ def find_pay(text, where=None):
         # data." Money never got it. Two cards in 604 change, both from a
         # phantom $80 to their true $9.03, and no corpus text moves.
         # ...and a figure that is really a duration or a distance is not a
-        # candidate either. See PAY_IS_A_DURATION.
+        # candidate either, nor a bonus per order. See PAY_IS_A_DURATION and
+        # PAY_IS_PER_ORDER.
         if any(start <= m.start() and m.end() <= end for start, end in units):
             continue
         if not HAS_DIGIT.search(m.group(1)):
@@ -2818,6 +2857,15 @@ def parse(raw_text):
         # Reported, not acted on here: parse() says what it read and rate()
         # decides what to do about it, the same division the other doubts keep.
         'notAnOffer': bool(NOT_AN_OFFER.search(text or '')),
+        # Whether this is the app's zone prompt — a bonus per order, which
+        # find_pay has already refused as a payout. See PAY_IS_PER_ORDER.
+        #
+        # Not a doubt, and not a second refusal: the prompt has no payout left
+        # once the bonus is refused, so rate() has nothing to withhold and the
+        # loop writes no offer. This is only what lets the loop say WHAT the
+        # payout-free frame was, so it is filed as a prompt rather than as the
+        # screen that followed a card. See note_promo in journal.py.
+        'promo': bool(PAY_IS_PER_ORDER.search(text or '')),
         # Whether the card REFUSED a destination, as opposed to the reader
         # simply not finding one. Uber prints "Customer dropoff" where the
         # address will be, which means the address exists and the driver has

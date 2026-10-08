@@ -314,7 +314,13 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
                     announced=len(announced),
                     reads=sum(1 for a, _ in verdicts
                               if a and isinstance(a[0], dict) and a[0].get('ready')),
-                    rows=(sum(1 for _ in open(journal))
+                    # Not the rig's own start and stop rows. The start lands
+                    # before anything is read, so counting it stopped every
+                    # "until a row lands" run before the first read. Matched
+                    # on the text Journal.append writes (sort_keys), because
+                    # this is asked on every sleep of the loop.
+                    rows=(sum(1 for line in open(journal)
+                              if '"kind": "up"' not in line)
                           if os.path.exists(journal) else 0))
 
     def bounded_sleep(s):
@@ -350,15 +356,20 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
             else:
                 os.environ[HOF.ENV_DIR] = had_dir
 
-    rows = []
+    rows, ups = [], []
     if os.path.exists(journal):
         for line in open(journal):
             line = line.strip()
             if line:
-                rows.append(json.loads(line))
+                row = json.loads(line)
+                # The rig's own up and down rows, apart: every check below
+                # that asks what a run wrote is asking about offers and the
+                # tallies beside them, and a start row first in the file
+                # would be the "last row" or the "one row" they find.
+                (ups if row.get('kind') == 'up' else rows).append(row)
     ready = [a for a, _ in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
     ready_kw = [k for a, k in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
-    return dict(cam=cam, rows=rows, ready=ready, ready_kw=ready_kw,
+    return dict(cam=cam, rows=rows, ups=ups, ready=ready, ready_kw=ready_kw,
                 announced=announced, gate_calls=gate_calls,
                 destinations=destinations, verdicts=verdicts,
                 config=config, journal=journal, started=len(started),
@@ -2029,9 +2040,343 @@ eq('...and the panel stops being told',
 # that silently stops appearing.
 page = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), 'live.html')).read()
-for field in ('tooBright', 'tooDim', 'refindRefused', 'notSaving'):
+for field in ('tooBright', 'tooDim', 'refindRefused', 'notSaving',
+              'gps', 'cpuC', 'throttled'):
     ok_('live.html reads %s off the heartbeat' % field,
         'msg.%s' % field in page)
+# ...and the one throttle word it names, which is the one it keeps the
+# temperature off. Renamed here and not there, the number would come back
+# beside a weak supply and, on the 3.5" hat, push the GPS's "min" off the end.
+_named = re.findall(r"t\.now\[0\] !== '([^']*)'", page)
+ok_('the throttle word live.html keeps the temperature off is one the scanner '
+    'sends (%r)' % (_named,),
+    bool(_named) and all(w in [x for _, x in SP.THROTTLE_BITS] for w in _named))
+
+# --- the GPS and the Pi on the beat -----------------------------------------
+#
+# The wire, here; that the loop fills it is measured in test_loop.py against the
+# real main(), for the reason notSaving's link is: with the wire in place and
+# the loop not passing it, every check below would pass and the panel would
+# still be silent.
+_gb = beat(gps={'state': 'stale', 'ageSeconds': 312.0},
+           pi={'cpuC': 71.4, 'cpuCWhy': None,
+               'throttled': {'now': ['under-voltage'], 'sinceBoot': ['under-voltage']},
+               'throttledWhy': None})
+eq('the beat carries the GPS word and how old the newest fix is',
+   _gb.get('gps'), {'state': 'stale', 'ageSeconds': 312.0})
+eq('...and the Pi\'s temperature, as its own field the page reads by name',
+   _gb.get('cpuC'), 71.4)
+eq('...and what the Pi says it is doing now and has done since boot',
+   _gb.get('throttled'), {'now': ['under-voltage'], 'sinceBoot': ['under-voltage']})
+# Null WITH a reason. A null alone reads the same as a Pi nobody asked.
+_gn = beat(pi=SP.PiHealth(temp=lambda: (None, 'no thermal zone'),
+                          throttle=lambda: (None, 'no vcgencmd on this machine'))
+           .sample(0.0))
+eq('a Pi that cannot be asked says null for both (%r, %r)'
+   % (_gn.get('cpuC'), _gn.get('throttled')),
+   (_gn.get('cpuC'), _gn.get('throttled')), (None, None))
+eq('...and why, for each', (_gn.get('cpuCWhy'), _gn.get('throttledWhy')),
+   ('no thermal zone', 'no vcgencmd on this machine'))
+
+# vcgencmd's own answer, bit by bit. 0x50005 is what a Pi on a weak supply
+# says: under-voltage and throttled now (bits 0 and 2), and both since boot
+# (16 and 18).
+class _Ran(object):
+    def __init__(self, out, code=0, err=''):
+        self.stdout, self.returncode, self.stderr = out, code, err
+
+
+eq('under-voltage and throttling, now and since boot',
+   SP.throttling(run=lambda *a, **k: _Ran('throttled=0x50005\n'))[0],
+   {'now': ['under-voltage', 'throttled'],
+    'sinceBoot': ['under-voltage', 'throttled']})
+# The sticky half alone is the ordinary shape at the end of a shift — a dip at
+# 6pm that is over — and nothing about it is happening now, so the panel, which
+# reads `now`, says nothing.
+eq('a dip that is over is since-boot only',
+   SP.throttling(run=lambda *a, **k: _Ran('throttled=0x80000\n'))[0],
+   {'now': [], 'sinceBoot': ['temp limit']})
+eq('a healthy Pi says nothing, and is still an answer rather than a null',
+   SP.throttling(run=lambda *a, **k: _Ran('throttled=0x0\n')),
+   ({'now': [], 'sinceBoot': []}, None))
+# Cause first, because the panel has room for one word and takes the first:
+# a hot Pi says "temp limit" there, not "throttled", which is only what the
+# firmware did about it.
+eq('every bit has its word, the causes ahead of what was done about them '
+   '(0xf: %r)' % SP.throttling(run=lambda *a, **k: _Ran('throttled=0xf'))[0]['now'],
+   SP.throttling(run=lambda *a, **k: _Ran('throttled=0xf'))[0]['now'],
+   ['under-voltage', 'temp limit', 'throttled', 'capped'])
+eq('...so a Pi capped for heat names the heat first',
+   SP.throttling(run=lambda *a, **k: _Ran('throttled=0xe'))[0]['now'][0],
+   'temp limit')
+
+
+def _missing(*a, **k):
+    raise FileNotFoundError('vcgencmd')
+
+
+def _hung(*a, **k):
+    import subprocess as _sp
+    raise _sp.TimeoutExpired('vcgencmd', 1.0)
+
+
+eq('no vcgencmd at all is a null with that said',
+   SP.throttling(run=_missing), (None, 'no vcgencmd on this machine'))
+ok_('a vcgencmd that hangs is a null with that said (%r)'
+    % (SP.throttling(run=_hung)[1],),
+    SP.throttling(run=_hung)[0] is None
+    and 'timed out' in (SP.throttling(run=_hung)[1] or ''))
+# A firmware that answers with something else, or fails: no bits invented.
+eq('an answer that is not the throttle word is a null, quoting it',
+   SP.throttling(run=lambda *a, **k: _Ran('error=1 error_msg="Command not registered"', 255)),
+   (None, 'vcgencmd said \'error=1 error_msg="Command not registered"\''))
+
+_tdir = tempfile.mkdtemp()
+_tz = os.path.join(_tdir, 'temp')
+with open(_tz, 'w') as _fh:
+    _fh.write('48312\n')
+eq('the thermal zone is millidegrees', SP.cpu_temp(_tz), (48.3, None))
+_gone = SP.cpu_temp(os.path.join(_tdir, 'nope'))
+ok_('no thermal zone is a null with the reason (%r)' % (_gone,),
+    _gone[0] is None and 'No such file' in (_gone[1] or ''))
+with open(_tz, 'w') as _fh:
+    _fh.write('hot\n')
+ok_('a thermal zone that is not a number is a null, not a crash',
+    SP.cpu_temp(_tz)[0] is None and SP.cpu_temp(_tz)[1])
+
+# Asked at most every PI_EVERY, because the throttle half is a process.
+_asked = []
+_ph = SP.PiHealth(every=30.0, temp=lambda: (_asked.append('t') or 50.0, None),
+                  throttle=lambda: ({'now': [], 'sinceBoot': []}, None))
+_ph.sample(100.0)
+_ph.sample(110.0)
+_ph.sample(129.9)
+eq('the Pi is asked once in its interval, however often the beat comes',
+   len(_asked), 1)
+_ph.sample(130.0)
+eq('...and again once the interval is up', len(_asked), 2)
+
+# --- a state that has to last before it is news ------------------------------
+_h = SP.Held('back', 60.0, quick=('back',))
+eq('bad news is not news until it has lasted', _h.update('gone', 0.0), None)
+eq('...59 seconds is not long enough', _h.update('gone', 59.0), None)
+eq('...and at the hold it is, with how long it had lasted',
+   _h.update('gone', 60.0), ('gone', 60.0))
+eq('good news is taken at once', _h.update('back', 60.5), ('back', 0.0))
+# A flicker: away for 30s, back for a second, away for 30s. Neither absence
+# is a minute, so neither is a row — and a hold that kept its clock across the
+# return would have called the second one the end of a minute away.
+_h2 = SP.Held('back', 60.0, quick=('back',))
+_said = [_h2.update('gone', 0.0), _h2.update('gone', 30.0),
+         _h2.update('back', 31.0), _h2.update('gone', 32.0),
+         _h2.update('gone', 62.0)]
+eq('two short absences either side of a return are not one long one',
+   _said, [None, None, None, None, None])
+
+# --- the rig's up and down rows ----------------------------------------------
+_ud_path = os.path.join(tempfile.mkdtemp(), 'j.jsonl')
+_ud = SP.UpDown(JR.Journal(_ud_path), asked_gps=True, phone_hold=60.0,
+                gps_hold=60.0)
+
+
+def _ud_rows():
+    return [json.loads(l) for l in open(_ud_path) if l.strip()]
+
+
+_ud.start(True, 4321)
+_start = _ud_rows()[-1]
+eq('a start row is a kind row the sync can key',
+   (_start.get('kind'), _start.get('seq'), _start.get('id', '').startswith('up-')),
+   ('up', 1, True))
+eq('...whose id names its run and its place in it, not the clock',
+   _start.get('id'), 'up-%s-1' % _ud.run)
+eq('...saying it is the rig starting, with --gps on, and how long the Pi had '
+   'been up', (_start.get('about'), _start.get('state'), _start.get('gps'),
+               _start.get('uptime')), ('rig', 'start', True, 4321))
+# The GPS, before the phone has said anything: not yet a word at all.
+eq('the beat says nothing about a GPS that has not answered yet',
+   _ud.beat(), {'state': None, 'ageSeconds': None})
+_ud.watch(1000.0, False, ('lost', None, None))
+eq('a GPS still looking is not a row before the hold',
+   [r.get('about') for r in _ud_rows()], ['rig'])
+_ud.watch(1001.0, False, ('ok', 0.4, None))
+_ok = _ud_rows()[-1]
+eq('the first fix is a row at once (%r)' % (_ok,),
+   (_ok.get('about'), _ok.get('state'), _ok.get('ageSeconds')), ('gps', 'ok', 0.4))
+eq('...and the beat says ok now', _ud.beat()['state'], 'ok')
+_ud.watch(1030.0, False, ('stale', 21.0, 'ConnectionRefusedError: refused'))
+eq('a fix gone stale is not a row until it has stayed stale',
+   len(_ud_rows()), 2)
+eq('...and the beat still says ok, with the true age beside it',
+   _ud.beat(), {'state': 'ok', 'ageSeconds': 21.0})
+_ud.watch(1090.0, False, ('stale', 81.0, 'ConnectionRefusedError: refused'))
+_st = _ud_rows()[-1]
+eq('...and is one once it has (%r)' % (_st,),
+   (_st.get('about'), _st.get('state'), _st.get('ageSeconds'), _st.get('forSeconds'),
+    _st.get('why')),
+   ('gps', 'stale', 81.0, 60, 'ConnectionRefusedError: refused'))
+eq('...and the beat says stale', _ud.beat()['state'], 'stale')
+_ud.watch(1100.0, True, ('stale', 91.0, None))
+_ud.watch(1159.0, True, ('stale', 150.0, None))
+eq('the phone out of sight for 59s is not a row',
+   [r.get('about') for r in _ud_rows()].count('phone'), 0)
+_ud.watch(1160.0, True, ('stale', 151.0, None))
+_gone_row = _ud_rows()[-1]
+eq('...and for 60s it is: gone, saying how long it had been',
+   (_gone_row.get('about'), _gone_row.get('state'), _gone_row.get('forSeconds')),
+   ('phone', 'gone', 60))
+_ud.watch(1161.0, False, ('ok', 0.5, None))
+eq('...and back the moment it is seen, alongside a fix coming back',
+   [(r.get('about'), r.get('state')) for r in _ud_rows()[-2:]],
+   [('phone', 'back'), ('gps', 'ok')])
+_n = len(_ud_rows())
+_ud.watch(1162.0, None, ('ok', 0.6, None))
+eq('nothing tracking the phone is no claim about it', len(_ud_rows()), _n)
+_ud.stop()
+eq('a stop row ends the run', (_ud_rows()[-1].get('about'), _ud_rows()[-1].get('state')),
+   ('rig', 'stop'))
+_ids = [r['id'] for r in _ud_rows()]
+eq('no two of a run\'s rows share an id, numbered in the order written (%r)'
+   % (_ids,), _ids, ['up-%s-%d' % (_ud.run, i + 1) for i in range(len(_ids))])
+eq('...and every row carries the pair the sync keys on',
+   [r for r in _ud_rows() if not (r.get('id') and r.get('seq') == 1)], [])
+
+# `at` is the clock's, whatever it does, and the ids stay apart without it.
+#
+# The rows are there to say WHEN the rig failed. Their `at` was pushed past the
+# last row's to keep ids apart, which after NTP stepped a fast clock back — the
+# seven hours AUDITS.md "The clock" records — stamped every later row at the
+# run's high-water mark: a GPS gone stale three hours after the step was put
+# 3.98 hours from when it happened. Driven through journal's own clock.
+_wall = [1790409639879]                 # the incident's fast stamp
+_real_now_ms = JR.now_ms
+JR.now_ms = lambda now=None: _wall[0]
+try:
+    _ck_path = os.path.join(tempfile.mkdtemp(), 'j.jsonl')
+    _ck = SP.UpDown(JR.Journal(_ck_path), asked_gps=True, gps_hold=60.0)
+    _ck.start(True, 100)
+    _ck.watch(0.0, False, ('ok', 0.4, None))
+    _ck_rows = [json.loads(l) for l in open(_ck_path) if l.strip()]
+    eq('two rows in one millisecond keep the clock\'s at, and two ids (%r)'
+       % ([(r['id'], r['at']) for r in _ck_rows],),
+       ([r['at'] for r in _ck_rows], len({r['id'] for r in _ck_rows})),
+       ([_wall[0], _wall[0]], 2))
+    _wall[0] -= 7 * 3600 * 1000         # NTP steps it back seven hours
+    _wall[0] += 3 * 3600 * 1000         # ...and three hours of driving later
+    _ck.watch(10800.0, False, ('stale', 21.0, None))
+    _wall[0] += 60 * 1000
+    _ck.watch(10860.0, False, ('stale', 81.0, None))
+    _ck_last = [json.loads(l) for l in open(_ck_path) if l.strip()][-1]
+    eq('a row written after the clock stepped back carries the clock\'s time, '
+       'not the run\'s highest (%r)' % (_ck_last,),
+       (_ck_last.get('state'), _ck_last.get('at')), ('stale', _wall[0]))
+    # Two boots before NTP, each starting 25.123s after 1970 — one run's ids
+    # were apart, the next run's were the same numbers again, and the copy at
+    # home keeps the first of two rows with one id.
+    _wall[0] = 25123
+    _boot_path = os.path.join(tempfile.mkdtemp(), 'j.jsonl')
+    for _boot in range(2):
+        SP.UpDown(JR.Journal(_boot_path), asked_gps=True).start(True, 25)
+    _boot_ids = [json.loads(l)['id'] for l in open(_boot_path) if l.strip()]
+    eq('two runs started in the same millisecond do not share an id (%r)'
+       % (_boot_ids,), len(set(_boot_ids)), 2)
+finally:
+    JR.now_ms = _real_now_ms
+
+# A rig never asked for a position never writes a GPS row and never says
+# anything but 'off' on the beat.
+_off_path = os.path.join(tempfile.mkdtemp(), 'j.jsonl')
+_off = SP.UpDown(JR.Journal(_off_path), asked_gps=False, gps_hold=0.0)
+_off.watch(0.0, False, SP.gps_now(None))
+_off.watch(500.0, False, SP.gps_now(None))
+eq('without --gps the beat says off', _off.beat(), {'state': 'off', 'ageSeconds': None})
+eq('...and no GPS row is written', os.path.exists(_off_path), False)
+# ...and --no-journal is no rows at all, quietly.
+eq('with no journal there is nothing to write and nothing raised',
+   SP.UpDown(None, asked_gps=True).start(True, 1), False)
+
+
+# The words gps.Phone.state() uses, in the beat's. A stub, because the real
+# thing is test_gps.py's to drive.
+class _Phone(object):
+    def __init__(self, state, age=None, error=None):
+        self.s = {'state': state, 'ageSeconds': age, 'error': error}
+
+    def state(self):
+        return dict(self.s)
+
+
+eq('no --gps is off', SP.gps_now(None), ('off', None, None))
+eq('--gps given and refused is lost, with the reason',
+   SP.gps_now(None, 'could not use --gps \'x:y\''),
+   ('lost', None, 'could not use --gps \'x:y\''))
+eq('a fixed phone is ok', SP.gps_now(_Phone('fixed', 1.0))[0], 'ok')
+eq('a stale one is stale, with its age', SP.gps_now(_Phone('stale', 300.0))[:2],
+   ('stale', 300.0))
+eq('a phone that has never handed over a position is lost',
+   SP.gps_now(_Phone('looking', None, 'refused'))[0], 'lost')
+eq('...and gps.py\'s own error rides along', SP.gps_now(_Phone('looking', None, 'refused'))[2],
+   'refused')
+
+# --- the seen row's window, and the health line it came from -----------------
+_hw = SP.Health()
+_hw.reset(0.0)
+_hw.add({'ms': {'total': 1800}, 'clipped': True}, {'pay': None, 'complete': False})
+_hw.add({'ms': {'total': 2100}, 'clipped': False}, {'pay': 16.05, 'complete': True})
+_hw.add({'ms': {'total': 1500}, 'clipped': False}, {'pay': 16.05, 'complete': True})
+_hw.saw, _hw.kept, _hw.failed, _hw.relocks = 1, 1, 2, 3
+_hw.too_bright = True
+
+
+class _Track(object):
+    def __init__(self, lost=False, stalled=False):
+        self.s = {'lost': lost, 'stalled': stalled, 'drift': 0.0, 'wander': 0.0}
+
+    def status(self):
+        return dict(self.s)
+
+
+_real_log2 = SP.log
+try:
+    SP.log = lambda m: None
+    _tw = _hw.report(SP.HEALTH_EVERY + 1.0, _Track(stalled=True),
+                     type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log2
+eq('the tally carries how the reading went in the window (%r)' % (_tw,),
+   dict((k, _tw.get(k)) for k in ('reads', 'failed', 'complete', 'noPay',
+                                  'clipped', 'medianMs', 'tooDim', 'tooBright',
+                                  'corners', 'relocks')),
+   {'reads': 3, 'failed': 2, 'complete': 2, 'noPay': 1, 'clipped': 1,
+    'medianMs': 1800, 'tooDim': False, 'tooBright': True, 'corners': 'stuck',
+    'relocks': 3})
+eq('corners lost', SP.corners_word({'lost': True, 'stalled': True}), 'lost')
+eq('corners held', SP.corners_word({'lost': False, 'stalled': False}), 'held')
+# ...and the window where every read raised, which still reaches the journal
+# when it inherited a card from the window before.
+_hf = SP.Health()
+_hf.reset(0.0)
+_hf.failed, _hf.saw, _hf.relocks = 4, 1, 2
+_hf.too_dim = True
+try:
+    SP.log = lambda m: None
+    _tf = _hf.report(SP.HEALTH_EVERY + 1.0, None,
+                     type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log2
+ok_('a window whose every read failed is still worth recording',
+    SP.worth_recording(_tf))
+# Every field the healthy window's row has, so the two rows read alike — and
+# asked for by name: a None from .get() would pass for "no median" and for "the
+# branch never wrote one" alike, which is how the first version of this check
+# passed with the fields left off altogether.
+eq('...and its row says so in the same fields, with no median to give and '
+   'nothing tracking', dict((k, _tf.get(k, 'missing')) for k in
+                            ('reads', 'failed', 'complete', 'noPay', 'clipped',
+                             'medianMs', 'tooDim', 'tooBright', 'corners', 'relocks')),
+   {'reads': 0, 'failed': 4, 'complete': 0, 'noPay': 0, 'clipped': 0,
+    'medianMs': None, 'tooDim': True, 'tooBright': False, 'corners': None,
+    'relocks': 2})
 
 # --- keeping the picture the reader was given --------------------------------
 #
