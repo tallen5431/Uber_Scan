@@ -1004,14 +1004,40 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None,
 SCANS_KEEP = 400          # ...and the oldest go first
 SCAN_QUALITY = 72         # ~40KB a card at the height the reader uses
 
+# ...EXCEPT the cards the rig itself was unsure of, which are kept always.
+#
+# On the owner's week 338 of 1,166 offers (29%) landed a row the reader had
+# doubts about: 328 with `milesCorrected` — recover_decimal's divide-by-ten,
+# which moves the cost line tenfold if it guessed wrong — 9 doubted, 9 suspect,
+# 4 with uncertain miles. Whether each guess was right is a question only the
+# picture can answer, and those are exactly the reads nobody asked to keep. One
+# picture per offer, the read that first landed it doubtful, in a folder of
+# their own with the same cap: 400 at ~40KB is ~16MB, about eight days of
+# this week's rate, the oldest going first.
+DOUBT_DIR = 'doubt'
+
+
+def doubted(row):
+    """Is this journal row one the reader was unsure of? See DOUBT_DIR."""
+    return bool(row and (row.get('milesCorrected') or row.get('milesUncertain')
+                         or row.get('suspect') or row.get('doubt')))
+
 
 def scan_dir(journal_path):
     """Where card pictures go: beside the journal, in a directory of their own."""
     return os.path.join(os.path.dirname(os.path.abspath(journal_path)), 'scans')
 
 
+_pruning_said = set()
+
+
 def prune_scans(where, keep=SCANS_KEEP):
-    """Oldest first, so a long shift cannot outgrow the card it is written to."""
+    """Oldest first, so a long shift cannot outgrow the card it is written to.
+
+    Says so the first time a folder reaches its cap in a run, once: pictures
+    going is the bound working, but pictures going with nothing saying so is
+    the second fault class.
+    """
     try:
         names = sorted(n for n in os.listdir(where) if n.endswith('.jpg'))
     except OSError:
@@ -1023,6 +1049,10 @@ def prune_scans(where, keep=SCANS_KEEP):
             dropped += 1
         except OSError:
             pass
+    if dropped and where not in _pruning_said:
+        _pruning_said.add(where)
+        log('%s is at its %d-picture cap: the oldest are now deleted as new '
+            'ones arrive' % (where, keep))
     return dropped
 
 
@@ -2095,6 +2125,7 @@ def main():
     # not once per read: a card sits on screen for tens of seconds and is
     # re-read throughout, and the page needs the id rather than a heartbeat.
     told_offer = None
+    doubt_kept_for = None
     # ...and what that card read as when it was told. A later, fuller reading
     # of the same card — the second leg, the address a single frame lost —
     # is told again, because the first was what the panel, the order in the
@@ -2193,7 +2224,7 @@ def main():
         nonlocal dropoff_until, dropoff_said, dropoff_asked
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
-        nonlocal last_sample, spoke_for, told_offer, told_as
+        nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -2735,11 +2766,11 @@ def main():
             # network — so this cannot make a read slow, and it answers None
             # whenever there is no phone, no answer, or an answer too old to
             # stand for where the car is now.
-            landed = offer_log.consider(parsed, rate, ms=out['ms']['total'],
-                                        locked=out['locked'], whole=whole,
-                                        settled=stable,
-                                        where=phone.fix() if phone else None
-                                        ) is not None
+            written = offer_log.consider(parsed, rate, ms=out['ms']['total'],
+                                         locked=out['locked'], whole=whole,
+                                         settled=stable,
+                                         where=phone.fix() if phone else None)
+            landed = written is not None
             # Nothing written because there was nothing new to say means an
             # earlier reading of this same card already landed, which is still
             # a card that reached the file.
@@ -2777,6 +2808,14 @@ def main():
             if args.keep_scans and landed and offer_log.id:
                 save_scan(out.get('fitted'), offer_log.id, scans_where,
                           keep=args.keep_scans)
+            # ...and, flag or no flag, the read the reader was unsure of. Once
+            # per offer: the first doubtful landing is the evidence, and a card
+            # read twenty times would otherwise be twenty pictures of one guess.
+            if landed and offer_log.id and offer_log.id != doubt_kept_for \
+                    and doubted(written):
+                if save_scan(out.get('fitted'), offer_log.id,
+                             os.path.join(scans_where, DOUBT_DIR)):
+                    doubt_kept_for = offer_log.id
             # ...and say which offer that is, once per card rather than once
             # per read. The driving screen holds it so the driver can mark it
             # as taken without going and finding the row afterwards.

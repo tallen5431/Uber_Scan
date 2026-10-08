@@ -3045,8 +3045,17 @@ text, because the text is what the damage left behind. What is written is the
 greyscale card as it came off the warp, **before** `preprocess()` — a picture of
 preprocess's own output cannot be used to judge preprocess.
 
-Off by default, because this writes to an SD card in a car and a feature that
-quietly fills one is worse than a feature nobody has. Bounded even when on: 400
+**Except the reads the rig was unsure of, which are kept always**, in
+`scans/doubt/` beside the journal: one picture per offer whose row says
+`milesCorrected`, `milesUncertain`, `suspect` or `doubt` — the read that first
+landed it doubtful. On the owner's week that was 338 of 1,166 offers, 328 of them
+on the decimal-point guess, and whether each guess was right is a question only
+the picture can answer. Same cap, 400 pictures (about 16MB, about eight days at
+that week's rate), oldest first, and the log says once when the folder reaches
+it.
+
+Everything else is off by default, because this writes to an SD card in a car
+and a feature that quietly fills one is worse than a feature nobody has. Bounded even when on: 400
 pictures, oldest first, about 40kB each. Written only on the reads that land a
 row, so what is on disk is the offers in the journal rather than every glance at
 an empty mount. Named by offer id and stamped, so a row and a picture can be put
@@ -7209,7 +7218,7 @@ node tests/mapview.test.js      # 232 on the deciding behind both maps, with
                                 #     cases — two walks in a row, a cache hit
                                 #     mid-walk, a hotspot that drops — cost
                                 #     milliseconds instead of seconds
-python3 rpi/test_loop.py        #  97 on the scan loop re-telling a card once
+python3 rpi/test_loop.py        # 103 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused

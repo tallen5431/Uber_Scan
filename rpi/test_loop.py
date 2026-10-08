@@ -121,7 +121,7 @@ class FakeCam(object):
         pass
 
 
-def out_for(text, clipped=False):
+def out_for(text, clipped=False, fitted=None):
     # `clipped` is what the real reader answers when a payout WAS found and was
     # sitting flush against the top of the crop — pipeline.py hands back
     # `parse('')` for it, so the parse is empty over a screen that was a card.
@@ -131,14 +131,14 @@ def out_for(text, clipped=False):
     return {'parsed': dict(p), 'rate': OP.rate(p, {'target': 25}), 'locked': False,
             'text': text, 'clipped': clipped, 'dropped': 1 if clipped else 0,
             'recovered': 0,
-            'crop': [0, 0, 1, 1], 'card': None, 'fitted': None,
+            'crop': [0, 0, 1, 1], 'card': None, 'fitted': fitted,
             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 1}}
 
 
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
         refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
-        clipped_for=None, dropoff_window=None, whole_text=None):
+        clipped_for=None, dropoff_window=None, whole_text=None, fitted=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return. `handoff`: a directory to point the button-press files at, so a
@@ -184,7 +184,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 real_sleep(0.05)
         if whole and whole_text is not None:
             return [out_for(whole_text) for _ in range(len(frames))]
-        return [out_for(texts_for_call(calls[0], k),
+        return [out_for(texts_for_call(calls[0], k), fitted=fitted,
                         clipped=bool(clipped_for and clipped_for(calls[0], k)))
                 for k in range(len(frames))]
 
@@ -523,6 +523,46 @@ ok_('a card box drawn mid-shift is taken (%r)' % r11['crops'][-1:],
     any(c == ([0.0, 0.25, 1.0, 0.4], 0.4) for c in r11['crops']))
 ok_('...and said in the log',
     any('card box' in l for l in r11['logs']))
+
+# --- the reads the rig was unsure of keep their picture ----------------------
+#
+# 338 of the week's 1,166 offers landed a row the reader doubted, 328 of them
+# on recover_decimal's divide-by-ten. Only the picture can say whether the
+# guess was right, and those were never kept: --keep-scans is off by default.
+DECIMAL_GUESS = WHOLE.replace('(7.3 mi) trip', '(73 mi) trip')
+# The reader's crop, which the stub otherwise leaves out: a grey card-sized
+# picture is all save_scan needs to have something to write.
+_crop = TC.blank()[:400, :300].copy()
+r12 = run(lambda n, k: DECIMAL_GUESS, seconds=4.0, fitted=_crop)
+_dd = os.path.join(os.path.dirname(r12['config']), 'scans', SP.DOUBT_DIR)
+_kept = sorted(os.listdir(_dd)) if os.path.isdir(_dd) else []
+_doubted = sorted(set(row['id'] for row in r12['rows']
+                      if not row.get('kind') and SP.doubted(row)))
+ok_('the card really was read with its miles corrected', _doubted)
+ok_('a card the reader corrected the miles on keeps its picture, with no flag asked (%r)'
+    % _kept, len(_kept) >= 1)
+eq('...one picture per doubtful offer, however many times it was read',
+   len(_kept), len(_doubted))
+r13 = run(lambda n, k: WHOLE, seconds=4.0, fitted=_crop)
+_dd13 = os.path.join(os.path.dirname(r13['config']), 'scans', SP.DOUBT_DIR)
+eq('a card read cleanly keeps no picture',
+   sorted(os.listdir(_dd13)) if os.path.isdir(_dd13) else [], [])
+
+# ...and the cap is said once, not on every picture after it.
+_pd = tempfile.mkdtemp()
+for _i in range(3):
+    open(os.path.join(_pd, '%013d-x.jpg' % _i), 'w').close()
+_said, _was_log = [], SP.log
+SP.log = _said.append
+try:
+    SP.prune_scans(_pd, keep=2)
+    open(os.path.join(_pd, '%013d-x.jpg' % 9), 'w').close()
+    SP.prune_scans(_pd, keep=2)
+finally:
+    SP.log = _was_log
+eq('pictures pruned at the cap leave the newest', sorted(os.listdir(_pd)),
+   ['%013d-x.jpg' % 2, '%013d-x.jpg' % 9])
+eq('...and say so once, the first time', len([l for l in _said if 'cap' in l]), 1)
 
 # --- a cost per mile typed on a screen prices the next reading ---------------
 #
