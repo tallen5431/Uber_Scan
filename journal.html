@@ -82,16 +82,36 @@
   .review[open] > summary::after { transform: rotate(-90deg); }
   .review > .note { margin: 0 14px 8px; font-size: 13px; line-height: 1.5;
                     color: var(--muted); }
+  /* The day either side of the one being closed, each a 52px press. A night
+     that runs past 4am is two days of the log — the owner's Saturday ran to
+     4:43am, and its 86 unanswered cards sat the other side of a 29-offer
+     tail — so a review stuck on the newest day could never ask about most of
+     it. The button with no day behind it keeps its place, unseen, so the
+     other does not slide under a thumb pressing it for the third time. */
+  .review .days { display: flex; gap: 8px; margin: 0 14px 8px; }
+  .review .days[hidden] { display: none; }
+  .review .days button { flex: 1 1 0; min-width: 0; min-height: 52px; padding: 4px 10px;
+                         font: inherit; font-size: 13px; font-weight: 700; line-height: 1.3;
+                         color: var(--text); background: var(--panel-2);
+                         border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
+                         font-variant-numeric: tabular-nums; }
+  .review .days button:disabled { visibility: hidden; }
   /* One row per card: what a driver remembers a job by on the left, and the
      two answers on the right at the 52px every control on this page keeps. */
   .review .ask { display: flex; align-items: center; gap: 8px;
                  padding: 4px 14px; border-top: 1px solid var(--line);
                  font-variant-numeric: tabular-nums; }
-  .review .ask .what { flex: 1 1 0; min-width: 0; font-size: 13px;
-                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The figures WRAP, between figures and never inside one, rather than run
+     under an ellipsis. They did run under one: on the owner's week at 360px
+     all six rows of the newest day showed "$41.02 · 63 min" and no distance
+     at all, and at 390px four of the six cut theirs mid-figure, "49." for
+     49.3 mi. The place underneath may be cut, and shows that it was; it is a
+     name, and its first words are the part a driver remembers a job by. */
+  .review .ask .what { flex: 1 1 0; min-width: 0; font-size: 13px; }
   .review .ask .what b { margin-right: 6px; }
   .review .ask .what em { display: block; font-style: normal; font-size: 11px;
-                          color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+                          color: var(--muted); white-space: nowrap;
+                          overflow: hidden; text-overflow: ellipsis; }
   .review .ask button { flex: none; min-width: 72px; min-height: 52px; padding: 0 10px;
                         font: inherit; font-size: 13px; font-weight: 700;
                         color: var(--muted); background: var(--panel-2);
@@ -478,7 +498,8 @@
     .chips button { font-size: 17px; }
     /* Close the shift, at the same driving-seat sizes as the log beneath it:
        its rows name the same cards and are read from the same distance. */
-    .review > summary, .review .ask .what, .review .ask button { font-size: 17px; }
+    .review > summary, .review .ask .what, .review .ask button,
+    .review .days button { font-size: 17px; }
     .review > .note { font-size: 16px; }
     .review .ask .what em { font-size: 15px; }
     #nothing { font-size: 17px; }
@@ -596,14 +617,19 @@
        page that looks broken; so is a stale one with a grey line under it. -->
   <div id="nothing" hidden></div>
 
-  <!-- Close the shift: the newest day's ACCEPT and CLOSE CALL cards that
-       nobody has answered for, each with Took and Passed. Every figure on this
-       page about the driver's own decisions rests on the ticks, and on the
-       owner's week that is 31 of 1,166 offers, chosen by whatever got
-       remembered. This asks about all of a day's cleared cards instead,
-       parked, one press each. See showReview. -->
+  <!-- Close the shift: one day's ACCEPT and CLOSE CALL cards that nobody has
+       answered for — the newest day, or any other day in the window, a press
+       away — each with Took and Passed. Every figure on this page about the
+       driver's own decisions rests on the ticks, and on the owner's week that
+       is 31 of 1,166 offers, chosen by whatever got remembered. This asks
+       about all of a day's cleared cards instead, parked, one press each. See
+       showReview. -->
   <details class="review" id="review" hidden>
     <summary><span id="reviewSays"></span></summary>
+    <div class="days" id="reviewDays" hidden>
+      <button type="button" id="reviewBack"></button>
+      <button type="button" id="reviewOn"></button>
+    </div>
     <p class="note" id="reviewLead"></p>
     <div id="reviewList"></div>
   </details>
@@ -786,7 +812,8 @@
    'find', 'findNote', 'live', 'nothing', 'ladder',
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
    'pairs', 'pairsHead', 'pairsLead', 'runsAll',
-   'review', 'reviewSays', 'reviewLead', 'reviewList',
+   'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
+   'reviewList',
    'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
    'sheetNote', 'sheetOut'].forEach(function (id) {
     el[id] = document.getElementById(id);
@@ -813,7 +840,10 @@
   // created the mirror image of the same problem.
   //
   // 4am is the conventional boundary for shift work, and it is the right shape
-  // of answer here: nobody is driving then, so no shift can straddle it. It is
+  // of answer here. It is not a wall: this said nobody is driving then, so no
+  // shift could straddle it, and on the owner's week one of the four did —
+  // Saturday ran to 4:43am, and its last 29 offers are a day of their own (see
+  // Advice.DAY_STARTS_AT, and showReview for where that cut is shown). It is
   // deliberately not configurable yet — one number that is right for almost
   // everybody beats a setting nobody finds.
   //
@@ -924,6 +954,16 @@
   // held exactly as long as nobody asked the server for them.
   function counted(r) {
     return Advice.trustworthy(r) && typeof r.perHour === 'number';
+  }
+
+  // A day's ticks, for the two lines that print them: the day header's
+  // "✓ N" in the log and Close the shift's "N ticked". One count, because it
+  // is one question on one page, and it was two: the review counted only the
+  // ticks on the cards it asks about, so on the owner's Sun 13 Sep the header
+  // said ✓ 7 and the review 5 ticked — the two PASS cards the driver took
+  // that day (4:30pm $24.06, 5:33pm $16.51) being the difference.
+  function ticksIn(rows) {
+    return rows.filter(counted).filter(function (o) { return o.accepted; });
   }
 
   function whyAside(r) {
@@ -2974,13 +3014,13 @@
       // and the search box work here too. They did not: this path built its
       // own list and ignored all three.
       lastBusy = busyBy;
+      // No `newest`: nothing here could be counted, so nothing here is a card
+      // the panel cleared that could be asked about — and the previous
+      // window's questions must not stand over this one.
       view = { kept: kept, target: t0, band: b0, busyBy: busyBy,
                pairedBy: pairedBy, data: data };
       renderList();
-      // Nothing here could be counted, so nothing here is a card the panel
-      // cleared that could be asked about — and the previous window's
-      // questions must not stand over this one.
-      showReview(null);
+      showReview();
       return;
     }
     showUnits(true);
@@ -3236,15 +3276,16 @@
     // keystroke. Measured over 3,000 offers on a desktop browser: 150-224ms a
     // keystroke, and the Pi's own browser is several times slower than that.
     lastBusy = busyBy;
+    // `newest` rides along for Close the shift: the most recent row not
+    // stamped in the future, for the reason that variable exists — one row
+    // from a wrong clock would otherwise make a day nobody drove the shift
+    // being closed, and the latest day it can step to.
     view = { kept: kept, target: target, band: band, busyBy: busyBy,
-             pairedBy: pairedBy, data: data };
+             pairedBy: pairedBy, data: data, newest: newest };
     renderList();
 
     // --- close the shift ---
-    // The day of `newest`, the most recent row not stamped in the future,
-    // for the reason that variable exists: one row from a wrong clock would
-    // otherwise make a day nobody drove the shift being closed.
-    showReview(newest);
+    showReview();
 
     // `offers`, not `kept`: the rows the figures above are actually made of.
     //
@@ -3340,7 +3381,7 @@
         // $X" at the end of it contradicted the headline above about the same
         // offers by 23%.
         var offered = netTotal(day_counted).pay;
-        var tookToday = day_counted.filter(function (o) { return o.accepted; });
+        var tookToday = ticksIn(ofDay);
         var tookPay = netTotal(tookToday).pay;
         var setAside = ofDay.length - day_counted.length;
         out.push('<div class="day"><b>' + dayOf(r.at).toLocaleDateString(undefined,
@@ -3396,64 +3437,117 @@
    * 191 cleared cards nobody marked. Each of those is a question only the
    * driver can answer, and parked is the time to ask it.
    *
-   * So this asks — about the newest day's cards the panel cleared, Took or
-   * Passed, newest first, one press each — and says how the asking stands:
-   * ticked, passed, still unlabelled.
+   * So this asks — about one day's cards the panel cleared, Took or Passed,
+   * newest first, one press each — and says how the asking stands: ticked,
+   * passed, still unlabelled.
    *
    * THE DAY IS THE LOG'S DAY. dayOf/dayKey on Advice.DAY_STARTS_AT, read out
    * of the same byDay the day headers below are drawn from, so the shift
    * being closed and the day header over its rows are one grouping. Advice.runs
    * would be the other candidate and is not one: it breaks at every silence of
-   * half an hour, and the owner's Saturday is three runs. Nor is the 4am line
-   * perfect, and the page says where it cut: on that same week the last night
-   * ran 6:34pm to 4:43am, so a review opened at the end of it would have been
-   * the 29 offers after 4am. The first and last card's times are printed for
-   * exactly that reason.
+   * half an hour, and the owner's Saturday is three runs.
+   *
+   * IT OPENS ON THE NEWEST DAY AND STEPS TO ANY OTHER IN THE WINDOW. It used
+   * to be the newest day and nothing else, and the 4am line is where that
+   * failed: the owner's Saturday ran 6:34pm to 4:43am, so the newest day of
+   * that week is the 29 offers after 4am, and Saturday's 86 unanswered cards —
+   * 45% of the 191 — could not be asked about from any window. So the line
+   * says how many more are waiting on other days, and the two buttons under
+   * it name the day either side and how many each still has open. The day
+   * stepped to is kept across the reload every answer causes, or each press
+   * on Saturday's cards would throw the section back to Sunday. The first
+   * and last card's times are printed so a day that is the tail of a night
+   * shows as one.
    *
    * WHICH CARDS is Advice.labels, which is the pile Advice.ifCleared mixes in,
-   * by construction: on a one-day window "still unlabelled" here and the
-   * cards the advice note says have no answer are the same number.
+   * by construction: summed over the window's days, "still unlabelled" is
+   * the count the advice note gives — 191 on the owner's week, 6 on the
+   * newest day and 185 on the four before it. "Ticked" is ticksIn, the count
+   * the day header prints.
    *
    * A card answered here stays on the list until the page is left, with its
    * answer pressed, rather than vanishing under the thumb — the next card
    * moving into the place just pressed is how a second press lands on the
    * wrong job. Pressing an answer again takes it back. */
   var reviewedHere = {};
+  // The key of the day the driver stepped to, or null for the newest.
+  var reviewDay = null;
 
-  function showReview(newest) {
-    if (!newest || !view) {
+  function showReview() {
+    // No view is a window that could not be fetched; no `newest`, a window
+    // with nothing in it that could be counted. Neither has a card to ask
+    // about, and the last window's questions must not stand over either.
+    if (!view || !view.newest) {
       el.review.hidden = true;
       el.reviewList.innerHTML = '';
       return;
     }
-    var key = dayKey(newest.at);
-    var dayRows = (view.byDay || (view.byDay = groupByDay(view.kept)))[key] || [];
-    var lb = Advice.labels(dayRows);
-    var dayName = dayOf(newest.at).toLocaleDateString(undefined,
-      { weekday: 'short', month: 'short', day: 'numeric' });
+    var byDay = view.byDay;
+    // The window's days, oldest first, up to the day of `newest`: a day after
+    // it holds only rows stamped in the future, the clock fault `newest`
+    // exists to step over.
+    var startOf = function (k) { return dayOf(byDay[k][0].at).getTime(); };
+    var last = dayOf(view.newest.at).getTime();
+    var days = Object.keys(byDay).filter(function (k) { return startOf(k) <= last; })
+      .sort(function (a, b) { return startOf(a) - startOf(b); });
+    // The day stepped to, while it is in the window; the newest otherwise.
+    var pos = days.indexOf(reviewDay);
+    if (pos === -1) pos = days.length - 1;
+    var per = days.map(function (k) { return Advice.labels(byDay[k]); });
+    var lb = per[pos];
+    var dayRows = byDay[days[pos]];
+    var nameOf = function (k) {
+      return dayOf(byDay[k][0].at).toLocaleDateString(undefined,
+        { weekday: 'short', month: 'short', day: 'numeric' });
+    };
+    var dayName = nameOf(days[pos]);
     var clock = function (at) {
       return new Date(at).toLocaleTimeString(undefined,
         { hour: 'numeric', minute: '2-digit' });
     };
+    // Still unlabelled on every OTHER day of the window, so the line folded
+    // up says where the rest of the advice note's count is waiting.
+    var elsewhere = 0, daysElsewhere = 0;
+    per.forEach(function (p, i) {
+      if (i !== pos && p.open.length) { elsewhere += p.open.length; daysElsewhere++; }
+    });
+    var more = elsewhere
+      ? ' · <b>' + elsewhere + '</b> more on '
+        + (daysElsewhere === 1 ? 'another day' : daysElsewhere + ' other days')
+      : '';
+    // The day either side, named with how many it still has open, so the
+    // driver can see where the rest are without stepping through them. The
+    // end with no day beyond it is disabled, which the stylesheet keeps in
+    // place unseen.
+    el.reviewDays.hidden = days.length < 2;
+    [[el.reviewBack, pos - 1, '‹ ', ''], [el.reviewOn, pos + 1, '', ' ›']]
+      .forEach(function (s) {
+        var k = days[s[1]];
+        s[0].disabled = !k;
+        s[0].setAttribute('data-day', k || '');
+        s[0].textContent = k
+          ? s[2] + nameOf(k) + ' · ' + per[s[1]].open.length + ' unlabelled' + s[3]
+          : '';
+      });
     el.review.hidden = false;
     var asked = lb.took.length + lb.passed.length + lb.open.length;
     if (!asked) {
       el.reviewSays.innerHTML = 'Close the shift <em>· ' + dayName + '</em> — '
-        + 'the panel cleared nothing that day, so there is nothing to ask.';
+        + 'the panel cleared nothing that day, so there is nothing to ask' + more + '.';
       el.reviewLead.textContent = '';
       el.reviewList.innerHTML = '';
       return;
     }
     el.reviewSays.innerHTML = 'Close the shift <em>· ' + dayName + '</em> — <b>'
-      + lb.took.length + '</b> ticked, <b>' + lb.passed.length + '</b> passed, <b>'
-      + lb.open.length + '</b> still unlabelled';
-    // The rows the day header below counts, first card to last, so a review
-    // opened just after 4am can be seen to be the tail of a night.
+      + ticksIn(dayRows).length + '</b> ticked, <b>' + lb.passed.length + '</b> passed, <b>'
+      + lb.open.length + '</b> still unlabelled' + more;
+    // The rows the day header below counts, first card to last, so a day that
+    // is the tail of a night can be seen to be one.
     var span = dayRows.map(function (r) { return r.at; })
       .filter(function (t) { return typeof t === 'number' && isFinite(t); });
     // The boundary in words off the same constant dayOf uses, so the sentence
     // cannot name an hour the grouping does not.
-    var starts = dayOf(newest.at);
+    var starts = dayOf(dayRows[0].at);
     starts.setHours(DAY_STARTS_AT);
     el.reviewLead.innerHTML = 'The cards the panel said ACCEPT or CLOSE CALL to on '
       + dayName + ' (cards from ' + clock(Math.min.apply(null, span)) + ' to '
@@ -3469,20 +3563,31 @@
     var shown = lb.open.concat(lb.took.concat(lb.passed).filter(function (r) {
       return reviewedHere[r.id];
     })).sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+    // Each figure is one unbreakable piece (`&nbsp;` inside it), so the line
+    // can wrap between figures and never inside one. See `.review .ask .what`.
     el.reviewList.innerHTML = shown.map(function (r) {
       var when = clock(r.at);
       return '<div class="ask" data-id="' + esc(r.id) + '" data-accepted="' + saidOf(r)
         + '" data-card="' + esc(when + ', ' + money(r.pay, 2)) + '">'
-        + '<span class="what"><b>' + when + '</b>' + money(r.pay, 2) + ' · '
-        + (r.minutes === null || r.minutes === undefined ? '--' : Math.round(r.minutes))
-        + ' min' + (typeof r.miles === 'number' ? ' · ' + num(r.miles) + ' mi' : '')
-        + (r.pickup ? '<em>' + esc(r.pickup) + '</em>' : '') + '</span>'
+        + '<span class="what"><b>' + when + '</b><span class="figs">' + money(r.pay, 2)
+        + ' · ' + (r.minutes === null || r.minutes === undefined ? '--' : Math.round(r.minutes))
+        + '&nbsp;min' + (typeof r.miles === 'number' ? ' · ' + num(r.miles) + '&nbsp;mi' : '')
+        + '</span>' + (r.pickup ? '<em>' + esc(r.pickup) + '</em>' : '') + '</span>'
         + '<button type="button" data-review="took" aria-pressed="'
         + (r.accepted === true) + '">Took</button>'
         + '<button type="button" data-review="passed" aria-pressed="'
         + (r.accepted === false) + '">Passed</button></div>';
     }).join('');
   }
+
+  // A day either side. Drawn by showReview, which is all a step needs: the
+  // window is already loaded, and every day in it is already grouped.
+  el.reviewDays.addEventListener('click', function (e) {
+    var button = e.target.closest('button[data-day]');
+    if (!button) return;
+    reviewDay = button.getAttribute('data-day');
+    showReview();
+  });
 
   // "Today" has to mean today where the driver is. A trailing 24 hours folds
   // last night's shift into this morning's percentiles and puts its offers in
@@ -3548,7 +3653,7 @@
         showPairs([]);
         // ...and the questions about the last window's day, whose buttons
         // would post marks against rows this page can no longer show.
-        showReview(null);
+        showReview();
         el.blockScale.innerHTML = '';
         el.findNote.hidden = true;
         // The three figures the page exists for, which this did not clear.

@@ -662,14 +662,23 @@ finally:
 #     different answers and the page counts them apart.
 #   * `null` takes an answer back, newest-wins like the other two, and folds to
 #     no field: a ✓ mis-tapped and undone must not become a pass nobody made.
+#   * `false` with NO `via` is that same take-back. Every page before Passed
+#     existed wrote it for the ✓ pressed again, and a page loaded before an
+#     upgrade still does (live.html never reloads; sw.js serves the cached
+#     copy first). Read as a pass, it took the card out of the review's list
+#     and out of Advice.ifCleared's mix with nobody having passed on it.
 work = tempfile.mkdtemp()
 journal = os.path.join(work, 'journal.jsonl')
-write(journal, [offer(i, NOW - (10 - i) * 60000) for i in range(1, 9)] + [
+write(journal, [offer(i, NOW - (12 - i) * 60000) for i in range(1, 11)] + [
     # A pairing for off7, so the outcome the offers page's Second jobs section
     # reads off the same marks is asked too.
     {'v': 1, 'kind': 'pair', 'id': 'off7', 'at': NOW - 3 * 60000,
      'held': {'pay': 12.0, 'minutes': 30}, 'offer': {'pay': 17.0, 'minutes': 20},
-     'stack': None}])
+     'stack': None},
+    # ...and a tick taken back the way every journal before this branch holds
+    # one: `true`, then `false` a minute later, neither naming a surface.
+    {'v': 1, 'kind': 'mark', 'id': 'off10', 'at': NOW - 90000, 'accepted': True},
+    {'v': 1, 'kind': 'mark', 'id': 'off10', 'at': NOW - 30000, 'accepted': False}])
 proc, base = start({'SCANNER': '0'}, journal)
 
 
@@ -687,7 +696,8 @@ try:
     eq('a mark says where it was pressed, for each of the three places one can '
        'be (%r)' % _said, _said, {'panel': 200, 'offers': 200, 'review': 200})
     eq('...and the journal row carries it, as sent',
-       [(r.get('id'), r.get('via')) for r in lines(journal) if r.get('kind') == 'mark'],
+       [(r.get('id'), r.get('via')) for r in lines(journal)[_before:]
+        if r.get('kind') == 'mark'],
        [('off1', 'panel'), ('off2', 'offers'), ('off3', 'review')])
     # Anything else is refused, and refused BEFORE the append. Dropped quietly,
     # a page that misspelt its own name would go on writing marks with no
@@ -732,6 +742,19 @@ try:
     # ...and from a pass, which is the other thing it can be taking back.
     post(base, '/api/offers/mark', {'id': 'off5', 'accepted': None, 'via': 'review'})
     no_('...and so does a pass taken back', 'accepted' in _folded(5))
+
+    # The same take-back from a page older than Passed: `false`, no `via`.
+    # Sent through the door, as a panel or offers page still running the old
+    # code sends it after the server is upgraded...
+    post(base, '/api/offers/mark', {'id': 'off9', 'accepted': True})
+    post(base, '/api/offers/mark', {'id': 'off9', 'accepted': False})
+    _o9 = _folded(9)
+    no_('a ✓ taken back by a page older than Passed (false, no via) folds to no '
+        'field, not to a pass (%r)' % _o9.get('accepted', 'absent'), 'accepted' in _o9)
+    # ...and as it already sits in every journal written before this branch.
+    _o10 = _folded(10)
+    no_('...and one already in the journal file reads the same (%r)'
+        % _o10.get('accepted', 'absent'), 'accepted' in _o10)
     # The withdrawal is the newest word on the pairing too, or Second jobs
     # counts it among the ones "marked either way".
     post(base, '/api/offers/mark', {'id': 'off7', 'accepted': False, 'via': 'review'})

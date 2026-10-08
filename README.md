@@ -240,16 +240,20 @@ So the Pi scanner keeps one line per offer it was confident about, in
   touches it, so it cannot know — but you can tell it, and once you do the page
   shows what you actually worked against what you were offered, per day and
   overall.
-* **close the shift.** One line at the top of the list — *Close the shift · Sat,
-  Sep 19 — 12 ticked, 0 passed, 86 still unlabelled* — that opens into the
-  newest day's ACCEPT and CLOSE CALL cards nobody has answered for, newest
-  first, each with **Took** and **Passed**. A card you passed on and never
-  marked looks exactly like a job you took and never ticked, so the advice
-  further down has to allow for every mix of them; each card answered here is
-  one fewer. Press an answer again to take it back. The day is the list's own
-  day, starting at 4am, and the line inside says which cards it covers from
-  first to last — on a night that runs past 4am, the part after it is a day of
-  its own.
+* **close the shift.** One line at the top of the list — *Close the shift · Sun,
+  Sep 20 — 1 ticked, 0 passed, 6 still unlabelled · 185 more on 4 other days*
+  — that opens into the newest day's ACCEPT and CLOSE CALL cards nobody has
+  answered for, newest first, each with **Took** and **Passed**. A card you
+  passed on and never marked looks exactly like a job you took and never
+  ticked, so the advice further down has to allow for every mix of them; each
+  card answered here is one fewer. Press an answer again to take it back. The
+  day is the list's own day, starting at 4am, and a night that runs past 4am
+  is two of them: on that week Saturday ran to 4:43am, so the newest day is
+  its last 29 offers. Two buttons under the line step to the day before or
+  after, each naming that day and how many it still has unlabelled (*‹ Sat,
+  Sep 19 · 86 unlabelled*), and the section stays on the day you stepped to
+  while you answer. "Ticked" is the same count as the ✓ on that day's header
+  in the list, a PASS card you took included.
 * **hide the ones that were not offers.** The test card you present to check the
   rig still works is not a job you were given, and left in it drags every median
   toward whatever that card says. Hide one, or hide *every* reading of that card

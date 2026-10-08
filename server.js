@@ -1820,8 +1820,24 @@ function latestPerOfferUncached(rows) {
       if (r.id) {
         var m = marks[r.id] || (marks[r.id] = {});
         var when = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
-        if (r.accepted !== undefined && when >= (m.acceptedAt || 0)) {
-          m.accepted = r.accepted; m.acceptedAt = when;
+        // A `false` that names no surface is a TAKE-BACK, folded exactly as a
+        // `null` is — not a pass.
+        //
+        // No press before Passed existed meant "I passed on it": the `false`
+        // in every older mark is the ✓ pressed again, the panel's Took pressed
+        // again, or the offers page's Undo after a first ✓. And a page loaded
+        // before an upgrade goes on writing those after it, with no `via`:
+        // live.html never reloads itself and sw.js serves the cached copy
+        // first. Read as a pass, one such take-back took the card out of
+        // Close the shift's list and out of Advice.ifCleared's mix at once —
+        // measured against this server, an old-style ✓ and ✓-again folded to
+        // `accepted: false`, and labels then said passed 1, open 0. A pass
+        // is now only ever sent with `via` (Passed sends 'review'), so the
+        // missing field is exactly what tells the two apart. Newest-wins
+        // still applies: it is a withdrawal, and beats an older tick.
+        var said = r.accepted === false && r.via === undefined ? null : r.accepted;
+        if (said !== undefined && when >= (m.acceptedAt || 0)) {
+          m.accepted = said; m.acceptedAt = when;
         }
         if (r.hidden !== undefined && when >= (m.hiddenAt || 0)) {
           m.hidden = r.hidden; m.hiddenAt = when;
@@ -2731,7 +2747,10 @@ function handler(req, res) {
  * same population, and a row that cannot say which it is cannot be counted
  * apart from the other later.
  *
- * Collection only. Nothing folds `via` onto an offer and no figure reads it.
+ * Nothing folds `via` onto an offer and no figure reads which surface it
+ * names. The fold reads one thing about it, its ABSENCE: a `false` with no
+ * `via` was written by a page from before Passed existed, and is a take-back
+ * (see latestPerOfferUncached).
  *
  * A fixed set, and anything else is REFUSED before a byte is written, never
  * stored and never dropped. Stored, it would be the free-text field the
@@ -2791,7 +2810,9 @@ function route(req, res) {
       // and false and absent were read alike everywhere, so it did not matter.
       // It matters now: a ✓ mis-tapped onto the wrong row and undone at once
       // would have been filed as a pass the driver never made, and the review
-      // would have stopped asking about that card.
+      // would have stopped asking about that card. A page still running the
+      // old code sends that `false` with no `via`, and the fold reads it as
+      // the take-back it is.
       if (typeof body.accepted === 'boolean' || body.accepted === null) {
         note.accepted = body.accepted;
       }

@@ -658,11 +658,15 @@ AGREEING = strength(31, agreeing=True)
 #
 #   q3 ticked and q4 passed      answered already; counted, not asked
 #   q5 a PASS card               the panel cleared nothing
+#   q8 a PASS card, ticked       not asked either, and still a tick: the line's
+#                                "N ticked" is the day header's "✓ N", 2 here,
+#                                where the cleared cards alone carry 1
 #   q6 an ACCEPT card set aside  not a reading anything counts
 #   q7 no verdict on record      asked, and named as such
-#   p1 the day before            another shift
+#   p1 the day before            another day of the log, a step back
 #   qz stamped in 2096           not "the newest day": a clock that is wrong
-#                                must not choose which shift is being closed
+#                                must not choose which shift is being closed,
+#                                nor be a day the section can step to
 #
 # `__fold` makes the stub fold each mark into the feed as the server would, so
 # what the page shows after a press is what it would show for real.
@@ -678,6 +682,7 @@ REVIEW = [
     asked('q7', 70, pay=9.0, pickup='Old Row Diner'),
     asked('q6', 60, state='go', suspect=True),
     asked('q5', 50, state='no'),
+    asked('q8', 45, pay=13.0, state='no', accepted=True),
     asked('q4', 40, state='go', accepted=False),
     asked('q3', 30, state='go', accepted=True),
     asked('q2', 20, pay=11.0, state='warn', pickup='Waffle House, Cobb Pkwy'),
@@ -1383,6 +1388,7 @@ const TEXT = (sel) => {
           rows: [].slice.call(document.querySelectorAll('#reviewList .ask')).map((r) => ({
             id: r.getAttribute('data-id'),
             text: (r.querySelector('.what').textContent || '').replace(/\s+/g, ' ').trim(),
+            figs: r.querySelector('.figs') ? r.querySelector('.figs').textContent : '',
             took: r.querySelector('[data-review="took"]').getAttribute('aria-pressed'),
             passed: r.querySelector('[data-review="passed"]').getAttribute('aria-pressed'),
             h: Math.min(r.querySelector('[data-review="took"]').getBoundingClientRect().height,
@@ -1391,6 +1397,16 @@ const TEXT = (sel) => {
           marks: (window.__marks || []).slice(),
           undo: document.getElementById('undo').hidden ? ''
             : (document.getElementById('undoWhat').textContent || '').trim(),
+          // The day either side: what each button says, whether it can be
+          // pressed, and whether the pair is up at all.
+          steps: document.getElementById('reviewDays').hidden ? null
+            : ['reviewBack', 'reviewOn'].map((id) => {
+              const b = document.getElementById(id);
+              return { text: (b.textContent || '').trim(), off: b.disabled,
+                       h: b.getBoundingClientRect().height,
+                       w: b.getBoundingClientRect().width,
+                       seen: getComputedStyle(b).visibility !== 'hidden' };
+            }),
         };
       });
       const press = async (id, which) => {
@@ -1427,6 +1443,14 @@ const TEXT = (sel) => {
         .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })),
         [feed.offers.filter((o) => o.id === 'q7')[0].at,
          feed.offers.filter((o) => o.id === 'q1')[0].at]);
+      // ...and the names of p1's day and q1's, as the page's own locale writes
+      // a day that starts at 4am.
+      rv.names = await page.evaluate((ats) => ats.map((t) => {
+        const d = new Date(t);
+        d.setHours(d.getHours() - 4);
+        return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      }), [feed.offers.filter((o) => o.id === 'p1')[0].at,
+           feed.offers.filter((o) => o.id === 'q1')[0].at]);
       // Opened by the pointer on its one line, which is the only way in.
       const line = await page.evaluate(() => {
         const s = document.querySelector('#review > summary');
@@ -1451,6 +1475,30 @@ const TEXT = (sel) => {
       rv.switched = await look();
       await undo();
       rv.switchUndone = await look();
+      // A day back, by the pointer on the button that names it; a Passed
+      // there, whose reload must leave the section on the day stepped to;
+      // and forward again.
+      const step = async (id) => {
+        const at = await page.evaluate((i) => {
+          const b = document.getElementById(i);
+          b.scrollIntoView({ block: 'center' });
+          const r = b.getBoundingClientRect();
+          const x = r.left + r.width / 2, y = r.top + r.height / 2;
+          const hit = document.elementFromPoint(x, y);
+          return { x: x, y: y, onTop: !!(hit && hit.closest('#' + i)) };
+        }, id);
+        if (at.onTop) {
+          await page.mouse.click(at.x, at.y);
+          await page.waitForTimeout(300);
+        }
+        return at;
+      };
+      rv.backAt = await step('reviewBack');
+      rv.back = await look();
+      await press('p1', 'passed');
+      rv.backPassed = await look();
+      rv.onAt = await step('reviewOn');
+      rv.forward = await look();
       // ...and the log's own hide, on a row of the day before, which the
       // review never lists: one more surface, and its name on the note.
       await page.evaluate(() => { window.__marks = []; });
@@ -2233,8 +2281,35 @@ try:
     ok_('...folded to one line until pressed, so the log stays where it was',
         r0.get('open') is False)
     ok_('...and that line says how the asking stands (%r)' % r0.get('says'),
-        STANDS % (1, 1, 3) in (r0.get('says') or ''))
+        STANDS % (2, 1, 3) in (r0.get('says') or ''))
+    # "Ticked" is the day header's ✓, a PASS card the driver took included:
+    # two lines on one page about one day's ticks give one number.
+    _hdr = [d for d in (got.get('close the shift') or {}).get('days') or []
+            if (rv.get('names') or ['?', '?'])[1] in d]
+    _said = re.search(r'(\d+) ticked', r0.get('says') or '')
+    _tick = re.search('✓ (\\d+)', _hdr[0] if _hdr else '')
+    eq('...its "ticked" the day header\'s ✓ for the same day (%r)' % (_hdr[:1],),
+       [_said and _said.group(1), _tick and _tick.group(1)], ['2', '2'])
+    # The rest of the window's unanswered cards: p1, the day before. Said on
+    # the folded line, so a day that is the tail of a night cannot pass for
+    # all there is to ask.
+    ok_('...and how many more wait on other days in the window (%r)' % r0.get('says'),
+        '· 1 more on another day' in (r0.get('says') or ''))
     r1 = rv.get('opened') or {}
+    _p1day, _qday = rv.get('names') or ['?', '?']
+    eq('...with the day before a press away, named with how many it still has open',
+       [(s['text'], s['off']) for s in r1.get('steps') or []][:1],
+       [('‹ %s · 1 unlabelled' % _p1day, False)])
+    eq('...and no later day to step to from the newest, the 2096 row\'s included',
+       [(s['text'], s['off']) for s in r1.get('steps') or []][1:], [('', True)])
+    ok_('...the step a 52px target (%r)' % [s['h'] for s in r1.get('steps') or []],
+        r1.get('steps') and r1['steps'][0]['h'] >= 51.5)
+    # Kept in its place, unseen, so the step beside it does not widen into the
+    # space and move under a thumb pressing it again.
+    _ends = [(s['seen'], round(s['w'])) for s in r1.get('steps') or []]
+    ok_('...the end with no day beyond it holding its half of the row, unseen (%r)' % _ends,
+        len(_ends) == 2 and _ends[0][0] and not _ends[1][0]
+        and _ends[1][1] > 0 and abs(_ends[0][1] - _ends[1][1]) <= 1)
     ok_('...opens on a press of that line', r1.get('open'))
     ok_('...which is a 52px target (%r)' % rv.get('lineH'), (rv.get('lineH') or 0) >= 51.5)
     eq('it asks about the newest day\'s unanswered ACCEPT and CLOSE CALL cards, '
@@ -2244,6 +2319,12 @@ try:
     ok_('...each saying when, what it paid, how long, how far and where from (%r)'
         % _q1, all(s in _q1 for s in ((rv.get('clock') or ['?', '?'])[1], '$14.00',
                                        '25 min', '6.0 mi', 'Zaxbys, Canton Rd')))
+    # Each figure one unbreakable piece, so a narrow screen wraps the line
+    # between figures and never leaves "25" at the end of one line and "min"
+    # at the start of the next. (test_layout holds the figures to the box.)
+    _f1 = (r1.get('rows') or [{}])[0].get('figs') or ''
+    ok_('...each figure kept in one piece when the line wraps (%r)' % _f1,
+        '25 min' in _f1 and '6.0 mi' in _f1)
     eq('...with neither answer pressed on a card nobody answered for',
        [(r['took'], r['passed']) for r in r1.get('rows') or []], [('false', 'false')] * 3)
     ok_('...each answer 52px tall (%r)' % [r['h'] for r in r1.get('rows') or []],
@@ -2257,7 +2338,7 @@ try:
     r2 = rv.get('passed') or {}
     eq('Passed posts a pass for that card and says the review made it',
        r2.get('marks'), [{'id': 'q2', 'accepted': False, 'via': 'review'}])
-    ok_('...counted as passed (%r)' % r2.get('says'), STANDS % (1, 2, 2) in (r2.get('says') or ''))
+    ok_('...counted as passed (%r)' % r2.get('says'), STANDS % (2, 2, 2) in (r2.get('says') or ''))
     # Kept on the list with its answer showing. The next card moving into the
     # place just pressed is how a second press lands on the wrong job.
     eq('...and the card stays where it was, with Passed pressed',
@@ -2268,22 +2349,52 @@ try:
     r3 = rv.get('withdrawn') or {}
     eq('Passed pressed again takes the answer back, rather than repeating it',
        r3.get('marks'), [{'id': 'q2', 'accepted': None, 'via': 'review'}])
-    ok_('...back to unlabelled (%r)' % r3.get('says'), STANDS % (1, 1, 3) in (r3.get('says') or ''))
+    ok_('...back to unlabelled (%r)' % r3.get('says'), STANDS % (2, 1, 3) in (r3.get('says') or ''))
     r4 = rv.get('took') or {}
     eq('Took posts a tick for that card',
        r4.get('marks'), [{'id': 'q1', 'accepted': True, 'via': 'review'}])
-    ok_('...counted as ticked (%r)' % r4.get('says'), STANDS % (2, 1, 2) in (r4.get('says') or ''))
+    ok_('...counted as ticked (%r)' % r4.get('says'), STANDS % (3, 1, 2) in (r4.get('says') or ''))
     r5 = rv.get('undone') or {}
     eq('Undo after a first answer puts back no answer, not a pass',
        r5.get('marks'), [{'id': 'q1', 'accepted': None, 'via': 'review'}])
     ok_('...and the counts are what they were (%r)' % r5.get('says'),
-        STANDS % (1, 1, 3) in (r5.get('says') or ''))
+        STANDS % (2, 1, 3) in (r5.get('says') or ''))
     r6 = rv.get('switched') or {}
     eq('Took on a card marked Passed changes the answer',
        r6.get('marks'), [{'id': 'q2', 'accepted': True, 'via': 'review'}])
     r7 = rv.get('switchUndone') or {}
     eq('...and Undo puts the pass back exactly',
        r7.get('marks'), [{'id': 'q2', 'accepted': False, 'via': 'review'}])
+
+    # A day back. On the owner's week the newest day was the 29 offers after
+    # 4am, and the 86 cards of the night they ended could not be reached from
+    # any window; a step back is how they are.
+    ok_('the day before is pressed by the pointer where it is drawn',
+        (rv.get('backAt') or {}).get('onTop'))
+    rbk = rv.get('back') or {}
+    eq('a step back asks about that day\'s unanswered cards instead',
+       [r['id'] for r in rbk.get('rows') or []], ['p1'])
+    ok_('...its line naming that day and how the asking stands there, and what '
+        'is still open on the newest (%r)' % rbk.get('says'),
+        all(s in (rbk.get('says') or '') for s in (
+            _p1day, STANDS % (0, 0, 1), '· 2 more on another day')))
+    eq('...with no day before it, and the newest a press away',
+       [(s['text'], s['off']) for s in rbk.get('steps') or []],
+       [('', True), ('%s · 2 unlabelled ›' % _qday, False)])
+    # Every answer reloads the window. A section that went back to the newest
+    # day each time would put another day's card under the next press.
+    rp = rv.get('backPassed') or {}
+    eq('Passed there posts a pass for that card',
+       rp.get('marks'), [{'id': 'p1', 'accepted': False, 'via': 'review'}])
+    ok_('...and the reload leaves the section on the day stepped to (%r)' % rp.get('says'),
+        _p1day in (rp.get('says') or '') and STANDS % (0, 1, 0) in (rp.get('says') or '')
+        and [(r['id'], r['passed']) for r in rp.get('rows') or []] == [('p1', 'true')])
+    ok_('the newest day is pressed by the pointer where it is drawn',
+        (rv.get('onAt') or {}).get('onTop'))
+    rfw = rv.get('forward') or {}
+    ok_('...and a step forward comes back to it (%r)' % rfw.get('says'),
+        _qday in (rfw.get('says') or '')
+        and [r['id'] for r in rfw.get('rows') or []] == ['q1', 'q2', 'q7'])
     # ...and the log's hide, which is the offers page's own surface.
     ok_('the log\'s hide was pressed on the day before', rv.get('hideAt'))
     eq('...and says it was pressed on the offers page',

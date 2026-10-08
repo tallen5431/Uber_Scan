@@ -751,11 +751,19 @@
 
   /* When a driver's day starts, which is not when the calendar's does.
    *
-   * 4am is the conventional boundary for shift work and nobody is driving
-   * then, so no shift can straddle it. `journal.html` and `live.html` have
-   * each carried this number since long before this file did; they now read it
-   * from here so the three cannot come apart, and their own day helpers stay
-   * where they are because each does more than return a key.
+   * 4am is the conventional boundary for shift work. A shift CAN straddle
+   * it, though, and this comment used to say one could not: on the owner's
+   * week one of the four shifts did. Saturday ran 6:34pm to 4:43am, scanning
+   * straight through 4am with a 14-minute gap (3:53 to 4:07), so the 4am
+   * days hold it as 316 offers on Saturday and a 29-offer tail on Sunday.
+   * Every grouping by this number inherits that cut. journal.html's Close the
+   * shift prints the first and last card of the day it covers and steps to
+   * the day either side, so there the cut can be seen and crossed.
+   *
+   * `journal.html` and `live.html` have each carried this number since long
+   * before this file did; they now read it from here so the three cannot
+   * come apart, and their own day helpers stay where they are because each
+   * does more than return a key.
    */
   var DAY_STARTS_AT = 4;
 
@@ -1111,14 +1119,15 @@
                  id: o.id,
                  took: o.accepted === true,
                  // ...and the driver's word that they did NOT take it, which
-                 // is not the same as no word at all. `false` is now written
-                 // by one press only — Passed, in "Close the shift" on the
+                 // is not the same as no word at all. `false` reaches here
+                 // from one press only — Passed, in "Close the shift" on the
                  // offers page — and an offer nobody answered for carries no
                  // field. Before that press existed a ✓ taken back wrote
-                 // `false` too; on the owner's week that is one row, a PASS
-                 // card, which nothing below asks about. Read by ifCleared and
-                 // labels, and by nothing that works out when the driver was
-                 // busy: a pass occupies nobody.
+                 // `false` too, with no `via`, and server.js folds every one
+                 // of those to no field: on the owner's week that was one
+                 // row, a PASS card, and it now arrives unmarked. Read by
+                 // ifCleared and labels, and by nothing that works out when
+                 // the driver was busy: a pass occupies nobody.
                  passed: o.accepted === false,
                  // What the panel said about it, for one question only: how
                  // far the two figures that rest on the ticks could move if
@@ -1520,7 +1529,9 @@
    * end. Each one answered is a card fewer that could go either way — `added`
    * falls by one and the kept range can only narrow, since dropping a value
    * from `extra` removes mixes and adds none. On the owner's week this moves
-   * nothing yet: the one row carrying `false` is a PASS card. */
+   * nothing yet: no row there reaches this carrying `false` (the one in the
+   * file is a ✓ taken back on a PASS card, which the fold reads as no
+   * answer). */
   function ifCleared(rows, breakMinutes) {
     var added = 0, unjudged = 0, extra = [];
     var alt = (rows || []).map(function (r) {

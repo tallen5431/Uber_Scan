@@ -551,34 +551,58 @@ off `live.html`, which is read at a glance.
 
 **Close the shift** is the same idea turned round: instead of the driver finding
 the rows they took, the page asks about the rows nobody has answered for. One
-line at the top of the offers list — *Close the shift · Sat, Sep 19 — 12 ticked,
-0 passed, 86 still unlabelled* on the owner's Saturday — opens into that day's
-ACCEPT and CLOSE CALL cards with no mark, newest first, each with **Took** and
-**Passed**, posting `{id, accepted: true | false, via: "review"}`. Passed is the
-one press that writes `false`, and `Advice.ifCleared` reads it as a known pass:
-the card leaves the pile the line kept is ranged over, so each answer narrows
-the range and none can widen it. Pressing an answer again takes it back
-(`null`), and Undo restores exactly what was there — for a card nobody had
-answered for, no answer, not a pass.
+line at the top of the offers list — on the owner's week, *Close the shift ·
+Sun, Sep 20 — 1 ticked, 0 passed, 6 still unlabelled · 185 more on 4 other
+days* — opens into that day's ACCEPT and CLOSE CALL cards with no mark, newest
+first, each with **Took** and **Passed**, posting `{id, accepted: true | false,
+via: "review"}`. Passed is the one press that writes `false`, and
+`Advice.ifCleared` reads it as a known pass: the card leaves the pile the line
+kept is ranged over, so each answer narrows the range and none can widen it.
+Pressing an answer again takes it back (`null`), and Undo restores exactly what
+was there — for a card nobody had answered for, no answer, not a pass.
 
 - **The shift is the offers list's own day**, `dayOf` on
   `Advice.DAY_STARTS_AT`, read out of the same grouping the day headers are
-  drawn from, of the newest row not stamped in the future. `Advice.runs` was
-  the other candidate and breaks at every half-hour silence — the owner's
-  Saturday is three runs. The 4am line is not perfect either: that night ran
-  6:34pm to 4:43am, so the 29 offers after 4am are a day of their own, and the
-  line inside the section prints the first and last card it covers so that is
-  visible.
+  drawn from. `Advice.runs` was the other candidate and breaks at every
+  half-hour silence — the owner's Saturday is three runs.
+- **It opens on the newest day and steps to any other in the window.** The
+  4am line is where a newest-day-only review failed: Saturday ran 6:34pm to
+  4:43am, scanning straight through 4am (a 14-minute gap, 3:53 to 4:07), so
+  the newest day of that week is the 29 offers after 4am, and Saturday's 86
+  unanswered cards — 45% of the 191 — could not be asked about from any
+  window. So the folded line says how many more wait on other days, and two
+  buttons under it name the day before and after with their own counts (*‹
+  Sat, Sep 19 · 86 unlabelled*). The day stepped to is kept across the reload
+  every answer causes. The newest day is the day of the newest row not stamped
+  in the future, and it is also the latest day a step can reach, so a row from
+  a wrong clock is never a shift to close. The line inside still prints the
+  first and last card of the day it covers, so a tail shows as one.
 - **Which cards is `Advice.labels`**, built on the same rule `ifCleared` mixes
-  in (`clearedByPanel`), so on a one-day window "still unlabelled" and the
-  advice note's count of unanswered cards are the same number.
+  in (`clearedByPanel`), so "still unlabelled" summed over the window's days is
+  the advice note's count of unanswered cards: 6 + 185 = 191 on the week.
+  **"Ticked" is the day header's ✓**, through one function (`ticksIn`): it
+  counted only the ticks on cleared cards and so said 5 where the header said
+  ✓ 7 on Sun 13 Sep, the two PASS cards the driver took that day being the
+  difference.
 - **A card answered stays on the list** with its answer pressed until the page
   is left. The next card sliding into the place just pressed is how a second
   press lands on the wrong job.
-- **`via` is collection only**: one of `panel`, `offers`, `review`, refused
+- **The figures on a row wrap, and are never cut.** Each row's pay, minutes and
+  miles run on one line that breaks between figures, not inside one; the place
+  under them is the part that may end in an ellipsis. Under one ellipsis for the
+  whole row, all six rows of the week's newest day lost their distance at
+  360px, and four of the six showed "49." for 49.3 mi at 390px.
+- **`via` names the surface**: one of `panel`, `offers`, `review`, refused
   with a 400 otherwise, absent on every mark written before it. Nothing folds
-  it onto an offer and no figure reads it; it is there so the panel's ticks and
-  the review's answers — two different samples — can be counted apart later.
+  it onto an offer and no figure reads which surface it names; it is there so
+  the panel's ticks and the review's answers — two different samples — can be
+  counted apart later. The fold reads one thing about it, its absence: a
+  `false` with no `via` was written by a page from before Passed existed — the
+  ✓ pressed again, the panel's Took pressed again, the offers page's Undo — and
+  is folded as the take-back it was, not as a pass. A page loaded before an
+  upgrade keeps writing those (live.html never reloads itself, and `sw.js`
+  serves the cached copy first); read as passes, one such take-back took the
+  card out of the review's list and out of `ifCleared`'s mix at once.
 
 ### Collecting the evidence for a tick the rig could make itself
 
@@ -5141,7 +5165,9 @@ withheld when that is far enough to reverse it. A row with no verdict on record
 panel did not clear it. A card the driver marked **Passed** under Close the
 shift does not: that is the one thing about an unticked row the record could
 not say before, and it is a fact. On the owner's week nothing moves yet — the
-one row carrying `false` is an old ✓ taken back on a PASS card.
+one mark in the file carrying `false` is an old ✓ taken back on a PASS card,
+and the server reads every `false` that names no surface (`via`) as exactly
+that, a take-back, so it reaches the page as no answer at all.
 `rpi/test_offerspage.py` asserts the strength at 0, 31 and 222 ticks of one
 market, not merely that a paragraph renders.
 
