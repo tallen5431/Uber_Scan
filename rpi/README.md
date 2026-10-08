@@ -2316,7 +2316,8 @@ job — the trip planner's restaurants and dropoffs — sit outside where the ca
 land. One tight box round the cards was the only way to keep the reader off the
 map, and it made ⌖ blind to all of that. A read of the whole screen box answers
 the press and nothing else: it is the card plus whatever surrounds it, so it is
-never merged into the offer, never priced, and never written as an offer row.
+never merged into the offer, never priced, never written as an offer row, and
+never one of the two agreeing reads a verdict waits for.
 With no box drawn the same holds for the screen the rig found itself: offers
 are read in the crop it places, and ⌖ reads all of the screen.
 

@@ -1117,6 +1117,65 @@ eq('a rig nobody pressed says nothing about a dropoff',
    [d for d in r6['dropoffs'] if d[1].get('asked')], [])
 eq('...and reads only the card box', [w for w in r6['wholes'] if w], [])
 
+# ...and a reading of the whole screen box is not one of the two card reads a
+# verdict waits for, in either direction. Scanner.settle ran the agreement
+# counter over every read, whole or not, so the reading kept out of the offer
+# was still deciding whether the offer was confirmed. One read at a time, where
+# every run shows it; paired reads confirm each other and show it only when the
+# partner frame loses its payout, and then it is the same thing.
+#
+# Pressed during the third card read, after the card has locked on the second.
+# The first card verdict after the press is the one at the index of the first
+# whole read, because reads are one at a time and a whole read emits nothing.
+def _press_on_card_read(handoff, press_on, text_for):
+    seen = [0]
+
+    def texts(n, k):
+        if k == 0:
+            seen[0] += 1
+            if seen[0] == press_on:
+                open(os.path.join(handoff, 'uberscan-dropoff'), 'w').close()
+        return text_for(seen[0])
+    return texts, seen
+
+
+def _after_press(r):
+    at = r['wholes'].index(True) if True in r['wholes'] else None
+    return at, [v[0][3] for v in r['verdicts']]
+
+
+# A navigation screen read whole, then the same card again. Before, the screen
+# reset the counter and the card's next read came back unlocked, which the
+# panel draws as a "?" on a verdict it had already settled.
+_hw1 = tempfile.mkdtemp()
+_texts, _seen = _press_on_card_read(_hw1, 3, lambda c: WHOLE)
+rw1 = run(_texts, extra_argv=['--no-parallel'], seconds=40.0, handoff=_hw1,
+          dropoff_window=1.0, whole_text=NAV_ADDR,
+          until=lambda rows, ann, calls: _seen[0] >= 5)
+_at, _locks = _after_press(rw1)
+ok_('a ⌖ press after the card locked was read whole (%r, %r)'
+    % (rw1['wholes'], _locks), _at is not None and _at < len(_locks) and _locks[_at - 1])
+if _at is not None and _at < len(_locks):
+    eq('...and the whole-screen read does not unlock the card it was pressed over',
+       _locks[_at], True)
+
+# A card that arrives while the press is open, read whole under a map that adds
+# nothing the parser keeps — so the whole-screen reading says exactly what the
+# card's first read will. Before, that confirmed it: the card landed in the
+# journal and settled on the panel off ONE read of the card box.
+_hw2 = tempfile.mkdtemp()
+_texts, _seen = _press_on_card_read(_hw2, 3, lambda c: SECOND if c <= 3 else WHOLE)
+rw2 = run(_texts, extra_argv=['--no-parallel'], seconds=40.0, handoff=_hw2,
+          dropoff_window=1.0, whole_text=WHOLE + '\nKennesaw State Univ\nChastain Rd',
+          until=lambda rows, ann, calls: _seen[0] >= 6)
+_at, _locks = _after_press(rw2)
+ok_('a card that arrived during a ⌖ press was read whole first (%r, %r)'
+    % (rw2['wholes'], _locks), _at is not None and _at + 1 < len(_locks))
+if _at is not None and _at + 1 < len(_locks):
+    eq('...and the whole-screen read does not confirm its first card read',
+       _locks[_at], False)
+    eq('...which its own second read does', _locks[_at + 1], True)
+
 # --- what the phone showed after a card landed ------------------------------
 #
 # The rig cannot see the Accept press and must never make it, so the only

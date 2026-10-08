@@ -1635,8 +1635,23 @@ class Scanner:
         In frame order, on one thread, because "two reads said the same thing"
         has to mean the same thing every run.
         """
+        whole = geom is not None and geom.whole
         for out in outs:
-            self._consider(out['parsed'])
+            # ...and "two reads" means two reads of the CARD. A ⌖ press reads
+            # the card plus the map or planner round it (Geometry.whole), which
+            # scan_pi keeps out of the offer, the verdict and the journal — and
+            # this counter is what the verdict and the journal are gated on, so
+            # a reading kept out of both was still deciding them. Measured
+            # through main(), one read at a time (rpi/test_loop.py): a
+            # navigation screen read whole reset a card already confirmed, so
+            # the next read of that same card came back unlocked and the panel
+            # put the "?" back on its verdict; and a card that arrived while the
+            # press was open was confirmed by the reading of it under the map,
+            # and landed in the journal off ONE read of the card box. Paired
+            # reads confirm each other and hide both, until the partner frame
+            # loses its payout — then it is the same thing.
+            if not whole:
+                self._consider(out['parsed'])
             # After, not during: _look runs before the agreement counter is
             # updated, so the copy it took is the state as of the *previous*
             # read. Reporting that would have said "not locked yet" on the very

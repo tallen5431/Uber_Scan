@@ -771,6 +771,29 @@ one._agree = 1
 out = one.read(blank, now=3.0)
 eq('the reported lock is current', out['locked'], one.locked)
 
+# A ⌖ press reads the whole screen box — the card AND the map or planner round
+# it — and that reading is kept out of the offer, the verdict and the journal.
+# It must be kept out of the agreement counter too, which is what the verdict
+# and the journal are gated on: it is not one of the two card reads, in either
+# direction.
+CARD_1605 = {'complete': True, 'pay': 16.05, 'minutes': 23.0, 'miles': 8.4}
+NAV_SCREEN = {'complete': False, 'pay': None, 'minutes': 12.0, 'miles': None}
+
+
+def reading(parsed):
+    return {'parsed': dict(parsed), 'dropped': 0, 'recovered': 0}
+
+
+ahead = PL.Scanner(quad=None, card_height=200, ocr_height=0)
+ahead.settle([reading(CARD_1605)], ahead.geometry(whole=True))
+eq('a whole-screen read does not confirm the card read after it',
+   ahead.settle([reading(CARD_1605)], ahead.geometry())[0]['locked'], False)
+kept = PL.Scanner(quad=None, card_height=200, ocr_height=0)
+kept.settle([reading(CARD_1605), reading(CARD_1605)], kept.geometry())
+kept.settle([reading(NAV_SCREEN)], kept.geometry(whole=True))
+eq('...nor unlock a card that was confirmed',
+   kept.settle([reading(CARD_1605)], kept.geometry())[0]['locked'], True)
+
 # --- a read taken beside the loop, against frozen corners -------------------
 # The read now runs on a thread while the loop that holds the camera keeps
 # going, and that loop moves the corners. So a read is a pure function of the
