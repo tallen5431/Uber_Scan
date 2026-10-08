@@ -533,7 +533,12 @@ DECIMAL_GUESS = WHOLE.replace('(7.3 mi) trip', '(73 mi) trip')
 # The reader's crop, which the stub otherwise leaves out: a grey card-sized
 # picture is all save_scan needs to have something to write.
 _crop = TC.blank()[:400, :300].copy()
-r12 = run(lambda n, k: DECIMAL_GUESS, seconds=4.0, fitted=_crop)
+# Until a doubtful row has landed, not for a fixed four seconds: under the full
+# runner's load four seconds was not always enough for one row, and every
+# check below then failed for want of a card rather than for the code.
+r12 = run(lambda n, k: DECIMAL_GUESS, seconds=30.0, fitted=_crop,
+          until=lambda rows, ann, calls: any(not r.get('kind') and SP.doubted(r)
+                                             for r in rows))
 _dd = os.path.join(os.path.dirname(r12['config']), 'scans', SP.DOUBT_DIR)
 _kept = sorted(os.listdir(_dd)) if os.path.isdir(_dd) else []
 _doubted = sorted(set(row['id'] for row in r12['rows']
@@ -543,7 +548,9 @@ ok_('a card the reader corrected the miles on keeps its picture, with no flag as
     % _kept, len(_kept) >= 1)
 eq('...one picture per doubtful offer, however many times it was read',
    len(_kept), len(_doubted))
-r13 = run(lambda n, k: WHOLE, seconds=4.0, fitted=_crop)
+r13 = run(lambda n, k: WHOLE, seconds=30.0, fitted=_crop,
+          until=lambda rows, ann, calls: len([r for r in rows if not r.get('kind')]) >= 2)
+ok_('the clean card really did land rows', len([r for r in r13['rows'] if not r.get('kind')]) >= 2)
 _dd13 = os.path.join(os.path.dirname(r13['config']), 'scans', SP.DOUBT_DIR)
 eq('a card read cleanly keeps no picture',
    sorted(os.listdir(_dd13)) if os.path.isdir(_dd13) else [], [])

@@ -7242,7 +7242,7 @@ node tests/mapview.test.js      # 232 on the deciding behind both maps, with
                                 #     cases — two walks in a row, a cache hit
                                 #     mid-walk, a hotspot that drops — cost
                                 #     milliseconds instead of seconds
-python3 rpi/test_loop.py        # 103 on the scan loop re-telling a card once
+python3 rpi/test_loop.py        # 104 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
