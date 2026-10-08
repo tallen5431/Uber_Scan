@@ -51,6 +51,7 @@ Three things this deliberately does not do:
 
 import json
 import os
+import re
 import sys
 import time
 
@@ -151,12 +152,34 @@ SCREEN_WINDOW_MS = 180 * 1000
 # for a few minutes of driving is a row per read in a file that is only ever
 # appended to.
 #
-# Five minutes, against the week's own prompts: the two that offered the same
-# bonus closest together were 10.8 minutes apart (rows 74 and 100), the next
-# closest 20.7 (rows 71 and 74). A window under 10.8 minutes keeps all five as
-# five rows; this one is half of that. A prompt still up past it is written
-# again, once per window, which is the bound.
+# Five minutes, against the week's own prompts. The two closest that offered
+# the same bonus were 10.8 minutes apart (rows 74 and 100, both Hiram, both
+# $1.00/order) and were two prompts, not one: the first ran until 5:29 PM and
+# the second until 7:29 PM, so they are told apart by PROMO_ENDS below and the
+# window never has to. The closest pair that were the same prompt — same bonus,
+# same end — were 20.7 minutes apart (rows 71 and 74). A window under 10.8
+# minutes would have kept all five as five rows even keyed on the bonus alone;
+# this one is under half of that. A prompt still up past it is written again,
+# once per window, which is the bound.
 PROMO_WINDOW_MS = 5 * 60 * 1000
+
+# When the zone's bonus runs out, as the prompt prints it straight after the
+# bonus: "+$1.00/order until 8:20 PM". Part of what makes two prompts the same
+# prompt. See note_promo.
+#
+# The bonus alone does not say it. Rows 74 and 100 on the owner's week are the
+# same zone (Hiram) offering the same +$1.00/order, 10.8 minutes apart, and they
+# are two prompts: one until 5:29 PM, the next until 7:29 PM. Keyed on the bonus
+# alone, two such prompts inside the window would have been one row with nothing
+# saying the second was ever asked. The end time read the same on every one of
+# the 29 frames of the five prompts on file — `5:29 PM`, `5:29 PM`, `7:29 PM`,
+# `8:20 PM`, `3:10 AM` — so it splits no prompt that the bonus kept whole.
+#
+# Only the printed grammar, digits and AM/PM. A frame whose end time does not
+# read has the bonus alone for its key, and is written as a prompt of its own;
+# that is a row too many, in a kind nothing reads, rather than a prompt lost.
+PROMO_ENDS = re.compile(r'\s*until\s*\d{1,2}\s*:\s*\d{2}\s*[ap]\s*m\b',
+                        re.IGNORECASE | re.ASCII)
 
 # How much of the tail to read at a time when walking backwards for the last
 # offer. Big enough that the ordinary case — an offer within a few rows of the
@@ -626,9 +649,10 @@ class OfferLog:
         # when a screen has been written against it, and every path that reads
         # it has to look at the same value.
         self.screen_wanted = None
-        # The last zone prompt written, as `(its bonus, when)`, or None. See
-        # note_promo. Like `screen_wanted`, deliberately not restored by
-        # resume(): a scanner that comes back mid-prompt writes it once more.
+        # The last zone prompt written, as `(its bonus and when that runs out,
+        # when it was written)`, or None. See note_promo. Like `screen_wanted`,
+        # deliberately not restored by resume(): a scanner that comes back
+        # mid-prompt writes it once more.
         self.promo_said = None
 
     def resume(self, now=None):
@@ -1042,39 +1066,62 @@ class OfferLog:
         """The app's zone prompt was in front of the camera. Returns the row,
         or None.
 
-        Records only, and never an offer. The prompt — "Switch to this zone
+        A record, and never an offer. The prompt — "Switch to this zone
         with peak pay! +$1.00/order ... Don't switch" — has no payout once
         find_pay refuses its bonus (see OP.PAY_IS_PER_ORDER), so the loop writes
         no offer for it. Five of them were offers on the owner's week; this is
         where they go instead, so the driver's record still says the app asked
         and when, rather than the prompt disappearing with nothing saying so.
 
-        And it keeps them out of note_screen, which collects whatever the phone
-        shows after a card for the accept detector to be measured on. The
-        prompt is a screen the reader can already name, and filed there it
-        would take the one slot a card is allowed and refuse the screen after
-        it.
+        And it ENDS the window of the card before it, which is the one thing
+        here that is not just a record. note_screen files the next payout-free
+        frame against the last card that landed, for the accept detector to be
+        measured on; saw_card drops that slate when a different payout is read,
+        because whatever the phone shows after a second card is not the first
+        card's screen. The prompt is the same case without a payout. Before the
+        bonus was refused it WAS a payout, $1, and saw_card dropped the slate on
+        it; refused, it would have left the slate armed, and a navigation
+        screen read inside three minutes of the card would have been written
+        `after: <that card>`, with the app's own prompt read in between. On
+        the week that card was never the one taken: all five cards read just
+        before the five prompts went unticked, 10.6 to 818.5 seconds before
+        them, and three were inside SCREEN_WINDOW_MS. So the slate goes, as for any other
+        screen that is not the card's: a missing row rather than a wrong one.
+        It goes on every read of a prompt, written or not — a prompt that the
+        window keeps out of the file is still on the phone.
 
-        Not written again while the last prompt written offered the same bonus
-        and is less than PROMO_WINDOW_MS old. The LAST one, not every one: the
-        app shows one prompt at a time. Keyed on the bonus as the parser reads
-        it — `$1.00/order` — and not on the whole frame. Row 71's one prompt was
-        kept as six different texts, its zone line reading "9A", ">A", "SA" and
-        "3A" over a map that read differently every time, so a key on the frame
-        would have written it six times at the least; the bonus reads the same
-        on every kept frame of all five prompts. Two prompts offering the same
-        bonus inside the window are one row; the week's closest pair was 10.8
-        minutes apart.
+        The prompt is not itself filed as the card's screen. It is written
+        here, once, with `at`, so a card and the prompt after it can be paired
+        by time by whoever builds the detector; writing it under both kinds
+        would be the one prompt in two places, and whether it landed in one or
+        the other would depend on whether a card had happened to land first.
+
+        Not written again while the last prompt written offered the same bonus,
+        ending at the same time, and is less than PROMO_WINDOW_MS old. The LAST
+        one, not every one: the app shows one prompt at a time, so a prompt
+        that comes back after another is asked again. Keyed on the bonus as the
+        parser reads it — `$1.00/order` — and when it runs out (PROMO_ENDS),
+        and not on the whole frame. Row 71's one prompt was kept as six
+        different texts, its zone line reading "9A", ">A", "SA" and "3A" over a
+        map that read differently every time, so a key on the frame would have
+        written it six times at the least; the bonus and its end read the same
+        on every kept frame of all five prompts.
         """
         text = text if isinstance(text, str) else ''
-        bonus = OP.PAY_IS_PER_ORDER.search(OP.normalize(text))
+        flat = OP.normalize(text)
+        bonus = OP.PAY_IS_PER_ORDER.search(flat)
         # Not a prompt, whatever the caller thought. One rule for what the
         # prompt is, and it is the parser's.
         if bonus is None:
             return None
-        bonus = ''.join(bonus.group(0).split()).lower()
+        # Before the window and before the append: the prompt on the phone is
+        # what ends the card's window, not whether this row of it was written.
+        self.screen_wanted = None
+        ends = PROMO_ENDS.match(flat, bonus.end())
+        key = ''.join((flat[bonus.start():ends.end()] if ends
+                       else bonus.group(0)).split()).lower()
         at = now_ms(now)
-        if (self.promo_said is not None and self.promo_said[0] == bonus
+        if (self.promo_said is not None and self.promo_said[0] == key
                 and at - self.promo_said[1] < PROMO_WINDOW_MS):
             return None
         row = {
@@ -1093,7 +1140,7 @@ class OfferLog:
         }
         if not self.journal.append(row):
             return None
-        self.promo_said = (bonus, at)
+        self.promo_said = (key, at)
         return row
 
 

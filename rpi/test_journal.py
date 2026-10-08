@@ -1581,8 +1581,9 @@ ok_('a different bonus inside the window is a different prompt',
 ok_('...and the prompt after that is compared with it, not with the one before',
     _pr_log.note_promo(_PROMO_AGAIN, now=1_700_000_320.0) is not None)
 # Against a real number of minutes as well as the constant: the week's two
-# closest prompts with the same bonus were 10.8 minutes apart, and a window
-# past that would fold two of the five into one row.
+# closest prompts with the same bonus were 10.8 minutes apart (rows 74 and 100,
+# told apart by their end times below), and its two closest that were the same
+# prompt, bonus and end, 20.7 (rows 71 and 74). Five minutes keeps all five.
 eq('the window is five minutes', JR.PROMO_WINDOW_MS, 5 * 60 * 1000)
 eq('...so the file holds four prompt rows and still no offer',
    [r.get('kind') for r in _pr_log.journal.rows()], ['promo'] * 4)
@@ -1621,6 +1622,87 @@ ok_('a prompt that read the whole phone is recorded', _pr_long is not None)
 if _pr_long:
     eq('...its text capped at the same length a reading is',
        len(_pr_long['text']), JR.TEXT_KEPT)
+
+# Two prompts are the same prompt when the bonus AND when it runs out match.
+# Rows 74 and 100 on the week, verbatim: both Hiram, both +$1.00/order, 10.8
+# minutes apart, the first until 5:29 PM and the second until 7:29 PM. Keyed
+# on the bonus alone, the second inside the window would have been no row at
+# all, with nothing saying the app had asked again.
+_PROMO_74 = ('on\n: Lo E\ni ca\n9A: Hiram\ngi Switch to this zone\n'
+             'with peak pay!\n+$1.00/order until 5:29 PM\nAvg. offer wait\n'
+             '3 min\ni Don\'t switch\n~\nwn O ek')
+_PROMO_100 = ('-\na. = ©\n~f 3 >.\nGA: Hiram\nSwitch to this zone\n'
+              'with peak pay!\n+$1.00/order until 7:29 PM\nAvg. offer wait\n'
+              '3 min\n‘ Don\'t switch\nm oO Ge xk')
+_pk_log = JR.OfferLog(JR.Journal(os.path.join(_pr_dir, 'ends.jsonl')))
+ok_('row 74\'s prompt is recorded',
+    _pk_log.note_promo(_PROMO_74, now=1_700_020_000.0) is not None)
+ok_('...and row 100\'s, the same zone and bonus running to a later time, is a '
+    'different prompt even inside the window',
+    _pk_log.note_promo(_PROMO_100, now=1_700_020_060.0) is not None)
+# A frame whose end did not read has the bonus alone for its key: a row too
+# many, in a kind nothing reads, rather than a prompt folded into another.
+ok_('a prompt whose end did not read is written as one of its own',
+    _pk_log.note_promo(_PROMO_100.replace(' until 7:29 PM', ''),
+                       now=1_700_020_070.0) is not None)
+eq('...so the file holds three prompt rows',
+   [r.get('kind') for r in _pk_log.journal.rows()], ['promo'] * 3)
+
+# --- the zone prompt ends the window of the card before it ------------------
+#
+# The slate a landed card arms files the next payout-free frame as the screen
+# after that card. While the prompt's bonus read as a $1 payout, saw_card
+# dropped the slate on it; refused, the prompt left the slate armed, and the
+# navigation screen read after it was written `after:` the card before the
+# prompt. On the week that card was never the one taken: all five cards read
+# just before the five prompts went unticked, three of them inside
+# SCREEN_WINDOW_MS. rpi/test_loop.py reproduces it through main(); these are
+# the same rule at the log, every way it can go.
+_ps_log = JR.OfferLog(JR.Journal(os.path.join(_pr_dir, 'slate.jsonl')))
+
+
+def _ps_land(text, t):
+    p = OfferAccumulator().add(P.parse(text), now=t)
+    return _ps_log.consider(p, P.rate(p, MONEY), now=t, locked=True,
+                            settled=False)
+
+
+_ps_a = _ps_land(_CARD, 1_700_030_000.0)
+ok_('card A lands and is owed a screen',
+    _ps_a is not None and _ps_log.screen_wanted is not None)
+eq('a text that is not a prompt leaves the slate alone',
+   (_ps_log.note_promo(_nav, now=1_700_030_005.0),
+    _ps_log.screen_wanted is not None), (None, True))
+ok_('the zone prompt after card A is recorded',
+    _ps_log.note_promo(_PROMO, now=1_700_030_010.0) is not None)
+eq('...and ends the window of the card before it', _ps_log.screen_wanted, None)
+eq('a navigation screen after the zone prompt is not filed against the card '
+   'before it', _ps_log.note_screen(_nav, now=1_700_030_090.0), None)
+# The prompt on the phone is what ends the window, not the row: a prompt the
+# window keeps out of the file is still in front of the camera.
+_ps_b = _ps_land(_CARD.replace('$8.83', '$9.25'), 1_700_030_100.0)
+ok_('card B lands and is owed a screen',
+    _ps_b is not None and _ps_log.screen_wanted is not None)
+eq('the same prompt again inside the window is not written',
+   _ps_log.note_promo(_PROMO_AGAIN, now=1_700_030_120.0), None)
+eq('...but still ends the window of the card before it',
+   _ps_log.screen_wanted, None)
+eq('...so the screen after it is not filed against card B either',
+   _ps_log.note_screen(_nav, now=1_700_030_130.0), None)
+# ...and neither is it the row reaching the file.
+_ps_c = _ps_land(_CARD.replace('$8.83', '$11.40'), 1_700_031_000.0)
+ok_('card C lands and is owed a screen',
+    _ps_c is not None and _ps_log.screen_wanted is not None)
+_ps_log.journal.append = lambda row: False
+eq('a prompt that could not be appended after card C',
+   _ps_log.note_promo(_PROMO, now=1_700_031_010.0), None)
+eq('...still ends the window of the card before it',
+   _ps_log.screen_wanted, None)
+del _ps_log.journal.append
+eq('so the file holds three cards, one prompt and no screen',
+   sorted(r.get('kind') or 'offer' for r in _ps_log.journal.rows()
+          if r.get('kind') or r.get('seq') == 1),
+   ['offer', 'offer', 'offer', 'promo'])
 
 shutil.rmtree(_pr_dir, ignore_errors=True)
 

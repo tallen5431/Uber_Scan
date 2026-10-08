@@ -1043,11 +1043,11 @@ if rp1['rows']:
     ok_('...the prompt as it was read, line breaks and all',
         rp1['rows'][0].get('text') == PROMPT)
 
-# ...and after a card, it is not the screen that followed the card. The slate a
-# landed card arms takes ONE clean screen, and a prompt filed there would turn
-# the navigation screen after it away. The card is read six times before the
-# prompt, two more than the navigation-screen run above needs, because a run on
-# a loaded machine that has not landed the card by then tests nothing here.
+# ...and after a card, it is not the screen that followed the card. It is one
+# prompt in one place, a `promo` row with its own stamp, whether or not a card
+# happened to land before it. The card is read six times before the prompt, two
+# more than the navigation-screen run above needs, because a run on a loaded
+# machine that has not landed the card by then tests nothing here.
 rp2 = run(lambda n, k: WHOLE if n <= 6 else PROMPT,
           extra_argv=['--no-parallel'], seconds=30.0,
           until=lambda rows, ann, calls: any(
@@ -1061,6 +1061,49 @@ eq('...it is recorded as a prompt',
 eq('...and no offer row carries its bonus as a payout',
    [x.get('pay') for x in rp2['rows'] if not x.get('kind')
     and x.get('pay') != 16.05], [])
+
+# ...and the prompt ENDS the card's window, so the screen after the prompt is
+# not filed against the card before it. While the bonus read as a $1 payout,
+# saw_card dropped the slate on it; refused, it left the slate armed, and this
+# run wrote the navigation screen `after:` the card — a card the driver did not
+# take, with the app's own prompt in between. All five cards read just before
+# the week's five prompts went unticked.
+#
+# The picture in the mount is changed under the prompt's read. Without that
+# the still picture is never read again once a frame comes back payout-free
+# (see the once-per-card note above), and a run that never reads the screen
+# after the prompt cannot fail the check that is about it.
+_rp3 = {'cam': [], 'nav_at': None}
+
+
+def _rp3_texts(n, k):
+    if n <= 6:
+        return WHOLE
+    if n == 7:
+        if _rp3['cam'] and k == 0:
+            _rp3['cam'][0].offer = _rp3['cam'][0].empty
+        return PROMPT
+    if _rp3['nav_at'] is None:
+        _rp3['nav_at'] = time.time()
+    return NAV
+
+
+# Halted at the screen row if one is written, or three seconds after the
+# screen was first read. With the slate left armed, the wrong row landed 21ms
+# after that read, so one that has not landed in three seconds is not coming.
+rp3 = run(_rp3_texts, extra_argv=['--no-parallel'], seconds=40.0,
+          cam_out=_rp3['cam'],
+          until=lambda rows, ann, calls: any(
+              x.get('kind') == 'screen' for x in rows)
+          or (_rp3['nav_at'] is not None
+              and time.time() - _rp3['nav_at'] > 3.0))
+ok_('a card, the prompt, then a screen: the card landed (%d reads)'
+    % rp3['calls'], any(not x.get('kind') for x in rp3['rows']))
+ok_('...the prompt was recorded',
+    any(x.get('kind') == 'promo' for x in rp3['rows']))
+ok_('...and the screen after the prompt was read', _rp3['nav_at'] is not None)
+eq('the screen after the zone prompt is not filed against the card before it',
+   [x.get('after') for x in rp3['rows'] if x.get('kind') == 'screen'], [])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)

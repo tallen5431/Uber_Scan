@@ -615,11 +615,20 @@ What decides whether a row is written:
   naming an offer they did not take, indistinguishable from a real one. Any
   payout that is not the armed card's now drops the slate, and the cost is a
   missing row instead of a wrong one.
-- **Not the app's zone prompt.** "Switch to this zone with peak pay!" has no
-  payout once its `+$1.00/order` bonus is refused (see "A third screen" below),
-  so it reaches this branch — and filed here it would take the one clean row a
-  card is allowed and turn the navigation screen after it away. The reader can
-  already name it, so it is written as a `kind: "promo"` row instead.
+- **Not the app's zone prompt, nor anything after it.** "Switch to this zone
+  with peak pay!" has no payout once its `+$1.00/order` bonus is refused (see
+  "A third screen" below), so it reaches this branch. It is not the screen
+  after the card before it, and it ends that card's window the way a second
+  card does: whatever the phone shows after the app's own prompt is not
+  evidence about a card read before it. While the bonus read as a $1 payout it
+  dropped the slate like any other payout; refused, it left the slate armed,
+  and a navigation screen read after it was written `after:` the card before
+  the prompt, which `rpi/test_loop.py` reproduces through `main()`. On the week
+  that card was never the one taken: all five cards read just before the five
+  prompts went unticked, and three were inside the three-minute window. So every read of a prompt drops the
+  slate, whether or not it is written, and the prompt is written once as a
+  `kind: "promo"` row with its own `at` rather than as a screen — one prompt in
+  one place, which a detector can still pair with the card before it by time.
 
 Two things it deliberately does **not** decide, and both were wrong in the first
 version:
@@ -3471,8 +3480,20 @@ counted in its day. `PAY_IS_PER_ORDER` refuses the figure the way
 `PAY_IS_A_DURATION` refuses a route time: a payout is never glued to a unit,
 and `/order` is one. It is the only money on all 29 frames of the five prompts
 and on no other frame or text of the week, so the prompt is left with no payout
-— no verdict, no row, the panel still saying WAITING FOR AN OFFER, which is
-what the app is doing.
+— no verdict, no offer row, the panel still saying WAITING FOR AN OFFER, which
+is what the app is doing.
+
+One anchor, and it is not widened for misreads nobody has seen. `/order` read
+cleanly on all 29 frames. Nothing else on the week's 5,491 frames prints a unit
+after a slash, so there is no other printed slash to learn this reader's
+mistakes from. The eleven other places a figure is followed by a slash and a
+letter are stray glyphs, and one is a real payout: `$20.02 /` over
+`Guaranteed`, row 997. A looser pattern, a dollar figure, then up to four
+characters of anything, then `order` (with `0` for `o` and `3` for `e`),
+matches the same 34 texts in the week and the corpus and nothing else. If
+`/order` ever misreads, the prompt comes back as the old $1 or $2 offer. That
+frame will be the evidence for a wider rule, the same way `NOT_AN_OFFER` takes
+a new phrase only when a card arrives that needs it.
 
 Refused rather than withheld, and the reason above does not apply here: that
 rule matches a screen's words, and a screen's words can sit over a real card.
@@ -3483,9 +3504,15 @@ Replayed over the whole week in both ports, five rows move — the five prompts 
 and nothing else.
 
 It does not vanish either. `parse()` says `promo: true`, and the loop writes a
-`kind: "promo"` row — `id`, `seq`, `at` and the reading as it was read — once
-per bonus per five minutes, instead of filing the prompt as the screen that
-followed a card. Collected, synced, read by nothing.
+`kind: "promo"` row — `id`, `seq`, `at` and the reading as it was read —
+instead of filing the prompt as the screen that followed a card, and drops that
+card's screen slate (see "Not the app's zone prompt" above). It is not written
+again while the last prompt written had the same bonus running to the same
+time and is under five minutes old. That is compared with the last prompt only,
+so a prompt that comes back after a different one is written again. The end
+time is part of the key because the bonus alone does not tell two prompts apart:
+rows 74 and 100 are both Hiram at +$1.00/order, 10.8 minutes apart, one until
+5:29 PM and the other until 7:29 PM. Collected, synced, read by nothing.
 
 ### What a read really costs
 

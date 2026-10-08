@@ -2417,10 +2417,17 @@ def main():
             if shot.get('pay') is None:
                 # ...unless the reader can already say what the screen is. The
                 # app's zone prompt has no payout once its per-order bonus is
-                # refused (see OP.PAY_IS_PER_ORDER), so it arrives here — and
-                # filed as a screen it would take the one row a card is allowed
-                # and turn the navigation screen after it away. It is written
-                # as what it is instead. See note_promo.
+                # refused (see OP.PAY_IS_PER_ORDER), so it arrives here. It is
+                # not the screen after the card before it, and it is the end of
+                # that card's window: what the phone shows after the app's own
+                # prompt is not evidence about a card read before it, any more
+                # than the screen after a second card is (saw_card, below). So
+                # note_promo drops the slate, on every read of a prompt, and
+                # writes the prompt as what it is. Before the bonus was refused
+                # it was a $1 payout and saw_card dropped the slate on it; this
+                # keeps that. Without it, a run through main() — the card, the
+                # prompt, then a navigation screen — wrote that screen `after:`
+                # the card. See rpi/test_loop.py.
                 if shot.get('promo'):
                     offer_log.note_promo(out.get('text'))
                 elif offer_log.note_screen(out.get('text'),
