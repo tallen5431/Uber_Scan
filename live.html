@@ -513,24 +513,38 @@
   .connbar:has(#snap.said) #shift { display: none; }
   #snap.failed { color: var(--no); box-shadow: inset 0 0 0 1px var(--no); }
   #snap[disabled] { cursor: progress; }
-  /* ...and not drawn at all on the two narrow rows, the 3.5" hat and a phone.
+  /* ...and not drawn at all on a row too narrow to give it the width.
 
-     The same measurement there: without this control the median's digits
-     reach the glass with 22px to spare on the hat and 4 on a phone. Even the
-     camera alone cuts them, by 19px on the hat and 34 on a phone. A figure
-     cut to make room for a camera button is this project's first fault class
-     bought for a convenience, so the row keeps its figure.
+     The same measurement decides it everywhere: drawn wherever the median's
+     digits still reach the glass with the camera beside them, and nowhere
+     else. A figure cut to make room for a camera button is this project's
+     first fault class bought for a convenience, so a row without the width
+     keeps its figure.
 
-     Every landscape panel 400px tall or more keeps the digits 22px or more to
-     spare with the camera drawn (800x480; 1024x768 keeps 80, 1024x600 174,
-     1280x800 220), which is where the line is. A phone is the
-     remote end anyway — it is not the screen being photographed — and
-     snaps.html carries the same press for it, reached from the offers page. */
-  @media (orientation: landscape) and (max-height: 380px) {
-    #snap { display: none; }
+     So the rule is the row's own width, asked of the row: it is a container,
+     and the camera goes below the width at which it starts to cut the digits.
+     That is 476px of row in landscape, where the row is set at 15px, and
+     389px in portrait, at 12px — measured by widening the screen a pixel at a
+     time until the digits came clear (775 to 779 wide at 480 tall, 423 to 427
+     at 844). The screen's size was the rule before, as a stand-in, and it was
+     wrong both ways: it hid the camera from rows with room for it (a tablet
+     upright at 768x1024, 54px to spare; a phone on its side at 740x360, 220)
+     and drew it over digits it cut (700x400, by 30px); and it drew it on a
+     phone held on its side at 844x390 (115px to spare), which the words
+     beside it said it would not.
+
+     Measured: 800x480 keeps 22px to spare with it, 1024x768 80, 1024x600 174,
+     1280x800 220. The 3.5" hat (19px short) and a phone held upright (34
+     short) do not draw it; snaps.html carries the same press for them,
+     reached from the offers page. A phone on its side does draw it, and
+     what it photographs from there is the rig's display, not the phone's —
+     the same as snaps.html's press, and the control's title says so. */
+  .connbar { container: connrow / inline-size; }
+  @media (orientation: landscape) {
+    @container connrow (width < 476px) { #snap { display: none; } }
   }
   @media (orientation: portrait) {
-    #snap { display: none; }
+    @container connrow (width < 389px) { #snap { display: none; } }
   }
   .dot.on { background: var(--go); }
   #viewWrap { margin: 0; }
@@ -834,14 +848,15 @@
        nothing on the bar moves and nothing is shed, which rpi/test_layout.py
        holds at all six panels by measuring the bar with this control and
        without it. What it does cost is width, out of the shift line beside
-       it, and on the 3.5" hat and a phone there is none to give: there it is
-       not drawn, for the measured reason given in the stylesheet, and
-       snaps.html carries the same press.
+       it, and where the row has none to give — the 3.5" hat, a phone held
+       upright — it is not drawn, by the row's own width as the stylesheet
+       measures it, and snaps.html carries the same press. From any screen it
+       photographs the rig's display, which is what its title says.
 
        Not 52px, which every control on the bar is held to. Those are pressed
        at a red light; this is pressed parked, with the mouse, to keep a
        picture, and the status link beside it is the same kind of target. -->
-  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of this screen on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button></div>
+  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of the rig's own screen, on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button></div>
 
   <nav class="bottombar">
     <!-- The one thing the rig cannot see: whether the driver pressed Accept.
@@ -3019,8 +3034,11 @@
   // the control can still ask what the last press kept.
   var SNAP_SAID_MS = 8000;
   var snapBack = null;
+  // No "already pressed" guard: the control is disabled while a press is out,
+  // and a disabled button is sent no click — by the mouse, Enter, Space or
+  // .click() — so a guard here could never be reached. rpi/test_dashboard.py
+  // presses it again while the first is out and counts the POSTs.
   snapBtn.addEventListener('click', function () {
-    if (snapBtn.disabled) return;
     clearTimeout(snapBack);
     snapBtn.disabled = true;
     snapBtn.classList.remove('said', 'failed');
@@ -3052,7 +3070,7 @@
         snapBack = setTimeout(function () {
           snapLabel();
           snapBtn.classList.remove('said', 'failed');
-          snapBtn.title = '📷 Snap: keep a picture of this screen on the rig. Last time: '
+          snapBtn.title = '📷 Snap: keep a picture of the rig\'s own screen, on the rig. Last time: '
                         + said.text.replace(/^📷 /, '');
         }, SNAP_SAID_MS);
       });

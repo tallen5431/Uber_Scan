@@ -3080,6 +3080,17 @@ const framed = (page) => page.waitForFunction(
     await press();
     await page.waitForTimeout(300);
     out.snapControl.busy = await snapState();
+    // ...and pressed again while that one is out: the mouse, forced past
+    // Playwright's own wait for an enabled control, then Enter, Space and a
+    // script's .click(). The control is what stops a second POST, being
+    // disabled; there is no other guard.
+    const postsBusy = posted.length;
+    await page.click('#snap', { force: true, timeout: 1000 }).catch(() => {});
+    await page.press('#snap', 'Enter', { timeout: 1000 }).catch(() => {});
+    await page.press('#snap', 'Space', { timeout: 1000 }).catch(() => {});
+    await page.evaluate(() => document.getElementById('snap').click());
+    await page.waitForTimeout(300);
+    out.snapControl.againWhileBusy = posted.length - postsBusy;
     await page.clock.runFor(20500);
     await page.waitForTimeout(300);
     out.snapControl.hungAfter = await snapState();
@@ -3131,6 +3142,7 @@ const framed = (page) => page.waitForFunction(
       await Promise.all(imgs.map((i) => i.decode().catch(() => {})));
       return arts.map((a) => ({
         when: (a.querySelector('h2').firstChild.nodeValue || '').trim(),
+        age: (a.querySelector('h2 small') || {}).textContent || '',
         said: (a.querySelector('.said').textContent || '').trim(),
         why: [].slice.call(a.querySelectorAll('.why li')).map((l) => l.textContent.trim()),
         fix: [].slice.call(a.querySelectorAll('.why code')).map((c) => c.textContent),
@@ -3162,7 +3174,25 @@ const framed = (page) => page.waitForFunction(
     }, one.href) : null;
     const answered = page.waitForResponse((r) => r.url().endsWith('/api/snap'), { timeout: 15000 })
       .then((r) => r.json(), () => null);
+    // The press is held on its way to the rig until the page has been pressed
+    // again, every way there is, so "a second press while the first is out"
+    // is the case measured and not a race the first one might win.
+    let snapPosts = 0;
+    let letGo;
+    const held = new Promise((r) => { letGo = r; });
+    await page.route('**/api/snap', async (route) => {
+      snapPosts += 1;
+      await held;
+      route.continue();
+    });
     out.snapsPage.pressed = await page.click('#snapNow', { timeout: 4000 }).then(() => true, () => false);
+    await page.click('#snapNow', { force: true, timeout: 1000 }).catch(() => {});
+    await page.press('#snapNow', 'Enter', { timeout: 1000 }).catch(() => {});
+    await page.press('#snapNow', 'Space', { timeout: 1000 }).catch(() => {});
+    await page.evaluate(() => document.getElementById('snapNow').click());
+    await page.waitForTimeout(300);
+    out.snapsPage.postsWhileOut = snapPosts;
+    letGo();
     out.snapsPage.reply = await answered;
     // The folder name as the page writes it: 2026-10-07_21-14-03 is shown as
     // 2026-10-07 21:14:03.
@@ -3263,10 +3293,18 @@ try:
             'why': 'grim is not installed', 'fix': 'sudo apt install grim',
             'session': 'wayland'}]
         with open(os.path.join(_dir, 'snap.json'), 'w') as _fh:
-            json.dump({'v': 1, 'name': _name, 'at': time.time() * 1000 - 86400000,
+            json.dump({'v': 1, 'name': _name, 'at': time.time() * 1000 - 3 * 86400000,
                        'contents': _missing, 'notes': [],
                        'said': 'saved' if _whole
                                else 'saved — no screenshot: grim is not installed'}, _fh)
+    # ...and one the rig took before the network set its clock, stamped 1970,
+    # which has no age a set clock can give it.
+    _dir = os.path.join(work, 'snaps', '1970-01-03_00-00-00')
+    os.makedirs(_dir)
+    with open(os.path.join(_dir, 'snap.json'), 'w') as _fh:
+        json.dump({'v': 1, 'name': '1970-01-03_00-00-00', 'at': 2 * 86400000, 'contents': [],
+                   'notes': ['the rig\'s clock is not set, so it is filed under 1970'],
+                   'said': 'saved — the rig\'s clock is not set, so it is filed under 1970'}, _fh)
     driver = os.path.join(work, 'dashboard.js')
     open(driver, 'w').write(DRIVER)
     readings = READINGS
@@ -4949,6 +4987,12 @@ try:
     ok_('...in the status row, not on the bar of controls',
         before.get('inRow') and not before.get('inBar'))
     eq('...saying what it does', before.get('text'), '📷 Snap')
+    # The press photographs the rig's display from whichever screen it is
+    # made on — a phone on its side draws this control too — so "this screen"
+    # would be false on every screen but the rig's own.
+    ok_('...and on its title, what it photographs from any screen: the rig\'s (%r)'
+        % before.get('title'),
+        (before.get('title') or '').startswith('📷 Snap: keep a picture of the rig\'s own screen'))
     ok_('...and it can be pressed', snap.get('pressed'))
     eq('pressing it posts to /api/snap, once a press', snap.get('posted'),
        ['POST', 'POST', 'POST', 'POST'])
@@ -4958,6 +5002,9 @@ try:
     ok_('...with what the last press kept still on its title (%r)'
         % (snap.get('back') or {}).get('title'),
         'Last time: saved' in ((snap.get('back') or {}).get('title') or ''))
+    ok_('...a title that still says whose screen it photographs',
+        ((snap.get('back') or {}).get('title') or '').startswith(
+            '📷 Snap: keep a picture of the rig\'s own screen'))
     # The server's own line, word for word: a second wording of it on the page
     # is a second place for the reason to go missing.
     eq('a snap with no screenshot says why, on the control',
@@ -4973,6 +5020,8 @@ try:
     _busy = snap.get('busy') or {}
     eq('pressing it while nothing answers puts it to work',
        (_busy.get('text'), _busy.get('off')), ('📷 …', True))
+    eq('...and pressing it again while that press is out sends nothing more',
+       snap.get('againWhileBusy'), 0)
     _after = snap.get('hungAfter') or {}
     eq('...and at the deadline it says nothing answered, rather than sitting there',
        (_after.get('text'), _after.get('off'), _after.get('failed')),
@@ -5023,9 +5072,19 @@ try:
         and _short.get('fix') == ['sudo apt install grim'])
     eq('...under the line the driving screen said for it',
        _short.get('said'), 'saved — no screenshot: grim is not installed')
+    # Ages off the rig's own clock: three days for the two left there, and
+    # none at all for the one stamped before the rig's clock was set.
+    eq('...each with how long ago it was taken, by the rig\'s clock',
+       [(s.get('when'), s.get('age')) for s in first
+        if s.get('when') in ('2026-01-02 09:00:00', '2026-01-02 09:05:00',
+                             '1970-01-03 00:00:00')],
+       [('2026-01-02 09:05:00', '· 3 days ago'), ('2026-01-02 09:00:00', '· 3 days ago'),
+        ('1970-01-03 00:00:00', '· age unknown')])
     _sreply = sp.get('reply') or {}
     ok_('pressing 📷 on 📷 Snaps keeps a snap of the rig\'s screen (%r)'
         % (_sreply.get('said'),), sp.get('pressed') and _sreply.get('ok') is True)
+    eq('...and pressing it again while that press is out sends nothing more',
+       sp.get('postsWhileOut'), 1)
     eq('...saying what the rig kept, in its own words',
        (sp.get('said') or {}).get('text'),
        '%s: %s' % (_sreply.get('name'), _sreply.get('said')))

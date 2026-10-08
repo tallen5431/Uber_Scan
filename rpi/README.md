@@ -2125,14 +2125,16 @@ filled, its own or another press's, which matters on a Pi that booted before
 the network set its clock: those snaps are named for 1970, sort as the oldest,
 and the reply says the clock was not set. `SNAPS_KEEP` changes the count.
 
-**Not drawn on the 3.5" hat or a phone.** Its width comes out of the shift line
-beside it, whose first figure is the shift's median, and on those two rows
-there is none to give: measured beside the longest line the connection shows
-in ordinary use ("nothing from the scanner for 300s"), even the bare 📷 pushes
-the median's digits 19px off the hat and 34px off a phone, where without it
-they have 22px and 4px to spare. The row keeps its figure; the phone has
-`snaps.html`. On every landscape panel 400px tall or more the digits keep 22px
-or more with 📷 drawn.
+**Drawn only where the row has room for it.** Its width comes out of the shift
+line beside it, whose first figure is the shift's median, so the rule is the
+row's own width: below 476px of row in landscape, or 389px in portrait, 📷
+would push the median's digits off the glass beside the longest line the
+connection shows in ordinary use ("nothing from the scanner for 300s"), and it
+is not drawn. That leaves it off the 3.5" hat and a phone held upright, where
+it would cut the digits by 19px and 34px; the phone has `snaps.html`. A phone
+held on its side has the room and does draw it, and from there, like
+`snaps.html`, it photographs the rig's display. The 7" panel keeps 22px to
+spare with 📷 drawn.
 
 ## Calibrate
 

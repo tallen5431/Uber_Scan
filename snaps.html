@@ -47,10 +47,10 @@
   #empty { margin: 0; font-size: 14px; line-height: 1.5; }
   #empty[hidden] { display: none; }
   /* The same press as 📷 Snap on the driving screen, for the screens that do
-     not draw it there: a phone, and the 3.5" hat, whose status rows have no
-     width to give (see #snap in live.html). From here it photographs the
-     rig's own display, whatever it is showing — which from a phone is the
-     point: the phone is not the screen being shared. */
+     not draw it there: a phone held upright, and the 3.5" hat, whose status
+     rows have no width to give (see #snap in live.html). From here it
+     photographs the rig's own display, whatever it is showing — which from a
+     phone is the point: the phone is not the screen being shared. */
   #snapNow { align-self: flex-start; min-height: 52px; padding: 6px 16px; font: inherit;
              font-size: 15px; font-weight: 700; color: var(--text);
              background: var(--panel); border: 1px solid var(--line);
@@ -250,8 +250,9 @@
 
   // The rig's own line, as the driving screen shows it — see snapSaid in
   // server.js — and the list again, so the new one is at the top of it.
+  // Disabled while the press is out, which is all that stops a second one: a
+  // disabled button is sent no click at all (see 📷 Snap in live.html).
   snapNow.addEventListener('click', function () {
-    if (snapNow.disabled) return;
     snapNow.disabled = true;
     snapNow.textContent = '📷 …';
     snapSaid.hidden = true;

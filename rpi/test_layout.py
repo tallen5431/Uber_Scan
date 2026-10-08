@@ -66,6 +66,19 @@ PANELS = [
     ('390x844', 390, 844),    # a phone
 ]
 
+# ...and screens measured for one question only — whether 📷 Snap is drawn
+# exactly where the status row has room for it — on either side of where that
+# room runs out, so the rule is held where it is decided and not only where
+# every answer is the same. Not added to PANELS: the rest of this suite is
+# about the screens the rig is bolted to, and these are not those.
+SNAP_PANELS = [
+    ('844x390', 844, 390),    # a phone held on its side
+    ('760x390', 760, 390),
+    ('740x360', 740, 360),    # a smaller phone on its side, in the hat's layout
+    ('700x400', 700, 400),    # landscape, but a row too narrow for it
+    ('768x1024', 768, 1024),  # a tablet held upright
+]
+
 # journal.html is one continuous list — a week of offers is fourteen thousand
 # pixels of it — so it scrolls by design and only its width is held to the
 # glass. Everything else is a screen glanced at while driving and must fit.
@@ -662,10 +675,12 @@ if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
 
 DRIVER = r'''
 const { chromium } = require('playwright');
-const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson] = process.argv.slice(2);
+const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
+       snapPanelsJson] = process.argv.slice(2);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
 // What 📷 Snap's measurement puts on the status row; see SNAP_FIXTURE.
 const SNAP_FIXTURE = JSON.parse(snapJson);
+const SNAP_PANELS = JSON.parse(snapPanelsJson);
 // The caption sentences, passed in rather than written here: the Python side
 // reads them back out of live.html to check that none has been added without
 // being measured, and two copies of that list is the fault this file is for.
@@ -677,6 +692,97 @@ const CAPTION_LINES = JSON.parse(captionJson);
 // image collapses to 2px and 2px passes "the phone is taller than the scene
 // was" as comfortably as a real picture does.
 const FRAMES = JSON.parse(framesJson);
+
+// 📷 Snap's measurement, run in the page: see where it is called, below.
+const SNAP_MEASURE = (fixture) => {
+  const snap = document.getElementById('snap');
+  const bar = document.querySelector('.bottombar');
+  const row = document.querySelector('.connbar');
+  const d = document.documentElement;
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    return [r.left, r.top, r.width, r.height].map((n) => Math.round(n * 10) / 10);
+  };
+  const layout = () => JSON.stringify({ row: box(row),
+                                       bar: [].slice.call(bar.children).map(box) });
+  const over = () => d.scrollWidth > d.clientWidth + 1
+                     || d.scrollHeight > d.clientHeight + 1;
+  // Every glyph of the label inside the control's own box.
+  const spilt = () => {
+    const r = snap.getBoundingClientRect();
+    const n = snap.firstChild;
+    if (!n) return '';
+    const rg = document.createRange();
+    let out = '';
+    for (let i = 0; i < n.length; i++) {
+      rg.setStart(n, i);
+      rg.setEnd(n, i + 1);
+      const c = rg.getBoundingClientRect();
+      if (c.width === 0 && c.height === 0) continue;
+      if (c.left < r.left - 0.5 || c.right > r.right + 0.5
+          || c.top < r.top - 0.5 || c.bottom > r.bottom + 0.5) out += n.data[i];
+    }
+    return out;
+  };
+  const r = snap.getBoundingClientRect();
+  const out = {
+    drawn: getComputedStyle(snap).display !== 'none' && r.width > 0 && r.height > 0,
+    inRow: !!snap.closest('.connbar'), inBar: !!snap.closest('.bottombar'),
+    onGlass: r.left >= -0.5 && r.top >= -0.5 && r.right <= d.clientWidth + 0.5
+             && r.bottom <= d.clientHeight + 0.5,
+    label: (snap.textContent || '').trim(), spilt: spilt(),
+    height: Math.round(r.height), over: over(),
+  };
+  const withIt = layout();
+  snap.style.display = 'none';
+  out.same = withIt === layout();
+  snap.style.display = '';
+  // The longest line it says: the screenshot missing and why. Put back
+  // as markup, not as text — the label's word is a span of its own, and
+  // flattening it into the text node would paint it.
+  const was = snap.innerHTML;
+  snap.textContent = fixture.said;
+  snap.classList.add('said');
+  out.sameSaid = withIt === layout();
+  out.overSaid = over();
+  // ...and the answer itself on the glass, beside the connection line
+  // rather than over it. Overflow alone cannot see this: #app clips, so
+  // a line that runs off the right edge leaves nothing to scroll.
+  const rs = snap.getBoundingClientRect();
+  const rc = document.getElementById('conn').getBoundingClientRect();
+  out.saidOnGlass = rs.left >= rc.right - 0.5 && rs.right <= d.clientWidth + 0.5;
+  snap.innerHTML = was;
+  snap.classList.remove('said');
+  // The median, beside the longest connection line the page writes.
+  const shift = document.getElementById('shift');
+  const conn = document.getElementById('conn');
+  const keep = [shift.textContent, shift.hidden, conn.textContent];
+  shift.textContent = fixture.shift;
+  shift.hidden = false;
+  conn.textContent = fixture.conn;
+  const node = shift.firstChild;
+  const at = node.nodeValue.indexOf(fixture.figure);
+  const rg = document.createRange();
+  rg.setStart(node, at);
+  rg.setEnd(node, at + fixture.figure.length);
+  out.figureSpare = Math.round(shift.getBoundingClientRect().right
+                               - rg.getBoundingClientRect().right);
+  // ...and the same with the control put on the row whatever the stylesheet
+  // says: the room it WOULD leave, which is what decides whether it may be
+  // drawn here at all. Measured on every screen, drawn or not, so one that
+  // does not draw it is held to the reason it does not.
+  // To a hundredth, not a pixel: the row's width is fractional on a landscape
+  // panel, and at 777x480 the digits end 0.05px past the glass, which rounds
+  // to "0px to spare" and is no room at all.
+  snap.style.display = 'inline-block';
+  out.roomWith = Math.round((shift.getBoundingClientRect().right
+                             - rg.getBoundingClientRect().right) * 100) / 100;
+  snap.style.display = '';
+  shift.textContent = keep[0];
+  shift.hidden = keep[1];
+  conn.textContent = keep[2];
+  return out;
+};
 
 (async () => {
   let browser;
@@ -1017,86 +1123,11 @@ const FRAMES = JSON.parse(framesJson);
         // gives? And does the shift line beside it, which is the item on that
         // row that gives way, still get the median's digits onto the glass
         // when the connection line is at its longest? That last is measured
-        // on every panel, drawn or not, so the panels that do not draw it are
-        // held to the reason they do not.
-        shown.snap = await page.evaluate((fixture) => {
-          const snap = document.getElementById('snap');
-          const bar = document.querySelector('.bottombar');
-          const row = document.querySelector('.connbar');
-          const d = document.documentElement;
-          const box = (el) => {
-            const r = el.getBoundingClientRect();
-            return [r.left, r.top, r.width, r.height].map((n) => Math.round(n * 10) / 10);
-          };
-          const layout = () => JSON.stringify({ row: box(row),
-                                               bar: [].slice.call(bar.children).map(box) });
-          const over = () => d.scrollWidth > d.clientWidth + 1
-                             || d.scrollHeight > d.clientHeight + 1;
-          // Every glyph of the label inside the control's own box.
-          const spilt = () => {
-            const r = snap.getBoundingClientRect();
-            const n = snap.firstChild;
-            if (!n) return '';
-            const rg = document.createRange();
-            let out = '';
-            for (let i = 0; i < n.length; i++) {
-              rg.setStart(n, i);
-              rg.setEnd(n, i + 1);
-              const c = rg.getBoundingClientRect();
-              if (c.width === 0 && c.height === 0) continue;
-              if (c.left < r.left - 0.5 || c.right > r.right + 0.5
-                  || c.top < r.top - 0.5 || c.bottom > r.bottom + 0.5) out += n.data[i];
-            }
-            return out;
-          };
-          const r = snap.getBoundingClientRect();
-          const out = {
-            drawn: getComputedStyle(snap).display !== 'none' && r.width > 0 && r.height > 0,
-            inRow: !!snap.closest('.connbar'), inBar: !!snap.closest('.bottombar'),
-            onGlass: r.left >= -0.5 && r.top >= -0.5 && r.right <= d.clientWidth + 0.5
-                     && r.bottom <= d.clientHeight + 0.5,
-            label: (snap.textContent || '').trim(), spilt: spilt(),
-            height: Math.round(r.height), over: over(),
-          };
-          const withIt = layout();
-          snap.style.display = 'none';
-          out.same = withIt === layout();
-          snap.style.display = '';
-          // The longest line it says: the screenshot missing and why. Put back
-          // as markup, not as text — the label's word is a span of its own, and
-          // flattening it into the text node would paint it.
-          const was = snap.innerHTML;
-          snap.textContent = fixture.said;
-          snap.classList.add('said');
-          out.sameSaid = withIt === layout();
-          out.overSaid = over();
-          // ...and the answer itself on the glass, beside the connection line
-          // rather than over it. Overflow alone cannot see this: #app clips, so
-          // a line that runs off the right edge leaves nothing to scroll.
-          const rs = snap.getBoundingClientRect();
-          const rc = document.getElementById('conn').getBoundingClientRect();
-          out.saidOnGlass = rs.left >= rc.right - 0.5 && rs.right <= d.clientWidth + 0.5;
-          snap.innerHTML = was;
-          snap.classList.remove('said');
-          // The median, beside the longest connection line the page writes.
-          const shift = document.getElementById('shift');
-          const conn = document.getElementById('conn');
-          const keep = [shift.textContent, shift.hidden, conn.textContent];
-          shift.textContent = fixture.shift;
-          shift.hidden = false;
-          conn.textContent = fixture.conn;
-          const node = shift.firstChild;
-          const at = node.nodeValue.indexOf(fixture.figure);
-          const rg = document.createRange();
-          rg.setStart(node, at);
-          rg.setEnd(node, at + fixture.figure.length);
-          out.figureSpare = Math.round(shift.getBoundingClientRect().right
-                                       - rg.getBoundingClientRect().right);
-          shift.textContent = keep[0];
-          shift.hidden = keep[1];
-          conn.textContent = keep[2];
-          return out;
-        }, SNAP_FIXTURE);
+        // on every panel twice, as drawn and with the control forced onto the
+        // row, so the panels that do not draw it are held to the reason they
+        // do not — it used to be measured only as drawn, which on a panel that
+        // hides it is the row without it, and proved nothing about the rule.
+        shown.snap = await page.evaluate(SNAP_MEASURE, SNAP_FIXTURE);
         // Bounded, and the result kept rather than thrown.
         //
         // A layout fault that puts the picture over the controls does not make
@@ -1303,6 +1334,24 @@ const FRAMES = JSON.parse(framesJson);
     }
     await ctx.close();
   }
+  // 📷 Snap alone, on the screens either side of where its room runs out:
+  // live.html as it lands, with the same pictures, and the same measurement.
+  for (const panel of SNAP_PANELS) {
+    const ctx = await browser.newContext({
+      viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.route('**/api/frame.*', (route) => {
+      const view = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
+      route.fulfill({ status: 200, contentType: 'image/jpeg',
+                      body: Buffer.from(FRAMES[view], 'base64') });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForTimeout(1800);
+    out[panel[0] + ' snap'] = await page.evaluate(SNAP_MEASURE, SNAP_FIXTURE);
+    await page.close();
+    await ctx.close();
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -1464,7 +1513,8 @@ try:
                ]))
     proc2 = subprocess.run(
         ['node', driver, base, json.dumps(PANELS), json.dumps(PAGES),
-         json.dumps(FRAMES), json.dumps(CAPTION_LINES), json.dumps(SNAP_FIXTURE)],
+         json.dumps(FRAMES), json.dumps(CAPTION_LINES), json.dumps(SNAP_FIXTURE),
+         json.dumps(SNAP_PANELS)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -1477,6 +1527,43 @@ try:
         crashed(got['__crashed'])
     if got.get('skip'):
         skip(got['skip'])
+
+    # 📷 Snap, on one screen.
+    #
+    # Off the bar, which holds six — AUDITS.md's Settled — and on the status
+    # row, where it costs nothing: not a tenth of a pixel of the bar or the
+    # row, with its label or with the longest answer it gives. Drawn exactly
+    # where the row has room for it, and that is measured, not stood in for:
+    # `roomWith` is the median's spare with the control forced onto the row,
+    # on every screen, so one that does not draw it is held to the reason. A
+    # rule written as the screen's size ("landscape, 400px tall") was the
+    # stand-in, and a phone held on its side broke it both ways round.
+    def snap_checks(panel, sn):
+        ok_('📷 Snap was measured at %s' % panel, 'drawn' in sn)
+        room = (sn.get('roomWith') if sn.get('roomWith') is not None else -1) >= 0
+        eq('📷 Snap is drawn at %s exactly where the row has room for it (%gpx with it)'
+           % (panel, sn.get('roomWith') if sn.get('roomWith') is not None else float('nan')),
+           bool(sn.get('drawn')), room)
+        ok_('...on the status row, never on the bar, at %s' % panel,
+            sn.get('inRow') and not sn.get('inBar'))
+        if room:
+            ok_('...on the glass at %s' % panel, sn.get('onGlass'))
+            eq('...saying what it is at %s' % panel, sn.get('label'), '📷 Snap')
+            eq('...with its label inside its own box at %s' % panel,
+               sn.get('spilt'), '')
+            ok_('...and its longest answer on the glass, clear of the '
+                'connection line, at %s' % panel, sn.get('saidOnGlass'))
+        ok_('...moving nothing on the bar or the row at %s' % panel, sn.get('same'))
+        ok_('...nor with its longest answer on it at %s' % panel, sn.get('sameSaid'))
+        ok_('...and the page still fits, label or answer, at %s' % panel,
+            not sn.get('over') and not sn.get('overSaid'))
+        ok_('...while the shift line\'s median reaches the glass beside the '
+            'longest connection line at %s (%spx to spare)'
+            % (panel, sn.get('figureSpare')),
+            (sn.get('figureSpare') if sn.get('figureSpare') is not None else -1) >= 0)
+
+    for panel, w, h in SNAP_PANELS:
+        snap_checks(panel, got.get('%s snap' % panel) or {})
 
     for panel, w, h in PANELS:
         dashboard = w > h and h <= 620
@@ -1658,35 +1745,7 @@ try:
                        % panel, crowded.get('spilling'), [])
 
                 # --- 📷 Snap ------------------------------------------------
-                #
-                # Off the bar, which holds six — AUDITS.md's Settled — and on
-                # the status row, where it costs nothing: not a tenth of a pixel
-                # of the bar or the row, with its label or with the longest
-                # answer it gives. Drawn on every landscape panel with 400px of
-                # height; not on the 3.5" hat or a phone, where the row's width
-                # is the shift line's median and there is none to give.
-                sn = phone.get('snap') or {}
-                ok_('📷 Snap was measured at %s' % panel, 'drawn' in sn)
-                wide = w > h and h >= 400
-                eq('📷 Snap is drawn at %s exactly where the row has room for it'
-                   % panel, bool(sn.get('drawn')), wide)
-                ok_('...on the status row, never on the bar, at %s' % panel,
-                    sn.get('inRow') and not sn.get('inBar'))
-                if wide:
-                    ok_('...on the glass at %s' % panel, sn.get('onGlass'))
-                    eq('...saying what it is at %s' % panel, sn.get('label'), '📷 Snap')
-                    eq('...with its label inside its own box at %s' % panel,
-                       sn.get('spilt'), '')
-                    ok_('...and its longest answer on the glass, clear of the '
-                        'connection line, at %s' % panel, sn.get('saidOnGlass'))
-                ok_('...moving nothing on the bar or the row at %s' % panel, sn.get('same'))
-                ok_('...nor with its longest answer on it at %s' % panel, sn.get('sameSaid'))
-                ok_('...and the page still fits, label or answer, at %s' % panel,
-                    not sn.get('over') and not sn.get('overSaid'))
-                ok_('...while the shift line\'s median reaches the glass beside the '
-                    'longest connection line at %s (%spx to spare)'
-                    % (panel, sn.get('figureSpare')),
-                    (sn.get('figureSpare') if sn.get('figureSpare') is not None else -1) >= 0)
+                snap_checks(panel, phone.get('snap') or {})
                 # ...which is a weaker claim than it looks, and was the one
                 # being made. #app clips, so a picture drawn taller than its
                 # row is trimmed rather than overflowed and every fits-check
