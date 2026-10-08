@@ -518,6 +518,38 @@ try:
 finally:
     phone.close()
 
+# The wall clock leaping, as NTP makes it do at the start of every shift on a
+# Pi that booted in 1970. Every other check here hands Phone a clock; this one
+# leaves it the default, because the default is what the rig runs on and the
+# fault was in the default. With the wall clock, a fix taken before the leap
+# was put 1,791,454,807 seconds old once the app stopped — and the panel would
+# have said "GPS: no fix for 29857580 min".
+#
+# The module is loaded again with time.time already leaping, so a default
+# bound to the wall clock would be bound to this one; restored either way.
+import importlib                                              # noqa: E402
+
+_real_time = time.time
+_leap = [0.0]
+time.time = lambda: _real_time() + _leap[0]
+try:
+    G2 = importlib.reload(G)
+    phone = FakePhone(script=[RMC + '\r\n'])
+    try:
+        it = G2.Phone(phone.address).start()
+        ok_('a fix arrives on the default clock', waited(lambda: it.fix() is not None))
+        _leap[0] = 56 * 365.25 * 86400
+        _aged = it.state()['ageSeconds']
+        ok_('...and the wall clock leaping 56 years does not age it (%r)' % (_aged,),
+            _aged is not None and _aged < 5)
+        eq('...nor turn a fresh fix stale', it.state()['state'], 'fixed')
+        it.stop()
+    finally:
+        phone.close()
+finally:
+    time.time = _real_time
+    importlib.reload(G)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d gps checks passed' % ok)
 sys.exit(1 if bad else 0)

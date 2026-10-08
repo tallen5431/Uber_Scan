@@ -3791,10 +3791,19 @@ holds a lock across the network, and reconnects quietly for ever.
 answers, so the GPS's own timestamps cannot be compared against the Pi's wall
 clock to decide freshness — the two disagree by decades at boot. Staleness is
 measured entirely against the local clock: when we received the line, against
-what the local clock says now. Both readings come from the same wrong clock, so
-the error cancels and the answer is right while the rig still thinks it is 1970.
+what the local clock says now. Both readings come from the same clock, so its
+error cancels and the answer is right while the rig still thinks it is 1970.
 A clock that jumps *backwards* mid-shift yields a negative age, and negative is
 refused too rather than reading as fresh.
+
+*The same clock was not enough, and the local clock is now the monotonic one.*
+Both readings came off the wall clock, so the error cancelled only until the
+wall clock moved between them — which NTP does once, by decades, at the start
+of every shift. Measured: a fix taken at boot, the app stopping, NTP arriving,
+and the fix was 1,791,454,807 seconds old. Close to harmless while the only
+reader was `fix()`, which refuses anything over twenty seconds and is put right
+by the next sentence a second later; the driving panel now prints the age as
+*GPS: no fix for N min*, and N would have been 29,857,580.
 
 **Two protocols, because port 2947 is not a promise.** Real gpsd greets with a
 JSON VERSION banner and says nothing until it is asked to WATCH; several phone
