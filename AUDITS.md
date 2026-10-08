@@ -3523,11 +3523,27 @@ did not survive are under Settled, "What else the rig could collect".
   (tips, promotions, later tip changes) and a trip count that needs no ticks.
   The importer has to be written against one real download; no column list
   could be confirmed from outside.
-- *Worth doing, lower priority:* a fill-up log typed at the pump (odometer,
-  gallons, dollars) giving a measured FUEL cost per mile beside the existing
-  cost-per-mile comparison, never written into the setting; odometer at the
-  start and end of a shift, for a dated mileage log (the IRS rate changed on
-  1 Jul 2026); a USB GPS receiver on the Pi (about $17), but only with a fix
+- *Planned, asked for by the owner:* **TeslaMate on the NucBox.** The car is a
+  Tesla Model 3, so the gas-car items first written here — a fill-up log typed
+  at the pump, odometer readings typed at each end of a shift — are replaced by
+  the car's own record. TeslaMate (open source, Docker, Postgres) logs every
+  drive (time, distance, energy, route) and every charge (energy, cost at a
+  home rate the driver enters) through Tesla's Fleet API, with nothing in the
+  car and nothing over the rig's hotspot. Three uses, all on the offers page
+  and none live on the panel: a measured ENERGY cost per mile shown beside the
+  existing cost-per-mile comparison for the driver to adopt, never written into
+  the setting (wear and depreciation still on top); a dated mileage log for
+  taxes (the IRS rate changed on 1 Jul 2026); and unpaid miles per shift —
+  the car's driven miles against the ticked jobs' miles. TeslaMate POLLS, and
+  Tesla meters every request, so it is the after-shift record and not a live
+  feed. Live position from the car needs Fleet Telemetry instead (the car
+  pushes over its own LTE to a server, Tesla's sample config at 10s for
+  location, reported down to about 1s), which needs a publicly reachable
+  TLS endpoint and a paired virtual key, or a paid relay; for the rig's live
+  position the phone's GPS over the shared hotspot, or a USB receiver on the
+  Pi, is nearer, faster and free. Do not join the car to the 2GB hotspot: it
+  downloads software updates over Wi-Fi.
+- *Worth doing, lower priority:* a USB GPS receiver on the Pi (about $17), but only with a fix
   quality gate, because the panel's "+N mi out of your way" would use it;
   keeping cards that showed a payout but did not parse, for new layouts and
   the first DoorDash cards; tesseract's per-word confidence on the scans,
