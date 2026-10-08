@@ -623,6 +623,30 @@ _prentp = _clock_journal('prentp.jsonl',
                          + [_crow(99, 1000)])
 eq('a row from before the clock was set is not a step backwards',
    findings(run(JOURNAL=_prentp).stdout).get("the journal's stamps run forwards"), True)
+# ...nor is the scanner's own account of itself. Its start row is written as
+# the loop starts, on every boot, and after the engine cuts the power that is
+# before NTP, on fake-hwclock's restored time: the last hourly save, earlier
+# than the offers the shift before it ended on. A fix that arrives in that
+# minute is a row too. Asked, they failed this check after every such boot,
+# and the remedy blamed the EARLIER offers — which were right.
+_shift0 = _cnow - 30 * 3600000
+_saved = _shift0 + 137 * 60000          # the last save, eight minutes before the end
+
+
+def _uprow(run, n, at, about, state):
+    return {'v': 1, 'kind': 'up', 'id': 'up-%s-%d' % (run, n), 'seq': 1,
+            'at': at, 'about': about, 'state': state}
+
+
+_powercut = _clock_journal(
+    'powercut.jsonl',
+    [_uprow('5e1f0a2b3c4d', 1, _shift0, 'rig', 'start')]
+    + [_crow(i, _shift0 + 300000 + i * 600000) for i in range(15)]
+    + [_uprow('9b7c26d1e0f3', 1, _saved + 31000, 'rig', 'start'),
+       _uprow('9b7c26d1e0f3', 2, _saved + 40000, 'gps', 'ok')]
+    + [_crow(50 + i, _cnow - 7200000 + i * 600000) for i in range(3)])
+eq('a boot\'s rows on fake-hwclock\'s restored time are not a step backwards',
+   findings(run(JOURNAL=_powercut).stdout).get("the journal's stamps run forwards"), True)
 # One row cannot be out of order with itself, and an empty file has nothing to
 # be out of order — both must still print the line rather than skipping it, or
 # a green report would be indistinguishable from an unasked question.

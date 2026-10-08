@@ -2044,6 +2044,13 @@ for field in ('tooBright', 'tooDim', 'refindRefused', 'notSaving',
               'gps', 'cpuC', 'throttled'):
     ok_('live.html reads %s off the heartbeat' % field,
         'msg.%s' % field in page)
+# ...and the one throttle word it names, which is the one it keeps the
+# temperature off. Renamed here and not there, the number would come back
+# beside a weak supply and, on the 3.5" hat, push the GPS's "min" off the end.
+_named = re.findall(r"t\.now\[0\] !== '([^']*)'", page)
+ok_('the throttle word live.html keeps the temperature off is one the scanner '
+    'sends (%r)' % (_named,),
+    bool(_named) and all(w in [x for _, x in SP.THROTTLE_BITS] for w in _named))
 
 # --- the GPS and the Pi on the beat -----------------------------------------
 #
@@ -2181,7 +2188,8 @@ _start = _ud_rows()[-1]
 eq('a start row is a kind row the sync can key',
    (_start.get('kind'), _start.get('seq'), _start.get('id', '').startswith('up-')),
    ('up', 1, True))
-eq('...whose id is built from its own at', _start.get('id'), 'up-%d' % _start['at'])
+eq('...whose id names its run and its place in it, not the clock',
+   _start.get('id'), 'up-%s-1' % _ud.run)
 eq('...saying it is the rig starting, with --gps on, and how long the Pi had '
    'been up', (_start.get('about'), _start.get('state'), _start.get('gps'),
                _start.get('uptime')), ('rig', 'start', True, 4321))
@@ -2227,11 +2235,53 @@ eq('nothing tracking the phone is no claim about it', len(_ud_rows()), _n)
 _ud.stop()
 eq('a stop row ends the run', (_ud_rows()[-1].get('about'), _ud_rows()[-1].get('state')),
    ('rig', 'stop'))
-_ats = [r['at'] for r in _ud_rows()]
-eq('every row\'s at is later than the last, so no two share an id (%r)' % (_ats,),
-   _ats, sorted(set(_ats)))
+_ids = [r['id'] for r in _ud_rows()]
+eq('no two of a run\'s rows share an id, numbered in the order written (%r)'
+   % (_ids,), _ids, ['up-%s-%d' % (_ud.run, i + 1) for i in range(len(_ids))])
 eq('...and every row carries the pair the sync keys on',
    [r for r in _ud_rows() if not (r.get('id') and r.get('seq') == 1)], [])
+
+# `at` is the clock's, whatever it does, and the ids stay apart without it.
+#
+# The rows are there to say WHEN the rig failed. Their `at` was pushed past the
+# last row's to keep ids apart, which after NTP stepped a fast clock back — the
+# seven hours AUDITS.md "The clock" records — stamped every later row at the
+# run's high-water mark: a GPS gone stale three hours after the step was put
+# 3.98 hours from when it happened. Driven through journal's own clock.
+_wall = [1790409639879]                 # the incident's fast stamp
+_real_now_ms = JR.now_ms
+JR.now_ms = lambda now=None: _wall[0]
+try:
+    _ck_path = os.path.join(tempfile.mkdtemp(), 'j.jsonl')
+    _ck = SP.UpDown(JR.Journal(_ck_path), asked_gps=True, gps_hold=60.0)
+    _ck.start(True, 100)
+    _ck.watch(0.0, False, ('ok', 0.4, None))
+    _ck_rows = [json.loads(l) for l in open(_ck_path) if l.strip()]
+    eq('two rows in one millisecond keep the clock\'s at, and two ids (%r)'
+       % ([(r['id'], r['at']) for r in _ck_rows],),
+       ([r['at'] for r in _ck_rows], len({r['id'] for r in _ck_rows})),
+       ([_wall[0], _wall[0]], 2))
+    _wall[0] -= 7 * 3600 * 1000         # NTP steps it back seven hours
+    _wall[0] += 3 * 3600 * 1000         # ...and three hours of driving later
+    _ck.watch(10800.0, False, ('stale', 21.0, None))
+    _wall[0] += 60 * 1000
+    _ck.watch(10860.0, False, ('stale', 81.0, None))
+    _ck_last = [json.loads(l) for l in open(_ck_path) if l.strip()][-1]
+    eq('a row written after the clock stepped back carries the clock\'s time, '
+       'not the run\'s highest (%r)' % (_ck_last,),
+       (_ck_last.get('state'), _ck_last.get('at')), ('stale', _wall[0]))
+    # Two boots before NTP, each starting 25.123s after 1970 — one run's ids
+    # were apart, the next run's were the same numbers again, and the copy at
+    # home keeps the first of two rows with one id.
+    _wall[0] = 25123
+    _boot_path = os.path.join(tempfile.mkdtemp(), 'j.jsonl')
+    for _boot in range(2):
+        SP.UpDown(JR.Journal(_boot_path), asked_gps=True).start(True, 25)
+    _boot_ids = [json.loads(l)['id'] for l in open(_boot_path) if l.strip()]
+    eq('two runs started in the same millisecond do not share an id (%r)'
+       % (_boot_ids,), len(set(_boot_ids)), 2)
+finally:
+    JR.now_ms = _real_now_ms
 
 # A rig never asked for a position never writes a GPS row and never says
 # anything but 'off' on the beat.

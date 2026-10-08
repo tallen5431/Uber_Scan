@@ -2456,23 +2456,36 @@
   // 370px where the 3.5" hat has 315 and the rig's own panel, beside the
   // phone, 357 — so the tail was cut, and the tail is the GPS's minutes. The
   // rest are on the status link and in every `seen` row.
+  //
+  // ...and the temperature beside every word but `under-voltage`. Heat is
+  // what the temperature explains: beside "temp limit" it says how far over,
+  // and beside "throttled" or "capped" whether heat is why. A weak supply's
+  // remedy is the power lead, and the number beside it told the driver
+  // nothing to act on — while it cost the GPS its unit: on the 3.5" hat
+  // "Pi under-voltage 61°C · GPS: no fix for 123 min" needed 315px of a 313px
+  // span, and the ellipsis took "min". Without it, 278px. The widest left is
+  // "Pi temp limit 85°C · GPS: no fix for 1000 min", 296px.
   function healthNote() {
     var bits = [];
     var t = throttledNow;
     if (t && t.now && t.now.length) {
       bits.push('Pi ' + t.now[0]
-                + (cpuNow !== null ? ' ' + Math.round(cpuNow) + '\u00b0C' : ''));
+                + (cpuNow !== null && t.now[0] !== 'under-voltage'
+                  ? ' ' + Math.round(cpuNow) + '\u00b0C' : ''));
     }
     var g = gpsNow;
     if (g && g.state === 'stale') {
-      // Whole minutes, rounded DOWN: "no fix for 1 min" at 80 seconds is true
-      // and "2 min" would not be. The scanner only settles on stale a minute
-      // after gps.py calls it so, so in practice this is never under one. No
-      // age is a clock that ran backwards past the fix, and then there is no
-      // honest duration to give.
-      bits.push(typeof g.ageSeconds === 'number'
-        ? 'GPS: no fix for ' + Math.max(1, Math.floor(g.ageSeconds / 60)) + ' min'
-        : 'GPS: no fix');
+      // Whole minutes, rounded DOWN: "no fix for 1 min" at 119 seconds is true
+      // and "2 min" would not be. The scanner settles on stale only once
+      // gps.py's twenty seconds and its own GPS_HOLD minute have both passed,
+      // so the age on a beat that says stale is 80 seconds or more in every
+      // ordinary run, and always a number: gps.py ages a fix on the
+      // monotonic clock, which cannot run backwards past it. There was a
+      // clamp up to one minute, which would have said "1 min" of a fix 30
+      // seconds old, and a branch for a stale fix with no age; no beat the
+      // scanner sends could reach either, and floor is the honest answer for
+      // any age that does arrive.
+      bits.push('GPS: no fix for ' + Math.floor(g.ageSeconds / 60) + ' min');
     } else if (g && g.state === 'lost') {
       bits.push('GPS: no fix since start');
     }

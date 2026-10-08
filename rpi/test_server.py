@@ -2501,7 +2501,7 @@ finally:
 # for — a kind this build knows nothing about crosses on its id and seq.
 _udir = tempfile.mkdtemp()
 _ujournal = os.path.join(_udir, 'journal.jsonl')
-_ups = [{'v': 1, 'kind': 'up', 'id': 'up-%d' % (NOW - 5000 + i), 'seq': 1,
+_ups = [{'v': 1, 'kind': 'up', 'id': 'up-0f3a9c21b7d4-%d' % (i + 1), 'seq': 1,
          'at': NOW - 5000 + i, 'about': about, 'state': state}
         for i, (about, state) in enumerate([('rig', 'start'), ('gps', 'stale'),
                                             ('phone', 'gone'), ('rig', 'stop')])]

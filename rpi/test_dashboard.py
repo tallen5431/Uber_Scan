@@ -3066,19 +3066,22 @@ const framed = (page) => page.waitForFunction(
     slot.ok = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 52.1, cpuCWhy: null,
                           throttled: { now: [], sinceBoot: ['under-voltage'] }, throttledWhy: null });
     slot.stale = await say(Object.assign({ gps: { state: 'stale', ageSeconds: 119.6 } }, NOPI));
-    slot.noAge = await say(Object.assign({ gps: { state: 'stale', ageSeconds: null } }, NOPI));
     slot.lost = await say(Object.assign({ gps: { state: 'lost', ageSeconds: null } }, NOPI));
     slot.hot = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
                            throttled: { now: ['temp limit', 'throttled', 'capped'],
                                         sinceBoot: ['temp limit', 'throttled', 'capped'] },
                            throttledWhy: null });
-    // The widest the row is asked to hold: the longest cause, and a GPS two
-    // hours stale, so three digits of minutes.
-    slot.both = await say({ gps: { state: 'stale', ageSeconds: 7380 }, cpuC: 84.6, cpuCWhy: null,
+    // The widest the row is asked to hold: the widest Pi word with its
+    // temperature, and a GPS stale for longer than a sixteen-hour day, so four
+    // digits of minutes. Measured, 296px; the span has 313 on the 3.5" hat.
+    slot.both = await say({ gps: { state: 'stale', ageSeconds: 60000 }, cpuC: 84.6, cpuCWhy: null,
                             throttled: { now: ['temp limit', 'throttled', 'capped'],
                                          sinceBoot: ['temp limit'] }, throttledWhy: null });
-    // ...and the shape a weak car supply gives, the commonest of them.
-    slot.weak = await say({ gps: { state: 'stale', ageSeconds: 734 }, cpuC: 61.0, cpuCWhy: null,
+    // ...and the shape a weak car supply gives, the commonest of them, with
+    // the GPS two hours gone — the app's timer having run out mid-shift. With
+    // the temperature beside the supply this was 315px and the ellipsis took
+    // the GPS's "min".
+    slot.weak = await say({ gps: { state: 'stale', ageSeconds: 7380 }, cpuC: 61.0, cpuCWhy: null,
                            throttled: { now: ['under-voltage', 'throttled'],
                                         sinceBoot: ['under-voltage', 'throttled'] },
                            throttledWhy: null });
@@ -4080,8 +4083,6 @@ try:
            _note('stale').get('text'), 'GPS: no fix for 1 min')
         ok_('[%s] ...on the glass, and whole' % _pn,
             _note('stale').get('shown') and _note('stale').get('whole'))
-        eq('[%s] a stale fix with no honest age gives no duration' % _pn,
-           _note('noAge').get('text'), 'GPS: no fix')
         eq('[%s] a GPS that has never answered says so' % _pn,
            _note('lost').get('text'), 'GPS: no fix since start')
         eq('[%s] a hot Pi names the cause, with its temperature' % _pn,
@@ -4089,7 +4090,7 @@ try:
         # The widest the row is asked to hold, and it has to hold it whole: a
         # cut here falls on the GPS's minutes.
         eq('[%s] the Pi and the GPS together, the Pi first' % _pn,
-           _note('both').get('text'), 'Pi temp limit 85°C · GPS: no fix for 123 min')
+           _note('both').get('text'), 'Pi temp limit 85°C · GPS: no fix for 1000 min')
         ok_('[%s] ...whole on this panel (%dpx of %dpx)'
             % (_pn, _note('both').get('w') or 0, _note('both').get('sw') or 0),
             _note('both').get('whole') and _note('both').get('shown'))
@@ -4106,9 +4107,15 @@ try:
            ('scanner reading', True))
         ok_('[%s] ...and the page still fits the glass' % _pn,
             (_h.get('both') or {}).get('fits'))
-        eq('[%s] a weak supply and a stale fix, the commonest pair' % _pn,
-           _note('weak').get('text'), 'Pi under-voltage 61°C · GPS: no fix for 12 min')
-        ok_('[%s] ...whole as well' % _pn, _note('weak').get('whole'))
+        # A weak supply's remedy is the power lead, and a temperature beside it
+        # says nothing to act on. It was there, and on the 3.5" hat it pushed
+        # the GPS's unit off the end of this very note.
+        eq('[%s] a weak supply and a stale fix, the commonest pair, with no '
+           'temperature beside the supply' % _pn,
+           _note('weak').get('text'), 'Pi under-voltage · GPS: no fix for 123 min')
+        ok_('[%s] ...whole as well (%dpx of %dpx)'
+            % (_pn, _note('weak').get('w') or 0, _note('weak').get('sw') or 0),
+            _note('weak').get('whole') and _note('weak').get('shown'))
         # The note is a word off a heartbeat. With the socket gone there is no
         # heartbeat, and the row says so instead of a GPS state from before.
         eq('[%s] a dropped socket takes the note down with it (%r)'

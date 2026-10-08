@@ -364,7 +364,7 @@ try:
     # 12 min" and the journal's gps rows; the word alone said only that the
     # fix had gone, not since when.
     eq('...and how old the newest fix is, on the same clock',
-       it.state()['ageSeconds'], 21.0)
+       it.state().get('ageSeconds', 'absent'), 21.0)
     it.stop()
 finally:
     phone.close()
@@ -384,7 +384,7 @@ try:
     eq('...and the word says so too, judged on the same unrounded age',
        it.state()['state'], 'stale')
     eq('...while the age it reports is rounded for reading',
-       it.state()['ageSeconds'], 20.0)
+       it.state().get('ageSeconds', 'absent'), 20.0)
     it.stop()
 finally:
     phone.close()
@@ -401,10 +401,11 @@ try:
     clock.now -= 3600.0
     eq('a fix from the future is not a fix', it.fix(), None)
     # ...and has no age to give. "No fix for -60 min" is the nonsense this
-    # rule exists to keep off the panel; None is the honest answer and the
-    # page says "no fix" without a duration for it.
+    # rule exists to keep off the panel, and None is the honest answer. Only a
+    # clock handed in can do this: the default is monotonic (see the end of
+    # this file), so the panel has no branch for a stale fix without an age.
     eq('...and has no age, rather than a negative one',
-       it.state()['ageSeconds'], None)
+       it.state().get('ageSeconds', 'absent'), None)
     it.stop()
 finally:
     phone.close()
@@ -433,7 +434,8 @@ try:
     ok_('...and the reader survives it',
         waited(lambda: it.state()['error'] is not None, seconds=5.0))
     eq('...and is still looking', it.state()['state'], 'looking')
-    eq('...with no fix to give an age for', it.state()['ageSeconds'], None)
+    eq('...with no fix to give an age for',
+       it.state().get('ageSeconds', 'absent'), None)
     # The scan loop calls this between frames. It has to be free.
     started = time.time()
     for _ in range(2000):
@@ -539,9 +541,9 @@ try:
         it = G2.Phone(phone.address).start()
         ok_('a fix arrives on the default clock', waited(lambda: it.fix() is not None))
         _leap[0] = 56 * 365.25 * 86400
-        _aged = it.state()['ageSeconds']
+        _aged = it.state().get('ageSeconds', 'absent')
         ok_('...and the wall clock leaping 56 years does not age it (%r)' % (_aged,),
-            _aged is not None and _aged < 5)
+            isinstance(_aged, (int, float)) and _aged < 5)
         eq('...nor turn a fresh fix stale', it.state()['state'], 'fixed')
         it.stop()
     finally:

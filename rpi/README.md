@@ -3861,7 +3861,7 @@ row beside *scanner reading*:
 |---|---|
 | *GPS: no fix for 12 min* | a fix arrived and none has since — gps.py calls a fix stale at 20 seconds, and the rig waits a further minute (`GPS_HOLD`) before saying so, so a hotspot stumble is not news. Minutes rounded down. |
 | *GPS: no fix since start* | `--gps` was given and nothing usable has arrived in the minute since the scanner started — the app not running, the wrong address, or an address that would not parse |
-| *Pi under-voltage 61°C*, *Pi temp limit 85°C* | `vcgencmd get_throttled` says it is happening **now** — one word, the cause, which is the one with a remedy: the power lead, or shade |
+| *Pi under-voltage*, *Pi temp limit 85°C* | `vcgencmd get_throttled` says it is happening **now** — one word, the cause, which is the one with a remedy: the power lead, or shade. The temperature beside every word but *under-voltage*, whose remedy it has nothing to do with: beside it, on the 3.5" hat, it pushed the GPS's "min" off the end of the row |
 | nothing | the fix is good, or there is no `--gps` at all |
 
 Nothing for a rig run without `--gps`, on purpose: that is a choice, and a line
@@ -3889,6 +3889,18 @@ hours into its uptime is the scanner. server.js's `fell` and `wedged`
 counters say the same things and start again at nought on every restart; these
 are in the one file that is kept. Every change carries `forSeconds`, how long
 it had already lasted when written, so a `gone` says when it really began.
+
+Each row's `at` is the clock's, untouched, and its id is `up-<run>-<n>`: a
+random token for the run and the row's number in it. Not `up-<at>`, which is
+what it was: keeping those apart pushed `at` past the run's last row, and after
+NTP stepped a fast clock back seven hours a GPS gone stale three hours later
+was stamped 3.98 hours from when it happened — and, replayed, two boots that
+reached the loop in the same millisecond before NTP both wrote `up-25123`, of
+which the copy at home keeps one. `n` orders a run's rows
+when the clock cannot. `doctor.py`'s *stamps run forwards* sets these rows
+aside: the start row is written at every boot, which after a power cut is on
+fake-hwclock's restored time, earlier than the shift before, and it failed that
+check after every such boot while blaming the offers before it.
 
 No row for a quiet stretch, ever. A row every quiet two minutes was proposed
 and refused — see `worth_recording` and AUDITS.md — and a phone glanced at for

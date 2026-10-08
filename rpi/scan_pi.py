@@ -1674,7 +1674,9 @@ GPS_WORDS = {'fixed': 'ok', 'stale': 'stale', 'looking': 'lost', 'off': 'off'}
 # ran 370px into the 315px the row has there — so it takes the first, and the
 # first is the one with a remedy: the power lead, or shade. "temp limit" and
 # not "soft temp limit" for the same 315px: with a GPS two hours stale beside
-# it the longer word was cut by 2px.
+# it the longer word was cut by 2px. live.html names 'under-voltage' too — it
+# is the one word it does not put the temperature beside — so a rename here
+# is a rename there.
 THROTTLE_BITS = ((0, 'under-voltage'), (3, 'temp limit'), (2, 'throttled'),
                  (1, 'capped'))
 
@@ -1803,7 +1805,7 @@ class Held(object):
 class UpDown(object):
     """The rig's `kind: 'up'` rows: start, stop, the phone, the GPS.
 
-        {v, kind: 'up', id: 'up-<at>', seq: 1, at, about, state, ...}
+        {v, kind: 'up', id: 'up-<run>-<n>', seq: 1, at, about, state, ...}
 
     `about` is 'rig', 'phone' or 'gps', so 'lost' on its own is never asked to
     say what was lost.
@@ -1829,9 +1831,24 @@ class UpDown(object):
     leaves a 'gone' with no 'back'; the stop row is where that run's account
     ends.
 
-    `at` is made strictly increasing within the run, because the id is built
-    from it and the sync keys on id and seq: two rows in one millisecond would
-    be one row to the copy at home, and the second would be dropped there.
+    `at` is the clock's, as it is on every other row, and the id is not built
+    from it. The sync keys on id and seq, so two rows sharing an id are one row
+    to the copy at home and the second is dropped there with nothing saying
+    so; the id is therefore this run's own token and the row's number in the
+    run, which no clock can make repeat. It was `up-<at>`, with `at` pushed
+    past the last row's to keep the ids apart, and both halves were wrong:
+      * the push held `at` at the run's high-water mark after NTP stepped a
+        fast clock back — the seven hours AUDITS.md "The clock" records as
+        real. Measured: a 'gps stale' row written three hours after a 7h step
+        back was stamped 3.98 hours from when it happened, on the rows whose
+        whole purpose is to say when the rig failed;
+      * and it kept ids apart within one run only. Replayed: two boots that
+        reached the loop in the same millisecond before NTP, 25.123s after
+        1970, both wrote 'up-25123', and the copy at home keeps the first row
+        with an id and drops the second. How often two boots land in one
+        millisecond was not measured; with the token it does not matter.
+    `n` also orders a run's rows when the clock cannot: a start row stamped
+    before NTP and the rows after it are still 1, 2, 3.
     """
 
     def __init__(self, journal, asked_gps, phone_hold=None, gps_hold=None):
@@ -1846,15 +1863,19 @@ class UpDown(object):
         self.gps = Held(None if asked_gps else 'off',
                         GPS_HOLD if gps_hold is None else gps_hold, quick=('ok',))
         self.gps_age = None
-        self._last_at = 0
+        # Random rather than read off the machine: the pid repeats across
+        # boots, and the clock is the thing this is here to stop trusting.
+        # 48 bits: a run a day for thirty years is 10,980 runs, and the
+        # chance any two of them share a token is about 1 in 4.7 million.
+        self.run = os.urandom(6).hex()
+        self._n = 0
 
     def _write(self, about, state, **extra):
         if self.journal is None:
             return False
-        at = max(JR.now_ms(), self._last_at + 1)
-        self._last_at = at
-        row = {'v': JR.SCHEMA, 'kind': 'up', 'id': 'up-%d' % at, 'seq': 1,
-               'at': at, 'about': about, 'state': state}
+        self._n += 1
+        row = {'v': JR.SCHEMA, 'kind': 'up', 'id': 'up-%s-%d' % (self.run, self._n),
+               'seq': 1, 'at': JR.now_ms(), 'about': about, 'state': state}
         row.update(extra)
         return self.journal.append(row)
 
