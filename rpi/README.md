@@ -7244,7 +7244,7 @@ python3 rpi/test_scan_pi.py     # 360 on the loop that holds the camera, on
                                 #     many times it is read
 python3 rpi/test_sync.py        # 202 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
-python3 rpi/test_scanjs.py      # 202 on the phone's own scanner, through a
+python3 rpi/test_scanjs.py      # 203 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
 python3 rpi/test_liveview.py    # 111 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
@@ -7259,7 +7259,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 289 on the faults that only surface when a
+python3 rpi/test_lint.py        # 300 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #  67 on the three files the browser and the
@@ -7277,14 +7277,14 @@ python3 rpi/test_doctor.py      # 119 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 657 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 688 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 795 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 900 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 451 on the offers page as a driver reads it:
@@ -7292,7 +7292,7 @@ python3 rpi/test_offerspage.py  # 451 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 166 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 239 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 315 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that

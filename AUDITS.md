@@ -2547,6 +2547,38 @@ Four mutations, four named killers.
 
 **⌖ Dropoff asked to be pressed on 400 cards a week that the panel was saying to PASS.** The ask was measured with DROPOFF_NOT_STATED over week.csv rows that have no dropoff: 457 cards, split no 400 / go 29 / warn 28, and all 4 ticks in that set were go or warn. The ask is now gated on the card's own verdict, which the offer line carries, and never on last.state. showDest runs before `last` is updated, so last.state can belong to the previous card. The ask drops to 57 a week. The offer line is re-told when that verdict moves on the same card, for example an item count read late that moves billed minutes but not the card's own. Otherwise the offer and the headline disagree about one card. Frame by frame over the week's stored scans, this happens on 1 row of 1,166. Checks: test_dashboard "...but does not ask to be pressed on a card the panel says to pass"; test_scan_pi "the offer carries the verdict its own card got"; test_loop "...and told again, same id and same journey, when its verdict moved".
 
+**There was no way to keep a picture of the driving screen short of a phone
+held up to the glass.** The panel is a browser on the Pi's 800x480 display,
+driven by a bluetooth mouse, with no Print Screen key in reach, and the bar
+already holds six (Settled). 📷 now sits at the end of the status row beside
+the connection dot, costing the row and the bar no height; its width comes out
+of the shift line, so only the camera is drawn (the word went to screen
+readers: with it the median's digits are cut by 16px at 800x480, without it
+they keep 22px). It is not drawn on the 480x320 hat or a phone, where even the
+camera cuts the median (19px, 34px); `snaps.html` carries the press there.
+
+`POST /api/snap` keeps `panel.png` (grim, then scrot or import, run as an
+argument list and killed after 8s, with the desktop found the way a systemd
+service must: `/run/user/<uid>`, the `wayland-*` socket, then `:0`), the camera
+picture with its age (called old past 12s), what `/api/status` says, and
+`snap.json` naming every missing part and why — word for word on the control.
+The NucBox keeps the status and says why it kept nothing else. The newest 40
+are kept; the reply and the log name what was removed. `snaps.html` lists them
+newest first with thumbnails and download links; files are served only from
+folders named the way a press names one, then checked by realpath.
+
+The traps: a Pi whose clock still says 1970 names its new snap as the oldest,
+so pruning would have deleted the press it just made (never the folder just
+made now, and the note says so); an empty folder for a press that kept nothing
+was removed after the reply, so a list straight after still showed it; serving
+by path alone would serve any real folder inside snaps/; an X tool on a Wayland
+desktop photographs only the X windows (Wayland is tried first); and a layout
+check on a 101-character answer passed with the cutting removed (now the
+202-character worst case). About fifty mutations across server.js, live.html,
+snaps.html, journal.html, .gitignore and sw.js, each caught by name. The
+snap-size figures (82kB panel PNG) were measured on Chromium's encoder and
+should be re-measured on the Pi with grim.
+
 ### The offers page
 
 **The cost sweep's footnote read a two-sided test as a one-sided one, and
