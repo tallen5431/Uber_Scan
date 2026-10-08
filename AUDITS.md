@@ -850,6 +850,18 @@ is never true at the moment the window is judged.
 
 **'Both apps print a payout to the cent' was false, and a next-card headline test built on it let a whole-dollar card below run into the one above.** Row 475 prints `$6 Guaranteed (incl. tip)` on all 7 frames, rows 374/479/584/602/604 print $6 or $7 the same way, and row 79's ride prints `$18 * 5.00`. A headline is now cents OR the card's label or the rider's star directly after it. Over every frame and text of the week, 0 of 121 cents-less non-chosen figures have a label or star directly after them, so it moves 0 rows. The residue, stated: 144 of 208 cents-less chosen payouts have junk between figure and label, and the gap cannot widen, because row 505's map glyph `$5 | Guaranteed` has the same shape as row 314's real `$19 | Guaranteed`. It errs long. Checks: 'a whole-dollar card below still bounds the first: DoorDash prints `$7 Guaranteed`', '...and so does a whole-dollar ride below, by the rider's star', 'a bare $5 off the map...'.
 
+**The cards the reader guessed at now keep their picture, flag or no flag.**
+338 of the week's 1,166 offers landed a row the reader was unsure of — 328 on
+`recover_decimal`'s divide-by-ten (`milesCorrected`), 9 doubted, 9 suspect, 4
+with uncertain miles. A wrong decimal guess moves the cost line tenfold, and
+only the picture can say whether it was right, but pictures were kept only
+under `--keep-scans`, off by default. One picture per doubtful offer (the read
+that first landed it doubtful) now goes to `scans/doubt/`, capped at 400 (about
+16MB, about eight days at that week's rate), oldest first, and the log says once
+when a folder reaches its cap. Removing the keep fails 'a card the reader
+corrected the miles on keeps its picture, with no flag asked'; keeping every
+read fails '...one picture per doubtful offer' (2 for 1).
+
 ### The order in the car
 
 **A destination scanned while SCREENING lost its provenance the moment the card
@@ -3190,6 +3202,52 @@ below; it is the proposed cure that was wrong.
 
 **Never shortening a live hold (plan 3.1) is declined on measurement.** Replayed over the week's 31 ticks and 1,166 cards: with Drop never pressed it refuses 4 marks and recovers 53 empty-car cards (5 go/warn), losing 0. With Drop pressed at each stated end it refuses 3 marks (84.9 hold minutes) and changes 0 cards either way. The 'B-only stretch: 48.3 min, 6 cards' that the naive formula prints differs on 0 cards, because the first Drop in a pair empties the one slot under both rules. What decides it: with A retained, the ⌖ press or navigation sighting for the job just accepted attaches through holding(now) (server.js:437-441). It becomes an asked:true dropoff on A's id in the append-only journal. Both retained A's in the week had no dropoff, so both were exposed. The only guard is the attribution guard refused twice above. Do not retry this without that guard. Do not argue it from drop-row corruption either: in 2 of the 3 refused pairs A was delivered first, so the rule would have named the delivered job more often than today's rule does.
 
+### What else the rig could collect
+
+Weighed on 8 Oct 2026 against the week and the code, each proposal attacked by
+a skeptic before it was kept. These did not survive, and why:
+
+**An OBD-II dongle for fuel use is not worth fitting.** Its fuel figure is an
+estimate until it is scaled by real fill-ups, so it adds nothing beyond the
+fill-up log listed under Open, and the one question only it could answer —
+idle fuel in the 23-minute overhead — has no permitted consumer: subtracting
+it per hour moves the target, which is the tuning refused above.
+
+**A car-cost ledger (tyres, service, depreciation) says nothing for months.**
+A handful of receipts a year amortised per category is one $900 tyre set
+divided by whatever miles came before it, and depreciation — the largest term —
+is the driver's own estimate typed in, so the rig would add nothing to it.
+
+**A weekly snap of the platform's acceptance tier is not a new fact.** The app
+shows it permanently, and the only thing it could feed is how much to accept
+by app, which is the per-app target tuning refused above.
+
+**A Passed button on the driving bar does not fit and costs a tap per
+decline.** The bar already overflows when two of its three conditional
+buttons show, and about 45 declines a night inside a 33-second window is
+driver effort spent while driving. The labels come from the end-of-shift
+review instead (Open).
+
+**A health row every two minutes, quiet ones included,** re-opens the decision
+recorded at `worth_recording` in `rpi/scan_pi.py`: a quiet two minutes with the
+phone out of the mount is not evidence, and would bury the windows that are.
+What survives is richer `seen` rows and explicit up/down rows (Open).
+
+### The phone
+
+**The rig does not press Decline, and a remapped ring button should not
+either.** Asked for on 8 Oct 2026: one press on the bluetooth ring to reject
+an offer. A rig-driven click (the Pi posing as a bluetooth mouse) is refused
+for the money: on Uber's offer card the card body itself is Accept, so a click
+that lands a little off — the phone shifted in the mount, the layout changed —
+accepts a job, the most expensive wrong action this project can take. A
+remapping app on the phone (Button Mapper, Key Mapper, Tasker) dispatches taps
+through an accessibility service, the same mechanism auto-accept bots use and
+the one Uber and DoorDash deactivate drivers for, whoever presses the button.
+What is left is free and safe: an offer that expires is a decline to both
+apps, and a mouse right-click is Android's Back, which may or may not dismiss
+an offer card — a thirty-second test on the phone, not something to build.
+
 ## Measured on a real week — 1,166 offers, 13–20 Sep 2026
 
 The numbers above this line came from a 272-card export. This is a bigger and
@@ -3446,6 +3504,53 @@ by n=30).
 ---
 
 **One unlabelled bracketed leg on a lone card is called whole, and on a ride card that is the drive to the rider alone.** is_whole's single-leg clause says 'Uber labels every leg of a ride (away, trip, total)'. laid_out_approach measured 'away' on 0 of 1,166 rows. Measured on the week: rows 444 frame 0 and 805 frame 1 are ride frames whose trip leg did not read, and they read whole on the approach alone. Row 805's merge recovered; row 444's journal row is whole=0 for another reason. Not fixed, because the same shape is also an Eats card whose `total` did not read (`tota`, `te al`): 7 frames on 6 rows, all whole jobs. Telling them apart needs a text-level ride signal carried through the accumulator. half_a_ride answers it only where another card is in shot, and 'whole / one bare leg on a frame holding ONE card is left as it was' pins that boundary.
+
+**What else to collect, vetted, and where each stands (8 Oct 2026).** Each
+item was proposed against the week and attacked by a skeptic; the ones that
+did not survive are under Settled, "What else the rig could collect".
+
+- *Done:* pictures of the reads the rig doubted, kept always — see Done,
+  "The cards the reader guessed at".
+- *Being built:* peak-pay "Switch to this zone" prompts read as $1 offers (a
+  fault, not a collection: five in the week showed a verdict on the panel);
+  the end-of-shift review on the offers page (Took / Passed for the shift's
+  unlabelled go and warn cards, plus the app's own session summary, written
+  as ordinary marks with `via: 'review'`); 📷 Snap; rig up/down rows.
+- *Next:* Snap asks the scanner for what only it has — the crop the reader was
+  handed, its text, the health counters, GPS state and Pi temperature.
+- *Waiting on a file from the driver:* importing the weekly earnings
+  statement from drivers.uber.com, the only source of what was actually paid
+  (tips, promotions, later tip changes) and a trip count that needs no ticks.
+  The importer has to be written against one real download; no column list
+  could be confirmed from outside.
+- *Worth doing, lower priority:* a fill-up log typed at the pump (odometer,
+  gallons, dollars) giving a measured FUEL cost per mile beside the existing
+  cost-per-mile comparison, never written into the setting; odometer at the
+  start and end of a shift, for a dated mileage log (the IRS rate changed on
+  1 Jul 2026); a USB GPS receiver on the Pi (about $17), but only with a fix
+  quality gate, because the panel's "+N mi out of your way" would use it;
+  keeping cards that showed a payout but did not parse, for new layouts and
+  the first DoorDash cards; tesseract's per-word confidence on the scans,
+  collection only, until the doubt pictures show whether it predicts anything.
+
+**Feeding the phone's screen to the Pi over HDMI was researched, not built
+(8 Oct 2026).** The Fold6 does put its screen out over USB-C (Samsung lists
+wired DeX for it); the setting that mirrors rather than starting DeX is under
+Settings, Connected devices, Samsung DeX, Connected display. The Pi 4's two
+micro-HDMI ports are outputs, so the input is a USB capture stick (MacroSilicon
+MS2109, about $15, the one PiKVM and TinyPilot support). What decides it is the
+Uber offer card, which the driver reports cannot be screenshotted: whether such
+a window shows over a cable depends on Android's version and Samsung's build
+(AOSP 15 QPR1+ treats wired displays as secure; Android 16 can start HDCP the
+moment a protected layer appears), and whether a given MS2109 stick has HDCP
+keys varies by brand. A TV is no test — it does HDCP. Only the real stick
+settles it. Other costs found: the stick is an HDMI audio sink and can take the
+phone's navigation voice; the mirror goes black when the phone sleeps;
+folding changes the layout mid-shift; and the gain is modest — a portrait
+phone fitted to 1080 lines puts the card near 540px against about 450px the
+reader gets from the camera today, without glare but not much sharper. The
+camera stays the input; a capture source is a contained change if a $15 test
+ever shows the card.
 
 ## What has been swept, and when
 

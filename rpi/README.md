@@ -7029,6 +7029,30 @@ something that is not a calibration is refused rather than stored — a backup
 that cannot be restored is worse than none, because it is believed.
 `--no-config` turns it off.
 
+### On a mobile hotspot
+
+A 2GB-a-month plan is plenty for the rig itself and can be gone in an hour if
+anyone watches the camera from home.
+
+| what | about | from |
+|---|---|---|
+| the journal reaching the NucBox | 25MB a month | 5.7MB a week (`journal.WEEK_BYTES`), only new rows, every 10 minutes |
+| the sync asking where the copy is up to | 5–10MB | six small requests an hour while the rig is on |
+| Tailscale keeping its tunnel up | 10–50MB | not measured here; it varies with how often the connection changes |
+| clock, address lookups | under 5MB | tiny requests |
+
+**Watching the live camera over the VPN is what spends it.** The scene view is
+a 480px JPEG at quality 60, about 20KB (measured on the test frame), and while
+somebody watches it is sent at up to 30 a second (`SNAPSHOT_FAST`): about 600KB
+a second, roughly 2GB an hour. The panel on the rig's own screen costs nothing
+— that is the Pi talking to itself — and so does the phone when it is on the
+same hotspot as the rig, because Tailscale finds the direct path. Reading the
+offers page or the panel's numbers from home is a few kilobytes a refresh.
+
+Two more things that can spend a month's plan in one go: an `apt upgrade` (do
+it at home on Wi-Fi), and putting the phone itself on the hotspot — the driver
+apps and navigation are a full-time driver's gigabytes, not the rig's.
+
 ## Tuning
 
 ```sh
