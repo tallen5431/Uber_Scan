@@ -2404,7 +2404,7 @@ with open(_frame, 'wb') as _fh:
 _frame_bytes = open(_frame, 'rb').read()
 
 
-def _snapper(case, env):
+def _snapper(case, env, cwd=None):
     """A server for one case: its own journal, so its own snaps folder."""
     home = os.path.join(_pdir, case)
     os.makedirs(home, exist_ok=True)
@@ -2427,7 +2427,7 @@ def _snapper(case, env):
     os.utime(_frame, None)
     # None takes a name out altogether, the way systemd starts the service.
     full = {k: v for k, v in full.items() if v is not None}
-    proc = subprocess.Popen([_node, os.path.join(ROOT, 'server.js')], env=full,
+    proc = subprocess.Popen([_node, os.path.join(ROOT, 'server.js')], env=full, cwd=cwd,
                             stdout=open(log, 'w'), stderr=subprocess.STDOUT)
     url = 'http://127.0.0.1:%d' % port
     for _ in range(120):
@@ -2474,6 +2474,18 @@ import urllib.parse                                           # noqa: E402
 def _listed(url, name):
     """One snap as GET /api/snaps describes it, or {}."""
     return ([s for s in get(url, '/api/snaps')['snaps'] if s.get('name') == name] or [{}])[0]
+
+
+def _jrows(path):
+    """A journal's rows, read here; `lines` above is rebound by the time this runs."""
+    with open(path) as fh:
+        return [json.loads(l) for l in fh if l.strip()]
+
+
+def _snaprow(snaps):
+    """The last snap row in the journal beside a snaps folder, or {}."""
+    return ([r for r in _jrows(os.path.join(os.path.dirname(snaps), 'journal.jsonl'))
+             if r.get('kind') == 'snap'] or [{}])[-1]
 
 
 def _shelve(snaps, name, record=None, torn=False):
@@ -2571,6 +2583,26 @@ try:
     _record = _json_in(_dir, 'snap.json') or {}
     eq('...and snap.json in the folder says the same',
        (_record.get('said'), _record.get('contents')), (_rep.get('said'), _rep.get('contents')))
+    # No scanner runs on this server — the copy at home's shape — so there is
+    # nothing to ask what it read. Recorded as not applying, with the reason,
+    # and not as two parts that failed: the line above is plain "saved".
+    eq('on a machine with no scanner the reader\'s two files do not apply, and say why',
+       [(_piece(_rep, w).get('file'), _piece(_rep, w).get('saved'),
+         _piece(_rep, w).get('applies'), _piece(_rep, w).get('why')) for w in ('crop', 'reader')],
+       [('reader.jpg', False, False, 'no scanner runs on this machine'),
+        ('reader.json', False, False, 'no scanner runs on this machine')])
+    # ...and the press is in the journal, so it can be found from the shift.
+    _snaprows = [r for r in _jrows(os.path.join(os.path.dirname(_snaps), 'journal.jsonl'))
+                 if r.get('kind') == 'snap']
+    eq('a press leaves one snap row in the journal, naming its folder and what it kept',
+       [(r.get('v'), r.get('id'), r.get('seq'), r.get('at'), r.get('folder'), r.get('parts'))
+        for r in _snaprows],
+       [(1, 'snap-%d' % _rep.get('at', 0), 1, _rep.get('at'), _name,
+         ['panel.png', 'camera.jpg', 'status.json', 'snap.json'])])
+    eq('...with nothing missing, and the reader\'s files as not applying here, with why',
+       [(r.get('missing'), r.get('notApplicable')) for r in _snaprows],
+       [({}, {'reader.jpg': 'no scanner runs on this machine',
+              'reader.json': 'no scanner runs on this machine'})])
     # Listed and served.
     _list = get(_u, '/api/snaps')
     eq('the list names it, with the files it holds and their sizes',
@@ -2952,7 +2984,9 @@ try:
             break
         time.sleep(0.05)
     post(_u, '/api/offers/mark', {'id': 'o-snap', 'accepted': True})
+    _t0 = time.time()
     _code, _rep = _snap(_u)
+    _took = time.time() - _t0
     _status = _json_in(os.path.join(_snaps, _rep.get('name') or '?'), 'status.json') or {}
     eq('status.json carries the reading on the panel, and the reader\'s text',
        ((_status.get('last') or {}).get('perHour'), (_status.get('last') or {}).get('text')),
@@ -2961,6 +2995,42 @@ try:
     eq('...and the order in the car', (_status.get('holding') or {}).get('pay'), 16.05)
     eq('a running scanner that has written no picture says so',
        _piece(_rep, 'camera').get('why'), 'no camera picture yet')
+    # This scanner never looks for a snap request, so the press asks, waits its
+    # four seconds, and then says so.
+    eq('a scanner that does not answer is given up on, and both reader files say so',
+       [(_piece(_rep, w).get('saved'), _piece(_rep, w).get('why')) for w in ('crop', 'reader')],
+       [(False, 'the scanner did not answer in 4s')] * 2)
+    ok_('...after the four seconds and not much more (%.1fs)' % _took, 4.0 <= _took < 6.0)
+    # The screenshot's bit aside, which is this machine's desktop and not the
+    # scanner's business.
+    eq('...said once for the two, in the line the panel shows',
+       [b for b in (_rep.get('said') or '').split(' — ', 1)[-1].split('; ')
+        if 'screenshot' not in b],
+       ['no camera picture: no camera picture yet',
+        'no reader crop or reader record: the scanner did not answer in 4s'])
+    # The request, as the scanner would have found it: in the handoff directory
+    # under the shared name, naming the folder, and no temporary left beside it.
+    eq('the request names the folder, under the name the scanner looks for',
+       (_json_in(_pdir, 'uberscan-snap.json') or {}).get('folder'),
+       os.path.join(_snaps, _rep.get('name') or '?'))
+    eq('...renamed into place, with no temporary left behind',
+       [n for n in os.listdir(_pdir) if n.startswith('uberscan-snap')], ['uberscan-snap.json'])
+    # ...and the server was free while it waited. A press four seconds long
+    # that held the event loop would have frozen the panel's every request.
+    _waited = {}
+
+    def _press_and_time():
+        _waited['reply'] = _snap(_u)
+
+    _pt = threading.Thread(target=_press_and_time)
+    _pt.start()
+    time.sleep(1.0)
+    _s0 = time.time()
+    get(_u, '/api/status')
+    _waited['status'] = time.time() - _s0
+    _pt.join()
+    ok_('...and the server goes on answering while it waits (status in %.2fs)'
+        % _waited['status'], _waited['status'] < 0.5)
 finally:
     stop(_p)
 
@@ -2980,8 +3050,283 @@ try:
     _code, _rep = _snap(_u)
     eq('a scanner that is not running is named as the reason there is no picture',
        _piece(_rep, 'camera').get('why'), 'the scanner is not running')
+    eq('...and as the reason there is nothing from the reader',
+       [(_piece(_rep, w).get('saved'), _piece(_rep, w).get('why')) for w in ('crop', 'reader')],
+       [(False, 'the scanner is not running')] * 2)
+    eq('...said once for all three, in the line the panel shows',
+       [b for b in (_rep.get('said') or '').split(' — ', 1)[-1].split('; ')
+        if 'screenshot' not in b],
+       ['no camera picture, reader crop or reader record: the scanner is not running'])
 finally:
     stop(_p)
+
+# ...and a request that cannot be written — /dev/shm full — is said as that,
+# at once, and leaves no temporary behind. Staged by tearing this server's own
+# fs.writeFile for the request's temporary, the way the torn case below does
+# for the snap's files.
+_aho = os.path.join(_pdir, 'ask-handoff')
+os.makedirs(_aho)
+_askfull = os.path.join(_pdir, 'ask-full.js')
+with open(_askfull, 'w') as _fh:
+    _fh.write("var fs = require('fs');\nvar real = fs.writeFile;\n"
+              "fs.writeFile = function (p, data, cb) {\n"
+              "  if (!/snap\\.json\\.\\d+\\.\\d+\\.part$/.test(String(p))) return real.apply(fs, arguments);\n"
+              "  return real.call(fs, p, String(data).slice(0, 4), function () {\n"
+              "    var e = new Error('no space left on device'); e.code = 'ENOSPC';\n"
+              "    cb(e);\n"
+              "  });\n"
+              "};\n")
+_p, _u, _snaps, _log = _snapper('unasked', {
+    'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _sfake2,
+    'UBERSCAN_HANDOFF_DIR': _aho, 'FRAME': os.path.join(_pdir, 'no-frame.jpg'),
+    'NODE_OPTIONS': '--require ' + _askfull})
+try:
+    for _ in range(100):
+        if get(_u, '/api/status')['scanner']['running']:
+            break
+        time.sleep(0.05)
+    _t0 = time.time()
+    _code, _rep = _snap(_u)
+    eq('a request the handoff directory will not take is said as that',
+       [(_piece(_rep, w).get('saved'), _piece(_rep, w).get('why')) for w in ('crop', 'reader')],
+       [(False, 'could not ask the scanner: ENOSPC')] * 2)
+    ok_('...at once, not after waiting for an answer to it (%.1fs)' % (time.time() - _t0),
+        time.time() - _t0 < 3.0)
+    eq('...leaving nothing in the handoff directory', os.listdir(_aho), [])
+finally:
+    stop(_p)
+
+# --- a scanner that answers: what the reader last read, into the folder -------
+#
+# The scanner here is a stand-in that takes the request and answers it with the
+# real scan_pi.py — snap_requested, reader_record, answer_snap — so what the
+# server reads is what the rig writes. rpi/test_loop.py drives the same three
+# through the real scan loop. Each answer is one line of the plan: agreeing
+# with the panel about the card, disagreeing, before any read, and a
+# reader.json that is not one. It takes a request every 0.6s, slowly enough
+# that two presses together are both written before it looks.
+try:
+    import numpy                                              # noqa: F401
+    import cv2                                                # noqa: F401
+    _have_reader = True
+except ImportError:
+    _have_reader = False
+    print('  (no numpy or OpenCV here, so the scanner\'s own answer cannot be '
+          'written — skipping the answering-scanner checks)')
+if _have_reader:
+    _rho = os.path.join(_pdir, 'reader-handoff')
+    os.makedirs(_rho)
+    _rplan = os.path.join(_pdir, 'reader-plan.txt')
+    with open(_rplan, 'w') as _fh:
+        _fh.write('agree disagree noread garbage agree agree')
+    _rfake = os.path.join(_pdir, 'answers.py')
+    with open(_rfake, 'w') as _fh:
+        _fh.write('import json, os, sys, time\n'
+                  'sys.path.insert(0, %r)\n'
+                  'import numpy as np\n'
+                  'import scan_pi as SP\n'
+                  'class OnRecord(object):\n'
+                  '    def __init__(self, i):\n'
+                  '        self.id = self.landed_id = i\n'
+                  'print(json.dumps({"ready": True, "state": "go", "perHour": 31.6, "pay": 16.05, '
+                  '"minutes": 23.0, "miles": 8.4, "offer": {"id": "o-snap", "pay": 16.05, '
+                  '"minutes": 23.0, "billedMinutes": 23.0, "miles": 8.4, "cost": 2.94, '
+                  '"state": "go"}}), flush=True)\n'
+                  'last = {"at": time.time(), "fitted": np.full((60, 40), 90, np.uint8), '
+                  '"wholeScreen": False, "crop": [0.0, 0.3, 1.0, 0.5], "text": "UberX $16.05", '
+                  '"parsed": {"pay": 16.05, "episode": 2}, "rate": {"ready": True, "state": "go"}}\n'
+                  'done = 0\n'
+                  'while True:\n'
+                  '    folder = SP.snap_requested()\n'
+                  '    if folder:\n'
+                  '        plan = open(%r).read().split()\n'
+                  '        how = plan[done] if done < len(plan) else "agree"\n'
+                  '        done += 1\n'
+                  '        now = time.time()\n'
+                  '        if how == "garbage":\n'
+                  '            open(os.path.join(folder, "reader.json"), "w").write("not json")\n'
+                  '        else:\n'
+                  '            read = None if how == "noread" else last\n'
+                  '            SP.answer_snap(folder, read, SP.reader_record(read, now, '
+                  'offer_log=OnRecord("o-other" if how == "disagree" else "o-snap"), '
+                  'counters=SP.Health().counters(now)))\n'
+                  '    time.sleep(0.6)\n' % (os.path.join(ROOT, 'rpi'), _rplan))
+    _p, _u, _snaps, _log = _snapper('reader', {
+        'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
+        'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _rfake,
+        'UBERSCAN_HANDOFF_DIR': _rho, 'FRAME': os.path.join(_pdir, 'no-frame.jpg')})
+    try:
+        for _ in range(400):
+            if (get(_u, '/api/status').get('offer') or {}).get('id') == 'o-snap':
+                break
+            time.sleep(0.05)
+        _code, _rep = _snap(_u)
+        _dir = os.path.join(_snaps, _rep.get('name') or '?')
+        _crop, _reader = _piece(_rep, 'crop'), _piece(_rep, 'reader')
+        eq('a scanner that answers leaves its crop and its account in the folder',
+           ((_crop.get('saved'), _crop.get('bytes')), (_reader.get('saved'), _reader.get('bytes'))),
+           ((True, _size(os.path.join(_dir, 'reader.jpg'))),
+            (True, _size(os.path.join(_dir, 'reader.json')))))
+        _said = _json_in(_dir, 'reader.json') or {}
+        eq('...reader.json being the scanner\'s, naming the card it has on record',
+           ((_said.get('read') or {}).get('text'), _said.get('offer'), _said.get('episode')),
+           ('UberX $16.05', {'id': 'o-snap', 'landed': True}, 2))
+        eq('...which is the panel\'s card too, so nothing is said about it',
+           (_reader.get('offer'), _reader.get('panelOffer'), _reader.get('warn'), _rep.get('said')),
+           ('o-snap', 'o-snap', None, 'saved — no camera picture: no camera picture yet'))
+        eq('...and the two are listed and served with the rest',
+           sorted(f['file'] for f in _listed(_u, _rep.get('name')).get('files') or []),
+           ['panel.png', 'reader.jpg', 'reader.json', 'snap.json', 'status.json'])
+        _st, _body, _type = _fetch(_u, '/api/snaps/%s/reader.jpg' % _rep.get('name'))
+        eq('...reader.jpg as the JPEG the scanner wrote',
+           (_st, _type, _body == open(os.path.join(_dir, 'reader.jpg'), 'rb').read()),
+           (200, 'image/jpeg', True))
+        _row = ([r for r in _jrows(os.path.join(os.path.dirname(_snaps), 'journal.jsonl'))
+                 if r.get('kind') == 'snap'] or [{}])[-1]
+        eq('...and the journal row lists them among the parts kept',
+           (_row.get('parts'), _row.get('missing'), _row.get('notApplicable')),
+           (['panel.png', 'reader.jpg', 'status.json', 'reader.json', 'snap.json'],
+            {'camera.jpg': 'no camera picture yet'}, {}))
+
+        # The reader on another card from the panel: said FIRST, because the
+        # line is cut from the end and this is the one thing a snap can say
+        # that means the verdict on the panel may be another card's.
+        _code, _rep = _snap(_u)
+        _reader = _piece(_rep, 'reader')
+        eq('a reader on another card from the panel is said first, briefly, on the panel\'s line',
+           _rep.get('said'), 'saved — reader and panel on different cards: reader o-other, '
+                             'panel o-snap; no camera picture: no camera picture yet')
+        eq('...and recorded in snap.json with both cards',
+           [(p.get('offer'), p.get('panelOffer')) for p in
+            (_json_in(os.path.join(_snaps, _rep.get('name') or '?'), 'snap.json') or {})
+            .get('contents') or [] if p.get('what') == 'reader'],
+           [('o-other', 'o-snap')])
+
+        _code, _rep = _snap(_u)
+        eq('a scanner with no read yet answers, and the crop it has not got is said as that',
+           [(_piece(_rep, w).get('saved'), _piece(_rep, w).get('why')) for w in ('crop', 'reader')],
+           [(False, 'no read yet'), (True, None)])
+        eq('...on the panel\'s line', _rep.get('said'),
+           'saved — no camera picture: no camera picture yet; no reader crop: no read yet')
+
+        _code, _rep = _snap(_u)
+        eq('a reader.json that is not one is kept, called unreadable, and the crop\'s absence '
+           'said as unexplained',
+           [(_piece(_rep, w).get('saved'), _piece(_rep, w).get('why')) for w in ('crop', 'reader')],
+           [(False, 'the scanner kept no reader.jpg and did not say why'),
+            (True, 'reader.json cannot be read')])
+
+        # Two presses together. One request file: written for both at once,
+        # the second would replace the first before the scanner looked, and
+        # the first would wait out four seconds for an answer that went to the
+        # other. Asked in turn, both are answered.
+        _two = [None, None]
+
+        def _press2(i):
+            _t = time.time()
+            _two[i] = (_snap(_u), time.time() - _t)
+
+        _ts = [threading.Thread(target=_press2, args=(i,)) for i in (0, 1)]
+        for _t in _ts:
+            _t.start()
+        for _t in _ts:
+            _t.join()
+        eq('two presses together are both answered by the scanner, in turn',
+           [[_piece(x[0][1], w).get('saved') for w in ('crop', 'reader')] for x in _two],
+           [[True, True], [True, True]])
+        ok_('...neither waiting out the deadline for it (%s)'
+            % ', '.join('%.1fs' % x[1] for x in _two), all(x[1] < 3.5 for x in _two))
+    finally:
+        stop(_p)
+
+    # The scanner is started in the checkout, and this server need not be: a
+    # JOURNAL given relative to where the server was started puts the snaps
+    # folder there too, and the folder named to the scanner has to be the same
+    # folder from where IT stands.
+    _rel = os.path.join(_pdir, 'started-elsewhere')
+    os.makedirs(_rel)
+    _p, _u, _snaps, _log = _snapper('relative', {
+        'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'], 'JOURNAL': 'journal.jsonl',
+        'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _rfake,
+        'UBERSCAN_HANDOFF_DIR': _rho, 'FRAME': os.path.join(_pdir, 'no-frame.jpg')}, cwd=_rel)
+    try:
+        open(os.path.join(_rel, 'journal.jsonl'), 'a').close()
+        for _ in range(400):
+            if (get(_u, '/api/status').get('offer') or {}).get('id') == 'o-snap':
+                break
+            time.sleep(0.05)
+        _code, _rep = _snap(_u)
+        eq('a server started elsewhere with a relative JOURNAL names the scanner a folder it '
+           'can find, and is answered in it',
+           ([_piece(_rep, w).get('saved') for w in ('crop', 'reader')],
+            os.path.isfile(os.path.join(_rel, 'snaps', _rep.get('name') or '?', 'reader.json'))),
+           ([True, True], True))
+    finally:
+        stop(_p)
+
+# The scanner refuses a request older than its window; the server stops waiting
+# after its own. The first must close before the second, or an answer can land
+# in a folder whose snap.json has already said there is none. Read out of both
+# files, so neither can move alone.
+_window = float(re.search(r'^SNAP_ANSWER_WINDOW = ([\d.]+)', open(
+    os.path.join(ROOT, 'rpi', 'scan_pi.py'), encoding='utf-8').read(), re.M).group(1))
+_wait = int(re.search(r'^var SNAP_READER_MS = (\d+);', open(
+    os.path.join(ROOT, 'server.js'), encoding='utf-8').read(), re.M).group(1))
+ok_('the scanner stops answering a snap request (%gs) a good half second before the '
+    'server stops waiting for one (%gs)' % (_window, _wait / 1000.0),
+    _window * 1000 <= _wait - 500)
+
+# --- the snap row is collection only: everything that reads offers passes it --
+#
+# A `kind` row, like a mark, a pair or a drop. Pressed on a journal with two
+# offers in it, and every reader asked the same question before and after:
+# the offers page's fold, the CSV, /api/journal/newest's count, the notes the
+# sync copies, and journal.py's last(), which the scanner resumes from.
+sys.path.insert(0, os.path.join(ROOT, 'rpi'))
+import journal as _JR                                         # noqa: E402
+_p, _u, _snaps, _log = _snapper('kinds', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim']})
+_kj = os.path.join(os.path.dirname(_snaps), 'journal.jsonl')
+_know = int(time.time() * 1000)
+write(_kj, [offer(71, _know - 120000), offer(72, _know - 60000)])
+try:
+    def _readers():
+        # `have` in /api/journal/newest is every row the copy holds, and is
+        # meant to count this one; the newest offer and the count of offers
+        # are the figures the sync resumes from.
+        _newest = get(_u, '/api/journal/newest')
+        return (get(_u, '/api/journal?days=0').get('offers'),
+                raw(_u, '/api/journal.csv?days=0')[1],
+                (_newest.get('newest'), _newest.get('offers')),
+                get(_u, '/api/journal/notes'),
+                _JR.Journal(_kj).last())
+    _before = _readers()
+    _code, _rep = _snap(_u)
+    _krows = [r for r in _jrows(_kj) if r.get('kind') == 'snap']
+    eq('a snap on a journal with offers in it writes its row', len(_krows), 1)
+    _after = _readers()
+    for _i, _what in enumerate(('the offers page\'s fold', 'the CSV',
+                                '/api/journal/newest\'s count of offers',
+                                'the notes the sync copies',
+                                'journal.py\'s last offer, which the scanner resumes from')):
+        eq('%s passes over the snap row' % _what, _after[_i], _before[_i])
+finally:
+    stop(_p)
+# ...and the sync carries it to the copy at home, which is why it has an id and
+# a seq: syncKey drops a kind row that has neither.
+_hj = os.path.join(_pdir, 'home-journal.jsonl')
+open(_hj, 'w').close()
+_hp, _hb = start({'SCANNER': '0'}, _hj)
+try:
+    def _send(rows):
+        return json.loads(urllib.request.urlopen(urllib.request.Request(
+            _hb + '/api/journal/ingest',
+            data=(''.join(json.dumps(r) + '\n' for r in rows)).encode('utf-8'),
+            headers={'Content-Type': 'application/x-ndjson'}), timeout=10).read().decode())
+    eq('the copy at home stores a snap row sent to it', _send(_krows).get('added'), 1)
+    eq('...once, however often it is sent', _send(_krows).get('added'), 0)
+    eq('...as it was written', _jrows(_hj), _krows)
+finally:
+    stop(_hp)
 
 # --- newest first, and the oldest go, out loud --------------------------------
 _p, _u, _snaps, _log = _snapper('prune', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
@@ -3163,6 +3508,14 @@ try:
     eq('...so the list shows only the picture that was kept, and that nothing records the rest',
        ([(f['file'], f['bytes']) for f in _first.get('files') or []], _first.get('said')),
        ([('panel.png', len(_PNG))], 'no snap.json in this folder, so nothing says what is missing'))
+    # ...but the journal does: its row is written either way, and says which
+    # files went missing, snap.json among them.
+    _trow = _snaprow(_snaps)
+    eq('...and the journal row records what is missing, snap.json among them',
+       (_trow.get('folder'), _trow.get('parts'), _trow.get('missing')),
+       (_rep.get('name'), ['panel.png'],
+        {'camera.jpg': 'could not keep the camera picture: ENOSPC',
+         'status.json': 'could not write it: ENOSPC', 'snap.json': 'could not write it: ENOSPC'}))
 finally:
     stop(_p)
 

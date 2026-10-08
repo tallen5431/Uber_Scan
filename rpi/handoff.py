@@ -1,11 +1,14 @@
 """The files the web side and the camera side pass requests through.
 
-Three of them, and they are all the same shape: the browser asks for something,
+Six of them, and they are all the same shape: the browser asks for something,
 the scanner notices within a frame or two and acts.
 
     .viewing        somebody is watching, and which of the two views they want
     .recalibrate    forget where you think the phone is and find it again
     .cropbox.json   read this box, drawn by hand on the live picture
+    .dropoff        read the screen in front of you as a destination
+    .settings.json  a mile costs this much
+    .snap.json      say what you last read, into this 📷 Snap folder
 
 Files rather than a socket or a signal, because the scanner is sometimes a child
 of the web server and sometimes a systemd unit that has never heard of it, and a
@@ -173,6 +176,14 @@ DROPOFF = '.dropoff'
 # append-only journal at all, and `pad` and `secondsPerItem`, which move every
 # rate the rig prints and stores. See settings_requested in scan_pi.py.
 SETTINGS = '.settings.json'
+# "What was the reader looking at?" — written by POST /api/snap while a press
+# fills its folder, and the only request answered INTO somewhere: it names the
+# snap folder, and the scan loop writes reader.jpg (the crop it last handed to
+# tesseract) and reader.json (what it made of it) there, once. Aged like
+# `.dropoff`, because /dev/shm outlives a scanner restart and a folder the
+# server has stopped waiting on must not be written into later. See
+# snap_requested in scan_pi.py and askReader in server.js.
+SNAP = '.snap.json'
 
 
 # The live picture is the fourth file the two sides share, and it moved here

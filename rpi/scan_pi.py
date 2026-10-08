@@ -697,6 +697,159 @@ def emit_settings(settings):
         flush=True)
 
 
+# How old a 📷 Snap request may be and still be answered.
+#
+# server.js waits SNAP_READER_MS (4s) for reader.json and then seals the folder
+# with "the scanner did not answer". An answer written after that would sit in
+# a folder whose snap.json says it is not there — two accounts of one press. So
+# the window closes a second earlier than the wait, which leaves the answer
+# itself and the server's tenth-of-a-second poll inside the margin. Measured on
+# the development box, not the Pi: answering with the test ride card's real
+# crop (1134x881, a 33kB reader.jpg and 3kB of reader.json) took 3.0ms median
+# and 5.1ms at worst over 50. rpi/test_server.py reads both figures and holds
+# them apart.
+SNAP_ANSWER_WINDOW = 3.0
+
+
+def snap_requested(now=None):
+    """The snap folder a 📷 press asked about, once per press; None when none.
+
+    The same age guard dropoff_requested applies and for the same reason: the
+    request lives in /dev/shm, which a scanner restart does not clear, so a
+    press made while this process was down — or aiming, or calibrating, which
+    is still the server's child and not yet this loop — would be found later
+    and answered into a folder the server sealed long ago. One older than its
+    window, or stamped ahead of a clock that has since stepped back, is cleared
+    and logged and not answered.
+
+    And a folder that is not there is not made. The server makes the folder,
+    and one that has gone was removed by a press that kept nothing; writing
+    into a fresh one of that name would be a snap with no record of its own.
+    """
+    try:
+        pressed = HO.age(HO.SNAP, now)
+    except OSError:
+        return None
+    if pressed is None:
+        return None
+    raw = None
+    for candidate in HO.candidates(HO.SNAP):
+        try:
+            with open(candidate) as fh:
+                raw = fh.read()
+            break
+        except (IOError, OSError):
+            continue
+    HO.clear(HO.SNAP)
+    if pressed < 0:
+        log('ignored a snap request stamped %ds ahead of the clock: the clock '
+            'has stepped since, so how old the press is cannot be told'
+            % int(-pressed))
+        return None
+    if pressed >= SNAP_ANSWER_WINDOW:
+        log('ignored a snap request from %ds ago: older than its %gs window, '
+            'so an answer could land after the server has said there was none'
+            % (int(pressed), SNAP_ANSWER_WINDOW))
+        return None
+    try:
+        folder = json.loads(raw or '').get('folder')
+    except (ValueError, AttributeError):
+        folder = None
+    if not isinstance(folder, str) or not os.path.isdir(folder):
+        log('ignored a snap request naming no folder that is there (%r)'
+            % (raw or '')[:120])
+        return None
+    return folder
+
+
+def age_ms(stamp, now):
+    """How long before `now` a stamp off this process's clock was, in ms.
+
+    None when that cannot be told: either was read before the network set the
+    clock (see CLOCK_BELIEVABLE_AFTER), or the stamp is ahead of now, which is
+    the clock stepping back between the two — not a reading from the future.
+    """
+    if stamp < CLOCK_BELIEVABLE_AFTER or now < CLOCK_BELIEVABLE_AFTER or stamp > now:
+        return None
+    return int(round((now - stamp) * 1000))
+
+
+def reader_record(last, now, offer_log=None, counters=None, beat=None,
+                  phone=None):
+    """What reader.json says: the reader's own account of the moment.
+
+    `last` is the read the loop kept (see `last_read` in main), or None before
+    the first one has come back. Nothing here reads the camera: a snap is
+    about what the panel was showing, and a fresh read would be a picture of
+    something else.
+
+    `offer` is the card on record and whether it reached the journal, or a
+    sentence when there is no journal to have one. server.js holds its id
+    against the offer /api/status had at the press: the panel and the reader
+    disagreeing about which card it is is the thing a snap exists to catch.
+
+    `heartbeat` is the last beat as the wire carried it, and how long ago —
+    not the conditions worked out again now, which could disagree with what
+    the panel was told. `gps` is the phone's own word and its fix, when the
+    rig was asked to listen to one.
+    """
+    record = {'v': 1, 'answeredAt': int(now * 1000)}
+    if last is None:
+        record['read'] = None
+        record['noCrop'] = 'no read yet'
+    else:
+        record['read'] = {'at': int(last['at'] * 1000),
+                          'ageMs': age_ms(last['at'], now),
+                          # A ⌖ read of the whole screen box, not the card crop.
+                          'wholeScreen': last['wholeScreen'],
+                          'crop': last['crop'],
+                          'text': last['text'],
+                          'parsed': last['parsed'],
+                          'rate': last['rate']}
+    record['episode'] = (last['parsed'].get('episode')
+                         if last is not None else None)
+    record['offer'] = ('not kept: --no-journal' if offer_log is None
+                       else {'id': offer_log.id,
+                             'landed': offer_log.id is not None
+                             and offer_log.landed_id == offer_log.id})
+    record['health'] = counters
+    record['heartbeat'] = ('none sent yet' if beat is None
+                           else dict(alive_flags(**beat[1]),
+                                     ageMs=age_ms(beat[0], now)))
+    record['gps'] = ('gps off' if phone is None
+                     else {'state': phone.state(), 'fix': phone.fix()})
+    return record
+
+
+def answer_snap(folder, last, record):
+    """reader.jpg, then reader.json, into the folder a press named. Never fatal.
+
+    reader.jpg is `last['fitted']`: the greyscale card as it came off the warp,
+    before preprocess() — the picture tesseract's input was made from, which is
+    what "why did it read that?" is asked of. In that order, because the
+    server takes reader.json arriving as the answer being complete.
+    """
+    if last is not None:
+        problem = PL.write_jpeg(os.path.join(folder, 'reader.jpg'),
+                                last['fitted'], quality=SCAN_QUALITY)
+        if problem:
+            record['noCrop'] = 'could not write reader.jpg: %s' % problem
+    where = os.path.join(folder, 'reader.json')
+    try:
+        with open(where + '.part', 'w') as fh:
+            json.dump(record, fh, indent=2)
+        os.replace(where + '.part', where)
+    except (IOError, OSError, TypeError, ValueError) as e:
+        try:
+            os.remove(where + '.part')
+        except OSError:
+            pass
+        log('could not answer a snap into %s: %s' % (folder, e))
+        return False
+    log('snap: said what the reader last read into %s' % folder)
+    return True
+
+
 def use_manual_box(scanner, quad_px, card=None):
     """Read exactly the box a person drew, and stop deriving one inside it.
 
@@ -1252,6 +1405,31 @@ class Health:
         if out.get('clipped'):
             self.clipped += 1
 
+    def counters(self, now):
+        """Every figure report() speaks of, as it stands, without saying it.
+
+        report() hands the same dict back as its tally, so the two cannot count
+        differently. Asked by 📷 Snap mid-window too, which is why this neither
+        logs nor starts a new window: a press would otherwise cut the two-minute
+        health line short and reset the counts the `seen` row is built from.
+        `over` is None before the first read has opened a window.
+        """
+        return {'over': None if self.since is None else int(now - self.since),
+                'reads': self.reads, 'complete': self.complete,
+                'failed': self.failed, 'noPay': self.no_pay,
+                'clipped': self.clipped,
+                'medianMs': sorted(self.ms)[len(self.ms) // 2] if self.ms else None,
+                'saw': self.saw, 'kept': self.kept,
+                # Run totals, not window totals — see __init__.
+                'streetNoAddress': self.street_seen_no_address,
+                'addressAsOffer': self.address_refused_as_offer,
+                'screensKept': self.screens_kept,
+                'relocks': self.relocks, 'rebaselines': self.rebaselines,
+                'bright': self.bright, 'banding': self.banding,
+                'gain': self.gain, 'exposure': self.exposure,
+                'measuredExposure': self.measured_exposure,
+                'tooBright': self.too_bright, 'tooDim': self.too_dim}
+
     def report(self, now, tracker, scanner):
         """Say what has happened lately. Returns the tally, or None if silent.
 
@@ -1264,18 +1442,16 @@ class Health:
             self.since = now
         if now - self.since < HEALTH_EVERY or not (self.reads or self.failed):
             return None
+        tally = self.counters(now)
         if not self.reads:
             # Every read raised. There are no timings to summarise and nothing
             # else here is meaningful, but saying so is the whole point.
             log('health over %ds: %d reads, ALL FAILED — see the read failure '
                 'above for what went wrong' % (now - self.since, self.failed))
-            tally = {'over': int(now - self.since), 'saw': self.saw,
-                     'kept': self.kept, 'reads': 0, 'failed': self.failed}
             self.reset(now)
             return tally
-        median = sorted(self.ms)[len(self.ms) // 2]
         bits = ['%d reads, %d complete' % (self.reads, self.complete),
-                'median %.0fms' % median]
+                'median %.0fms' % tally['medianMs']]
         if self.failed:
             bits.append('%d failed' % self.failed)
         # `or self.kept`, because the two are counted at different moments and
@@ -1366,11 +1542,6 @@ class Health:
                 bits.append('un-stuck %dx — the size the tracker judges against '
                             'is out of date' % self.rebaselines)
         log('health over %.0fs: %s' % (now - self.since, '; '.join(bits)))
-        tally = {'over': int(now - self.since), 'saw': self.saw,
-                 'kept': self.kept, 'reads': self.reads, 'failed': self.failed,
-                 # Run totals, not window totals — see __init__.
-                 'streetNoAddress': self.street_seen_no_address,
-                 'addressAsOffer': self.address_refused_as_offer}
         self.reset(now)
         return tally
 
@@ -1531,11 +1702,21 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
     already reports that way, but the offers themselves are written from inside
     this loop with nobody to answer.
     """
-    print(json.dumps({'alive': True, 'at': int(time.time() * 1000),
-                      'tooBright': bool(too_bright),
-                      'tooDim': bool(too_dim),
-                      'refindRefused': refind_refused or None,
-                      'notSaving': not_saving or None}), flush=True)
+    print(json.dumps(dict({'alive': True, 'at': int(time.time() * 1000)},
+                          **alive_flags(too_bright, too_dim, refind_refused,
+                                        not_saving))), flush=True)
+
+
+def alive_flags(too_bright=False, too_dim=False, refind_refused=None,
+                not_saving=None):
+    """The beat's four conditions as the wire carries them.
+
+    Its own function so 📷 Snap's reader.json says the last beat in the words
+    the beat said it, rather than in a second spelling of the same four.
+    """
+    return {'tooBright': bool(too_bright), 'tooDim': bool(too_dim),
+            'refindRefused': refind_refused or None,
+            'notSaving': not_saving or None}
 
 
 def emit_reading():
@@ -2179,6 +2360,12 @@ def main():
     # its own expected aftermath from a fault. See the stalled branch.
     reset_at = None
     last_alive = 0.0
+    # What 📷 Snap asks this process for — see reader_record. The read digest()
+    # took last, crop and all, and the last beat with when it went. Kept, not
+    # made again on request: the crop is the one tesseract was handed, and the
+    # beat is what the panel was told.
+    last_read = None
+    last_beat = None
     # The card currently being watched, and what has become of it. See
     # Health.saw — an episode that ends having shown a payout but written
     # nothing is a card the rig saw and failed to keep.
@@ -2225,6 +2412,7 @@ def main():
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
+        nonlocal last_read
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -2265,6 +2453,12 @@ def main():
         # it in - the driver who took a moment to get the destination up is
         # exactly the driver whose address arrives at the end of the window.
         started = read_at if read_at is not None else time.time()
+        # ...and kept for 📷 Snap, ⌖ reads included: whatever tesseract was
+        # handed last is what "what was the reader looking at?" asks about.
+        # A reference, not a copy — the reader makes a new crop every read.
+        last_read = {'at': started, 'fitted': out.get('fitted'),
+                     'wholeScreen': bool(whole), 'crop': out.get('crop'),
+                     'text': out.get('text'), 'parsed': parsed, 'rate': rate}
         # WITH OR WITHOUT THE BUTTON.
         #
         # This branch used to run only inside the window a press opens, and the
@@ -2982,10 +3176,24 @@ def main():
                             % int(now_alive - reader.since))
                 elif now_alive - last_alive > ALIVE_EVERY:
                     last_alive = now_alive
-                    emit_alive(too_bright=health.too_bright,
-                               too_dim=health.too_dim,
-                               refind_refused=health.refind_notice(now_alive),
-                               not_saving=not_saving_notice(offer_log))
+                    flags = {'too_bright': health.too_bright,
+                             'too_dim': health.too_dim,
+                             'refind_refused': health.refind_notice(now_alive),
+                             'not_saving': not_saving_notice(offer_log)}
+                    emit_alive(**flags)
+                    last_beat = (now_alive, flags)
+
+            # 📷 Snap, asking for what only this process has. Here, after the
+            # read that finished and before the capture, so the answer is the
+            # newest read there is and costs the camera nothing. See
+            # snap_requested; the server waits four seconds for it.
+            snap_to = snap_requested()
+            if snap_to is not None:
+                now_snap = time.time()
+                answer_snap(snap_to, last_read, reader_record(
+                    last_read, now_snap, offer_log=offer_log,
+                    counters=health.counters(now_snap), beat=last_beat,
+                    phone=phone))
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate

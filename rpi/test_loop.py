@@ -138,7 +138,8 @@ def out_for(text, clipped=False, fitted=None):
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
         refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
-        clipped_for=None, dropoff_window=None, whole_text=None, fitted=None):
+        clipped_for=None, dropoff_window=None, whole_text=None, fitted=None,
+        fitted_for=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return. `handoff`: a directory to point the button-press files at, so a
@@ -183,8 +184,12 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             while True:
                 real_sleep(0.05)
         if whole and whole_text is not None:
-            return [out_for(whole_text) for _ in range(len(frames))]
-        return [out_for(texts_for_call(calls[0], k), fitted=fitted,
+            return [out_for(whole_text, fitted=fitted_for(calls[0]) if fitted_for else None)
+                    for _ in range(len(frames))]
+        # `fitted_for(n)`: a crop of its own for each read, so a check can
+        # tell which read a kept picture came from.
+        return [out_for(texts_for_call(calls[0], k),
+                        fitted=fitted_for(calls[0]) if fitted_for else fitted,
                         clipped=bool(clipped_for and clipped_for(calls[0], k)))
                 for k in range(len(frames))]
 
@@ -1014,6 +1019,337 @@ ok_('a card landed before the crop slipped',
     any(not x.get('kind') for x in r2['rows']))
 eq('a clipped read is not recorded as the screen after a card',
    [x for x in r2['rows'] if x.get('kind') == 'screen'], [])
+
+# --- 📷 Snap: the reader says what it last read, into the folder named ---------
+#
+# status.json is what the panel knew. What the READER was looking at — the crop
+# handed to tesseract, what it made of it, its counters, its last beat, the
+# phone's GPS — never left this loop, so POST /api/snap leaves a request naming
+# its folder and the loop answers into it once. Driven through main() the way
+# the dropoff and crop-box requests are, with the request written as server.js
+# writes it: JSON naming the folder, renamed into place.
+import re                                                     # noqa: E402
+import socket as _socket                                      # noqa: E402
+import threading as _threading                                # noqa: E402
+
+
+def _ask_snap(handoff, folder, age=None):
+    """What POST /api/snap leaves for the loop. `age` back-dates it."""
+    where = os.path.join(handoff, 'uberscan-snap.json')
+    with open(where + '.w', 'w') as fh:
+        json.dump({'folder': folder}, fh)
+    os.replace(where + '.w', where)
+    if age is not None:
+        os.utime(where, (time.time() - age, time.time() - age))
+    return where
+
+
+def _json_or_none(path):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+# A crop of its own for each read, flat grey at 20 times the read's number, so
+# the picture kept says which read it came from. Read 4 never comes back: the
+# reader is stuck on it, so read 3 is the last one there is, and an answer that
+# went back to the camera for a fresh one could never arrive at all.
+def _crop_of(n):
+    return np.full((120, 80), 20 * n, np.uint8)
+
+
+_snho = tempfile.mkdtemp()
+_snfold = tempfile.mkdtemp()
+_sreq = [None]
+# --no-track and a Re-find press, so the beat carries a refusal: the flags
+# reader.json reports are then something the beat said, not four Falses.
+open(os.path.join(_snho, 'uberscan-recalibrate'), 'w').close()
+
+
+def _snap_once_stuck(rows, ann, calls):
+    if _sreq[0] is None and calls >= 4 and any(not x.get('kind') for x in rows):
+        _sreq[0] = _ask_snap(_snho, _snfold)
+    return _sreq[0] is not None and os.path.exists(os.path.join(_snfold, 'reader.json'))
+
+
+r14 = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=20.0, handoff=_snho,
+          alive_every=0.05, stuck_after=60.0, hang_from=4, fitted_for=_crop_of,
+          until=_snap_once_stuck)
+_said = _json_or_none(os.path.join(_snfold, 'reader.json')) or {}
+_jpg = cv2.imread(os.path.join(_snfold, 'reader.jpg'), cv2.IMREAD_GRAYSCALE)
+ok_('a snap request is answered into the folder it names, reader.json and reader.jpg (%r)'
+    % sorted(os.listdir(_snfold)), _said and _jpg is not None)
+ok_('reader.jpg is the crop the last read handed the reader, kept from it (mean %r, read 3 is 60)'
+    % (None if _jpg is None else round(float(_jpg.mean()), 1)),
+    _jpg is not None and _jpg.shape == (120, 80) and abs(float(_jpg.mean()) - 60) < 2)
+eq('...answered while the reader is stuck on the next one, so no read was asked for it',
+   r14['calls'], 4)
+_read = _said.get('read') or {}
+eq('reader.json says what that read saw, as text and as figures',
+   (_read.get('text'), (_read.get('parsed') or {}).get('pay'),
+    (_read.get('rate') or {}).get('state')), (WHOLE, 16.05, 'go'))
+eq('...and that it read the card crop, not the whole screen for ⌖', _read.get('wholeScreen'), False)
+ok_('...when it was read, and how long before the answer (%r ms)' % _read.get('ageMs'),
+    isinstance(_read.get('ageMs'), int) and 0 <= _read['ageMs'] < 30000
+    and abs(_read.get('at', 0) + _read['ageMs'] - (_said.get('answeredAt') or 0)) <= 1)
+_snoffers = [x for x in r14['rows'] if not x.get('kind')]
+eq('...the offer it has on record, and that it is in the journal',
+   _said.get('offer'), {'id': _snoffers[-1].get('id') if _snoffers else '?', 'landed': True})
+ok_('...and the card\'s episode (%r)' % _said.get('episode'),
+    isinstance(_said.get('episode'), int))
+# Three reads were digested and the health window is two minutes, so the
+# counters as they stand are those three — not a fresh window a press opened.
+eq('...the health counters as they stand', ((_said.get('health') or {}).get('reads'),
+                                              (_said.get('health') or {}).get('complete')), (3, 3))
+_beat = _said.get('heartbeat')
+ok_('...and the flags the last heartbeat carried, the refused Re-find among them (%r)'
+    % (_beat,), isinstance(_beat, dict) and
+    '--no-track' in (_beat.get('refindRefused') or '')
+    and (_beat.get('tooBright'), _beat.get('tooDim'), _beat.get('notSaving')) == (False, False, None)
+    and isinstance(_beat.get('ageMs'), int))
+eq('...and "gps off", with no --gps given', _said.get('gps'), 'gps off')
+ok_('the request is taken, so it is answered once',
+    _sreq[0] is not None and not os.path.exists(_sreq[0]))
+eq('...and the log says where the answer went, once',
+   [l for l in r14['logs'] if l.startswith('snap:')],
+   ['snap: said what the reader last read into %s' % _snfold])
+
+# ...and before any read has come back there is no crop to give, and it says so.
+# --no-journal as well, so there is no card on record to name either.
+_snho2 = tempfile.mkdtemp()
+_snfold2 = tempfile.mkdtemp()
+_sreq2 = [None]
+
+
+def _snap_first_thing(rows, ann, calls):
+    if _sreq2[0] is None and calls >= 1:
+        _sreq2[0] = _ask_snap(_snho2, _snfold2)
+    return _sreq2[0] is not None and os.path.exists(os.path.join(_snfold2, 'reader.json'))
+
+
+run(lambda n, k: WHOLE, extra_argv=['--no-journal'], seconds=15.0, handoff=_snho2,
+    hang_from=1, stuck_after=60.0, fitted_for=_crop_of, until=_snap_first_thing)
+_said2 = _json_or_none(os.path.join(_snfold2, 'reader.json')) or {}
+eq('a scanner that has not read anything yet answers with no read and says why',
+   (_said2.get('read', '?'), _said2.get('noCrop')), (None, 'no read yet'))
+eq('...and leaves no reader.jpg', sorted(os.listdir(_snfold2)), ['reader.json'])
+eq('...and says no journal keeps an offer on record, rather than naming none',
+   _said2.get('offer'), 'not kept: --no-journal')
+
+# ...and a ⌖ read is a read: the last thing tesseract was handed was the whole
+# screen box, and reader.json says that is what it was. Pressed in read 1, so
+# read 2 is the whole-screen one; read 3 never comes back, so read 2 stays the
+# last there is.
+_snho3 = tempfile.mkdtemp()
+_snfold3 = tempfile.mkdtemp()
+_sreq3 = [None]
+
+
+_SNAP_NAV = 'Dropoff 9 Elm St, Acworth, GA 30101 4 min Start'
+
+
+def _press_dropoff_in_read_1(n, k):
+    if n == 1 and k == 0:
+        open(os.path.join(_snho3, 'uberscan-dropoff'), 'w').close()
+    return WHOLE
+
+
+def _snap_after_the_press(rows, ann, calls):
+    if _sreq3[0] is None and calls >= 3:
+        _sreq3[0] = _ask_snap(_snho3, _snfold3)
+    return _sreq3[0] is not None and os.path.exists(os.path.join(_snfold3, 'reader.json'))
+
+
+_r15 = run(_press_dropoff_in_read_1, seconds=15.0, handoff=_snho3,
+           whole_text=_SNAP_NAV, hang_from=3, stuck_after=60.0, fitted_for=_crop_of,
+           until=_snap_after_the_press)
+_read3 = (_json_or_none(os.path.join(_snfold3, 'reader.json')) or {}).get('read') or {}
+_jpg3 = cv2.imread(os.path.join(_snfold3, 'reader.jpg'), cv2.IMREAD_GRAYSCALE)
+eq('the last read being ⌖\'s, reader.json says it read the whole screen, and what it saw (%r)'
+   % (_r15['wholes'],), (_read3.get('wholeScreen'), _read3.get('text')), (True, _SNAP_NAV))
+ok_('...and reader.jpg is that read\'s crop (mean %r, read 2 is 40)'
+    % (None if _jpg3 is None else round(float(_jpg3.mean()), 1)),
+    _jpg3 is not None and abs(float(_jpg3.mean()) - 40) < 2)
+
+# --- ...but only a request still worth answering -----------------------------
+#
+# The request lives in /dev/shm, which a scanner restart does not clear, and
+# server.js stops waiting after four seconds. One found older than that — made
+# while the scanner was down, or aiming — would land reader files in a folder
+# whose snap.json already says there are none.
+for _age, _label, _said_as in (
+        (10.0, 'a snap request from before the scanner was listening',
+         r'ignored a snap request from \d+s ago'),
+        (-600.0, 'a snap request stamped ahead of a clock that has since stepped back',
+         r'ignored a snap request stamped \d+s ahead of the clock')):
+    _ho = tempfile.mkdtemp()
+    _fold = tempfile.mkdtemp()
+    _req = _ask_snap(_ho, _fold, age=_age)
+    _r = run(lambda n, k: WHOLE, seconds=6.0, handoff=_ho, fitted_for=_crop_of,
+             until=lambda rows, ann, calls: calls >= 2)
+    eq('%s is not answered' % _label, os.listdir(_fold), [])
+    eq('...is cleared, so it cannot be answered later either', os.path.exists(_req), False)
+    ok_('...and the log says it was ignored (%r)'
+        % [l for l in _r['logs'] if 'snap request' in l][:1],
+        any(re.match(_said_as, l) for l in _r['logs']))
+
+# ...and a folder that is not there is not made. The server makes the folder;
+# one that has gone was removed by a press that kept nothing.
+_ho = tempfile.mkdtemp()
+_gone = os.path.join(tempfile.mkdtemp(), 'removed-by-the-server')
+_req = _ask_snap(_ho, _gone)
+_r = run(lambda n, k: WHOLE, seconds=6.0, handoff=_ho, fitted_for=_crop_of,
+         until=lambda rows, ann, calls: calls >= 2)
+eq('a snap request naming a folder that is not there makes none', os.path.exists(_gone), False)
+ok_('...and says so in the log',
+    any(l.startswith('ignored a snap request naming no folder') for l in _r['logs']))
+
+# The age rule's edges, asked directly the way test_scan_pi.py asks
+# dropoff_requested: a request a moment old and one just inside the window are
+# answered; one exactly the window old is not.
+_ho = tempfile.mkdtemp()
+_fold = tempfile.mkdtemp()
+_was_dir, _was_log = os.environ.get(HO.ENV_DIR), SP.log
+os.environ[HO.ENV_DIR] = _ho
+SP.log = lambda m: None
+try:
+    _now = time.time()
+    for _age in (0.2, SP.SNAP_ANSWER_WINDOW - 0.2):
+        _req = _ask_snap(_ho, _fold)
+        os.utime(_req, (_now - _age, _now - _age))
+        eq('a snap request %.1fs old names its folder' % _age, SP.snap_requested(now=_now), _fold)
+        eq('...once', SP.snap_requested(now=_now), None)
+    _req = _ask_snap(_ho, _fold)
+    os.utime(_req, (_now - SP.SNAP_ANSWER_WINDOW, _now - SP.SNAP_ANSWER_WINDOW))
+    eq('a snap request exactly its window old is not answered', SP.snap_requested(now=_now), None)
+finally:
+    SP.log = _was_log
+    if _was_dir is None:
+        os.environ.pop(HO.ENV_DIR, None)
+    else:
+        os.environ[HO.ENV_DIR] = _was_dir
+
+# --- ...with the phone's GPS when it was asked to listen to one --------------
+#
+# A phone that answers: a socket here sending the RMC sentence test_gps.py reads
+# as 34.0117N 84.6105W. reader.json carries Phone.state() and fix() as given.
+RMC = '$GPRMC,182049.00,A,3400.7020,N,08436.6300,W,0.0,0.0,120926,,,A*4A'
+_gsock = _socket.socket()
+_gsock.bind(('127.0.0.1', 0))
+_gsock.listen(1)
+_gstop = []
+
+
+def _gps_phone():
+    _gsock.settimeout(0.2)
+    while not _gstop:
+        try:
+            conn, _ = _gsock.accept()
+        except OSError:
+            continue
+        try:
+            while not _gstop:
+                conn.sendall((RMC + '\r\n').encode('ascii'))
+                real_sleep_for_gps(0.1)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+
+real_sleep_for_gps = time.sleep
+_gthread = _threading.Thread(target=_gps_phone, daemon=True)
+_gthread.start()
+_ho = tempfile.mkdtemp()
+_fold = tempfile.mkdtemp()
+_greq = [None]
+_gt0 = time.time()
+
+
+def _snap_once_fixed(rows, ann, calls):
+    if _greq[0] is None and time.time() - _gt0 > 2.0 and calls >= 1:
+        _greq[0] = _ask_snap(_ho, _fold)
+    return _greq[0] is not None and os.path.exists(os.path.join(_fold, 'reader.json'))
+
+
+try:
+    run(lambda n, k: WHOLE, extra_argv=['--gps', '127.0.0.1:%d' % _gsock.getsockname()[1]],
+        seconds=15.0, handoff=_ho, fitted_for=_crop_of, until=_snap_once_fixed)
+finally:
+    _gstop.append(True)
+    _gsock.close()
+_gps = (_json_or_none(os.path.join(_fold, 'reader.json')) or {}).get('gps')
+_gps = _gps if isinstance(_gps, dict) else {'said': _gps}
+eq('a rig listening to a phone says what the phone said: its state, and its fix (%r)'
+   % (_gps.get('said'),),
+   ((_gps.get('state') or {}).get('state'),
+    round((_gps.get('fix') or {}).get('lat') or 0, 4),
+    round((_gps.get('fix') or {}).get('lon') or 0, 4)),
+   ('fixed', 34.0117, -84.6105))
+
+# --- the pieces, asked directly ------------------------------------------------
+# An age is two readings of one clock, and the Pi's jumps when the network sets
+# it. A read before the jump and an answer after it are not "20,000 days ago".
+eq('a read and an answer on a set clock are an age in ms',
+   SP.age_ms(1790000000.0, 1790000002.5), 2500)
+eq('...a read before the clock was set is of unknown age',
+   SP.age_ms(1000.0, 1790000002.5), None)
+eq('...and so is a read stamped after the answer: the clock stepped back',
+   SP.age_ms(1790000002.5, 1790000000.0), None)
+
+# A card the journal has not taken yet — the append failed, or has not run — is
+# on record in memory and not on disk, and reader.json says which.
+class _OnRecord(object):
+    id, landed_id = '1790000000000-1605', None
+
+
+eq('a card on record that has not reached the journal is said as not landed',
+   SP.reader_record(None, 1790000000.0, offer_log=_OnRecord()).get('offer'),
+   {'id': '1790000000000-1605', 'landed': False})
+
+# The counters a snap reports are the ones the health line would, as they
+# stand, and asking for them does not start a new window.
+_h = SP.Health()
+_h.since = 1000.0
+for _i in range(2):
+    _h.add({'ms': {'total': 100.0 + _i}}, {'complete': True, 'pay': 9.0})
+_mid = _h.counters(1010.0)
+_was_log = SP.log
+SP.log = lambda m: None
+try:
+    _tally = _h.report(1000.0 + SP.HEALTH_EVERY + 1, None, PL.Scanner(quad=None, roi=None))
+finally:
+    SP.log = _was_log
+eq('a snap\'s counters are the window as it stands', (_mid['reads'], _mid['over']), (2, 10))
+eq('...and asking for them does not end the window: the health line still has both reads',
+   (_tally or {}).get('reads'), 2)
+eq('...the line\'s tally being the same counters, at its own moment',
+   sorted((_tally or {}).keys()), sorted(_mid.keys()))
+
+# A crop that cannot be written is said in reader.json, and reader.json itself
+# still goes; a folder that cannot take reader.json is said in the log.
+_fold = tempfile.mkdtemp()
+_said3 = []
+_was_log = SP.log
+SP.log = _said3.append
+try:
+    _last = {'at': time.time(), 'fitted': None, 'wholeScreen': False, 'crop': None,
+             'text': '', 'parsed': {}, 'rate': {}}
+    SP.answer_snap(_fold, _last, SP.reader_record(_last, time.time()))
+    _blocked = os.path.join(tempfile.mkdtemp(), 'a-file')
+    open(_blocked, 'w').close()
+    eq('a folder that will not take reader.json is answered False',
+       SP.answer_snap(_blocked, None, SP.reader_record(None, time.time())), False)
+finally:
+    SP.log = _was_log
+ok_('a crop that cannot be written is said in reader.json (%r)'
+    % (_json_or_none(os.path.join(_fold, 'reader.json')) or {}).get('noCrop'),
+    ((_json_or_none(os.path.join(_fold, 'reader.json')) or {}).get('noCrop') or '')
+    .startswith('could not write reader.jpg: '))
+ok_('...and one that cannot take reader.json is said in the log (%r)' % _said3[-1:],
+    any(l.startswith('could not answer a snap into %s' % _blocked) for l in _said3))
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)

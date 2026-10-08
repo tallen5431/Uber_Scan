@@ -3284,6 +3284,11 @@ try:
         os.makedirs(_dir)
         if _whole:
             Image.new('RGB', (800, 480), (11, 15, 20)).save(os.path.join(_dir, 'panel.png'))
+            # ...and what the scanner answers into a folder: the crop it last
+            # read, greyscale as the reader has it, and its account of it.
+            Image.new('L', (440, 560), 200).save(os.path.join(_dir, 'reader.jpg'), quality=72)
+            with open(os.path.join(_dir, 'reader.json'), 'w') as _fh:
+                json.dump({'v': 1, 'read': None, 'noCrop': 'no read yet'}, _fh)
         Image.new('RGB', (480, 1040), (238, 240, 244)).save(
             os.path.join(_dir, 'camera.jpg'), quality=60)
         with open(os.path.join(_dir, 'status.json'), 'w') as _fh:
@@ -5055,14 +5060,17 @@ try:
         % (_whens,), {'2026-01-02 09:00:00', '2026-01-02 09:05:00'} <= set(_whens))
     eq('...newest first', _whens, sorted(_whens, reverse=True))
     _whole = ([s for s in first if s.get('when') == '2026-01-02 09:00:00'] or [{}])[0]
-    eq('...showing a whole one\'s panel and camera picture, both loaded',
+    eq('...showing a whole one\'s panel, camera picture and reader\'s crop side by side, '
+       'all loaded',
        [(p.get('src'), p.get('loaded')) for p in _whole.get('pics') or []],
        [('/api/snaps/2026-01-02_09-00-00/panel.png', True),
-        ('/api/snaps/2026-01-02_09-00-00/camera.jpg', True)])
-    eq('...with a link to save each file under the snap\'s own name',
+        ('/api/snaps/2026-01-02_09-00-00/camera.jpg', True),
+        ('/api/snaps/2026-01-02_09-00-00/reader.jpg', True)])
+    eq('...with a link to save each file under the snap\'s own name, reader.json among them',
        [(l.get('href'), l.get('download')) for l in _whole.get('links') or []],
        [('/api/snaps/2026-01-02_09-00-00/' + f, '2026-01-02_09-00-00-' + f)
-        for f in ('panel.png', 'camera.jpg', 'status.json', 'snap.json')])
+        for f in ('panel.png', 'camera.jpg', 'status.json', 'snap.json',
+                  'reader.jpg', 'reader.json')])
     eq('...and a link that opens what it names',
        (sp.get('opened') or {}).get('status'), 200)
     _short = ([s for s in first if s.get('when') == '2026-01-02 09:05:00'] or [{}])[0]

@@ -2065,7 +2065,39 @@ connection dot, just above the bar of buttons — not on the bar, which holds si
 | `panel.png` | the Pi's display, taken by the desktop's own screenshot tool |
 | `camera.jpg` | the live picture the scanner last wrote, with its age |
 | `status.json` | what `/api/status` would have answered at the press: the reading on the panel, the reader's text when the reading carries it, the offer on record and the order in the car |
+| `reader.jpg` | the crop the scanner last handed to tesseract — the greyscale card as it came off the warp |
+| `reader.json` | the scanner's own account of that read: when, and how long before it answered; the text, the parse and the rate; whether it was a ⌖ read of the whole screen; the offer it has on record and the card's episode; its health counters as they stand; the flags its last heartbeat carried; and the phone's GPS state and fix, or "gps off" |
 | `snap.json` | which of those it kept, and for each one it did not, why |
+
+**Why the scanner is asked.** Everything above `reader.jpg` is what the
+*panel* knew. A misread is a question about what the *reader* was looking at,
+and that never left the scan loop: the crop was made, read and dropped every
+read, the health counters reached a log line every two minutes, and the GPS
+state was reported nowhere. So a press leaves a request for the scanner in the
+handoff directory (`uberscan-snap.json` in `/dev/shm`, naming the folder), and
+the scan loop answers into the folder once — with the crop it **kept from its
+last read**, never a new one, so the picture is the last one tesseract was
+handed (a ⌖ read of the whole screen included, and said to be one). The server
+waits up to four seconds, polling, and then says
+what is missing and why: the scanner is not running, it did not answer in 4s,
+or it has not read anything yet. A request older than three seconds is cleared
+and logged by the scanner, never answered later, so nothing lands in a folder
+whose `snap.json` already says it is not there. Two presses at once are asked
+in turn, so one cannot overwrite the other's request.
+
+**When the reader and the panel disagree about the card**, the control says so
+first: **📷 saved — reader and panel on different cards: reader <id>, panel
+<id>**. The reader's offer on record is held against the one `/api/status` had
+at the press; when they differ, the verdict on the panel may be another card's,
+which is the thing a snap is most often taken to show. On the copy at home,
+which runs no scanner, the two reader files are recorded as not applicable,
+with that reason, and are not called missing.
+
+**Each press leaves a row in the journal**, `kind: "snap"`, naming the folder,
+the files it kept, the ones missing and why, and the ones that do not apply —
+so a snap can be found from the shift it was taken in after its folder has
+been pruned. Collection only: the offers page, the CSV and the sync's offer
+count all pass over it, and nothing reads it into a rate.
 
 The control answers in place: **📷 saved**, or **📷 saved — no screenshot: grim
 is not installed**. It never says "saved" over less than it kept. A camera
@@ -2102,12 +2134,13 @@ machine, a card too full to write to. The copy at home, with no desktop and no
 camera, keeps `status.json` and says why it kept nothing else.
 
 **Getting them off the rig.** **▤ Offers → 📷 Snaps** (`snaps.html`) lists every
-snap, newest first, with the two pictures and a link to open or save each file
+snap, newest first, with its pictures — the panel, the camera's and the
+reader's crop — and a link to open or save each file, `reader.json` among them
 — under the snap's own name, so four `panel.png` in a Downloads folder are
 still four snaps. It has its own 📷 press as well, which is the one to use from
 a phone: it photographs the rig's display, not the phone's. Underneath it are
 `GET /api/snaps` and `GET /api/snaps/<folder>/<file>`, which serve exactly what
-the list shows — the folders this server makes and the four files it writes,
+the list shows — the folders this server makes and the files a press writes,
 real ones, never a link wherever it points. Each is listed with its age by the
 rig's clock, or "age unknown" when it or the clock reading it was never set.
 On the rig the folders are in `rpi/snaps/`, beside the
@@ -2116,9 +2149,10 @@ journal (wherever `JOURNAL` puts it), which `.gitignore` covers and
 belong in a commit.
 
 **It keeps the newest forty, and the oldest go first.** Measured, a snap is
-110–135kB — an 82kB PNG of the panel at 800x480 out of Chromium's encoder, a
-23–50kB camera picture and a 1.9kB status — so forty is under 5.5MB, a third of
-what `--keep-scans` is allowed. When one goes, the control's own line names
+146–171kB — an 82kB PNG of the panel at 800x480 out of Chromium's encoder, a
+23–50kB camera picture, a 1.9kB status, and the reader's 33kB crop and 3kB
+account of the test ride card — so forty is under 7MB, under half of what
+`--keep-scans` is allowed. When one goes, the control's own line names
 it — **📷 saved — removed the oldest to keep 40: <folder>** — and so do the
 reply and the server's log. A press never removes a folder that is still being
 filled, its own or another press's, which matters on a Pi that booted before

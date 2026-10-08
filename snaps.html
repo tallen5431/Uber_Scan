@@ -169,7 +169,12 @@
     box.appendChild(el('p', 'said', snap.said || ''));
     var files = (snap.files || []).map(function (f) { return f.file; });
     var pics = el('div', 'pics');
-    ['panel.png', 'camera.jpg'].forEach(function (file) {
+    // The screen, the phone as the camera saw it, and the crop the reader was
+    // handed — the three pictures a misread is worked out from, side by side.
+    // What the reader made of the crop is reader.json, in the links below.
+    var PICS = { 'panel.png': 'the rig\'s screen', 'camera.jpg': 'the camera\'s last picture',
+                 'reader.jpg': 'the crop the reader last read' };
+    Object.keys(PICS).forEach(function (file) {
       if (files.indexOf(file) === -1) return;
       var a = el('a');
       a.href = fileUrl(snap.name, file);
@@ -178,7 +183,7 @@
       var img = el('img');
       img.loading = 'lazy';
       img.src = fileUrl(snap.name, file);
-      img.alt = file === 'panel.png' ? 'the rig\'s screen' : 'the camera\'s last picture';
+      img.alt = PICS[file];
       a.appendChild(img);
       pics.appendChild(a);
     });

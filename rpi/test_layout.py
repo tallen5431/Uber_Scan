@@ -1472,6 +1472,10 @@ for _name, _whole in (('2026-10-07_21-14-03', True), ('2026-10-07_21-15-40', Fal
     os.makedirs(os.path.join(_shelf, _name))
     if _whole:
         Image.new('RGB', (800, 480), (11, 15, 20)).save(os.path.join(_shelf, _name, 'panel.png'))
+        # ...and the third picture a whole one has: the reader's crop, at the
+        # size the test ride card's comes off the warp.
+        Image.new('L', (881, 1134), 200).save(
+            os.path.join(_shelf, _name, 'reader.jpg'), quality=72)
     Image.new('RGB', (480, 1040), (238, 240, 244)).save(
         os.path.join(_shelf, _name, 'camera.jpg'), quality=60)
     with open(os.path.join(_shelf, _name, 'status.json'), 'w') as _fh:

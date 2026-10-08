@@ -57,7 +57,7 @@ def ok_(name, cond):
 # the same path for it, and that a private directory moves it for both of them.
 # A request written where the reader is not looking is not a stale picture, it
 # is a button that does nothing.
-BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS]
+BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS, HO.SNAP]
 
 # --- the rule --------------------------------------------------------------
 for base in BASES:

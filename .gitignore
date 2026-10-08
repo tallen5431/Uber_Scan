@@ -2,9 +2,9 @@
 *.pyc
 __pycache__/
 # Requests in flight between the web side and the camera side: someone is
-# looking, re-find the phone, read this box, read the destination. All four
-# exist for seconds and
-# live in /dev/shm on any machine that has it — see rpi/handoff.py. These are
+# looking, re-find the phone, read this box, read the destination, a cost per
+# mile, what the reader last read. Every one exists for seconds and
+# lives in /dev/shm on any machine that has it — see rpi/handoff.py. These are
 # the fallback names, used where there is no RAM disk to write in, and still
 # read on either machine so an upgrade cannot drop a request between the two
 # sides restarting.
@@ -25,6 +25,11 @@ rpi/.dropoff*
 # Committed, every checkout would set the car's running cost to whatever the
 # committing machine last typed.
 rpi/.settings.json*
+# The sixth: a 📷 Snap asking the scan loop what it last read, naming the
+# folder to answer into. Committed, it names a folder on the machine that
+# committed it, and is refused on the first frame — for its age, or for a
+# folder that is not there — and logged.
+rpi/.snap.json*
 rpi/live-frame.jpg*
 # Advisory between this project's own scripts, so a second one says which pid
 # holds the camera instead of dying with a traceback about a device. It contains
