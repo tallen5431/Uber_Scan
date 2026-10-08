@@ -1102,14 +1102,20 @@ try:
     # The frame text holds a PIPE, which is the whole point of the column's
     # form: the card's icon row and its dividers both arrive as pipes, and
     # joining frames with " | " split 19% of its own rows mid-frame.
+    #
+    # Its `text` is the reader's output as rpi/journal.py stores it, line breaks
+    # and all, with a quote in a merchant's name: the two characters JSON has
+    # to escape, which is what the replay check at the foot of this block reads.
+    _scanned_frames = ['$9.00 | 20 min (4.0 mi) trip',
+                       '$9.00 20 min (4.0 mi) trip']
+    _scanned_text = '$9.00\n20 min (4.0 mi) trip\nJoe\'s "Famous" Deli\nCanton Rd'
     with open(journal, 'a') as _fh:
         _fh.write(json.dumps({
             'v': 1, 'id': 'scanned-1', 'seq': 1,
             'at': int(time.time() * 1000) - 1000,
             'firstAt': int(time.time() * 1000) - 1000,
             'pay': 9.0, 'minutes': 20.0, 'miles': 4.0, 'perHour': 27.0,
-            'scans': ['$9.00 | 20 min (4.0 mi) trip',
-                      '$9.00 20 min (4.0 mi) trip'],
+            'scans': _scanned_frames, 'text': _scanned_text,
         }) + '\n')
     body = urllib.request.urlopen(base + '/api/journal.csv', timeout=10)
     text = body.read().decode('utf-8')
@@ -1166,6 +1172,38 @@ try:
     # not a flaky check, it is a check that cannot fail - which is this
     # project's sixth fault, sitting in its own suite.
     eq('a row with frames in it reached the export at all', _round_tripped, 1)
+
+    # ...and the replay reads back the text the rig wrote.
+    #
+    # tools/replay_week.py is how a parser change is tried on a real week
+    # before it ships. It decoded `scans` and handed `text` to both ports as
+    # the cell stood — and the cell is JSON too, so the parsers were given one
+    # run-on line in quotes, every break a literal "\n" and every quote
+    # backslashed. On the owner's week
+    # 1,073 of 1,166 texts read differently from the decoded text, the two
+    # ports agreeing on the wrong string throughout. Asked of the tool's own
+    # reader against this server's own export, so a change on either side of
+    # the file fails here.
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import replay_week
+    _export = os.path.join(work, 'export.csv')
+    with open(_export, 'w', newline='') as _fh:
+        _fh.write(text)
+    eq('the replay reads the text the rig wrote, line breaks and quotes and all',
+       [r['text'] for r in replay_week.read_rows(_export)
+        if r['frames'] == _scanned_frames], [_scanned_text])
+    # A cell that is not a JSON string is an export this tool cannot read, and
+    # it says which row rather than handing the parsers a number.
+    _odd = os.path.join(work, 'odd.csv')
+    with open(_odd, 'w', newline='') as _fh:
+        _fh.write('scans,text\n"[]","12"\n')
+    try:
+        replay_week.read_rows(_odd)
+        _refused = None
+    except SystemExit as e:
+        _refused = str(e)
+    eq('...and stops on a text cell that is not a JSON string, naming its row',
+       _refused, 'row 1: text is not a JSON string')
 
     # --- the delivery card, which had no second-job line at all --------------
     #

@@ -1,7 +1,8 @@
 /* The browser port's half of tools/replay_week.py. Not run on its own.
  *
  * Reads the rows replay_week.py already took apart — frames from the `scans`
- * column by JSON, never by splitting on "|" — on stdin, parses every frame and
+ * column by JSON, never by splitting on "|", and the `text` cell decoded from
+ * the JSON string server.js writes it as — on stdin, parses every frame and
  * the stored text through offer-parser.js with the row's own settings, and
  * writes the same summary the Python half builds, keyed by row number, to
  * stdout. One summary shape for both ports, so they can be compared field by

@@ -39,6 +39,16 @@ real week 5,881 pipe characters sit INSIDE frame texts — OCR reads a card's
 border as one. A replay that split on the pipe would be replaying frames the
 camera never took.
 
+THE TEXT IS DECODED WITH json.loads TOO. server.js writes `text` through
+JSON.stringify so that one offer is one line of the file, which makes the cell
+a JSON string: quoted, with every line break written as a backslash and an n.
+This tool handed the cell over as it stood, so the `text` readings were of one
+run-on line full of literal "\\n"s — a frame the reader never returned. On the
+real week every one of the 1,166 cells carries them, and 1,073 read differently
+from the decoded text: places on all 1,073, pickup on 965, dropoff on 472, and
+pay, verdict and rate on one. Both ports were fed the same wrong string, so
+they agreed with each other throughout and nothing said so.
+
 Rates are taken with each row's own target, band and costPerMile, so a verdict
 is judged against the line the driver had set that night, not today's.
 """
@@ -121,8 +131,12 @@ def read_rows(path):
         frames = json.loads(raw) if raw.strip() else []
         if not isinstance(frames, list):
             raise SystemExit('row %d: scans is not a JSON array' % n)
+        raw = row.get('text') or ''
+        text = json.loads(raw) if raw else ''
+        if not isinstance(text, str):
+            raise SystemExit('row %d: text is not a JSON string' % n)
         out.append({'row': n, 'at': row.get('at'), 'frames': frames,
-                    'text': row.get('text') or '', 'settings': settings_of(row)})
+                    'text': text, 'settings': settings_of(row)})
     return out
 
 
