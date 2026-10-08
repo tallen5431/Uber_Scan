@@ -2818,20 +2818,32 @@ if (!isFinite(SNAPS_KEEP) || SNAPS_KEEP < 1) SNAPS_KEEP = 40;
 
 /* How long the screenshot tool may take before it is killed and the snap is
  * kept without it. Well inside the twenty seconds the panel itself waits for
- * any answer (POST_TIMEOUT_MS in live.html), so a tool that hangs comes back
- * as a reason on the control rather than as the panel giving up on the press
- * and the driver left not knowing whether anything was kept. Overridable so
- * the hang can be checked without waiting it out. */
+ * any answer (POST_TIMEOUT_MS in live.html, ASK_MS in snaps.html), so a tool
+ * that hangs comes back as a reason on the control rather than as the panel
+ * giving up on the press and the driver left not knowing whether anything was
+ * kept. rpi/test_server.py hangs a tool against this default and holds the
+ * answer inside the pages' own deadline, read out of the pages. Overridable so
+ * the other hang checks need not wait it out. */
 var SNAP_TOOL_MS = Number(process.env.SNAP_TOOL_MS);
 if (!isFinite(SNAP_TOOL_MS) || SNAP_TOOL_MS <= 0) SNAP_TOOL_MS = 8000;
 
 /* Past this the camera picture is still kept — it is evidence of what the
  * scanner last saw — but it is never presented as what was in front of the
- * camera at the press. A running scan loop rewrites it every SNAPSHOT_IDLE =
- * 3.0s with nobody watching and thirty times a second with somebody watching,
- * so twelve seconds is the same window live.html's STALE_MS gives a scanner
- * before the panel stops believing it is running: the snap and the panel it
- * was taken from cannot disagree about whether the picture is current. */
+ * camera at the press.
+ *
+ * The picture's own age, from the file's mtime: the question is whether THIS
+ * picture is the one at the press, and only the picture can answer it. A
+ * running scan loop rewrites it every SNAPSHOT_IDLE = 3.0s with nobody
+ * watching (rpi/scan_pi.py) and thirty times a second with somebody watching,
+ * so twelve seconds is four idle rewrites missed. rpi/test_server.py reads
+ * SNAPSHOT_IDLE out of scan_pi.py and holds a picture two rewrites old as
+ * current and one six rewrites old as old.
+ *
+ * It is not the panel's rule, and the two can disagree. live.html dims its
+ * picture on silence from the scanner (STALE_MS, timed from the last message
+ * the page heard), which asks how long since the scanner said anything; this
+ * asks how old the picture is. The same twelve seconds, two different clocks.
+ * panel.png beside it shows what the panel said. */
 var SNAP_FRAME_STALE_MS = 12000;
 
 // The folder names this server makes, and the files it puts in them. The only
@@ -2839,7 +2851,13 @@ var SNAP_FRAME_STALE_MS = 12000;
 // URL is ever a path.
 var SNAP_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d{2})?$/;
 var SNAP_FILES = ['panel.png', 'camera.jpg', 'status.json', 'snap.json'];
-var PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// How every PNG opens — its signature, then its image header, which the format
+// requires first — and how every PNG ends: the empty IEND chunk and its CRC.
+// The tail is what a tool cut off part way, or a card that filled under it,
+// does not have.
+var PNG_HEAD = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+                            0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+var PNG_TAIL = Buffer.from([0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
 
 // Sortable as text, in local time, because the name is what a person reads in
 // a file listing: 2026-10-07_21-14-03. It sorts by the clock it was stamped
@@ -2857,6 +2875,24 @@ function spellAge(ms) {
   if (s < 90) return s + 's';
   if (s < 90 * 60) return Math.round(s / 60) + ' min';
   return (s / 3600).toFixed(1) + 'h';
+}
+
+/* How long before `now` a stamp this machine wrote was, or null when that
+ * cannot be known.
+ *
+ * Both are this machine's clock, so the subtraction looks safe, and it is not:
+ * the Pi boots in 1970 and jumps when the network arrives, so a stamp written
+ * before the jump and a `now` read after it are two different clocks. A snap
+ * taken in the minute after boot and listed once the clock was set came out
+ * 20,732 days old; one taken yesterday and listed on a rig that has just
+ * rebooted came out 0s old, because the negative was clamped. A stamp or a now
+ * below CLOCK_BELIEVABLE_AFTER is a clock nobody had set, and an age with one
+ * of those on either side is not an age. Both below is no better: two unset
+ * clocks can be two boots, each starting from 1970. */
+function clockAge(stamp, now) {
+  if (typeof stamp !== 'number' || !isFinite(stamp)) return null;
+  if (stamp < CLOCK_BELIEVABLE_AFTER || now < CLOCK_BELIEVABLE_AFTER) return null;
+  return Math.max(0, now - stamp);
 }
 
 /* Where the desktop is, for a server that was not started from it.
@@ -2979,25 +3015,40 @@ function takePanel(out, done) {
       return done(part);
     }
     // Exit 0 is the tool's word; the file is the evidence. A tool that
-    // reports success over an empty or foreign file is a picture nobody
-    // could open, kept under a name that promises one.
+    // reports success over an empty, foreign or half-written file is a
+    // picture nobody could open, kept under a name that promises one. So the
+    // file has to open the way a PNG opens and end the way one ends; eight
+    // bytes of signature alone was believed as a screenshot.
     fs.open(out, 'r', function (openErr, fd) {
       if (openErr) {
         part.why = tool.bin + ' finished without writing a picture';
         return done(part);
       }
-      var head = Buffer.alloc(PNG_MAGIC.length);
-      fs.read(fd, head, 0, head.length, 0, function (readErr, got) {
-        fs.fstat(fd, function (statErr, st) {
-          fs.close(fd, function () {
-            if (readErr || statErr || got !== head.length || !head.equals(PNG_MAGIC)) {
-              fs.unlink(out, function () {});
-              part.why = tool.bin + ' wrote something that is not a PNG';
-              return done(part);
-            }
-            part.saved = true;
-            part.bytes = st.size;
-            done(part);
+      var head = Buffer.alloc(PNG_HEAD.length);
+      var tail = Buffer.alloc(PNG_TAIL.length);
+      fs.fstat(fd, function (statErr, st) {
+        var size = statErr ? 0 : st.size;
+        fs.read(fd, head, 0, head.length, 0, function (headErr, gotHead) {
+          var whole = size >= head.length + tail.length;
+          var tailAt = whole ? size - tail.length : 0;
+          fs.read(fd, tail, 0, tail.length, tailAt, function (tailErr, gotTail) {
+            fs.close(fd, function () {
+              var bad = null;
+              if (statErr || headErr || gotHead !== head.length || !head.equals(PNG_HEAD)) {
+                bad = 'wrote something that is not a PNG';
+              } else if (!whole || tailErr || gotTail !== tail.length || !tail.equals(PNG_TAIL)) {
+                bad = 'wrote a PNG that stops before its end';
+              }
+              if (bad) {
+                return fs.unlink(out, function () {
+                  part.why = tool.bin + ' ' + bad;
+                  done(part);
+                });
+              }
+              part.saved = true;
+              part.bytes = size;
+              done(part);
+            });
           });
         });
       });
@@ -3063,12 +3114,26 @@ function keepCamera(out, done) {
           }
           fs.writeFile(out, data, function (writeErr) {
             if (writeErr) {
-              return done(Object.assign(part, {
-                why: 'could not keep the camera picture: ' + (writeErr.code || writeErr.message) }));
+              // A card that fills part way through leaves the file made and
+              // torn, under a name the list would then show as a picture
+              // beside a reply that said none was kept. It goes first.
+              return fs.unlink(out, function () {
+                done(Object.assign(part, {
+                  why: 'could not keep the camera picture: ' + (writeErr.code || writeErr.message) }));
+              });
             }
             part.saved = true;
             part.bytes = data.length;
-            part.ageMs = Math.max(0, Date.now() - st.mtimeMs);
+            var now = Date.now();
+            part.ageMs = clockAge(st.mtimeMs, now);
+            if (part.ageMs === null) {
+              // Neither current nor old: nothing can say which.
+              part.stale = null;
+              part.why = 'camera picture of unknown age: ' + (now < CLOCK_BELIEVABLE_AFTER
+                ? 'the rig\'s clock is not set'
+                : 'it was written before the rig\'s clock was set');
+              return done(part);
+            }
             part.stale = part.ageMs > SNAP_FRAME_STALE_MS;
             // Kept, and said to be old in the same breath. The reason the
             // scanner is not refreshing it goes with it where there is one,
@@ -3108,7 +3173,13 @@ function snapSaid(parts, notes) {
  * directory entries, this is asked for by a press rather than on a timer, and
  * a callback ladder here would be the most intricate code in the feature for
  * no gain. Real directories only — a link dropped in among them is listed by
- * nothing and served by nothing. */
+ * nothing and served by nothing.
+ *
+ * This and snapFiles below are the whole of what counts as a snap, and both
+ * the list and /api/snaps/<folder>/<file> ask them. Serving used to have a
+ * rule of its own — a name the right shape, then realpath inside snaps/ — so
+ * a link named like a snap, pointing at a folder in snaps/ that is not one,
+ * was served while the list never showed it. */
 function snapNames() {
   try {
     return {
@@ -3125,19 +3196,41 @@ function snapNames() {
   }
 }
 
-/* Down to SNAPS_KEEP, oldest first, never the one just made.
+/* ...and the files in one: the four a press writes, each a real file. A link
+ * is not one, whatever it is named and wherever it points. */
+function snapFiles(name) {
+  var files = [];
+  SNAP_FILES.forEach(function (file) {
+    try {
+      var st = fs.lstatSync(path.join(SNAPS_DIR, name, file));
+      if (st.isFile()) files.push({ file: file, bytes: st.size });
+    } catch (e) { /* not in this one */ }
+  });
+  return files;
+}
+
+/* The folders a press has made and not yet finished: claimed, being filled,
+ * and not yet sealed with its snap.json or removed for holding nothing. */
+var snapsFilling = {};
+
+/* Down to SNAPS_KEEP, oldest first, never one that is still being filled.
  *
- * "Never the one just made" is not a nicety. A Pi has no real-time clock and
- * boots in 1970; a snap taken before the network sets the clock is named for
- * 1970, sorts as the oldest folder there is, and would otherwise be deleted by
- * the very press that made it — a reply saying "saved" over a folder that is
- * already gone. */
-function pruneSnaps(keepName) {
+ * Not a nicety. A Pi has no real-time clock and boots in 1970; a snap taken
+ * before the network sets the clock is named for 1970, sorts as the oldest
+ * folder there is, and would otherwise be deleted by the very press that made
+ * it — a reply saying "saved" over a folder that is already gone. Sparing only
+ * the press's own folder was not enough: two presses at once on an unset
+ * clock and a full shelf are two 1970 folders, the oldest two there are, and
+ * the first to finish removed the other while its screenshot was still being
+ * taken. That one was answered "saved", with "could not write snap.json:
+ * ENOENT" on the end, over a folder that no longer existed, and the log named
+ * the newest snap on the rig as the oldest one removed. */
+function pruneSnaps() {
   var names = snapNames().names;
   var over = names.length - SNAPS_KEEP;
   if (over <= 0) return [];
   var gone = [];
-  names.filter(function (n) { return n !== keepName; }).slice(0, over)
+  names.filter(function (n) { return !snapsFilling[n]; }).slice(0, over)
     .forEach(function (name) {
       try {
         fs.rmSync(path.join(SNAPS_DIR, name), { recursive: true, force: true });
@@ -3172,6 +3265,7 @@ function takeSnap(done) {
       fs.mkdir(path.join(SNAPS_DIR, name), function (mkErr) {
         if (mkErr && mkErr.code === 'EEXIST' && n < 99) { n++; return claim(); }
         if (mkErr) return done(mkErr);
+        snapsFilling[name] = true;
         fill(name);
       });
     }());
@@ -3189,16 +3283,27 @@ function takeSnap(done) {
     };
     takePanel(path.join(dir, 'panel.png'), landed(0));
     keepCamera(path.join(dir, 'camera.jpg'), landed(1));
-    fs.writeFile(path.join(dir, 'status.json'), status, function (err) {
-      landed(2)(err
-        ? { what: 'status', file: 'status.json', saved: false,
-            why: 'could not write it: ' + (err.code || err.message) }
-        : { what: 'status', file: 'status.json', saved: true,
-            bytes: Buffer.byteLength(status) });
+    var statusAt = path.join(dir, 'status.json');
+    fs.writeFile(statusAt, status, function (err) {
+      if (!err) {
+        return landed(2)({ what: 'status', file: 'status.json', saved: true,
+                           bytes: Buffer.byteLength(status) });
+      }
+      // Torn, like a camera picture that could not be written — see keepCamera.
+      fs.unlink(statusAt, function () {
+        landed(2)({ what: 'status', file: 'status.json', saved: false,
+                    why: 'could not write it: ' + (err.code || err.message) });
+      });
     });
   }
 
   function seal(name, dir, parts) {
+    // The one way out, so the folder stops being one in progress — open to
+    // pruning — however the press ends.
+    var answer = function (err, record) {
+      delete snapsFilling[name];
+      done(err, record);
+    };
     if (!parts.some(function (p) { return p.saved; })) {
       // Not one part landed — a full card, a read-only card. An empty folder
       // would list as a snap with three reasons and no picture, so it goes,
@@ -3206,35 +3311,41 @@ function takeSnap(done) {
       // so a list asked for straight after the answer cannot still show it.
       var e = new Error(parts.map(function (p) { return p.why; }).join('; '));
       e.code = 'NOTHING';
-      return fs.rm(dir, { recursive: true, force: true }, function () { done(e); });
+      return fs.rm(dir, { recursive: true, force: true }, function () { answer(e); });
     }
     var notes = [];
     // Said rather than discovered. See pruneSnaps for what a 1970 name costs.
     if (at < CLOCK_BELIEVABLE_AFTER) {
       notes.push('the rig\'s clock is not set, so it is filed under ' + name.slice(0, 4));
     }
-    var pruned = pruneSnaps(name);
+    var pruned = pruneSnaps();
+    // ...and what made room for it, in the line the control shows. The
+    // forty-first press removes the first, and a control that says only
+    // "saved" over that is a snap gone with nothing on the panel saying so.
+    if (pruned.length) {
+      notes.push('removed the oldest to keep ' + SNAPS_KEEP + ': ' + pruned.join(', '));
+    }
     var record = {
       v: 1, name: name, at: at,
       contents: parts, notes: notes,
       said: snapSaid(parts, notes),
       pruned: pruned, keep: SNAPS_KEEP
     };
-    console.log('snap: ' + name + ' ' + record.said);
-    if (pruned.length) {
-      console.log('snap: removed the oldest ' + pruned.length + ' to keep '
-                  + SNAPS_KEEP + ': ' + pruned.join(', '));
-    }
-    fs.writeFile(path.join(dir, 'snap.json'), JSON.stringify(record, null, 2) + '\n',
-                 function (err) {
+    var sealed = path.join(dir, 'snap.json');
+    fs.writeFile(sealed, JSON.stringify(record, null, 2) + '\n', function (err) {
       // The parts are on disk either way; what is lost is the note saying
-      // what is missing, so that is what the log and the reply say.
-      if (err) {
-        console.error('snap: could not write snap.json for ' + name + ': ' + err.message);
-        record.notes.push('could not write snap.json: ' + (err.code || err.message));
-        record.said = snapSaid(parts, record.notes);
-      }
-      done(null, record);
+      // what is missing, so that is what the log and the reply say — and the
+      // torn file goes, so the list says there is no snap.json rather than
+      // reading half of one.
+      var then = function () {
+        console.log('snap: ' + name + ' ' + record.said);
+        answer(null, record);
+      };
+      if (!err) return then();
+      console.error('snap: could not write snap.json for ' + name + ': ' + err.message);
+      record.notes.push('could not write snap.json: ' + (err.code || err.message));
+      record.said = snapSaid(parts, record.notes);
+      fs.unlink(sealed, then);
     });
   }
 }
@@ -3242,38 +3353,44 @@ function takeSnap(done) {
 /* Every snap, newest first, with what each holds and what each is missing.
  * An age rather than a time, measured on this machine's clock, for the reason
  * /api/status gives: the phone reading this is not the machine that wrote it,
- * and the name already says the local time to anybody who wants it. */
+ * and the name already says the local time to anybody who wants it — and no
+ * age at all where the stamp or the clock reading it was never set (clockAge),
+ * which snaps.html says as "age unknown". */
 function describeSnaps() {
   var found = snapNames();
   var now = Date.now();
   var snaps = found.names.slice().reverse().map(function (name) {
     var dir = path.join(SNAPS_DIR, name);
     var record = null;
-    try { record = JSON.parse(fs.readFileSync(path.join(dir, 'snap.json'), 'utf8')); } catch (e) { record = null; }
-    var files = [];
-    SNAP_FILES.forEach(function (file) {
-      try {
-        var st = fs.lstatSync(path.join(dir, file));
-        if (st.isFile()) files.push({ file: file, bytes: st.size });
-      } catch (e) { /* not in this one */ }
-    });
+    var missing = false;
+    try {
+      record = JSON.parse(fs.readFileSync(path.join(dir, 'snap.json'), 'utf8'));
+      if (!record || typeof record.said !== 'string') throw new Error('no line in it');
+    } catch (e) {
+      record = null;
+      missing = e.code === 'ENOENT';
+    }
     var at = record && typeof record.at === 'number' ? record.at : null;
     if (at === null) {
       try { at = fs.statSync(dir).mtimeMs; } catch (e) { at = null; }
     }
     return {
       name: name,
-      ageMs: at === null ? null : Math.max(0, now - at),
-      files: files,
+      ageMs: clockAge(at, now),
+      files: snapFiles(name),
       // Each part that is missing, and each kept with something to say about
       // it — a camera picture too old to be the one at the press.
       problems: record && Array.isArray(record.contents)
         ? record.contents.filter(function (p) { return p && (!p.saved || p.why); })
         : [],
-      // A folder with no record of its own — made by hand, or by a build
-      // before this one — says so instead of claiming a clean bill.
-      said: record && typeof record.said === 'string'
-        ? record.said : 'no snap.json in this folder, so nothing says what is missing'
+      // A folder with no record of its own — made by hand, by a build before
+      // this one, or by a press whose snap.json could not be written — says
+      // so instead of claiming a clean bill. A record that is there and
+      // cannot be read — torn by a full card or a power cut mid-write — is
+      // not the same answer, and is not given as if it were.
+      said: record ? record.said
+        : missing ? 'no snap.json in this folder, so nothing says what is missing'
+        : 'snap.json in this folder cannot be read, so nothing says what is missing'
     };
   });
   return { snaps: snaps, unreadable: found.unreadable };
@@ -4368,30 +4485,25 @@ function route(req, res) {
     }), { 'Content-Type': 'application/json; charset=utf-8' });
   }
 
-  /* ...and one file out of one of them.
+  /* ...and one file out of one of them: a folder the list names, and a file
+   * the list says that folder holds — snapNames and snapFiles, the list's own
+   * two questions, so nothing is served that the list does not show.
    *
-   * The folder is matched against the names this server makes and the file
-   * against the four it writes, so `..`, an encoded `..`, an absolute path and
-   * a name with a slash in it never become a path at all — and everything
-   * under /api/snaps/ is answered here, so none of them falls through to the
-   * static handler to be judged by a different rule. Then the path is checked
-   * again after following links, the same way the static handler does it: a
-   * name can be right and still be a link that points at rpi/config.json. */
+   * Nothing typed into the URL becomes a path until both have said yes, so
+   * `..`, an encoded `..`, an absolute path and a name with a slash in it are
+   * never looked up at all — and everything under /api/snaps/ is answered
+   * here, so none of them falls through to the static handler to be judged by
+   * a different rule. Neither answer follows a link, so a name that is right
+   * and a link that points at rpi/config.json is not a snap file. That is
+   * also why there is no realpath recheck here any more: a folder and a file
+   * that are both real, inside snaps/, cannot resolve anywhere else, and the
+   * recheck it would have been could not fail. */
   if (pathname.indexOf('/api/snaps/') === 0) {
     var snapAsk = /^\/api\/snaps\/([^/]+)\/([^/]+)$/.exec(pathname);
-    if (!snapAsk || !SNAP_NAME.test(snapAsk[1]) || SNAP_FILES.indexOf(snapAsk[2]) === -1) {
-      return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
-    }
-    return fs.realpath(SNAPS_DIR, function (homeErr, home) {
-      if (homeErr) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
-      fs.realpath(path.join(SNAPS_DIR, snapAsk[1], snapAsk[2]), function (linkErr, real) {
-        if (linkErr) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
-        if (!real.startsWith(home + path.sep)) {
-          return send(res, 403, 'forbidden', { 'Content-Type': 'text/plain' });
-        }
-        serveFile(req, res, real);
-      });
-    });
+    var snapHeld = snapAsk && snapNames().names.indexOf(snapAsk[1]) !== -1
+      && snapFiles(snapAsk[1]).some(function (f) { return f.file === snapAsk[2]; });
+    if (!snapHeld) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
+    return serveFile(req, res, path.join(SNAPS_DIR, snapAsk[1], snapAsk[2]));
   }
 
   // The scanner writes this every couple of seconds while it runs. Serving it

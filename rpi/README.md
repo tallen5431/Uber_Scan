@@ -2069,11 +2069,15 @@ connection dot, just above the bar of buttons — not on the bar, which holds si
 
 The control answers in place: **📷 saved**, or **📷 saved — no screenshot: grim
 is not installed**. It never says "saved" over less than it kept. A camera
-picture more than twelve seconds old — the panel's own window for a scanner
-that has gone quiet — is kept but called old ("camera picture 10 min old"),
-because a picture of the phone from before the press is not a picture of the
-press. If the rig does not answer within twenty seconds the control says so and
-offers itself again.
+picture more than twelve seconds old by its own file time — four of the
+three-second rewrites a running scanner makes with nobody watching — is kept
+but called old ("camera picture 10 min old"), because a picture of the phone
+from before the press is not a picture of the press. That is the picture's own
+age, not the panel's rule for a quiet scanner, and the two can disagree; the
+screenshot shows what the panel said. A picture written before the rig's clock
+was set, or pressed on a clock that is not set yet, is kept with its age
+unknown rather than with a number made of two clocks. If the rig does not
+answer within twenty seconds the control says so and offers itself again.
 
 **The screenshot needs a tool the Pi does not have by default.** Raspberry Pi OS
 Bookworm on a Pi 4 runs a Wayland desktop (wayfire, or labwc on newer images),
@@ -2088,20 +2092,25 @@ ImageMagick's `import` if that is already there. The server runs under systemd
 with no desktop session of its own, so it finds the one the desktop account is
 logged into — the `wayland-*` socket in `/run/user/<uid>`, or X display `:0` —
 which works because the service runs as that account (`User=` in
-`install-service.sh`). The tool is given eight seconds, well inside the
-panel's twenty, and killed after that; whatever is missing is named in the
-reply: no tool installed, no desktop session found, no camera picture yet, the
-scanner not running, no scanner on this machine. The copy at home, with no
-desktop and no camera, keeps `status.json` and says why it kept nothing else.
+`install-service.sh`), with the account's `~/.Xauthority` handed to an X tool.
+The tool is given eight seconds, well inside the panel's twenty, and killed
+after that; a file it leaves has to open and end the way a PNG does, or it is
+not kept. Whatever is missing is named in the reply: no tool installed, no
+desktop session found, the tool's own error, a picture that is not one or is
+cut short, no camera picture yet, the scanner not running, no scanner on this
+machine, a card too full to write to. The copy at home, with no desktop and no
+camera, keeps `status.json` and says why it kept nothing else.
 
 **Getting them off the rig.** **▤ Offers → 📷 Snaps** (`snaps.html`) lists every
 snap, newest first, with the two pictures and a link to open or save each file
 — under the snap's own name, so four `panel.png` in a Downloads folder are
 still four snaps. It has its own 📷 press as well, which is the one to use from
 a phone: it photographs the rig's display, not the phone's. Underneath it are
-`GET /api/snaps` and `GET /api/snaps/<folder>/<file>`, which serve only the
-folders this server makes and the four files it writes, and refuse a link that
-points out of the folder. On the rig the folders are in `rpi/snaps/`, beside the
+`GET /api/snaps` and `GET /api/snaps/<folder>/<file>`, which serve exactly what
+the list shows — the folders this server makes and the four files it writes,
+real ones, never a link wherever it points. Each is listed with its age by the
+rig's clock, or "age unknown" when it or the clock reading it was never set.
+On the rig the folders are in `rpi/snaps/`, beside the
 journal (wherever `JOURNAL` puts it), which `.gitignore` covers and
 `test_lint.py` holds it to — a picture of a phone with an address on it does not
 belong in a commit.
@@ -2109,11 +2118,12 @@ belong in a commit.
 **It keeps the newest forty, and the oldest go first.** Measured, a snap is
 110–135kB — an 82kB PNG of the panel at 800x480 out of Chromium's encoder, a
 23–50kB camera picture and a 1.9kB status — so forty is under 5.5MB, a third of
-what `--keep-scans` is allowed. When one goes, the reply names it and the
-server's log says `snap: removed the oldest 1 to keep 40: <folder>`. A press
-never removes the folder it just made, which matters on a Pi that booted before
-the network set its clock: that snap is named for 1970, sorts as the oldest, and
-the reply says the clock was not set. `SNAPS_KEEP` changes the count.
+what `--keep-scans` is allowed. When one goes, the control's own line names
+it — **📷 saved — removed the oldest to keep 40: <folder>** — and so do the
+reply and the server's log. A press never removes a folder that is still being
+filled, its own or another press's, which matters on a Pi that booted before
+the network set its clock: those snaps are named for 1970, sort as the oldest,
+and the reply says the clock was not set. `SNAPS_KEEP` changes the count.
 
 **Not drawn on the 3.5" hat or a phone.** Its width comes out of the shift line
 beside it, whose first figure is the shift's median, and on those two rows
