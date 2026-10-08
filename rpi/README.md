@@ -2622,11 +2622,24 @@ clock cannot be held to a fixed corpus. A row says which it used:
 `fromDeadline` is true when the minutes came from a deadline rather than from a
 stated duration.
 
+**Uber prints one too.** An Uber Eats Early look card reached the rig on 8
+October reading `Est. delivery 4:15 PM • 8.6 mi` where every Early look card in
+the week before it printed `27 min (7.3 mi) total`. It parsed to a payout and a
+distance and nothing else, so it was incomplete, got no verdict and never
+reached the journal — the same invisibility the DoorDash cards had. The
+deadline rule now reads both wordings (one rule, not two: `DELIVER_BY` in both
+ports), and the card's merchant and destination are read from the end of that
+line, the way they are read from the end of a total leg. Nothing on the panel,
+the offers page or the journal row was DoorDash-only: the panel's `min left`,
+the offers page's "Time from: the delivery deadline" and the row's
+`fromDeadline` say the same of this card as of a DoorDash one.
+
 | card | reads as |
 |---|---|
 | `$41.11 … 9.8 mi … Deliver by 7:15 PM … Pickup Papa John's Store 3317` | $41.11, 9.8 mi, 46 min left, *Papa John's Store 3317* |
 | `+$16.00 … Additional 6.9 mi … Deliver by 7:08 PM … Pickup Buffalo Wild Wings` | $16.00, 6.9 mi, 39 min left, *Buffalo Wild Wings* |
 | `Deliver by 6:39 PM Cherry Cricket 4 items 0.6 mi $8.00` | $8.00, 0.6 mi, 4 items, 10 min left, *Cherry Cricket* |
+| `$14.48 … Est. delivery 4:15 PM • 8.6 mi … Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100) … Foothill Trl & Northwoods Dr, Marietta` | $14.48, 8.6 mi, 30 min left at 3:45 PM, $23.80/hr CLOSE CALL, both ends |
 | `UberX $10.30 19 min (8.5 mi) Mae Dell Rd & Riggins Dr … 12 mins (6.6 mi) Camp Jordan Pkwy` | $10.30, 31 min, 15.1 mi, both addresses |
 
 A Pi 4 has **no real-time clock**. With no network it boots somewhere in 1970 and
@@ -2645,11 +2658,11 @@ cannot check is not much of a record. The offers page searches on them: type
 `papa john` or `chattanooga` into the find box.
 
 Only what the card printed, and only against an anchor the card also printed —
-the merchant behind a `Pickup` label, the merchant under a deadline, the address
-after a leg. Never free text off the map: the `4 mi from fast charger` badge and
-the `(2 orders)` after a store name are both things a looser reader would have
-swallowed, and a journal full of half-read map furniture would be worse than one
-that cannot be searched by place.
+the merchant behind a `Pickup` label, the merchant under a deadline (both ends
+under Uber's), the address after a leg. Never free text off the map: the `4 mi
+from fast charger` badge and the `(2 orders)` after a store name are both things
+a looser reader would have swallowed, and a journal full of half-read map
+furniture would be worse than one that cannot be searched by place.
 
 It is a real trade and worth stating plainly. This is a record of where you were
 and when, it lives on a card in a vehicle, and it is copied to a machine at home.
@@ -3309,7 +3322,19 @@ same measurement:
   the `ill` is the bottom icon row. A comma, a capitalised name or two, and
   stop. The possessive is allowed, because a card does not always end on a town:
   `Roswell Road, Johnny's Hideaway` ends on the venue, and a first version cut
-  it to `Roswell Road, Johnny`.
+  it to `Roswell Road, Johnny`. "A name or two" took its second name off the
+  NEXT line, though, because the reader's lines are joined with a space: the
+  rig's Jimmy John's snap of 8 October read the Accept button under the card
+  as `Pverel 8) 4 P` and the dropoff went to the journal as `Shadowood Pkwy SE,
+  Atlanta Pverel`. A town now takes a second name that begins the next line
+  only when that line is address-shaped — `Bartow` / `County` and `Powder` /
+  `Springs` wrap and are kept — which refuses it on 91 of the week's 6,657
+  frames and texts, 50 rows, all of them furniture. And `Matching may take
+  longer`, the chip under an Early look card's destination, ends a place the
+  way `Avg. wait time` does: on row 6 it had gone into the journal as the
+  dropoff `Hwy NW &N @ Matching may take longer`, and on six rows it made the
+  destination too long to keep — on three of them on every frame, so the row
+  went to the journal with nowhere to go.
 - **The leg-tail window is 130 characters, not 80.** With merchant and address
   sharing one tail, 80 cut the town off the end of the half that matters:
   `Double Branches Ln & Sagamore Ct. Dal`.
@@ -7751,6 +7776,6 @@ is opened — `>` instead of `>>` in a shell wrapper, or `flags: 'w'` instead of
   enough.
 - Two card grammars are handled, a stated journey (Uber's `N min (D.D mi)`
   legs) and a stated deadline (DoorDash's `Deliver by H:MM AM/PM` with a
-  distance on its own — see "Delivery cards, and where an offer went"), and
-  nothing else. A layout change breaks parsing, which is why the typed keypad
+  distance on its own, and Uber Eats' `Est. delivery H:MM AM/PM • D.D mi` —
+  see "Delivery cards, and where an offer went"), and nothing else. A layout change breaks parsing, which is why the typed keypad
   on `index.html` stays the reliable path.

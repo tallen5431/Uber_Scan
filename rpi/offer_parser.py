@@ -259,8 +259,53 @@ ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 # The deadline is the honest denominator for one of these. It is not the drive
 # time — it is how long the job occupies the driver, waiting at the counter
 # included, which is the thing an hourly rate is supposed to divide by.
+#
+# Uber prints one too now, and the rig could not see it. An Uber Eats "Early
+# look" card off this driver's phone, as the phone showed it:
+#
+#     Early look • Order in progress
+#     Delivery  $14.48  Includes expected tip
+#     Est. delivery 4:15 PM • 8.6 mi
+#     Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)
+#     Foothill Trl & Northwoods Dr, Marietta
+#     Matching may take longer
+#
+# A time of delivery, where every Early look card in the owner's week prints a
+# duration — "27 min (7.3 mi) total". The phone's clock read 3:45 PM, so the
+# job takes thirty minutes, and the driver's own description of what to do with
+# the card is the subtraction rate() already makes for DoorDash. What the rule
+# lacked was the wording: the card parsed to $14.48 and 8.6 miles with no
+# deadline and no places, so it was incomplete, got no verdict and never
+# reached the journal. Reworded to "Deliver by", the same card read 975 and,
+# at 945 against a $25 line and 30c a mile, $23.80/hr CLOSE CALL.
+#
+# So this rule is widened rather than joined by a second one: two rules for
+# "when is this due" would answer differently the first time either was
+# touched. The OCR variants are the ones this reader already makes of the same
+# glyphs elsewhere — the full stop after "Est" lost ("Est delivery") or read as
+# a comma ("Est, delivery"), the space before PM lost, the colon read as a
+# dot — and the rig's own reading of the card was "Est. delivery 4:15 PM- 8.6
+# mi". What it must not read: the "Delivery" badge on its own, which prints no
+# time; a word that merely ends in "est" ("Fastest delivery"), which is what
+# the \b is for; and any other clock time on a card. The only clock times in
+# the owner's week, 29 of its 6,657 frames and stored texts, are the zone
+# prompt's "+$1.00/order until 8:20 PM", which is not when anything is due.
+#
+# ...and the distance on the same line, as the fourth group. Uber glues it on
+# with its own bullet, "4:15 PM • 8.6 mi", which is where that line ENDS: both
+# ends of the job are printed after it the way they are printed after a total
+# leg, and find_places reads them from there. It is never taken as the
+# distance — LONE_MILES already finds the same figure — only as where the line
+# stops. The glue is LEG's, one to three glyphs that are neither space nor
+# word. DoorDash never prints a distance there: it puts it before the deadline
+# ("9.8 mi Deliver by 7:15 PM") or after the merchant ("Deliver by 6:39 PM
+# Cherry Cricket 4 items 0.6 mi"), so the group is absent on every DoorDash
+# card and that card's merchant is read as it always was.
 DELIVER_BY = re.compile(
-    r'deliver(?:ed|y)?\s*by\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?', re.IGNORECASE | ASCII)
+    r'(?:deliver(?:ed|y)?\s*by|\best\s*[.,]?\s*delivery)'
+    r'\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?'
+    r'(?:\s*[^\s\w()]{1,3}\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)'
+    r'\s*mi(?:les?)?\b(?!\s*from))?', re.IGNORECASE | ASCII)
 
 # A decimal point inside a distance token, either way OCR renders it. Kept
 # because the fact is lost the moment the string becomes a float: "10.0 mi" and
@@ -359,11 +404,36 @@ PLACE_JUNK = re.compile(
 # fast charger` — walked straight past it, and the address a driver reads to
 # recognise the job months later has a charger advert stapled to the end of it.
 # Three of one shift's 210 cards.
+#
+# `matching` is Uber Eats' "Matching may take longer" chip, printed under the
+# destination on an Early look card — 124 of the owner's 6,657 frames and
+# stored texts, on 27 rows. Where the address ended at its town the town rule
+# stopped short of it; where the town did not read, nothing did, and row 6 went
+# into the journal with its dropoff as `Hwy NW &N @ Matching may take longer`.
+# Riding along, it also cost readings their destination outright: an address
+# with the chip still on the end is over MAX_PLACE and keep() refuses it. That
+# happened on six rows (88, 419, 421, 423, 484, 487), and on 421, 423 and 487
+# to every reading, so the journal row named the merchant and nowhere to go.
+#
+# ...and it had been deciding where a piece split. With the chip on, two
+# pieces were over the cap and the junction seam below cut them: row 914 inside
+# its address (`Kennesaw` / `State University Rd NW & …`), which now stores
+# whole, and row 86 at its merchant's bracket, which now stores the bracket and
+# the destination as one place — the shape rows 92, 293, 643, 891 and 904
+# already have, where the card's route line reads as a pipe in front of a
+# wrapped branch and splits the merchant's name from it. That is its own fault,
+# and the chip was only ever hiding it on row 86.
+#
+# `match` is the same card's accept button, which `accept` is on every other
+# card. No frame of the week reads it, and the rig's own reading of the Est.
+# delivery card has an `o` where it stands, but the phone shows it directly
+# under the chip.
 PLACE_TAIL = re.compile(
     r'(?:\|'
     r'|\bfast\s*charg'
     r'|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline'
-    r'|verified|exclusive|guaranteed|included|customer|dropoff|orders?)\b)',
+    r'|verified|exclusive|guaranteed|included|customer|dropoff|orders?'
+    r'|match(?:ing)?)\b)',
     re.IGNORECASE | ASCII)
 
 # The card's bottom bar — a row of icons — comes back as one and two character
@@ -450,8 +520,37 @@ PLACE_JUNCTION_AT = re.compile(
 # (0.2 mi) Roswell Road, Johnny's Hideaway" ends on the venue, and a rule that
 # stopped at the first capitalised word after a comma cut it to "Roswell Road,
 # Johnny". Lower case still ends it, which is what keeps the icon row out.
+#
+# ...and "a capitalised name or two" took its second name from the NEXT LINE.
+# normalize() joins the reader's lines with a space, so a capitalised scrap on
+# the line under the town reads exactly like the second half of "Powder
+# Springs". The rig's snap of a Jimmy John's card on 8 October: one frame
+# caught the Accept button under the card as `Pverel 8) 4 P`, and the dropoff
+# on the panel and in the journal was `Shadowood Pkwy SE, Atlanta Pverel` —
+# kept over every frame that read it cleanly, because merge_place keeps the
+# longer of two readings of a place.
+#
+# So the second name is its own group, and find_places asks where the reader
+# put it: an address that has reached its town, by PLACE_TOWN, does not take a
+# name that begins the next line unless that line is itself address-shaped,
+# by looks_like_a_place — the parser's one test for that. Measured on the
+# owner's 6,657 frames and stored texts it refuses a second name on 91 of them,
+# 50 rows, every one of them furniture: `Atlanta Pele`, `Marietta Ill`,
+# `Dallas Mbit`, `Woodstock Uber`, `Kennesaw Leg`. It refuses none of the
+# corpus's. Two-word towns DO wrap — "Springs" begins a line on 56 of the 133
+# readings of Powder Springs, "County" on 5 of 22 of Cobb County and all 7 of
+# Bartow County — and every one is kept, because those are words
+# looks_like_a_place already calls a street.
+#
+# What it still takes is a next line the test calls address-shaped that is not
+# the town's: `…, USA` / `Buckley Way NE & Pacer Pl, Atlanta` on row 590,
+# `…, Dallas` / `Five Guys (3450 Cobb Pkwy. NW)` on row 504, `…, Marietta` /
+# `On the way` on row 815 — six rows (466, 504, 590, 757, 815, 943), which read
+# exactly as they did. It is the test the rule was asked for, and a tighter one
+# is a different change with a replay of its own.
+PLACE_TOWN_NAME = r"[A-Z][A-Za-z]+(?:'s)?"
 PLACE_ENDS_AT_TOWN = re.compile(
-    r"^(.*?,\s*[A-Z][A-Za-z]+(?:'s)?(?:\s+[A-Z][A-Za-z]+(?:'s)?)?)\b", ASCII)
+    r"^(.*?,\s*%s)(\s+(%s))?\b" % (PLACE_TOWN_NAME, PLACE_TOWN_NAME), ASCII)
 TOTAL_TAIL = re.compile(r'\btota?l\b', ASCII)
 
 # The leg that is the drive to the pickup, which an Uber card labels "away".
@@ -628,6 +727,38 @@ def normalize(text):
     text = re.sub(r'[–—−]', '-', text)
     text = text.replace(' ', ' ')
     return WHITESPACE.sub(' ', text).strip()
+
+
+def line_starts(raw_text):
+    """Where the reader began each line after the first, as offsets into
+    normalize(raw_text).
+
+    normalize() throws the line breaks away so that every rule can be written
+    without caring how the engine broke the lines, and nothing downstream of it
+    could ask where they had been. One rule needs to — where an address ends at
+    its town, see PLACE_ENDS_AT_TOWN — so this says where they fall, in the
+    flattened text that rule reads.
+
+    By construction rather than by arithmetic: each line normalized on its
+    own, the empty ones dropped, joined with the one space normalize() would
+    have put there. That is normalize(raw_text) exactly — a line break is
+    whitespace, so normalize() makes one space of it and of the whitespace on
+    either side, and what it does to the rest of a line it does to that line
+    alone — so the offsets cannot drift from the text they index.
+    rpi/test_parser.py and tests/parser.test.js hold each port to that over
+    every text in the shared corpus.
+    """
+    starts, at = [], None
+    for line in re.split(r'[\r\n]+', str(raw_text or '')):
+        part = normalize(line)
+        if not part:
+            continue
+        if at is None:
+            at = len(part)
+        else:
+            starts.append(at + 1)
+            at += 1 + len(part)
+    return starts
 
 
 # A number that is a duration or a distance, wearing a dollar sign.
@@ -2234,7 +2365,7 @@ def find_pickup(places, ends=None):
     return None
 
 
-def find_places(text, legs, whose=None):
+def find_places(text, legs, whose=None, lines=()):
     """Where the job goes, as the card writes it. Never invented.
 
     `whose`, when a list is passed, is filled beside the return value with the
@@ -2244,11 +2375,19 @@ def find_places(text, legs, whose=None):
     place sat gets this pass's own answer rather than a second search that
     could disagree with it. See laid_out_approach, which is the rule it feeds.
 
-    Two anchors only. What follows "Pickup" on a delivery card is the merchant;
-    what follows a leg's distance on a ride card is the address for that leg.
-    Anything that does not sit against one of those anchors is left alone —
-    a journal full of half-read map furniture would be worse than one that
-    cannot be searched by where an offer went.
+    `lines` is where the reader began each line, as offsets into `text` — see
+    line_starts. Empty, the text is one line, which is how this read every
+    text before it asked.
+
+    Three anchors, each something the card prints. What follows "Pickup" on a
+    delivery card is the merchant; what follows a deadline is the merchant on
+    a DoorDash card, and both ends of the job on the Uber card whose deadline
+    line carries its distance; what follows a leg's distance is the address
+    for that leg. "Two anchors only" is what this said, while the deadline
+    had been one since DoorDash cards were first read. Anything that does not
+    sit against one of them is left alone — a journal full of half-read map
+    furniture would be worse than one that cannot be searched by where an
+    offer went.
     """
     out = []
     found_on = []
@@ -2274,16 +2413,48 @@ def find_places(text, legs, whose=None):
     # A delivery card without a "Pickup" label puts the merchant straight after
     # the deadline: "Deliver by 6:39 PM / Cherry Cricket / 4 items 0.6 mi". The
     # deadline is the anchor; the name ends where the figures begin.
+    #
+    # Not where the deadline line carries the distance — Uber's "Est. delivery
+    # 4:15 PM • 8.6 mi" — because that card's places follow its line the way a
+    # total leg's do, and are read as a tail below. Read here as well, the
+    # merchant's branch is cut at its first digit and "Dave's Hot Chicken" is
+    # stored as a third place beside the two the tail finds.
     d = DELIVER_BY.search(text)
-    if d:
+    if d and d.group(4) is None:
         after = text[d.end():d.end() + 60]
         after = re.split(r'\d|\b(?:accept|decline|pickup|customer|dropoff)\b',
                          after, maxsplit=1, flags=re.IGNORECASE | ASCII)[0]
         keep(after)
 
     def ends_at_town(value):
+        """`value` up to its town. See PLACE_ENDS_AT_TOWN.
+
+        A second name is kept unless the reader began a line with it and that
+        line is not address-shaped. Asked of the reader's lines rather than by
+        searching for `value` in the text: the town as `value` spells it, from
+        its comma, is looked for at each line start, sitting so that its second
+        name is the first thing on that line. A line start where it does not
+        sit asks nothing, so a town the text spells differently keeps both
+        names, which is what this did before it asked.
+        """
         m = PLACE_ENDS_AT_TOWN.match(value)
-        return m.group(1) if m else value
+        if not m:
+            return value
+        town = value[value.rindex(',', 0, m.end(1)):m.end()]
+        # Only an address that has already reached a town, by the parser's own
+        # rule for one, PLACE_TOWN — three letters or more. Row 304 of the
+        # owner's week reads `Ridgewood Dr & Stockwood Ct, Dy` / `Woodstock 7`:
+        # `Dy` is the icon row and `Woodstock`, on the next line, is the town.
+        if m.group(2) and PLACE_TOWN.match(town):
+            name = m.group(3)
+            lead = len(town) - len(name)
+            for n, at in enumerate(lines):
+                if text[at - lead:at + len(name)] != town:
+                    continue
+                below = lines[n + 1] if n + 1 < len(lines) else len(text)
+                if not looks_like_a_place(text[at:below]):
+                    return m.group(1)
+        return m.group(0)
 
     # The tail of each leg, up to whatever comes next.
     #
@@ -2291,11 +2462,24 @@ def find_places(text, legs, whose=None):
     # holds the merchant AND the address, and 80 cut the town off the end of the
     # one that matters: "Double Branches Ln & Sagamore Ct. Dal". The window can
     # afford it now that the tail is split rather than stored whole.
+    #
+    # ...and the tail of the deadline line, on the card that prints its
+    # distance there. `Est. delivery 4:15 PM • 8.6 mi` stands where `27 min
+    # (7.3 mi) total` stands on every other Early look card, and the merchant
+    # and the destination follow it in the same order, so they are read by the
+    # same code from the end of that line rather than by a second rule for one
+    # card. No leg, so no index: `whose` records None, as it does for a place
+    # off the Pickup label.
+    tails = []
     for i, leg in enumerate(legs):
         start = leg.get('end')
         if start is None:
             continue
         stop = legs[i + 1].get('start') if i + 1 < len(legs) else len(text)
+        tails.append((start, stop, i))
+    if d and d.group(4) is not None:
+        tails.append((d.end(), len(text), None))
+    for start, stop, i in tails:
         tail = text[start:stop][:130]
         # Cut at the first thing that is plainly not part of an address.
         tail = re.split(r'\b(?:accept|decline|verified|exclusive|guaranteed'
@@ -2793,7 +2977,9 @@ def parse(raw_text):
     uncertain = uncertain or short_a_leg
 
     _whose = []
-    places = find_places(mine, legs, _whose)
+    # The reader's own line breaks go with it, as offsets into `text` — which
+    # are offsets into `mine` too, because only_card blanks rather than slices.
+    places = find_places(mine, legs, _whose, line_starts(raw_text))
     # Which end of the job the card printed each name against, from this same
     # pass's record of where they sat. Asked before the two ends, because it is
     # what decides them when the card stated it.

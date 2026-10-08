@@ -91,8 +91,9 @@
 
   /* The settings, with the time of day attached.
    *
-   * A DoorDash card gives a deadline where an Uber card gives a duration —
-   * "Deliver by 7:15 PM" — and rate() turns that into minutes only if something
+   * A delivery card can give a deadline where a ride card gives a duration —
+   * DoorDash's "Deliver by 7:15 PM", and Uber Eats' "Est. delivery 4:15 PM" on
+   * an Early look card — and rate() turns that into minutes only if something
    * tells it what time it is. The parser deliberately will not read the clock
    * itself, so that it can be held to a fixed corpus. Without this every
    * delivery card read here came back unjudgeable while the status line said

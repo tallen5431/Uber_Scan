@@ -935,6 +935,14 @@ if 'deliverBy' in _js_src:
     for _doc, _txt in (('SCANNING.md', _scanning), ('rpi/README.md', _readme_rpi)):
         ok_('%s no longer says only Uber\'s wording is handled' % _doc,
             'Only Uber\'s current card wording' not in _txt)
+# ...and Uber's, the day the parser reads it. The limits said a deadline was
+# "the DoorDash shape" and that none of the driver's offers stated one, while
+# an Uber Eats card stating `Est. delivery 4:15 PM` had reached the rig and gone
+# unread. Keyed on the wording being in the rule, so the sentence and the
+# grammar go together.
+if r'est\\s*[.,]?\\s*delivery' in _js_src:
+    ok_('SCANNING.md\'s limits name Uber\'s Est. delivery card as well',
+        'Est. delivery' in _limits)
 
 # Every path it names in backticks is a path that exists. A doc naming a file
 # that was renamed a year ago is a doc nobody trusts the rest of.

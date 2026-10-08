@@ -42,7 +42,17 @@ for c in cases['parse']:
 for c in cases['rate']:
     r = P.rate(P.parse(c['text']), c['settings'])
     for key, want in c['expect'].items():
-        got = r[key]
+        # The sentinel for the same reason as the parse runner above, and
+        # found the same way: a rate that is not ready answers {ready, state}
+        # and nothing else, so `r[key]` raised KeyError on the first case whose
+        # card stopped reading — the Est. delivery card with its deadline rule
+        # taken away stopped this file in a traceback, while the JavaScript
+        # half printed each missing figure as a named failure and carried on.
+        got = r.get(key, SENTINEL)
+        if got is SENTINEL:
+            eq(c['name'] + ' / ' + key + ' (rate() returns no such key)',
+               sorted(r.keys()), want)
+            continue
         if key.lower().endswith('perhour') and got is not None:
             got = round(got, 2)
         eq(c['name'] + ' / ' + key, got, want)
@@ -356,6 +366,39 @@ _cut = P.one_card(P.find_legs(_row227), _w227)
 eq('one_card returns the legs and nothing else, the shape oneCard returns',
    [l['minutes'] for l in _cut] if isinstance(_cut, list) else _cut,
    [12.0, 23.0])
+
+
+# --- where the reader began each line -----------------------------------------
+#
+# find_places asks where a line began, to refuse a town the second name the
+# reader put on the NEXT line — the Accept button under a Jimmy John's card,
+# read as `Pverel 8) 4 P`, stored as `Shadowood Pkwy SE, Atlanta Pverel`. It
+# asks in offsets into normalize(text), which has already thrown every line
+# break away, so the offsets are only worth anything if they land exactly where
+# normalize() put each line. Held to that over every corpus text that has lines,
+# by cutting the flattened text at them and comparing the pieces with the lines
+# normalized one at a time. tests/parser.test.js carries the mirror.
+_lined = [c['text'] for sec in ('parse', 'rate', 'places', 'whole', 'ends',
+                                'deadline', 'toPickup')
+          for c in cases.get(sec, []) if '\n' in c.get('text', '')]
+
+
+def _cut_at_starts(t):
+    flat = P.normalize(t)
+    cuts = [0] + P.line_starts(t) + [len(flat) + 1]
+    return [flat[a:b - 1] for a, b in zip(cuts, cuts[1:])]
+
+
+def _lines_alone(t):
+    return [P.normalize(l) for l in t.replace('\r', '\n').split('\n')
+            if P.normalize(l)]
+
+
+eq('line_starts cuts the flattened text into the reader\'s own lines (%d texts)'
+   % len(_lined),
+   [t for t in _lined if _cut_at_starts(t) != _lines_alone(t)], [])
+eq('...a blank line and a CRLF each one break, and no start before the first line',
+   P.line_starts('Jimmy\n\n  Atlanta \r\nPverel'), [6, 14])
 
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)

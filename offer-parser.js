@@ -76,6 +76,28 @@
       .trim();
   }
 
+  /* Where the reader began each line after the first, as offsets into
+     normalize(rawText). normalize() throws the line breaks away and one rule
+     needs them — where an address ends at its town, see PLACE_ENDS_AT_TOWN.
+     By construction: each line normalized on its own, the empty ones dropped,
+     joined with the one space normalize() would have put there, which is
+     normalize(rawText) exactly. tests/parser.test.js holds it to that over the
+     corpus. See line_starts in offer_parser.py. */
+  function lineStarts(rawText) {
+    var starts = [], at = null;
+    String(rawText || '').split(/[\r\n]+/).forEach(function (line) {
+      var part = normalize(line);
+      if (!part) return;
+      if (at === null) {
+        at = part.length;
+      } else {
+        starts.push(at + 1);
+        at += 1 + part.length;
+      }
+    });
+    return starts;
+  }
+
   /* ---------- pay ---------- */
 
   // Digits as OCR may render them. Kept narrow on purpose: letters like G and T
@@ -698,8 +720,32 @@
    *
    * The deadline is the honest denominator for one of these. It is not the
    * drive time — it is how long the job occupies the driver, waiting at the
-   * counter included, which is what an hourly rate is supposed to divide by. */
-  var DELIVER_BY = /deliver(?:ed|y)?\s*by\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?/i;
+   * counter included, which is what an hourly rate is supposed to divide by.
+   *
+   * Uber prints one too now: an Uber Eats "Early look" card reading "Est.
+   * delivery 4:15 PM • 8.6 mi" where every Early look card in the owner's week
+   * prints a duration, "27 min (7.3 mi) total". It parsed to a payout and a
+   * distance with no deadline and no places, so it got no verdict and never
+   * reached the journal; reworded to "Deliver by" the same card read 975 and,
+   * at 945 against a $25 line and 30c a mile, $23.80/hr CLOSE CALL. So this
+   * rule is widened rather than joined by a second one. The variants are the
+   * ones this reader already makes of the same glyphs — the full stop after
+   * "Est" lost or read as a comma, the space before PM lost, the colon read as
+   * a dot. Not the "Delivery" badge, which prints no time; not a word that
+   * only ends in "est" ("Fastest delivery"), which is the \b; and not any
+   * other clock time: the only ones in the owner's week are the zone prompt's
+   * "until 8:20 PM". See DELIVER_BY in offer_parser.py for the whole card.
+   *
+   * The fourth group is the distance Uber glues onto that line with its own
+   * bullet, "4:15 PM • 8.6 mi" — never read as the distance (LONE_MILES finds
+   * the same figure), only as where the line ends, because both ends of the
+   * job are printed after it. The glue is LEG's. DoorDash never prints a
+   * distance there, so the group is absent on every DoorDash card. */
+  var DELIVER_BY = new RegExp(
+    '(?:deliver(?:ed|y)?\\s*by|\\best\\s*[.,]?\\s*delivery)'
+    + '\\s*(\\d{1,2})\\s*[:.]\\s*(\\d{2})\\s*([ap])\\.?\\s*m\\.?'
+    + '(?:\\s*[^\\s\\w()]{1,3}\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)'
+    + '\\s*mi(?:les?)?\\b(?!\\s*from))?', 'i');
 
   // A decimal point inside a distance token, either way OCR renders it. Kept
   // because the fact is lost the moment the string becomes a number: "10.0 mi"
@@ -781,8 +827,16 @@
      can never match "fast charger": the closing boundary would have to fall
      between "charg" and "e", and there is no boundary there. So the one badge
      this stopper was written for walked straight past it, and the address kept
-     a charger advert stapled to its end. Three of one shift's 210 cards. */
-  var PLACE_TAIL = /(?:\||\bfast\s*charg|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline|verified|exclusive|guaranteed|included|customer|dropoff|orders?)\b)/i;
+     a charger advert stapled to its end. Three of one shift's 210 cards.
+
+     `matching` is Uber Eats' "Matching may take longer" chip under the
+     destination. Where the town did not read nothing stopped it, and row 6 of
+     the owner's week was journalled with its dropoff as `Hwy NW &N @ Matching
+     may take longer`; riding along, it made destinations on six rows too long
+     to keep. `match` is the same card's accept button, which `accept` is on
+     every other card. See PLACE_TAIL in offer_parser.py for what the chip had
+     been doing to the seam below. */
+  var PLACE_TAIL = /(?:\||\bfast\s*charg|\b(?:avg|wait\s*time|add\s+to\s+route|accept|decline|verified|exclusive|guaranteed|included|customer|dropoff|orders?|match(?:ing)?)\b)/i;
 
   /* The commonest delivery card puts BOTH ends of the job after one total leg:
    *
@@ -849,13 +903,22 @@
    * The possessive is allowed because a card does not always end on a town:
    * "1min (0.2 mi) Roswell Road, Johnny's Hideaway" ends on the venue, and a
    * rule stopping at the first capitalised word cut it to "Roswell Road,
-   * Johnny". Lower case still ends it, which keeps the icon row out. */
-  var PLACE_ENDS_AT_TOWN = /^(.*?,\s*[A-Z][A-Za-z]+(?:'s)?(?:\s+[A-Z][A-Za-z]+(?:'s)?)?)\b/;
-
-  function endsAtTown(value) {
-    var m = String(value || '').match(PLACE_ENDS_AT_TOWN);
-    return m ? m[1] : value;
-  }
+   * Johnny". Lower case still ends it, which keeps the icon row out.
+   *
+   * ...and "a capitalised name or two" took its second name from the NEXT
+   * LINE, because normalize() joins the reader's lines with a space. One frame
+   * of the rig's Jimmy John's snap on 8 October caught the Accept button under
+   * the card as `Pverel 8) 4 P`, and the dropoff went to the journal as
+   * `Shadowood Pkwy SE, Atlanta Pverel`. So the second name is its own group,
+   * and findPlaces asks where the reader put it: an address that has reached
+   * its town does not take a name that begins the next line unless that line
+   * is address-shaped by looksLikeAPlace. A town that wraps survives it
+   * because its second line is a place word: `Sequoia Cir SE, Bartow` /
+   * `County`, and "Springs" on 56 readings of Powder Springs. See
+   * PLACE_ENDS_AT_TOWN in offer_parser.py for the week's measurement. */
+  var PLACE_TOWN_NAME = "[A-Z][A-Za-z]+(?:'s)?";
+  var PLACE_ENDS_AT_TOWN = new RegExp(
+    '^(.*?,\\s*' + PLACE_TOWN_NAME + ')(\\s+(' + PLACE_TOWN_NAME + '))?\\b');
 
   /* The card's bottom bar — a row of icons — comes back as one and two
      character scraps: `Kennesaw 4`, `Marietta %`, `Acworth ¥`, `Kennesaw 2c 4`.
@@ -1344,8 +1407,13 @@
      one found against the Pickup or Deliver-by label. Same shape as findPay's
      `_where` and for the same reason: the caller that needs to know where a
      place sat gets this pass's own answer rather than a second search that
-     could disagree with it. See laidOutApproach, the rule it feeds. */
-  function findPlaces(text, legs, whose) {
+     could disagree with it. See laidOutApproach, the rule it feeds.
+
+     `lines` is where the reader began each line, as offsets into `text` - see
+     lineStarts. Absent, the text is one line, which is how this read every
+     text before it asked. */
+  function findPlaces(text, legs, whose, lines) {
+    lines = lines || [];
     var out = [], foundOn = [];
     function keep(value, leg) {
       value = trimPlace(value);
@@ -1367,21 +1435,67 @@
     }
 
     /* A delivery card without a "Pickup" label puts the merchant straight after
-       the deadline: "Deliver by 6:39 PM / Cherry Cricket / 4 items 0.6 mi". */
+       the deadline: "Deliver by 6:39 PM / Cherry Cricket / 4 items 0.6 mi".
+       Not where the deadline line carries the distance - Uber's "Est.
+       delivery 4:15 PM • 8.6 mi" - because that card's places follow its line
+       the way a total leg's do and are read as a tail below. Read here as
+       well, the merchant's branch is cut at its first digit and "Dave's Hot
+       Chicken" is stored as a third place beside the two the tail finds. */
     var d = DELIVER_BY.exec(text);
-    if (d) {
+    if (d && d[4] === undefined) {
       var after = text.slice(d.index + d[0].length, d.index + d[0].length + 60);
       keep(after.split(AFTER_DEADLINE_STOP)[0]);
     }
 
-    for (var j = 0; j < legs.length; j++) {
-      if (typeof legs[j].end !== 'number') continue;
-      var stop = (j + 1 < legs.length && typeof legs[j + 1].start === 'number')
-        ? legs[j + 1].start : text.length;
+    /* `value` up to its town - see PLACE_ENDS_AT_TOWN. A second name is kept
+       unless the reader began a line with it and that line is not
+       address-shaped. Asked of the reader's lines rather than by searching
+       for `value` in the text: the town as `value` spells it, from its comma,
+       is looked for at each line start, sitting so that its second name is
+       the first thing on that line. See ends_at_town in offer_parser.py. */
+    function endsAtTown(value) {
+      value = String(value || '');
+      var m = value.match(PLACE_ENDS_AT_TOWN);
+      if (!m) return value;
+      var town = value.slice(value.lastIndexOf(',', m[1].length - 1), m[0].length);
+      // Only an address that has already reached a town, by the parser's own
+      // rule for one, PLACE_TOWN - three letters or more. Row 304 of the
+      // owner's week reads `Ridgewood Dr & Stockwood Ct, Dy` / `Woodstock 7`:
+      // `Dy` is the icon row and `Woodstock`, on the next line, is the town.
+      if (m[2] && PLACE_TOWN.test(town)) {
+        var name = m[3], lead = town.length - name.length;
+        for (var n = 0; n < lines.length; n++) {
+          var at = lines[n];
+          if (text.slice(at - lead, at + name.length) !== town) continue;
+          var below = n + 1 < lines.length ? lines[n + 1] : text.length;
+          if (!looksLikeAPlace(text.slice(at, below))) return m[1];
+        }
+      }
+      return m[0];
+    }
+
+    /* The tail of each leg, and of the deadline line on the card that prints
+       its distance there: `Est. delivery 4:15 PM • 8.6 mi` stands where `27
+       min (7.3 mi) total` stands on every other Early look card, and the
+       merchant and the destination follow it in the same order, so they are
+       read by the same code rather than by a second rule for one card. No
+       leg, so `whose` records null for them. */
+    var tails = [];
+    for (var t = 0; t < legs.length; t++) {
+      if (typeof legs[t].end !== 'number') continue;
+      tails.push([legs[t].end,
+                  (t + 1 < legs.length && typeof legs[t + 1].start === 'number')
+                    ? legs[t + 1].start : text.length,
+                  t]);
+    }
+    if (d && d[4] !== undefined) tails.push([d.index + d[0].length, text.length, null]);
+
+    for (var q = 0; q < tails.length; q++) {
+      var start = tails[q][0], stop = tails[q][1], j = tails[q][2];
       // 130 rather than 80. On the single-total delivery card the tail holds
       // the merchant AND the address, and 80 cut the town off the end of the
       // one that matters: "Double Branches Ln & Sagamore Ct. Dal".
-      var tail = text.slice(legs[j].end, stop).slice(0, 130);
+      var tail = text.slice(start, stop).slice(0, 130);
       tail = tail.split(PLACE_STOP)[0];
       // Trimmed before it is judged, not after. The test asks whether this is
       // an address, and the thing to ask it about is the string that would be
@@ -2207,7 +2321,9 @@
     dist.uncertain = dist.uncertain || legsShortADistance(used, miles);
 
     var whose = [];
-    var places = findPlaces(mine, legs, whose);
+    // The reader's own line breaks go with it, as offsets into `text` - which
+    // are offsets into `mine` too, because onlyCard blanks rather than slices.
+    var places = findPlaces(mine, legs, whose, lineStarts(rawText));
     /* Which end of the job the card printed each name against, from this same
        pass's record of where they sat. Asked before the two ends, because it
        is what decides them when the card stated it. */
@@ -2680,7 +2796,8 @@
   // function that decides what target an offer is judged against, it had
   // drifted, and nothing could see that because it was not reachable from a
   // test.
-  return { parse: parse, rate: rate, normalize: normalize, toNumber: toNumber,
+  return { parse: parse, rate: rate, normalize: normalize, lineStarts: lineStarts,
+           toNumber: toNumber,
            setting: setting, doubt: doubt, round2: round2,
            DOUBT_REASONS: DOUBT_REASONS,
            TYPED_DOUBT_REASONS: TYPED_DOUBT_REASONS,

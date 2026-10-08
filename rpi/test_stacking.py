@@ -1204,6 +1204,24 @@ try:
         _refused = str(e)
     eq('...and stops on a text cell that is not a JSON string, naming its row',
        _refused, 'row 1: text is not a JSON string')
+    # ...and compares the deadline, in both ports.
+    #
+    # A reading that gains a deadline moves nothing else the replay compares:
+    # it runs rate() without the clock, so Uber's Est. delivery card stays
+    # `empty` on both sides of the change that taught the reader its wording,
+    # and the replay of that change reported its frames as unmoved until
+    # `deliverBy` was one of the fields. Asked of the tool's own two halves on
+    # one reading, so taking the field out of either summary, or out of what a
+    # diff compares, fails here by name.
+    _est_text = '$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi'
+    _est = [{'row': 1, 'at': None, 'frames': [_est_text], 'text': _est_text,
+             'settings': replay_week.settings_of({})}]
+    _est_py = replay_week.replay_python(_est)[1]['frames'][0]
+    _est_js = replay_week.replay_js(_est)[1]['frames'][0]
+    eq("the replay reads an Est. delivery card's deadline in both ports",
+       [_est_py.get('deliverBy'), _est_js.get('deliverBy')], [975, 975])
+    eq('...and a reading that gains one is a reading that moved',
+       replay_week.changed(dict(_est_py, deliverBy=None), _est_py), ['deliverBy'])
 
     # --- the delivery card, which had no second-job line at all --------------
     #

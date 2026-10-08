@@ -1705,6 +1705,29 @@
     "complete": true,
     "promo": false
    }
+  },
+  {
+   "name": "Uber's Est. delivery card states a time, not a duration, and is a deadline card",
+   "_why": "An Uber Eats Early look card off the rig on 8 October, line by line as the phone showed it. Every other Early look card in the owner's week prints `27 min (7.3 mi) total`; this one prints when the job is due. It parsed to $14.48 and 8.6 mi with no deadline, so it was incomplete, got no verdict and never reached the journal.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": {
+    "pay": 14.48,
+    "minutes": null,
+    "miles": 8.6,
+    "deliverBy": 975,
+    "complete": true
+   }
+  },
+  {
+   "name": "...and as the rig read it, the payout line cut off by the card box",
+   "_why": "The rig's own reading of the same card, verbatim. The drawn card box cut the payout line and it read `gg Pit.`, which is a separate fault - this card must still find no payout in it, and the deadline and the distance it did read.",
+   "text": "gg Pit.\nIncludes expected tip\na © Est. delivery 4:15 PM- 8.6 mi\n| Dave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Tri & Northwoods Dr,\nMarietta\n@ Matching may take longer\no",
+   "expect": {
+    "pay": null,
+    "miles": 8.6,
+    "deliverBy": 975,
+    "complete": false
+   }
   }
  ],
  "rate": [
@@ -2254,6 +2277,24 @@
    },
    "expect": {
     "perHour": 22.4,
+    "state": "warn"
+   }
+  },
+  {
+   "name": "Uber's Est. delivery card read at 3:45 PM is thirty minutes, not a guess",
+   "_why": "The phone's clock read 3:45 PM on the snap. 4:15 PM less 3:45 PM is 30 minutes; $14.48 less 8.6 mi at 30c is $11.90, $23.80/hr against a $25 line with a 15% band, CLOSE CALL - the subtraction rate() already made for every DoorDash card, now reached by an Uber one.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "settings": {
+    "target": 25,
+    "band": 15,
+    "costPerMile": 0.3,
+    "nowMinutes": 945
+   },
+   "expect": {
+    "cardMinutes": 30,
+    "fromDeadline": true,
+    "perHour": 23.8,
+    "doubt": null,
     "state": "warn"
    }
   }
@@ -2951,6 +2992,74 @@
     "Zaxbys (Old 41 Hwy)",
     "Bartleson Dr NW & Smithwell Pt NW, Kennesaw"
    ]
+  },
+  {
+   "name": "Uber's Est. delivery card names both ends after its deadline line, as a total leg's card does",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Trl & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "...and the rig's reading of it, Tri and all",
+   "text": "gg Pit.\nIncludes expected tip\na © Est. delivery 4:15 PM- 8.6 mi\n| Dave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Tri & Northwoods Dr,\nMarietta\n@ Matching may take longer\no",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Tri & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "...and Match, that card's accept button, is not part of the town before it",
+   "text": "$14.48 Includes expected tip Est. delivery 4:15 PM • 8.6 mi Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100) Foothill Trl & Northwoods Dr, Marietta Match",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Trl & Northwoods Dr, Marietta"
+   ]
+  },
+  {
+   "name": "a town does not take the Accept button on the line under it as its second name",
+   "text": "Exclusive x\n| $4.21 |\n’ . '\nGuaranteed (incl. tip)\n© 23 min (5.2 mi) total\nJimmy John's (1337 Powers Ferry Rd\n| Se)\nShadowood Pkwy SE, Atlanta\nPverel 8) 4 P",
+   "expect": [
+    "Jimmy John's (1337 Powers Ferry Rd Se)",
+    "Shadowood Pkwy SE, Atlanta"
+   ]
+  },
+  {
+   "name": "...but a town that wraps keeps its second line when that line is a place word",
+   "text": "om ™\n¥ Shop & Deliver (2) Exclusive ™%\n$15.05\nGuaranteed (inci. tip)\n© Litem (2 units)\n© 40 min (119 mi) total\nWalgreens (4075 Cherokee St Nw)\nI Sequoia Cir & Sequoia Cir SE, Bartow\nCounty\n© Orders have the same drop-off\n| o rs |\nRS ent aoe ec A\nETT ere",
+   "expect": [
+    "Walgreens (4075 Cherokee St Nw)",
+    "Sequoia Cir & Sequoia Cir SE, Bartow County"
+   ]
+  },
+  {
+   "name": "...and a first name too short to be a town takes the next line, which is the town",
+   "text": "v\n4\n*\nco\n, at\nz* Mt\n, fs\nSa i\n$7.68\nGuaranteed (incl. tip Y\n© 33 min (8.6 mi) total aS\nGameStop - Gamestop 3408 @ 3\nl Kennesaw S/C - Marietta ah\nRidgewood Dr & Stockwood Ct, Dy\nWoodstock 7\nPx\n= —— ce\n© Customer verification —_*\n: ee “3",
+   "expect": [
+    "GameStop - Gamestop 3408 @ 3 l Kennesaw S/C - Marietta",
+    "Ridgewood Dr & Stockwood Ct, Dy Woodstock"
+   ]
+  },
+  {
+   "name": "...and the line under a town is asked about on its own, not with the address on the line after it",
+   "text": "We pores ae\nPeale)\n(O}\nTerre\n‘\n$10.03\n*% 478 @ Verified\n6 min (4.4 mi)\nEast Atlanta Village, SFS\nUmins (6.5 mi)\n12th St NW & Spring St NW, Atlanta\n® On the way\now",
+   "expect": [
+    "East Atlanta Village, SFS"
+   ]
+  },
+  {
+   "name": "the Matching chip under an address whose town did not read is not part of it",
+   "text": "Cu Cy 0)\n2) PUTED soley\nre Piureecy\nWETS 18 Lem ste ey\nQ Early look - Order in progress\n¥f Delivery\n$7.03\nIncludes expected tip\n© 25 min (69 mi) total\nRoberts Rd)\nGeorgia State Route 5 N & 1-575 N,\nCobb County\nHooters (Old 41 Hwy NW &N\n@ Matching may take longer\n:",
+   "expect": []
+  },
+  {
+   "name": "...and a chip that made the destination too long to store no longer costs the card it",
+   "text": "ee\na Trip Radar @ a\n: Q Early look - Order in progress\n\\ A\n,\niu ye\nmm $10.18 b:\nfy\nincludes expected tip\nB:\n© 29 min (8.3 mi) total 7}\n: Panda Express (COBB PKWY & A\nMARS) ' ¥\nyl\n: Creekstone Dr & Salem Woods Dr, a\nAcworth\n@ Matching may take longer | om\n—— ————\nR\n. itt 6 ‘\nIos trPir. ” ULL",
+   "expect": [
+    "Panda Express (COBB PKWY & A MARS)",
+    "Creekstone Dr & Salem Woods Dr, a Acworth"
+   ]
   }
  ],
  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
@@ -3003,6 +3112,61 @@
   {
    "name": "no deadline at all",
    "text": "23 min (8.4 mi) trip",
+   "expect": null
+  },
+  {
+   "name": "Uber's Est. delivery",
+   "text": "Est. delivery 4:15 PM • 8.6 mi",
+   "expect": 975
+  },
+  {
+   "name": "...with its full stop lost",
+   "text": "Est delivery 4:15 PM",
+   "expect": 975
+  },
+  {
+   "name": "...or read as a comma",
+   "text": "Est, delivery 4:15 PM",
+   "expect": 975
+  },
+  {
+   "name": "...with no space before PM",
+   "text": "Est. delivery 4:15PM",
+   "expect": 975
+  },
+  {
+   "name": "...with a dot for the colon",
+   "text": "Est. delivery 4.15 PM",
+   "expect": 975
+  },
+  {
+   "name": "...and the rig's own reading, a dash for the bullet",
+   "text": "a © Est. delivery 4:15 PM- 8.6 mi",
+   "expect": 975
+  },
+  {
+   "name": "an Early look card's Delivery badge and total leg state no deadline",
+   "text": "Cu Cy 0)\n2) PUTED soley\nre Piureecy\nWETS 18 Lem ste ey\nQ Early look - Order in progress\n¥f Delivery\n$7.03\nIncludes expected tip\n© 25 min (69 mi) total\nRoberts Rd)\nGeorgia State Route 5 N & 1-575 N,\nCobb County\nHooters (Old 41 Hwy NW &N\n@ Matching may take longer\n:",
+   "expect": null
+  },
+  {
+   "name": "a word that only ends in est is not Uber's Est.",
+   "text": "Fastest delivery 4:15 PM",
+   "expect": null
+  },
+  {
+   "name": "a pickup time is not when the job is due",
+   "text": "Est. pickup 3:50 PM",
+   "expect": null
+  },
+  {
+   "name": "...and on a card printing both, the delivery time is",
+   "text": "Est. pickup 3:50 PM • Est. delivery 4:15 PM • 8.6 mi",
+   "expect": 975
+  },
+  {
+   "name": "the zone prompt's bonus runs until a time, which is not a deadline",
+   "text": "GA: Marietta North\nSwitch to this zone\nwith peak pay!\n+$1.00/order until 8:20 PM\nAvg. offer wait\n1min\nDon't switch",
    "expect": null
   }
  ],
@@ -3338,6 +3502,12 @@
    "name": "...and with its count it is",
    "text": "Shop & Deliver $18.40 12 items (12 units) 38 min (9.1 mi) total",
    "expect": true
+  },
+  {
+   "name": "Uber's Est. delivery card with its distance is finished, as a DoorDash one is",
+   "_why": "The panel says `still reading` and the voice waits until a reading is whole. A deadline card is whole with a payout, a deadline and a distance; this card has all three, and it is held to the same rule as the DoorDash cards above it.",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": true
   }
  ]
 ,
@@ -3666,6 +3836,14 @@
    "expect": [
     "(19.2 Capri Rdg & Top",
     null
+   ]
+  },
+  {
+   "name": "Uber's Est. delivery card: the merchant is where it starts, the address where it ends",
+   "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": [
+    "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+    "Foothill Trl & Northwoods Dr, Marietta"
    ]
   }
  ]

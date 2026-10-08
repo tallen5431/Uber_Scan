@@ -321,5 +321,37 @@ check('largest dollar figure wins over a promo line',
      P.legsShortADistance([]), false);
 })();
 
+/* ---- where the reader began each line ---- */
+/* The mirror of rpi/test_parser.py's check of the same name. findPlaces asks
+   where a line began, to refuse a town the second name the reader put on the
+   NEXT line, and it asks in offsets into normalize(text) — which has already
+   thrown every line break away. So the offsets are held to landing exactly
+   where normalize() put each line, over every corpus text that has lines: the
+   flattened text cut at them must be the lines normalized one at a time. */
+(function () {
+  var cases = require('./fixtures/cases.json'), lined = [];
+  ['parse', 'rate', 'places', 'whole', 'ends', 'deadline', 'toPickup'].forEach(function (sec) {
+    (cases[sec] || []).forEach(function (c) {
+      if (c.text && c.text.indexOf('\n') >= 0) lined.push(c.text);
+    });
+  });
+  function cutAtStarts(t) {
+    var flat = P.normalize(t), cuts = [0].concat(P.lineStarts(t), [flat.length + 1]), out = [];
+    for (var i = 0; i + 1 < cuts.length; i++) out.push(flat.slice(cuts[i], cuts[i + 1] - 1));
+    return out;
+  }
+  function linesAlone(t) {
+    return t.replace(/\r/g, '\n').split('\n').map(P.normalize)
+      .filter(function (l) { return l; });
+  }
+  var wrong = lined.filter(function (t) {
+    return JSON.stringify(cutAtStarts(t)) !== JSON.stringify(linesAlone(t));
+  });
+  eq("line_starts cuts the flattened text into the reader's own lines ("
+     + lined.length + ' texts)', wrong.length, 0);
+  eq('...a blank line and a CRLF each one break, and no start before the first line',
+     P.lineStarts('Jimmy\n\n  Atlanta \r\nPverel').join(','), '6,14');
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');
 process.exit(fail ? 1 : 0);

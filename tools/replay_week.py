@@ -84,8 +84,14 @@ csv.field_size_limit(1 << 30)
 # would never be spoken again, reported as "no published state moved".
 # untimedMiles is the figure live.html prints in "a leg this reading could not
 # time"; the doubt is which of the rate's refusals fired.
-FIELDS = ('pay', 'minutes', 'miles', 'pickup', 'dropoff', 'state', 'perHour',
-          'places', 'whole', 'doubt', 'untimedMiles')
+#
+# `deliverBy` because it is the denominator of every card that states a time
+# of delivery instead of a duration, and it moves no other field here: rate()
+# is run without the clock, so a frame that gains a deadline stays `empty` and
+# only this column can say the reader now sees one. Widening the deadline rule
+# to Uber's "Est. delivery" card was replayed blind to it until it was added.
+FIELDS = ('pay', 'minutes', 'miles', 'deliverBy', 'pickup', 'dropoff', 'state',
+          'perHour', 'places', 'whole', 'doubt', 'untimedMiles')
 
 # A second apart, which is well inside the accumulator's window and about the
 # pace the rig reads at. The merge keys on silence, not on the clock, so any
@@ -109,6 +115,7 @@ def summary(parsed, rate):
         'pay': parsed.get('pay'),
         'minutes': parsed.get('minutes'),
         'miles': parsed.get('miles'),
+        'deliverBy': parsed.get('deliverBy'),
         'pickup': parsed.get('pickup'),
         'dropoff': parsed.get('dropoff'),
         'places': list(parsed.get('places') or []),

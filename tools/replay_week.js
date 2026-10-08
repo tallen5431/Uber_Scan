@@ -19,6 +19,7 @@ function summary(parsed, rate) {
     pay: parsed.pay === undefined ? null : parsed.pay,
     minutes: parsed.minutes === undefined ? null : parsed.minutes,
     miles: parsed.miles === undefined ? null : parsed.miles,
+    deliverBy: parsed.deliverBy === undefined ? null : parsed.deliverBy,
     pickup: parsed.pickup === undefined ? null : parsed.pickup,
     dropoff: parsed.dropoff === undefined ? null : parsed.dropoff,
     places: (parsed.places || []).slice(),
