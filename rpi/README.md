@@ -2165,11 +2165,12 @@ journal (wherever `JOURNAL` puts it), which `.gitignore` covers and
 `test_lint.py` holds it to — a picture of a phone with an address on it does not
 belong in a commit.
 
-**It keeps the newest forty, and the oldest go first.** Measured, a snap is
-146–171kB — an 82kB PNG of the panel at 800x480 out of Chromium's encoder, a
-23–50kB camera picture, a 1.9kB status, and the reader's 33kB crop and 3kB
-account of the test ride card — so forty is under 7MB, under half of what
-`--keep-scans` is allowed. When one goes, the control's own line names
+**It keeps the newest forty, and the oldest go first.** On the rig itself the
+first real snap's panel.png was 212kB (scrot, X11, a 1024x600 panel) and its
+camera picture 17.5kB; with the reader's 33kB crop and a few kB of status and
+account (measured on the test ride card), a snap is about 270kB, so forty is
+about 11MB — under the 16MB `--keep-scans` is allowed. (An 82kB panel PNG
+measured earlier came out of Chromium's encoder at 800x480, not the rig's.) When one goes, the control's own line names
 it — **📷 saved — removed the oldest to keep 40: <folder>** — and so do the
 reply and the server's log. A press never removes a folder that is still being
 filled, its own or another press's, which matters on a Pi that booted before
@@ -7322,10 +7323,10 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 300 on the faults that only surface when a
+python3 rpi/test_lint.py        # 308 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
-python3 rpi/test_handoff.py     #  67 on the three files the browser and the
+python3 rpi/test_handoff.py     #   75 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
 python3 rpi/test_service.py     #  58 on the systemd units BOTH installers
@@ -7340,14 +7341,14 @@ python3 rpi/test_doctor.py      # 119 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 688 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 693 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 900 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 951 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 451 on the offers page as a driver reads it:
@@ -7355,7 +7356,7 @@ python3 rpi/test_offerspage.py  # 451 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 166 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 315 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 398 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -7377,7 +7378,7 @@ node tests/mapview.test.js      # 232 on the deciding behind both maps, with
                                 #     cases — two walks in a row, a cache hit
                                 #     mid-walk, a hotspot that drops — cost
                                 #     milliseconds instead of seconds
-python3 rpi/test_loop.py        # 104 on the scan loop re-telling a card once
+python3 rpi/test_loop.py        # 146 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused

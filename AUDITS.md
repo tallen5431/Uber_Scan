@@ -2579,6 +2579,39 @@ snaps.html, journal.html, .gitignore and sw.js, each caught by name. The
 snap-size figures (82kB panel PNG) were measured on Chromium's encoder and
 should be re-measured on the Pi with grim.
 
+**An independent check of the merged 📷 Snap found three faults it shipped
+with.** A snap's age subtracted a stamp written before NTP from a now read
+after it: measured, "20732 days ago" one way and 0 the other (now null, "age
+unknown", whenever either side is below CLOCK_BELIEVABLE_AFTER). Two presses at
+once on an unset clock with a full shelf deleted each other, because pruning
+spared only the pressing folder (now every folder still being filled is
+spared). And a failed write left a torn camera.jpg, status.json or snap.json
+that the list then counted as kept (now unlinked before the reply; an
+unreadable snap.json is told apart from a missing one). Also fixed: the PNG
+check wanted only the signature (now IHDR and IEND too); serving and listing
+disagreed about a link inside snaps/ (serving now asks the list); pruning was
+said only in the JSON (now on the control); and where 📷 is drawn had three
+different rules (now one, the status row's own width, measured on eleven
+panel sizes). Nine unchecked branches each gained a named check. On the rig,
+the first real snap measured panel.png at 212kB (scrot, X11), not the 82kB
+Chromium's encoder gave, so forty snaps are about 9MB.
+
+**📷 Snap now also asks the scanner what it last read.** A sixth handoff
+request, `.snap.json`, taken with the same age guard as a ⌖ press, is
+answered once with reader.jpg (the card the reader was handed, before
+preprocess) and reader.json (that read's text, parsed fields and rate, the
+health counters, the heartbeat flags, and GPS state). The server waits at
+most 4s, polling, and says which part is missing and why. When the reader and
+the panel both name a card and they differ, the line says so first — the
+first version also fired when one side simply had no card, after a restart,
+and a skeptic caught it. Each press appends one collection-only
+`kind:'snap'` row, stamped when it is written (stamped at the press, it could
+land up to 8s behind offer rows and read as a clock step to doctor.py), which
+every journal reader passes over. On the NucBox the camera and the reader are
+recorded together as not applying. Still open: the 3s answer window against
+the 4s wait is measured only on the development box (3.0ms median, 5.1ms
+worst), and the answer time on the Pi needs measuring.
+
 ### The offers page
 
 **The cost sweep's footnote read a two-sided test as a one-sided one, and

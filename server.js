@@ -2816,10 +2816,11 @@ var SNAPS_DIR = path.join(path.dirname(JOURNAL_PATH), 'snaps');
  * 480px and quality 60 is 23kB, and rpi/scan_pi.py puts the wide scene at
  * about 50kB; status.json with a reading, its text and an offer on record is
  * 1.9kB; the scanner's answer for that card's real crop is a 33kB reader.jpg
- * and 3kB of reader.json. So 146-171kB a snap, and forty is under 7MB — under
- * half the 16MB the kept card pictures are already allowed (SCANS_KEEP, 400 at
- * ~40kB), on the one part of the rig that wears out. grim's encoder is not
- * Chromium's, and that is the figure to re-measure on the Pi.
+ * and 3kB of reader.json. Re-measured on the rig: its first real snap's
+ * panel.png was 212kB (scrot, X11, a 1024x600 panel) and its camera picture
+ * 17.5kB, so a snap there is about 270kB and forty about 11MB — still under the
+ * 16MB the kept card pictures are allowed (SCANS_KEEP, 400 at ~40kB), on the
+ * one part of the rig that wears out.
  *
  * Overridable for the reason HOLD_GRACE_MS is: a check that has to press forty
  * times to watch the forty-first arrive is a check nobody runs. */
