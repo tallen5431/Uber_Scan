@@ -710,9 +710,12 @@
   /* The Trip Planner's stops, one line each, after a ⌖ press.
    *
    * Only ever drawn between offers (see showStops), when the card holds the
-   * phase and nothing else — the rate and the four figures are `novalue`,
-   * above — so there is room in it, and rpi/test_layout.py measures that
-   * nothing else on the panel moves for it. Each stop one line, ellipsised at
+   * phase and the notice and nothing else — the rate and the four figures are
+   * `novalue`, above — so there is room in it, and rpi/test_layout.py
+   * measures that nothing else on the panel moves for it. `flex: none` like
+   * the address line, so a stop is never drawn as part of a line; the notice
+   * is not starved by that, because showStops takes lines off the end while
+   * the notice is cut. Each stop one line, ellipsised at
    * the end: the kind and the time first, which may not be cut (see
    * stopLine), then the name, then the street, which is the part a driver
    * already has on the phone in front of them. The size is the address
@@ -787,8 +790,8 @@
       <div class="stackline" id="stack" hidden></div>
       <!-- Uber's Trip Planner, as ⌖ Dropoff read it: every stop in order, one
            line each. Between offers only — when the card holds nothing but the
-           phase — and for as long as the destination the same press read is on
-           the button. See showStops. -->
+           phase and the notice, which it gives way to — and forgotten when the
+           destination the same press read is. See showStops. -->
       <div class="stops" id="stops" hidden></div>
       <div id="warn" class="notice" hidden></div>
     </section>
@@ -1662,8 +1665,10 @@
   // outlived the thing that failed would be worse than not saying it.
   var destFailed = false;
   // ...and the Trip Planner the same press read, when it was one: the stops,
-  // in the order the phone listed them, or null. See showStops.
-  var stopsSaid = null;
+  // in the order the phone listed them, and the scanner's reason for filing
+  // none of them as the order's end — {stops, unfiled} — or null. See
+  // showStops and unfiledNow.
+  var plannerSaid = null;
 
   /* What a press read is forgotten, all of it, in one place.
    *
@@ -1675,15 +1680,67 @@
    * answer the first time somebody added an eighth to one list and not the
    * other: stops still on the glass for an order already put down, which is a
    * route for a trip that is over. rpi/test_dashboard.py holds every one of
-   * them to this function.
+   * them to this function. server.js drops the stops it keeps on the order in
+   * the car at the same moments (forgetPlanner), so a reload does not bring
+   * back what this has forgotten.
    *
    * ...and the stops come off the glass HERE, not at the next render: Drop and
    * the replies to a press answer on their own and do not render, so for up to
    * the second-long tick a put-down order's stops were still being shown. */
   function forgetDest() {
     destSaid = '';
-    stopsSaid = null;
+    plannerSaid = null;
     showStops(false);
+  }
+
+  /* Why the planner the last press read gave the order in the car no end, as
+   * the SCANNER decided it — see planner_destination in rpi/scan_pi.py — or ''.
+   *
+   * Read off the line, not worked out here. This page used to count the
+   * dropoffs itself, which was a second copy of half the scanner's rule: it
+   * said nothing when the one dropoff did not read whole, and nothing could
+   * have told it the list ran off the screen.
+   *
+   * '' the moment the button has an end on it, whichever read put it there.
+   * "End not guessed" beside a green "Read as: …" was two answers to one
+   * question on the glass at once — a two-dropoff planner, then the address
+   * seen on the navigation screen — and the second is the one that holds. */
+  function unfiledNow() {
+    return (!destSaid && plannerSaid && plannerSaid.unfiled) || '';
+  }
+
+  // Each reason twice: the line under the stops, which has to survive the
+  // thirty characters the 3.5" hat's scene picture gives a line, and the
+  // sentence it stands for on the button's title. Keyed by the words
+  // planner_destination returns, and rpi/test_lint.py holds the two lists to
+  // each other: a reason the scanner gives that this has no words for would
+  // throw in the middle of drawing the driving screen.
+  var UNFILED_THEN = ' so the order\'s destination is left as it was. Press this '
+    + 'over the navigation screen for it instead.';
+  var UNFILED_SAID = {
+    dropoffs: function (drops) {
+      return { note: drops + ' dropoffs: end not guessed',
+               title: 'The Trip Planner lists ' + drops + ' dropoffs and the rig '
+                 + 'does not guess which one is this order\'s,' + UNFILED_THEN };
+    },
+    list: function () {
+      return { note: 'list cut off: end not guessed',
+               title: 'The rig could not see both ends of the Trip Planner\'s list — '
+                 + 'the title over the first stop and "Waybill" under the last — so '
+                 + 'the one dropoff it read may not be the trip\'s only one,'
+                 + UNFILED_THEN };
+    },
+    address: function () {
+      return { note: 'dropoff address unread',
+               title: 'The Trip Planner\'s dropoff did not read as a street and a '
+                 + 'town,' + UNFILED_THEN };
+    }
+  };
+
+  function unfiledSaid(why, stops) {
+    return UNFILED_SAID[why]((stops || []).filter(function (s) {
+      return s.kind === 'dropoff';
+    }).length);
   }
 
   // "4:18" off minutes since midnight. No AM or PM: a stop is expected within
@@ -1726,30 +1783,67 @@
    * and nothing else (see #stops in the stylesheet), so the block costs the
    * panel nothing it was using. A card being judged takes the space back —
    * render() hides the block whenever a reading carries a verdict — and the
-   * stops come back when it goes, for as long as they are remembered, which is
-   * exactly as long as the destination the same press read: see forgetDest.
+   * stops come back when it goes, for as long as they are remembered, which
+   * ends at exactly the moments the read destination does: see forgetDest.
    *
-   * With several dropoffs on the planner the rig does not say which one is
-   * the order in the car's — the scanner refuses to guess, see
-   * planner_destination — and this says so in a line of its own, because the
-   * button staying amber is the only other sign of it. */
+   * When the scanner gave the order in the car no end off the planner — two
+   * dropoffs, a list it could not see both ends of, a dropoff that did not
+   * read whole — this says so in a line of its own, because the button staying
+   * amber is the only other sign of it. See unfiledNow.
+   *
+   * THE NOTICE FIRST. Between offers the card also holds the notice — the
+   * journal refusing writes, the phone too bright or too dim, a Re-find
+   * refused, the phase's own message — and the notice is the item that gives
+   * way (see `#warn` in the stylesheet), while these lines are `flex: none`.
+   * So on a small panel the stops took the notice's room, and it went with
+   * nothing saying so: on the 3.5" hat's scene picture "Offers are NOT being
+   * saved" with "too bright" after it needs 139px, had 121 on the glass before
+   * four stops arrived, and 17 after (rpi/test_layout.py, this fold switched
+   * off). Now the stops give way first, a
+   * line at a time from the end, each one counted into "+ N more stops", down
+   * to one line saying how many there are — so neither disappears silently.
+   * That one line can still cost a notice that does not fit even without it;
+   * a notice longer than the card is scrollable, and was cut before. */
   function showStops(show) {
+    var stops = show && plannerSaid ? plannerSaid.stops : [];
+    var why = stops.length ? unfiledNow() : '';
+    var note = why ? unfiledSaid(why, stops).note : '';
+    var k = stops.length > STOPS_SHOWN ? STOPS_SHOWN - 1 : stops.length;
+    var drawn = drawStops(stopsLines(stops, k, note));
+    while (k && noticeCut()) {
+      var fewer;
+      do { k--; fewer = stopsLines(stops, k, note); } while (k && fewer.length >= drawn);
+      drawn = drawStops(fewer);
+    }
+  }
+
+  // The first `k` stops, the rest counted, and the note under them; with no
+  // room for a single stop, one line that says how many were read.
+  function stopsLines(stops, k, note) {
+    if (!stops.length) return [];
+    var plural = function (n) { return n + (n === 1 ? ' stop' : ' stops'); };
+    if (!k) return ['▸ ' + plural(stops.length) + ': no room to list'];
+    var lines = stops.slice(0, k).map(stopLine);
+    if (k < stops.length) lines.push('+ ' + plural(stops.length - k).replace(' ', ' more '));
+    if (note) lines.push(note);
+    return lines;
+  }
+
+  function drawStops(lines) {
     while (el.stops.firstChild) el.stops.removeChild(el.stops.firstChild);
-    var stops = show && stopsSaid ? stopsSaid : [];
-    var lines = stops.length > STOPS_SHOWN
-      ? stops.slice(0, STOPS_SHOWN - 1).map(stopLine)
-          .concat(['+ ' + (stops.length - STOPS_SHOWN + 1) + ' more stops'])
-      : stops.map(stopLine);
-    var drops = stops.filter(function (s) { return s.kind === 'dropoff'; }).length;
-    // Short, because it has to survive the same thirty characters: the
-    // sentence it stands for is on the button's title.
-    if (drops > 1) lines.push(drops + ' dropoffs: end not guessed');
     lines.forEach(function (text) {
       var div = document.createElement('div');
       div.textContent = text;
       el.stops.appendChild(div);
     });
     el.stops.hidden = !lines.length;
+    return lines.length;
+  }
+
+  // Whether the notice is showing less than it says. Measured on the element,
+  // after the lines above are drawn: its height is what the card had left.
+  function noticeCut() {
+    return !el.warn.hidden && el.warn.scrollHeight > el.warn.clientHeight + 1;
   }
 
   /* The other state this button is for, which it did not used to have.
@@ -1858,21 +1952,18 @@
                      : (screening && !!onRecord.endRefused
                         && onRecord.state !== 'no'));
     el.dest.classList.toggle('wanted', wants);
-    // A Trip Planner the last press read, with more than one dropoff on it:
-    // the panel lists the stops and says the end was not guessed, in thirty
-    // characters; this is the sentence that stands for.
-    var unguessed = !destSaid && stopsSaid ? stopsSaid.filter(function (s) {
-      return s.kind === 'dropoff';
-    }).length : 0;
+    // A Trip Planner the last press read, which the scanner gave the order no
+    // end off: the panel says why under the stops, in thirty characters; this
+    // is the sentence that stands for. One reason, read off the line, for
+    // both. See unfiledNow.
+    var unfiled = unfiledNow();
     el.dest.title = destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
       : destFailed
       ? 'Nothing on that screen read as an address. Get the destination up on '
         + 'your phone and press again.'
-      : unguessed > 1
-      ? 'The Trip Planner lists ' + unguessed + ' dropoffs, and which one is this '
-        + 'order\'s is not guessed, so its destination is left as it was. Press '
-        + 'this over the navigation screen for it instead.'
+      : unfiled
+      ? unfiledSaid(unfiled, plannerSaid.stops).title
       : wants && holdingNow
       ? 'The order you are carrying has no address on record, so the rig '
         + 'cannot say whether a second job ends near it. Read it off your '
@@ -3098,12 +3189,12 @@
       // ...and a press that read Uber's Trip Planner, which is an answer of
       // its own: the stops, in order, whether or not one of them could be
       // given to the order in the car. When one could, a `dropoff` line comes
-      // with it and the branch above turns the button green exactly as for any
-      // address; when the planner lists two dropoffs none does, and the rig
-      // says no "not read" over the stops either. Either way the press is
-      // answered, so the button stops saying "reading…".
+      // after it and the branch above turns the button green exactly as for
+      // any address; when none could, the line carries the scanner's reason,
+      // and the rig says no "not read" over the stops either. Either way the
+      // press is answered, so the button stops saying "reading…".
       if (msg.planner && Array.isArray(msg.planner.stops)) {
-        stopsSaid = msg.planner.stops;
+        plannerSaid = { stops: msg.planner.stops, unfiled: msg.planner.unfiled || null };
         destFailed = false;
         destBusy = false;
         showDest();
@@ -3192,11 +3283,16 @@
     } else if (!s.holding) {
       forgetDest();
     }
-    // ...and the Trip Planner's stops, by the same rule: the server keeps the
-    // ones a press read while this order was in the car, and drops them with
-    // it. A planner read with nothing held was shown and not kept, like an
-    // address read with nothing held, so a reload does not bring it back.
-    if (s.holding && Array.isArray(s.holding.planner)) stopsSaid = s.holding.planner;
+    // ...and the Trip Planner's stops, with the scanner's reason for filing
+    // none of them: the server keeps the ones a press read while this order
+    // was in the car, and drops them at the moments this page forgets them
+    // (forgetPlanner in server.js). A planner read with nothing held was
+    // shown and not kept, like an address read with nothing held, so a reload
+    // does not bring it back.
+    var heldPlanner = s.holding && s.holding.planner;
+    if (heldPlanner && Array.isArray(heldPlanner.stops)) {
+      plannerSaid = { stops: heldPlanner.stops, unfiled: heldPlanner.unfiled || null };
+    }
     showDest();
     scannerState = s.scanner || null;
     render();

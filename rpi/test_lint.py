@@ -1045,6 +1045,25 @@ _alike = sorted(set(_a[:60] for _i, _a in enumerate(_heads)
 ok_('AUDITS.md keeps each entry in one section, not %s' % (_alike[:2] or 'two'),
     not _alike)
 
+# --- the reasons a Trip Planner gives the order in the car no end -------------
+#
+# rpi/scan_pi.py's planner_destination decides, and says which reason in a word
+# on the planner line; live.html's UNFILED_SAID has the panel's words for each.
+# Two lists in two languages that have to be the same list: a reason the
+# scanner gives that the page has no entry for is a TypeError on the driving
+# screen, and an entry the scanner never gives is a branch no input reaches.
+# Read out of both files, as the doubt reasons above are.
+_sp_src = open(os.path.join(ROOT, 'rpi', 'scan_pi.py'), encoding='utf-8').read()
+_pd = _sp_src[_sp_src.index('\ndef planner_destination('):]
+_pd = _pd[:_pd.index('\ndef ', 1)]
+_given = set(re.findall(r"return None, '([a-z]+)'", _pd))
+_live_src = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
+_said = re.search(r'var UNFILED_SAID = \{(.*?)\n  \};', _live_src, re.S)
+eq('live.html has words for every reason planner_destination gives, and no other',
+   sorted(re.findall(r'^    ([a-z]+): function', _said.group(1), re.M)) if _said else None,
+   sorted(_given))
+ok_('...and planner_destination gives some (%r)' % sorted(_given), len(_given) >= 3)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)

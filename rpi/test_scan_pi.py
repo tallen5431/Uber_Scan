@@ -3199,7 +3199,7 @@ def _stop(kind, street=None, city=None, line=None):
 _KESTREL = _stop('dropoff', '4821 Kestrel Dr', 'Marietta', '4821 Kestrel Dr, Marietta')
 _was_stdout, sys.stdout = sys.stdout, io.StringIO()
 try:
-    SP2.emit_planner([_KESTREL], ms={'total': 5})
+    SP2.emit_planner([_KESTREL], unfiled='list', keep=True, ms={'total': 5})
     _planner_said = sys.stdout.getvalue()
 finally:
     sys.stdout = _was_stdout
@@ -3207,45 +3207,78 @@ _pmsg = json.loads(_planner_said)
 eq('a Trip Planner goes out on a line of its own', sorted(_pmsg), ['planner'])
 eq('...carrying the stops, and that it answered a press',
    (_pmsg['planner'].get('stops'), _pmsg['planner'].get('asked')), ([_KESTREL], True))
+eq('...and why none of them was filed, and whether the journal may keep them',
+   (_pmsg['planner'].get('unfiled'), _pmsg['planner'].get('keep')), ('list', True))
 eq('...and nothing a verdict is made of',
    [k for k in ('ready', 'state', 'perHour', 'pay')
     if k in _pmsg or k in _pmsg['planner']], [])
 
-eq('one dropoff whose street and town read is the order\'s destination',
-   (SP2.planner_destination([_stop('pickup'), _KESTREL]) or {}).get('line'),
-   '4821 Kestrel Dr, Marietta')
+# (address, why): the address when there is one to file, and otherwise the word
+# the panel says why with. `True` is a list seen whole, both ends on the screen.
+_BIRCH = _stop('dropoff', '77 Birch Ln NW', 'Roswell', '77 Birch Ln NW, Roswell')
+_got = SP2.planner_destination([_stop('pickup'), _KESTREL], True)
+eq('one dropoff whose street and town read, on a list seen whole, is the order\'s '
+   'destination', ((_got[0] or {}).get('line'), _got[1]),
+   ('4821 Kestrel Dr, Marietta', None))
 eq('...two dropoffs are not guessed between',
-   SP2.planner_destination([_KESTREL, _stop('dropoff', '77 Birch Ln NW', 'Roswell',
-                                            '77 Birch Ln NW, Roswell')]), None)
+   SP2.planner_destination([_KESTREL, _BIRCH], True), (None, 'dropoffs'))
+# The count is of the dropoffs the screen shows, and two open stops fill the
+# list: on a list whose ends are not both on the glass, one dropoff may be one
+# of two, the other under the bar of buttons. See OP.planner_bounded.
+eq('...one dropoff on a list the rig could not see both ends of is not taken for '
+   'the trip\'s only one', SP2.planner_destination([_stop('pickup'), _KESTREL], False),
+   (None, 'list'))
 eq('...a dropoff whose street did not read is not filed: a town alone is no '
-   'address', SP2.planner_destination([_stop('dropoff', None, 'Marietta', 'Marietta')]),
-   None)
-eq('...and a planner of pickups gives no destination',
+   'address', SP2.planner_destination([_stop('dropoff', None, 'Marietta', 'Marietta')],
+                                      True), (None, 'address'))
+eq('...and a planner of pickups gives no destination and has nothing to explain',
    SP2.planner_destination([_stop('pickup', '310 Mill St', 'Roswell',
-                                  '310 Mill St, Roswell')]), None)
+                                  '310 Mill St, Roswell')], True), (None, None))
 
 # ...and the whole of it through the real reader. rpi/test_loop.py drives the
 # wiring with a stubbed one; this is the planner DRAWN and read through the
 # lens, the warp, the whole-screen crop and tesseract, which is the only way to
 # know the grammar survives what a real read does to it — the bullet as a "+"
-# or a "*", the stop's icon as "@", "Pat Q." as "pata.". Mounted at 900 rather
+# or a "*", the stop's icon as "@", "Pat Q." as "pata.". Mounted at 820 rather
 # than run()'s 1200: the planner is read from the TOP of the screen, which the
 # closer mount crops off the frame, and the rig's own photograph of one has
-# the whole phone in it.
+# the whole phone in it, title and all. The drawing has the title over the stop
+# and "Waybill" under it, as the phone does, and the read has to get both for
+# the one dropoff to be filed — the list's ends are read off the same pixels.
+# Measured on the first planner read at each mount: at 900 the title is off the
+# top of the frame and not in the text at all, at 880 half of it is, read as
+# "TMP Fiatiler", and at 850, 820, 780 and 750 it reads whole, with "Waybill",
+# the street and the town.
 run_planner = run(TC.planner_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
                   appear_at=0.0, vanish_at=1e9, extra_argv=['--no-parallel'],
-                  press_dropoff=True, mount_width=900,
+                  press_dropoff=True, mount_width=820,
                   until=lambda st: st['planners'] >= 1 and st['destinations'] >= 1)
 eq('a drawn Trip Planner read through the real reader answers ⌖ with its stop',
    [[(s['kind'], s['expectedBy'], s['line']) for s in p[0]]
     for p in run_planner['planners']],
    [[('dropoff', 978, '4821 Kestrel Dr, Marietta')]])
+eq('...both ends of its list read, so nothing is left unfiled',
+   [p[1].get('unfiled', '<not passed>') for p in run_planner['planners']], [None])
 eq('...and its one dropoff goes out as the order\'s destination, asked for',
    [((d[0] or {}).get('line'), d[1].get('asked')) for d in run_planner['destinations']],
    [('4821 Kestrel Dr, Marietta', True)])
 eq('...and nothing on the screen was taken for an offer',
    (run_planner['ready'], run_planner['announced'],
     [r for r in run_planner['rows'] if not r.get('kind')]), ([], [], []))
+# ...and the same planner with its top cut off by a closer mount, which is the
+# list's start gone through the real reader rather than in a typed fixture: the
+# stop still answers the press, and its one dropoff is not taken for the trip's
+# only one, because nothing on what was read says no stop is above it.
+run_cut = run(TC.planner_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
+              appear_at=0.0, vanish_at=1e9, extra_argv=['--no-parallel'],
+              press_dropoff=True, mount_width=900)
+eq('a drawn Trip Planner with its title off the top of the frame answers ⌖ with '
+   'its stop, saying the list\'s ends were not both seen',
+   [([(s['kind'], s['line']) for s in p[0]], p[1].get('unfiled'))
+    for p in run_cut['planners']],
+   [([('dropoff', '4821 Kestrel Dr, Marietta')], 'list')])
+eq('...and gives the order in the car no destination off it',
+   [(d[0] or {}).get('line') for d in run_cut['destinations']], [])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)

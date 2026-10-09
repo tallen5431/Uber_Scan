@@ -101,6 +101,11 @@ function stopFields(stops) {
   var want = JSON.stringify(stopFields(c.expect));
   if (got === want) ok++;
   else { bad++; console.log('FAIL  planner / ' + c.name + ': got ' + got + ' want ' + want); }
+  /* ...and whether both ends of the list are on the screen. Every case says;
+     one that does not compares against undefined and fails. */
+  var ends = P.plannerBounded(c.text);
+  if (ends === c.bounded) ok++;
+  else { bad++; console.log('FAIL  planner ends / ' + c.name + ': got ' + ends + ' want ' + c.bounded); }
 });
 
 (cases.whole || []).forEach(function (c) {

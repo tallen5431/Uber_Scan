@@ -2772,7 +2772,12 @@ and when, it lives on a card in a vehicle, and it is copied to a machine at home
 "settings": { "keepPlaces": false }
 ```
 
-turns it off and changes nothing else.
+turns it off and changes nothing else. The Trip Planner's stops follow it too:
+the scanner says on the planner line whether the journal may keep them, and
+server.js writes the row only when it may. Two kinds of row server.js writes do
+NOT follow it yet, and that is open rather than settled: a destination read off
+the phone — the ⌖ `mark` row, and the ends on a `pair` row — is written
+whatever this says, because the server does not read the scanner's settings.
 
 ### How well the three card shapes actually read
 
@@ -5848,32 +5853,76 @@ read — the owner's words, and the existing rule followed rather than widened:
 an unprompted sighting is taken only under the strict ZIP grammar, and this is
 the one place that grammar is loosened. A planner answers the press at once on
 its own `planner` line (no `ready`, no rate, no pay) and closes the window.
-With **exactly one dropoff** whose street and town both read, that address goes
-out as an ordinary `dropoff` line and is filed by the one path every
-destination takes; with two or more it does not, because nothing on the screen
-says which is the order in the car — and on a planner `find_address`'s own
-answer is not taken either, since it would be the last address printed, one of
-two customers chosen by layout. A town without a street is not filed: a map
-asked for "Marietta" puts a pin in the middle of Marietta.
+`planner_destination` decides whether one of its stops is the order in the
+car's end, and when it is not, says why in a word on that line:
 
-**Where it goes.** server.js puts the stops on the order in the car (and so on
-`/api/status`, for a panel reloaded mid-delivery) and writes one
+* **`dropoffs`** — two or more on the screen. Nothing on it says which is the
+  order in the car, and the planner lists them in driving order, not the order
+  they were accepted. On a planner `find_address`'s own answer is not taken
+  either, asked or not: it would be the last ZIP address printed, one of two
+  customers chosen by layout, and unprompted it would go out as a sighting.
+* **`list`** — one dropoff, but the rig could not see both ends of the list.
+  The count is of the dropoffs on the SCREEN, and on the rig's own live view
+  of a planner one open stop's card is 308 rows of a 695-row list: two open
+  stops fill it, and the one dropoff left on the glass of a longer trip may be
+  another customer's door, with the other under the bar of buttons or scrolled
+  off the top. So `offer_parser.planner_bounded` (and `plannerBounded`) asks
+  for both ends: the `Trip Planner` title with the first stop's header
+  straight under it, and `Waybill` — printed under the stops, outside their
+  card — after the last header. Through the read path, the whole live view
+  lost `Waybill` and all five crops of it to the phone's glass (which is what
+  the screen box is) read it, once as `Waypbill`. That it follows the LAST
+  stop and not each one is read off where it sits on the one planner
+  photographed, which had one stop; a stacked one has not been seen.
+* **`address`** — one dropoff, list seen whole, but its street or its town did
+  not read. A town alone is not filed: a map asked for "Marietta" puts a pin
+  in the middle of Marietta.
+
+Otherwise the address goes out as an ordinary `dropoff` line and is filed by
+the one path every destination takes.
+
+**Where it goes.** server.js puts the stops, with that word, on the order in
+the car (and so on `/api/status`, for a panel reloaded mid-delivery), and
+takes them off again at the moments the driving screen forgets them — a ⌖
+press, a different offer on the record, the order going (`forgetPlanner`).
+They were kept until another planner replaced them at first, and a reload after
+a two-dropoff planner and a press that read the order's end brought back "2
+dropoffs: end not guessed" beside a green button. The read end itself stays on
+the order: the stack line uses it. It writes one
 `{v:1, kind:"planner", id, seq:1, at, stops, asked}` row per planner — the same
-stops pressed again inside `PLANNER_SAME_MS` (five minutes) are one row. Nothing
+stops pressed again inside `PLANNER_SAME_MS` (five minutes) are one row — and
+only when the scanner's line says `keep`, which is false under
+`"keepPlaces": false` and under `--no-journal`: the stops are customers' names
+and front doors, and this server does not read the scanner's settings. Nothing
 reads those rows back: the fold and `resume()` skip the kind, and the sync
-carries it on its `id` and `seq`. The driving screen lists the stops in the
-card between offers, when it otherwise holds only the phase (not while the rig
-is aiming), one line each — `▸ Dropoff by 4:18 · Pat Q. ·
+carries it on its `id` and `seq`.
+
+**On the glass.** The driving screen lists the stops in the card between
+offers, when it otherwise holds only the phase and the notice (not while the
+rig is aiming), one line each — `▸ Dropoff by 4:18 · Pat Q. ·
 4821 Kestrel Dr, Marietta`, kind and time first because the 3.5" hat's scene
 picture has about thirty characters and the name ahead of the time pushed
-`by 12:05` into the ellipsis — at most four (three and "+ N more"), with "2
-dropoffs: end not guessed" under them when that is why the button is still
-amber (the button's title says it in full). A card being judged takes the room
-back, and they are forgotten at the seven moments the destination is
-(`forgetDest`). Proven to fit at 1024x600, 800x480 and 480x320 in both
-pictures with four stops and that line, in `rpi/test_layout.py`.
-map.html plots a scanned destination off its mark row, so the one dropoff a
-planner files is on the map by that path; the other stops are not plotted.
+`by 12:05` into the ellipsis — at most four (three and "+ N more"), with the
+scanner's word under them in the panel's own: "2 dropoffs: end not guessed",
+"list cut off: end not guessed", "dropoff address unread" (the button's title
+says each in full). That line goes the moment the order has an end on the
+button, whichever read put it there. The notice comes first: the stops are a
+line apiece that does not shrink, so on the 3.5" hat they took the notice's
+room until it showed nothing; now they give way a line at a time from the end,
+each counted, down to one line saying how many stops were read. A card being
+judged takes their room back, and they are forgotten at the seven moments the
+destination is (`forgetDest`). Proven in `rpi/test_layout.py` at 1024x600,
+800x480 and 480x320 in both pictures, with four stops and each of the three
+lines under them, and again beside a dead journal's notice.
+
+**Not on the map, apart from the one it files.** map.html and the panel's map
+plot an offer's two ends and the end of the order in the car, and the one
+dropoff a planner files reaches both by that path, as a mark row on the held
+order. The other stops have no offer to ride: the planner does not say which
+order a stop belongs to, so a pickup or another customer's dropoff put on the
+held order would be the wrong attribution `planner_destination` exists to
+refuse, and plotting them on their own is a new map feature, which this was
+not asked to build.
 
 #### A read that outlived the window it went out in
 

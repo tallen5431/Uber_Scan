@@ -2421,6 +2421,15 @@ def _planner_address(street_line, town_line):
             'line': ', '.join(parts) or None}
 
 
+def _planner_lines(text):
+    """The text's lines, each normalize()d on its own and the empty ones gone,
+    and where the stop headers among them are. One split for find_planner and
+    planner_bounded, so the two can never disagree about which line is a stop."""
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    lines = [l for l in lines if l]
+    return lines, [i for i, l in enumerate(lines) if PLANNER_STOP.match(l)]
+
+
 def find_planner(text):
     """The stops on Uber's Trip Planner, in the order the screen lists them.
 
@@ -2434,11 +2443,7 @@ def find_planner(text):
     follows the header is the name, which two follow the label are the address.
     normalize() is applied to each line on its own, as line_starts does.
     """
-    if not text:
-        return None
-    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text))]
-    lines = [l for l in lines if l]
-    heads = [i for i, l in enumerate(lines) if PLANNER_STOP.match(l)]
+    lines, heads = _planner_lines(text)
     if not heads:
         return None
     stops = []
@@ -2480,6 +2485,58 @@ def find_planner(text):
         stop.update(_planner_address(street_line, town_line))
         stops.append(stop)
     return stops
+
+
+# The two ends of the list, which is what "the planner has one dropoff" needs
+# and what counting the dropoffs on the SCREEN does not give.
+#
+# A stop that is open is a tall block. Measured on the rig's own live view of
+# the planner, 1000 rows tall: the one stop's card runs from row 163 to row 471,
+# 308 rows, and the list has the 695 between the rule under the title (153) and
+# the rule over the bar of buttons (848), "Waybill" sitting 58 rows under the
+# card. Two open stops and that link come to 686 of the 695, and a stacked trip
+# of four does not fit. What is below the screen is not read, and the one
+# dropoff left on the glass may be another customer's door — filed as the order
+# in the car's end, `asked: true`, into the append-only journal. Scrolled the
+# other way, the same is true of a stop gone off the top.
+#
+# So the list has to be seen whole, and the screen marks both ends of it:
+#   * the start: the "Trip Planner" title, with the first stop's header
+#     straight under it. A list scrolled down puts the tail of the stop above —
+#     its time, its address, "View details" — between the two, and a line with
+#     two letters in a row there is taken as exactly that. The title's own line
+#     may carry junk after it: the list icon beside it read as "—", "=" and
+#     "Set" on the rig's reads.
+#   * the end: "Waybill", after the last header. It is printed outside the
+#     stop's card, centred under its edge, which is where a link for the whole
+#     trip goes and not where one for a stop does. That is read off where it
+#     sits: the one planner photographed has one stop, so "after the LAST stop
+#     and not after each" has not been seen on a stacked trip. Through the read
+#     path it was lost on the whole live view, which has the phone's bezel and
+#     the cloth round it, and read on all five crops of the same pixels to the
+#     phone's glass, which is what the screen box is — four as "Waybill" and one
+#     as "Waypbill", so one stray letter inside the word is allowed.
+# Either end missing is False, and the stops are still every stop that read:
+# this decides only whether one of them may be filed, see planner_destination
+# in scan_pi.py.
+PLANNER_TITLE = re.compile(r'^[^A-Za-z0-9]{0,3}trip ?planner\b', re.IGNORECASE | ASCII)
+PLANNER_END = re.compile(r'^[^A-Za-z0-9]{0,3}way ?[A-Za-z]? ?bill\b', re.IGNORECASE | ASCII)
+
+
+def planner_bounded(text):
+    """True when both ends of the Trip Planner's list are on the screen: the
+    title with the first stop straight under it, and "Waybill" after the last.
+    False otherwise, and for a text that is no planner at all. See PLANNER_END.
+    """
+    lines, heads = _planner_lines(text)
+    if not heads:
+        return False
+    titles = [i for i in range(heads[0]) if PLANNER_TITLE.match(lines[i])]
+    if not titles:
+        return False
+    if any(re.search(r'[A-Za-z]{2}', l) for l in lines[titles[-1] + 1:heads[0]]):
+        return False
+    return any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:])
 
 
 # The card saying, in its own words, that it is not going to tell you where the

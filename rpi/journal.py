@@ -43,7 +43,9 @@ Three things this deliberately does not do:
     It is a real trade. This is a record of where the driver was and when, it
     lives on a card in a vehicle, and it is copied to a machine at home. Setting
     `"keepPlaces": false` alongside the other settings turns it off and changes
-    nothing else.
+    nothing else in this file. The Trip Planner rows server.js writes follow it
+    too (the scanner says `keep` on the planner line); the ⌖ mark and pair rows
+    server.js writes do not yet, which README.md names as open.
   * it does not fail. A full card, a read-only filesystem or a missing directory
     costs the journal and nothing else: the scanner exists to read offers, and
     it keeps reading them.

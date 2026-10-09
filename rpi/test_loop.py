@@ -1140,19 +1140,28 @@ _PLANNERS = {c['name']: c['text'] for c in json.load(open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['planner']}
 _ONE_DROP = _PLANNERS["Uber's Trip Planner as the rig's live view read it"]
+# ...the same pixels cropped to the phone's glass, which is what the screen box
+# is: "Waybill" read under the stop, so both ends of the list are on it.
+_ONE_DROP_WHOLE = _PLANNERS["Uber's Trip Planner as the rig read it off the phone's glass"]
 _TWO_DROPS = _PLANNERS['two dropoffs are both listed, in the order the screen gives them']
 
 _hp1, _pl1 = tempfile.mkdtemp(), []
 rp1 = run(_press_on_first_read(_hp1, ''), extra_argv=['--no-parallel'], seconds=5.0,
-          handoff=_hp1, whole_text=_ONE_DROP, planners=_pl1)
+          handoff=_hp1, whole_text=_ONE_DROP_WHOLE, planners=_pl1)
 eq('⌖ over a Trip Planner is answered with the planner, once (%d reads)' % rp1['calls'],
    len(rp1['planners']), 1)
 if rp1['planners']:
     eq('...its stops as the screen listed them',
        [[s['kind'], s['expectedBy'], s['line']] for s in rp1['planners'][0][0]],
        [['dropoff', 978, '4821 Kestrel Dr, Marietta']])
-eq('...and its one dropoff is the address the press gets, on the dropoff line',
-   [((d[0] or {}).get('line'), d[1].get('asked')) for d in rp1['dropoffs']],
+    # The journal may hold them: this run keeps a journal, and keepPlaces is
+    # not off. See the two runs further down for the other two answers.
+    eq('...saying none was left unfiled, and that the journal may keep them',
+       (rp1['planners'][0][1].get('unfiled'), rp1['planners'][0][1].get('keep')),
+       (None, True))
+eq('...and its one dropoff, on a list seen whole, is the address the press gets, '
+   'on the dropoff line', [((d[0] or {}).get('line'), d[1].get('asked'))
+                           for d in rp1['dropoffs']],
    [('4821 Kestrel Dr, Marietta', True)])
 eq('...off the first whole-screen read, then back to the card box (%r)' % rp1['wholes'],
    (sum(rp1['wholes']), rp1['wholes'][-1] if rp1['wholes'] else None), (1, False))
@@ -1165,6 +1174,23 @@ eq('...and the planner reaches no reading the panel is sent',
     if len(v[0]) > 1 and 'Kestrel' in ((v[0][1] or {}).get('rawText') or '')], [])
 eq('...nor the journal as an offer', [x for x in rp1['rows'] if not x.get('kind')], [])
 
+# The same planner as the WHOLE live view read it: "Waybill" lost, so the rig
+# cannot say the list ends under the one dropoff it can see. Two open stops
+# fill the list (OP.planner_bounded), and the one dropoff on the glass of a
+# longer trip may be another customer's door.
+_hp1b = tempfile.mkdtemp()
+rp1b = run(_press_on_first_read(_hp1b, ''), extra_argv=['--no-parallel'], seconds=5.0,
+           handoff=_hp1b, whole_text=_ONE_DROP)
+ok_('the premise: that read has one dropoff and no end to its list',
+    [s['kind'] for s in OP.find_planner(_ONE_DROP)] == ['dropoff']
+    and not OP.planner_bounded(_ONE_DROP))
+eq('one dropoff on a list the rig could not see the end of is answered with the '
+   'stop and the reason, once',
+   [([s['line'] for s in p[0]], p[1].get('unfiled')) for p in rp1b['planners']],
+   [(['4821 Kestrel Dr, Marietta'], 'list')])
+eq('...and is not filed as the order\'s end, nor told "not read" over the stop',
+   rp1b['dropoffs'], [])
+
 # Two dropoffs, the second with a ZIP — so find_address, left to itself, would
 # have answered the press with that customer's door, chosen by layout.
 ok_('the premise: find_address alone would answer this planner with its last '
@@ -1172,8 +1198,9 @@ ok_('the premise: find_address alone would answer this planner with its last '
 _hp2 = tempfile.mkdtemp()
 rp2 = run(_press_on_first_read(_hp2, ''), extra_argv=['--no-parallel'], seconds=5.0,
           handoff=_hp2, whole_text=_TWO_DROPS)
-eq('a planner with two dropoffs is answered with both, once',
-   [[s['name'] for s in p[0]] for p in rp2['planners']], [['Pat Q.', 'Lee M.']])
+eq('a planner with two dropoffs is answered with both, once, and the reason',
+   [([s['name'] for s in p[0]], p[1].get('unfiled')) for p in rp2['planners']],
+   [(['Pat Q.', 'Lee M.'], 'dropoffs')])
 eq('...and the order in the car is given neither, and is not told "not read" '
    'over the stops either', rp2['dropoffs'], [])
 eq('...and the window shuts on the answer, not twelve seconds later (%r)'
@@ -1195,6 +1222,34 @@ ok_('the premise: the card box read the planner, unpressed (%d reads)' % rp3['ca
     rp3['calls'] >= 1 and not any(rp3['wholes']))
 eq('a planner nobody pressed for is not answered', rp3['planners'], [])
 eq('...and gives the order in the car nothing', rp3['dropoffs'], [])
+# ...including the address find_address WOULD take off it. That planner has no
+# ZIP, so find_address had nothing to give either way; this one has one, on the
+# second customer's door, and an unprompted read of a screen with a ZIP address
+# and no payout on it is otherwise sent as a sighting — which the server files
+# on the card being screened, or on an order in the car that has no end. On a
+# planner the planner's own rule decides, asked or not: see `found` in digest().
+rp5 = run(lambda n, k: _TWO_DROPS, extra_argv=['--no-parallel'], seconds=4.0,
+          handoff=tempfile.mkdtemp())
+ok_('the premise: the card box read the two-dropoff planner, unpressed (%d reads)'
+    % rp5['calls'], rp5['calls'] >= 1 and not any(rp5['wholes']))
+eq('a planner nobody pressed for gives no address, not even the one find_address '
+   'would take off it', [((d[0] or {}).get('line'), d[1].get('asked'))
+                         for d in rp5['dropoffs']], [])
+
+# Whether the journal may keep the stops — names and front doors — is the
+# scanner's to say, because the server does not read its settings: not with
+# "keepPlaces": false, and not with no journal at all.
+_hpk, _plk = tempfile.mkdtemp(), []
+run(_press_on_first_read(_hpk, ''), extra_argv=['--no-parallel'], seconds=4.0,
+    handoff=_hpk, whole_text=_ONE_DROP_WHOLE, planners=_plk,
+    config_extra={'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
+                               'keepPlaces': False}})
+eq('with "keepPlaces": false the planner line says the journal may not keep the '
+   'stops', [p[1].get('keep') for p in _plk], [False])
+_hpn, _pln = tempfile.mkdtemp(), []
+run(_press_on_first_read(_hpn, ''), extra_argv=['--no-parallel', '--no-journal'],
+    seconds=4.0, handoff=_hpn, whole_text=_ONE_DROP_WHOLE, planners=_pln)
+eq('...and nor with --no-journal', [p[1].get('keep') for p in _pln], [False])
 
 # A payout on the screen is an offer whatever else is printed round it.
 _PAID_PLANNER = _ONE_DROP + '\n$12.50\nAccept'

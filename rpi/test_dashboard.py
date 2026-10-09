@@ -3530,10 +3530,11 @@ const framed = (page) => page.waitForFunction(
 
   // --- the Trip Planner's stops, after a ⌖ press -----------------------------
   //
-  // Driven off the stream the way the rig sends them: a `planner` line, and
-  // for a planner with one dropoff a `dropoff` line beside it. On the rig's own
-  // 1024x600; whether they FIT is rpi/test_layout.py's question. Names, streets
-  // and houses invented.
+  // Driven off the stream the way the rig sends them: a `planner` line, with
+  // the scanner's reason for filing none of its stops as the order's end, and
+  // for a planner it could file one from, a `dropoff` line after it. On the
+  // rig's own 1024x600; whether they FIT is rpi/test_layout.py's question.
+  // Names, streets and houses invented.
   stage = 'the Trip Planner stops';
   {
     const stop = (kind, orders, name, by, line) => ({ kind: kind, orders: orders,
@@ -3545,17 +3546,42 @@ const framed = (page) => page.waitForFunction(
                   stop('dropoff', 1, 'Sam R.', 768, null)];
     const SIX = [1, 2, 3, 4, 5, 6].map((n) => stop('pickup', 1, 'Shop ' + n, 700 + n, null));
     const ONE = [stop('dropoff', 1, 'Pat Q.', 978, '4821 Kestrel Dr, Marietta')];
+    const TOWN_ONLY = [stop('dropoff', 1, 'Pat Q.', 978, 'Marietta')];
+    const KESTREL = { line: '4821 Kestrel Dr, Marietta', street: '4821 Kestrel Dr',
+                      city: 'Marietta', state: 'GA', zip: null, found: true, asked: true };
     let statusHolding = null;
     const page = await browser.newContext({
       viewport: { width: 1024, height: 600 }, deviceScaleFactor: 1,
     }).then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    // What the glass says about the stops and the button, taken in the page so
+    // a check can take it in the same turn as the click it is about — before
+    // the one-second tick has had a chance to put anything right.
+    await page.addInitScript(() => {
+      window.__stopsNow = () => {
+        const s = document.getElementById('stops');
+        const r = s.getBoundingClientRect();
+        const d = document.getElementById('dest');
+        return { shown: !s.hidden && r.height > 0 && getComputedStyle(s).display !== 'none',
+                 lines: [].slice.call(s.children).map((c) => c.textContent),
+                 label: (d.textContent || '').trim(), title: d.getAttribute('title') || '',
+                 failed: d.classList.contains('failed'), done: d.classList.contains('done') };
+      };
+    });
     await page.route('**/api/status*', (route) => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ ok: true, status: 'scanning',
         scanner: { enabled: true, running: true, error: null },
         last: null, lastAgeMs: null, heardAgeMs: 400, offer: null,
         holding: statusHolding }) }));
+    // The rig's answers to a press and to Drop, so the order in the car is the
+    // one this page was told about: the test server itself holds none, and
+    // its "nothing held" reply would put the order down under the check.
+    await page.route('**/api/dropoff', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, holding: true }) }));
+    await page.route('**/api/delivered', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) }));
     const open = async () => {
       await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
@@ -3565,15 +3591,11 @@ const framed = (page) => page.waitForFunction(
       await page.evaluate((x) => window.__es.push(x), m);
       await page.waitForTimeout(wait || 200);
     };
-    const stops = () => page.evaluate(() => {
-      const s = document.getElementById('stops');
-      const r = s.getBoundingClientRect();
-      const d = document.getElementById('dest');
-      return { shown: !s.hidden && r.height > 0 && getComputedStyle(s).display !== 'none',
-               lines: [].slice.call(s.children).map((c) => c.textContent),
-               label: (d.textContent || '').trim(), title: d.getAttribute('title') || '',
-               failed: d.classList.contains('failed'), done: d.classList.contains('done') };
-    });
+    const stops = () => page.evaluate(() => window.__stopsNow());
+    const press = async () => {
+      await page.evaluate(() => document.getElementById('dest').click());
+      await page.waitForTimeout(150);
+    };
     const EMPTY = { ready: false, state: 'empty', track: null };
     const HELD = Object.assign({}, READINGS.deducted, {
       holding: { pay: 12, minutes: 30, dropoff: null }, stack: null });
@@ -3584,12 +3606,16 @@ const framed = (page) => page.waitForFunction(
     // An order in the car, its card gone: the state ⌖ is pressed in.
     await push(HELD);
     await push(EMPTY);
-    await page.evaluate(() => document.getElementById('dest').click());
-    await page.waitForTimeout(150);
-    slot.pressed = await stops();
-    await push({ planner: { stops: FOUR, asked: true, ms: null, at: 1 } });
+    await press();
+    await push({ planner: { stops: FOUR, unfiled: 'dropoffs', asked: true, ms: null, at: 1 } });
     slot.four = await stops();
-    await push({ planner: { stops: SIX, asked: true, ms: null, at: 2 } });
+    // ...and then the order's end, read after all: the navigation screen seen
+    // unprompted, which the server files on an order that has none.
+    await push({ dropoff: { line: '12 Oak St, Marietta, GA 30060', street: '12 Oak St',
+                            city: 'Marietta', state: 'GA', zip: '30060', found: true,
+                            asked: false, at: 2 } });
+    slot.fourThenEnd = await stops();
+    await push({ planner: { stops: SIX, unfiled: null, asked: true, ms: null, at: 3 } });
     slot.six = await stops();
     // A card arrives and is being judged; then it goes, unrecorded.
     await push(HELD);
@@ -3606,26 +3632,64 @@ const framed = (page) => page.waitForFunction(
     // ...and a card that IS recorded: the destination the press read goes,
     // and the stops go with it.
     await push({ offer: { id: 'o-next', pay: 9.5, minutes: 20, perHour: 18,
-                          dropoff: null, endRefused: true }, at: 3 });
+                          dropoff: null, endRefused: true }, at: 4 });
     await push(EMPTY);
     slot.afterNewOffer = await stops();
-    // One dropoff: the scanner sends the stops and the address beside them.
-    await page.evaluate(() => document.getElementById('dest').click());
-    await page.waitForTimeout(150);
-    await push({ planner: { stops: ONE, asked: true, ms: null, at: 4 } }, 50);
-    await push({ dropoff: { line: '4821 Kestrel Dr, Marietta', street: '4821 Kestrel Dr',
-                            city: 'Marietta', state: 'GA', zip: null, found: true,
-                            asked: true, at: 5 } });
+    await push(HELD);
+    await push(EMPTY);
+    // The other two reasons the scanner can give, each in the words it has.
+    await press();
+    await push({ planner: { stops: ONE, unfiled: 'list', asked: true, ms: null, at: 5 } });
+    slot.list = await stops();
+    await press();
+    await push({ planner: { stops: TOWN_ONLY, unfiled: 'address', asked: true, ms: null,
+                            at: 6 } });
+    slot.address = await stops();
+    // One dropoff the scanner could file: the stops, then the address.
+    await press();
+    await push({ planner: { stops: ONE, unfiled: null, asked: true, ms: null, at: 7 } }, 50);
+    await push({ dropoff: Object.assign({ at: 8 }, KESTREL) });
     slot.one = await stops();
-    // Put down: the order, its destination and its stops together.
-    await page.evaluate(() => document.getElementById('drop').click());
-    await page.waitForTimeout(600);
-    slot.afterDrop = await stops();
+    // Pressed again with all of that on the glass: what it read is gone in the
+    // same turn as the click, before an answer and before the tick.
+    slot.repressed = await page.evaluate(() => {
+      document.getElementById('dest').click();
+      return window.__stopsNow();
+    });
+    await page.waitForTimeout(1200);
+    slot.repressedLater = await stops();
+    await push({ planner: { stops: ONE, unfiled: null, asked: true, ms: null, at: 9 } }, 50);
+    await push({ dropoff: Object.assign({ at: 10 }, KESTREL) });
+    slot.beforeDrop = await stops();
+    // Put down: the order, its destination and its stops together — looked at
+    // the moment Drop's answer has been taken, which is when the button goes,
+    // before the one-second tick could take the stops off instead.
+    await page.evaluate(() => {
+      window.__atDrop = null;
+      const drop = document.getElementById('drop');
+      const watch = new MutationObserver(() => {
+        if (drop.hidden && window.__atDrop === null) {
+          window.__atDrop = window.__stopsNow();
+          watch.disconnect();
+        }
+      });
+      watch.observe(drop, { attributes: true });
+      drop.click();
+    });
+    await page.waitForFunction(() => window.__atDrop !== null, null, { timeout: 5000 })
+      .catch(() => {});
+    slot.atDrop = await page.evaluate(() => window.__atDrop);
     // A panel reloaded mid-delivery, off what the server kept on the order...
     statusHolding = { pay: 12, minutes: 30, dropoff: null, dropoffScanned: false,
-                      planner: ONE, heldMs: 60000 };
+                      planner: { stops: ONE, unfiled: null }, heldMs: 60000 };
     await open();
     slot.reloaded = await stops();
+    // ...with a two-dropoff planner and an end read since, unprompted...
+    statusHolding = { pay: 12, minutes: 30, dropoff: '12 Oak St, Marietta, GA 30060',
+                      dropoffScanned: true, planner: { stops: FOUR, unfiled: 'dropoffs' },
+                      heldMs: 60000 };
+    await open();
+    slot.reloadedEnd = await stops();
     // ...and with nothing held, nothing.
     statusHolding = null;
     await open();
@@ -5693,8 +5757,8 @@ try:
 
     # --- the Trip Planner's stops, after a ⌖ press --------------------------
     #
-    # Where the destination answer is shown, for exactly as long, and between
-    # offers only. See showStops and forgetDest in live.html.
+    # Where the destination answer is shown, forgotten when it is, and between
+    # offers only. See showStops, unfiledNow and forgetDest in live.html.
     pl = got.get('planner') or {}
     ok_('the stops were measured', bool(pl.get('four')))
     # One lifetime for one answer. live.html forgets the destination a press
@@ -5705,11 +5769,8 @@ try:
     eq('live.html forgets the destination and the stops in one place, at every '
        'moment it forgets either',
        (len(re.findall(r"(?<!var )\bdestSaid = ''", _live)),
-        len(re.findall(r"(?<!var )\bstopsSaid = null", _live)),
+        len(re.findall(r"(?<!var )\bplannerSaid = null", _live)),
         _live.count('forgetDest();')), (1, 1, 7))
-    eq('a press forgets what the last one read before it asks again',
-       ((pl.get('pressed') or {}).get('shown'), (pl.get('pressed') or {}).get('label')),
-       (False, '⌖ reading…'))
     eq('the Trip Planner a press read is shown stop by stop, in the order the '
        'phone listed them',
        (pl.get('four') or {}).get('lines', [])[:4],
@@ -5720,14 +5781,31 @@ try:
     # The scanner refuses to guess which of two dropoffs is the order in the
     # car's, and the panel says so rather than leaving the driver to work out
     # why the button is still amber — under the stops, and in full on the
-    # button's title.
+    # button's title. In the scanner's words: the page counts nothing itself.
     eq('...saying, with two dropoffs on it, that the order\'s end was not guessed',
        ((pl.get('four') or {}).get('lines', [])[4:],
-        'not guessed' in ((pl.get('four') or {}).get('title') or '')),
+        'does not guess' in ((pl.get('four') or {}).get('title') or '')),
        (['2 dropoffs: end not guessed'], True))
     eq('...and the press is answered: no "reading…", and no failure',
        ((pl.get('four') or {}).get('label'), (pl.get('four') or {}).get('failed')),
        ('⌖ Dropoff', False))
+    # ...and the moment the order HAS an end, whichever read gave it, the note
+    # goes: "end not guessed" beside a green "Read as: …" was two answers to
+    # one question on the glass at once. The stops stay; they are still the
+    # trip's.
+    _fe = pl.get('fourThenEnd') or {}
+    eq('an end read after the planner takes the "not guessed" line away, and leaves '
+       'the stops', (_fe.get('lines'), _fe.get('done'), _fe.get('title')),
+       ((pl.get('four') or {}).get('lines', [])[:4], True,
+        'Read as: 12 Oak St, Marietta, GA 30060. Press again to read it afresh.'))
+    eq('a list the rig could not see both ends of is said to be why the end was not '
+       'guessed', ((pl.get('list') or {}).get('lines', [])[1:],
+                   'both ends' in ((pl.get('list') or {}).get('title') or '')),
+       (['list cut off: end not guessed'], True))
+    eq('...and a dropoff that did not read whole, in its own words',
+       ((pl.get('address') or {}).get('lines', [])[1:],
+        'street and a town' in ((pl.get('address') or {}).get('title') or '')),
+       (['dropoff address unread'], True))
     eq('a planner longer than four stops shows three and says how many more',
        (pl.get('six') or {}).get('lines'),
        ['▸ Pickup by 11:41 · Shop 1', '▸ Pickup by 11:42 · Shop 2',
@@ -5742,14 +5820,28 @@ try:
     eq('an offer put on the record forgets them, as it forgets the destination',
        (pl.get('afterNewOffer') or {}).get('shown'), False)
     eq('a planner with one dropoff shows its stop, and the button goes green off '
-       'the dropoff line beside it',
+       'the dropoff line after it',
        ((pl.get('one') or {}).get('lines'), (pl.get('one') or {}).get('done')),
        (['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta'], True))
-    eq('putting the order down forgets its stops', (pl.get('afterDrop') or {}).get('shown'),
-       False)
+    # Taken in the same turn as the click, so it is the press that did it and
+    # not the one-second tick, and with the stops and a green button on the
+    # glass first — a press over nothing has nothing to forget.
+    _rp = pl.get('repressed') or {}
+    eq('a press forgets what the last one read before it asks again',
+       (_rp.get('shown'), _rp.get('done'), _rp.get('label')), (False, False, '⌖ reading…'))
+    eq('...and for good, not until the next tick redraws them',
+       (pl.get('repressedLater') or {}).get('shown'), False)
+    ok_('the premise: the stops are on the glass when Drop is pressed',
+        (pl.get('beforeDrop') or {}).get('shown'))
+    eq('putting the order down takes its stops off the glass with the answer, not '
+       'at the next tick', (pl.get('atDrop') or {}).get('shown', '<not seen>'), False)
     eq('a panel reloaded mid-delivery shows the stops the server kept on the order',
        (pl.get('reloaded') or {}).get('lines'),
        ['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta'])
+    _re = pl.get('reloadedEnd') or {}
+    eq('...and, with an end on the order, no "not guessed" beside it',
+       (len(_re.get('lines') or []), _re.get('done'),
+        [l for l in _re.get('lines') or [] if 'not guessed' in l]), (4, True, []))
     eq('...and none with nothing held', (pl.get('reloadedNone') or {}).get('shown'), False)
 
 finally:

@@ -680,12 +680,14 @@ for _said, _fields in NOVERDICT_SAID.items():
 NOVERDICT_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '480x320')]
 
 # The Trip Planner's stops, as the driving screen lists them after a ⌖ press:
-# at the most the block is asked to hold. Four stops, two of them dropoffs, so
-# the line saying the order's end was not guessed is under them — five lines —
-# with an ×2 pickup, a closed block, and the longest address line the corpus
-# reads, so the ellipsis has an address to take. Measured between offers, which
-# is the only time the block is drawn, on the same three panels and in both
-# pictures. Invented throughout.
+# at the most the block is asked to hold. Four stops and the line saying why
+# the order's end was not taken from them — five lines — with an ×2 pickup, a
+# closed block, and the longest address line the corpus reads, so the ellipsis
+# has an address to take. Three pickups and one dropoff: four open stops do
+# not fit the phone's list, so the scanner says 'list', whose line is the
+# longest of the three reasons; each of the three is measured as well, below.
+# Measured between offers, which is the only time the block is drawn, on the
+# same three panels and in both pictures. Invented throughout.
 def _pstop(kind, orders, name, by, line):
     return {'kind': kind, 'orders': orders, 'name': name, 'expectedBy': by,
             'street': None, 'city': None, 'state': None, 'zip': None, 'line': line}
@@ -694,10 +696,26 @@ def _pstop(kind, orders, name, by, line):
 PLANNER_STOPS = [
     _pstop('pickup', 1, 'Burger Barn', 712, '310 Mill St, Roswell'),
     _pstop('pickup', 2, 'Taco Hut Express', 725, None),
-    _pstop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Roswell, GA 30075'),
+    _pstop('pickup', 1, 'Pho Real Kitchen', 751, '77 Birch Ln NW, Roswell, GA 30075'),
     _pstop('dropoff', 1, 'Pat Q.', 978, '4821 Kestrel Dr S, Powder Springs'),
 ]
+PLANNER_UNFILED = 'list'
+# ...and the stops each of the scanner's reasons comes with, so every line the
+# panel can put under them is measured on the panel it has to fit.
+PLANNER_NOTES = {
+    'list': PLANNER_STOPS,
+    'dropoffs': PLANNER_STOPS[:2] + [
+        _pstop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Roswell, GA 30075'),
+        PLANNER_STOPS[3]],
+    'address': PLANNER_STOPS[:3] + [
+        _pstop('dropoff', 1, 'Pat Q.', 978, 'Powder Springs')],
+}
 PLANNER_PANELS = NOVERDICT_PANELS
+# The notice the stops have to share the card with between offers: the two a
+# rig with a dead journal under a bright phone writes at once, the first of
+# them the longest notSaving the scanner has been seen to send.
+PLANNER_NOTICE = {'notSaving': 'Offers are NOT being saved: [Errno 30] Read-only '
+                               'file system', 'tooBright': True}
 # ...and the two strings that fixture copies have to still be the page's, or it
 # measures a line the page no longer writes.
 ok_('live.html still writes the median as "/hr an offer"', "'/hr an offer'" in live_src)
@@ -731,7 +749,8 @@ const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
        plannerPanelsJson] = process.argv.slice(2);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
 // The Trip Planner's stops and where they are measured; see PLANNER_STOPS.
-const PLANNER_STOPS = JSON.parse(plannerJson);
+const PLANNER = JSON.parse(plannerJson);
+const PLANNER_STOPS = PLANNER.stops;
 const PLANNER_PANELS = JSON.parse(plannerPanelsJson);
 // The readings with no verdict in them, and where their line is measured; see
 // NOVERDICT on the Python side.
@@ -1584,92 +1603,152 @@ const SNAP_MEASURE = (fixture) => {
   // The Trip Planner's stops between offers, where they are drawn. Measured
   // against the same panel a moment before they arrived, so "the bar, the
   // status row and the picture did not move" is a comparison and not a guess.
+  const plannerPage = async (panel, view) => {
+    const ctx = await browser.newContext({
+      viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.addInitScript((v) => {
+      try { localStorage.setItem('uberscan.liveView', v); } catch (e) {}
+      class FakeEventSource {
+        constructor(url) { this.url = url; window.__es = this; }
+        close() {}
+        push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
+      }
+      window.EventSource = FakeEventSource;
+    }, view);
+    await page.route('**/api/frame.*', (route) => {
+      const v = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
+      route.fulfill({ status: 200, contentType: 'image/jpeg',
+                      body: Buffer.from(FRAMES[v], 'base64') });
+    });
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ scanner: { enabled: true, running: true, error: null },
+                             status: { phase: 'scanning', message: '' },
+                             last: null, lastAgeMs: null, heardAgeMs: 400,
+                             offer: null, holding: null }) }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
+                               null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    return { ctx: ctx, page: page };
+  };
+  const measurePlanner = (page, stops) => page.evaluate((stops) => {
+    const box = (sel) => {
+      const b = document.querySelector(sel).getBoundingClientRect();
+      return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+    };
+    const v = document.getElementById('verdict').getBoundingClientRect();
+    const s = document.getElementById('stops');
+    const inCard = (r) => r.top >= v.top - 0.5 && r.bottom <= v.bottom + 0.5
+      && r.left >= v.left - 0.5 && r.right <= v.right + 0.5;
+    const clock = (m) => ((Math.floor(m / 60) % 12) || 12) + ':'
+      + String(m % 60).padStart(2, '0');
+    const lines = [].slice.call(s.children).map((d, i) => {
+      const r = d.getBoundingClientRect();
+      const cs = getComputedStyle(d);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.35;
+      // The parts of a stop that may not be cut, wherever on the line the page
+      // puts them: its kind, its time, and the first letter of its name, so
+      // the name at least begins on the glass. The rest of the name and the
+      // address are what the ellipsis takes. Asked of the STOP, not of the
+      // line's punctuation: measured up to the first " · ", a line with the
+      // name moved ahead of the time passed with "by 12:05" in the ellipsis.
+      // Any other line — the note, "+ N more stops", the count — is held whole.
+      const text = d.textContent;
+      const st = /^▸ (Pickup|Dropoff)\b/.test(text) ? stops[i] : null;
+      const need = [];
+      const want = (part, len) => {
+        const at = text.indexOf(part);
+        if (at === -1) need.push([-1, part]);
+        else need.push([at, at + (len === undefined ? part.length : len)]);
+      };
+      if (st) {
+        want(st.kind === 'pickup' ? 'Pickup' : 'Dropoff');
+        if (typeof st.expectedBy === 'number') want('by ' + clock(st.expectedBy));
+        if (st.name) want(st.name, 1);
+      } else {
+        need.push([0, text.length]);
+      }
+      let cut = need.filter((n) => n[0] === -1).map((n) => 'missing ' + n[1]).join('');
+      const n = d.firstChild;
+      if (n) {
+        const rg = document.createRange();
+        need.filter((p) => p[0] !== -1).forEach((p) => {
+          for (let k = p[0]; k < p[1]; k++) {
+            rg.setStart(n, k);
+            rg.setEnd(n, k + 1);
+            const c = rg.getBoundingClientRect();
+            if (!c.width && !c.height) continue;
+            if (c.left < r.left - 0.5 || c.right > r.right + 0.5) cut += n.data[k];
+          }
+        });
+      }
+      return { text: text, rows: Math.round(r.height / lh), cut: cut,
+               inCard: inCard(r),
+               onGlass: r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5 };
+    });
+    const d = document.documentElement;
+    const w = document.getElementById('warn');
+    const sr = s.getBoundingClientRect();
+    return { shown: !s.hidden && sr.height > 0,
+             lines: lines, fontPx: parseFloat(getComputedStyle(s).fontSize),
+             // What the block costs the column: its height and the margin over it.
+             cost: s.hidden ? 0 : sr.height + parseFloat(getComputedStyle(s).marginTop),
+             // The notice: how much of it is on the glass, and how much it says.
+             warn: { shown: !w.hidden && w.getBoundingClientRect().height > 0,
+                     client: w.clientHeight, need: w.scrollHeight },
+             labelIn: inCard(document.getElementById('verdictLabel').getBoundingClientRect()),
+             layout: { verdict: box('#verdict'), bar: box('.bottombar'),
+                       row: box('.connbar'), view: box('#viewWrap') },
+             over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+             phone: document.body.classList.contains('phoneview') };
+  }, stops);
+  const pushPlanner = async (page, stops, unfiled) => {
+    await page.evaluate((a) => window.__es.push(
+      { planner: { stops: a[0], unfiled: a[1], asked: true, ms: null, at: 1 } }),
+      [stops, unfiled]);
+    await page.waitForTimeout(150);
+  };
   for (const panel of PLANNER_PANELS) {
     for (const view of ['screen', 'scene']) {
-      const ctx = await browser.newContext({
-        viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
-      });
-      const page = await ctx.newPage();
-      await page.addInitScript((v) => {
-        try { localStorage.setItem('uberscan.liveView', v); } catch (e) {}
-        class FakeEventSource {
-          constructor(url) { this.url = url; window.__es = this; }
-          close() {}
-          push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
-        }
-        window.EventSource = FakeEventSource;
-      }, view);
-      await page.route('**/api/frame.*', (route) => {
-        const v = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
-        route.fulfill({ status: 200, contentType: 'image/jpeg',
-                        body: Buffer.from(FRAMES[v], 'base64') });
-      });
-      await page.route('**/api/status*', (route) => route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ scanner: { enabled: true, running: true, error: null },
-                               status: { phase: 'scanning', message: '' },
-                               last: null, lastAgeMs: null, heardAgeMs: 400,
-                               offer: null, holding: null }) }));
-      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
-      await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
-                                 null, { timeout: 10000 }).catch(() => {});
-      await page.waitForTimeout(600);
-      const measure = () => page.evaluate(() => {
-        const box = (sel) => {
-          const b = document.querySelector(sel).getBoundingClientRect();
-          return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
-        };
-        const v = document.getElementById('verdict').getBoundingClientRect();
-        const s = document.getElementById('stops');
-        const inCard = (r) => r.top >= v.top - 0.5 && r.bottom <= v.bottom + 0.5
-          && r.left >= v.left - 0.5 && r.right <= v.right + 0.5;
-        const lines = [].slice.call(s.children).map((d) => {
-          const r = d.getBoundingClientRect();
-          const cs = getComputedStyle(d);
-          const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.35;
-          // The part of a stop that may not be cut: its kind and its time,
-          // which come first, and the first letter of the name after them, so
-          // the name at least begins on the glass. The rest of the name and
-          // the address are what the ellipsis takes. A line with no " · " —
-          // the note, "+ N more stops" — is held whole.
-          const text = d.textContent;
-          const at = text.indexOf(' · ');
-          const head = at === -1 ? text.length : Math.min(text.length, at + 4);
-          let cut = '';
-          const n = d.firstChild;
-          if (n) {
-            const rg = document.createRange();
-            for (let i = 0; i < head; i++) {
-              rg.setStart(n, i);
-              rg.setEnd(n, i + 1);
-              const c = rg.getBoundingClientRect();
-              if (!c.width && !c.height) continue;
-              if (c.left < r.left - 0.5 || c.right > r.right + 0.5) cut += n.data[i];
-            }
-          }
-          return { text: text, rows: Math.round(r.height / lh), cut: cut,
-                   inCard: inCard(r),
-                   onGlass: r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5 };
-        });
-        const d = document.documentElement;
-        return { shown: !s.hidden && s.getBoundingClientRect().height > 0,
-                 lines: lines, fontPx: parseFloat(getComputedStyle(s).fontSize),
-                 labelIn: inCard(document.getElementById('verdictLabel').getBoundingClientRect()),
-                 layout: { verdict: box('#verdict'), bar: box('.bottombar'),
-                           row: box('.connbar'), view: box('#viewWrap') },
-                 over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
-                 phone: document.body.classList.contains('phoneview') };
-      });
+      const { ctx, page } = await plannerPage(panel, view);
       await page.evaluate(() => {
         window.__es.push({ alive: true, at: 1 });
         window.__es.push({ ready: false, state: 'empty', track: null, places: [], text: '' });
       });
       await page.waitForTimeout(150);
-      const before = await measure();
-      await page.evaluate((stops) => window.__es.push(
-        { planner: { stops: stops, asked: true, ms: null, at: 1 } }), PLANNER_STOPS);
+      const before = await measurePlanner(page, PLANNER_STOPS);
+      await pushPlanner(page, PLANNER_STOPS, PLANNER.unfiled);
+      const after = await measurePlanner(page, PLANNER_STOPS);
+      // ...and the line under them in each of the scanner's words.
+      const notes = {};
+      for (const why of Object.keys(PLANNER.notes)) {
+        await pushPlanner(page, PLANNER.notes[why], why);
+        const m = await measurePlanner(page, PLANNER.notes[why]);
+        notes[why] = m.lines[m.lines.length - 1] || null;
+      }
+      out[panel[0] + ' ' + view + ' planner'] = { before: before, after: after, notes: notes };
+      await page.close();
+      await ctx.close();
+    }
+  }
+  // ...and with the notice up, which is the other thing the card holds between
+  // offers and the item that gives way. The stops may not take its room.
+  for (const panel of PLANNER_PANELS) {
+    for (const view of ['screen', 'scene']) {
+      const { ctx, page } = await plannerPage(panel, view);
+      await page.evaluate((notice) => {
+        window.__es.push(Object.assign({ alive: true, at: 1, tooDim: false,
+                                         refindRefused: null }, notice));
+        window.__es.push({ ready: false, state: 'empty', track: null, places: [], text: '' });
+      }, PLANNER.notice);
       await page.waitForTimeout(150);
-      out[panel[0] + ' ' + view + ' planner'] = { before: before, after: await measure() };
+      const before = await measurePlanner(page, PLANNER_STOPS);
+      await pushPlanner(page, PLANNER_STOPS, PLANNER.unfiled);
+      out[panel[0] + ' ' + view + ' planner notice'] = {
+        before: before, after: await measurePlanner(page, PLANNER_STOPS) };
       await page.close();
       await ctx.close();
     }
@@ -1861,7 +1940,9 @@ try:
         ['node', driver, base, json.dumps(PANELS), json.dumps(PAGES),
          json.dumps(FRAMES), json.dumps(CAPTION_LINES), json.dumps(SNAP_FIXTURE),
          json.dumps(SNAP_PANELS), json.dumps(NOVERDICT),
-         json.dumps(NOVERDICT_PANELS), json.dumps(PLANNER_STOPS),
+         json.dumps(NOVERDICT_PANELS),
+         json.dumps({'stops': PLANNER_STOPS, 'unfiled': PLANNER_UNFILED,
+                     'notes': PLANNER_NOTES, 'notice': PLANNER_NOTICE}),
          json.dumps(PLANNER_PANELS)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
@@ -1999,6 +2080,66 @@ try:
             eq('...and the card, the picture, the status row and the bar where they '
                'were at %s' % where, now.get('layout'), was.get('layout'))
             no_('...and nothing scrolls at %s' % where, now.get('over'))
+            # The line under the stops in each of the scanner's three reasons,
+            # whole and on one line: it is the only place on the glass that
+            # says why the button stayed amber.
+            _notes = pm.get('notes') or {}
+            eq('...and the line saying why no end was taken, in each of its three '
+               'wordings, whole on one line at %s' % where,
+               sorted((why, (n or {}).get('text'), (n or {}).get('rows'), (n or {}).get('cut'))
+                      for why, n in _notes.items()),
+               [('address', 'dropoff address unread', 1, ''),
+                ('dropoffs', '2 dropoffs: end not guessed', 1, ''),
+                ('list', 'list cut off: end not guessed', 1, '')])
+
+    # ...and with the notice up as well: the journal dead and the phone too
+    # bright, which between offers is the card's other occupant and the item
+    # that gives way. The stops are `flex: none`, so on the 3.5" hat they took
+    # its room — measured here with the panel's fold switched off: the notice
+    # needs 139px in the scene picture and had 121 of them on the glass, and
+    # 17 with the four stops under it; in the screen picture 93 of 93, then 38.
+    # Now the stops fold first, a line at a time into
+    # "+ N more stops", down to one line counting them, and the notice keeps
+    # what it had but that one line — which on a notice too long for the card
+    # even alone is a line it was not showing in full anyway.
+    _FLOOR = re.compile(r'^▸ (\d+) stops?: no room to list$')
+    _MORE = re.compile(r'^\+ (\d+) more stops?$')
+    for panel, w, h in PLANNER_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            pm = got.get('%s %s planner notice' % (panel, view)) or {}
+            was, now = pm.get('before') or {}, pm.get('after') or {}
+            ok_('the Trip Planner\'s stops were measured beside the notice at %s' % where,
+                (was.get('warn') or {}).get('shown') and now.get('shown'))
+            if not ((was.get('warn') or {}).get('shown') and now.get('shown')):
+                continue
+            _texts = [l['text'] for l in now.get('lines') or []]
+            _listed = sum(1 for t in _texts if re.match(r'^▸ (Pickup|Dropoff)\b', t))
+            _counted = sum(int(m.group(1)) for m in (_MORE.match(t) or _FLOOR.match(t)
+                                                     for t in _texts) if m)
+            eq('...every stop listed or counted with the notice up at %s (%r)'
+               % (where, _texts), _listed + _counted, len(PLANNER_STOPS))
+            _ww, _wn = was.get('warn') or {}, now.get('warn') or {}
+            _whole = _wn.get('need', 0) <= _wn.get('client', 0) + 1
+            _floor = len(_texts) == 1 and bool(_FLOOR.match(_texts[0]))
+            ok_('...and the notice shows all it says, or the stops are down to the one '
+                'line that counts them, at %s (notice %s of %spx; %d lines)'
+                % (where, _wn.get('client'), _wn.get('need'), len(_texts)),
+                _whole or _floor)
+            ok_('...and the notice keeps what it showed without them, less that one '
+                'line at most, at %s (%spx before, %spx after, the line %.1fpx)'
+                % (where, _ww.get('client'), _wn.get('client'), now.get('cost') or 0),
+                _wn.get('client', 0) >= min(_ww.get('client', 0), _wn.get('need', 0))
+                - (now.get('cost') or 0) - 1 if _floor
+                else _wn.get('client', 0) >= min(_ww.get('client', 0), _wn.get('need', 0)) - 1)
+            eq('...each stop line still whole where it may not be cut at %s' % where,
+               [(l['text'][:24], l['cut']) for l in now.get('lines') or [] if l.get('cut')],
+               [])
+            # Where the card has room for both, nothing is given up: the fold
+            # answers the notice being cut, not the notice being there.
+            if panel != '480x320':
+                eq('...and where the card has room for both, all four stops and the '
+                   'line under them at %s' % where, len(_texts), 5)
 
     for panel, w, h in PANELS:
         dashboard = w > h and h <= 620

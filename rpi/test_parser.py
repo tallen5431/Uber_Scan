@@ -119,6 +119,10 @@ def _stops(stops):
 
 for c in cases.get('planner', []):
     eq('planner / ' + c['name'], _stops(P.find_planner(c['text'])), _stops(c['expect']))
+    # ...and whether both ends of the list are on the screen, which is what
+    # lets the scanner take a planner's one dropoff for the trip's only one.
+    # Every case says, and a case that does not is a KeyError, not a pass.
+    eq('planner ends / ' + c['name'], P.planner_bounded(c['text']), c['bounded'])
 
 for c in cases.get('whole', []):
     eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])

@@ -241,14 +241,22 @@ So the Pi scanner keeps one line per offer it was confident about, in
   up on the phone and the driving screen lists its stops in order, one line
   each — `▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta` — between
   offers, until you press again, the order is put down or the next offer is
-  recorded, which is when a read destination goes too. The planner prints no ZIP, so
-  it is read by its own layout (the stop header, the name, “Expected by”, and
-  the street and town under “Address”), and only when you press. With exactly
-  one dropoff on it, that address becomes the order in the car's destination
-  as any other read one does; with two or more the rig does not guess which is
-  yours, says so under the stops, and leaves the order's destination as it
-  was. Each planner is also written to the journal as a row of its own, for
-  the record only — nothing on the offers page reads it.
+  recorded, which is when a read destination goes too; a panel reloaded in
+  between shows the same. A notice on the card (the journal not saving, the
+  phone too bright) comes first: the stops give way to it a line at a time and
+  say how many they are. The planner prints no ZIP, so it is read by its own
+  layout (the stop header, the name, “Expected by”, and the street and town
+  under “Address”), and only when you press. When the trip has exactly one
+  dropoff — one on the screen, and both ends of the list in view: the title
+  over the first stop and “Waybill” under the last — and its street and town
+  read, that address becomes the order in the car's destination as any other
+  read one does. Otherwise the rig does not guess: it says why under the stops
+  (two dropoffs, the list cut off, the address unread) and leaves the order's
+  destination as it was, and ⌖ over the navigation screen reads it as before.
+  Each planner is also written to the journal as a row of its own, for the
+  record only — nothing on the offers page reads it, and not at all with
+  `"keepPlaces": false`. The stops are not put on the map; only the one
+  dropoff it files is, as any read destination is.
 * **tick the ones you took.** The scanner cannot see the Accept button and never
   touches it, so it cannot know — but you can tell it, and once you do the page
   shows what you actually worked against what you were offered, per day and
@@ -335,7 +343,10 @@ Two things it is careful about:
   It is a real trade: this is a record of where you were and when, it lives on a
   card in a vehicle, and it is copied to the machine at home. `"keepPlaces":
   false` alongside the other settings in `rpi/config.json` turns it off and
-  changes nothing else; `--no-journal` keeps no record at all. Either way
+  changes nothing else, and the Trip Planner's stops follow it too. A
+  destination read off the phone is still written on the `mark` and `pair`
+  rows server.js writes whatever it says — the server does not read that
+  setting — and that is open. `--no-journal` keeps no record at all. Either way
   `rpi/journal.jsonl` is gitignored and, like everything under `rpi/`, the
   server refuses to serve the file itself.
 

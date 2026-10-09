@@ -1522,12 +1522,16 @@ if shutil.which('python3'):
                  'line': None}]
     # ...and the same trip with the first stop done.
     _STOPS_B = _STOPS_A[1:]
+    # ...and a planner the scanner says the journal may not keep: "keepPlaces"
+    # off, or no journal. Shown, held, and not written.
+    _STOPS_C = [dict(_STOPS_A[0], name='Sam R.')]
     with open(fake, 'w') as fh:
         fh.write(
             'import json, sys, time\n'
-            'A = %s\nB = %s\n'
-            'def planner(stops):\n'
-            '    print(json.dumps({"planner": {"stops": stops, "asked": True,\n'
+            'A = %s\nB = %s\nC = %s\n'
+            'def planner(stops, keep=True):\n'
+            '    print(json.dumps({"planner": {"stops": stops, "unfiled": "dropoffs",\n'
+            '        "keep": keep, "asked": True,\n'
             '        "ms": None, "at": int(time.time() * 1000)}}), flush=True)\n'
             '# Long enough for the mark below to put the order in the car.\n'
             'time.sleep(2.0)\n'
@@ -1540,8 +1544,11 @@ if shutil.which('python3'):
             '# ...and B again once PLANNER_SAME_MS (1.5s here) has passed.\n'
             'time.sleep(2.0)\n'
             'planner(B)\n'
+            'time.sleep(0.4)\n'
+            'planner(C, keep=False)\n'
             'time.sleep(600)\n' % (json.dumps(_STOPS_A).replace('null', 'None'),
-                                   json.dumps(_STOPS_B).replace('null', 'None')))
+                                   json.dumps(_STOPS_B).replace('null', 'None'),
+                                   json.dumps(_STOPS_C).replace('null', 'None')))
     open(journal, 'w').close()
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
                         'SCANNER_ARGS': fake, 'PLANNER_SAME_MS': '1500'}, journal)
@@ -1573,10 +1580,25 @@ if shutil.which('python3'):
             eq('...each a collection row the sync can carry',
                (row.get('v'), row.get('id'), row.get('seq'), row.get('asked')),
                (1, 'planner-%s' % row.get('at'), 1, True))
+        # ...and C, which the scanner said the journal may not keep, is on the
+        # stream and on the order and nowhere on disk.
+        for _ in range(60):
+            if len([m for m in told if isinstance(m, dict) and m.get('planner')]) >= 5:
+                break
+            time.sleep(0.05)
+        time.sleep(0.2)
+        rows = [json.loads(l) for l in open(journal) if l.strip()]
+        eq('a planner the scanner says may not be kept — "keepPlaces": false, or no '
+           'journal — is not written: no row names its stops',
+           [r.get('id') for r in rows if r.get('kind') == 'planner'
+            and r.get('stops') == _STOPS_C], [])
         status = get(base, '/api/status')
         held = status.get('holding') or {}
-        eq('the order in the car carries the stops last read, for a panel '
-           'reloaded mid-delivery', held.get('planner'), _STOPS_B)
+        # With the scanner's reason for filing none of them, so a reloaded
+        # panel says what the live one said about the button.
+        eq('the order in the car carries the stops last read, and why none was '
+           'filed, for a panel reloaded mid-delivery', held.get('planner'),
+           {'stops': _STOPS_C, 'unfiled': 'dropoffs'})
         # One rule for where an order ends. The scanner sends a dropoff line
         # when a planner gives one; this one did not, so the end stays as it
         # was — a server that read an address out of the stops itself would be
@@ -1585,9 +1607,8 @@ if shutil.which('python3'):
            (held.get('dropoff'), held.get('dropoffScanned')), (None, False))
         no_('...nor a mark written from the stops',
             any(r.get('kind') == 'mark' and r.get('dropoff') for r in rows))
-        time.sleep(0.4)
-        eq('the panel is told each planner on the stream',
-           len([m for m in told if isinstance(m, dict) and m.get('planner')]), 4)
+        eq('the panel is told each planner on the stream, kept or not',
+           len([m for m in told if isinstance(m, dict) and m.get('planner')]), 5)
         # Collection only: the fold skips a kind it has no use for, so the
         # offers page and every total on it are what they were.
         page = get(base, '/api/journal?days=0')
@@ -1606,11 +1627,97 @@ if shutil.which('python3'):
             _back = json.loads(urllib.request.urlopen(_req, timeout=10).read().decode())
             eq('...and a planner row synced back is recognised as already here',
                (_back.get('added'), _back.get('malformed')), (0, 0))
-        # Put down, the stops go with the order: the same lifetime as the
-        # scanned destination beside them.
+        # Put down, the stops go with the order.
         code, _ = post(base, '/api/delivered', {})
         eq('...and they go when the order is put down',
            (code, get(base, '/api/status').get('holding')), (200, None))
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
+# ...and off the order in the car at the other two moments the panel forgets
+# them — a press, and a different offer on the record — so a reload shows what
+# the live panel shows. They were kept until another planner replaced them, and
+# a reload after a two-dropoff planner and then a ⌖ press that READ the order's
+# end brought back "2 dropoffs: end not guessed" beside a green button. The
+# order's read end itself stays: the stack line goes on using it.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    handoff = os.path.join(work, 'handoff')
+    os.makedirs(handoff)
+    fake = os.path.join(work, 'planner2.py')
+    _TWO = [{'kind': 'dropoff', 'orders': 1, 'name': n, 'expectedBy': 978,
+             'street': None, 'city': None, 'state': None, 'zip': None, 'line': None}
+            for n in ('Pat Q.', 'Lee M.')]
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import json, sys, time\n'
+            'T = %s\n'
+            'def say(x):\n'
+            '    print(json.dumps(x), flush=True)\n'
+            'def planner():\n'
+            '    say({"planner": {"stops": T, "unfiled": "dropoffs", "keep": True,\n'
+            '         "asked": True, "ms": None, "at": int(time.time() * 1000)}})\n'
+            'time.sleep(2.0)\n'
+            'planner()\n'
+            '# The press the test makes in this gap reads the navigation screen.\n'
+            'time.sleep(2.5)\n'
+            'say({"dropoff": {"line": "12 Oak St, Marietta, GA 30060", "street":\n'
+            '     "12 Oak St", "city": "Marietta", "state": "GA", "zip": "30060",\n'
+            '     "found": True, "asked": True, "at": int(time.time() * 1000)}})\n'
+            'time.sleep(1.0)\n'
+            'planner()\n'
+            '# ...and a different card goes on the record.\n'
+            'time.sleep(2.5)\n'
+            'say({"offer": {"id": "o-next-card", "pay": 9.5, "minutes": 20,\n'
+            '     "perHour": 18, "dropoff": None}})\n'
+            'time.sleep(600)\n' % json.dumps(_TWO).replace('null', 'None'))
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'UBERSCAN_HANDOFF_DIR': handoff},
+                       journal)
+
+    def _held_planner(want_some, seconds=6.0):
+        """holding.planner once it is (or is not) there, polled."""
+        h = None
+        for _ in range(int(seconds / 0.05)):
+            h = (get(base, '/api/status').get('holding') or {})
+            if bool(h.get('planner')) == want_some:
+                break
+            time.sleep(0.05)
+        return h
+
+    try:
+        code, reply = post(base, '/api/offers/mark', {
+            'id': 'o-carried', 'accepted': True,
+            'offer': {'id': 'o-carried', 'pay': 14.0, 'minutes': 30.0,
+                      'billedMinutes': 30.0, 'miles': 6.0, 'cost': 2.1,
+                      'dropoff': None}})
+        ok_('the premise: an order is in the car before the planners are read',
+            code == 200 and reply.get('holding') is True)
+        ok_('the premise: the order in the car holds a two-dropoff planner',
+            (_held_planner(True).get('planner') or {}).get('unfiled') == 'dropoffs')
+        code, _ = post(base, '/api/dropoff', {})
+        eq('a ⌖ press takes the last planner off the order in the car, as it takes '
+           'its stops off the panel', (code, (get(base, '/api/status').get('holding')
+                                              or {}).get('planner')), (200, None))
+        held = {}
+        for _ in range(80):
+            held = get(base, '/api/status').get('holding') or {}
+            if held.get('dropoff'):
+                break
+            time.sleep(0.05)
+        eq('...so a reload after that press read the order\'s end shows the end '
+           'and no stops beside it',
+           (held.get('dropoff'), held.get('dropoffScanned'), held.get('planner')),
+           ('12 Oak St, Marietta, GA 30060', True, None))
+        ok_('the premise: a planner is held again before the next card',
+            bool(_held_planner(True).get('planner')))
+        held = _held_planner(False)
+        eq('...and a different offer on the record takes it off too, and leaves '
+           'the order its end', (held.get('planner'), held.get('dropoff')),
+           (None, '12 Oak St, Marietta, GA 30060'))
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)

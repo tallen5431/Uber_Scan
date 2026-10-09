@@ -1422,12 +1422,20 @@
      expectedBy, street, city, state, zip, line}, or null with no stop header.
      Every field that does not read is null and never guessed. Line by line,
      each normalized on its own, as lineStarts does. See find_planner. */
-  function findPlanner(text) {
-    if (!text) return null;
-    var lines = String(text).split(/[\r\n]+/).map(normalize)
+  /* The text's lines, each normalized on its own and the empty ones gone, and
+     where the stop headers among them are: one split for findPlanner and
+     plannerBounded, so the two never disagree about which line is a stop. */
+  function plannerLines(text) {
+    var lines = String(text || '').split(/[\r\n]+/).map(normalize)
       .filter(function (l) { return l; });
     var heads = [];
     lines.forEach(function (l, i) { if (PLANNER_STOP.test(l)) heads.push(i); });
+    return { lines: lines, heads: heads };
+  }
+
+  function findPlanner(text) {
+    var split = plannerLines(text);
+    var lines = split.lines, heads = split.heads;
     if (!heads.length) return null;
     return heads.map(function (at, k) {
       var head = PLANNER_STOP.exec(lines[at]);
@@ -1469,6 +1477,32 @@
       Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
       return stop;
     });
+  }
+
+  /* Whether both ends of the planner's list are on the screen: the "Trip
+     Planner" title with the first stop's header straight under it (a list
+     scrolled down puts the tail of the stop above between the two), and
+     "Waybill" after the last header (printed under the stops, outside their
+     card; lost on the rig's whole live view, read on all five crops of it to
+     the phone's glass, once as "Waypbill"). What counting the dropoffs on the
+     SCREEN does not give: two open stops fill the list, and the one dropoff
+     left on the glass of a longer trip may be another customer's. False for a
+     text that is no planner. See planner_bounded in offer_parser.py. */
+  var PLANNER_TITLE = /^[^A-Za-z0-9]{0,3}trip ?planner\b/i;
+  var PLANNER_END = /^[^A-Za-z0-9]{0,3}way ?[A-Za-z]? ?bill\b/i;
+
+  function plannerBounded(text) {
+    var split = plannerLines(text);
+    var lines = split.lines, heads = split.heads;
+    if (!heads.length) return false;
+    var title = -1;
+    for (var i = 0; i < heads[0]; i++) if (PLANNER_TITLE.test(lines[i])) title = i;
+    if (title === -1) return false;
+    if (lines.slice(title + 1, heads[0]).some(function (l) { return /[A-Za-z]{2}/.test(l); })) {
+      return false;
+    }
+    return lines.slice(heads[heads.length - 1] + 1)
+      .some(function (l) { return PLANNER_END.test(l); });
   }
 
   function labelledPickup(text, place) {
@@ -3029,6 +3063,7 @@
            findPickup: findPickup, findDropoff: findDropoff,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner,
+           plannerBounded: plannerBounded,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,
            /* Exported so the default can be checked directly. Everything that

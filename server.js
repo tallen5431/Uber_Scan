@@ -409,6 +409,9 @@ function startScanner() {
           }
           scanner.offer = read.offer;
           if (!sameCard) scanner.offerAt = Date.now();
+          // ...and the Trip Planner a press read goes, as it goes off the
+          // panel at this moment. See forgetPlanner.
+          if (!sameCard) forgetPlanner(Date.now());
           // ...and if there is an order in the car, WRITE THE PAIRING DOWN.
           //
           // Without this a shift produces no evidence about the one feature it
@@ -701,23 +704,33 @@ function startScanner() {
         // Uber's Trip Planner, read off the whole screen because ⌖ was
         // pressed: every stop of the trip in order. See emit_planner.
         //
-        // It travels the way the scanned destination does. To the panel on the
-        // stream — the broadcast below sends it whole, as it sends a dropoff
-        // line — and onto the order in the car, so a panel reloaded mid-
-        // delivery shows the stops it showed before, and they go when the
-        // order does. With nothing held there is nothing to attach them to,
-        // and like an address read with nothing held they are shown and not
-        // kept. Through holding(), for the reason the dropoff branch gives.
+        // To the panel on the stream — the broadcast below sends it whole, as
+        // it sends a dropoff line — and onto the order in the car, so a panel
+        // reloaded mid-delivery shows the stops it showed before. Kept there
+        // for exactly as long as the panel keeps them, which is not as long as
+        // the order: see forgetPlanner. With nothing held there is nothing to
+        // attach them to, and like an address read with nothing held they are
+        // shown and not kept. Through holding(), for the reason the dropoff
+        // branch gives. The stops and the scanner's reason for filing none of
+        // them as the order's end travel together, so a reloaded panel says
+        // the same thing about the button as the live one did.
         //
-        // NOT a destination. The one dropoff of a planner that has exactly one
+        // NOT a destination. The one dropoff of a planner the scanner can file
         // arrives separately, as an ordinary `dropoff` line, and is filed by
         // the branch above like every other; nothing here reads an address
         // out of the stops, so there is one rule for where an order ends.
+        //
+        // Into the journal only when the scanner says the record may hold
+        // them — `keep`, which is `"keepPlaces"` and --no-journal: the stops
+        // are customers' names and front doors.
         if (read.planner && Array.isArray(read.planner.stops)) {
           var plannedAt = Date.now();
           var heldNow = holding(plannedAt);
-          if (heldNow) heldNow.planner = read.planner.stops;
-          recordPlanner(read.planner, plannedAt);
+          if (heldNow) {
+            heldNow.planner = { stops: read.planner.stops,
+                                unfiled: read.planner.unfiled || null };
+          }
+          if (read.planner.keep === true) recordPlanner(read.planner, plannedAt);
         }
         // The scan loop's own voice — a reading or a heartbeat — as opposed to
         // the autopilot's progress messages. Only this arms the watchdog, and
@@ -1265,6 +1278,26 @@ function recordPairing(offer, now, reading) {
   });
 }
 
+/* The Trip Planner's stops come off the order in the car at the moments the
+ * driving screen forgets them — live.html's forgetDest — so a panel reloaded
+ * mid-delivery shows what the live one showed, and not stops it had already
+ * dropped.
+ *
+ * They were kept until the order went or another planner replaced them, which
+ * is longer than the panel keeps them, and the difference was on the glass: a
+ * two-dropoff planner, then ⌖ over the navigation screen, which read the
+ * order's end — and a reload brought back "2 dropoffs: end not guessed" beside
+ * a green button reading that very end (reproduced through this server). The
+ * panel forgets them at a press, when the order goes, and when a different
+ * offer goes on the record; the order going takes them with it here, and this
+ * is the other two. The read destination beside them is the order's end and
+ * goes on being used by the stack line whatever the panel shows, so it is not
+ * dropped here: only the answer to the press is. */
+function forgetPlanner(now) {
+  var h = holding(now);
+  if (h) delete h.planner;
+}
+
 /* The Trip Planner, written down: collection only. Nothing reads these rows
  * back — the fold skips a kind it has no use for ("something newer than this
  * reader") and resume() in rpi/journal.py skips every kind — so they change no
@@ -1288,7 +1321,16 @@ function recordPairing(offer, now, reading) {
  * duplicate a reader can see, where a lost row is not.
  *
  * Settable for the reason SCREENING_MS is: a check that has to wait out five
- * minutes of real clock to prove the window ends is a check nobody runs. */
+ * minutes of real clock to prove the window ends is a check nobody runs.
+ *
+ * ONLY WHEN THE SCANNER SAYS `keep`. These rows hold customers' names and
+ * front doors, and `"keepPlaces": false` is documented as keeping addresses
+ * out of the journal; this server does not read the scanner's settings, so the
+ * scanner says it on the line. It was written regardless at first, which made
+ * the setting a claim this file did not honour for the most personal rows it
+ * writes. The ⌖ mark rows and the pairing rows beside it still carry a read
+ * destination whatever the setting says — that is older than this, and named
+ * as open in README.md rather than fixed in passing. */
 var PLANNER_SAME_MS = Number(process.env.PLANNER_SAME_MS);
 if (!isFinite(PLANNER_SAME_MS) || PLANNER_SAME_MS < 0) PLANNER_SAME_MS = 5 * 60000;
 var plannerWritten = null;
@@ -2920,8 +2962,10 @@ function statusNow() {
                    dropoff: h.dropoff || null,
                    dropoffScanned: !!h.dropoffScanned,
                    // ...and the Trip Planner's stops, when ⌖ read one while
-                   // this order was in the car: the same lifetime as the
-                   // scanned destination beside it. See the planner branch.
+                   // this order was in the car, with the scanner's reason for
+                   // filing none of them as its end: {stops, unfiled}. Kept
+                   // as long as the panel keeps them, which is shorter than
+                   // the scanned destination beside it — see forgetPlanner.
                    planner: h.planner || null,
                    heldMs: Math.max(0, Date.now() - h.acceptedAt) } : null;
     }()),
@@ -4202,6 +4246,10 @@ function route(req, res) {
   // as a `dropoff` line, which is why this returns as soon as the ask is
   // written rather than waiting for one.
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/dropoff') {
+    // A press asks the question again, and the panel forgets the last answer's
+    // stops the moment it is pressed: so does the order in the car. See
+    // forgetPlanner.
+    forgetPlanner(Date.now());
     return fs.writeFile(DROPOFF_PATH, '', function (err) {
       if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
                            { 'Content-Type': 'application/json; charset=utf-8' });
