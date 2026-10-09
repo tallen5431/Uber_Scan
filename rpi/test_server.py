@@ -4069,8 +4069,13 @@ def _records(text):
 
 
 def _raw(path):
-    with open(path, 'rb') as fh:
-        return fh.read()
+    """A file's bytes, or None where there is no file — a result, so the check
+    that reads it fails by name rather than the suite (see _snap)."""
+    try:
+        with open(path, 'rb') as fh:
+            return fh.read()
+    except OSError:
+        return None
 
 
 def _note(url, body, raw=None):
@@ -4117,7 +4122,7 @@ try:
     _recs = _records(_text)
     eq('...and each record shown as its text, exactly, a leading line break and markup '
        'in it included',
-       [(f, shown == _raw(os.path.join(_adir, f)).decode('utf-8')) for f, shown, _s, _n in _recs],
+       [(f, shown.encode('utf-8') == _raw(os.path.join(_adir, f))) for f, shown, _s, _n in _recs],
        [('status.json', True), ('snap.json', True), ('reader.json', True)])
     eq('...and carried again as the file itself, byte for byte, saved under the snap\'s name',
        [(f, saved == _raw(os.path.join(_adir, f)), name) for f, _t, saved, name in _recs],
@@ -4255,17 +4260,39 @@ try:
        (_st, _rep.get('error'), _raw(os.path.join(_snaps, '2026-01-07_00-00-00', 'snap.json'))),
        (409, 'this snap\'s snap.json cannot be read, so there is nowhere to keep a note',
         _torn_text))
+    # The link's target says something of its own in every field the list and
+    # a bundle take from a record — its line, a note and a part's why — so
+    # anything read through the link shows up as itself.
     _shelve(_snaps, '2026-01-08_00-00-00')
     _elsewhere = os.path.join(_pdir, 'a-record-elsewhere.json')
-    with open(_elsewhere, 'w') as _fh:
-        _fh.write('{"v": 1, "said": "saved", "contents": [], "notes": []}\n')
+    _elsewhere_text = json.dumps({
+        'v': 1, 'at': 1, 'said': 'SAID-FROM-OUTSIDE', 'note': 'NOTE-FROM-OUTSIDE', 'notes': [],
+        'contents': [{'what': 'camera', 'file': 'camera.jpg', 'saved': False,
+                      'why': 'WHY-FROM-OUTSIDE'}]}).encode('utf-8') + b'\n'
+    with open(_elsewhere, 'wb') as _fh:
+        _fh.write(_elsewhere_text)
     os.symlink(_elsewhere, os.path.join(_snaps, '2026-01-08_00-00-00', 'snap.json'))
     _st, _rep = _note(_u, {'snap': '2026-01-08_00-00-00', 'note': 'x'})
     eq('a note on a snap whose snap.json is a link is refused, and nothing read or written '
        'through it',
-       (_st, os.path.islink(os.path.join(_snaps, '2026-01-08_00-00-00', 'snap.json')),
-        _raw(_elsewhere)),
-       (409, True, b'{"v": 1, "said": "saved", "contents": [], "notes": []}\n'))
+       (_st, _rep.get('error'),
+        os.path.islink(os.path.join(_snaps, '2026-01-08_00-00-00', 'snap.json')),
+        _raw(_elsewhere) == _elsewhere_text),
+       (409, 'this snap has no snap.json to keep a note in', True, True))
+    # ...and the list and a bundle of it give the same answer as the note:
+    # there is no snap.json here. Read through the link, both carried the
+    # target's line, note and why, and the bundle took them off the rig.
+    _linked = _listed(_u, '2026-01-08_00-00-00')
+    eq('...and the list says it has no snap.json, with nothing from the file the link points at',
+       (_linked.get('said'), _linked.get('note'), _linked.get('problems'),
+        [f['file'] for f in _linked.get('files') or []]),
+       ('no snap.json in this folder, so nothing says what is missing', None, [],
+        ['status.json']))
+    _st, _hd, _text = _bundle(_u, '2026-01-08_00-00-00')
+    eq('...and so does a bundle of it, carrying nothing from that file',
+       (_st, re.findall(r'<p class="said">([^<]*)</p>', _text),
+        re.findall(r'[A-Z]+-FROM-OUTSIDE', _text)),
+       (200, ['no snap.json in this folder, so nothing says what is missing'], []))
 finally:
     stop(_p)
 
@@ -4330,9 +4357,13 @@ try:
 finally:
     stop(_p)
 
-# ...and a note on a snap still being kept: it has no snap.json yet and will
-# in a moment, which is not the same as a folder that has none. A screenshot
-# that takes a second holds the press open while the note is sent.
+# ...and a snap still being kept: it has no snap.json yet and will in a
+# moment, which is not the same as a folder that has none, and its screenshot
+# can be part way written. A screenshot that takes a second holds the press
+# open while the list is read, the note is sent and the snap is bundled — one
+# answer from all three, as stillKeeping gives it. The bundle used to be built
+# anyway and hand on whatever of the picture was on the card, under "no
+# snap.json in this folder".
 _p, _u, _snaps, _log = _snapper('notefill', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['slow']})
 try:
     _pressing = {}
@@ -4345,13 +4376,30 @@ try:
             break
         time.sleep(0.01)
     _st, _rep = _note(_u, {'snap': _filling, 'note': 'offer card'})
+    _bst, _bhd, _btext = _bundle(_u, _filling or '?')
+    _fsaid = _listed(_u, _filling).get('said')
+    # All three asked inside the press, or the checks below are about a snap
+    # that had already been kept.
+    _out = _pt.is_alive()
     _pt.join()
     eq('a note on a snap still being kept is refused, saying so',
        (_st, _rep.get('error')), (409, 'this snap is still being kept; try again in a moment'))
+    eq('...and so is a bundle of it, saying which, whatever of it is on the card by then',
+       (_bst, _btext, _out),
+       (409, 'snap "%s" is still being kept; try again in a moment\n' % _filling, True))
+    eq('...and the list says it is still being kept, not that it has no snap.json',
+       _fsaid, 'still being kept, so nothing says yet what is missing')
     _st, _rep = _note(_u, {'snap': _filling, 'note': 'offer card'})
     eq('...and kept once it has been',
        (_st, (_json_in(os.path.join(_snaps, _filling or '?'), 'snap.json') or {}).get('note')),
        (200, 'offer card'))
+    _bst, _bhd, _btext = _bundle(_u, _filling or '?')
+    eq('...and bundled whole once it has been, under the line the panel said for it',
+       (_bst, [(f, b == _raw(os.path.join(_snaps, _filling or '?', f)))
+               for f, b in _pictures(_btext)],
+        re.findall(r'<p class="said">([^<]*)</p>', _btext)),
+       (200, [('panel.png', True), ('camera.jpg', True)],
+        [(_pressing.get('reply') or (None, {}))[1].get('said')]))
 finally:
     stop(_p)
 

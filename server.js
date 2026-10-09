@@ -3638,6 +3638,22 @@ function snapFiles(name) {
  * and not yet sealed with its snap.json or removed for holding nothing. */
 var snapsFilling = {};
 
+/* Whether a snap is still being kept, which is one question with one answer
+ * for everything that asks it: pruning, which never removes one; the list,
+ * which says so in place of its line; a note, which is refused until it is
+ * kept; and a bundle, which is refused too. Until seal() the folder can hold a
+ * screenshot the tool is part way through writing and no snap.json, and a
+ * bundle used to be built of it anyway: a screenshot tool that wrote half of
+ * the rig's real 180,177-byte Trip Planner panel.png and took three seconds
+ * over the rest, bundled in between, was handed on with 90,088 bytes of it
+ * inline as "the rig's screen", under "no snap.json in this folder, so
+ * nothing says what is missing" — while a note on the same snap was refused
+ * as still being kept. The window is the press itself: the screenshot's up
+ * to SNAP_TOOL_MS, and SNAP_READER_MS for the reader. */
+function stillKeeping(name) {
+  return Object.prototype.hasOwnProperty.call(snapsFilling, name);
+}
+
 /* Down to SNAPS_KEEP, oldest first, never one that is still being filled.
  *
  * Not a nicety. A Pi has no real-time clock and boots in 1970; a snap taken
@@ -3655,7 +3671,7 @@ function pruneSnaps() {
   var over = names.length - SNAPS_KEEP;
   if (over <= 0) return [];
   var gone = [];
-  names.filter(function (n) { return !snapsFilling[n]; }).slice(0, over)
+  names.filter(function (n) { return !stillKeeping(n); }).slice(0, over)
     .forEach(function (name) {
       try {
         fs.rmSync(path.join(SNAPS_DIR, name), { recursive: true, force: true });
@@ -3845,11 +3861,19 @@ function isSnap(name) {
   return typeof name === 'string' && snapNames().names.indexOf(name) !== -1;
 }
 
-/* A snap's own record, snap.json, as the list reads it: {record}, or no
- * record and whether the file is missing rather than unreadable. One reading
- * for the list and for a note written into it, so "can a note be kept here"
- * and "what does the list say about this folder" cannot disagree. */
+/* A snap's own record, snap.json, as everything that reads one reads it:
+ * {record}, or no record and whether the file is missing rather than
+ * unreadable. A snap.json is one by snapFiles' rule — a real file, never a
+ * link wherever it points — and that is asked here, once, for the list, for a
+ * bundle and for a note written into it. It used to be asked by the note
+ * alone: a snap.json that was a link to a file outside snaps/ had its said,
+ * its note and its whys listed, and carried into a bundle that leaves the rig,
+ * while a note on the same folder was refused as having no snap.json. Now all
+ * three say there is none, which is also what the folder's file list says. */
 function snapRecord(name) {
+  if (!snapFiles(name).some(function (f) { return f.file === 'snap.json'; })) {
+    return { record: null, missing: true };
+  }
   try {
     var record = JSON.parse(fs.readFileSync(path.join(SNAPS_DIR, name, 'snap.json'), 'utf8'));
     if (!record || typeof record.said !== 'string') throw new Error('no line in it');
@@ -3892,8 +3916,10 @@ function describeSnap(name, now) {
     // this one, or by a press whose snap.json could not be written — says
     // so instead of claiming a clean bill. A record that is there and
     // cannot be read — torn by a full card or a power cut mid-write — is
-    // not the same answer, and is not given as if it were.
-    said: record ? record.said
+    // not the same answer, and is not given as if it were. And a press still
+    // under way has none yet, which is not having none (stillKeeping).
+    said: stillKeeping(name) ? 'still being kept, so nothing says yet what is missing'
+      : record ? record.said
       : read.missing ? 'no snap.json in this folder, so nothing says what is missing'
       : 'snap.json in this folder cannot be read, so nothing says what is missing',
     // What the driver called it, if anything — see keepSnapNote.
@@ -3928,11 +3954,17 @@ function describeSnaps() {
  * Refused, with the reason, rather than tidied: a name the list does not show
  * (isSnap); a note that is not text, is longer than SNAP_NOTE_MAX, or holds a
  * control character — a line break among them, because the note is a label
- * on one line wherever it is shown; a snap still being kept, whose snap.json
- * is about to be written over by seal(); and a folder with no snap.json the
- * list can read, because writing one there would make a record that says
- * nothing about what the folder holds. Blank, after trimming, takes the note
- * away. */
+ * on one line wherever it is shown; a snap still being kept (stillKeeping);
+ * and a folder with no snap.json the list can read, because writing one there
+ * would make a record that says nothing about what the folder holds.
+ *
+ * The still-being-kept refusal is for the reason it gives, not a guard against
+ * seal() writing over a note: seal() writes snap.json once, and a note is only
+ * ever written into a snap.json that is there, so neither can write over the
+ * other. Without it a note sent during the press is refused all the same, as
+ * "this snap has no snap.json to keep a note in" (measured, with the refusal
+ * taken out) — true of the folder that second and wrong about the snap, which
+ * will have one in a moment. Blank, after trimming, takes the note away. */
 var SNAP_NOTE_MAX = 80;
 
 /* `done(status, reply)`, once. */
@@ -3950,13 +3982,12 @@ function keepSnapNote(body, done) {
   if (/[\u0000-\u001f\u007f]/.test(note)) {
     return done(400, { ok: false, error: 'a note is one line of text' });
   }
-  if (snapsFilling[name]) {
+  if (stillKeeping(name)) {
     return done(409, { ok: false, error: 'this snap is still being kept; try again in a moment' });
   }
-  // A real snap.json, by the list's own rule for what a snap's file is — a
-  // link named snap.json is not one, and nothing is read through it.
-  var read = snapFiles(name).some(function (f) { return f.file === 'snap.json'; })
-    ? snapRecord(name) : { record: null, missing: true };
+  // The record as the list reads it — a link named snap.json is not one, and
+  // nothing is read or written through it (snapRecord).
+  var read = snapRecord(name);
   if (!read.record) {
     return done(409, { ok: false, error: read.missing
       ? 'this snap has no snap.json to keep a note in'
@@ -3988,9 +4019,9 @@ function keepSnapNote(body, done) {
  * .html instead, built when it is asked for and never kept: each picture
  * inside it as a data: URI, byte for byte; each record shown as its text and
  * carried again, byte for byte, as a data: URI behind a link that saves it.
- * Nothing in it reaches for the network, so it opens on a phone in a car park,
- * and there is no script in it, so it opens the same in a mail client's or a
- * file manager's preview as in a browser.
+ * Nothing in it reaches for the network and nothing in it runs — there is no
+ * script — so it opens on a phone in a car park: rpi/test_dashboard.py opens
+ * one off the disk in a browser at a phone's size with the network off.
  *
  * Not a <script type="application/json"> block for the records: one ends at
  * the first `</script` inside it and parses differently after a `<!--`, and
@@ -4007,7 +4038,14 @@ function keepSnapNote(body, done) {
  * order whatever order they were asked in, oldest first, because a series
  * reads in the order it was taken: the list's own order, which is the folder
  * names' (and so files a 1970 snap first, as the list does last). The files
- * in each are snapFiles' — real files the press writes, never a link.
+ * in each are snapFiles' — real files the press writes, never a link — and
+ * its line and note are snapRecord's, by the same rule.
+ *
+ * And finished: a snap still being kept refuses the request, 409, as a note
+ * on it is refused (stillKeeping). Its screenshot can be part way written,
+ * and a file that leaves the rig would carry half a picture as the rig's
+ * screen. Refused rather than left out, for the reason a name the rig does
+ * not have is.
  *
  * Streamed a snap at a time, each file read without blocking, so a long
  * series neither holds the event loop — the driving screen's event stream
@@ -4024,14 +4062,19 @@ function snapBundle(asked) {
   if (!want.length) return { status: 400, error: 'name a snap to bundle: ?snap=<folder>' };
   for (var i = 0; i < want.length; i++) {
     if (!isSnap(want[i])) return { status: 404, error: 'no snap named ' + JSON.stringify(want[i]) };
+    if (stillKeeping(want[i])) {
+      return { status: 409, error: 'snap ' + JSON.stringify(want[i])
+                                   + ' is still being kept; try again in a moment' };
+    }
   }
   return { names: snapNames().names.filter(function (n) { return want.indexOf(n) !== -1; }) };
 }
 
 // What each file a press writes is, in a few words, for the two places that
-// have to say: snaps.html under each picture, and a bundle, which is opened
-// with no rig to ask. Plain words, written into a bundle as they are, so no
-// markup character and no double quote.
+// have to say: snaps.html, as each picture's alt text, and a bundle, which is
+// opened with no rig to ask — under each picture and above each record. Plain
+// words, written into a bundle as they are, so no markup character and no
+// double quote.
 var SNAP_ABOUT = {
   'panel.png': 'the rig\'s screen',
   'camera.jpg': 'the camera\'s last picture',
@@ -5330,8 +5373,9 @@ function route(req, res) {
       where: SNAPS_DIR,
       keep: SNAPS_KEEP,
       // Which files are pictures, in the order snaps.html lays them out; what
-      // each file is, which it says under each picture; and how long a note
-      // may be, which its note box is held to. A bundle says the same.
+      // each file is, which it gives each picture as its alt text; and how
+      // long a note may be, which its note box is held to. A bundle says the
+      // same.
       pictures: SNAP_PICTURES,
       about: SNAP_ABOUT,
       noteMax: SNAP_NOTE_MAX,

@@ -2274,8 +2274,10 @@ still four snaps. It has its own 📷 press as well, which is the one to use fro
 a phone: it photographs the rig's display, not the phone's. Underneath it are
 `GET /api/snaps` and `GET /api/snaps/<folder>/<file>`, which serve exactly what
 the list shows — the folders this server makes and the files a press writes,
-real ones, never a link wherever it points. Each is listed with its age by the
-rig's clock, or "age unknown" when it or the clock reading it was never set.
+real ones, never a link wherever it points; a `snap.json` that is a link is not
+read for the list's line, a bundle or a note either, and the folder says it has
+none. Each is listed with its age by the rig's clock, or "age unknown" when it
+or the clock reading it was never set.
 On the rig the folders are in `rpi/snaps/`, beside the
 journal (wherever `JOURNAL` puts it), which `.gitignore` covers and
 `test_lint.py` holds it to — a picture of a phone with an address on it does not
@@ -2289,7 +2291,8 @@ Planner — named alike in a Downloads folder. So each snap on `snaps.html` has
 byte; each record shown as its text and carried again, byte for byte, behind a
 link that saves it as the file it was. It reaches for nothing outside itself —
 no address, no script, its few styles written into it — so it opens on a phone
-with no signal, or in a mail client's preview, as it does in a browser.
+with no signal: `test_dashboard.py` opens one off the disk in a browser at a
+phone's size with the network off, and every picture in it draws.
 **⤓ with the N newer** takes that snap and every one listed above it — the
 series it starts, when the series is shared soon after it is taken, with no gap
 between snaps guessed at — and ticking any others puts **⤓ N chosen** on the
@@ -2297,18 +2300,21 @@ bar. Either way they are one
 file, oldest first whatever order they were chosen in, a section each under a
 list that leads to each, named for the first and the last
 (`…_15-05-03_to_…_15-09-41.html`). A name the rig does not have refuses the
-whole request and says which, rather than leaving that snap out; a file that
-cannot be read by the time the bundle reaches it is said in its place. Built
+whole request and says which, rather than leaving that snap out, and so does a
+snap whose press is still under way, whose screenshot can be half written —
+the list says "still being kept" for it until it is; a file that cannot be read
+by the time the bundle reaches it is said in its place. Built
 when asked, never kept, streamed a snap at a time, the next one read only once
 the phone has taken the one before, so a slow link holds one snap in the Pi's
 memory and not the series: `GET /api/snaps/bundle?snap=<folder>&snap=…`, which
 takes only folders the list shows and only the files it lists. Measured on the
 development box against the rig's three real snaps of 8 October, fetched over
 loopback, median of five: one (the Jimmy John's card, 276kB) is a 378kB file
-built in 9ms — base64 and the page around it make a snap 1.36–1.37 times its
-size; six (the three, twice) are 2.3MB in 27ms; a full shelf of a hundred (the
-three and 97 copies) is 38MB in 371ms, during which `/api/status`, asked every
-50ms, answered within 12.5ms at worst (2.4ms with nothing else asked of it).
+built in 8ms — base64 and the page around it make a snap 1.36–1.37 times its
+size; six (the three, twice) are 2.3MB in 25ms; a full shelf of a hundred (the
+three and 97 copies) is 38MB in 375ms. Over ten of those hundreds,
+`/api/status`, asked every 50ms, answered within 24ms at worst, and within 3ms
+in three of the ten (2.4ms at worst with nothing else asked of it).
 
 **A note on each.** Under each snap is a box for a few words — "trip planner",
 "after accept" — kept in that snap's own `snap.json` as `note`, shown beside its
