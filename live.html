@@ -1852,15 +1852,21 @@
   // A request that arrived while one was in flight, to be run once it
   // lands. Marking an offer during the slow poll is exactly that case.
   var shiftAgain = false;
-  // Three minutes. The server has to read and parse the whole journal to
-  // answer, on the same event loop that drives the camera stream — the live
-  // file reaches 64MB before it rolls, at most about twelve weeks at the 5.7MB
-  // a week rpi/journal.py's WEEK_BYTES measures, and a third of that in real
-  // rows, 22.4MB, parses in 64-223ms on the development container and more on
-  // a Pi 4. /api/journal/newest already
-  // sets the house budget for a
-  // journal-reading GET at "every few minutes", and a shift figure is not a
-  // number anybody watches tick.
+  // Three minutes. What an ask costs the server, on the same event loop that
+  // drives the camera stream, depends on whether it has read the journal
+  // since it started. The first read parses the whole file — it reaches 64MB
+  // before it rolls, at most about twelve weeks at the 5.7MB a week
+  // rpi/journal.py's WEEK_BYTES measures, and a third of that in real rows,
+  // 22.4MB, parses in 64-223ms on the development container and more on a
+  // Pi 4. Every ask after that reads only the bytes appended since
+  // (readJournal in server.js, which keeps its rows), and costs a few
+  // milliseconds: see SHIFT_SOON_MS below, which is what rests on that.
+  // This said every ask paid the whole parse. readJournal was already tailing
+  // the file when that was written, and once SHIFT_SOON_MS below quoted the
+  // tail's cost the page gave two different costs for one request. The timer
+  // stays at the house budget /api/journal/newest set for a journal-reading
+  // GET, "every few minutes", for the reason that never depended on the cost:
+  // a shift figure is not a number anybody watches tick.
   var SHIFT_EVERY_MS = 180000;
 
   // ...but it is a number that should not contradict the card that has just
@@ -1885,11 +1891,27 @@
   // until then rides it. Five seconds is a second longer than the resample
   // burst that follows a card's arrival (RESAMPLE_WINDOW in rpi/scan_pi.py),
   // which is the burst of extra reads a card's fuller readings come out of.
-  // Replayed against the week's landing times that is 1,099 asks rather than
-  // 1,166, never more than nine in a minute, and each one is cheap: after an
-  // append the journal cache reads only the new bytes, and /api/today measured
-  // 6.6ms median, 31.8ms worst, over twenty appends to the replayed week on
-  // the development container, against 240ms for the first, cold read.
+  //
+  // Replayed against the week's landing times, one line a card, that is 1,099
+  // asks rather than 1,166, never more than nine in a minute. That is per
+  // card, and so a floor: a card's later rows send lines too, and one that
+  // lands after the window its card's first line opened has closed arms an
+  // ask of its own. The export keeps one time a card, so when those landed is
+  // not on file. The replay that measured WEEK_BYTES stamps each frame of a card
+  // one read time (the row's `ms`) after the one before; counted over its
+  // 3,265 rows that way it is 1,416 asks rather than 3,265, never more than
+  // ten in a minute.
+  //
+  // Many more asks than the timer above makes, and outside the "every few
+  // minutes" it keeps — on purpose, and on what an ask costs once the
+  // journal has been read: only the appended bytes are parsed. /api/today
+  // right after an append measured 2.9-3.1ms median and 6.4ms worst on the
+  // replayed week (5.7MB a week, WEEK_BYTES), and 4.2-4.5ms median and 9.9ms
+  // worst on four of it (22.9MB) — two runs of 60 appends each, on the
+  // development container. The whole-file parse the timer was sized against
+  // is paid once, by the first read of the journal after the server starts or
+  // the file rolls: 44-59ms and 161-198ms on those two, as the first
+  // /api/today.
   //
   // Any ask at all answers what is pending — see loadShift — so a mark inside
   // the window is the only request, not one of two.

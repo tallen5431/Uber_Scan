@@ -782,19 +782,25 @@ There is deliberately no dollar total. `pay` is what the card offered, not what
 was earned, and a gross sum beside a net median is the exact sentence the offers
 page was corrected for.
 
-**What it costs.** A full journal parse — split, then a `JSON.parse` per line —
+**What it costs.** The first read of the journal after the server starts, or
+after the file rolls, is a full parse — split, then a `JSON.parse` per line —
 on the event loop that also drives the 12ms MJPEG tick and touches the file
 telling the scanner somebody is watching. The live file runs to 64MB before it
 rolls — at most about twelve weeks at 5.7MB a week (`journal.WEEK_BYTES`) — and
 a third of that in real rows, 22.4MB and 12,766 rows of the replayed week, parses
 in 64-223ms on the development container (48 runs), more on a Pi 4. The
 150-265ms once quoted here was a 20MB file of fifty thousand short rows, about
-400 bytes each against the real 1,752, so it was never a third of this file. So
-the page asks every three minutes — and once more five seconds after the rig
-says it has written an offer, see below —
-matching the budget `/api/journal/newest` already set for a journal-reading GET,
-and the answer is cached against the journal's size and mtime — append-only means
-size is monotonic where mtime granularity is not. The cache holds the finished
+400 bytes each against the real 1,752, so it was never a third of this file.
+Every read after the first parses only the bytes appended since (`readJournal`
+keeps its rows), so an ask right after the rig writes an offer measured
+2.9-4.5ms median and 9.9ms worst — see below. The page's own timer asks every
+three minutes, matching the budget `/api/journal/newest` already set for a
+journal-reading GET, because a shift figure is not a number anybody watches
+tick; the asks after a written offer are outside that budget, on that measured
+cost. This paragraph used to justify the timer by the full parse alone, as if
+every ask paid it, while the paragraph below gave the same request a cost of a
+few milliseconds. The answer is cached against the journal's size and mtime —
+append-only means size is monotonic where mtime granularity is not. The cache holds the finished
 summary and never the parsed rows, which `latestPerOffer` writes `hidden` and
 `accepted` onto.
 
@@ -835,12 +841,19 @@ also asks when the scanner's `{offer: …}` line arrives — `emit_offer`, sent 
 `OfferLog.consider` has appended the row and closed the file — coalesced to one
 request five seconds after the first such line, because a card sends another
 for each later reading of it that lands reading differently (2.8 rows an offer
-on the replayed week, up to ten for one card). Over the real week's landing times that is 1,099 requests
-rather than 1,166 and never more than nine in a minute; after an append the
-journal is read incrementally, and `/api/today` measured 6.6ms median, 31.8ms
-worst, over twenty appends to the replayed week on the development container.
-Any request at all — a mark inside the five seconds — answers the pending one,
-and a background tab asks when it is next shown instead.
+on the replayed week, up to ten for one card). Over the real week's landing
+times, one line a card, that is 1,099 requests rather than 1,166 and never more
+than nine in a minute. That is a floor: a card's later rows send lines too, and
+the export keeps one time a card, so when those landed is not on file. Counted
+over the 3,265 rows of the replay that measured `WEEK_BYTES`, which stamps each
+frame of a card one read time after the one before, it is 1,416 requests rather
+than 3,265 and never more than ten in a minute. After an append the journal is
+read incrementally, and `/api/today` measured 2.9-3.1ms median and 6.4ms worst
+on the replayed week, 4.2-4.5ms and 9.9ms on four of it (22.9MB), over two runs
+of 60 appends each on the development container; the first read after the
+server starts was 44-59ms and 161-198ms. Any request at all — a mark inside the
+five seconds — answers the pending one, and a background tab asks when it is
+next shown instead.
 
 `test_dashboard.py` holds both: it asks whether the count moved, and — because
 asserting a hidden line on a page that never got an answer proves nothing, since
