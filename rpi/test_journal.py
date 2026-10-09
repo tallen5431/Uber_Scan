@@ -408,6 +408,20 @@ feed(after, [OFFER] * 2, start=1_700_000_006.0)
 offers = [r for r in after.journal.rows() if not r.get('kind')]
 eq('...and does not record the card twice', len(offers), 1)
 
+# ...and the newest annotation, the Trip Planner a ⌖ press read, which
+# server.js writes into this same file (recordPlanner) and nothing on this side
+# has a use for. Its shape is the server's own, stops and all: if it were taken
+# for an offer, the card a restart resumes from would be a list of somebody's
+# stops with no payout on it.
+after.journal.append({'v': 1, 'kind': 'planner', 'id': 'planner-1700000007000',
+                      'seq': 1, 'at': JR.now_ms(), 'asked': True,
+                      'stops': [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.',
+                                 'expectedBy': 978, 'street': '4821 Kestrel Dr',
+                                 'city': 'Marietta', 'state': 'GA', 'zip': None,
+                                 'line': '4821 Kestrel Dr, Marietta'}]})
+eq('a Trip Planner row last in the file is not the last offer',
+   (after.journal.last() or {}).get('pay'), 12.45)
+
 # --- "settled" means the reading stopped moving, so it has to be able to -----
 # A row is only ever written on the read where the reading *changed*, so at that
 # moment "this reading has stopped moving" is false by construction. 208 of 245

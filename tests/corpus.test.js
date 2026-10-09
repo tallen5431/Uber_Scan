@@ -83,6 +83,26 @@ function sameList(a, b) {
                             + JSON.stringify(c.expect)); }
 });
 
+/* The stops on Uber's Trip Planner, every field of every stop in one fixed
+   order. A key findPlanner leaves out is '<missing>', not null - null is an
+   expected value here, "this field did not read". rpi/test_parser.py runs the
+   same cases in the same order. */
+var PLANNER_KEYS = ['kind', 'orders', 'name', 'expectedBy', 'street', 'city',
+                    'state', 'zip', 'line'];
+function stopFields(stops) {
+  return stops === null ? null : stops.map(function (s) {
+    return PLANNER_KEYS.map(function (k) {
+      return Object.prototype.hasOwnProperty.call(s, k) ? s[k] : '<missing>';
+    });
+  });
+}
+(cases.planner || []).forEach(function (c) {
+  var got = JSON.stringify(stopFields(P.findPlanner(c.text)));
+  var want = JSON.stringify(stopFields(c.expect));
+  if (got === want) ok++;
+  else { bad++; console.log('FAIL  planner / ' + c.name + ': got ' + got + ' want ' + want); }
+});
+
 (cases.whole || []).forEach(function (c) {
   var got = P.isWhole(P.parse(c.text));
   if (got === c.expect) ok++;

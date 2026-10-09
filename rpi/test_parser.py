@@ -102,6 +102,24 @@ for c in cases.get('address', []):
     eq('address / ' + c['name'],
        [got['line'], got['city'], got['zip']] if got else None, c['expect'])
 
+# The stops on Uber's Trip Planner, every field of every stop in one fixed
+# order, so a stop whose name read and whose town did not is named for the
+# field it got wrong. A key find_planner leaves out is MISSING, not None —
+# None is an expected value here, "this field did not read", and a stop short
+# of a field must not pass as one that read nothing. tests/corpus.test.js runs
+# the same cases in the same order. See OP.find_planner.
+PLANNER_KEYS = ('kind', 'orders', 'name', 'expectedBy', 'street', 'city',
+                'state', 'zip', 'line')
+
+
+def _stops(stops):
+    return None if stops is None else [[s.get(k, '<missing>') for k in PLANNER_KEYS]
+                                       for s in stops]
+
+
+for c in cases.get('planner', []):
+    eq('planner / ' + c['name'], _stops(P.find_planner(c['text'])), _stops(c['expect']))
+
 for c in cases.get('whole', []):
     eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])
 

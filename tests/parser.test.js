@@ -368,5 +368,30 @@ check('largest dollar figure wins over a promo line',
      JSON.stringify(whose), '[null,null]');
 })();
 
+/* ---- a Trip Planner address is one the geography can read ---- */
+/* The planner prints no ZIP, so its line is "4821 Kestrel Dr, Marietta" and
+   not "..., Marietta, GA": Advice.area takes the town off the END of a place
+   and strips only a ", ST ZIP" tail, so a line ending at the state gave it no
+   town at all - measured, area() is null on it - and every pair judged against
+   the order in the car would have gone back to ENDS ? on the very address the
+   button was pressed to read. Asked of advice.js itself, because what has to
+   hold is that the two files agree, and a copy of its rule here would only
+   agree with itself. The ZIP-bearing line is findAddress's shape and keeps it. */
+(function () {
+  var A = require('../advice.js');
+  var planner = require('./fixtures/cases.json').planner;
+  var named = function (n) {
+    return P.findPlanner(planner.filter(function (c) { return c.name === n; })[0].text);
+  };
+  var printed = named('...and as the phone printed it')[0];
+  var area = A.area(printed.line);
+  eq('a Trip Planner address with no ZIP gives Advice.area its town',
+     area && area.town, 'marietta');
+  var withZip = named('three stops in the order the screen lists them, one of them closed')[2];
+  area = A.area(withZip.line);
+  eq('...and one with a ZIP gives it the ZIP, as findAddress\'s line does',
+     area && area.zip, '30075');
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');
 process.exit(fail ? 1 : 0);

@@ -3992,5 +3992,216 @@
     "Foothill Trl & Northwoods Dr, Marietta"
    ]
   }
+ ],
+ "_planner_comment": "Uber's Trip Planner, read off the whole screen when the driver presses the dropoff button: every stop in the order the screen lists it. `expect` is the list of stops, each with all nine fields - kind, orders, name, expectedBy (minutes since midnight), street, city, state, zip, line - or null when the text is not a planner. Compared field by field in that order by both runners. Names, streets and house numbers are invented in every case; the layout, the OCR noise and the time in the first case are a real reading's.",
+ "planner": [
+  {
+   "name": "Uber's Trip Planner as the rig's live view read it",
+   "_why": "Measured: camera.jpg off the rig - the LOW-RESOLUTION live view, not a read a press of the button would take - through the rig's own read path, fit_for_ocr to 1800, to_grey, preprocess, ocr_lines. The noise is that read's; the name and the street are invented in place of the real ones. \"Dropoff-1 order\" is the app's bullet read as a dash, \"©\" the stop's icon, and \"he\", \"S\" and \"E\" are the screen's scroll bar, which sits beside exactly those three lines - so the S after the street goes, because the town line under it carries the same mark. find_address gives None on this text: there is no ZIP on the screen.",
+   "text": "3:57 THY - @ ~sicnscs@\nTrip Planner —\nDropoff-1 order\n© pats.\nExpected by 4:18 PM\n; ‘\nAddress he\n4821 Kestrel Dr S\nMarietta, GA E\nView details >\n“\n95 Q\na\nee",
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "pats.",
+     "expectedBy": 978,
+     "street": "4821 Kestrel Dr",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "4821 Kestrel Dr, Marietta"
+    }
+   ]
+  },
+  {
+   "name": "...and as the phone printed it",
+   "text": "3:57\nTrip Planner\nDropoff • 1 order\nPat Q.\nExpected by 4:18 PM\nAddress\n4821 Kestrel Dr\nMarietta, GA\nView details\nWaybill\nStop New Requests",
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 978,
+     "street": "4821 Kestrel Dr",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "4821 Kestrel Dr, Marietta"
+    }
+   ]
+  },
+  {
+   "name": "three stops in the order the screen lists them, one of them closed",
+   "_why": "Stacked orders: two pickups and a dropoff. The second pickup's block is closed, so it shows no address, and all five of its address fields are null rather than borrowed from a neighbour. The dropoff prints a ZIP, which goes into the line beside the state the way find_address writes one; the first pickup prints none, and its line ends at the town. Noon is 12:05 PM, 725. Invented throughout.",
+   "text": "Trip Planner\nPickup • 1 order\nBurger Barn\nExpected by 11:52 AM\nAddress\n310 Mill St\nRoswell, GA\nView details\nPickup • 2 orders\nTaco Hut\nExpected by 12:05 PM\nDropoff • 1 order\nLee M.\nExpected by 12:31 PM\nAddress\n77 Birch Ln NW\nRoswell, GA 30075\nView details",
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Burger Barn",
+     "expectedBy": 712,
+     "street": "310 Mill St",
+     "city": "Roswell",
+     "state": "GA",
+     "zip": null,
+     "line": "310 Mill St, Roswell"
+    },
+    {
+     "kind": "pickup",
+     "orders": 2,
+     "name": "Taco Hut",
+     "expectedBy": 725,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee M.",
+     "expectedBy": 751,
+     "street": "77 Birch Ln NW",
+     "city": "Roswell",
+     "state": "GA",
+     "zip": "30075",
+     "line": "77 Birch Ln NW, Roswell, GA 30075"
+    }
+   ]
+  },
+  {
+   "name": "two dropoffs are both listed, in the order the screen gives them",
+   "_why": "Orders stacked to two customers. The reader lists both; which one belongs to the order in the car is not its question, and rpi/scan_pi.py's planner_destination refuses to guess it. The second prints a ZIP, so find_address alone would answer with it - the last address on the screen - which is why a planner decides its own destination. Invented throughout.",
+   "text": "Trip Planner\nDropoff • 1 order\nPat Q.\nExpected by 4:18 PM\nAddress\n4821 Kestrel Dr\nMarietta, GA\nView details\nDropoff • 1 order\nLee M.\nExpected by 4:41 PM\nAddress\n77 Birch Ln NW\nRoswell, GA 30075\nView details",
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 978,
+     "street": "4821 Kestrel Dr",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "4821 Kestrel Dr, Marietta"
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee M.",
+     "expectedBy": 1001,
+     "street": "77 Birch Ln NW",
+     "city": "Roswell",
+     "state": "GA",
+     "zip": "30075",
+     "line": "77 Birch Ln NW, Roswell, GA 30075"
+    }
+   ]
+  },
+  {
+   "name": "a lone letter after the street is kept when the town line under it is clean",
+   "_why": "A suffix followed by a single N, S, E or W is a real quadrant on 7 of the 1,802 distinct places in the owner's week (Cobb Pkwy N and S, Picketts Forge Dr E and W), so with nothing beside it saying the screen's edge is in the way, it stays.",
+   "text": "Dropoff • 1 order\nPat Q.\nExpected by 4:18 PM\nAddress\n4821 Kestrel Dr S\nMarietta, GA",
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 978,
+     "street": "4821 Kestrel Dr S",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "4821 Kestrel Dr S, Marietta"
+    }
+   ]
+  },
+  {
+   "name": "a town line whose state is not a state is refused, and the street kept",
+   "_why": "The state is the check, as it is in find_address: \"OA\" is a G read as an O, two letters the town line's shape admits and STATES does not. Not \"6A\", which was this case first and never reached STATES: the shape asks for two letters, so it refused 6A itself and the STATES check could be deleted with every case passing. Per field: the street read and stands.",
+   "text": "Dropoff • 1 order\nPat Q.\nExpected by 4:18 PM\nAddress\n4821 Kestrel Dr\nMarietta, OA",
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 978,
+     "street": "4821 Kestrel Dr",
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": "4821 Kestrel Dr"
+    }
+   ]
+  },
+  {
+   "name": "a name the reader lost is not replaced by the time under it",
+   "text": "Dropoff • 1 order\nExpected by 4:18 PM",
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": null,
+     "expectedBy": 978,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null
+    }
+   ]
+  },
+  {
+   "name": "a street the reader lost does not push the town out of reach",
+   "text": "Dropoff • 1 order\nPat Q.\nAddress\nMarietta, GA\nView details",
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": null,
+     "street": null,
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "Marietta"
+    }
+   ]
+  },
+  {
+   "name": "the title alone is not a planner",
+   "_why": "It is the one line the planner shares with no stop, and alone it says nothing worth showing.",
+   "text": "Trip Planner\nWaybill\nStop New Requests",
+   "expect": null
+  },
+  {
+   "name": "an offer card is not a planner",
+   "text": "$1 8.75 Includes expected tip 12.1 mi + 40 min @ Pickup Talkin Tacos",
+   "expect": null
+  },
+  {
+   "name": "a DoorDash card's order count is not a stop header",
+   "_why": "367 of the week's 6,657 frames carry an order count, every one of them in brackets like this and not one straight after a Pickup or Dropoff label. Verbatim from the week.",
+   "text": "@ Pickup\nWasabi (2 orders)\nTX Customer dropoff\nf® Customer dropoff",
+   "expect": null
+  },
+  {
+   "name": "...and nor is the count in brackets straight after the label",
+   "_why": "The header's glue is the app's bullet, never a bracket.",
+   "text": "@ Pickup (2 orders)\nTX Customer dropoff",
+   "expect": null
+  },
+  {
+   "name": "a DoorDash Deliver by card is not a planner",
+   "text": "Decline\nHigh paying offer!\n$41.11\nGuaranteed (incl. tips)\n9.8 mi\nDeliver by 7:15 PM\nPickup Papa John's Store 3317 (2 orders)\nCustomer dropoff\nCustomer dropoff\nAccept",
+   "expect": null
+  },
+  {
+   "name": "a navigation screen with a map label on it is not a planner",
+   "_why": "\"89 Shanty Drive\" is the background map label find_address is strict to keep off the panel; this reader takes nothing outside a stop it can see the header of.",
+   "text": "Dropoff\n14 min · 3.2 mi\nTurn right onto Kestrel Dr\n89 Shanty Drive\nStart",
+   "expect": null
+  }
  ]
 }

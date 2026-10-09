@@ -758,10 +758,15 @@
    * window's other frames name them. DoorDash never prints a distance there,
    * so the group is absent on every DoorDash card. No charger-badge lookahead:
    * the badge never follows a deadline, and what does is the merchant's name -
-   * `From The Earth Brewing` cost the card both ends. */
+   * `From The Earth Brewing` cost the card both ends.
+   *
+   * The clock time itself is CLOCK_TIME, named so the Trip Planner's "Expected
+   * by 4:18 PM" (PLANNER_EXPECTED) is read by the same glyph rule and not a
+   * copy of it. See CLOCK_TIME in offer_parser.py. */
+  var CLOCK_TIME = '(\\d{1,2})\\s*[:.]\\s*(\\d{2})\\s*([ap])\\.?\\s*m\\.?';
   var DELIVER_BY = new RegExp(
     '(?:deliver(?:ed|y)?\\s*by|\\best\\s*[.,]?\\s*delivery)'
-    + '\\s*(\\d{1,2})\\s*[:.]\\s*(\\d{2})\\s*([ap])\\.?\\s*m\\.?'
+    + '\\s*' + CLOCK_TIME
     + '(?:\\s*[^\\s\\w()]{1,3}\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)'
     + '\\s*mi(?:les?)?\\b)?', 'i');
 
@@ -967,11 +972,18 @@
   function findDeadline(text) {
     var m = text.match(DELIVER_BY);
     if (!m) return null;
-    var hour = parseInt(m[1], 10);
-    var minute = parseInt(m[2], 10);
+    return timeOfDay(m[1], m[2], m[3]);
+  }
+
+  /* CLOCK_TIME's three groups as minutes since midnight, or null. The one place
+     a 12-hour clock becomes a number: the delivery deadline and the Trip
+     Planner's "Expected by" both come through here. See time_of_day. */
+  function timeOfDay(hour, minute, half) {
+    hour = parseInt(hour, 10);
+    minute = parseInt(minute, 10);
     if (!(hour >= 1 && hour <= 12) || minute > 59) return null;
     hour = hour % 12;
-    if (m[3].toLowerCase() === 'p') hour += 12;
+    if (half.toLowerCase() === 'p') hour += 12;
     return hour * 60 + minute;
   }
 
@@ -1221,8 +1233,11 @@
    'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV ' +
    'WI WY DC AS GU MP PR VI').split(' ').forEach(function (s) { STATES[s] = true; });
 
+  /* TOWN is the town's own words, named so the Trip Planner's "Marietta, GA"
+     line (PLANNER_TOWN) is held to the same idea of a town as this. */
+  var TOWN = '[A-Za-z][A-Za-z.\'’-]*(?:\\s+[A-Za-z][A-Za-z.\'’-]*){0,3}';
   var ADDRESS = new RegExp(
-    '([A-Za-z][A-Za-z.\'’-]*(?:\\s+[A-Za-z][A-Za-z.\'’-]*){0,3})' +
+    '(' + TOWN + ')' +
     '\\s*,\\s*([A-Za-z]{2})\\s+(' + ZIP_RX + ')' +
     '(?:\\s*-\\s*[\\dOoQlIiSsBbZz]{4})?(?!\\d)', 'g');
 
@@ -1238,7 +1253,22 @@
      suffix abbreviations, a list for the same reason STATES is one. The
      optional trailing quadrant belongs to the street: "Chastain Rd NW
      Kennesaw". */
-  var STREET_ENDS = /\b(?:st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd|boulevard|ct|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend)\b\.?(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?\s+/gi;
+  var STREET_SUFFIX = 'st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd|boulevard|ct'
+    + '|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace'
+    + '|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend';
+  var STREET_ENDS = new RegExp('\\b(?:' + STREET_SUFFIX + ')\\b'
+    + '\\.?(?:\\s+(?:NW|NE|SW|SE|N|S|E|W))?\\s+', 'gi');
+
+  /* Five characters as a ZIP that is in use, or null: fixDigits first, since
+     "3O127" is this OCR's commonest confusion, and 00501 to 99950 is the range
+     in use. One rule for findAddress and the Trip Planner's town line. See
+     a_zip in offer_parser.py. */
+  function aZip(token) {
+    var digits = fixDigits(token);
+    if (!/^\d{5}$/.test(digits)) return null;
+    var code = parseInt(digits, 10);
+    return (code >= 501 && code <= 99950) ? digits : null;
+  }
 
   /* A single letter alone in front of a town is the icon row, not a word: "l
      Atlanta", "j Powder Springs". PLACE_TOWN in advice.js tolerates exactly
@@ -1254,15 +1284,11 @@
     while ((m = ADDRESS.exec(text)) !== null) {
       if (m.index === ADDRESS.lastIndex) ADDRESS.lastIndex++;
       var state = m[2].toUpperCase();
-      // fixDigits first: the ZIP is five characters of small type through a
-      // lens and "3O127" is this OCR's commonest confusion, not a different
-      // number. The state gets no such help - two letters have no digits in
-      // them, and "6A" corrected to "GA" would be inventing the one token that
-      // is here to refuse.
-      var digits = fixDigits(m[3]);
-      if (!STATES[state] || !/^\d{5}$/.test(digits)) continue;
-      var code = parseInt(digits, 10);
-      if (!(code >= 501 && code <= 99950)) continue;
+      // The ZIP gets fixDigits (see aZip). The state gets no such help - two
+      // letters have no digits in them, and "6A" corrected to "GA" would be
+      // inventing the one token that is here to refuse.
+      var digits = aZip(m[3]);
+      if (!STATES[state] || digits === null) continue;
       var city = m[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '')
                      .replace(CITY_JUNK, '');
       if (city.length < 3) continue;
@@ -1322,6 +1348,127 @@
       after = m.index + m[0].length;
     }
     return best;
+  }
+
+  /* --- the stops on Uber's Trip Planner ------------------------------------
+   *
+   * After an accept the driver can open Uber's Trip Planner: every stop of the
+   * trip in order, each a block headed "Pickup • N order(s)" or "Dropoff • N
+   * order(s)", then a name, "Expected by 4:18 PM", and - while the block is
+   * open - "Address", a street line and a "Town, ST" line. No ZIP, so
+   * findAddress refuses it, and should: the ZIP is what makes its answer
+   * refusable in free text. An address is taken here only where the app
+   * labels one, inside a block the app headed as a stop, so free text off a
+   * map is no closer to the panel than it was.
+   *
+   * The header is the recogniser: over the owner's week, 6,657 frames and
+   * stored texts, none carries one; the 367 that carry an order count all have
+   * it in brackets, DoorDash's "Wasabi (2 orders)". The glue is the app's
+   * bullet, read as a glyph ("Dropoff-1 order" on the rig's own reading) or
+   * lost, and never a bracket. See the
+   * same section of offer_parser.py for the measurements behind each rule. */
+  var PLANNER_STOP = new RegExp('^[^A-Za-z0-9]{0,3}(pick ?-?up|drop ?-?off) ?[^\\w\\s()]{0,3} ?'
+    + '(' + DC + '{1,2}) ?orders?\\b', 'i');
+  var PLANNER_EXPECTED = new RegExp('\\bexpected\\s*by\\s*' + CLOCK_TIME, 'i');
+  var PLANNER_ADDRESS = /^[^A-Za-z0-9]{0,3}address\b/i;
+  var PLANNER_TOWN = new RegExp('^[^A-Za-z]{0,3}(' + TOWN + ') ?, ?([A-Za-z]{2})\\b ?(.*)$');
+  var PLANNER_ZIP = new RegExp('^(' + ZIP_RX + ')(?: ?- ?' + DC + '{4})?(?![0-9A-Za-z])');
+  // A line's furniture off both ends; a full stop is kept, "Pat Q." being how
+  // the app writes a name.
+  var PLANNER_EDGE = /^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$/g;
+  // One letter after the street's suffix: where a quadrant goes, and where the
+  // screen's edge leaves a mark. See plannerAddress.
+  var PLANNER_LONE_LETTER = new RegExp('\\b(?:' + STREET_SUFFIX + ')\\.? ([A-Za-z])$', 'i');
+
+  /* The street and the town under a stop's "Address" label, field by field.
+     A lone letter after the street's suffix is dropped only when the town line
+     beside it carries something after its state that is not a ZIP - the
+     screen's scroll bar is a column, and it marks every line it passes. With a
+     clean town line the letter is kept as the quadrant it may be: 7 of the
+     week's 1,802 places carry a real one, Cobb Pkwy N and S among them. The
+     line carries the state only beside a ZIP, which is
+     findAddress's line exactly; without one Advice.area could not take the
+     town off its end. See _planner_address in offer_parser.py. */
+  function plannerAddress(streetLine, townLine) {
+    var city = null, state = null, zip = null, tail = false;
+    var t = PLANNER_TOWN.exec(townLine || '');
+    if (t && STATES[t[2].toUpperCase()]) {
+      var town = t[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '')
+                     .replace(CITY_JUNK, '');
+      if (town.length >= 3) {
+        city = town;
+        state = t[2].toUpperCase();
+        var rest = t[3].trim();
+        var z = PLANNER_ZIP.exec(rest);
+        zip = z ? aZip(z[1]) : null;
+        tail = !!(zip ? rest.slice(z[0].length) : rest).trim();
+      }
+    }
+    var street = (streetLine || '').replace(PLANNER_EDGE, '');
+    var lone = PLANNER_LONE_LETTER.exec(street);
+    if (lone && tail) street = street.slice(0, lone.index + lone[0].length - 1).replace(/\s+$/, '');
+    var s = STREET.exec(street);
+    street = (s && s.index === 0)
+      ? s[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '') : null;
+    var parts = [];
+    if (street) parts.push(street);
+    if (city) parts.push(city);
+    if (zip) parts.push(state + ' ' + zip);
+    return { street: street || null, city: city, state: state, zip: zip,
+             line: parts.length ? parts.join(', ') : null };
+  }
+
+  /* The stops on the Trip Planner in screen order: {kind, orders, name,
+     expectedBy, street, city, state, zip, line}, or null with no stop header.
+     Every field that does not read is null and never guessed. Line by line,
+     each normalized on its own, as lineStarts does. See find_planner. */
+  function findPlanner(text) {
+    if (!text) return null;
+    var lines = String(text).split(/[\r\n]+/).map(normalize)
+      .filter(function (l) { return l; });
+    var heads = [];
+    lines.forEach(function (l, i) { if (PLANNER_STOP.test(l)) heads.push(i); });
+    if (!heads.length) return null;
+    return heads.map(function (at, k) {
+      var head = PLANNER_STOP.exec(lines[at]);
+      var block = lines.slice(at + 1, k + 1 < heads.length ? heads[k + 1] : lines.length);
+      var count = toNumber(head[2]);
+      // The line under the header, unless it is the time or the label: a lost
+      // name must not promote whatever came next into it.
+      var name = null;
+      if (block.length && !PLANNER_EXPECTED.test(block[0])
+          && !PLANNER_ADDRESS.test(block[0])) {
+        name = block[0].replace(PLANNER_EDGE, '');
+        if (!/[A-Za-z]{2}/.test(name)) name = null;
+      }
+      var due = null;
+      for (var i = 0; i < block.length; i++) {
+        var m = PLANNER_EXPECTED.exec(block[i]);
+        if (m) { due = timeOfDay(m[1], m[2], m[3]); break; }
+      }
+      // The street and then the town, looked for in the two lines after the
+      // label, so a lost street does not push the town out of reach.
+      var streetLine = null, townLine = null, label = -1;
+      for (var j = 0; j < block.length; j++) {
+        if (PLANNER_ADDRESS.test(block[j])) { label = j; break; }
+      }
+      if (label !== -1) {
+        var under = block.slice(label + 1, label + 3);
+        var townAt = -1;
+        for (var u = 0; u < under.length; u++) {
+          if (PLANNER_TOWN.test(under[u])) { townAt = u; break; }
+        }
+        townLine = townAt !== -1 ? under[townAt] : null;
+        streetLine = under.length && townAt !== 0 ? under[0] : null;
+      }
+      var stop = { kind: /^p/i.test(head[1]) ? 'pickup' : 'dropoff',
+                   orders: (count !== null && count >= 1 && count === Math.floor(count))
+                     ? count : null,
+                   name: name, expectedBy: due };
+      var where = plannerAddress(streetLine, townLine);
+      Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
+      return stop;
+    });
   }
 
   function labelledPickup(text, place) {
@@ -2881,7 +3028,7 @@
            findPlaces: findPlaces, trimPlace: trimPlace,
            findPickup: findPickup, findDropoff: findDropoff,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
-           findAddress: findAddress,
+           findAddress: findAddress, findPlanner: findPlanner,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,
            /* Exported so the default can be checked directly. Everything that

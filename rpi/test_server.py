@@ -1499,6 +1499,122 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- a ⌖ press that read Uber's Trip Planner ---------------------------------
+#
+# The scanner sends the planner's stops on a line of their own (emit_planner).
+# Here they go to the panel on the stream, onto the order in the car for a
+# panel reloaded mid-delivery, and into the journal as a collection row the
+# copy at home can carry — once for one planner, however many presses read it.
+#
+# Two stops, both dropoffs: the planner a destination is NOT taken from, so
+# the order in the car must come out of this with the end it went in with.
+# The scanner sends no dropoff line for it, and nothing here may make one up
+# out of the stops. Names, streets and houses invented.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'planner.py')
+    _STOPS_A = [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 978,
+                 'street': '4821 Kestrel Dr', 'city': 'Marietta', 'state': 'GA',
+                 'zip': None, 'line': '4821 Kestrel Dr, Marietta'},
+                {'kind': 'dropoff', 'orders': 1, 'name': 'Lee M.', 'expectedBy': 1001,
+                 'street': None, 'city': None, 'state': None, 'zip': None,
+                 'line': None}]
+    # ...and the same trip with the first stop done.
+    _STOPS_B = _STOPS_A[1:]
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import json, sys, time\n'
+            'A = %s\nB = %s\n'
+            'def planner(stops):\n'
+            '    print(json.dumps({"planner": {"stops": stops, "asked": True,\n'
+            '        "ms": None, "at": int(time.time() * 1000)}}), flush=True)\n'
+            '# Long enough for the mark below to put the order in the car.\n'
+            'time.sleep(2.0)\n'
+            'planner(A)\n'
+            '# The driver checking the answer: the same screen, pressed again.\n'
+            'time.sleep(0.4)\n'
+            'planner(A)\n'
+            'time.sleep(0.4)\n'
+            'planner(B)\n'
+            '# ...and B again once PLANNER_SAME_MS (1.5s here) has passed.\n'
+            'time.sleep(2.0)\n'
+            'planner(B)\n'
+            'time.sleep(600)\n' % (json.dumps(_STOPS_A).replace('null', 'None'),
+                                   json.dumps(_STOPS_B).replace('null', 'None')))
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'PLANNER_SAME_MS': '1500'}, journal)
+    try:
+        told = listen(base, 8.0)
+        code, reply = post(base, '/api/offers/mark', {
+            'id': 'o-planned', 'accepted': True,
+            'offer': {'id': 'o-planned', 'pay': 14.0, 'minutes': 30.0,
+                      'billedMinutes': 30.0, 'miles': 6.0, 'cost': 2.1,
+                      'dropoff': None}})
+        ok_('the premise: an order is in the car before the planner is read',
+            code == 200 and reply.get('holding') is True)
+        planned = []
+        for _ in range(160):
+            rows = [json.loads(l) for l in open(journal) if l.strip()]
+            planned = [r for r in rows if r.get('kind') == 'planner']
+            if len(planned) >= 3:
+                break
+            time.sleep(0.05)
+        eq('one planner read twice inside PLANNER_SAME_MS is one journal row',
+           [r.get('stops') == _STOPS_A for r in planned].count(True), 1)
+        eq('...a planner that reads differently is a row of its own, and the same '
+           'one again past the window is written again',
+           [r.get('stops') == _STOPS_B for r in planned].count(True), 2)
+        if planned:
+            row = planned[0]
+            # The shape syncKey carries a kind row across on: without `id` and
+            # `seq` the copy at home would hold none of these.
+            eq('...each a collection row the sync can carry',
+               (row.get('v'), row.get('id'), row.get('seq'), row.get('asked')),
+               (1, 'planner-%s' % row.get('at'), 1, True))
+        status = get(base, '/api/status')
+        held = status.get('holding') or {}
+        eq('the order in the car carries the stops last read, for a panel '
+           'reloaded mid-delivery', held.get('planner'), _STOPS_B)
+        # One rule for where an order ends. The scanner sends a dropoff line
+        # when a planner gives one; this one did not, so the end stays as it
+        # was — a server that read an address out of the stops itself would be
+        # a second answer to the question emit_dropoff already answers.
+        eq('...and no destination of its own: the order keeps the end it had',
+           (held.get('dropoff'), held.get('dropoffScanned')), (None, False))
+        no_('...nor a mark written from the stops',
+            any(r.get('kind') == 'mark' and r.get('dropoff') for r in rows))
+        time.sleep(0.4)
+        eq('the panel is told each planner on the stream',
+           len([m for m in told if isinstance(m, dict) and m.get('planner')]), 4)
+        # Collection only: the fold skips a kind it has no use for, so the
+        # offers page and every total on it are what they were.
+        page = get(base, '/api/journal?days=0')
+        eq('the offers page does not count a planner row as an offer',
+           [o.get('id') for o in (page.get('offers') or [])
+            if str(o.get('id') or '').startswith('planner')], [])
+        # ...and the row the server wrote is one the sync recognises when it
+        # comes back: ingest builds its de-duplication over syncKey, so a row it
+        # could not key would be refused as malformed, and one keyed wrongly
+        # would be stored twice.
+        if planned:
+            _req = urllib.request.Request(
+                base + '/api/journal/ingest',
+                data=(json.dumps(planned[0]) + '\n').encode('utf-8'),
+                headers={'Content-Type': 'application/x-ndjson'})
+            _back = json.loads(urllib.request.urlopen(_req, timeout=10).read().decode())
+            eq('...and a planner row synced back is recognised as already here',
+               (_back.get('added'), _back.get('malformed')), (0, 0))
+        # Put down, the stops go with the order: the same lifetime as the
+        # scanned destination beside them.
+        code, _ = post(base, '/api/delivered', {})
+        eq('...and they go when the order is put down',
+           (code, get(base, '/api/status').get('holding')), (200, None))
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a card too old to attach an address to ----------------------------------
 #
 # The ceiling, which is the whole of what keeps the old rule's protection. An

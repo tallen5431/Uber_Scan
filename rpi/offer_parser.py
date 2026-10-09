@@ -333,9 +333,15 @@ ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 # No charger-badge lookahead on it. One was copied from LONE_MILES, and the
 # badge never follows a deadline; what follows this distance is the merchant's
 # name, so a merchant called `From The Earth Brewing` cost the card both ends.
+#
+# The clock time itself is CLOCK_TIME, named so that the Trip Planner's
+# "Expected by 4:18 PM" (see PLANNER_EXPECTED) is read by the same glyph rule
+# rather than a copy of it: two rules for "what a time looks like through this
+# lens" would answer differently the first time either was touched.
+CLOCK_TIME = r'(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?'
 DELIVER_BY = re.compile(
     r'(?:deliver(?:ed|y)?\s*by|\best\s*[.,]?\s*delivery)'
-    r'\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?'
+    r'\s*' + CLOCK_TIME +
     r'(?:\s*[^\s\w()]{1,3}\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)'
     r'\s*mi(?:les?)?\b)?', re.IGNORECASE | ASCII)
 
@@ -1763,13 +1769,22 @@ def find_deadline(text):
     m = DELIVER_BY.search(text)
     if not m:
         return None
-    hour = int(m.group(1))
-    minute = int(m.group(2))
+    return time_of_day(m.group(1), m.group(2), m.group(3))
+
+
+def time_of_day(hour, minute, half):
+    """CLOCK_TIME's three groups as minutes since midnight, or None.
+
+    The one place a 12-hour clock becomes a number. The delivery deadline and
+    the Trip Planner's "Expected by" both come through here, so noon, midnight
+    and an impossible "19:15 PM" are answered once for both.
+    """
+    hour = int(hour)
+    minute = int(minute)
     if not (1 <= hour <= 12) or minute > 59:
         return None
-    half = m.group(3).lower()
     hour = hour % 12
-    if half == 'p':
+    if half.lower() == 'p':
         hour += 12
     return hour * 60 + minute
 
@@ -2129,8 +2144,12 @@ STATES = set((
 # "…, Powder Springs, GA 30127" and the ZIP+4 form. The city is taken back to a
 # comma or the start, because that is where a US address puts the break; the
 # street is whatever preceded it, and is kept only for showing.
+#
+# TOWN is the town's own words, named so the Trip Planner's "Marietta, GA" line
+# (see PLANNER_TOWN) is held to the same idea of a town as this.
+TOWN = r'[A-Za-z][A-Za-z.\'’-]*(?:\s+[A-Za-z][A-Za-z.\'’-]*){0,3}'
 ADDRESS = re.compile(
-    r'([A-Za-z][A-Za-z.\'’-]*(?:\s+[A-Za-z][A-Za-z.\'’-]*){0,3})'
+    r'(' + TOWN + r')'
     r'\s*,\s*([A-Za-z]{2})\s+(' + ZIP + r')(?:\s*-\s*' + DC + r'{4})?(?!\d)',
     ASCII)
 
@@ -2160,11 +2179,27 @@ CITY_JUNK = re.compile(r'^(?:[A-Za-z]\s+)+', ASCII)
 # Ln Powder Springs" — which two readings of the same street would disagree
 # about. The optional trailing quadrant is part of the street, not the town:
 # "Chastain Rd NW Kennesaw".
+STREET_SUFFIX = (r'st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd|boulevard|ct'
+                 r'|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace'
+                 r'|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend')
 STREET_ENDS = re.compile(
-    r'\b(?:st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd|boulevard|ct'
-    r'|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace'
-    r'|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend)\b'
+    r'\b(?:' + STREET_SUFFIX + r')\b'
     r'\.?(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?\s+', re.IGNORECASE | ASCII)
+
+
+def a_zip(token):
+    """Five characters as a ZIP that is in use, or None.
+
+    `fix_digits` first: the ZIP is five characters of small type through a
+    lens, and "3O127" is this OCR's commonest confusion, not a different
+    number. 00501 is the lowest ZIP in use and 99950 the highest; five digits
+    outside that are a phone fragment or an order id, not a place. One rule for
+    find_address and the Trip Planner's town line both.
+    """
+    digits = fix_digits(token)
+    if not digits.isdigit() or len(digits) != 5:
+        return None
+    return digits if 501 <= int(digits) <= 99950 else None
 
 
 def find_address(text):
@@ -2189,18 +2224,11 @@ def find_address(text):
     after = 0          # where the previous address ended; see `head` below.
     for m in ADDRESS.finditer(text):
         state = m.group(2).upper()
-        # `fix_digits` first: the ZIP is five characters of small type through a
-        # lens, and "3O127" is this OCR's commonest confusion, not a different
-        # number. The state gets no such help — two letters have no digits in
-        # them, and "6A" corrected to "GA" would be inventing the one token that
-        # is here to refuse.
-        digits = fix_digits(m.group(3))
-        if state not in STATES or not digits.isdigit() or len(digits) != 5:
-            continue
-        # 00501 is the lowest ZIP in use and 99950 the highest. A five-digit
-        # number outside that is a phone fragment or an order id, not a place.
-        code = int(digits)
-        if not (501 <= code <= 99950):
+        # The ZIP gets `fix_digits` (see a_zip). The state gets no such help —
+        # two letters have no digits in them, and "6A" corrected to "GA" would
+        # be inventing the one token that is here to refuse.
+        digits = a_zip(m.group(3))
+        if state not in STATES or digits is None:
             continue
         city = CITY_JUNK.sub('', re.sub(r'\s+', ' ', m.group(1)).strip(' .,'))
         if len(city) < 3:
@@ -2275,6 +2303,183 @@ def find_address(text):
         # place a card names for the same reason.
         best = found
     return best
+
+
+# --- the stops on Uber's Trip Planner -----------------------------------------
+#
+# After an accept the driver can open Uber's Trip Planner, which lists the stops
+# of the trip in order — several pickups and dropoffs when orders are stacked.
+# Every stop is a block laid out the same way:
+#
+#     Dropoff • 1 order
+#     Pat Q.
+#     Expected by 4:18 PM
+#     Address                  <- this and what follows only while the block
+#     4821 Kestrel Dr             is open; a closed one stops at the time
+#     Marietta, GA
+#     View details
+#
+# find_address cannot read it and is right not to. There is no ZIP on this
+# screen, and the ZIP is what makes find_address's answer refusable in free
+# text. Measured on the rig's own live view of a planner, through the read path
+# (fit_for_ocr to 1800, to_grey, preprocess, ocr_lines): find_address -> None.
+#
+# What the screen has instead is its own grammar, and the grammar is the anchor.
+# An address is taken only where the app labels one — "Address", then a street
+# line, then a "Town, ST" line — inside a block the app headed as a stop. Free
+# text is never read this way, so a map label like "89 Shanty Drive" is no
+# closer to the panel than it was.
+#
+# The stop header is the recogniser. Over the owner's week, 6,657 frames and
+# stored texts, not one carries a stop header, the "Trip Planner" title,
+# "Expected by", or a line opening with "Address". The nearest thing is
+# DoorDash's "Pickup / Wasabi (2 orders)": 367 frames carry an order count,
+# every one of them in brackets and not one straight after a Pickup or Dropoff
+# label, and the header admits neither. The title is not asked for:
+# it is the one line the planner shares with no stop, and alone it says nothing
+# worth showing.
+#
+# The glue between the word and the count is the app's bullet, which the reader
+# renders as a glyph — "Dropoff-1 order" on the rig's own reading — or loses.
+# Up to three glyphs that are neither space nor word, the same allowance
+# DELIVER_BY gives Uber's bullet, and never a bracket.
+PLANNER_STOP = re.compile(
+    r'^[^A-Za-z0-9]{0,3}(pick ?-?up|drop ?-?off) ?[^\w\s()]{0,3} ?'
+    r'(' + DC + r'{1,2}) ?orders?\b', re.IGNORECASE | ASCII)
+PLANNER_EXPECTED = re.compile(r'\bexpected\s*by\s*' + CLOCK_TIME,
+                              re.IGNORECASE | ASCII)
+PLANNER_ADDRESS = re.compile(r'^[^A-Za-z0-9]{0,3}address\b', re.IGNORECASE | ASCII)
+# "Marietta, GA", and whatever the line carries after the state. TOWN is
+# find_address's own idea of a town; the state is the check, as it is there.
+PLANNER_TOWN = re.compile(r'^[^A-Za-z]{0,3}(' + TOWN + r') ?, ?([A-Za-z]{2})\b ?(.*)$',
+                          ASCII)
+PLANNER_ZIP = re.compile(r'(' + ZIP + r')(?: ?- ?' + DC + r'{4})?(?![0-9A-Za-z])', ASCII)
+# A line's own furniture, off both ends: the stop's icon read as "©" in front
+# of the name, a chevron or a stray mark after it. A full stop is kept at the
+# end, because "Pat Q." is how the app writes a name.
+PLANNER_EDGE = re.compile(r'^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$', ASCII)
+# One letter standing after the street's suffix: where a quadrant goes, and
+# where the screen's edge leaves a mark. See _planner_address.
+PLANNER_LONE_LETTER = re.compile(r'\b(?:' + STREET_SUFFIX + r')\.? ([A-Za-z])$',
+                                 re.IGNORECASE | ASCII)
+
+
+def _planner_address(street_line, town_line):
+    """The street and the town under a stop's "Address" label, field by field.
+
+    A field that does not read is None and the others stand: a town line whose
+    state is not a state takes the town with it, and leaves the street.
+
+    THE LETTER AFTER THE STREET. The rig's own reading of a planner was
+
+        Address he
+        4821 Kestrel Dr S
+        Marietta, GA E
+
+    and the street on the phone was "<number> <name> Dr", nothing after it. The
+    three tails are the screen's scroll bar, which sits at the right edge
+    beside exactly those three lines: "he" after a label, "E" after a state,
+    where nothing real can stand, and "S" after the street's suffix — where a
+    quadrant CAN stand. Of the 1,802 distinct places in the owner's week, 508
+    follow a suffix with NW, NE, SW or SE, and 7 with a single N, S, E or W
+    that is real: Cobb Pkwy N and S, Picketts Forge Dr E and W, roads this
+    driver works on. So a single letter there is real sometimes and junk
+    sometimes, and the word alone cannot say which.
+
+    The line under it can. The bar is a column, and a column marks every line
+    it passes: when the town line carries something after its state that is not
+    a ZIP — which no town line has a use for — the street line beside it is in
+    the same column and its lone letter is taken as the same mark. With a clean
+    town line it is kept, as the quadrant it may be. Two letters are never
+    touched: that is NW/NE/SW/SE, and "Ct", which is a street.
+    """
+    city = state = zipcode = None
+    tail = False
+    t = PLANNER_TOWN.match(town_line or '')
+    if t and t.group(2).upper() in STATES:
+        town = CITY_JUNK.sub('', re.sub(r'\s+', ' ', t.group(1)).strip(' .,'))
+        if len(town) >= 3:
+            city, state = town, t.group(2).upper()
+            rest = t.group(3).strip()
+            z = PLANNER_ZIP.match(rest)
+            zipcode = a_zip(z.group(1)) if z else None
+            tail = bool((rest[z.end():] if zipcode else rest).strip())
+    street = PLANNER_EDGE.sub('', street_line or '')
+    lone = PLANNER_LONE_LETTER.search(street)
+    if lone and tail:
+        street = street[:lone.start(1)].rstrip()
+    s = STREET.match(street)
+    street = re.sub(r'\s+', ' ', s.group(1)).strip(' .,') if s else None
+    # What to show and to store. The state goes in only beside a ZIP, which
+    # is find_address's line exactly; without one, "…, Marietta, GA" would end
+    # on a word Advice.area cannot take for a town, and the geography would go
+    # silent on the very address this was read for. `state` is still returned.
+    parts = [p for p in (street, city) if p]
+    if zipcode:
+        parts.append('%s %s' % (state, zipcode))
+    return {'street': street, 'city': city, 'state': state, 'zip': zipcode,
+            'line': ', '.join(parts) or None}
+
+
+def find_planner(text):
+    """The stops on Uber's Trip Planner, in the order the screen lists them.
+
+    A list of {'kind': 'pickup'|'dropoff', 'orders', 'name', 'expectedBy',
+    'street', 'city', 'state', 'zip', 'line'}, or None when the text carries no
+    stop header. `expectedBy` is minutes since midnight, through time_of_day.
+    Every field that does not read is None and is never guessed; a closed block
+    has no address and says so with five Nones.
+
+    Line by line, because the planner's grammar IS its lines: which line
+    follows the header is the name, which two follow the label are the address.
+    normalize() is applied to each line on its own, as line_starts does.
+    """
+    if not text:
+        return None
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text))]
+    lines = [l for l in lines if l]
+    heads = [i for i, l in enumerate(lines) if PLANNER_STOP.match(l)]
+    if not heads:
+        return None
+    stops = []
+    for k, at in enumerate(heads):
+        head = PLANNER_STOP.match(lines[at])
+        block = lines[at + 1:heads[k + 1] if k + 1 < len(heads) else len(lines)]
+        count = to_number(head.group(2))
+        # The name is the line under the header, when that line is not the
+        # time or the label — a reader that lost the name must not promote
+        # whatever came next into it. Two letters in a row, or it is a mark.
+        name = None
+        if block and not PLANNER_EXPECTED.search(block[0]) \
+                and not PLANNER_ADDRESS.match(block[0]):
+            name = PLANNER_EDGE.sub('', block[0])
+            if not re.search(r'[A-Za-z]{2}', name):
+                name = None
+        due = None
+        for line in block:
+            m = PLANNER_EXPECTED.search(line)
+            if m:
+                due = time_of_day(m.group(1), m.group(2), m.group(3))
+                break
+        # Under the label, the street and then the town. The town line is
+        # looked for in the two lines after the label, so a street the reader
+        # lost does not push the town out of reach — and a line that IS the
+        # town is never read as a street.
+        street_line = town_line = None
+        label = next((j for j, l in enumerate(block) if PLANNER_ADDRESS.match(l)), None)
+        if label is not None:
+            under = block[label + 1:label + 3]
+            town_at = next((j for j, l in enumerate(under) if PLANNER_TOWN.match(l)),
+                           None)
+            town_line = under[town_at] if town_at is not None else None
+            street_line = under[0] if under and town_at != 0 else None
+        stop = {'kind': 'pickup' if head.group(1)[0] in 'pP' else 'dropoff',
+                'orders': int(count) if count is not None and count >= 1
+                and count == int(count) else None,
+                'name': name, 'expectedBy': due}
+        stop.update(_planner_address(street_line, town_line))
+        stops.append(stop)
+    return stops
 
 
 # The card saying, in its own words, that it is not going to tell you where the

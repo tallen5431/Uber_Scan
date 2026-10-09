@@ -97,7 +97,8 @@
        loses nothing legible by giving up ten. These two are one line each and
        there is no such thing as most of a line. */
     .live #verdict > .places,
-    .live #verdict > .stackline { flex: none; }
+    .live #verdict > .stackline,
+    .live #verdict > .stops { flex: none; }
     /* `stretch`, not `center`, and this is the difference between a picture
        that fits and one that is cut.
        
@@ -706,6 +707,20 @@
     max-height: 28vh; overflow: auto; font-size: 11px; line-height: 1.45;
   }
 
+  /* The Trip Planner's stops, one line each, after a ⌖ press.
+   *
+   * Only ever drawn between offers (see showStops), when the card holds the
+   * phase and nothing else — the rate and the four figures are `novalue`,
+   * above — so there is room in it, and rpi/test_layout.py measures that
+   * nothing else on the panel moves for it. Each stop one line, ellipsised at
+   * the end: the kind and the time first, which may not be cut (see
+   * stopLine), then the name, then the street, which is the part a driver
+   * already has on the phone in front of them. The size is the address
+   * line's, `.places`, which this sits where. */
+  .stops { margin-top: 6px; font-size: clamp(12px, 3vw, 15px); line-height: 1.35; }
+  .stops > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stops[hidden] { display: none; }
+
   /* ---------- Sizes for the driver's seat ----------
    *
    * Last in the file on purpose. Everything above is written for a phone held
@@ -770,6 +785,11 @@
            and which it turns out to be is a fact about two maps that this rig
            cannot see. Naming one number would be claiming that geography. -->
       <div class="stackline" id="stack" hidden></div>
+      <!-- Uber's Trip Planner, as ⌖ Dropoff read it: every stop in order, one
+           line each. Between offers only — when the card holds nothing but the
+           phase — and for as long as the destination the same press read is on
+           the button. See showStops. -->
+      <div class="stops" id="stops" hidden></div>
       <div id="warn" class="notice" hidden></div>
     </section>
     <div class="pending" id="detail" style="text-align:center"></div>
@@ -1041,7 +1061,7 @@
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
    'working', 'places', 'spoken', 'took', 'shift', 'stack', 'drop', 'dest',
-   'health']
+   'health', 'stops']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -1527,7 +1547,7 @@
       // server's own clock, and a button for an order that is not there is
       // worse than no button.
       if (body && typeof body.holding === 'boolean') {
-        if (holdingNow && !body.holding) destSaid = '';
+        if (holdingNow && !body.holding) forgetDest();
         holdingNow = body.holding;
         // The mark reply says only whether an order is held, not where it
         // ends. Cleared rather than kept: a stale end belonging to the last
@@ -1609,7 +1629,7 @@
       dropFailed = !r.ok;
       dropFailedFor = r.ok ? null : heldSig;
       if (r.ok) {
-        holdingNow = false; destSaid = ''; heldEnds = undefined; heldSig = null;
+        holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
         showStack(null); showDest();
       }
     }).catch(function () {
@@ -1641,6 +1661,96 @@
   // and by an address arriving, the same way `tookFailed` is — a failure that
   // outlived the thing that failed would be worse than not saying it.
   var destFailed = false;
+  // ...and the Trip Planner the same press read, when it was one: the stops,
+  // in the order the phone listed them, or null. See showStops.
+  var stopsSaid = null;
+
+  /* What a press read is forgotten, all of it, in one place.
+   *
+   * `destSaid` was cleared at seven places in this file — a new press, a hold
+   * that ended four different ways, a new offer on the record, a reload with
+   * nothing held — and the planner's stops are the same answer to the same
+   * press, so they have to go at exactly those seven moments and no others.
+   * Seven more assignments beside the seven would be two lifetimes for one
+   * answer the first time somebody added an eighth to one list and not the
+   * other: stops still on the glass for an order already put down, which is a
+   * route for a trip that is over. rpi/test_dashboard.py holds every one of
+   * them to this function.
+   *
+   * ...and the stops come off the glass HERE, not at the next render: Drop and
+   * the replies to a press answer on their own and do not render, so for up to
+   * the second-long tick a put-down order's stops were still being shown. */
+  function forgetDest() {
+    destSaid = '';
+    stopsSaid = null;
+    showStops(false);
+  }
+
+  // "4:18" off minutes since midnight. No AM or PM: a stop is expected within
+  // the hour of the trip it is on, and the line has no room for two letters
+  // that say nothing the driver does not know.
+  function clockOf(minutes) {
+    var h = Math.floor(minutes / 60) % 12;
+    var m = minutes % 60;
+    return (h || 12) + ':' + (m < 10 ? '0' : '') + m;
+  }
+
+  // One stop, as one line: "▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr,
+  // Marietta". The rig's own words for each field and nothing in place of one
+  // it did not read — a closed block on the planner prints no address, and the
+  // line stops at the name.
+  //
+  // What and when first, because that is the order of the trip and it is the
+  // part that must never be cut: in the 3.5" hat's scene picture the column is
+  // about thirty characters wide, and with the name ahead of the time a
+  // "Taco Hut Express" pickup lost its "by 12:05" to the ellipsis — measured,
+  // rpi/test_layout.py. The name and the street are what give way, from the end.
+  function stopLine(s) {
+    var line = '▸ ' + (s.kind === 'pickup' ? 'Pickup' : 'Dropoff')
+      + (typeof s.orders === 'number' && s.orders > 1 ? ' ×' + s.orders : '');
+    if (typeof s.expectedBy === 'number') line += ' by ' + clockOf(s.expectedBy);
+    if (s.name) line += ' · ' + s.name;
+    if (s.line) line += ' · ' + s.line;
+    return line;
+  }
+
+  // At most four lines. A planner longer than that shows its first three and
+  // says how many more there are, so the driver knows the list goes on rather
+  // than reading three as the trip.
+  var STOPS_SHOWN = 4;
+
+  /* The stops the last ⌖ press read off Uber's Trip Planner, one line each,
+   * in order — between offers.
+   *
+   * Between offers because that is when the card has room: it holds the phase
+   * and nothing else (see #stops in the stylesheet), so the block costs the
+   * panel nothing it was using. A card being judged takes the space back —
+   * render() hides the block whenever a reading carries a verdict — and the
+   * stops come back when it goes, for as long as they are remembered, which is
+   * exactly as long as the destination the same press read: see forgetDest.
+   *
+   * With several dropoffs on the planner the rig does not say which one is
+   * the order in the car's — the scanner refuses to guess, see
+   * planner_destination — and this says so in a line of its own, because the
+   * button staying amber is the only other sign of it. */
+  function showStops(show) {
+    while (el.stops.firstChild) el.stops.removeChild(el.stops.firstChild);
+    var stops = show && stopsSaid ? stopsSaid : [];
+    var lines = stops.length > STOPS_SHOWN
+      ? stops.slice(0, STOPS_SHOWN - 1).map(stopLine)
+          .concat(['+ ' + (stops.length - STOPS_SHOWN + 1) + ' more stops'])
+      : stops.map(stopLine);
+    var drops = stops.filter(function (s) { return s.kind === 'dropoff'; }).length;
+    // Short, because it has to survive the same thirty characters: the
+    // sentence it stands for is on the button's title.
+    if (drops > 1) lines.push(drops + ' dropoffs: end not guessed');
+    lines.forEach(function (text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      el.stops.appendChild(div);
+    });
+    el.stops.hidden = !lines.length;
+  }
 
   /* The other state this button is for, which it did not used to have.
    *
@@ -1748,11 +1858,21 @@
                      : (screening && !!onRecord.endRefused
                         && onRecord.state !== 'no'));
     el.dest.classList.toggle('wanted', wants);
+    // A Trip Planner the last press read, with more than one dropoff on it:
+    // the panel lists the stops and says the end was not guessed, in thirty
+    // characters; this is the sentence that stands for.
+    var unguessed = !destSaid && stopsSaid ? stopsSaid.filter(function (s) {
+      return s.kind === 'dropoff';
+    }).length : 0;
     el.dest.title = destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
       : destFailed
       ? 'Nothing on that screen read as an address. Get the destination up on '
         + 'your phone and press again.'
+      : unguessed > 1
+      ? 'The Trip Planner lists ' + unguessed + ' dropoffs, and which one is this '
+        + 'order\'s is not guessed, so its destination is left as it was. Press '
+        + 'this over the navigation screen for it instead.'
       : wants && holdingNow
       ? 'The order you are carrying has no address on record, so the rig '
         + 'cannot say whether a second job ends near it. Read it off your '
@@ -1784,7 +1904,7 @@
   el.dest.addEventListener('click', function () {
     if (destBusy) return;
     destBusy = true;
-    destSaid = '';
+    forgetDest();
     destFailed = false;
     showDest();
     ask('/api/dropoff', { method: 'POST' }).then(function (r) {
@@ -1796,7 +1916,7 @@
       // Drop and ⌖ Dropoff stayed lit for an order that no longer existed,
       // and pressing this photographed the phone for nothing.
       if (b && b.holding === false && holdingNow) {
-        holdingNow = false; destSaid = ''; heldEnds = undefined;
+        holdingNow = false; forgetDest(); heldEnds = undefined;
         showDrop(); showStack(null);
       }
     }).catch(function () {
@@ -2200,6 +2320,10 @@
       // belonging to whatever comes next.
       showPlaces(null);
       showStack(null);
+      // ...and this is where the Trip Planner's stops go, if a press read one:
+      // no card is being judged. Not while aiming, when the card is showing
+      // the mount's own measurements.
+      showStops(p.phase !== 'aim');
       var quiet = Date.now() - seenAt;
       el.detail.textContent = aiming
         ? 'the view below is live — move the mount until this says good'
@@ -2395,6 +2519,8 @@
     // arrived. See MV.ends, which the offers page asks too. Without MV this
     // page still draws the list, which is what it always drew.
     showPlaces(MV ? MV.ends(r) : r.places);
+    // A card being judged takes the stops' room back. See showStops.
+    showStops(false);
     // Sent by the server, which is where the order in the car is known. A page
     // works it out for nobody: several may be open and each would answer
     // slightly differently as its own clock drifted.
@@ -2855,7 +2981,7 @@
           //
           // /api/status is fetched once, at load — it is not a poll — so
           // nothing downstream was ever going to catch this up.
-          destSaid = '';
+          forgetDest();
           // ...and so does a failed one. "Nothing on that screen read as an
           // address" is an answer about the card the driver was looking at
           // when they pressed; carried onto the next card it is a complaint
@@ -2917,7 +3043,7 @@
         // back reading the PREVIOUS order's address with "press again to read
         // it afresh" — for an order whose destination has never been scanned,
         // so the driver has no reason to press it.
-        if (holdingNow && !msg.holding) destSaid = '';
+        if (holdingNow && !msg.holding) forgetDest();
         // A different order in the car is a different write. `dropFailed` is
         // about the press that failed, not about this job, and left standing
         // it painted the NEXT order's button "Drop · failed" the moment that
@@ -2966,6 +3092,19 @@
         // `asked` only: an unprompted sighting finding nothing is not the
         // answer to a question anybody asked.
         destFailed = true;
+        destBusy = false;
+        showDest();
+      }
+      // ...and a press that read Uber's Trip Planner, which is an answer of
+      // its own: the stops, in order, whether or not one of them could be
+      // given to the order in the car. When one could, a `dropoff` line comes
+      // with it and the branch above turns the button green exactly as for any
+      // address; when the planner lists two dropoffs none does, and the rig
+      // says no "not read" over the stops either. Either way the press is
+      // answered, so the button stops saying "reading…".
+      if (msg.planner && Array.isArray(msg.planner.stops)) {
+        stopsSaid = msg.planner.stops;
+        destFailed = false;
         destBusy = false;
         showDest();
       }
@@ -3051,8 +3190,13 @@
     if (s.holding && s.holding.dropoffScanned && s.holding.dropoff) {
       destSaid = s.holding.dropoff;
     } else if (!s.holding) {
-      destSaid = '';
+      forgetDest();
     }
+    // ...and the Trip Planner's stops, by the same rule: the server keeps the
+    // ones a press read while this order was in the car, and drops them with
+    // it. A planner read with nothing held was shown and not kept, like an
+    // address read with nothing held, so a reload does not bring it back.
+    if (s.holding && Array.isArray(s.holding.planner)) stopsSaid = s.holding.planner;
     showDest();
     scannerState = s.scanner || null;
     render();

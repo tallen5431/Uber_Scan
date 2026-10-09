@@ -150,7 +150,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
         clipped_for=None, dropoff_window=None, whole_text=None, fitted=None,
         fitted_for=None, hang_on_loop=True,
-        fail_after=None, phone_hold=None, gps_hold=None, phone=None):
+        fail_after=None, phone_hold=None, gps_hold=None, phone=None,
+        planners=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -159,6 +160,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     request written here cannot be eaten by a scanner running on the same
     machine, nor this one eat theirs. `fail_after`: (n, exception) for the
     camera — see FakeCam. `phone`: what gps.Phone hands back, for a --gps run.
+    `planners`: a list every Trip Planner the loop answers a press with is
+    appended to, as (stops, keywords), handed in so an `until` can watch it.
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
     it began, and the exception main() raised, if any."""
@@ -232,6 +235,10 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # Captured rather than printed, like the offer line beside it. The empty
     # answer — a press that found no address — is only visible here.
     SP.emit_dropoff = lambda address, **k: dropoffs.append((address, k))
+    # ...and the planner line beside it, which nothing else on the wire carries.
+    was_planner = SP.emit_planner
+    said_planners = planners if planners is not None else []
+    SP.emit_planner = lambda stops, **k: said_planners.append((stops, k))
     SP.start_camera = lambda *a, **k: cam
     # Stamped, so a check can ask how soon after something a verdict came.
     SP.emit = lambda *a, **k: verdicts.append((a, k, time.time()))
@@ -298,6 +305,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
          PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
          SP.emit_reading, SP.emit_dropoff, SP.emit_settings, SP.Reader.submit) = real
+        SP.emit_planner = was_planner
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.REFIND_NOTICE_S = was_refind_s
@@ -308,7 +316,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             else:
                 os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
-                submitted=submitted[0],
+                submitted=submitted[0], planners=said_planners,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
                 raised=raised)
@@ -1116,6 +1124,89 @@ r6 = run(lambda n, k: WHOLE, extra_argv=['--no-parallel'], seconds=6.0,
 eq('a rig nobody pressed says nothing about a dropoff',
    [d for d in r6['dropoffs'] if d[1].get('asked')], [])
 eq('...and reads only the card box', [w for w in r6['wholes'] if w], [])
+
+# --- a ⌖ press over Uber's Trip Planner -------------------------------------
+#
+# The planner prints no ZIP, so find_address returns None on it and the press
+# used to end "not read" twelve seconds later with every stop on the screen.
+# Now the planner answers the press, on its own line, the moment a whole-screen
+# read finds it; its one dropoff, when it has exactly one, goes on through the
+# dropoff line to the consumer every destination has.
+#
+# The real twelve-second window, not the one-second one above: "answered at
+# once" means nothing in a window that shuts by itself a second later. The card
+# box sees a blank screen, so every word of the planner came off a ⌖ read.
+_PLANNERS = {c['name']: c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['planner']}
+_ONE_DROP = _PLANNERS["Uber's Trip Planner as the rig's live view read it"]
+_TWO_DROPS = _PLANNERS['two dropoffs are both listed, in the order the screen gives them']
+
+_hp1, _pl1 = tempfile.mkdtemp(), []
+rp1 = run(_press_on_first_read(_hp1, ''), extra_argv=['--no-parallel'], seconds=5.0,
+          handoff=_hp1, whole_text=_ONE_DROP, planners=_pl1)
+eq('⌖ over a Trip Planner is answered with the planner, once (%d reads)' % rp1['calls'],
+   len(rp1['planners']), 1)
+if rp1['planners']:
+    eq('...its stops as the screen listed them',
+       [[s['kind'], s['expectedBy'], s['line']] for s in rp1['planners'][0][0]],
+       [['dropoff', 978, '4821 Kestrel Dr, Marietta']])
+eq('...and its one dropoff is the address the press gets, on the dropoff line',
+   [((d[0] or {}).get('line'), d[1].get('asked')) for d in rp1['dropoffs']],
+   [('4821 Kestrel Dr, Marietta', True)])
+eq('...off the first whole-screen read, then back to the card box (%r)' % rp1['wholes'],
+   (sum(rp1['wholes']), rp1['wholes'][-1] if rp1['wholes'] else None), (1, False))
+# The `whole` early return in digest() is what keeps this off the offer path,
+# and nothing else does: the planner has no payout, so it would never have
+# made a verdict — but it WOULD have gone to the panel as a reading, in place
+# of whatever the driver was looking at, and through the health tally.
+eq('...and the planner reaches no reading the panel is sent',
+   [v[0][1].get('rawText') for v in rp1['verdicts']
+    if len(v[0]) > 1 and 'Kestrel' in ((v[0][1] or {}).get('rawText') or '')], [])
+eq('...nor the journal as an offer', [x for x in rp1['rows'] if not x.get('kind')], [])
+
+# Two dropoffs, the second with a ZIP — so find_address, left to itself, would
+# have answered the press with that customer's door, chosen by layout.
+ok_('the premise: find_address alone would answer this planner with its last '
+    'dropoff', (OP.find_address(_TWO_DROPS) or {}).get('zip') == '30075')
+_hp2 = tempfile.mkdtemp()
+rp2 = run(_press_on_first_read(_hp2, ''), extra_argv=['--no-parallel'], seconds=5.0,
+          handoff=_hp2, whole_text=_TWO_DROPS)
+eq('a planner with two dropoffs is answered with both, once',
+   [[s['name'] for s in p[0]] for p in rp2['planners']], [['Pat Q.', 'Lee M.']])
+eq('...and the order in the car is given neither, and is not told "not read" '
+   'over the stops either', rp2['dropoffs'], [])
+eq('...and the window shuts on the answer, not twelve seconds later (%r)'
+   % rp2['wholes'], sum(rp2['wholes']), 1)
+# ...and the reads the window was forcing stop with it. The whole-screen reads
+# would stop on their own, because the press is no longer outstanding; the
+# forced beat would not, and the rig would go on photographing a planner it has
+# answered every half second for the rest of the twelve. Measured over this
+# run's five seconds: 4 reads with the window shut on the answer, 13 without.
+ok_('...and the reads it was forcing stop with it (%d reads in five seconds)'
+    % rp2['calls'], rp2['calls'] <= 6)
+
+# Nobody pressed: the card box is looking straight at a planner. Read only
+# under a press, which is what the owner asked for and the existing rule for
+# a loosened address — so neither the stops nor their dropoff go anywhere.
+rp3 = run(lambda n, k: _ONE_DROP, extra_argv=['--no-parallel'], seconds=4.0,
+          handoff=tempfile.mkdtemp())
+ok_('the premise: the card box read the planner, unpressed (%d reads)' % rp3['calls'],
+    rp3['calls'] >= 1 and not any(rp3['wholes']))
+eq('a planner nobody pressed for is not answered', rp3['planners'], [])
+eq('...and gives the order in the car nothing', rp3['dropoffs'], [])
+
+# A payout on the screen is an offer whatever else is printed round it.
+_PAID_PLANNER = _ONE_DROP + '\n$12.50\nAccept'
+ok_('the premise: that screen has a payout and a planner\'s grammar',
+    OP.parse(_PAID_PLANNER)['pay'] == 12.5 and OP.find_planner(_PAID_PLANNER))
+_hp4 = tempfile.mkdtemp()
+rp4 = run(_press_on_first_read(_hp4, ''), extra_argv=['--no-parallel'], seconds=4.0,
+          handoff=_hp4, dropoff_window=1.0, whole_text=_PAID_PLANNER)
+eq('a planner with a payout on the screen is not answered as a planner',
+   rp4['planners'], [])
+eq('...and the press is told it found nothing, as for any offer card',
+   [d[0] for d in rp4['dropoffs'] if d[1].get('asked')], [None])
 
 # ...and a reading of the whole screen box is not one of the two card reads a
 # verdict waits for, in either direction. Scanner.settle ran the agreement

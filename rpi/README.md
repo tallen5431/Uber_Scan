@@ -5801,6 +5801,80 @@ the full address appears at accept or only after pickup — is unanswered. The Z
 anchor survives almost any layout; the street/city split is where a surprise
 would land.
 
+One real post-acceptance screen has met it since, and it was the surprise:
+**Uber's Trip Planner prints no ZIP at all** — `4821 Kestrel Dr` over
+`Marietta, GA` on the rig's own photograph (name and house changed). The rig's
+read path on that live view gave `find_address` → `None`, so ⌖ over a planner
+answered "not read" with every stop on the screen. See the next section.
+
+#### Uber's Trip Planner, read when ⌖ is pressed
+
+After an accept the driver can open Uber's Trip Planner, which lists the trip's
+stops in order — several pickups and dropoffs when orders are stacked — each a
+block of `Pickup • N order(s)` or `Dropoff • N order(s)`, a name, `Expected by
+4:18 PM`, and, while the block is open, `Address` with a street line and a
+`Town, ST` line. `offer_parser.find_planner` (and `findPlanner` in the browser
+port, held to the same corpus) reads it by that grammar: every stop in screen
+order as `{kind, orders, name, expectedBy, street, city, state, zip, line}`,
+the time through the one `time_of_day` the delivery deadline uses, every field
+that does not read `None` and never guessed.
+
+**`find_address` is not loosened.** Free text still needs `, ST ZIP`; an address
+without one is taken only where the planner labels it, inside a block it headed
+as a stop. Over the owner's week, 6,657 frames and stored texts, nothing carries
+a stop header, the title, `Expected by` or a line opening `Address`; the 367
+that carry an order count all have it in brackets, DoorDash's `Wasabi (2
+orders)`, which the header refuses. Parse and rate are unchanged on all 6,657 in
+both ports.
+
+**The letter after the street.** The rig read `Address he` / `4821 Kestrel Dr S`
+/ `Marietta, GA E`, and the street on the phone ends at `Dr`: the three tails
+are the screen's scroll bar, which sits at the right edge beside exactly those
+lines. A single letter after a suffix is also where a quadrant goes — 7 of the
+week's 1,802 distinct places carry a real one (Cobb Pkwy N and S, Picketts
+Forge Dr E and W) against 508 with NW/NE/SW/SE — so the word alone cannot
+decide. The town line can: a tail after its state that is not a ZIP is the
+same column marking it, and then the street's lone letter is dropped; with a
+clean town line it is kept.
+
+**The line has no state without a ZIP.** `Advice.area` takes the town off the
+END of a place and strips only `, ST ZIP`, so `4821 Kestrel Dr, Marietta, GA`
+gave it no town — measured, `area()` is `null` on it — and the geography would
+have gone silent on the very address ⌖ was pressed for. The line is `4821
+Kestrel Dr, Marietta`; `state` is still a field.
+
+**What the scan loop does with it.** Only under a press, off the whole-screen
+read — the owner's words, and the existing rule followed rather than widened:
+an unprompted sighting is taken only under the strict ZIP grammar, and this is
+the one place that grammar is loosened. A planner answers the press at once on
+its own `planner` line (no `ready`, no rate, no pay) and closes the window.
+With **exactly one dropoff** whose street and town both read, that address goes
+out as an ordinary `dropoff` line and is filed by the one path every
+destination takes; with two or more it does not, because nothing on the screen
+says which is the order in the car — and on a planner `find_address`'s own
+answer is not taken either, since it would be the last address printed, one of
+two customers chosen by layout. A town without a street is not filed: a map
+asked for "Marietta" puts a pin in the middle of Marietta.
+
+**Where it goes.** server.js puts the stops on the order in the car (and so on
+`/api/status`, for a panel reloaded mid-delivery) and writes one
+`{v:1, kind:"planner", id, seq:1, at, stops, asked}` row per planner — the same
+stops pressed again inside `PLANNER_SAME_MS` (five minutes) are one row. Nothing
+reads those rows back: the fold and `resume()` skip the kind, and the sync
+carries it on its `id` and `seq`. The driving screen lists the stops in the
+card between offers, when it otherwise holds only the phase (not while the rig
+is aiming), one line each — `▸ Dropoff by 4:18 · Pat Q. ·
+4821 Kestrel Dr, Marietta`, kind and time first because the 3.5" hat's scene
+picture has about thirty characters and the name ahead of the time pushed
+`by 12:05` into the ellipsis — at most four (three and "+ N more"), with "2
+dropoffs: end not guessed" under them when that is why the button is still
+amber (the button's title says it in full). A card being judged takes the room
+back, and they are forgotten at the seven moments the destination is
+(`forgetDest`). Proven to fit at 1024x600, 800x480 and 480x320 in both
+pictures with four stops and that line, in `rpi/test_layout.py`.
+map.html plots a scanned destination off its mark row, so the one dropoff a
+planner files is on the map by that path; the other stops are not plotted.
+
 #### A read that outlived the window it went out in
 
 `digest()` judged the window by `time.time()` at the moment the reading LANDED.

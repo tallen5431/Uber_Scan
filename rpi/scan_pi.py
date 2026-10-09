@@ -2142,6 +2142,50 @@ def emit_dropoff(address, ms=None, asked=True):
         'at': int(time.time() * 1000)}}), flush=True)
 
 
+def emit_planner(stops, ms=None):
+    """Uber's Trip Planner, read off the whole screen because ⌖ was pressed.
+
+    Its own line, for the reason a dropoff is: the screen is a list of stops,
+    not an offer, so it carries no `ready`, no rate and no pay and can neither
+    replace a verdict nor stand in for one. `stops` is OP.find_planner's list,
+    in the order the screen gave it — every stop, the ones whose fields did not
+    read included, so the panel shows what is there rather than what parsed.
+
+    `asked` is always true, and is on the line so a row written from it says on
+    its face that it answered a press, as a dropoff mark does. The planner is
+    read only under one: see `planner` in main().
+    """
+    print(json.dumps({'planner': {'stops': stops, 'asked': True, 'ms': ms,
+                                  'at': int(time.time() * 1000)}}), flush=True)
+
+
+def planner_destination(stops):
+    """The address a Trip Planner gives the order in the car, or None.
+
+    EXACTLY ONE DROPOFF. With two or more on the screen — orders stacked —
+    nothing on it says which one belongs to the order the driver marked taken,
+    and the planner lists them in the order they will be driven, not the order
+    they were accepted. Taking the last, the way find_address takes the last
+    address on a navigation screen, would file another customer's door as this
+    order's destination, into the append-only journal, with `asked: true` on
+    it. So the stops are shown and the order in the car keeps the end it had.
+
+    ...AND BOTH THE STREET AND THE TOWN READ. With no ZIP on this screen the
+    street is the only precision there is: a town alone would go out as the
+    destination, and a map asked for "Marietta" puts a pin on the middle of
+    Marietta — a place that looks like an address and is not one. A stop that
+    did not read whole is still on the panel; it is only not filed.
+
+    The same fields find_address returns, so it goes out through emit_dropoff
+    and server.js files it by the rule every other destination is filed by:
+    one message, one consumer.
+    """
+    drops = [s for s in stops if s.get('kind') == 'dropoff']
+    if len(drops) != 1 or not (drops[0].get('street') and drops[0].get('city')):
+        return None
+    return {k: drops[0].get(k) for k in ('line', 'street', 'city', 'state', 'zip')}
+
+
 def emit_offer(offer_id, parsed, rate):
     """Which offer is now on the record, so the driver can say they took it.
 
@@ -2930,6 +2974,36 @@ def main():
         # documents, not for the export.
         an_offer = shot.get('pay') is not None or bool(shot.get('places'))
         found = None if an_offer else shot.get('address')
+        # UBER'S TRIP PLANNER, which lists every stop of the trip in order and
+        # prints no ZIP, so find_address returns None on it — measured on the
+        # rig's own view of one. OP.find_planner reads it by its own grammar.
+        #
+        # ONLY WHEN ASKED, AND ONLY OFF THE WHOLE SCREEN, which is what the
+        # owner asked for: "only while ⌖ is pressed". It is also the existing
+        # policy for destinations, followed rather than widened. An unprompted
+        # sighting is taken only under find_address's strict `, ST ZIP` grammar
+        # — the reason it may be taken at all — and the planner's address is
+        # the one place that grammar is loosened. A loosened rule belongs under
+        # the press, the way the forced reads do; unprompted, a planner left up
+        # from the trip before would be filed against whatever card is on the
+        # slot (see the screening branch in server.js), which is the confidently
+        # wrong direction AUDITS' "Plan 3.1" entry describes.
+        #
+        # Not on an offer either: `an_offer` is the same two-armed test the
+        # address answers to. Measured, it costs a planner nothing — parse()
+        # finds no payout and no places on one, pickups and all.
+        #
+        # A planner DECIDES the destination, asked or not. A screen listing
+        # stops can carry more than one address, and find_address would take
+        # the last one printed — on a planner with two dropoffs that is one of
+        # two customers, chosen by layout. So on a planner `found` is what
+        # planner_destination says, which is nothing unless the screen has
+        # exactly one dropoff and the press asked for it: one rule for "where is
+        # this order going" on this screen, not two.
+        planner = None if an_offer else OP.find_planner(out.get('text'))
+        answers = planner is not None and whole and asked
+        if planner is not None:
+            found = planner_destination(planner) if answers else None
         # ...and KEPT, which is new, and is the one thing standing between this
         # rig and knowing which offers the driver took.
         #
@@ -3094,6 +3168,26 @@ def main():
         # confidently wrong one.
         if found and not asked and (found.get('line') or None) == dropoff_said:
             found = None
+        # The planner, when it answered a press, goes out on its own line and
+        # closes the window — whether or not it gave the order in the car a
+        # destination. A planner with two dropoffs IS the answer to "what is on
+        # that screen", and the panel shows its stops; a "nothing on that screen
+        # read as an address" arriving after it, from the branch that closes an
+        # unanswered window, would contradict the stops on the glass. So it is
+        # answered here, by the same two assignments `if found:` makes, and the
+        # one dropoff — when there is exactly one — goes on below through that
+        # branch to the consumer every destination has.
+        if answers:
+            dropoff_until = 0.0
+            dropoff_asked = False
+            if args.json:
+                emit_planner(planner, ms=out.get('ms'))
+            # The kinds, not the names: the log is the rig's, and the stops
+            # name people and their doors.
+            log('trip planner read: %s; %s'
+                % (', '.join(s['kind'] for s in planner),
+                   'its one dropoff is the destination' if found
+                   else 'the destination is left as it was'))
         if found:
             dropoff_said = found.get('line')
             # Closed the moment it is answered, and what that closes is the

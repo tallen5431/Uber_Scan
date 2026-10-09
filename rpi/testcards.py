@@ -174,6 +174,54 @@ def doordash_screen(pal=LIGHT, pay='$41.11', miles='9.8', by='7:15 PM',
     return _bgr(im)
 
 
+# The stops a rendered Trip Planner lists unless told otherwise: the one-stop
+# planner the rig photographed, with the name and the house invented. `where` is
+# (street, town line), or None for a block the driver has not opened.
+PLANNER_STOPS = [('Dropoff • 1 order', 'Pat Q.', 'Expected by 4:18 PM',
+                  ('4821 Kestrel Dr', 'Marietta, GA'))]
+
+
+def planner_screen(pal=LIGHT, stops=PLANNER_STOPS):
+    """Uber's Trip Planner: the screen ⌖ Dropoff is pressed over after an accept.
+
+    Not an offer and not a map. Laid out as the rig's own photograph of one
+    shows it, in the phone's own pixels — the title at the top, each stop a
+    block of a header ("Dropoff • 1 order"), a name, an "Expected by" time and,
+    when the block is open, "Address" with the street and the town under it —
+    because what a read of it has to survive is THIS layout through a lens: a
+    whole-screen crop, a tall white page, small grey type under the black.
+
+    `stops` is a list of (header, name, expected, where), `where` being
+    (street, town line) or None for a closed block. Every name and street a
+    caller passes should be invented; this draws whatever it is given.
+    """
+    im = Image.new('RGB', (W, H), pal['bg'])
+    d = ImageDraw.Draw(im)
+    d.text((70, 40), '3:57', font=font(34, False), fill=pal['fg'])
+    d.text((W // 2 - 150, 210), 'Trip Planner', font=font(50, False), fill=pal['fg'])
+    d.line([(60, 330), (W - 60, 330)], fill=pal['rule'], width=3)
+    y = 400
+    for head, name, expected, where in stops:
+        d.ellipse([60, y + 50, 116, y + 106], fill=(200, 40, 50))
+        d.text((150, y), head, font=font(34, False), fill=pal['sub'])
+        d.text((150, y + 52), name, font=font(42), fill=pal['fg'])
+        d.text((150, y + 120), expected, font=font(34, False), fill=pal['sub'])
+        y += 200
+        if where is not None:
+            d.text((150, y), 'Address', font=font(34, False), fill=pal['sub'])
+            d.text((150, y + 64), where[0], font=font(34, False), fill=pal['sub'])
+            d.text((150, y + 128), where[1], font=font(34, False), fill=pal['sub'])
+            d.rounded_rectangle([150, y + 210, 470, y + 280], radius=30, fill=pal['chip'])
+            d.text((180, y + 224), 'View details', font=font(30, False), fill=pal['chip_fg'])
+            y += 320
+        d.line([(60, y), (W - 60, y)], fill=pal['rule'], width=3)
+        y += 60
+    d.text((W // 2 - 90, y + 80), 'Waybill', font=font(36, False), fill=(40, 110, 200))
+    d.line([(0, H - 300), (W, H - 300)], fill=pal['rule'], width=3)
+    d.ellipse([W // 2 - 110, H - 250, W // 2 + 110, H - 30], fill=(200, 40, 50))
+    return _bgr(im)
+
+
 def mount(screen, width, seed=1, cabin=24, sensor=SENSOR):
     """Put the phone in the frame at a given closeness, with sensor noise.
 

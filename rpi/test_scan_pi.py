@@ -156,7 +156,7 @@ class FakeCam(object):
 
 def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         until=None, look=None, spoil=None, config_extra=None,
-        press_dropoff=False, dispute=None, press_age=None):
+        press_dropoff=False, dispute=None, press_age=None, mount_width=1200):
     """Drive scan_pi.main() over a fake camera and collect what came out.
 
     `until(state)` ends the run as soon as the thing being tested has happened,
@@ -168,7 +168,11 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     """
     import scan_pi as SP
 
-    offer = TC.mount(screen, 1200)
+    # 1200 is a close mount, which clips the top of the phone off the frame: an
+    # offer card sits low on the screen and is untouched. `mount_width` is for a
+    # screen read from the top, the Trip Planner, which the rig's own photograph
+    # shows with the whole phone in frame.
+    offer = TC.mount(screen, mount_width)
     empty = TC.blank()
     quad = PL.detect_screen_quad(offer)
     if quad is None:
@@ -269,6 +273,12 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     real_dropoff = SP.emit_dropoff
     SP.emit_dropoff = lambda *a, **k: (destinations.append((a[0] if a else None, k)),
                                        real_dropoff(*a, **k))[1]
+    # ...and every Trip Planner it answered a press with, for the same reason:
+    # the wiring is what is under test, not the line emit_planner writes.
+    planners = []
+    real_planner = SP.emit_planner
+    SP.emit_planner = lambda *a, **k: (planners.append((a[0] if a else None, k)),
+                                       real_planner(*a, **k))[1]
 
     # The button. Written before the loop starts, which is the same file the
     # server's /api/dropoff writes and the same one dropoff_requested() clears.
@@ -305,6 +315,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
 
     def state():
         return dict(verdicts=verdicts, destinations=len(destinations),
+                    planners=len(planners),
                     # How many times the loop has reached a verdict, and how
                     # many times it has named the offer on record. A run that
                     # stops the instant a row lands cannot tell "once per card"
@@ -344,6 +355,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         SP.start_camera, SP.emit = real_start, real_emit
         SP.emit_offer = real_offer
         SP.emit_dropoff = real_dropoff
+        SP.emit_planner = real_planner
         SP.Health = real_health_cls
         PL.Scanner.look_many = real_look
         PL.Scanner.should_read = real_should
@@ -371,7 +383,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     ready_kw = [k for a, k in verdicts if a and isinstance(a[0], dict) and a[0].get('ready')]
     return dict(cam=cam, rows=rows, ups=ups, ready=ready, ready_kw=ready_kw,
                 announced=announced, gate_calls=gate_calls,
-                destinations=destinations, verdicts=verdicts,
+                destinations=destinations, planners=planners, verdicts=verdicts,
                 config=config, journal=journal, started=len(started),
                 health=(healths[-1] if healths else None))
 
@@ -3170,6 +3182,70 @@ if run_slow['destinations']:
     eq('...and it is the address that was read',
        run_slow['destinations'][0][0].get('line'),
        '1234 Daffodil Ln, Powder Springs, GA 30127')
+
+
+# --- ⌖ over Uber's Trip Planner ----------------------------------------------
+#
+# The pieces first. emit_planner is the line the panel and the journal are fed
+# from, so it carries the stops and nothing a verdict is made of; and
+# planner_destination is the whole of the rule for when a planner may give the
+# order in the car its end. Names and streets invented.
+def _stop(kind, street=None, city=None, line=None):
+    return {'kind': kind, 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 978,
+            'street': street, 'city': city, 'state': 'GA' if city else None,
+            'zip': None, 'line': line}
+
+
+_KESTREL = _stop('dropoff', '4821 Kestrel Dr', 'Marietta', '4821 Kestrel Dr, Marietta')
+_was_stdout, sys.stdout = sys.stdout, io.StringIO()
+try:
+    SP2.emit_planner([_KESTREL], ms={'total': 5})
+    _planner_said = sys.stdout.getvalue()
+finally:
+    sys.stdout = _was_stdout
+_pmsg = json.loads(_planner_said)
+eq('a Trip Planner goes out on a line of its own', sorted(_pmsg), ['planner'])
+eq('...carrying the stops, and that it answered a press',
+   (_pmsg['planner'].get('stops'), _pmsg['planner'].get('asked')), ([_KESTREL], True))
+eq('...and nothing a verdict is made of',
+   [k for k in ('ready', 'state', 'perHour', 'pay')
+    if k in _pmsg or k in _pmsg['planner']], [])
+
+eq('one dropoff whose street and town read is the order\'s destination',
+   (SP2.planner_destination([_stop('pickup'), _KESTREL]) or {}).get('line'),
+   '4821 Kestrel Dr, Marietta')
+eq('...two dropoffs are not guessed between',
+   SP2.planner_destination([_KESTREL, _stop('dropoff', '77 Birch Ln NW', 'Roswell',
+                                            '77 Birch Ln NW, Roswell')]), None)
+eq('...a dropoff whose street did not read is not filed: a town alone is no '
+   'address', SP2.planner_destination([_stop('dropoff', None, 'Marietta', 'Marietta')]),
+   None)
+eq('...and a planner of pickups gives no destination',
+   SP2.planner_destination([_stop('pickup', '310 Mill St', 'Roswell',
+                                  '310 Mill St, Roswell')]), None)
+
+# ...and the whole of it through the real reader. rpi/test_loop.py drives the
+# wiring with a stubbed one; this is the planner DRAWN and read through the
+# lens, the warp, the whole-screen crop and tesseract, which is the only way to
+# know the grammar survives what a real read does to it — the bullet as a "+"
+# or a "*", the stop's icon as "@", "Pat Q." as "pata.". Mounted at 900 rather
+# than run()'s 1200: the planner is read from the TOP of the screen, which the
+# closer mount crops off the frame, and the rig's own photograph of one has
+# the whole phone in it.
+run_planner = run(TC.planner_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
+                  appear_at=0.0, vanish_at=1e9, extra_argv=['--no-parallel'],
+                  press_dropoff=True, mount_width=900,
+                  until=lambda st: st['planners'] >= 1 and st['destinations'] >= 1)
+eq('a drawn Trip Planner read through the real reader answers ⌖ with its stop',
+   [[(s['kind'], s['expectedBy'], s['line']) for s in p[0]]
+    for p in run_planner['planners']],
+   [[('dropoff', 978, '4821 Kestrel Dr, Marietta')]])
+eq('...and its one dropoff goes out as the order\'s destination, asked for',
+   [((d[0] or {}).get('line'), d[1].get('asked')) for d in run_planner['destinations']],
+   [('4821 Kestrel Dr, Marietta', True)])
+eq('...and nothing on the screen was taken for an offer',
+   (run_planner['ready'], run_planner['announced'],
+    [r for r in run_planner['rows'] if not r.get('kind')]), ([], [], []))
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)

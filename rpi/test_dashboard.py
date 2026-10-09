@@ -3528,6 +3528,112 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  // --- the Trip Planner's stops, after a ⌖ press -----------------------------
+  //
+  // Driven off the stream the way the rig sends them: a `planner` line, and
+  // for a planner with one dropoff a `dropoff` line beside it. On the rig's own
+  // 1024x600; whether they FIT is rpi/test_layout.py's question. Names, streets
+  // and houses invented.
+  stage = 'the Trip Planner stops';
+  {
+    const stop = (kind, orders, name, by, line) => ({ kind: kind, orders: orders,
+      name: name, expectedBy: by, street: null, city: null, state: null, zip: null,
+      line: line });
+    const FOUR = [stop('pickup', 1, 'Burger Barn', 712, '310 Mill St, Roswell'),
+                  stop('pickup', 2, 'Taco Hut', 725, null),
+                  stop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Roswell, GA 30075'),
+                  stop('dropoff', 1, 'Sam R.', 768, null)];
+    const SIX = [1, 2, 3, 4, 5, 6].map((n) => stop('pickup', 1, 'Shop ' + n, 700 + n, null));
+    const ONE = [stop('dropoff', 1, 'Pat Q.', 978, '4821 Kestrel Dr, Marietta')];
+    let statusHolding = null;
+    const page = await browser.newContext({
+      viewport: { width: 1024, height: 600 }, deviceScaleFactor: 1,
+    }).then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'scanning',
+        scanner: { enabled: true, running: true, error: null },
+        last: null, lastAgeMs: null, heardAgeMs: 400, offer: null,
+        holding: statusHolding }) }));
+    const open = async () => {
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    };
+    const push = async (m, wait) => {
+      await page.evaluate((x) => window.__es.push(x), m);
+      await page.waitForTimeout(wait || 200);
+    };
+    const stops = () => page.evaluate(() => {
+      const s = document.getElementById('stops');
+      const r = s.getBoundingClientRect();
+      const d = document.getElementById('dest');
+      return { shown: !s.hidden && r.height > 0 && getComputedStyle(s).display !== 'none',
+               lines: [].slice.call(s.children).map((c) => c.textContent),
+               label: (d.textContent || '').trim(), title: d.getAttribute('title') || '',
+               failed: d.classList.contains('failed'), done: d.classList.contains('done') };
+    });
+    const EMPTY = { ready: false, state: 'empty', track: null };
+    const HELD = Object.assign({}, READINGS.deducted, {
+      holding: { pay: 12, minutes: 30, dropoff: null }, stack: null });
+    const slot = {};
+    await open();
+    await push({ phase: 'scanning', message: '' });
+    await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+    // An order in the car, its card gone: the state ⌖ is pressed in.
+    await push(HELD);
+    await push(EMPTY);
+    await page.evaluate(() => document.getElementById('dest').click());
+    await page.waitForTimeout(150);
+    slot.pressed = await stops();
+    await push({ planner: { stops: FOUR, asked: true, ms: null, at: 1 } });
+    slot.four = await stops();
+    await push({ planner: { stops: SIX, asked: true, ms: null, at: 2 } });
+    slot.six = await stops();
+    // A card arrives and is being judged; then it goes, unrecorded.
+    await push(HELD);
+    slot.underVerdict = await stops();
+    await push(EMPTY);
+    slot.afterVerdict = await stops();
+    // The rig re-aiming: the card shows the mount's own measurements, and the
+    // stops wait until it is scanning again.
+    await push({ phase: 'aim', message: '', cardPixels: 820, sharpness: 41,
+                 stable: 2, need: 6 });
+    slot.aiming = await stops();
+    await push({ phase: 'scanning', message: '' });
+    slot.afterAiming = await stops();
+    // ...and a card that IS recorded: the destination the press read goes,
+    // and the stops go with it.
+    await push({ offer: { id: 'o-next', pay: 9.5, minutes: 20, perHour: 18,
+                          dropoff: null, endRefused: true }, at: 3 });
+    await push(EMPTY);
+    slot.afterNewOffer = await stops();
+    // One dropoff: the scanner sends the stops and the address beside them.
+    await page.evaluate(() => document.getElementById('dest').click());
+    await page.waitForTimeout(150);
+    await push({ planner: { stops: ONE, asked: true, ms: null, at: 4 } }, 50);
+    await push({ dropoff: { line: '4821 Kestrel Dr, Marietta', street: '4821 Kestrel Dr',
+                            city: 'Marietta', state: 'GA', zip: null, found: true,
+                            asked: true, at: 5 } });
+    slot.one = await stops();
+    // Put down: the order, its destination and its stops together.
+    await page.evaluate(() => document.getElementById('drop').click());
+    await page.waitForTimeout(600);
+    slot.afterDrop = await stops();
+    // A panel reloaded mid-delivery, off what the server kept on the order...
+    statusHolding = { pay: 12, minutes: 30, dropoff: null, dropoffScanned: false,
+                      planner: ONE, heldMs: 60000 };
+    await open();
+    slot.reloaded = await stops();
+    // ...and with nothing held, nothing.
+    statusHolding = null;
+    await open();
+    slot.reloadedNone = await stops();
+    out.planner = slot;
+    await page.close();
+  }
+
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -5584,6 +5690,67 @@ try:
        '%s: %s' % (_sreply.get('name'), _sreply.get('said')))
     eq('...and the list then has the new one at the top',
        ((sp.get('after') or [{}])[0] or {}).get('when'), sp.get('freshWhen'))
+
+    # --- the Trip Planner's stops, after a ⌖ press --------------------------
+    #
+    # Where the destination answer is shown, for exactly as long, and between
+    # offers only. See showStops and forgetDest in live.html.
+    pl = got.get('planner') or {}
+    ok_('the stops were measured', bool(pl.get('four')))
+    # One lifetime for one answer. live.html forgets the destination a press
+    # read at seven moments; the stops are the same press's answer, so they go
+    # by the same function at the same seven — and a `destSaid = ''` written
+    # anywhere else is an eighth moment the stops would outlive.
+    _live = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
+    eq('live.html forgets the destination and the stops in one place, at every '
+       'moment it forgets either',
+       (len(re.findall(r"(?<!var )\bdestSaid = ''", _live)),
+        len(re.findall(r"(?<!var )\bstopsSaid = null", _live)),
+        _live.count('forgetDest();')), (1, 1, 7))
+    eq('a press forgets what the last one read before it asks again',
+       ((pl.get('pressed') or {}).get('shown'), (pl.get('pressed') or {}).get('label')),
+       (False, '⌖ reading…'))
+    eq('the Trip Planner a press read is shown stop by stop, in the order the '
+       'phone listed them',
+       (pl.get('four') or {}).get('lines', [])[:4],
+       ['▸ Pickup by 11:52 · Burger Barn · 310 Mill St, Roswell',
+        '▸ Pickup ×2 by 12:05 · Taco Hut',
+        '▸ Dropoff by 12:31 · Lee M. · 77 Birch Ln NW, Roswell, GA 30075',
+        '▸ Dropoff by 12:48 · Sam R.'])
+    # The scanner refuses to guess which of two dropoffs is the order in the
+    # car's, and the panel says so rather than leaving the driver to work out
+    # why the button is still amber — under the stops, and in full on the
+    # button's title.
+    eq('...saying, with two dropoffs on it, that the order\'s end was not guessed',
+       ((pl.get('four') or {}).get('lines', [])[4:],
+        'not guessed' in ((pl.get('four') or {}).get('title') or '')),
+       (['2 dropoffs: end not guessed'], True))
+    eq('...and the press is answered: no "reading…", and no failure',
+       ((pl.get('four') or {}).get('label'), (pl.get('four') or {}).get('failed')),
+       ('⌖ Dropoff', False))
+    eq('a planner longer than four stops shows three and says how many more',
+       (pl.get('six') or {}).get('lines'),
+       ['▸ Pickup by 11:41 · Shop 1', '▸ Pickup by 11:42 · Shop 2',
+        '▸ Pickup by 11:43 · Shop 3', '+ 3 more stops'])
+    eq('a card being judged takes their room', (pl.get('underVerdict') or {}).get('shown'),
+       False)
+    eq('...and they are back when it goes', (pl.get('afterVerdict') or {}).get('shown'),
+       True)
+    eq('the rig re-aiming takes their room too, and gives it back when it scans',
+       ((pl.get('aiming') or {}).get('shown'), (pl.get('afterAiming') or {}).get('shown')),
+       (False, True))
+    eq('an offer put on the record forgets them, as it forgets the destination',
+       (pl.get('afterNewOffer') or {}).get('shown'), False)
+    eq('a planner with one dropoff shows its stop, and the button goes green off '
+       'the dropoff line beside it',
+       ((pl.get('one') or {}).get('lines'), (pl.get('one') or {}).get('done')),
+       (['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta'], True))
+    eq('putting the order down forgets its stops', (pl.get('afterDrop') or {}).get('shown'),
+       False)
+    eq('a panel reloaded mid-delivery shows the stops the server kept on the order',
+       (pl.get('reloaded') or {}).get('lines'),
+       ['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta'])
+    eq('...and none with nothing held', (pl.get('reloadedNone') or {}).get('shown'), False)
 
 finally:
     proc.terminate()

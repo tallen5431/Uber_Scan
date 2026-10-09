@@ -237,6 +237,18 @@ So the Pi scanner keeps one line per offer it was confident about, in
   address goes on that offer's row — labelled as read off the phone rather
   than printed on the card, because the two are different kinds of evidence.
   It is also what puts the job on the map.
+* **the stops on Uber's Trip Planner.** Press **⌖ Dropoff** with the planner
+  up on the phone and the driving screen lists its stops in order, one line
+  each — `▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta` — between
+  offers, until you press again, the order is put down or the next offer is
+  recorded, which is when a read destination goes too. The planner prints no ZIP, so
+  it is read by its own layout (the stop header, the name, “Expected by”, and
+  the street and town under “Address”), and only when you press. With exactly
+  one dropoff on it, that address becomes the order in the car's destination
+  as any other read one does; with two or more the rig does not guess which is
+  yours, says so under the stops, and leaves the order's destination as it
+  was. Each planner is also written to the journal as a row of its own, for
+  the record only — nothing on the offers page reads it.
 * **tick the ones you took.** The scanner cannot see the Accept button and never
   touches it, so it cannot know — but you can tell it, and once you do the page
   shows what you actually worked against what you were offered, per day and

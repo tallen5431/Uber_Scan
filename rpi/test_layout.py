@@ -678,6 +678,26 @@ for _said, _fields in NOVERDICT_SAID.items():
             **_fields)
 # The rig's own display, and the two the panel is proven at.
 NOVERDICT_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '480x320')]
+
+# The Trip Planner's stops, as the driving screen lists them after a ⌖ press:
+# at the most the block is asked to hold. Four stops, two of them dropoffs, so
+# the line saying the order's end was not guessed is under them — five lines —
+# with an ×2 pickup, a closed block, and the longest address line the corpus
+# reads, so the ellipsis has an address to take. Measured between offers, which
+# is the only time the block is drawn, on the same three panels and in both
+# pictures. Invented throughout.
+def _pstop(kind, orders, name, by, line):
+    return {'kind': kind, 'orders': orders, 'name': name, 'expectedBy': by,
+            'street': None, 'city': None, 'state': None, 'zip': None, 'line': line}
+
+
+PLANNER_STOPS = [
+    _pstop('pickup', 1, 'Burger Barn', 712, '310 Mill St, Roswell'),
+    _pstop('pickup', 2, 'Taco Hut Express', 725, None),
+    _pstop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Roswell, GA 30075'),
+    _pstop('dropoff', 1, 'Pat Q.', 978, '4821 Kestrel Dr S, Powder Springs'),
+]
+PLANNER_PANELS = NOVERDICT_PANELS
 # ...and the two strings that fixture copies have to still be the page's, or it
 # measures a line the page no longer writes.
 ok_('live.html still writes the median as "/hr an offer"', "'/hr an offer'" in live_src)
@@ -707,8 +727,12 @@ if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
 DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
-       snapPanelsJson, noVerdictJson, noVerdictPanelsJson] = process.argv.slice(2);
+       snapPanelsJson, noVerdictJson, noVerdictPanelsJson, plannerJson,
+       plannerPanelsJson] = process.argv.slice(2);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
+// The Trip Planner's stops and where they are measured; see PLANNER_STOPS.
+const PLANNER_STOPS = JSON.parse(plannerJson);
+const PLANNER_PANELS = JSON.parse(plannerPanelsJson);
 // The readings with no verdict in them, and where their line is measured; see
 // NOVERDICT on the Python side.
 const NOVERDICT = JSON.parse(noVerdictJson);
@@ -1557,6 +1581,99 @@ const SNAP_MEASURE = (fixture) => {
       await ctx.close();
     }
   }
+  // The Trip Planner's stops between offers, where they are drawn. Measured
+  // against the same panel a moment before they arrived, so "the bar, the
+  // status row and the picture did not move" is a comparison and not a guess.
+  for (const panel of PLANNER_PANELS) {
+    for (const view of ['screen', 'scene']) {
+      const ctx = await browser.newContext({
+        viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+      });
+      const page = await ctx.newPage();
+      await page.addInitScript((v) => {
+        try { localStorage.setItem('uberscan.liveView', v); } catch (e) {}
+        class FakeEventSource {
+          constructor(url) { this.url = url; window.__es = this; }
+          close() {}
+          push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
+        }
+        window.EventSource = FakeEventSource;
+      }, view);
+      await page.route('**/api/frame.*', (route) => {
+        const v = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
+        route.fulfill({ status: 200, contentType: 'image/jpeg',
+                        body: Buffer.from(FRAMES[v], 'base64') });
+      });
+      await page.route('**/api/status*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ scanner: { enabled: true, running: true, error: null },
+                               status: { phase: 'scanning', message: '' },
+                               last: null, lastAgeMs: null, heardAgeMs: 400,
+                               offer: null, holding: null }) }));
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
+                                 null, { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(600);
+      const measure = () => page.evaluate(() => {
+        const box = (sel) => {
+          const b = document.querySelector(sel).getBoundingClientRect();
+          return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+        };
+        const v = document.getElementById('verdict').getBoundingClientRect();
+        const s = document.getElementById('stops');
+        const inCard = (r) => r.top >= v.top - 0.5 && r.bottom <= v.bottom + 0.5
+          && r.left >= v.left - 0.5 && r.right <= v.right + 0.5;
+        const lines = [].slice.call(s.children).map((d) => {
+          const r = d.getBoundingClientRect();
+          const cs = getComputedStyle(d);
+          const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.35;
+          // The part of a stop that may not be cut: its kind and its time,
+          // which come first, and the first letter of the name after them, so
+          // the name at least begins on the glass. The rest of the name and
+          // the address are what the ellipsis takes. A line with no " · " —
+          // the note, "+ N more stops" — is held whole.
+          const text = d.textContent;
+          const at = text.indexOf(' · ');
+          const head = at === -1 ? text.length : Math.min(text.length, at + 4);
+          let cut = '';
+          const n = d.firstChild;
+          if (n) {
+            const rg = document.createRange();
+            for (let i = 0; i < head; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (!c.width && !c.height) continue;
+              if (c.left < r.left - 0.5 || c.right > r.right + 0.5) cut += n.data[i];
+            }
+          }
+          return { text: text, rows: Math.round(r.height / lh), cut: cut,
+                   inCard: inCard(r),
+                   onGlass: r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5 };
+        });
+        const d = document.documentElement;
+        return { shown: !s.hidden && s.getBoundingClientRect().height > 0,
+                 lines: lines, fontPx: parseFloat(getComputedStyle(s).fontSize),
+                 labelIn: inCard(document.getElementById('verdictLabel').getBoundingClientRect()),
+                 layout: { verdict: box('#verdict'), bar: box('.bottombar'),
+                           row: box('.connbar'), view: box('#viewWrap') },
+                 over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+                 phone: document.body.classList.contains('phoneview') };
+      });
+      await page.evaluate(() => {
+        window.__es.push({ alive: true, at: 1 });
+        window.__es.push({ ready: false, state: 'empty', track: null, places: [], text: '' });
+      });
+      await page.waitForTimeout(150);
+      const before = await measure();
+      await page.evaluate((stops) => window.__es.push(
+        { planner: { stops: stops, asked: true, ms: null, at: 1 } }), PLANNER_STOPS);
+      await page.waitForTimeout(150);
+      out[panel[0] + ' ' + view + ' planner'] = { before: before, after: await measure() };
+      await page.close();
+      await ctx.close();
+    }
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -1744,7 +1861,8 @@ try:
         ['node', driver, base, json.dumps(PANELS), json.dumps(PAGES),
          json.dumps(FRAMES), json.dumps(CAPTION_LINES), json.dumps(SNAP_FIXTURE),
          json.dumps(SNAP_PANELS), json.dumps(NOVERDICT),
-         json.dumps(NOVERDICT_PANELS)],
+         json.dumps(NOVERDICT_PANELS), json.dumps(PLANNER_STOPS),
+         json.dumps(PLANNER_PANELS)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -1844,6 +1962,43 @@ try:
                     ref = old if s['lines'] == old['lines'] else was
                     eq('..."%s" %s, moving nothing the old line did not move at %s'
                        % (opens, note, where), s['layout'], ref['layout'])
+
+    # The Trip Planner's stops between offers, at the most the block holds:
+    # four stops and the line under them. Every one on a line of its own, its
+    # kind and time on the glass and its name begun, with only the rest of the
+    # name and the address given to the ellipsis; inside the card with the
+    # verdict label; and the card, the picture, the status row and the bar
+    # exactly where they were before the stops arrived. The name came before
+    # the time once, and in the 3.5" hat's scene picture "Taco Hut Express"
+    # pushed "by 12:05" into the ellipsis.
+    for panel, w, h in PLANNER_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            pm = got.get('%s %s planner' % (panel, view)) or {}
+            was, now = pm.get('before') or {}, pm.get('after') or {}
+            ok_('the Trip Planner\'s stops were measured at %s' % where,
+                was and now and now.get('shown'))
+            if not (was and now and now.get('shown')):
+                continue
+            eq('...in the layout that picture is drawn in at %s' % where,
+               now.get('phone'), view == 'screen')
+            _lines = now.get('lines') or []
+            eq('...four stops and the line under them at %s' % where, len(_lines), 5)
+            eq('...each on one line at %s' % where,
+               [l['text'] for l in _lines if l.get('rows') != 1], [])
+            eq('...every stop\'s kind and time on the glass and its name begun, only '
+               'the rest given to the ellipsis, at %s' % where,
+               [(l['text'][:24], l['cut']) for l in _lines if l.get('cut')], [])
+            eq('...all of it inside the card at %s' % where,
+               [l['text'][:24] for l in _lines
+                if not (l.get('inCard') and l.get('onGlass'))], [])
+            ok_('...with the verdict label still inside it at %s' % where,
+                now.get('labelIn'))
+            ok_('...in type no smaller than the address line\'s floor at %s (%spx)'
+                % (where, now.get('fontPx')), (now.get('fontPx') or 0) >= 12)
+            eq('...and the card, the picture, the status row and the bar where they '
+               'were at %s' % where, now.get('layout'), was.get('layout'))
+            no_('...and nothing scrolls at %s' % where, now.get('over'))
 
     for panel, w, h in PANELS:
         dashboard = w > h and h <= 620

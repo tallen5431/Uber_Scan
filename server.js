@@ -698,6 +698,27 @@ function startScanner() {
           // `dropoffScanned`, and since this change so does the card on the
           // slot, both of which /api/status already sends.
         }
+        // Uber's Trip Planner, read off the whole screen because ⌖ was
+        // pressed: every stop of the trip in order. See emit_planner.
+        //
+        // It travels the way the scanned destination does. To the panel on the
+        // stream — the broadcast below sends it whole, as it sends a dropoff
+        // line — and onto the order in the car, so a panel reloaded mid-
+        // delivery shows the stops it showed before, and they go when the
+        // order does. With nothing held there is nothing to attach them to,
+        // and like an address read with nothing held they are shown and not
+        // kept. Through holding(), for the reason the dropoff branch gives.
+        //
+        // NOT a destination. The one dropoff of a planner that has exactly one
+        // arrives separately, as an ordinary `dropoff` line, and is filed by
+        // the branch above like every other; nothing here reads an address
+        // out of the stops, so there is one rule for where an order ends.
+        if (read.planner && Array.isArray(read.planner.stops)) {
+          var plannedAt = Date.now();
+          var heldNow = holding(plannedAt);
+          if (heldNow) heldNow.planner = read.planner.stops;
+          recordPlanner(read.planner, plannedAt);
+        }
         // The scan loop's own voice — a reading or a heartbeat — as opposed to
         // the autopilot's progress messages. Only this arms the watchdog, and
         // only this feeds it.
@@ -1241,6 +1262,52 @@ function recordPairing(offer, now, reading) {
   };
   appendLines(JSON.stringify(row) + '\n', function (err) {
     if (err) console.error('journal: could not record a pairing: ' + err.message);
+  });
+}
+
+/* The Trip Planner, written down: collection only. Nothing reads these rows
+ * back — the fold skips a kind it has no use for ("something newer than this
+ * reader") and resume() in rpi/journal.py skips every kind — so they change no
+ * figure on any page. What they are for is the question no file on this rig can
+ * answer yet: how a stacked trip actually ran, stop by stop, against the times
+ * the app said to expect.
+ *
+ * `id` and `seq` because syncKey drops a kind row without them, and the copy at
+ * home would then hold none. Stamped from the clock like a sighting, with the
+ * same caveat, which cannot bite here: two planners in one millisecond would
+ * need two ⌖ presses answered in it.
+ *
+ * ONE ROW FOR ONE PLANNER. A driver checking an answer presses again, and the
+ * screen has not changed: the same stops read twice inside PLANNER_SAME_MS are
+ * one row, not a row per press. Kept on the stops exactly as read, so a stop
+ * finished, an order added or a name read differently is a new row — a second
+ * reading that disagrees is evidence, and only a repeat is noise. Timed from
+ * the row last written, so a planner unchanged for longer than that is written
+ * again: "still these stops at this time" is a fact the first row did not
+ * hold. Process memory, so a restart may write one planner twice; that is a
+ * duplicate a reader can see, where a lost row is not.
+ *
+ * Settable for the reason SCREENING_MS is: a check that has to wait out five
+ * minutes of real clock to prove the window ends is a check nobody runs. */
+var PLANNER_SAME_MS = Number(process.env.PLANNER_SAME_MS);
+if (!isFinite(PLANNER_SAME_MS) || PLANNER_SAME_MS < 0) PLANNER_SAME_MS = 5 * 60000;
+var plannerWritten = null;
+
+function recordPlanner(planner, now) {
+  var key = JSON.stringify(planner.stops);
+  if (plannerWritten && plannerWritten.key === key
+      && now - plannerWritten.at < PLANNER_SAME_MS) return;
+  plannerWritten = { key: key, at: now };
+  appendLines(JSON.stringify({
+    v: 1, kind: 'planner', id: 'planner-' + now, seq: 1, at: now,
+    stops: planner.stops,
+    // Always true from this scanner, which reads a planner only under a press;
+    // written so the row says on its face what it answered, as a mark does.
+    asked: planner.asked === true
+  }) + '\n', function (err) {
+    // Said out loud, like every other write on this path: a tally that stopped
+    // being written would be read later as a rig that never saw a planner.
+    if (err) console.error('journal: could not record a trip planner: ' + err.message);
   });
 }
 
@@ -2852,6 +2919,10 @@ function statusNow() {
                    // once it has been answered.
                    dropoff: h.dropoff || null,
                    dropoffScanned: !!h.dropoffScanned,
+                   // ...and the Trip Planner's stops, when ⌖ read one while
+                   // this order was in the car: the same lifetime as the
+                   // scanned destination beside it. See the planner branch.
+                   planner: h.planner || null,
                    heldMs: Math.max(0, Date.now() - h.acceptedAt) } : null;
     }()),
     lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
