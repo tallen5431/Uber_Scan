@@ -51,9 +51,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # whether the page FITS is a different question, and the answer to it was
 # unmeasured.
 PAGES = ['index.html', 'live.html', 'journal.html', 'scan.html', 'map.html',
-         # ...and the list of 📷 Snaps, measured with two in it — one whole and
-         # one with the longest reason a part can be missing — so its widest
-         # line is on the page when it is asked whether the page fits.
+         # ...and the list of 📷 Snaps, measured with two in it — one whole,
+         # with the longest note the rig keeps, and one with the longest
+         # reason a part can be missing — so its widest line is on the page
+         # when it is asked whether the page fits.
          'snaps.html']
 
 # The panels this thing actually gets bolted to, plus a phone for comparison.
@@ -1313,6 +1314,74 @@ const SNAP_MEASURE = (fixture) => {
         shown.backImgShown = back.imgShown;
         out[panel[0] + ' phoneview'] = shown;
       }
+      // 📷 Snaps with its snaps ticked: the one state in which its bar has a
+      // third link, the ticked ones as one file. Drawn only once something is
+      // ticked, so the page as it lands, measured above, never has it.
+      if (name === 'snaps.html') {
+        for (const tick of await page.$$('#shelf .snap .pick input')) {
+          await tick.check({ timeout: 2000 }).catch(() => {});
+        }
+        out[panel[0] + ' snaps chosen'] = await page.evaluate(() => {
+          const d = document.documentElement;
+          const links = [].slice.call(document.querySelectorAll('.bottombar a'))
+            .filter((a) => a.getBoundingClientRect().width > 0);
+          // Where each glyph of a label landed, as the bar on live.html is
+          // asked: a width comparison misses a label that wraps, because a
+          // bar link is allowed to wrap rather than clip, and grows a line
+          // taller instead of overflowing. So: every glyph inside its link,
+          // and all of them on one line — their tops within half the font's
+          // size of each other.
+          const unread = (el) => {
+            const r = el.getBoundingClientRect();
+            const px = parseFloat(getComputedStyle(el).fontSize);
+            const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+            const tops = [];
+            let outside = '';
+            let node;
+            while ((node = walk.nextNode())) {
+              const rg = document.createRange();
+              for (let i = 0; i < node.length; i++) {
+                if (/\s/.test(node.data[i])) continue;
+                rg.setStart(node, i);
+                rg.setEnd(node, i + 1);
+                const c = rg.getBoundingClientRect();
+                if (!c.width && !c.height) continue;
+                tops.push(c.top);
+                if (c.left < r.left - 0.5 || c.right > r.right + 0.5 ||
+                    c.top < r.top - 0.5 || c.bottom > r.bottom + 0.5) outside += node.data[i];
+              }
+            }
+            const spread = tops.length ? Math.max.apply(null, tops) - Math.min.apply(null, tops) : 0;
+            return outside || (spread > px / 2 ? 'on ' + Math.round(spread / px + 1) + ' lines' : '');
+          };
+          return {
+            labels: links.map((a) => a.textContent),
+            unread: links.map((a) => [a.textContent, unread(a)]).filter((p) => p[1]),
+            shortest: Math.min.apply(null, links.map((a) => a.getBoundingClientRect().height)),
+            sideways: d.scrollWidth > d.clientWidth + 1,
+          };
+        });
+        // ...and the one file a snap is saved as, opened at this size: the
+        // snap that carries the longest note the rig keeps, with no space in
+        // it to wrap at — a heading that pushes the page past the glass.
+        const noted = await page.evaluate(() => {
+          const n = document.querySelector('#shelf .snap h2 .noted:not(:empty)');
+          return n ? n.closest('.snap').getAttribute('data-name') : null;
+        });
+        const file = noted ? await page.evaluate((n) => fetch(
+          '/api/snaps/bundle?snap=' + encodeURIComponent(n)).then((r) => r.text()), noted) : '';
+        const opened = await ctx.newPage();
+        await opened.setContent(file, { waitUntil: 'load' }).catch(() => {});
+        out[panel[0] + ' snap file'] = await opened.evaluate(() => {
+          const d = document.documentElement;
+          return {
+            note: (document.querySelector('h2 .note') || {}).textContent || '',
+            pictures: document.images.length,
+            sideways: d.scrollWidth > d.clientWidth + 1,
+          };
+        }).catch((e) => ({ error: String(e).slice(0, 200) }));
+        await opened.close();
+      }
       // The one section on this page about two offers at once.
       //
       // Its rows carry more in a summary than an offer row does — a range, two
@@ -1887,7 +1956,12 @@ FRAMES = {'scene': _jpeg((640, 480), (44, 48, 56)),
 # Two 📷 Snaps for snaps.html to lay out, in the folder the server keeps them
 # in — beside the journal. One whole, at the panel's own size; one with no
 # screenshot and the longest reason the server gives for that, so the widest
-# line the page can draw is on it.
+# line the page can draw is on it. The whole one carries the longest note the
+# rig keeps (SNAP_NOTE_MAX, read out of server.js) in its widest letter with no
+# space in it: the heading that has nowhere to wrap, on the list and in the
+# one file the snap is saved as.
+_NOTE_MAX = int(re.search(r'var SNAP_NOTE_MAX = (\d+);',
+                          open(os.path.join(ROOT, 'server.js'), encoding='utf-8').read()).group(1))
 _shelf = os.path.join(work, 'snaps')
 for _name, _whole in (('2026-10-07_21-14-03', True), ('2026-10-07_21-15-40', False)):
     os.makedirs(os.path.join(_shelf, _name))
@@ -1905,11 +1979,14 @@ for _name, _whole in (('2026-10-07_21-14-03', True), ('2026-10-07_21-15-40', Fal
         'what': 'panel', 'file': 'panel.png', 'saved': False,
         'why': 'no display session found',
         'detail': 'no wayland-* socket in /run/user/1000, no X display'}]
+    _record = {'v': 1, 'name': _name, 'at': now,
+               'contents': _missing, 'notes': [],
+               'said': 'saved' if _whole else
+                       'saved — no screenshot: no display session found'}
+    if _whole:
+        _record['note'] = 'W' * _NOTE_MAX
     with open(os.path.join(_shelf, _name, 'snap.json'), 'w') as _fh:
-        json.dump({'v': 1, 'name': _name, 'at': now,
-                   'contents': _missing, 'notes': [],
-                   'said': 'saved' if _whole else
-                           'saved — no screenshot: no display session found'}, _fh)
+        json.dump(_record, _fh)
 
 port = free_port()
 proc = subprocess.Popen(
@@ -2667,6 +2744,33 @@ try:
                 ]
                 eq('%s at %s draws nothing on top of anything' % (name, panel),
                    overlaps, [])
+
+    # 📷 Snaps with both its snaps ticked: the bar's third link, to the ticked
+    # ones as one file, beside the two it always has — whole, as tall as every
+    # control on a bar, and without pushing the page sideways.
+    for panel, w, h in PANELS:
+        sc = got.get('%s snaps chosen' % panel)
+        ok_('📷 Snaps was measured with its snaps ticked at %s' % panel, sc is not None)
+        if not sc:
+            continue
+        eq('...its bar offering the ticked ones as one file at %s' % panel,
+           sc['labels'], ['◂ Live', '▤ Offers', '⤓ 2 chosen'])
+        eq('...every label on the bar on one line, inside its link, at %s' % panel,
+           sc['unread'], [])
+        ok_('...every link on it %dpx tall at %s (%.4gpx)'
+            % (52 if h >= 400 else 44, panel, sc['shortest']),
+            sc['shortest'] >= (51.5 if h >= 400 else 43.5))
+        no_('...and the page not scrolling sideways at %s' % panel, sc['sideways'])
+
+    # ...and the one file a snap is saved as, opened at each size: the snap
+    # with the longest note the rig keeps, which has no space to wrap at.
+    for panel, w, h in PANELS:
+        sf = got.get('%s snap file' % panel) or {}
+        eq('a snap saved as one file, opened at %s, carries its note and its pictures' % panel,
+           (sf.get('error'), sf.get('note'), sf.get('pictures')),
+           (None, '— ' + 'W' * _NOTE_MAX, 3))
+        no_('...and the longest note there is does not push it sideways at %s' % panel,
+            sf.get('sideways', True))
 finally:
     proc.terminate()
     try:

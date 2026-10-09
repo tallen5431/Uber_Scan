@@ -3369,12 +3369,38 @@ const framed = (page) => page.waitForFunction(
         why: [].slice.call(a.querySelectorAll('.why li')).map((l) => l.textContent.trim()),
         fix: [].slice.call(a.querySelectorAll('.why code')).map((c) => c.textContent),
         pics: [].slice.call(a.querySelectorAll('img')).map((i) => ({
-          src: i.getAttribute('src'), loaded: i.naturalWidth > 0 })),
+          src: i.getAttribute('src'), loaded: i.naturalWidth > 0, alt: i.alt })),
         links: [].slice.call(a.querySelectorAll('.files a')).map((l) => ({
           href: l.getAttribute('href'), download: l.getAttribute('download'),
           text: l.firstChild.nodeValue })),
+        name: a.getAttribute('data-name'),
+        noted: (a.querySelector('h2 .noted') || {}).textContent,
+        picks: [].slice.call(a.querySelectorAll('.pick a')).map((l) => ({
+          text: l.textContent, href: l.getAttribute('href') })),
       }));
     });
+    // The bar's link to the ones ticked, as a thumb would find it.
+    const bar = () => page.evaluate(() => {
+      const b = document.getElementById('bundleChosen');
+      return { hidden: b.hidden, drawn: b.getBoundingClientRect().width > 0,
+               text: b.textContent, href: b.getAttribute('href') };
+    });
+    const WHOLE = '2026-01-02_09-00-00';
+    const SHORT = '2026-01-02_09-05-00';
+    const COLD = '1970-01-03_00-00-00';
+    const art = (n) => '#shelf .snap[data-name="' + n + '"]';
+    // A download, followed the way a thumb follows it, and kept where the
+    // Python side can read it — under a name ending .html, which is what a
+    // browser opening it off the disk goes by.
+    const save = async (sel, as) => {
+      const [dl] = await Promise.all([
+        page.waitForEvent('download', { timeout: 10000 }),
+        page.click(sel, { timeout: 4000 }),
+      ]);
+      const to = require('path').join(process.env.SNAP_SAVE_DIR, as);
+      await dl.saveAs(to);
+      return { name: dl.suggestedFilename(), path: to, failure: await dl.failure() };
+    };
     // Reached the way a driver reaches it: from the offers page, by its link.
     await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
     out.snapsPage = {};
@@ -3394,6 +3420,18 @@ const framed = (page) => page.waitForFunction(
       const r = await fetch(href);
       return { status: r.status, type: r.headers.get('Content-Type') };
     }, one.href) : null;
+    // Two ticked, and a note typed on a third and not yet kept — all before
+    // the press below, whose answer draws the list again.
+    out.snapsPage.barBefore = await bar();
+    await page.check(art(WHOLE) + ' .pick input', { timeout: 4000 }).catch(() => {});
+    await page.check(art(SHORT) + ' .pick input', { timeout: 4000 }).catch(() => {});
+    out.snapsPage.barChosen = await bar();
+    await page.fill(art(COLD) + ' .noteform input', 'waiting for offers', { timeout: 4000 })
+      .catch(() => {});
+    out.snapsPage.noteMax = await page.evaluate(() => fetch('/api/snaps').then((r) => r.json())
+      .then((j) => j.noteMax, () => null));
+    out.snapsPage.maxLength = await page.evaluate(
+      (s) => (document.querySelector(s) || {}).maxLength, art(WHOLE) + ' .noteform input');
     const answered = page.waitForResponse((r) => r.url().endsWith('/api/snap'), { timeout: 15000 })
       .then((r) => r.json(), () => null);
     // The press is held on its way to the rig until the page has been pressed
@@ -3432,8 +3470,108 @@ const framed = (page) => page.waitForFunction(
       text: document.getElementById('snapSaid').textContent,
       shown: !document.getElementById('snapSaid').hidden }));
     out.snapsPage.after = await shelf();
+    // What the redraw kept: the two ticks, and the note typed and not kept.
+    out.snapsPage.barAfter = await bar();
+    out.snapsPage.ticksAfter = await page.evaluate(() =>
+      [].slice.call(document.querySelectorAll('#shelf .snap'))
+        .filter((a) => a.querySelector('.pick input').checked)
+        .map((a) => a.getAttribute('data-name')));
+    out.snapsPage.draftAfter = await page.inputValue(art(COLD) + ' .noteform input',
+                                                     { timeout: 4000 }).catch(() => null);
+    // A note kept, and one the rig refuses: longer than the box allows,
+    // which only a page that skips the box can send, so the page's answer to
+    // a refusal is measured on the one refusal a phone cannot produce.
+    await page.fill(art(WHOLE) + ' .noteform input', '  trip planner ', { timeout: 4000 })
+      .catch(() => {});
+    await page.click(art(WHOLE) + ' .noteform button', { timeout: 4000 }).catch(() => {});
+    await page.waitForFunction((s) => !!(document.querySelector(s) || {}).textContent,
+                               art(WHOLE) + ' .noteSaid', { timeout: 8000 }).catch(() => {});
+    const noteState = (n) => page.evaluate((s) => {
+      const a = document.querySelector(s);
+      if (!a) return null;
+      const said = a.querySelector('.noteSaid');
+      return { heading: a.querySelector('h2 .noted').textContent,
+               value: a.querySelector('.noteform input').value,
+               said: said.textContent, failed: said.classList.contains('failed') };
+    }, art(n));
+    out.snapsPage.noted = await noteState(WHOLE);
+    // ...and the snap's own snap.json, as the rig serves it, before the note
+    // is taken off again below.
+    out.snapsPage.notedOnRig = await page.evaluate((u) => fetch(u, { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => j.note, () => null), '/api/snaps/' + WHOLE + '/snap.json');
+    await page.evaluate((s) => {
+      const i = document.querySelector(s);
+      if (i) i.value = 'x'.repeat(i.maxLength + 1);
+    }, art(SHORT) + ' .noteform input');
+    await page.click(art(SHORT) + ' .noteform button', { timeout: 4000 }).catch(() => {});
+    await page.waitForFunction((s) => !!(document.querySelector(s) || {}).textContent,
+                               art(SHORT) + ' .noteSaid', { timeout: 8000 }).catch(() => {});
+    out.snapsPage.refused = await noteState(SHORT);
+    // One snap as one file, its note now among what it holds, and the two
+    // ticked as one.
+    out.snapsPage.oneFile = await save(art(WHOLE) + ' .pick a.one', 'one-snap.html')
+      .catch((e) => ({ error: String(e).slice(0, 200) }));
+    out.snapsPage.chosenFile = await save('#bundleChosen', 'two-snaps.html')
+      .catch((e) => ({ error: String(e).slice(0, 200) }));
+    // ...and the note's other answers: taken off, a rig that does not answer,
+    // and one that answers with something that is not its own reply.
+    const submit = async (n, value) => {
+      await page.evaluate((a) => {
+        const i = document.querySelector(a[0]);
+        if (i) i.value = a[1];
+        const s = document.querySelector(a[2]);
+        if (s) s.textContent = '';
+      }, [art(n) + ' .noteform input', value, art(n) + ' .noteSaid']);
+      await page.click(art(n) + ' .noteform button', { timeout: 4000 }).catch(() => {});
+      await page.waitForFunction((s) => !!(document.querySelector(s) || {}).textContent,
+                                 art(n) + ' .noteSaid', { timeout: 8000 }).catch(() => {});
+      return noteState(n);
+    };
+    // On the snap that was given a note typed before the press and kept over
+    // its redraw: kept now, then taken off.
+    out.snapsPage.keptDraft = await submit(COLD, 'waiting for offers');
+    out.snapsPage.cleared = await submit(COLD, '   ');
+    await page.route('**/api/snap/note', (route) => route.abort());
+    out.snapsPage.unanswered = await submit(SHORT, 'offer card');
+    await page.unroute('**/api/snap/note');
+    await page.route('**/api/snap/note', (route) => route.fulfill({
+      status: 502, contentType: 'text/html', body: '<h1>Bad gateway</h1>' }));
+    out.snapsPage.notJson = await submit(SHORT, 'offer card');
+    await page.unroute('**/api/snap/note');
     await page.close();
     await ctx.close();
+    // The one-snap file opened the way it is opened after it has been handed
+    // on: off the disk, on a phone, with no network at all.
+    if (out.snapsPage.oneFile && out.snapsPage.oneFile.path) {
+      const off = await browser.newContext({ viewport: { width: 390, height: 844 },
+                                             deviceScaleFactor: 1, offline: true });
+      const asked = [];
+      off.on('request', (r) => asked.push(r.url().slice(0, 80)));
+      const pg = await off.newPage();
+      await pg.goto('file://' + out.snapsPage.oneFile.path, { waitUntil: 'load' }).catch(() => {});
+      out.snapsPage.offline = await pg.evaluate(async () => {
+        const imgs = [].slice.call(document.images);
+        await Promise.all(imgs.map((i) => i.decode().catch(() => {})));
+        const bytes = (href) => {
+          const bin = atob(href.slice(href.indexOf(',') + 1));
+          return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+        };
+        const d = document.documentElement;
+        return {
+          title: document.title,
+          pics: imgs.map((i) => ({ alt: i.alt, loaded: i.naturalWidth > 0 })),
+          records: [].slice.call(document.querySelectorAll('details')).map((x) => ({
+            file: x.querySelector('summary').textContent.split(' — ')[0],
+            text: x.querySelector('pre').textContent,
+            saved: bytes(x.querySelector('a').href),
+            as: x.querySelector('a').getAttribute('download') })),
+          scripts: document.scripts.length,
+          sideways: d.scrollWidth > d.clientWidth + 1,
+        };
+      }).catch((e) => ({ error: String(e).slice(0, 200) }));
+      out.snapsPage.offline.asked = asked.filter((u) => !/^(file|data):/.test(u));
+      await off.close();
+    }
   }
 
   // --- what the rig says about itself, on the connection row ---------------
@@ -3769,10 +3907,16 @@ try:
         if _whole:
             Image.new('RGB', (800, 480), (11, 15, 20)).save(os.path.join(_dir, 'panel.png'))
             # ...and what the scanner answers into a folder: the crop it last
-            # read, greyscale as the reader has it, and its account of it.
+            # read, greyscale as the reader has it, and its account of it —
+            # here beginning with a line break, which an HTML parser drops
+            # straight after <pre>, and carrying markup, which is what
+            # tesseract can make of whatever the camera saw: the two things a
+            # bundle of this snap has to show exactly, in a real browser.
             Image.new('L', (440, 560), 200).save(os.path.join(_dir, 'reader.jpg'), quality=72)
-            with open(os.path.join(_dir, 'reader.json'), 'w') as _fh:
-                json.dump({'v': 1, 'read': None, 'noCrop': 'no read yet'}, _fh)
+            with open(os.path.join(_dir, 'reader.json'), 'w', newline='') as _fh:
+                _fh.write('\n' + json.dumps({'v': 1, 'read': None, 'noCrop': 'no read yet',
+                                             'text': '</script><!-- <b>Pverel</b> & "x"'},
+                                            indent=2) + '\n')
         Image.new('RGB', (480, 1040), (238, 240, 244)).save(
             os.path.join(_dir, 'camera.jpg'), quality=60)
         with open(os.path.join(_dir, 'status.json'), 'w') as _fh:
@@ -3804,7 +3948,9 @@ try:
                  PW_EXES=json.dumps([
                      os.environ.get('CHROMIUM', ''),
                      '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-                 ])),
+                 ]),
+                 # Where 📷 Snaps' downloads are kept, for the checks to read.
+                 SNAP_SAVE_DIR=work),
         capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -5754,6 +5900,115 @@ try:
        '%s: %s' % (_sreply.get('name'), _sreply.get('said')))
     eq('...and the list then has the new one at the top',
        ((sp.get('after') or [{}])[0] or {}).get('when'), sp.get('freshWhen'))
+
+    # --- 📷 Snaps: a snap as one file, several as one, and a note on each ----
+    from urllib.parse import parse_qs, urlparse
+    _WHOLE, _SHORT, _COLD = '2026-01-02_09-00-00', '2026-01-02_09-05-00', '1970-01-03_00-00-00'
+    _wdir = os.path.join(work, 'snaps', _WHOLE)
+
+    def _asks(href):
+        """The snaps a bundle link names, in the order it names them."""
+        u = urlparse(href or '')
+        return (u.path, parse_qs(u.query).get('snap', []))
+
+    def _file_text(name):
+        with open(os.path.join(_wdir, name), encoding='utf-8', newline='') as fh:
+            return fh.read()
+
+    _after = sp.get('after') or []
+    _order = [s.get('name') for s in _after]
+    _wafter = ([s for s in _after if s.get('name') == _WHOLE] or [{}])[0]
+    _about = json.loads(urllib.request.urlopen(base + '/api/snaps', timeout=5).read()
+                        .decode('utf-8')).get('about') or {}
+    eq('each picture is described in the rig\'s own words for it',
+       [p.get('alt') for p in _wafter.get('pics') or []],
+       [_about.get(f) for f in ('panel.png', 'camera.jpg', 'reader.jpg')])
+    eq('each snap offers itself as one file',
+       [_asks(p.get('href')) for p in _wafter.get('picks') or [] if p.get('text') == '⤓ one file'],
+       [('/api/snaps/bundle', [_WHOLE])])
+    # A series is its first snap and every one listed above it: one tap on
+    # the first, with everything newer in the one file.
+    _sat = _order.index(_SHORT) if _SHORT in _order else -1
+    _sruns = [p for p in (([s for s in _after if s.get('name') == _SHORT] or [{}])[0]
+                          .get('picks') or []) if p.get('text', '').startswith('⤓ with the ')]
+    eq('...and with every one newer than it, counted, as the series it starts',
+       [(p.get('text'), _asks(p.get('href'))) for p in _sruns],
+       [('⤓ with the %d newer' % _sat, ('/api/snaps/bundle', [_SHORT] + _order[:_sat]))])
+    eq('...and the newest offers no series, there being nothing newer',
+       [p.get('text') for p in (_after[0] if _after else {}).get('picks') or []],
+       ['⤓ one file'])
+    eq('...and the one below it offers itself with the newer one',
+       [(p.get('text'), _asks(p.get('href'))) for p in (_after[1] if len(_after) > 1 else {})
+        .get('picks') or [] if p.get('text') != '⤓ one file'],
+       [('⤓ with the newer one', ('/api/snaps/bundle', _order[1:2] + _order[:1]))])
+    eq('nothing ticked, the bar has no link to the ticked ones',
+       ((sp.get('barBefore') or {}).get('hidden'), (sp.get('barBefore') or {}).get('drawn')),
+       (True, False))
+    eq('...two ticked, it offers them as one file, counted',
+       ((sp.get('barChosen') or {}).get('drawn'), (sp.get('barChosen') or {}).get('text'),
+        _asks((sp.get('barChosen') or {}).get('href'))),
+       (True, '⤓ 2 chosen', ('/api/snaps/bundle', [_SHORT, _WHOLE])))
+    eq('...and the list drawn again after a press keeps them ticked, and the bar\'s link with them',
+       (sorted(sp.get('ticksAfter') or []), (sp.get('barAfter') or {}).get('text'),
+        _asks((sp.get('barAfter') or {}).get('href'))),
+       (sorted([_SHORT, _WHOLE]), '⤓ 2 chosen', ('/api/snaps/bundle', [_SHORT, _WHOLE])))
+    eq('...and keeps a note typed and not yet kept',
+       sp.get('draftAfter'), 'waiting for offers')
+
+    _one = sp.get('oneFile') or {}
+    eq('⤓ one file downloads the snap as one .html, named for it',
+       (_one.get('name'), _one.get('failure'), _one.get('error')), (_WHOLE + '.html', None, None))
+    _two = sp.get('chosenFile') or {}
+    _twotext = open(_two['path'], encoding='utf-8').read() if _two.get('path') else ''
+    eq('...and the two ticked download as one, named for the first and last, oldest first',
+       (_two.get('name'), re.findall(r'<section id="([^"]+)">', _twotext)),
+       ('%s_to_%s.html' % (_WHOLE, _SHORT), [_WHOLE, _SHORT]))
+    _off = sp.get('offline') or {}
+    eq('the one-snap file opens off the disk with no network, asking nothing of it, with no script',
+       (_off.get('error'), _off.get('asked'), _off.get('scripts')), (None, [], 0))
+    eq('...titled with the snap and the note it was given', _off.get('title'),
+       '📷 Snap %s — trip planner' % _WHOLE)
+    eq('...every picture in it drawn',
+       [(p.get('alt'), p.get('loaded')) for p in _off.get('pics') or []],
+       [(_about.get(f), True) for f in ('panel.png', 'camera.jpg', 'reader.jpg')])
+    eq('...each record reading, in the browser, exactly as the file on the rig — a leading line '
+       'break and markup in it included',
+       [(r.get('file'), r.get('text') == _file_text(r.get('file'))) for r in _off.get('records') or []],
+       [('status.json', True), ('snap.json', True), ('reader.json', True)])
+    eq('...and each saving as the file itself, under the snap\'s name',
+       [(r.get('file'), r.get('saved') == _file_text(r.get('file')), r.get('as'))
+        for r in _off.get('records') or []],
+       [(f, True, '%s-%s' % (_WHOLE, f)) for f in ('status.json', 'snap.json', 'reader.json')])
+    no_('...and fitting a phone\'s width', _off.get('sideways', True))
+
+    eq('the note box holds what the rig will keep, and no more',
+       (sp.get('maxLength'), sp.get('noteMax') is not None), (sp.get('noteMax'), True))
+    _noted = sp.get('noted') or {}
+    eq('a note saved from 📷 Snaps is shown as the rig kept it, trimmed, beside the snap\'s time',
+       (_noted.get('heading'), _noted.get('value'), _noted.get('said'), _noted.get('failed')),
+       ('— trip planner ', 'trip planner', 'Noted.', False))
+    eq('...and is in that snap\'s snap.json on the rig', sp.get('notedOnRig'), 'trip planner')
+    _refused = sp.get('refused') or {}
+    eq('a note the rig refuses says why, in red, and nothing beside the snap\'s time changes',
+       (_refused.get('said'), _refused.get('failed'), _refused.get('heading')),
+       ('Not kept: a note is at most %s characters, and this one is %s'
+        % (sp.get('noteMax'), (sp.get('noteMax') or 0) + 1), True, ''))
+    eq('the note typed before the press, kept over its redraw, is kept when saved',
+       ((sp.get('keptDraft') or {}).get('said'), (sp.get('keptDraft') or {}).get('heading')),
+       ('Noted.', '— waiting for offers '))
+    _cleared = sp.get('cleared') or {}
+    eq('...and a blank note then takes it off, beside the time',
+       (_cleared.get('said'), _cleared.get('heading'), _cleared.get('failed')),
+       ('Note taken off.', '', False))
+    with open(os.path.join(work, 'snaps', _COLD, 'snap.json'), encoding='utf-8') as _fh:
+        no_('...and on the rig, in that snap\'s snap.json', 'note' in json.load(_fh))
+    eq('a rig that does not answer a note is said as that, not as a note kept or refused',
+       ((sp.get('unanswered') or {}).get('said'), (sp.get('unanswered') or {}).get('failed'),
+        (sp.get('unanswered') or {}).get('heading')),
+       ('No answer from the rig, so whether the note was kept is not known.', True, ''))
+    eq('...and an answer that is not the rig\'s own reply, as refused',
+       ((sp.get('notJson') or {}).get('said'), (sp.get('notJson') or {}).get('failed')),
+       ('Not kept: the rig refused it', True))
 
     # --- the Trip Planner's stops, after a ⌖ press --------------------------
     #

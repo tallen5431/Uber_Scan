@@ -2975,7 +2975,7 @@ try:
                         ('snap.json', _size(os.path.join(_dir, 'snap.json')))]))])
     eq('...and says where they are on the rig', _list.get('where'), _snaps)
     # The default, with nothing set: what snaps.html tells the driver it keeps.
-    eq('...and keeps the newest 40 unless told otherwise', _list.get('keep'), 40)
+    eq('...and keeps the newest 100 unless told otherwise', _list.get('keep'), 100)
     _age = (_list['snaps'] or [{}])[0].get('ageMs')
     _since = (time.time() - _before) * 1000
     ok_('...and how long ago it was taken, by the rig\'s clock (%r ms, %d since the press)'
@@ -4012,6 +4012,384 @@ try:
        ([], []))
     eq('...and no snap row in the journal, there being no folder for one to name',
        _snaprow(_snaps), {})
+finally:
+    stop(_p)
+
+# --- 📷 a snap as one file, several as one, and a note on each ----------------
+#
+# A snap is six files, and the driver hands a series of them to their
+# assistant. GET /api/snaps/bundle?snap=<folder>&snap=… makes them one .html,
+# built when asked: each picture inline as a data: URI, each record as its text
+# and again as the file itself behind a link that saves it. Read here as text,
+# which is how an assistant reads it; rpi/test_dashboard.py opens one in a
+# browser with the network off.
+#
+# The reader's two files are put in the first snap by hand — no scanner runs
+# here — and its reader.json is the hardest text a record can hold for this:
+# a line break before anything else, which an HTML parser drops after <pre>,
+# and markup — `</script>`, `<!--`, a tag, an ampersand and quotes — which is
+# what tesseract makes of whatever the camera saw.
+import base64                                                 # noqa: E402
+import html as _html                                          # noqa: E402
+
+
+def _bundle(url, *names, **kw):
+    """Status, headers and text of a bundle, the query sent exactly as given."""
+    q = kw.get('raw')
+    if q is None:
+        q = '&'.join('snap=' + urllib.parse.quote(n, safe='') for n in names)
+    u = urllib.parse.urlparse(url)
+    c = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+    try:
+        c.request('GET', '/api/snaps/bundle' + ('?' + q if q else ''))
+        r = c.getresponse()
+        body = r.read()
+    except Exception as e:
+        # A server that dropped the connection part way — a result, so the
+        # check that names it fails, rather than the suite (see _snap).
+        return None, {}, repr(e)
+    finally:
+        c.close()
+    return r.status, dict(r.getheaders()), body.decode('utf-8', 'replace')
+
+
+def _pictures(text):
+    """(file, bytes) for each picture in a bundle, in order."""
+    return [(m.group(2).split(' — ')[0], base64.b64decode(m.group(1))) for m in re.finditer(
+        r'<img src="data:image/[a-z]+;base64,([A-Za-z0-9+/=]*)" alt="[^"]*">'
+        r'<figcaption>([^<]*)</figcaption>', text)]
+
+
+def _records(text):
+    """(file, text shown, bytes saved, name saved under) for each record, in order."""
+    return [(m.group(1).split(' — ')[0], _html.unescape(m.group(2)), base64.b64decode(m.group(4)),
+             m.group(3)) for m in re.finditer(
+        r'<details><summary>([^<]*)</summary>\n<pre>\n(.*?)</pre>\n<a download="([^"]+)" '
+        r'href="data:application/json;base64,([A-Za-z0-9+/=]*)">', text, re.S)]
+
+
+def _raw(path):
+    with open(path, 'rb') as fh:
+        return fh.read()
+
+
+def _note(url, body, raw=None):
+    """POST /api/snap/note, with `raw` bytes in place of the JSON when given."""
+    req = urllib.request.Request(url + '/api/snap/note',
+                                 data=raw if raw is not None else json.dumps(body).encode('utf-8'),
+                                 headers={'Content-Type': 'application/json'}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read().decode('utf-8') or '{}')
+
+
+_p, _u, _snaps, _log = _snapper('bundle', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim']})
+try:
+    _a, _b, _c = sorted((_snap(_u)[1].get('name') or '?') for _ in range(3))
+    _adir = os.path.join(_snaps, _a)
+    _reader_text = ('\n' + json.dumps({'v': 1, 'read': {
+        'text': '</script><!-- Jimmy John\'s & "Accept" <b>Pverel'}}, indent=2) + '\n')
+    with open(os.path.join(_adir, 'reader.json'), 'w', newline='') as _fh:
+        _fh.write(_reader_text)
+    shutil.copy(_frame, os.path.join(_adir, 'reader.jpg'))
+
+    def _tree(top):
+        """Every file under `top`, by its path, with its bytes for all but the log."""
+        return sorted((os.path.relpath(os.path.join(d, n), top),
+                       None if n == 'server.log' else _raw(os.path.join(d, n)))
+                      for d, _x, ns in os.walk(top) for n in ns)
+
+    _home_before = _tree(os.path.dirname(_snaps))
+    _st, _hd, _text = _bundle(_u, _a)
+    eq('a snap as one file is a download named for the snap, made fresh each time',
+       (_st, _hd.get('Content-Type'), _hd.get('Content-Disposition'), _hd.get('Cache-Control')),
+       (200, 'text/html; charset=utf-8', 'attachment; filename="%s.html"' % _a, 'no-store'))
+    eq('...and kept nowhere on the rig: not a file beside the journal or in a snap changed by it',
+       _tree(os.path.dirname(_snaps)) == _home_before, True)
+    eq('...holding its pictures inline, byte for byte, the rig\'s screen first',
+       [(f, b == _raw(os.path.join(_adir, f))) for f, b in _pictures(_text)],
+       [('panel.png', True), ('camera.jpg', True), ('reader.jpg', True)])
+    eq('...all three pictures before any record',
+       re.findall(r'<(?:figcaption|summary)>([a-z]+\.[a-z]+) — ', _text),
+       ['panel.png', 'camera.jpg', 'reader.jpg', 'status.json', 'snap.json', 'reader.json'])
+    _recs = _records(_text)
+    eq('...and each record shown as its text, exactly, a leading line break and markup '
+       'in it included',
+       [(f, shown == _raw(os.path.join(_adir, f)).decode('utf-8')) for f, shown, _s, _n in _recs],
+       [('status.json', True), ('snap.json', True), ('reader.json', True)])
+    eq('...and carried again as the file itself, byte for byte, saved under the snap\'s name',
+       [(f, saved == _raw(os.path.join(_adir, f)), name) for f, _t, saved, name in _recs],
+       [(f, True, '%s-%s' % (_a, f)) for f in ('status.json', 'snap.json', 'reader.json')])
+    # Markup in a record is text in the bundle. Written as it is, `<!--` would
+    # open a comment that swallows the rest of the file, and the <pre> above
+    # would read back the same here while a browser showed nothing after it.
+    eq('...the markup in a record written as text, so nothing in it opens an element',
+       ('<b>Pverel' in _text, '&lt;b&gt;Pverel' in _text, '<!-- Jimmy' in _text),
+       (False, True, False))
+    _refs = re.findall(r'\b(?:src|href)="([^"]*)"', _text)
+    eq('...reaching for nothing outside itself: no address, no script, no stylesheet',
+       ([r[:40] for r in _refs if not r.startswith(('data:', '#'))],
+        re.findall(r'<script|<link|<iframe|url\(|@import', _text, re.I)),
+       ([], []))
+    eq('...under the line the panel said for it', re.findall(r'<p class="said">([^<]*)</p>', _text),
+       ['saved'])
+
+    _st, _hd, _text = _bundle(_u, _c, _a, _b, _a)
+    eq('several snaps are one file, oldest first whatever order they were asked in, each once',
+       (_st, re.findall(r'<section id="([^"]+)">', _text)), (200, [_a, _b, _c]))
+    eq('...named for the first and the last',
+       _hd.get('Content-Disposition'), 'attachment; filename="%s_to_%s.html"' % (_a, _c))
+    eq('...with a list at the top that leads to each',
+       re.findall(r'<li><a href="#([^"]+)">', _text), [_a, _b, _c])
+
+    # --- what a bundle refuses ----------------------------------------------
+    _st, _hd, _text = _bundle(_u, raw='')
+    eq('a bundle that names no snap is refused, saying how to name one',
+       (_st, _text), (400, 'name a snap to bundle: ?snap=<folder>\n'))
+    _st, _hd, _text = _bundle(_u, _a, 'not-a-snap')
+    eq('a bundle naming one snap the rig does not have is refused whole, saying which',
+       (_st, _text), (404, 'no snap named "not-a-snap"\n'))
+    # The journal one directory up holds an offer, a folder in snaps/ made by
+    # hand holds a picture, and a folder named like a snap is a link out of
+    # snaps/ to one that holds a status: what a name in the query would be
+    # after. Each is refused before anything is read.
+    with open(os.path.join(os.path.dirname(_snaps), 'journal.jsonl'), 'ab') as _fh:
+        _fh.write(b'{"v": 1, "id": "secret-offer"}\n')
+    os.mkdir(os.path.join(_snaps, 'by-hand'))
+    shutil.copy(_pngfile, os.path.join(_snaps, 'by-hand', 'panel.png'))
+    _outb = os.path.join(_pdir, 'outside-bundle')
+    os.makedirs(_outb)
+    with open(os.path.join(_outb, 'status.json'), 'w') as _fh:
+        _fh.write('{"secret-offer": true}')
+    os.symlink(_outb, os.path.join(_snaps, '2026-01-02_00-00-00'))
+    for _q in ('snap=..%2Fjournal.jsonl', 'snap=..', 'snap=.', 'snap=', 'snap=%2Fetc%2Fpasswd',
+               'snap=%s%%2F..%%2F..%%2Fjournal.jsonl' % _a, 'snap=%s%%2Fpanel.png' % _a,
+               'snap=%2e%2e%2fjournal.jsonl', 'snap=by-hand', 'snap=2026-01-02_00-00-00',
+               'snap[]=' + _a):
+        _st, _hd, _text = _bundle(_u, raw=_q)
+        _inside = b''.join(b for _f, b in _pictures(_text))
+        ok_('a bundle of %s is refused (%r)' % (_q, _st),
+            _st in (400, 404) and 'secret-offer' not in _text and b'secret-offer' not in _inside
+            and 'root:' not in _text)
+    # A name that is right and a file in it that is a link: panel.png in a
+    # real snap replaced by a link to the journal. Not a snap's file, by the
+    # list's rule, so not in the bundle.
+    os.remove(os.path.join(_snaps, _b, 'panel.png'))
+    os.symlink(os.path.join(os.path.dirname(_snaps), 'journal.jsonl'),
+               os.path.join(_snaps, _b, 'panel.png'))
+    _st, _hd, _text = _bundle(_u, _b)
+    eq('a panel.png that is a link out of the snaps folder is not put in a bundle',
+       (_st, [f for f, _x in _pictures(_text)],
+        any(b'secret-offer' in x for _f, _t, x, _n in _records(_text))),
+       (200, ['camera.jpg'], False))
+
+    # --- a note ---------------------------------------------------------------
+    # The limit as the list states it to snaps.html, whose note box is held to
+    # it: one figure, read from where the page reads it.
+    _max = get(_u, '/api/snaps').get('noteMax') or 0
+    ok_('the list says how long a note may be, room for a few words (%r)' % _max, _max >= 20)
+    _rec0 = _json_in(_adir, 'snap.json')
+    _st, _rep = _note(_u, {'snap': _a, 'note': '  trip planner  '})
+    eq('a note is kept, trimmed, and said back', (_st, _rep),
+       (200, {'ok': True, 'snap': _a, 'note': 'trip planner'}))
+    _rec1 = _json_in(_adir, 'snap.json') or {}
+    eq('...in the snap\'s own snap.json, with the rest of it as it was',
+       (_rec1.get('note'), dict((k, v) for k, v in _rec1.items() if k != 'note')),
+       ('trip planner', _rec0))
+    eq('...leaving no temporary beside it', [n for n in os.listdir(_adir) if '.part' in n], [])
+    eq('...listed with its snap', _listed(_u, _a).get('note'), 'trip planner')
+    _st, _hd, _text = _bundle(_u, _a)
+    eq('...and in a bundle of it, in the title and beside the snap\'s name',
+       ('<title>📷 Snap %s — trip planner</title>' % _a in _text,
+        '<h2>%s <span class="note">— trip planner</span></h2>' % _a in _text), (True, True))
+    _note(_u, {'snap': _b, 'note': '<b>after</b> accept & go'})
+    _st, _hd, _text = _bundle(_u, _a, _b)
+    eq('...a note with markup in it shown as text: beside its snap, in the list at the top, '
+       'and in its snap.json',
+       (_text.count('&lt;b&gt;after&lt;/b&gt; accept &amp; go'), '<b>after' in _text), (3, False))
+    eq('the longest note there is room for is kept',
+       _note(_u, {'snap': _a, 'note': 'x' * _max})[0], 200)
+    _held = _raw(os.path.join(_adir, 'snap.json'))
+    _st, _rep = _note(_u, {'snap': _a, 'note': 'x' * (_max + 1)})
+    eq('...and one character more is refused, saying the limit, with the record left as it was',
+       (_st, _rep.get('error'), _raw(os.path.join(_adir, 'snap.json')) == _held),
+       (400, 'a note is at most %d characters, and this one is %d' % (_max, _max + 1), True))
+    for _bad, _what in ((5, 'a number'), (None, 'null'), ('after\naccept', 'two lines'),
+                        ('tab\there', 'a tab in it')):
+        _st, _rep = _note(_u, {'snap': _a, 'note': _bad})
+        eq('a note that is %s is refused, with the record left as it was' % _what,
+           (_st, _raw(os.path.join(_adir, 'snap.json')) == _held), (400, True))
+    eq('...and so is a press with no note in it at all',
+       _note(_u, {'snap': _a})[0], 400)
+    eq('...and a body that is not JSON', _note(_u, None, raw=b'trip planner'), (400, {
+       'ok': False, 'error': 'bad body'}))
+    _st, _rep = _note(_u, {'snap': _a, 'note': '   '})
+    eq('a blank note takes the note off',
+       (_st, _rep.get('note'), 'note' in (_json_in(_adir, 'snap.json') or {})), (200, None, False))
+    # Names that are not snaps: nothing is written anywhere for any of them.
+    _shelf_before = sorted(os.listdir(_snaps))
+    for _name in ('nope', '../journal.jsonl', '..', 'by-hand', '2026-01-02_00-00-00',
+                  _a + '/..', '', None, 5, [_a]):
+        _st, _rep = _note(_u, {'snap': _name, 'note': 'x'})
+        eq('a note on %r is refused as no snap' % (_name,), (_st, _rep.get('error')),
+           (404, 'no snap by that name'))
+    eq('...and nothing is written for any of them, in snaps/ or out of it',
+       (sorted(os.listdir(_snaps)), os.listdir(os.path.join(_snaps, 'by-hand')),
+        os.listdir(_outb)),
+       (_shelf_before, ['panel.png'], ['status.json']))
+    # Folders the list shows but that have no record it can read: none, a
+    # torn one, and one that is a link to a record somewhere else.
+    _shelve(_snaps, '2026-01-06_00-00-00')
+    _st, _rep = _note(_u, {'snap': '2026-01-06_00-00-00', 'note': 'x'})
+    eq('a note on a snap with no snap.json is refused, and none is made for it',
+       (_st, _rep.get('error'), os.path.exists(os.path.join(_snaps, '2026-01-06_00-00-00',
+                                                            'snap.json'))),
+       (409, 'this snap has no snap.json to keep a note in', False))
+    _shelve(_snaps, '2026-01-07_00-00-00', {'v': 1, 'at': 1, 'said': 'saved', 'contents': [],
+                                            'notes': []}, torn=True)
+    _torn_text = _raw(os.path.join(_snaps, '2026-01-07_00-00-00', 'snap.json'))
+    _st, _rep = _note(_u, {'snap': '2026-01-07_00-00-00', 'note': 'x'})
+    eq('a note on a snap whose snap.json is torn is refused, and the file left as it was',
+       (_st, _rep.get('error'), _raw(os.path.join(_snaps, '2026-01-07_00-00-00', 'snap.json'))),
+       (409, 'this snap\'s snap.json cannot be read, so there is nowhere to keep a note',
+        _torn_text))
+    _shelve(_snaps, '2026-01-08_00-00-00')
+    _elsewhere = os.path.join(_pdir, 'a-record-elsewhere.json')
+    with open(_elsewhere, 'w') as _fh:
+        _fh.write('{"v": 1, "said": "saved", "contents": [], "notes": []}\n')
+    os.symlink(_elsewhere, os.path.join(_snaps, '2026-01-08_00-00-00', 'snap.json'))
+    _st, _rep = _note(_u, {'snap': '2026-01-08_00-00-00', 'note': 'x'})
+    eq('a note on a snap whose snap.json is a link is refused, and nothing read or written '
+       'through it',
+       (_st, os.path.islink(os.path.join(_snaps, '2026-01-08_00-00-00', 'snap.json')),
+        _raw(_elsewhere)),
+       (409, True, b'{"v": 1, "said": "saved", "contents": [], "notes": []}\n'))
+finally:
+    stop(_p)
+
+# ...and a file that cannot be read by the time its turn comes — a snap pruned
+# while the bundle was being built, or a card going bad — is said in its place.
+# The reply has already gone out as 200 by then, so the file has to say it.
+# Staged the way the torn card is, by failing this server's own fs.readFile
+# for camera.jpg before server.js loads — and its fs.rename onto a snap.json,
+# which is the last step of keeping a note, for a note that cannot be kept.
+_unread = os.path.join(_pdir, 'unreadable.js')
+with open(_unread, 'w') as _fh:
+    _fh.write("var fs = require('fs');\nvar real = fs.readFile;\n"
+              "fs.readFile = function (p) {\n"
+              "  if (typeof p === 'string' && /camera\\.jpg$/.test(p)) {\n"
+              "    var cb = arguments[arguments.length - 1];\n"
+              "    var e = new Error('input/output error'); e.code = 'EIO';\n"
+              "    return setImmediate(cb, e);\n"
+              "  }\n"
+              "  return real.apply(fs, arguments);\n"
+              "};\n"
+              "var move = fs.rename;\n"
+              "fs.rename = function (from, to, cb) {\n"
+              "  if (!/snap\\.json$/.test(String(to))) return move.apply(fs, arguments);\n"
+              "  var e = new Error('input/output error'); e.code = 'EIO';\n"
+              "  return setImmediate(cb, e);\n"
+              "};\n"
+              # ...and a card that fills while a note's temporary is written,
+              # for the one note that says so: half of it written, then ENOSPC.
+              "var write = fs.writeFile;\n"
+              "fs.writeFile = function (p, data, cb) {\n"
+              "  if (!/snap\\.json\\.\\d+\\.\\d+\\.part$/.test(String(p))\n"
+              "      || String(data).indexOf('card full') === -1) return write.apply(fs, arguments);\n"
+              "  var buf = Buffer.from(data);\n"
+              "  return write.call(fs, p, buf.subarray(0, buf.length >> 1), function () {\n"
+              "    var e = new Error('no space left on device'); e.code = 'ENOSPC';\n"
+              "    cb(e);\n"
+              "  });\n"
+              "};\n")
+_p, _u, _snaps, _log = _snapper('unbundled', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'],
+                                              'NODE_OPTIONS': '--require ' + _unread})
+try:
+    _n = _snap(_u)[1].get('name') or '?'
+    _st, _hd, _text = _bundle(_u, _n)
+    eq('a file that cannot be read when a bundle is made is said in its place, the rest kept',
+       (_st, re.findall(r'<p class="lost">([^<]*)</p>', _text),
+        [f for f, _x in _pictures(_text)], [f for f, _t, _s, _x in _records(_text)]),
+       (200, ['camera.jpg — the camera\'s last picture: could not be read when this file '
+              'was made (EIO)'], ['panel.png'], ['status.json', 'snap.json']))
+    _ndir = os.path.join(_snaps, _n)
+    _held = _raw(os.path.join(_ndir, 'snap.json'))
+    _st, _rep = _note(_u, {'snap': _n, 'note': 'after accept'})
+    eq('a note that cannot be put in place is said as that, leaving snap.json as it was and '
+       'no temporary beside it',
+       (_st, _rep.get('error'), _raw(os.path.join(_ndir, 'snap.json')) == _held,
+        [x for x in os.listdir(_ndir) if '.part' in x]),
+       (500, 'could not keep the note: EIO', True, []))
+    _st, _rep = _note(_u, {'snap': _n, 'note': 'card full'})
+    eq('...and one whose temporary cannot be written, the same way, leaving no torn temporary',
+       (_st, _rep.get('error'), _raw(os.path.join(_ndir, 'snap.json')) == _held,
+        [x for x in os.listdir(_ndir) if '.part' in x]),
+       (500, 'could not keep the note: ENOSPC', True, []))
+finally:
+    stop(_p)
+
+# ...and a note on a snap still being kept: it has no snap.json yet and will
+# in a moment, which is not the same as a folder that has none. A screenshot
+# that takes a second holds the press open while the note is sent.
+_p, _u, _snaps, _log = _snapper('notefill', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['slow']})
+try:
+    _pressing = {}
+    _pt = threading.Thread(target=lambda: _pressing.update(reply=_snap(_u)))
+    _pt.start()
+    _filling = None
+    for _ in range(200):
+        _filling = ([s['name'] for s in get(_u, '/api/snaps')['snaps']] or [None])[0]
+        if _filling:
+            break
+        time.sleep(0.01)
+    _st, _rep = _note(_u, {'snap': _filling, 'note': 'offer card'})
+    _pt.join()
+    eq('a note on a snap still being kept is refused, saying so',
+       (_st, _rep.get('error')), (409, 'this snap is still being kept; try again in a moment'))
+    _st, _rep = _note(_u, {'snap': _filling, 'note': 'offer card'})
+    eq('...and kept once it has been',
+       (_st, (_json_in(os.path.join(_snaps, _filling or '?'), 'snap.json') or {}).get('note')),
+       (200, 'offer card'))
+finally:
+    stop(_p)
+
+# ...and a bundle a phone takes slowly, which over the VPN on a phone signal is
+# every bundle: the next snap is read once the one before it has gone out, and
+# not before. Seen from outside as what a snap removed in the meantime comes
+# out as. With the server's "full" ignored, the second snap had been read in
+# behind the first, into the Pi's memory, inside the second the phone sat on
+# 64kB of it — and came out whole although it was removed after that second.
+# The first snap's picture is 16MB, more than the buffers between a server and
+# a client that has stopped reading can take (21MB once it is base64).
+_p, _u, _snaps, _log = _snapper('slowphone', {'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim']})
+try:
+    _first, _second = sorted((_snap(_u)[1].get('name') or '?') for _ in range(2))
+    with open(os.path.join(_snaps, _first, 'panel.png'), 'wb') as _fh:
+        _fh.write(os.urandom(16 * 1000 * 1000))
+    _held = [f['file'] for f in _listed(_u, _second).get('files') or []]
+    _c = http.client.HTTPConnection('127.0.0.1', urllib.parse.urlparse(_u).port, timeout=30)
+    try:
+        _c.request('GET', '/api/snaps/bundle?snap=%s&snap=%s' % (_first, _second))
+        _r = _c.getresponse()
+        _got = _r.read(65536)
+        time.sleep(1.0)
+        shutil.rmtree(os.path.join(_snaps, _second))
+        _got += _r.read()
+    except Exception as e:
+        _got = repr(e).encode('utf-8')
+    finally:
+        _c.close()
+    _text = _got.decode('utf-8', 'replace')
+    eq('a bundle taken slowly reads the next snap only once the one before it has gone out, '
+       'so one removed meanwhile is said in its place, file by file',
+       (re.findall(r'<section id="([^"]+)">', _text),
+        re.findall(r'<p class="lost">([a-z]+\.[a-z]+) — [^<]*\((\w+)\)</p>', _text)),
+       ([_first, _second], [(f, 'ENOENT') for f in ('panel.png', 'camera.jpg', 'reader.jpg',
+                                                     'status.json', 'snap.json', 'reader.json')
+                            if f in _held]))
+    ok_('...a snap with something in it to lose (%r)' % (_held,), len(_held) >= 3)
 finally:
     stop(_p)
 

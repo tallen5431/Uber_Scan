@@ -44,6 +44,32 @@
              border: 1px solid var(--line); border-radius: 8px; color: var(--text);
              text-decoration: none; font-size: 13px; font-variant-numeric: tabular-nums; }
   .files a small { font-size: inherit; margin-left: 6px; color: var(--muted); }
+  /* What to do with a snap as a whole: choose it for one file of several, save
+     it as one file, or save it with every newer one — the series it starts,
+     when it is the first of a series just taken. The same 44px as the file
+     links, for the same thumb. */
+  .pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+  .pick label, .pick a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+                         padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px;
+                         color: var(--text); text-decoration: none; font-size: 13px; }
+  .pick input { width: 20px; height: 20px; margin: 0; }
+  /* The note: a label for the snap, typed here so 📷 on the rig stays one
+     press. It is shown beside the snap's time, as the server kept it —
+     broken anywhere it has to be, because the rig keeps any 80 characters,
+     and 80 with no space in them pushed this page sideways on every panel
+     rpi/test_layout.py measures, the 1280px one included. */
+  .snap h2 .noted { color: var(--text); font-weight: 700; overflow-wrap: anywhere; }
+  .noteform { display: flex; gap: 6px; margin: 8px 0 0; }
+  .noteform input { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 4px 10px;
+                    font: inherit; font-size: 16px; color: var(--text); background: var(--bg);
+                    border: 1px solid var(--line); border-radius: 8px; }
+  .noteform button { flex: none; min-height: 44px; padding: 4px 12px; font: inherit;
+                     font-size: 13px; font-weight: 700; color: var(--text);
+                     background: var(--panel); border: 1px solid var(--line);
+                     border-radius: 8px; cursor: pointer; }
+  .noteSaid { margin: 4px 0 0; font-size: 13px; }
+  .noteSaid:empty { display: none; }
+  .noteSaid.failed { color: var(--no); }
   #empty { margin: 0; font-size: 14px; line-height: 1.5; }
   #empty[hidden] { display: none; }
   /* The same press as 📷 Snap on the driving screen, for the screens that do
@@ -66,12 +92,14 @@
      to 15px there and 12px on the 3.5" hat. */
   @media (orientation: landscape) {
     h1 { font-size: 22px; }
-    #lead, .said, .why, .files a, #empty, #snapSaid { font-size: 15px; }
+    #lead, .said, .why, .files a, #empty, #snapSaid, .pick label, .pick a,
+    .noteform button, .noteSaid { font-size: 15px; }
     #lead code, .why code { font-size: 15px; }
     .snap h2 { font-size: 18px; }
   }
   @media (orientation: landscape) and (max-height: 380px) {
-    #lead, .said, .why, .files a, #empty, #snapSaid, #lead code, .why code { font-size: 12px; }
+    #lead, .said, .why, .files a, #empty, #snapSaid, #lead code, .why code,
+    .pick label, .pick a, .noteform button, .noteSaid { font-size: 12px; }
     #snapNow { min-height: 44px; font-size: 13px; }
     .snap h2 { font-size: 14px; }
     .pics img { height: 110px; }
@@ -89,6 +117,10 @@
   <nav class="bottombar">
     <a class="linkbtn" href="live.html">◂ Live</a>
     <a class="linkbtn" href="journal.html">▤ Offers</a>
+    <!-- The snaps ticked below, as one file, oldest first. Here rather than at
+         the top so it is in reach wherever the list has been scrolled to, and
+         only drawn once something is ticked. -->
+    <a class="linkbtn" id="bundleChosen" hidden>⤓</a>
   </nav>
 </main>
 
@@ -101,14 +133,26 @@
   var shelf = document.getElementById('shelf');
   var snapNow = document.getElementById('snapNow');
   var snapSaid = document.getElementById('snapSaid');
+  var bundleChosen = document.getElementById('bundleChosen');
 
   // The same deadline the driving screen puts on every request, for the same
   // reason: a connection that opens and never answers would otherwise leave
   // "Asking the rig…" on this page for as long as it is open.
   var ASK_MS = 20000;
 
-  function ask(url, method) {
+  // The snaps ticked for one file, by folder name, and the names on the page,
+  // newest first. Kept apart from the boxes because a press from this page
+  // draws the list again, and ticks that went with the old boxes would be a
+  // choice undone with nothing saying so.
+  var chosen = {};
+  var shown = [];
+
+  function ask(url, method, body) {
     var opts = { cache: 'no-store', method: method || 'GET' };
+    if (body !== undefined) {
+      opts.body = JSON.stringify(body);
+      opts.headers = { 'Content-Type': 'application/json' };
+    }
     if (typeof AbortController !== 'function') return fetch(url, opts);
     var stop = new AbortController();
     var timer = setTimeout(function () { stop.abort(); }, ASK_MS);
@@ -161,9 +205,38 @@
     return '/api/snaps/' + encodeURIComponent(name) + '/' + encodeURIComponent(file);
   }
 
-  function draw(snap) {
+  // One file holding every snap named, which the rig builds when asked and
+  // sends as a download under the snap's own name — see sendSnapBundle in
+  // server.js. Oldest first whatever order they are named in here.
+  function bundleUrl(names) {
+    return '/api/snaps/bundle?' + names.map(function (n) {
+      return 'snap=' + encodeURIComponent(n);
+    }).join('&');
+  }
+
+  // The bar's link to the ticked ones, drawn only once one is ticked, and
+  // counting only the ones still on the page.
+  function showChosen() {
+    var names = shown.filter(function (n) { return chosen[n]; });
+    bundleChosen.hidden = !names.length;
+    bundleChosen.textContent = '⤓ ' + names.length + ' chosen';
+    bundleChosen.title = 'Save the ' + names.length + ' chosen as one file, oldest first';
+    bundleChosen.href = bundleUrl(names);
+  }
+
+  // `newer` is the names listed above this one, newest first; `rig` is the
+  // rig's answer to /api/snaps, which says which files are pictures, what
+  // each file is and how long a note may be; `draft` is a note typed into
+  // this snap's box and not yet kept, carried over a redraw.
+  function draw(snap, newer, rig, draft) {
+    var pictures = rig.pictures;
+    var about = rig.about;
     var box = el('article', 'snap');
+    box.setAttribute('data-name', snap.name);
     var head = el('h2', null, when(snap.name) + ' ');
+    // The note as the rig kept it, not as typed: set from the server's answer.
+    var noted = el('span', 'noted', snap.note ? '— ' + snap.note + ' ' : '');
+    head.appendChild(noted);
     head.appendChild(el('small', null, '· ' + ago(snap.ageMs)));
     box.appendChild(head);
     box.appendChild(el('p', 'said', snap.said || ''));
@@ -172,9 +245,9 @@
     // The screen, the phone as the camera saw it, and the crop the reader was
     // handed — the three pictures a misread is worked out from, side by side.
     // What the reader made of the crop is reader.json, in the links below.
-    var PICS = { 'panel.png': 'the rig\'s screen', 'camera.jpg': 'the camera\'s last picture',
-                 'reader.jpg': 'the crop the reader last read' };
-    Object.keys(PICS).forEach(function (file) {
+    // Which they are, in which order, and what each one is come from the rig,
+    // which lays out a bundle of the snap the same way.
+    pictures.forEach(function (file) {
       if (files.indexOf(file) === -1) return;
       var a = el('a');
       a.href = fileUrl(snap.name, file);
@@ -183,7 +256,7 @@
       var img = el('img');
       img.loading = 'lazy';
       img.src = fileUrl(snap.name, file);
-      img.alt = PICS[file];
+      img.alt = about[file];
       a.appendChild(img);
       pics.appendChild(a);
     });
@@ -203,6 +276,75 @@
       });
       box.appendChild(why);
     }
+    // The snap as one file, alone or with every one taken after it. Plain
+    // links: the rig answers with the file as a download, and anything it
+    // refuses — a snap removed since this list was drawn — opens as the
+    // rig's own sentence saying which, rather than as nothing.
+    var pick = el('div', 'pick');
+    var choose = el('label');
+    var tick = el('input');
+    tick.type = 'checkbox';
+    tick.checked = !!chosen[snap.name];
+    tick.addEventListener('change', function () {
+      if (tick.checked) chosen[snap.name] = true;
+      else delete chosen[snap.name];
+      showChosen();
+    });
+    choose.appendChild(tick);
+    choose.appendChild(document.createTextNode('choose'));
+    pick.appendChild(choose);
+    var one = el('a', 'one', '⤓ one file');
+    one.href = bundleUrl([snap.name]);
+    pick.appendChild(one);
+    // A series is taken in a row and listed newest first, so when it is
+    // shared soon after, it is its first snap and everything above it: one
+    // tap on that first snap, with no gap between snaps to guess at.
+    if (newer.length) {
+      var run = el('a', 'run', '⤓ with the ' + (newer.length === 1 ? 'newer one'
+                                                                     : newer.length + ' newer'));
+      run.href = bundleUrl([snap.name].concat(newer));
+      pick.appendChild(run);
+    }
+    box.appendChild(pick);
+    // The note, typed and kept on the rig in this snap's snap.json.
+    var form = el('form', 'noteform');
+    var input = el('input');
+    input.type = 'text';
+    input.maxLength = rig.noteMax;
+    input.placeholder = 'a note: waiting, offer, accepted, planner…';
+    input.setAttribute('aria-label', 'Note on this snap');
+    // The value the rig has, so a box that differs from it has a note typed
+    // and not yet kept — which is what a redraw carries over.
+    input.defaultValue = snap.note || '';
+    if (draft !== undefined) input.value = draft;
+    var keep = el('button', null, 'Save note');
+    keep.type = 'submit';
+    form.appendChild(input);
+    form.appendChild(keep);
+    box.appendChild(form);
+    var noteSaid = el('p', 'noteSaid');
+    box.appendChild(noteSaid);
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      ask('/api/snap/note', 'POST', { snap: snap.name, note: input.value }).then(function (r) {
+        return r.json().then(function (body) { return { ok: r.ok, body: body || {} }; },
+                             function () { return { ok: false, body: {} }; });
+      }).then(function (got) {
+        if (got.ok && got.body.ok) {
+          input.defaultValue = got.body.note || '';
+          input.value = got.body.note || '';
+          noted.textContent = got.body.note ? '— ' + got.body.note + ' ' : '';
+          return { text: got.body.note ? 'Noted.' : 'Note taken off.', failed: false };
+        }
+        return { text: 'Not kept: ' + (got.body.error || 'the rig refused it'), failed: true };
+      }, function () {
+        return { text: 'No answer from the rig, so whether the note was kept is not known.',
+                 failed: true };
+      }).then(function (said) {
+        noteSaid.textContent = said.text;
+        noteSaid.classList.toggle('failed', said.failed);
+      });
+    });
     var list = el('ul', 'files');
     (snap.files || []).forEach(function (f) {
       var li = el('li');
@@ -229,9 +371,18 @@
         + 'pressed, newest first. It keeps the newest ' + got.keep
         + ' and the oldest go first. On the rig they are in ';
       lead.appendChild(el('code', null, got.where || '?'));
-      lead.appendChild(document.createTextNode('.'));
+      lead.appendChild(document.createTextNode('. ⤓ saves a snap — or the ones chosen — '
+        + 'as one file to share, pictures and all.'));
+      // A note typed and not yet kept goes over the redraw with its snap.
+      var drafts = {};
+      [].forEach.call(shelf.querySelectorAll('.snap'), function (art) {
+        var input = art.querySelector('.noteform input');
+        if (input.value !== input.defaultValue) drafts[art.getAttribute('data-name')] = input.value;
+      });
       shelf.textContent = '';
       empty.hidden = true;
+      shown = snaps.map(function (s) { return s.name; });
+      showChosen();
       // An unreadable folder and an empty one are different answers.
       if (got.unreadable) {
         empty.textContent = 'The rig could not read its snaps folder (' + got.unreadable
@@ -245,7 +396,9 @@
         empty.hidden = false;
         return;
       }
-      snaps.forEach(function (s) { shelf.appendChild(draw(s)); });
+      snaps.forEach(function (s, i) {
+        shelf.appendChild(draw(s, shown.slice(0, i), got, drafts[s.name]));
+      });
     }).catch(function (e) {
       lead.textContent = 'Could not get the list from the rig: '
         + (e && e.name === 'AbortError' ? 'no answer in 20 seconds' : (e && e.message) || 'no answer')

@@ -3037,30 +3037,32 @@ function statusNow() {
  * to: a picture of a phone with a customer's address on it does not belong in
  * a public remote. None of it goes out through the static handler — rpi/ is
  * refused there by name — only through /api/snaps below, which takes a folder
- * and a file from two short lists and never a path.
+ * and a file from two short lists and never a path, and through the bundle
+ * beside it (sendSnapBundle), which takes folders from the first of those
+ * lists and files from the second.
  */
 var SNAPS_DIR = path.join(path.dirname(JOURNAL_PATH), 'snaps');
 
 /* How many to keep. The oldest go first, and the reply and the log name them.
  *
  * A count rather than a size, because a count is what a driver can hold in
- * their head — "the newest forty are there" — and the size of one is measured
- * rather than unknown. live.html at 800x480 with a reading in the card and
- * rpi/testcards.py's ride offer in the picture pane, sensor noise and all, is
- * 82kB as a PNG out of Chromium's encoder; that picture at the live view's
- * 480px and quality 60 is 23kB, and rpi/scan_pi.py puts the wide scene at
- * about 50kB; status.json with a reading, its text and an offer on record is
- * 1.9kB; the scanner's answer for that card's real crop is a 33kB reader.jpg
- * and 3kB of reader.json. Re-measured on the rig: its first real snap's
- * panel.png was 212kB (scrot, X11, a 1024x600 panel) and its camera picture
- * 17.5kB, so a snap there is about 270kB and forty about 11MB — still under the
- * 16MB the kept card pictures are allowed (SCANS_KEEP, 400 at ~40kB), on the
- * one part of the rig that wears out.
+ * their head — "the newest hundred are there" — and the size of one is
+ * measured rather than unknown. The rig's three real snaps of 8 October, all
+ * six files each, are 276kB (the Jimmy John's card), 323kB (the Est. delivery
+ * card) and 246kB (a Trip Planner): panel.png is 180–214kB of each (scrot,
+ * X11, the 1024x600 panel), the camera picture 18–58kB, reader.jpg 24–45kB and
+ * the three records 5–8kB together. A note adds 14 bytes and its own length
+ * to snap.json. So a hundred is about 28MB on the one part of the rig that
+ * wears out — more than the 16MB the kept card pictures are allowed
+ * (SCANS_KEEP, 400 at ~40kB), and asked for: the driver snaps a series per
+ * offer — waiting for offers, the card, after the accept, the Trip Planner —
+ * and forty was ten offers' worth.
  *
- * Overridable for the reason HOLD_GRACE_MS is: a check that has to press forty
- * times to watch the forty-first arrive is a check nobody runs. */
+ * Overridable for the reason HOLD_GRACE_MS is: a check that has to press a
+ * hundred times to watch the hundred-and-first arrive is a check nobody
+ * runs. */
 var SNAPS_KEEP = Math.floor(Number(process.env.SNAPS_KEEP));
-if (!isFinite(SNAPS_KEEP) || SNAPS_KEEP < 1) SNAPS_KEEP = 40;
+if (!isFinite(SNAPS_KEEP) || SNAPS_KEEP < 1) SNAPS_KEEP = 100;
 
 /* How long the screenshot tool may take before it is killed and the snap is
  * kept without it. Well inside the twenty seconds the panel itself waits for
@@ -3590,8 +3592,10 @@ function snapSaid(parts, notes) {
 }
 
 /* The snap folders on disk, oldest first, and whether the directory could be
- * read at all. Synchronous, like the hold file: forty folders are forty
- * directory entries, this is asked for by a press rather than on a timer, and
+ * read at all. Synchronous, like the hold file: a hundred folders are a
+ * hundred directory entries, this is asked for by a press rather than on a
+ * timer (once per name in a request: a bundle of a hundred is a hundred
+ * reads, 5ms on the development box), and
  * a callback ladder here would be the most intricate code in the feature for
  * no gain. Real directories only — a link dropped in among them is listed by
  * nothing and served by nothing.
@@ -3755,7 +3759,7 @@ function takeSnap(done) {
     }
     var pruned = pruneSnaps();
     // ...and what made room for it, in the line the control shows. The
-    // forty-first press removes the first, and a control that says only
+    // hundred-and-first press removes the first, and a control that says only
     // "saved" over that is a snap gone with nothing on the panel saying so.
     if (pruned.length) {
       notes.push('removed the oldest to keep ' + SNAPS_KEEP + ': ' + pruned.join(', '));
@@ -3793,7 +3797,7 @@ function takeSnap(done) {
 }
 
 /* The journal's note of a snap, so one can be found from the record of the
- * shift it was taken in — the folders are pruned to forty and named by a clock
+ * shift it was taken in — the folders are pruned to a hundred and named by a clock
  * that can read 1970; the journal is kept and synced.
  *
  * A `kind` row, collection only: nothing reads it into a rate. The readers of
@@ -3832,53 +3836,337 @@ function snapRow(record, sealErr) {
            folder: record.name, parts: kept, missing: missing, notApplicable: notHere };
 }
 
-/* Every snap, newest first, with what each holds and what each is missing.
+/* Whether a name is one of the snaps the list shows. The one question every
+ * request that names a snap asks — a file out of one, a note on one, a bundle
+ * of several — so there is no second rule for what a snap is to drift from
+ * snapNames. Anything that is not a string the list holds is not a snap:
+ * `..`, a path, a folder made by hand, a link named like one. */
+function isSnap(name) {
+  return typeof name === 'string' && snapNames().names.indexOf(name) !== -1;
+}
+
+/* A snap's own record, snap.json, as the list reads it: {record}, or no
+ * record and whether the file is missing rather than unreadable. One reading
+ * for the list and for a note written into it, so "can a note be kept here"
+ * and "what does the list say about this folder" cannot disagree. */
+function snapRecord(name) {
+  try {
+    var record = JSON.parse(fs.readFileSync(path.join(SNAPS_DIR, name, 'snap.json'), 'utf8'));
+    if (!record || typeof record.said !== 'string') throw new Error('no line in it');
+    return { record: record, missing: false };
+  } catch (e) {
+    return { record: null, missing: e.code === 'ENOENT' };
+  }
+}
+
+/* One snap: what it holds, what it is missing, and its note. The list's entry
+ * for it, and the head of its section in a bundle — one description of a
+ * folder, so the page and the file handed on cannot say two things about it.
+ *
  * An age rather than a time, measured on this machine's clock, for the reason
  * /api/status gives: the phone reading this is not the machine that wrote it,
  * and the name already says the local time to anybody who wants it — and no
  * age at all where the stamp or the clock reading it was never set (clockAge),
  * which snaps.html says as "age unknown". */
+function describeSnap(name, now) {
+  var dir = path.join(SNAPS_DIR, name);
+  var read = snapRecord(name);
+  var record = read.record;
+  var at = record && typeof record.at === 'number' ? record.at : null;
+  if (at === null) {
+    try { at = fs.statSync(dir).mtimeMs; } catch (e) { at = null; }
+  }
+  return {
+    name: name,
+    ageMs: clockAge(at, now),
+    files: snapFiles(name),
+    // Each part that is missing, and each kept with something to say about
+    // it — a camera picture too old to be the one at the press. Not a part
+    // that does not apply on this machine: the reader's, on the copy at home.
+    problems: record && Array.isArray(record.contents)
+      ? record.contents.filter(function (p) {
+        return p && p.applies !== false && (!p.saved || p.why);
+      })
+      : [],
+    // A folder with no record of its own — made by hand, by a build before
+    // this one, or by a press whose snap.json could not be written — says
+    // so instead of claiming a clean bill. A record that is there and
+    // cannot be read — torn by a full card or a power cut mid-write — is
+    // not the same answer, and is not given as if it were.
+    said: record ? record.said
+      : read.missing ? 'no snap.json in this folder, so nothing says what is missing'
+      : 'snap.json in this folder cannot be read, so nothing says what is missing',
+    // What the driver called it, if anything — see keepSnapNote.
+    note: record && typeof record.note === 'string' ? record.note : null
+  };
+}
+
+/* Every snap, newest first. */
 function describeSnaps() {
   var found = snapNames();
   var now = Date.now();
   var snaps = found.names.slice().reverse().map(function (name) {
-    var dir = path.join(SNAPS_DIR, name);
-    var record = null;
-    var missing = false;
-    try {
-      record = JSON.parse(fs.readFileSync(path.join(dir, 'snap.json'), 'utf8'));
-      if (!record || typeof record.said !== 'string') throw new Error('no line in it');
-    } catch (e) {
-      record = null;
-      missing = e.code === 'ENOENT';
-    }
-    var at = record && typeof record.at === 'number' ? record.at : null;
-    if (at === null) {
-      try { at = fs.statSync(dir).mtimeMs; } catch (e) { at = null; }
-    }
-    return {
-      name: name,
-      ageMs: clockAge(at, now),
-      files: snapFiles(name),
-      // Each part that is missing, and each kept with something to say about
-      // it — a camera picture too old to be the one at the press. Not a part
-      // that does not apply on this machine: the reader's, on the copy at home.
-      problems: record && Array.isArray(record.contents)
-        ? record.contents.filter(function (p) {
-          return p && p.applies !== false && (!p.saved || p.why);
-        })
-        : [],
-      // A folder with no record of its own — made by hand, by a build before
-      // this one, or by a press whose snap.json could not be written — says
-      // so instead of claiming a clean bill. A record that is there and
-      // cannot be read — torn by a full card or a power cut mid-write — is
-      // not the same answer, and is not given as if it were.
-      said: record ? record.said
-        : missing ? 'no snap.json in this folder, so nothing says what is missing'
-        : 'snap.json in this folder cannot be read, so nothing says what is missing'
-    };
+    return describeSnap(name, now);
   });
   return { snaps: snaps, unreadable: found.unreadable };
+}
+
+/* ---------- a note on a snap: "trip planner", "after accept" -----------------
+ *
+ * The driver snaps a series per offer — waiting for offers, the card, after
+ * the accept, the Trip Planner — and a folder name says when each was taken,
+ * not which of the four it is. So a snap can carry a few words, set on
+ * snaps.html from a phone or the copy at home, and never asked for at the
+ * press: 📷 on the driving screen stays one click.
+ *
+ * Kept in the snap's own snap.json, under `note`, so it goes where the snap
+ * goes — listed with it, carried into a bundle of it, and pruned with it.
+ * Rewritten through a temporary of its own and a rename, like every file this
+ * server rewrites, so a list read during the write sees the record before or
+ * after the note and never half of one.
+ *
+ * Refused, with the reason, rather than tidied: a name the list does not show
+ * (isSnap); a note that is not text, is longer than SNAP_NOTE_MAX, or holds a
+ * control character — a line break among them, because the note is a label
+ * on one line wherever it is shown; a snap still being kept, whose snap.json
+ * is about to be written over by seal(); and a folder with no snap.json the
+ * list can read, because writing one there would make a record that says
+ * nothing about what the folder holds. Blank, after trimming, takes the note
+ * away. */
+var SNAP_NOTE_MAX = 80;
+
+/* `done(status, reply)`, once. */
+function keepSnapNote(body, done) {
+  var name = body.snap;
+  if (!isSnap(name)) return done(404, { ok: false, error: 'no snap by that name' });
+  if (typeof body.note !== 'string') return done(400, { ok: false, error: 'a note is text' });
+  var note = body.note.trim();
+  // Counted the way a browser's maxlength counts, in UTF-16 units, so the box
+  // on snaps.html (which is handed this limit) and this agree on every note.
+  if (note.length > SNAP_NOTE_MAX) {
+    return done(400, { ok: false, error: 'a note is at most ' + SNAP_NOTE_MAX
+                                         + ' characters, and this one is ' + note.length });
+  }
+  if (/[\u0000-\u001f\u007f]/.test(note)) {
+    return done(400, { ok: false, error: 'a note is one line of text' });
+  }
+  if (snapsFilling[name]) {
+    return done(409, { ok: false, error: 'this snap is still being kept; try again in a moment' });
+  }
+  // A real snap.json, by the list's own rule for what a snap's file is — a
+  // link named snap.json is not one, and nothing is read through it.
+  var read = snapFiles(name).some(function (f) { return f.file === 'snap.json'; })
+    ? snapRecord(name) : { record: null, missing: true };
+  if (!read.record) {
+    return done(409, { ok: false, error: read.missing
+      ? 'this snap has no snap.json to keep a note in'
+      : 'this snap\'s snap.json cannot be read, so there is nowhere to keep a note' });
+  }
+  var record = read.record;
+  if (note) record.note = note;
+  else delete record.note;
+  var file = path.join(SNAPS_DIR, name, 'snap.json');
+  var tmp = partName(file);
+  var failed = function (err) {
+    fs.unlink(tmp, function () {});
+    console.error('snap: could not keep a note on ' + name + ': ' + err.message);
+    done(500, { ok: false, error: 'could not keep the note: ' + (err.code || err.message) });
+  };
+  fs.writeFile(tmp, JSON.stringify(record, null, 2) + '\n', function (writeErr) {
+    if (writeErr) return failed(writeErr);
+    fs.rename(tmp, file, function (renameErr) {
+      if (renameErr) return failed(renameErr);
+      done(200, { ok: true, snap: name, note: note || null });
+    });
+  });
+}
+
+/* ---------- a snap, or a series of them, as one file to hand on -------------
+ *
+ * The driver shares snaps with their assistant, and a snap is six files: a
+ * series of four is twenty-four, named alike in a Downloads folder. So one
+ * .html instead, built when it is asked for and never kept: each picture
+ * inside it as a data: URI, byte for byte; each record shown as its text and
+ * carried again, byte for byte, as a data: URI behind a link that saves it.
+ * Nothing in it reaches for the network, so it opens on a phone in a car park,
+ * and there is no script in it, so it opens the same in a mail client's or a
+ * file manager's preview as in a browser.
+ *
+ * Not a <script type="application/json"> block for the records: one ends at
+ * the first `</script` inside it and parses differently after a `<!--`, and
+ * reader.json carries tesseract's text, which is whatever the camera saw.
+ * Escaping either makes it not the file any more; a data: URI cannot be ended
+ * by what is in it. The <pre> beside it is the same text, for reading: escaped
+ * for HTML, and opened with a newline, which the parser drops, so a record
+ * that begins with one keeps it.
+ *
+ * Which snaps: every name asked for has to be one the list shows (isSnap's
+ * rule, snapNames), and one that is not refuses the whole request rather than
+ * being left out of it — a file of three handed over as the four that were
+ * chosen is a snap gone with nothing saying so. Asked twice is once. In time
+ * order whatever order they were asked in, oldest first, because a series
+ * reads in the order it was taken: the list's own order, which is the folder
+ * names' (and so files a 1970 snap first, as the list does last). The files
+ * in each are snapFiles' — real files the press writes, never a link.
+ *
+ * Streamed a snap at a time, each file read without blocking, so a long
+ * series neither holds the event loop — the driving screen's event stream
+ * rides it — nor every picture in memory at once. The next snap is not read
+ * until the one before it has gone out to the phone: res.write said "full"
+ * otherwise, and a phone on a slow link was still taking the first snap of a
+ * hundred while the rest were read in behind it, all held in the Pi's memory
+ * (rpi/test_server.py stops reading a bundle part way and measures this). A
+ * file that cannot be read by the time its turn comes, a snap pruned while
+ * the bundle was being built among them, is said in its place: the reply was
+ * sent as 200 before it was read, so the file has to say it. */
+function snapBundle(asked) {
+  var want = asked === undefined ? [] : [].concat(asked);
+  if (!want.length) return { status: 400, error: 'name a snap to bundle: ?snap=<folder>' };
+  for (var i = 0; i < want.length; i++) {
+    if (!isSnap(want[i])) return { status: 404, error: 'no snap named ' + JSON.stringify(want[i]) };
+  }
+  return { names: snapNames().names.filter(function (n) { return want.indexOf(n) !== -1; }) };
+}
+
+// What each file a press writes is, in a few words, for the two places that
+// have to say: snaps.html under each picture, and a bundle, which is opened
+// with no rig to ask. Plain words, written into a bundle as they are, so no
+// markup character and no double quote.
+var SNAP_ABOUT = {
+  'panel.png': 'the rig\'s screen',
+  'camera.jpg': 'the camera\'s last picture',
+  'reader.jpg': 'the crop the reader last read',
+  'status.json': 'what /api/status said at the press',
+  'reader.json': 'the scanner\'s account of its last read',
+  'snap.json': 'what the press kept, and why anything is missing'
+};
+// Which of them are pictures, in the order they are laid side by side — on
+// snaps.html, which is handed this list, and at the head of a bundle's
+// section, before the records.
+function isPicture(file) {
+  return /^image\//.test(TYPES[path.extname(file)] || '');
+}
+var SNAP_PICTURES = SNAP_FILES.filter(isPicture);
+var BUNDLE_ORDER = SNAP_PICTURES.concat(SNAP_FILES.filter(function (f) { return !isPicture(f); }));
+
+// Text, never an attribute: the three characters markup can start with, and
+// not a quote, which status.json is full of. A bundle is read as text by
+// somebody's assistant as often as it is opened in a browser, and every key
+// written as &quot;scanner&quot; made the records unreadable that way. The
+// attributes a bundle writes are folder names and SNAP_ABOUT, and neither can
+// hold a quote.
+function escapeHtml(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Its own colours, not styles.css: nothing outside the file can be reached.
+var BUNDLE_CSS = [
+  ':root { color-scheme: light dark; }',
+  'body { margin: 0 auto; max-width: 900px; padding: 12px 16px 40px;',
+  '       font: 15px/1.45 system-ui, sans-serif; }',
+  'h1 { font-size: 19px; margin: 0 0 6px; }',
+  'h2 { font-size: 17px; margin: 0; font-variant-numeric: tabular-nums; }',
+  // A note is any 80 characters, and 80 with no space in them ran a heading
+  // off the side of every screen rpi/test_layout.py opens this on.
+  'h1, h2, .toc { overflow-wrap: anywhere; }',
+  'h2 .note { font-weight: 400; }',
+  'section { border-top: 1px solid #8886; padding: 14px 0 6px; }',
+  '.said { margin: 4px 0 10px; }',
+  '.lost { color: #c33; }',
+  'figure { margin: 0 0 12px; }',
+  'img { display: block; max-width: 100%; height: auto; border: 1px solid #8886;',
+  '      border-radius: 6px; }',
+  'figcaption, summary, .lead, .toc { font-size: 14px; }',
+  'summary { padding: 10px 0; cursor: pointer; }',
+  'pre { margin: 0 0 6px; padding: 8px; border-radius: 6px; background: #8882;',
+  '      font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }',
+  'details a { display: inline-block; padding: 10px 0; }'
+].join('\n');
+
+function bundleHead(snaps) {
+  var one = snaps.length === 1;
+  var title = one
+    ? '📷 Snap ' + snaps[0].name + (snaps[0].note ? ' — ' + snaps[0].note : '')
+    : '📷 ' + snaps.length + ' snaps, ' + snaps[0].name + ' to ' + snaps[snaps.length - 1].name;
+  var head = '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+    + '<title>' + escapeHtml(title) + '</title>\n<style>\n' + BUNDLE_CSS + '\n</style>\n'
+    + '</head>\n<body>\n<h1>' + escapeHtml(title) + '</h1>\n'
+    + '<p class="lead">' + (one ? 'Every file kept for this snap'
+                                : 'Every file kept for each of these snaps, oldest first')
+    + ': the pictures as they are, and each record as its text, with the file itself'
+    + ' behind the link under it.</p>\n';
+  if (!one) {
+    head += '<ol class="toc">\n' + snaps.map(function (s) {
+      return '<li><a href="#' + s.name + '">' + s.name
+           + (s.note ? ' — ' + escapeHtml(s.note) : '') + '</a></li>\n';
+    }).join('') + '</ol>\n';
+  }
+  return head;
+}
+
+/* One snap's section, `done(html)` once its files have been read in turn. */
+function bundleSection(snap, done) {
+  var have = snap.files.map(function (f) { return f.file; });
+  var files = BUNDLE_ORDER.filter(function (f) { return have.indexOf(f) !== -1; });
+  var html = '<section id="' + snap.name + '">\n<h2>' + snap.name
+    + (snap.note ? ' <span class="note">— ' + escapeHtml(snap.note) + '</span>' : '')
+    + '</h2>\n<p class="said">' + escapeHtml(snap.said) + '</p>\n';
+  var i = 0;
+  (function next() {
+    if (i === files.length) return done(html + '</section>\n');
+    var file = files[i++];
+    var about = file + ' — ' + SNAP_ABOUT[file];
+    fs.readFile(path.join(SNAPS_DIR, snap.name, file), function (err, data) {
+      if (err) {
+        html += '<p class="lost">' + about + ': could not be read when this file was made ('
+              + escapeHtml(err.code || err.message) + ')</p>\n';
+        return next();
+      }
+      // Each file's size is in snap.json, which is in here too; said again
+      // beside each picture it would be a second formatter of a size to keep
+      // in step with snaps.html's.
+      var uri = 'data:' + TYPES[path.extname(file)].split(';')[0] + ';base64,'
+              + data.toString('base64');
+      if (isPicture(file)) {
+        html += '<figure><img src="' + uri + '" alt="' + SNAP_ABOUT[file]
+              + '"><figcaption>' + about + '</figcaption></figure>\n';
+      } else {
+        html += '<details><summary>' + about + '</summary>\n<pre>\n'
+              + escapeHtml(data.toString('utf8')) + '</pre>\n<a download="' + snap.name + '-'
+              + file + '" href="' + uri + '">save ' + file + ' as it is on the rig</a>'
+              + '</details>\n';
+      }
+      next();
+    });
+  }());
+}
+
+/* The bundle, answered. `names` are snapBundle's: checked, and in time order. */
+function sendSnapBundle(res, names) {
+  var now = Date.now();
+  var snaps = names.map(function (name) { return describeSnap(name, now); });
+  // The snap's own name, which is what it is called everywhere else: on the
+  // list, in the journal row, and in the per-file downloads on snaps.html.
+  var file = (names.length === 1 ? names[0] : names[0] + '_to_' + names[names.length - 1])
+           + '.html';
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Disposition': 'attachment; filename="' + file + '"',
+    'Cache-Control': 'no-store'
+  });
+  res.write(bundleHead(snaps));
+  var i = 0;
+  (function next() {
+    if (i === snaps.length) return res.end('</body>\n</html>\n');
+    bundleSection(snaps[i++], function (html) {
+      // The next snap once this one is on its way, and not before: see
+      // "Streamed a snap at a time" above. A phone that gives up on the
+      // download stops the reading with it, there being no drain after that.
+      if (res.write(html)) return next();
+      res.once('drain', next);
+    });
+  }());
 }
 
 function send(res, status, body, headers) {
@@ -4987,6 +5275,18 @@ function route(req, res) {
     });
   }
 
+  // ...and a note on one, from snaps.html: {snap: <folder>, note: <text>}.
+  // See keepSnapNote.
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/snap/note') {
+    return readJsonBody(req, function (err, body) {
+      var answer = function (status, reply) {
+        send(res, status, JSON.stringify(reply), { 'Content-Type': 'application/json; charset=utf-8' });
+      };
+      if (err || !body) return answer(400, { ok: false, error: 'bad body' });
+      keepSnapNote(body, answer);
+    });
+  }
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return send(res, 405, 'method not allowed', { 'Content-Type': 'text/plain' });
   }
@@ -5029,14 +5329,33 @@ function route(req, res) {
       // Where they are on the rig, so they can be copied off it some other way.
       where: SNAPS_DIR,
       keep: SNAPS_KEEP,
+      // Which files are pictures, in the order snaps.html lays them out; what
+      // each file is, which it says under each picture; and how long a note
+      // may be, which its note box is held to. A bundle says the same.
+      pictures: SNAP_PICTURES,
+      about: SNAP_ABOUT,
+      noteMax: SNAP_NOTE_MAX,
       unreadable: shelf.unreadable,
       snaps: shelf.snaps
     }), { 'Content-Type': 'application/json; charset=utf-8' });
   }
 
+  // One or several snaps as one .html: /api/snaps/bundle?snap=<folder>&snap=…
+  // Under /api/snaps/ with the rest, and before the route below that answers
+  // everything else there; `bundle` is no name a press makes. See
+  // sendSnapBundle.
+  if (pathname === '/api/snaps/bundle') {
+    var bundle = snapBundle(parsed.query.snap);
+    if (bundle.error) {
+      return send(res, bundle.status, bundle.error + '\n', { 'Content-Type': 'text/plain; charset=utf-8' });
+    }
+    return sendSnapBundle(res, bundle.names);
+  }
+
   /* ...and one file out of one of them: a folder the list names, and a file
-   * the list says that folder holds — snapNames and snapFiles, the list's own
-   * two questions, so nothing is served that the list does not show.
+   * the list says that folder holds — snapNames (by way of isSnap) and
+   * snapFiles, the list's own two questions, so nothing is served that the
+   * list does not show.
    *
    * Nothing typed into the URL becomes a path until both have said yes, so
    * `..`, an encoded `..`, an absolute path and a name with a slash in it are
@@ -5049,7 +5368,7 @@ function route(req, res) {
    * recheck it would have been could not fail. */
   if (pathname.indexOf('/api/snaps/') === 0) {
     var snapAsk = /^\/api\/snaps\/([^/]+)\/([^/]+)$/.exec(pathname);
-    var snapHeld = snapAsk && snapNames().names.indexOf(snapAsk[1]) !== -1
+    var snapHeld = snapAsk && isSnap(snapAsk[1])
       && snapFiles(snapAsk[1]).some(function (f) { return f.file === snapAsk[2]; });
     if (!snapHeld) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
     return serveFile(req, res, path.join(SNAPS_DIR, snapAsk[1], snapAsk[2]));

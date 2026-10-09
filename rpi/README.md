@@ -2281,14 +2281,55 @@ journal (wherever `JOURNAL` puts it), which `.gitignore` covers and
 `test_lint.py` holds it to — a picture of a phone with an address on it does not
 belong in a commit.
 
-**It keeps the newest forty, and the oldest go first.** On the rig itself the
-first real snap's panel.png was 212kB (scrot, X11, a 1024x600 panel) and its
-camera picture 17.5kB; with the reader's 33kB crop and a few kB of status and
-account (measured on the test ride card), a snap is about 270kB, so forty is
-about 11MB — under the 16MB `--keep-scans` is allowed. (An 82kB panel PNG
-measured earlier came out of Chromium's encoder at 800x480, not the rig's.) When one goes, the control's own line names
-it — **📷 saved — removed the oldest to keep 40: <folder>** — and so do the
-reply and the server's log. A press never removes a folder that is still being
+**One file per snap, or per series.** Six files a snap is twenty-four for a
+series of four — waiting for offers, the card, after the accept, the Trip
+Planner — named alike in a Downloads folder. So each snap on `snaps.html` has
+**⤓ one file**, which the rig answers with a single `.html` named for the snap
+(`2026-10-08_15-05-03.html`): every picture inside it as a `data:` URI, byte for
+byte; each record shown as its text and carried again, byte for byte, behind a
+link that saves it as the file it was. It reaches for nothing outside itself —
+no address, no script, its few styles written into it — so it opens on a phone
+with no signal, or in a mail client's preview, as it does in a browser.
+**⤓ with the N newer** takes that snap and every one listed above it — the
+series it starts, when the series is shared soon after it is taken, with no gap
+between snaps guessed at — and ticking any others puts **⤓ N chosen** on the
+bar. Either way they are one
+file, oldest first whatever order they were chosen in, a section each under a
+list that leads to each, named for the first and the last
+(`…_15-05-03_to_…_15-09-41.html`). A name the rig does not have refuses the
+whole request and says which, rather than leaving that snap out; a file that
+cannot be read by the time the bundle reaches it is said in its place. Built
+when asked, never kept, streamed a snap at a time, the next one read only once
+the phone has taken the one before, so a slow link holds one snap in the Pi's
+memory and not the series: `GET /api/snaps/bundle?snap=<folder>&snap=…`, which
+takes only folders the list shows and only the files it lists. Measured on the
+development box against the rig's three real snaps of 8 October, fetched over
+loopback, median of five: one (the Jimmy John's card, 276kB) is a 378kB file
+built in 9ms — base64 and the page around it make a snap 1.36–1.37 times its
+size; six (the three, twice) are 2.3MB in 27ms; a full shelf of a hundred (the
+three and 97 copies) is 38MB in 371ms, during which `/api/status`, asked every
+50ms, answered within 12.5ms at worst (2.4ms with nothing else asked of it).
+
+**A note on each.** Under each snap is a box for a few words — "trip planner",
+"after accept" — kept in that snap's own `snap.json` as `note`, shown beside its
+time on the list and in any file it is saved in. It is typed on the phone or the
+copy at home, never asked for at the press, so 📷 on the driving screen stays
+one click. One line of at most 80 characters, which the box is held to; the rig
+refuses anything else and says why, as it does a note on a snap still being
+kept or one with no `snap.json` it can read. A blank note takes the note off.
+A note typed and not yet saved, and the ticks, survive the list being drawn
+again after a 📷 press from the page.
+
+**It keeps the newest hundred, and the oldest go first.** The rig's three real
+snaps of 8 October are 276kB, 323kB and 246kB with all six files: panel.png
+180–214kB of each (scrot, X11, the 1024x600 panel), the camera picture
+18–58kB, reader.jpg 24–45kB and the three records 5–8kB together; a note adds
+14 bytes and its own length to `snap.json`. So a hundred is about 28MB — more
+than the 16MB `--keep-scans` is allowed, and asked for: a series per offer made
+forty ten offers' worth. (An 82kB panel PNG measured earlier came out of
+Chromium's encoder at 800x480, not the rig's.) When one goes, the control's own
+line names it — **📷 saved — removed the oldest to keep 100: <folder>** — and
+so do the reply and the server's log. A press never removes a folder that is still being
 filled, its own or another press's, which matters on a Pi that booted before
 the network set its clock: those snaps are named for 1970, sort as the oldest,
 and the reply says the clock was not set. `SNAPS_KEEP` changes the count.
