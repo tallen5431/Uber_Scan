@@ -133,7 +133,22 @@ var scanner = {
   // /api/status always said none.
   wedged: 0,
   wedgedAt: null,      // when the last one happened, for the same reason
+  // What went wrong with the scanner process, and nothing else. See `stderr`
+  // beside it, and the 'close' handler, which is the one place a process's own
+  // words become this.
   error: null,
+  // The last few lines the scanner printed to stderr, kept as what they are.
+  //
+  // They used to be stored straight into `error`, every chunk of them, and a
+  // running scanner prints things there that are not errors. The 📷 Snap of
+  // 8 Oct 15:45 has `running: true` beside error "Error in boxClipToRectangle:
+  // box outside rectangle Error in pixScanForForeground: invalid box", which is
+  // leptonica, inside tesseract, narrating a crop it clipped — while the scanner
+  // went on reading. The panel prints `error` as the reason when the scanner is
+  // NOT running, so a crash with nothing to say for itself (a SIGKILL, a
+  // segfault in the camera driver) would have been explained to the driver by
+  // whatever the library had muttered last, possibly hours before.
+  stderr: null,
   // Set up HERE and never again, which is the difference that matters: these
   // two are facts about the DRIVER'S CAR, not about the scanner process, so
   // startScanner() deliberately leaves them alone. See the note there.
@@ -217,16 +232,17 @@ function startScanner() {
   scanner.proc = spawn(bin, args, { cwd: ROOT });
   scanner.started = Date.now();
   scanner.error = null;
+  scanner.stderr = null;           // ...and what the last process printed
   scanner.heardAt = null;          // nothing from the scan loop yet
   scanner.costPerMile = null;      // ...and nothing about its settings either
   scanner.beat = null;             // ...nor a heartbeat. See /api/status.
   // What is NOT cleared here, and why.
   //
-  // `started`, `error` and `heardAt` are facts about the PROCESS, and a new
-  // process makes them false. The order in the car is not one of those. It is
-  // a fact about the driver's car, established by their own press of "Took",
-  // and a camera that crashed says nothing about whether there is food on the
-  // back seat.
+  // `started`, `error`, `stderr` and `heardAt` are facts about the PROCESS, and
+  // a new process makes them false. The order in the car is not one of those.
+  // It is a fact about the driver's car, established by their own press of
+  // "Took", and a camera that crashed says nothing about whether there is food
+  // on the back seat.
   //
   // Clearing it meant a wedge mid-delivery — the watchdog kills a scanner
   // blocked in the camera driver roughly every minute it stays blocked — threw
@@ -250,6 +266,11 @@ function startScanner() {
     console.error('scanner: ' + scanner.error);
   });
 
+  // What this process last printed to stderr with nothing on stdout since —
+  // set by the stderr handler below, emptied by any stdout at all, and read
+  // only when it exits. Per process, so a new one starts with none.
+  var lastWords = '';
+
   // 'close', not 'exit'. A process that starts and then dies emits both, but a
   // process that never starts at all — python3 missing, SCANNER_CMD wrong or
   // not executable, EMFILE — emits 'error' and then 'close' and *never* 'exit'.
@@ -260,6 +281,26 @@ function startScanner() {
   // names this exact failure and only half of it was handled.
   scanner.proc.on('close', function (code, signal) {
     console.error('scanner: exited (' + (signal || code) + ')');
+    // The reason it is not running, which is now true: it exited. Not over
+    // an `error` already set for this process — "could not start" before
+    // this, or the watchdog's account of a kill it made — since both are
+    // better accounts of this same exit than an exit code.
+    //
+    // With its last words, and only its last words: stderr this process
+    // printed and said nothing on stdout after. A traceback is the last thing
+    // a Python crash prints, so it qualifies. A library warning the scan loop
+    // carried on reading through has a heartbeat behind it — one every four
+    // seconds at most (ALIVE_EVERY in rpi/scan_pi.py) — so it does not, and
+    // a SIGKILL or a segfault that said nothing says "exited (SIGKILL)"
+    // rather than borrowing the last thing anything muttered. It is still in
+    // `stderr`, for whoever opens the status link. The one case this cannot
+    // tell apart is a warning in the last four seconds before a death that
+    // printed nothing, which then rides along behind an exit it did not cause
+    // — and even then the line opens with the exit, which is true.
+    if (!scanner.error) {
+      scanner.error = 'exited (' + (signal || code) + ')'
+                    + (lastWords ? ': ' + lastWords : '');
+    }
     var ranFor = Date.now() - scanner.started;
     scanner.proc = null;
     if (shuttingDown) return;
@@ -306,6 +347,9 @@ function startScanner() {
 
   var buffered = '';
   scanner.proc.stdout.on('data', function (chunk) {
+    // Anything at all: a reading, a heartbeat, a log line. The process was
+    // still going after whatever it last put on stderr.
+    lastWords = '';
     buffered += chunk.toString();
     var lines = buffered.split('\n');
     buffered = lines.pop();          // keep the partial line for next time
@@ -678,10 +722,16 @@ function startScanner() {
     });
   });
 
+  // Kept, and not called an error. See `stderr` where `scanner` is built: a
+  // running scanner's stderr is mostly libraries talking, and the one time it
+  // explains anything is when it is the last thing said before an exit, which
+  // the 'close' handler above is the one place that knows.
   scanner.proc.stderr.on('data', function (c) {
     var text = c.toString().trim();
-    if (text) console.error('scanner: ' + text);
-    scanner.error = text.split('\n').slice(-3).join(' ');
+    if (!text) return;
+    console.error('scanner: ' + text);
+    scanner.stderr = text.split('\n').slice(-3).join(' ');
+    lastWords = scanner.stderr;
   });
 
 }
@@ -2753,7 +2803,14 @@ function statusNow() {
       // now for the third time this evening".
       wedgedAt: scanner.wedgedAt || null,
       startedAt: scanner.started,
-      error: scanner.error
+      // What went wrong with this process — it could not start, could not be
+      // attached to, went quiet, or exited — and never what a working one
+      // printed.
+      error: scanner.error,
+      // ...and what it has printed: the last lines of its stderr, which on a
+      // running rig are libraries talking. See `stderr` where `scanner` is
+      // built for why the two are not one field.
+      stderr: scanner.stderr
     },
     // A copy re-stacked against the hold as it is NOW, exactly as the
     // event stream's replay does. broadcast() stacks the stored reading

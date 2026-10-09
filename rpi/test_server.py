@@ -3918,6 +3918,97 @@ finally:
     stop(_uproc)
     shutil.rmtree(_udir, ignore_errors=True)
 
+# --- what the scanner printed, and why it stopped -----------------------------
+#
+# Every chunk of the scanner's stderr used to be stored as `scanner.error`. The
+# 📷 Snap of 15:45 on 8 Oct has `running: true` beside an error of "Error in
+# boxClipToRectangle: box outside rectangle Error in pixScanForForeground:
+# invalid box" — leptonica, inside tesseract, narrating a crop while the
+# scanner went on reading. The panel shows `error` as the reason a scanner is
+# not running, so a crash that said nothing would have been blamed on whatever
+# a library last muttered.
+#
+# Four runs of one stand-in, each the shape of a real one: a library warning
+# the loop reads on past and then a silent exit; a crash, whose traceback is
+# the last thing it says; a fresh start; and a wedge the watchdog kills. The
+# silence window is short so the wedge takes a second and a half, and every
+# run beats well inside it.
+_edir = tempfile.mkdtemp()
+_ejournal = os.path.join(_edir, 'journal.jsonl')
+open(_ejournal, 'w').close()
+_efake = os.path.join(_edir, 'talks.py')
+_eruns = os.path.join(_edir, 'runs')
+_LEPTONICA = ('Error in boxClipToRectangle: box outside rectangle\n'
+              'Error in pixScanForForeground: invalid box\n')
+with open(_efake, 'w') as fh:
+    fh.write(
+        'import json, os, sys, time\n'
+        'n = int(open(%r).read() or 0) + 1 if os.path.exists(%r) else 1\n'
+        'open(%r, "w").write(str(n))\n'
+        'def beat():\n'
+        '    print(json.dumps({"alive": True, "at": 1}), flush=True)\n'
+        'if n == 1:\n'
+        '    sys.stderr.write(%r)\n'
+        '    sys.stderr.flush()\n'
+        '    for _ in range(6):\n'
+        '        time.sleep(0.3)\n'
+        '        beat()\n'
+        '    time.sleep(0.3)\n'
+        '    os._exit(3)\n'
+        'elif n == 2:\n'
+        '    beat()\n'
+        '    time.sleep(0.3)\n'
+        '    raise RuntimeError("camera gone")\n'
+        'elif n == 3:\n'
+        '    time.sleep(1.0)\n'
+        '    beat()\n'
+        '    time.sleep(0.3)\n'
+        '    beat()\n'
+        'time.sleep(600)\n' % (_eruns, _eruns, _eruns, _LEPTONICA))
+_eproc, _ebase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': _efake, 'SCANNER_SILENT_MS': '1500'},
+                       _ejournal)
+
+
+def _escanner(until, limit=20.0):
+    end = time.time() + limit
+    while time.time() < end:
+        _s = get(_ebase, '/api/status').get('scanner') or {}
+        if until(_s):
+            return _s
+        time.sleep(0.05)
+    return {}
+
+
+try:
+    _talk = _escanner(lambda s: s.get('running') and s.get('stderr'))
+    eq('a running scanner\'s stderr is kept, as what it printed',
+       _talk.get('stderr'), _LEPTONICA.strip().replace('\n', ' '))
+    eq('...and is not its error while it goes on reading', _talk.get('error', 'absent'),
+       None)
+    _quiet = _escanner(lambda s: s.get('fell', 0) >= 1 and not s.get('running'))
+    eq('a scanner that read on past a warning and then exited says it exited',
+       _quiet.get('error'), 'exited (3)')
+    no_('...and the warning is not given as the reason (%r)' % _quiet.get('error'),
+        'boxClipToRectangle' in (_quiet.get('error') or ''))
+    ok_('...though it is still kept as what it printed',
+        'boxClipToRectangle' in (_quiet.get('stderr') or ''))
+    _crash = _escanner(lambda s: s.get('fell', 0) >= 2 and not s.get('running'))
+    ok_('a crash\'s traceback, the last thing it said, is its error (%r)'
+        % _crash.get('error'),
+        (_crash.get('error') or '').startswith('exited (1): ')
+        and 'RuntimeError: camera gone' in (_crash.get('error') or ''))
+    _fresh = _escanner(lambda s: s.get('fell', 0) >= 2 and s.get('running'))
+    eq('a restarted scanner has no error and nothing printed yet',
+       (_fresh.get('error', 'absent'), _fresh.get('stderr', 'absent')), (None, None))
+    _wedge = _escanner(lambda s: s.get('wedged', 0) >= 1 and not s.get('running'))
+    ok_('a scanner the watchdog killed keeps the watchdog\'s account of it (%r)'
+        % _wedge.get('error'),
+        'stopped reporting' in (_wedge.get('error') or ''))
+finally:
+    stop(_eproc)
+    shutil.rmtree(_edir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

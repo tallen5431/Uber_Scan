@@ -102,9 +102,22 @@ once calibration succeeds, and the camera preview is on port 8081 meanwhile.
 | `/api/events` | server-sent events, one per read |
 | `/api/frame.jpg` | the most recent camera view, refreshed every couple of seconds |
 
-The scanner is restarted with a backoff if it dies, its errors appear in
-`/api/status`, and the site keeps serving throughout. `SCANNER=0` disables it,
-`SCANNER_SPEAK=0` keeps it silent.
+The scanner is restarted with a backoff if it dies, why it died appears in
+`/api/status` as `scanner.error`, and the site keeps serving throughout.
+`SCANNER=0` disables it, `SCANNER_SPEAK=0` keeps it silent.
+
+`error` says only what went wrong with the process: it could not start, could
+not be attached to, went quiet and was killed, or exited — `exited (1):
+RuntimeError: …` with the last lines it printed to stderr when those were the
+last thing it said, plain `exited (SIGKILL)` when it said nothing first. Its
+stderr is kept separately as `scanner.stderr` and is not an error: a running
+rig's stderr is mostly libraries talking. A 📷 Snap at 15:45 on 8 Oct has
+`running: true` beside an `error` of "Error in boxClipToRectangle: box outside
+rectangle Error in pixScanForForeground: invalid box" — leptonica, inside
+tesseract, narrating a crop while the scanner went on reading — and the panel
+shows `error` as the reason a scanner is not running, so a crash with nothing to
+say would have been blamed on that. Both are cleared when the next process
+starts.
 
 It is also restarted if it stops working **without** dying. A CSI camera that
 stops delivering frames leaves `capture_request()` blocked forever: the process

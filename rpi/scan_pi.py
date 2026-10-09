@@ -2569,9 +2569,10 @@ def main():
     # concerned with not answering.
     phone = None
     # ...and why not, when it was asked for and cannot be. Kept rather than
-    # only printed: stderr becomes server.js's `error`, which the next line
-    # anything prints there replaces, and a rig that was asked for a position
-    # and will never get one has to keep saying so — see gps_now.
+    # only printed: stderr is server.js's `stderr` tail, which the next line
+    # anything prints there replaces (and its `error` only when it is the last
+    # thing said before an exit, which this is not), and a rig that was asked
+    # for a position and will never get one has to keep saying so — see gps_now.
     gps_refused = None
     if args.gps:
         try:
