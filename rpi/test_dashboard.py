@@ -191,9 +191,64 @@ DIVIDES = dict(UNCERTAIN, state='go', pay=14.0, minutes=30.0, cardMinutes=30.0,
                cost=2.10, perMile=1.70, milesUncertain=False, uncosted=False,
                whole=True)
 
+# A reading with no verdict in it, exactly as the rig sent one at 15:45 on 8 Oct:
+# an Uber Est. delivery card square in front of the camera, its $14.48 cut in
+# half by the card box. Copied from that 📷 Snap's status.json (`last`), less
+# the `at` the server stamps on. The parser of that day got the distance and
+# nothing else it could use, and the panel said "scanner running, no offer on
+# screen" over the card.
+CUT_PAY = {
+    'track': None, 'ready': False, 'locked': False, 'state': 'empty',
+    'doubt': None, 'untimedMiles': None, 'uncosted': False, 'perHour': None,
+    'grossPerHour': None, 'billedMinutes': None, 'perMile': None, 'pay': None,
+    'minutes': None, 'cardMinutes': None, 'fromDeadline': False,
+    'deliverBy': None, 'places': [], 'dropoff': None, 'pickup': None,
+    'endRefused': False, 'target': None, 'band': None, 'miles': 8.6,
+    'items': None, 'milesCorrected': False, 'milesUncertain': False,
+    'cost': None, 'costPerMile': None, 'ms': 1651,
+    'text': "gg Pit. Includes expected tip a © Est. delivery 4:15 PM- 8.6 mi | "
+            "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100) Foothill Tri & "
+            "Northwoods Dr, Marietta @ Matching may take longer o",
+    'legs': 0, 'mergedFrom': 0, 'grew': False, 'whole': False,
+}
+# ...the same text as the parser reads it now, with the deadline and both ends.
+CUT_PAY_NOW = dict(CUT_PAY, deliverBy=975,
+                   places=["Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+                           'Foothill Tri & Northwoods Dr, Marietta'],
+                   pickup="Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
+                   dropoff='Foothill Tri & Northwoods Dr, Marietta')
+# A card whose time did not read: the $4.21 Jimmy John's card of 15:05 that day,
+# with its "23 min (5.2 mi) total" line gone, as the parser reads that text.
+NO_TIME = dict(CUT_PAY, pay=4.21, miles=None, ms=1567,
+               text="Exclusive x $4.21 Guaranteed (incl. tip) Jimmy John's "
+                    "(1337 Powers Ferry Rd Se) Shadowood Pkwy SE, Atlanta")
+# The app's zone prompt, which is no card at all: its average wait reads as
+# minutes and its bonus is refused as a payout (PAY_IS_PER_ORDER). It reads the
+# way a card missing its pay reads, which is why the line may not claim a card.
+ZONE = dict(CUT_PAY, miles=None, minutes=1.0,
+            text="GA: Marietta North Switch to this zone with peak pay! "
+                 "+$1.00/order until 8:20 PM Avg. offer wait 1min Don't switch")
+# ...and one for each of the other two things a reading can carry with no pay,
+# each alone, so that every one of the four is what the line is said off: the
+# Est. delivery card's text with its distance lost as well, and the corpus's
+# DoorDash card ("$S 8.75 Guaranteed (incl. tips) 18.0 mi - 39 min @ Pickup
+# Buffalo Luke's") with its payout and its journey lost — both as the parser
+# reads those texts. Neither shape is in the week's stored frames; both are a
+# line or two of glare away from ones that are.
+DEADLINE_ONLY = dict(CUT_PAY, miles=None, deliverBy=975,
+                     text='gg Pit. Includes expected tip a © Est. delivery 4:15 PM '
+                          '@ Matching may take longer')
+PICKUP_ONLY = dict(CUT_PAY, miles=None, places=["Buffalo Luke's"],
+                   pickup="Buffalo Luke's",
+                   text="Guaranteed (incl. tips) @ Pickup Buffalo Luke's")
+# ...and a reading that got nothing at all.
+BLANK = dict(CUT_PAY, miles=None, text='')
+
 READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
             'impossible': IMPOSSIBLE, 'untimed': UNTIMED, 'loss': LOSS,
-            'divides': DIVIDES}
+            'divides': DIVIDES, 'cutpay': CUT_PAY, 'cutpaynow': CUT_PAY_NOW,
+            'notime': NO_TIME, 'zone': ZONE, 'deadlineonly': DEADLINE_ONLY,
+            'pickuponly': PICKUP_ONLY, 'blank': BLANK}
 
 # ...and every field above has to be one the rig actually sends.
 #
@@ -1499,8 +1554,17 @@ const framed = (page) => page.waitForFunction(
     // same one twice: it let a version through with the notice missing from
     // the between-offers branch entirely, which is where this rig spends most
     // of its time.
+    //
+    // A reading with nothing on it, as the rig sends between offers. This was
+    // the card above with `ready` taken off, which kept its $8.00 and 22
+    // minutes — a shape the rig sends only for a deadline due that very
+    // minute — and the line under the verdict now says what a reading with no
+    // verdict did read, so it said "pay read but no time" instead of the
+    // between-offers words the check below looks for.
     await page.evaluate((r) => window.__es.push(
-      Object.assign({}, r, { ready: false, state: 'empty', perHour: null })),
+      Object.assign({}, r, { ready: false, state: 'empty', perHour: null,
+                             pay: null, minutes: null, cardMinutes: null,
+                             miles: null, places: [], pickup: null, dropoff: null })),
       READINGS.deducted);
     await page.evaluate(() => window.__es.push(
       { phase: 'scanning', message: '' }));
@@ -2007,6 +2071,54 @@ const framed = (page) => page.waitForFunction(
       conn: document.getElementById('conn').textContent.trim(),
       detail: document.getElementById('detail').textContent.trim(),
       dot: document.getElementById('dot').classList.contains('on') }));
+    await page.close();
+  }
+
+  // --- a reading with no verdict, and what it did read ----------------------
+  //
+  // That same line, over a card. At 15:45 on 8 Oct the card box cut an Uber
+  // Est. delivery card's $14.48 in half; the reader got the rest and the panel
+  // said "scanner running, no offer on screen". Each reading here is one the
+  // rig sends, in the order a driver might meet them, on one page — so a line
+  // left over from the reading before is caught as well as a wrong one.
+  {
+    stage = 'a reading with no verdict says what it did read';
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+      .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'scanning',
+        scanner: { enabled: true, running: true, error: null },
+        last: null, lastAgeMs: null, heardAgeMs: 900, offer: null, holding: null }) }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 0, counted: 0, setAside: 0, took: 0,
+                             beforeClock: 0, unreadable: null, rolled: false, clockSet: true }) }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+    await page.evaluate(() => window.__es.push({ phase: 'scanning', message: '' }));
+    out.noVerdict = {};
+    for (const key of ['cutpay', 'cutpaynow', 'notime', 'zone', 'deadlineonly',
+                       'pickuponly', 'blank']) {
+      await page.evaluate(() => window.__es.push({ alive: true, at: 1 }));
+      await page.evaluate((r) => window.__es.push(r), READINGS[key]);
+      await page.waitForTimeout(150);
+      const slot = await page.evaluate(() => ({
+        detail: document.getElementById('detail').textContent.trim(),
+        label: document.getElementById('verdictLabel').textContent.trim(),
+        verdict: document.getElementById('verdict').className,
+      }));
+      // Painted, not merely set: the headline and the four figures under it
+      // hide themselves when there is nothing to report.
+      slot.painted = [];
+      for (const sel of ['.rate.big', '.submetrics', '#places', '#working', '#stack']) {
+        if ((await page.evaluate(LOOK, sel)).shown) slot.painted.push(sel);
+      }
+      out.noVerdict[key] = slot;
+    }
     await page.close();
   }
 
@@ -4516,6 +4628,59 @@ try:
             'finds the phone' in (land.get('note') or ''))
         ok_('a portrait phone is laid out as one', port.get('phoneLayout'))
         ok_('...with the flattened-phone caption', 'flattened' in (port.get('note') or ''))
+
+    # --- a reading with no verdict, and what it did read -----------------
+    #
+    # A card under the reader with its pay cut off by the card box, and the
+    # line under the verdict saying there was no offer on screen. What it says
+    # now is what the reading got, with no figure and no verdict, because none
+    # was reached — and it may not claim a card either, since the app's zone
+    # prompt reads exactly the way a card missing its pay does.
+    nv = got.get('noVerdict') or {}
+    eq('every reading with no verdict was measured', sorted(nv),
+       ['blank', 'cutpay', 'cutpaynow', 'deadlineonly', 'notime', 'pickuponly',
+        'zone'])
+    cut = (nv.get('cutpay') or {}).get('detail') or ''
+    no_('the 8 Oct Est. delivery card the box cut the pay off is not called '
+        '"no offer on screen" (%r)' % cut, 'no offer on screen' in cut)
+    ok_('...it says no pay was read, off the distance alone, as the rig sent it',
+        cut.startswith('no pay read'))
+    ok_('...and names the box as the thing that may have cut it off',
+        'the box may cut off' in cut)
+    eq('...and the same card as the parser reads it now, deadline and both ends, '
+       'says the same', (nv.get('cutpaynow') or {}).get('detail'), cut)
+    notime = (nv.get('notime') or {}).get('detail') or ''
+    ok_('a card whose pay read and time did not says exactly that (%r)' % notime,
+        notime.startswith('pay read but no time'))
+    ok_('...and names the box for it too', 'the box may cut it off' in notime)
+    zone = (nv.get('zone') or {}).get('detail') or ''
+    ok_('a zone prompt, whose wait reads as minutes, is a reading with no pay (%r)'
+        % zone, zone.startswith('no pay read'))
+    alone = (nv.get('deadlineonly') or {}).get('detail') or ''
+    ok_('a reading with the deadline alone is a reading with no pay (%r)' % alone,
+        alone.startswith('no pay read'))
+    alone = (nv.get('pickuponly') or {}).get('detail') or ''
+    ok_('...and so is one with the pickup alone (%r)' % alone,
+        alone.startswith('no pay read'))
+    for key in ('cutpay', 'cutpaynow', 'notime', 'zone', 'deadlineonly', 'pickuponly'):
+        s = nv.get(key) or {}
+        said = s.get('detail') or ''
+        # "a card's pay" is a card the box MAY have cut; what is refused is the
+        # line saying one is there.
+        no_('...and %s never says a card is there (%r)' % (key, said),
+            re.search(r"\bcards? (is|are|in view|on (the )?screen)\b|\bcard (up|showing)\b",
+                      said))
+        eq('...no verdict on %s, which has none' % key,
+           (s.get('label'),
+            sorted(set((s.get('verdict') or '').split())
+                   & {'empty', 'go', 'warn', 'no', 'doubt', 'fault'})),
+           ('WAITING FOR AN OFFER', ['empty']))
+        eq('...no figure painted for %s' % key, s.get('painted'), [])
+        no_('...nor a digit in the line under it (%s, %r)' % (key, said),
+            re.search(r'\d', said))
+    blank = (nv.get('blank') or {}).get('detail') or ''
+    ok_('a reading that got nothing still says there is no offer on screen (%r)'
+        % blank, blank.startswith('scanner running, no offer on screen'))
 
     # --- what the shift adds up to, on the row under the verdict ---------
     first = got.get('shiftFirst') or {}

@@ -647,6 +647,22 @@ SNAP_FIXTURE = {
             'support wlr-screencopy-unstable-v1; no camera picture: the scanner is '
             'not running; the rig\'s clock is not set, so it is filed under 1970',
 }
+# The line under the verdict when a reading carries no verdict: what the reader
+# got and what may have cut the rest off, where it used to say "scanner
+# running, no offer on screen" over a card whose pay the box had cut in half.
+# One reading for each sentence, in the order they are measured: the old line
+# first, so the other two are compared against the panel as it was. Shapes
+# only — rpi/test_dashboard.py holds what each one says, off the rig's own
+# readings; this file holds where the words land.
+NOVERDICT = {
+    'nothing': {'ready': False, 'state': 'empty', 'track': None, 'text': ''},
+    'nopay': {'ready': False, 'state': 'empty', 'track': None, 'miles': 8.6,
+              'places': [], 'text': ''},
+    'notime': {'ready': False, 'state': 'empty', 'track': None, 'pay': 4.21,
+               'places': [], 'text': ''},
+}
+# The rig's own display, and the two the panel is proven at.
+NOVERDICT_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '480x320')]
 # ...and the two strings that fixture copies have to still be the page's, or it
 # measures a line the page no longer writes.
 ok_('live.html still writes the median as "/hr an offer"', "'/hr an offer'" in live_src)
@@ -676,8 +692,12 @@ if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
 DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
-       snapPanelsJson] = process.argv.slice(2);
+       snapPanelsJson, noVerdictJson, noVerdictPanelsJson] = process.argv.slice(2);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
+// The readings with no verdict in them, and where their line is measured; see
+// NOVERDICT on the Python side.
+const NOVERDICT = JSON.parse(noVerdictJson);
+const NOVERDICT_PANELS = JSON.parse(noVerdictPanelsJson);
 // What 📷 Snap's measurement puts on the status row; see SNAP_FIXTURE.
 const SNAP_FIXTURE = JSON.parse(snapJson);
 const SNAP_PANELS = JSON.parse(snapPanelsJson);
@@ -1424,6 +1444,96 @@ const SNAP_MEASURE = (fixture) => {
     await page.close();
     await ctx.close();
   }
+  // The line under the verdict when a reading has none, on the rig's own
+  // panel and the two it is proven at, in both pictures. The scene picture is
+  // the narrower verdict, and it is the width the rig's own panel had on 8 Oct
+  // with the phone up: 500px of 1024. Each sentence is measured against the
+  // one it replaced, on one page, so "moves nothing" is a comparison with the
+  // panel as it was and not a guess at what fits.
+  for (const panel of NOVERDICT_PANELS) {
+    for (const view of ['screen', 'scene']) {
+      const ctx = await browser.newContext({
+        viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+      });
+      const page = await ctx.newPage();
+      await page.addInitScript((v) => {
+        try { localStorage.setItem('uberscan.liveView', v); } catch (e) {}
+        class FakeEventSource {
+          constructor(url) { this.url = url; window.__es = this; }
+          close() {}
+          push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
+        }
+        window.EventSource = FakeEventSource;
+      }, view);
+      await page.route('**/api/frame.*', (route) => {
+        const v = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
+        route.fulfill({ status: 200, contentType: 'image/jpeg',
+                        body: Buffer.from(FRAMES[v], 'base64') });
+      });
+      await page.route('**/api/status*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ scanner: { enabled: true, running: true, error: null },
+                               status: { phase: 'scanning', message: '' },
+                               last: null, lastAgeMs: null, heardAgeMs: 400,
+                               offer: null, holding: null }) }));
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
+                                 null, { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(600);
+      const slot = {};
+      for (const [key, reading] of Object.entries(NOVERDICT)) {
+        await page.evaluate((r) => {
+          window.__es.push({ alive: true, at: 1 });
+          window.__es.push(r);
+        }, reading);
+        await page.waitForTimeout(150);
+        slot[key] = await page.evaluate(() => {
+          const d = document.getElementById('detail');
+          const r = d.getBoundingClientRect();
+          const cs = getComputedStyle(d);
+          const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+          // Every letter inside the line's own width and on the glass: what a
+          // screenshot would show, which a width comparison does not. Up and
+          // down against the glass alone — on the 3.5" hat this line is set
+          // at `line-height: 1`, so every glyph's own box is taller than the
+          // line's, the old sentence's included, and nothing clips it.
+          const off = [];
+          const walk = document.createTreeWalker(d, NodeFilter.SHOW_TEXT);
+          const rg = document.createRange();
+          let n;
+          while ((n = walk.nextNode())) {
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (!c.width && !c.height) continue;
+              if (c.left < Math.max(0, r.left) - 0.5
+                  || c.right > Math.min(window.innerWidth, r.right) + 0.5
+                  || c.top < -0.5 || c.bottom > window.innerHeight + 0.5) off.push(n.data[i]);
+            }
+          }
+          const box = (sel) => {
+            const b = document.querySelector(sel).getBoundingClientRect();
+            return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+          };
+          const doc = document.documentElement;
+          return {
+            text: d.textContent.trim(),
+            lines: Math.round(r.height / line),
+            off: off.join(''),
+            // Everything else on the panel a driver reads or presses.
+            layout: { label: box('#verdictLabel'), verdict: box('#verdict'),
+                      bar: box('.bottombar'), row: box('.connbar'), view: box('#viewWrap') },
+            over: doc.scrollWidth > doc.clientWidth + 1 || doc.scrollHeight > doc.clientHeight + 1,
+            phone: document.body.classList.contains('phoneview'),
+          };
+        });
+      }
+      out[panel[0] + ' ' + view + ' noverdict'] = slot;
+      await page.close();
+      await ctx.close();
+    }
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -1610,7 +1720,8 @@ try:
     proc2 = subprocess.run(
         ['node', driver, base, json.dumps(PANELS), json.dumps(PAGES),
          json.dumps(FRAMES), json.dumps(CAPTION_LINES), json.dumps(SNAP_FIXTURE),
-         json.dumps(SNAP_PANELS)],
+         json.dumps(SNAP_PANELS), json.dumps(NOVERDICT),
+         json.dumps(NOVERDICT_PANELS)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -1660,6 +1771,36 @@ try:
 
     for panel, w, h in SNAP_PANELS:
         snap_checks(panel, got.get('%s snap' % panel) or {})
+
+    # The line under the verdict when a reading has none. Whole, on one line,
+    # every letter on the glass, and costing the panel nothing: the label, the
+    # verdict, the camera view, the status row and the bar exactly where the
+    # line it replaced left them. One line is the whole budget — the verdict is
+    # this row's other occupant and every pixel the line takes comes out of it.
+    for panel, w, h in NOVERDICT_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            nv = got.get('%s %s noverdict' % (panel, view)) or {}
+            eq('the no-verdict line was measured at %s' % where, sorted(nv),
+               ['nopay', 'nothing', 'notime'])
+            if not nv:
+                continue
+            was = nv['nothing']
+            # Two pictures are two layouts, or this measured one of them twice.
+            eq('...in the layout that picture is drawn in at %s' % where,
+               was['phone'], view == 'screen')
+            ok_('...against the line it replaced at %s (%r)' % (where, was['text']),
+                was['text'].startswith('scanner running, no offer on screen'))
+            for key, opens in (('nopay', 'no pay read'),
+                               ('notime', 'pay read but no time')):
+                s = nv[key]
+                ok_('"%s" is the line measured at %s (%r)' % (opens, where, s['text']),
+                    s['text'].startswith(opens))
+                eq('...on one line at %s' % where, s['lines'], 1)
+                eq('...every letter of it on the glass at %s' % where, s['off'], '')
+                eq('...moving nothing else on the panel at %s' % where,
+                   s['layout'], was['layout'])
+                no_('...and the page still fits at %s' % where, s['over'])
 
     for panel, w, h in PANELS:
         dashboard = w > h and h <= 620

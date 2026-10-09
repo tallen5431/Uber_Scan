@@ -2128,7 +2128,7 @@
             ? 'nothing from the scanner for ' + Math.round(quiet / 1000)
               + 's — it may have stopped'
             : (busy ? 'working out the pay, the time and the distance'
-               : (r ? 'scanner running, no offer on screen' + trackNote(r) : '')));
+               : (r ? noVerdictSaid(r) + trackNote(r) : '')));
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
       el.working.hidden = true;
       showRaw(r && r.text);
@@ -2486,6 +2486,63 @@
     // of them counts since start.
     else if (t && t.drift >= 25) bits.push('tracking ' + Math.round(t.drift) + 'px');
     return bits.length ? ' · ' + bits.join(' · ') : '';
+  }
+
+  // What a reading with no verdict in it DID read, in words and no figures.
+  //
+  // Every one of them used to get "scanner running, no offer on screen", which
+  // is a claim about the phone this page has no way to know. On 8 Oct an Uber
+  // Est. delivery card sat square in front of the camera: the card box cut
+  // its $14.48 in half, the reader got "Includes expected tip", the deadline,
+  // "8.6 mi" and both addresses, and the panel told the driver there was no
+  // offer. A reading carries what it got — `pay`, `minutes`, `deliverBy`,
+  // `miles` and `places` are all on every message emit() sends — so this says
+  // what was got, and the one thing the driver can do about it.
+  //
+  // NOT "a card is in view", which is the obvious sentence and is not true
+  // either. Of the corpus's 19 texts that read no payout, 18 read a time, a
+  // distance or a place, and 12 of those are not cards at all: Uber's route
+  // planner (7) and the app's zone prompt (5). Nothing on file says what a
+  // navigation screen reads as through this camera (AUDITS.md, the `screen`
+  // rows), so the panel cannot tell a card missing its pay from a screen that
+  // never had one — and says the half it knows, with the remedy conditional on
+  // the half it does not.
+  //
+  // A pay is different: a payout is the rig's own test for a card on the
+  // screen (`card_on_screen` in rpi/scan_pi.py), and a reading with one and no
+  // verdict has no time to divide it by. `> 0` as is_complete has it. Every
+  // reading that reaches this with a pay read no time at all, but for a
+  // deadline rate() could not count down — one due this very minute, or read
+  // before the Pi's clock was set (clock_minutes) — or a negative `pad` in
+  // config.json, and "no time" is the truth about those as well.
+  //
+  // No figure, in either: no verdict was reached, and a number on this line
+  // is one the driver would read as the reading's. The box, not the card box:
+  // a driver who pressed No card box reads the whole screen box, and the
+  // control that fixes either is ▣ Set box.
+  //
+  // Measured on the real week's 5,491 stored frames: 135, on 59 of the 1,166
+  // cards, read a pay and no time — each one a card until a frame of it with a
+  // time merges in. 19 read a time and no pay, and all 19 are the app's zone
+  // prompt, five prompts and not one card: a frame with no payout passes the
+  // accumulator untouched (accumulate.add's first guard), so over those this
+  // line now says "no pay read", where "no offer on screen" was true as well.
+  // The hedge is what keeps it true there. The card it was written for, a pay
+  // the box cut off, is not in that week's frames at all; it is the 8 Oct one.
+  function noVerdictSaid(r) {
+    if (typeof r.pay === 'number' && r.pay > 0) {
+      return 'pay read but no time — the box may cut it off';
+    }
+    // The places asked of MV.ends, as showPlaces asks: the one rule for what
+    // a reading named (rpi/test_lint.py holds the page to it).
+    var named = MV ? MV.ends(r) : (r.places || []);
+    if ((typeof r.minutes === 'number' && r.minutes > 0)
+        || (r.deliverBy !== null && r.deliverBy !== undefined)
+        || typeof r.miles === 'number'
+        || named.length) {
+      return 'no pay read — the box may cut off a card\'s pay';
+    }
+    return 'scanner running, no offer on screen';
   }
 
   // What the dot means.

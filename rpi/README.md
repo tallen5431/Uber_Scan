@@ -2418,6 +2418,25 @@ honouring an inherited one would silently disable the placement — including,
 for the oldest files, restoring the tight `[0.02, 0.48, 0.96, 0.50]` box that
 lost the payout on 13 of 42 test cards. A stale `roi` key is now ignored.
 
+**When the box cuts a card short, the panel says so.** At 15:45 on 8 Oct an
+Uber Est. delivery card had its `$14.48` cut in half by the top edge of the card
+box — the crop the reader was given, `reader.jpg` in that 📷 Snap, starts
+through the middle of the digits. The reader got "Includes expected tip", the
+deadline, `8.6 mi` and both addresses, and the line under the verdict said
+`scanner running, no offer on screen`. A reading with no verdict now says what
+it did read, in words and never a figure: `pay read but no time — the box may
+cut it off` when it has a payout, and `no pay read — the box may cut off a
+card's pay` when it read a time, a deadline, a distance or a place and no
+payout. The second claims no card, because it cannot know of one: of the
+corpus's 18 texts that read something and no payout, 12 are not cards at all —
+Uber's route planner and the app's zone prompt. On the real week's 5,491 stored
+frames it would have shown over the zone prompt and nothing else — 19 frames,
+five prompts, where `no offer on screen` was true as well — and the card it is
+for, a payout the box cut off, is the 8 Oct one. `no offer on screen` is kept
+for a reading that got nothing. It is one line on the rig's own panel, on the
+800x480 one and on the 3.5" hat, in either picture, and moves nothing else;
+`rpi/test_layout.py` measures that and `rpi/test_dashboard.py` what it says.
+
 ### The headline is a *net* rate
 
 `costPerMile` defaults to **$0.30** here, and it comes off the top. That makes
@@ -3757,7 +3776,11 @@ counted in its day. `PAY_IS_PER_ORDER` refuses the figure the way
 and `/order` is one. It is the only money on all 29 frames of the five prompts
 and on no other frame or text of the week, so the prompt is left with no payout
 — no verdict, no offer row, the panel still saying WAITING FOR AN OFFER, which
-is what the app is doing.
+is what the app is doing. The line under it says `no pay read — the box may cut
+off a card's pay`, because the wait's minutes did read and the panel cannot
+tell a prompt from a card whose payout the box cut off (see `noVerdictSaid` in
+`live.html`); it claims no card, and names the one thing to check if there is
+one.
 
 One anchor, and it is not widened for misreads nobody has seen. `/order` read
 cleanly on all 29 frames. Nothing else on the week's 5,491 frames prints a unit
