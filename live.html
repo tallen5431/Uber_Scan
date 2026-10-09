@@ -1542,11 +1542,13 @@
     }).then(function () {
       tookBusy = false;
       showTook();
-      // The count on the status row is about to be wrong by one. Marking is the
-      // only thing on this screen that changes it, so it is also the only time
-      // it is worth asking again off the timer — and leaving it until the next
-      // slow poll would mean pressing "took it" and watching the number beside
-      // it not move.
+      // The tick on the status row is about to be wrong by one. It is one of
+      // two things on this screen that ask again off the timer — the other is
+      // the rig saying it has written an offer, see SHIFT_SOON_MS — and
+      // leaving it until the next slow poll would mean pressing "took it" and
+      // watching the number beside it not move. This comment used to say
+      // marking was the only thing that changes the row, which was never
+      // true: every card the rig saves is one more offer on it.
       loadShift();
     });
   });
@@ -1861,6 +1863,54 @@
   // number anybody watches tick.
   var SHIFT_EVERY_MS = 180000;
 
+  // ...but it is a number that should not contradict the card that has just
+  // been saved, and at three minutes it did. On 8 Oct the rig's own panel read
+  // "✓ 0 · 0 offers" at 3:05pm under a $4.21 PASS whose row had landed 27.6
+  // seconds earlier (that 📷 Snap's status.json: offerAgeMs 27566). The poll
+  // was the only thing asking, bar a mark.
+  //
+  // So it is asked again when the rig says it has written an offer: the
+  // `{offer: …}` line rpi/scan_pi.py's emit_offer sends once
+  // OfferLog.consider has appended the row — journal.py closes the file
+  // before it returns, so the row is on disk when the line is sent. It goes
+  // out for each new card and again for a later reading of the same card that
+  // landed reading differently, and both move this row: the count, and the
+  // median and set-aside figures a fuller reading changes.
+  //
+  // Coalesced, because that is several lines a card. The week replayed through
+  // OfferLog.consider wrote 2.8 rows an offer (rpi/journal.py, WEEK_BYTES) and
+  // up to ten for one card, and the real week's cards landed as close as 0.87s
+  // apart, 77 of 1,165 gaps under five seconds and ten cards in its busiest
+  // minute. The first line arms one request SHIFT_SOON_MS later and every line
+  // until then rides it. Five seconds is a second longer than the resample
+  // burst that follows a card's arrival (RESAMPLE_WINDOW in rpi/scan_pi.py),
+  // which is the burst of extra reads a card's fuller readings come out of.
+  // Replayed against the week's landing times that is 1,099 asks rather than
+  // 1,166, never more than nine in a minute, and each one is cheap: after an
+  // append the journal cache reads only the new bytes, and /api/today measured
+  // 6.6ms median, 31.8ms worst, over twenty appends to the replayed week on
+  // the development container, against 240ms for the first, cold read.
+  //
+  // Any ask at all answers what is pending — see loadShift — so a mark inside
+  // the window is the only request, not one of two.
+  //
+  // Not in a background tab, for the reason the poll's own tick gives: nobody
+  // is reading it, and a phone with the panel open behind something else
+  // would otherwise ask the rig to read its journal every five seconds of a
+  // busy hub. It is left owing instead — `shiftAt` zeroed, so the first tick
+  // the tab is visible again asks at once rather than up to three minutes on.
+  var SHIFT_SOON_MS = 5000;
+  var shiftSoonTimer = null;
+
+  function shiftSoon() {
+    if (shiftSoonTimer) return;
+    shiftSoonTimer = setTimeout(function () {
+      shiftSoonTimer = null;
+      if (document.hidden) { shiftAt = 0; return; }
+      loadShift();
+    }, SHIFT_SOON_MS);
+  }
+
   function showShift(s) {
     if (!s) { el.shift.hidden = true; return; }
     var bits;
@@ -1996,6 +2046,13 @@
   var CLOCK_BELIEVABLE_AFTER = 1735689600000;
 
   function loadShift() {
+    // Whoever asked, the answer is worked out after every offer line that has
+    // arrived so far — sent now, or queued behind the request in flight by
+    // `shiftAgain` below — so an ask an offer left pending is already answered.
+    if (shiftSoonTimer) {
+      clearTimeout(shiftSoonTimer);
+      shiftSoonTimer = null;
+    }
     // The page's OWN clock first. On the panel bolted to the dashboard this
     // browser is running on the Pi, so an unset clock makes dayStart() a 1970
     // moment — which the server refuses, correctly, and the line would simply
@@ -2769,6 +2826,9 @@
         // second; a second is a long time on a screen the driver is reading
         // to decide, and the card may be gone by then.
         showDest();
+        // ...and the status row, whose figures a row on disk has just
+        // changed. See SHIFT_SOON_MS.
+        shiftSoon();
       }
       // A read started, and — on the next message carrying a verdict — ended.
       // Same shape as the two above: no `ready`, so it cannot stand in for one.

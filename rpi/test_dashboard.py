@@ -681,11 +681,14 @@ const framed = (page) => page.waitForFunction(
                label: el.getAttribute('aria-label') || '' };
     });
 
-    // Marking is the one thing on this screen that changes the count, so it is
-    // the one time the figures are worth asking for off the timer. Left to the
-    // three-minute poll, a driver would press "took it" and watch the number
-    // beside it not move — the same two-figures-disagreeing failure, now inside
-    // one panel.
+    // Marking changes the tick, so it asks for the figures off the timer. Left
+    // to the three-minute poll, a driver would press "took it" and watch the
+    // number beside it not move — the same two-figures-disagreeing failure, now
+    // inside one panel. (It is not the only thing that changes the row: an
+    // offer the rig writes does too, and asks five seconds on — see "the status
+    // row, when the rig writes an offer". Here the press answers the ask o1
+    // left pending, and the one the next cards arm is not due until five
+    // seconds after them, well after this count is taken — so it is two.)
     out.shiftAfterMark = await lookShift();
     out.shiftAsked = shiftAsked.length;
 
@@ -2120,6 +2123,95 @@ const framed = (page) => page.waitForFunction(
       out.noVerdict[key] = slot;
     }
     await page.close();
+  }
+
+  // --- the status row, when the rig writes an offer ---------------------------
+  //
+  // At 15:05 on 8 Oct the rig's own panel read "✓ 0 · 0 offers" under a card
+  // whose row had landed 27.6 seconds earlier: only the three-minute poll and
+  // a mark asked for the figures. The page now asks again five seconds after
+  // the scanner's `{offer: …}` line, once however many lines arrive in those
+  // five seconds, never from a tab nobody can see, and not at all when
+  // something else has asked in the meantime.
+  //
+  // On the page's own clock, driven from here. The window is five seconds and
+  // this asks about four moments around it; waited out for real it is twenty
+  // seconds of a long suite, on a machine whose load decides whether a timer
+  // due at five seconds has fired by six.
+  {
+    stage = 'the status row asks again when an offer is written';
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    // `document.hidden`, settable from here. A real background tab cannot be
+    // made in a headless context, and this is the one property the page reads.
+    await page.addInitScript(() => {
+      window.__hidden = false;
+      Object.defineProperty(document, 'hidden', {
+        configurable: true, get: () => window.__hidden });
+    });
+    const asked = [];
+    await page.route('**/api/today*', (route) => {
+      asked.push(route.request().url());
+      // The count moves with every ask, so an answer reaching the row is seen
+      // rather than inferred.
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ offers: asked.length, counted: asked.length,
+                               setAside: 0, took: 0, beforeClock: 0,
+                               unreadable: null, rolled: false, clockSet: true }) });
+    });
+    await page.route('**/api/offers/mark', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"ok":true}' }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(400);
+    // Stopped here, so from now on the page's timers move only when told to.
+    // The answers still arrive in real time — the network is not a timer — so
+    // each step gives them a moment after the clock moves.
+    const pageNow = await page.evaluate(() => Date.now());
+    await page.clock.pauseAt(pageNow + 50);
+    const tick = async (ms) => {
+      await page.clock.runFor(ms);
+      await page.waitForTimeout(250);
+      return asked.length;
+    };
+    const soon = {};
+    soon.atLoad = asked.length;
+    // A burst: one card read over and over, each fuller reading landing a row
+    // and a line, then a second card — twelve lines in all, in one go.
+    await page.evaluate(() => {
+      for (let i = 0; i < 12; i++) {
+        window.__es.push({ offer: { id: i < 9 ? 'burst-1' : 'burst-2',
+                                    pay: i < 9 ? 8.04 : 11.5, minutes: 20 + i },
+                           at: i });
+      }
+    });
+    soon.inBurst = await tick(0);
+    soon.fourSeconds = await tick(4000);
+    soon.fiveSeconds = await tick(1200);
+    soon.row = await page.evaluate(() => document.getElementById('shift').textContent);
+    soon.later = await tick(10000);
+    // A mark inside the window: it asks, and the ask the offer left pending is
+    // answered by it rather than made as well.
+    await page.evaluate(() => window.__es.push(
+      { offer: { id: 'marked', pay: 9.5, minutes: 18 }, at: 20 }));
+    await tick(300);
+    soon.markClicked = await page.click('#took', { timeout: 3000 }).then(() => true, () => false);
+    soon.marked = await tick(300);
+    soon.afterMark = await tick(6000);
+    // ...and a tab nobody is looking at.
+    await page.evaluate(() => { window.__hidden = true; });
+    await page.evaluate(() => window.__es.push(
+      { offer: { id: 'behind', pay: 7.0, minutes: 15 }, at: 30 }));
+    soon.hidden = await tick(6000);
+    await page.evaluate(() => { window.__hidden = false; });
+    soon.shown = await tick(1100);
+    out.soon = soon;
+    await page.close();
+    await ctx.close();
   }
 
   // --- the phone view is for a picture of a phone ---------------------------
@@ -4681,6 +4773,27 @@ try:
     blank = (nv.get('blank') or {}).get('detail') or ''
     ok_('a reading that got nothing still says there is no offer on screen (%r)'
         % blank, blank.startswith('scanner running, no offer on screen'))
+
+    # --- the status row, when the rig writes an offer --------------------
+    #
+    # Counted at the door: every /api/today the page made.
+    so = got.get('soon') or {}
+    ok_('the status row was measured around written offers', bool(so))
+    if so:
+        eq('the figures are asked for once at load', so.get('atLoad'), 1)
+        eq('...twelve offer lines in one go ask nothing at once', so.get('inBurst'), 1)
+        eq('...nor four seconds on', so.get('fourSeconds'), 1)
+        eq('...and ask once, five seconds after the first', so.get('fiveSeconds'), 2)
+        ok_('...whose answer reaches the row (%r)' % so.get('row'),
+            '2 offers' in (so.get('row') or ''))
+        eq('...and only once for the whole burst', so.get('later'), 2)
+        ok_('the Took press was made', so.get('markClicked'))
+        eq('a mark inside the window asks', so.get('marked'), 3)
+        eq('...and answers the ask the offer left pending rather than being one '
+           'of two', so.get('afterMark'), 3)
+        eq('a tab nobody is looking at does not ask when an offer is written',
+           so.get('hidden'), 3)
+        eq('...and asks on its first tick once it is shown', so.get('shown'), 4)
 
     # --- what the shift adds up to, on the row under the verdict ---------
     first = got.get('shiftFirst') or {}

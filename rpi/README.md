@@ -788,7 +788,8 @@ a third of that in real rows, 22.4MB and 12,766 rows of the replayed week, parse
 in 64-223ms on the development container (48 runs), more on a Pi 4. The
 150-265ms once quoted here was a 20MB file of fifty thousand short rows, about
 400 bytes each against the real 1,752, so it was never a third of this file. So
-the page asks every three minutes,
+the page asks every three minutes — and once more five seconds after the rig
+says it has written an offer, see below —
 matching the budget `/api/journal/newest` already set for a journal-reading GET,
 and the answer is cached against the journal's size and mtime — append-only means
 size is monotonic where mtime granularity is not. The cache holds the finished
@@ -822,8 +823,22 @@ the panel offered to mark it again — while the count had already counted it. T
 mark route now records `accepted` against the offer the driving screen is
 holding, and the page seeds from it. And marking refetched nothing, so pressing
 "took it" and watching the number beside it not move was the whole experience
-until the next poll. Marking is the only thing on this screen that changes the
-count, so it is the one time the figures are worth asking for off the timer.
+until the next poll. So marking asks again off the timer.
+
+This said marking was the only thing on the screen that changes the count, and
+it never was: every card the rig saves is one more offer on the line. At 15:05
+on 8 Oct the rig's own panel read `✓ 0 · 0 offers` under a $4.21 PASS whose row
+had landed 27.6 seconds before (the 📷 Snap's `offerAgeMs`, 27566). The page now
+also asks when the scanner's `{offer: …}` line arrives — `emit_offer`, sent once
+`OfferLog.consider` has appended the row and closed the file — coalesced to one
+request five seconds after the first such line, because a card sends another
+for each later reading of it that lands reading differently (2.8 rows an offer
+on the replayed week, up to ten for one card). Over the real week's landing times that is 1,099 requests
+rather than 1,166 and never more than nine in a minute; after an append the
+journal is read incrementally, and `/api/today` measured 6.6ms median, 31.8ms
+worst, over twenty appends to the replayed week on the development container.
+Any request at all — a mark inside the five seconds — answers the pending one,
+and a background tab asks when it is next shown instead.
 
 `test_dashboard.py` holds both: it asks whether the count moved, and — because
 asserting a hidden line on a page that never got an answer proves nothing, since
