@@ -2270,7 +2270,8 @@ def emit_offer(offer_id, parsed, rate):
     }, 'at': int(time.time() * 1000)}), flush=True)
 
 
-def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
+def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
+         clipped=False):
     """One JSON object per line, flushed, so a parent process sees reads live."""
     payload = {
         'track': tracker.status() if tracker is not None else None,
@@ -2389,6 +2390,18 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None):
         # plain ACCEPT on a card missing half its journey, which reads as a much
         # better offer than it is.
         'whole': None if whole is None else bool(whole),
+        # Whether this read found a payout flush against the top of the box
+        # and threw the whole parse away for it (pipeline.money_is_clipped).
+        # The one case where the rig KNOWS the box cut a card, and the reading
+        # it sends is `parse('')` — no pay, no time, no places, no text — the
+        # same shape as a read of an empty screen. Without this the panel
+        # could not tell them apart and said "scanner running, no offer on
+        # screen" over the card, while this process's own log said "the payout
+        # sat against the top edge of the crop". rpi/README.md's tight-box
+        # measurement is the size of it: a box that clips the payout lost it
+        # on 13 of 42 cards. Only ever on a reading with no verdict — the
+        # empty parse cannot be rated — so it can never sit beside a number.
+        'clipped': bool(clipped),
     }
     sys.stdout.write(json.dumps(payload) + '\n')
     sys.stdout.flush()
@@ -3222,7 +3235,8 @@ def main():
         note_tally(tally)
 
         if args.json:
-            emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole)
+            emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole,
+                 clipped=bool(out.get('clipped')))
         else:
             show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
 

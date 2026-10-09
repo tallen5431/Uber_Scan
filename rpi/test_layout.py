@@ -650,17 +650,32 @@ SNAP_FIXTURE = {
 # The line under the verdict when a reading carries no verdict: what the reader
 # got and what may have cut the rest off, where it used to say "scanner
 # running, no offer on screen" over a card whose pay the box had cut in half.
-# One reading for each sentence, in the order they are measured: the old line
-# first, so the other two are compared against the panel as it was. Shapes
-# only — rpi/test_dashboard.py holds what each one says, off the rig's own
-# readings; this file holds where the words land.
-NOVERDICT = {
-    'nothing': {'ready': False, 'state': 'empty', 'track': None, 'text': ''},
-    'nopay': {'ready': False, 'state': 'empty', 'track': None, 'miles': 8.6,
-              'places': [], 'text': ''},
-    'notime': {'ready': False, 'state': 'empty', 'track': None, 'pay': 4.21,
-               'places': [], 'text': ''},
+# One reading for each sentence, the old line first, so the others are compared
+# against the panel as it was. Shapes only — rpi/test_dashboard.py holds what
+# each one says, off the rig's own readings; this file holds where the words
+# land.
+#
+# ...and each of them three times over, because trackNote() appends to this
+# line: nothing, " · tracking 30px" (drift past 25px), and " · screen not
+# visible". The first version measured `track: None` alone, and its sentences
+# wrapped beside the drift note at 800x480 and on the 3.5" hat — lifting the
+# verdict label 12px and 5px where the old sentence, with the same note, had
+# stayed on one line. The lost note wraps the old sentence too in those two
+# scene pictures, so "moves nothing" is asked against the old line WITH the
+# same note, not against the line alone.
+NOVERDICT_SAID = {
+    'nothing': {},
+    'nopay': {'miles': 8.6},
+    'notime': {'pay': 4.21},
+    'clipped': {'clipped': True},
 }
+NOVERDICT_TRACK = {'alone': None, 'drift': {'drift': 30}, 'lost': {'lost': True}}
+NOVERDICT = {}
+for _said, _fields in NOVERDICT_SAID.items():
+    for _track, _t in NOVERDICT_TRACK.items():
+        NOVERDICT['%s/%s' % (_said, _track)] = dict(
+            {'ready': False, 'state': 'empty', 'track': _t, 'places': [], 'text': ''},
+            **_fields)
 # The rig's own display, and the two the panel is proven at.
 NOVERDICT_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '480x320')]
 # ...and the two strings that fixture copies have to still be the page's, or it
@@ -1516,15 +1531,23 @@ const SNAP_MEASURE = (fixture) => {
             const b = document.querySelector(sel).getBoundingClientRect();
             return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
           };
-          const doc = document.documentElement;
+          // The words' own width, in the page's font: of the sentence alone
+          // when there is no note, which is the one compared.
+          const all = document.createRange();
+          all.selectNodeContents(d);
+          // No "the page still fits" here. It was asked, and it could not
+          // fail: #app clips rather than scrolls, so the sentence twelve
+          // times over and a `white-space: nowrap` that ran it off the glass
+          // both left the page's scroll size alone. The letters are what a
+          // driver would miss, and `off` above is what asks after them.
           return {
             text: d.textContent.trim(),
+            width: Math.round(all.getBoundingClientRect().width * 10) / 10,
             lines: Math.round(r.height / line),
             off: off.join(''),
             // Everything else on the panel a driver reads or presses.
             layout: { label: box('#verdictLabel'), verdict: box('#verdict'),
                       bar: box('.bottombar'), row: box('.connbar'), view: box('#viewWrap') },
-            over: doc.scrollWidth > doc.clientWidth + 1 || doc.scrollHeight > doc.clientHeight + 1,
             phone: document.body.classList.contains('phoneview'),
           };
         });
@@ -1772,35 +1795,55 @@ try:
     for panel, w, h in SNAP_PANELS:
         snap_checks(panel, got.get('%s snap' % panel) or {})
 
-    # The line under the verdict when a reading has none. Whole, on one line,
-    # every letter on the glass, and costing the panel nothing: the label, the
-    # verdict, the camera view, the status row and the bar exactly where the
-    # line it replaced left them. One line is the whole budget — the verdict is
-    # this row's other occupant and every pixel the line takes comes out of it.
+    # The line under the verdict when a reading has none. No wider than the
+    # line it replaced, every letter on the glass, and costing the panel
+    # nothing the old line did not cost it: the label, the verdict, the camera
+    # view, the status row and the bar exactly where the old sentence left
+    # them, with the same tracking note beside it. One line is the whole budget
+    # when there is no note — the verdict is this row's other occupant and
+    # every pixel the line takes comes out of it.
+    NOTE = {'alone': 'alone', 'drift': 'beside "tracking 30px"',
+            'lost': 'beside "screen not visible"'}
     for panel, w, h in NOVERDICT_PANELS:
         for view in ('screen', 'scene'):
             where = '%s, %s view' % (panel, view)
             nv = got.get('%s %s noverdict' % (panel, view)) or {}
             eq('the no-verdict line was measured at %s' % where, sorted(nv),
-               ['nopay', 'nothing', 'notime'])
-            if not nv:
+               sorted(NOVERDICT))
+            if sorted(nv) != sorted(NOVERDICT):
                 continue
-            was = nv['nothing']
+            was = nv['nothing/alone']
             # Two pictures are two layouts, or this measured one of them twice.
             eq('...in the layout that picture is drawn in at %s' % where,
                was['phone'], view == 'screen')
             ok_('...against the line it replaced at %s (%r)' % (where, was['text']),
-                was['text'].startswith('scanner running, no offer on screen'))
+                was['text'] == 'scanner running, no offer on screen')
             for key, opens in (('nopay', 'no pay read'),
-                               ('notime', 'pay read but no time')):
-                s = nv[key]
+                               ('notime', 'pay, no time'),
+                               ('clipped', 'pay at the box edge')):
+                s = nv[key + '/alone']
                 ok_('"%s" is the line measured at %s (%r)' % (opens, where, s['text']),
                     s['text'].startswith(opens))
-                eq('...on one line at %s' % where, s['lines'], 1)
-                eq('...every letter of it on the glass at %s' % where, s['off'], '')
-                eq('...moving nothing else on the panel at %s' % where,
-                   s['layout'], was['layout'])
-                no_('...and the page still fits at %s' % where, s['over'])
+                # The rule the rest follows from: whatever trackNote() can put
+                # beside the old sentence and still fit, it can put beside
+                # this one.
+                ok_('..."%s" no wider than the line it replaced at %s (%spx of %spx)'
+                    % (opens, where, s['width'], was['width']),
+                    0 < s['width'] <= was['width'])
+                for track, note in NOTE.items():
+                    s, old = nv['%s/%s' % (key, track)], nv['nothing/%s' % track]
+                    ok_('..."%s" %s, on no more lines than the old line %s at %s '
+                        '(%d, %d)' % (opens, note, note, where, s['lines'], old['lines']),
+                        1 <= s['lines'] <= old['lines'])
+                    eq('..."%s" %s, every letter of it on the glass at %s'
+                       % (opens, note, where), s['off'], '')
+                    # Against the old line with the same note when they take
+                    # the same lines; a shorter sentence that stays on one
+                    # line where the old one wrapped leaves the panel as the
+                    # old sentence alone left it.
+                    ref = old if s['lines'] == old['lines'] else was
+                    eq('..."%s" %s, moving nothing the old line did not move at %s'
+                       % (opens, note, where), s['layout'], ref['layout'])
 
     for panel, w, h in PANELS:
         dashboard = w > h and h <= 620

@@ -292,7 +292,9 @@ cut edge of the crop is half a number, and half a number still reads as a
 number — a `4.95` rating with its top shaved became a `$45.00` offer in
 testing. There is nowhere better to re-fit to any more, so the answer is to
 report nothing. A missed offer costs one fare; a phantom $45 one costs an hour
-driving it.
+driving it. Nothing, but not silence: the reading carries `clipped`, and the
+line under the verdict says `pay at the box edge — not trusted` rather than
+that there is no offer on screen.
 
 ### The crop is loose on purpose
 
@@ -2439,18 +2441,38 @@ box — the crop the reader was given, `reader.jpg` in that 📷 Snap, starts
 through the middle of the digits. The reader got "Includes expected tip", the
 deadline, `8.6 mi` and both addresses, and the line under the verdict said
 `scanner running, no offer on screen`. A reading with no verdict now says what
-it did read, in words and never a figure: `pay read but no time — the box may
-cut it off` when it has a payout, and `no pay read — the box may cut off a
-card's pay` when it read a time, a deadline, a distance or a place and no
-payout. The second claims no card, because it cannot know of one: of the
-corpus's 18 texts that read something and no payout, 12 are not cards at all —
-Uber's route planner and the app's zone prompt. On the real week's 5,491 stored
-frames it would have shown over the zone prompt and nothing else — 19 frames,
-five prompts, where `no offer on screen` was true as well — and the card it is
-for, a payout the box cut off, is the 8 Oct one. `no offer on screen` is kept
-for a reading that got nothing. It is one line on the rig's own panel, on the
-800x480 one and on the 3.5" hat, in either picture, and moves nothing else;
-`rpi/test_layout.py` measures that and `rpi/test_dashboard.py` what it says.
+it did read, in words and never a figure:
+
+- `pay at the box edge — not trusted` when the reader found a payout flush
+  against the box's top edge and threw the parse away for it
+  (`money_is_clipped`, above). That reading is `parse('')`, as empty as one of
+  a blank screen, so `scan_pi.emit` now sends `clipped` beside it; without the
+  flag it was told `no offer on screen` while the scanner's own log said the
+  payout sat against the top edge of the crop. The 8 Oct card missed this path
+  only because its cut digits read as `gg Pit.`, which is no payout; an edge a
+  little lower would have left them readable, flush, and dropped.
+- `pay, no time — box may cut it off` when it has a payout and no time.
+- `no pay read — box may cut it off` when it read a time, a deadline, a
+  distance or a place and no payout. This one claims no card, because it
+  cannot know of one: of the corpus's 18 texts that read something and no
+  payout, 12 are not cards at all — the app's zone prompt (5) and Uber's map
+  screen (7), which reads as 39 minutes and 1.0 mi. That map is the navigation
+  screen a delivery is driven under, so this line will be up for long stretches
+  of every delivery; its hedge is what keeps it true there. On the real week's
+  5,491 stored frames — the ones kept on offer rows, which the navigation
+  screens are not — it would have shown over the zone prompt and nothing else:
+  19 frames, five prompts, where `no offer on screen` was true as well.
+- `scanner running, no offer on screen` for a reading that got nothing.
+
+Each is no wider than the sentence it replaced, in the page's own font on the
+rig's own panel, the 800x480 one and the 3.5" hat, in either picture, so
+whatever `trackNote` appends — ` · tracking 30px`, ` · screen not visible` —
+lands as it did beside the old one. The first wordings were 46 and 45
+characters: alone they fitted, but beside the drift note they wrapped at
+800x480 and on the hat and lifted the verdict label 12px and 5px where the old
+line had stayed on one. `rpi/test_layout.py` measures every sentence alone and
+with both notes against the old line with the same note, and
+`rpi/test_dashboard.py` holds what each one says.
 
 ### The headline is a *net* rate
 
@@ -3791,11 +3813,10 @@ counted in its day. `PAY_IS_PER_ORDER` refuses the figure the way
 and `/order` is one. It is the only money on all 29 frames of the five prompts
 and on no other frame or text of the week, so the prompt is left with no payout
 — no verdict, no offer row, the panel still saying WAITING FOR AN OFFER, which
-is what the app is doing. The line under it says `no pay read — the box may cut
-off a card's pay`, because the wait's minutes did read and the panel cannot
-tell a prompt from a card whose payout the box cut off (see `noVerdictSaid` in
-`live.html`); it claims no card, and names the one thing to check if there is
-one.
+is what the app is doing. The line under it says `no pay read — box may cut it
+off`, because the wait's minutes did read and the panel cannot tell a prompt
+from a card whose payout the box cut off (see `noVerdictSaid` in `live.html`);
+it claims no card, and names the one thing to check if there is one.
 
 One anchor, and it is not widened for misreads nobody has seen. `/order` read
 cleanly on all 29 frames. Nothing else on the week's 5,491 frames prints a unit

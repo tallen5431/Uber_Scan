@@ -428,11 +428,11 @@ import scan_pi as SP                                          # noqa: E402
 import io                                                     # noqa: E402
 
 
-def emitted(rate, parsed, whole):
+def emitted(rate, parsed, whole, **more):
     out = io.StringIO()
     real, sys.stdout = sys.stdout, out
     try:
-        SP.emit(rate, parsed, {'total': 10}, True, whole=whole)
+        SP.emit(rate, parsed, {'total': 10}, True, whole=whole, **more)
     finally:
         sys.stdout = real
     return json.loads(out.getvalue())
@@ -449,6 +449,22 @@ eq('...and a finished reading as whole',
    emitted(sample_rate, sample_parsed, True)['whole'], True)
 eq('...and a caller that does not say leaves it unstated',
    emitted(sample_rate, sample_parsed, None)['whole'], None)
+
+# --- ...and when the box cut the card at its payout --------------------------
+# pipeline.read answers a payout flush against the top of the box with
+# parse(''), so the reading that goes out is as empty as one of a blank screen,
+# and the panel said "scanner running, no offer on screen" over the card. The
+# flag is the only thing on the wire that tells the two apart.
+import offer_parser as _OP                                     # noqa: E402
+_empty = _OP.parse('')
+_clipped = emitted(_OP.rate(_empty), _empty, False, clipped=True)
+eq('a reading the box cut at the payout says so on the wire',
+   _clipped.get('clipped'), True)
+eq('...over a reading with nothing else in it, which is why it has to',
+   (_clipped['ready'], _clipped['pay'], _clipped['minutes'], _clipped['miles'],
+    _clipped['places'], _clipped['text']), (False, None, None, None, [], ''))
+eq('...and a reading of a blank screen says it was not',
+   emitted(_OP.rate(_empty), _empty, False).get('clipped'), False)
 
 # --- the journal -----------------------------------------------------------
 rows = run_uberx['rows']

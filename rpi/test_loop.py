@@ -1321,6 +1321,22 @@ ok_('a card landed before the crop slipped',
 eq('a clipped read is not recorded as the screen after a card',
    [x for x in r2['rows'] if x.get('kind') == 'screen'], [])
 
+# ...and the page is told, which is the other half of the same fact. The
+# reading a clipped read sends is parse('') — no pay, no time, no places — and
+# without the flag the panel said "scanner running, no offer on screen" over
+# the card while this loop's own log said the payout sat against the top edge
+# of the crop. Asked of what main() handed emit(), so a flag emit() can write
+# but the loop never passes is caught here and not only in test_scan_pi.
+# As (what the loop said, whether the reading was empty): repr-sorted, so a
+# loop that says nothing (None) is reported rather than crashing the sort.
+_said = sorted(set((v[1].get('clipped'), v[0][1].get('pay') is None)
+                   for v in r2['verdicts']), key=repr)
+ok_('the loop tells the page which readings it dropped for a payout at the '
+    'box\'s edge (%r)' % (_said,), any(c is True for c, _ in _said))
+eq('...on those readings and no others: every one of them is empty, and every '
+   'reading of the card before the crop slipped says it was not',
+   _said, [(False, False), (True, True)])
+
 # --- 📷 Snap: the reader says what it last read, into the folder named ---------
 #
 # status.json is what the panel knew. What the READER was looking at — the card

@@ -243,12 +243,29 @@ PICKUP_ONLY = dict(CUT_PAY, miles=None, places=["Buffalo Luke's"],
                    text="Guaranteed (incl. tips) @ Pickup Buffalo Luke's")
 # ...and a reading that got nothing at all.
 BLANK = dict(CUT_PAY, miles=None, text='')
+# A read the box cut at the payout, as emit() writes one: pipeline.read found
+# a payout flush against the top of the box (money_is_clipped), handed back
+# parse('') for it, and the loop says why on `clipped`. Field for field the
+# reading above but for that flag and the one merged frame, which is the
+# point: without the flag the page cannot tell a card the rig dropped for
+# being cut from a screen with nothing on it.
+CLIPPED = dict(BLANK, mergedFrom=1, clipped=True)
+# Uber's map screen, as the parser reads the corpus's own text of it ("a map
+# screen is not an offer", tests/fixtures/cases.json) and emit() writes it: no
+# payout, 39 minutes and 1.0 mi out of the route chips. It is the navigation
+# screen a whole delivery is driven under, so this is the line the panel shows
+# for most of every delivery, and it may claim no card any more than the zone
+# prompt's may.
+MAP = dict(CUT_PAY, miles=1.0, minutes=39.0, legs=4, mergedFrom=1,
+           text='The Townes at Chastain 3min 8 11 min $ 22 min & 3 min (1.0 mi) '
+                'Fastest route now due to traffic conditions')
 
 READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
             'impossible': IMPOSSIBLE, 'untimed': UNTIMED, 'loss': LOSS,
             'divides': DIVIDES, 'cutpay': CUT_PAY, 'cutpaynow': CUT_PAY_NOW,
             'notime': NO_TIME, 'zone': ZONE, 'deadlineonly': DEADLINE_ONLY,
-            'pickuponly': PICKUP_ONLY, 'blank': BLANK}
+            'pickuponly': PICKUP_ONLY, 'blank': BLANK, 'clipped': CLIPPED,
+            'map': MAP}
 
 # ...and every field above has to be one the rig actually sends.
 #
@@ -1560,10 +1577,11 @@ const framed = (page) => page.waitForFunction(
     //
     // A reading with nothing on it, as the rig sends between offers. This was
     // the card above with `ready` taken off, which kept its $8.00 and 22
-    // minutes — a shape the rig sends only for a deadline due that very
-    // minute — and the line under the verdict now says what a reading with no
-    // verdict did read, so it said "pay read but no time" instead of the
-    // between-offers words the check below looks for.
+    // minutes — a shape rate() gives only when a `pad` of -22 or less cancels
+    // those 22 minutes, since a stated duration is never counted down — and
+    // the line under the verdict now says what a reading with no verdict did
+    // read, so it said "pay, no time" instead of the between-offers words the
+    // check below looks for.
     await page.evaluate((r) => window.__es.push(
       Object.assign({}, r, { ready: false, state: 'empty', perHour: null,
                              pay: null, minutes: null, cardMinutes: null,
@@ -2105,7 +2123,7 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({ phase: 'scanning', message: '' }));
     out.noVerdict = {};
     for (const key of ['cutpay', 'cutpaynow', 'notime', 'zone', 'deadlineonly',
-                       'pickuponly', 'blank']) {
+                       'pickuponly', 'blank', 'clipped', 'map']) {
       await page.evaluate(() => window.__es.push({ alive: true, at: 1 }));
       await page.evaluate((r) => window.__es.push(r), READINGS[key]);
       await page.waitForTimeout(150);
@@ -4730,21 +4748,21 @@ try:
     # prompt reads exactly the way a card missing its pay does.
     nv = got.get('noVerdict') or {}
     eq('every reading with no verdict was measured', sorted(nv),
-       ['blank', 'cutpay', 'cutpaynow', 'deadlineonly', 'notime', 'pickuponly',
-        'zone'])
+       ['blank', 'clipped', 'cutpay', 'cutpaynow', 'deadlineonly', 'map', 'notime',
+        'pickuponly', 'zone'])
     cut = (nv.get('cutpay') or {}).get('detail') or ''
     no_('the 8 Oct Est. delivery card the box cut the pay off is not called '
         '"no offer on screen" (%r)' % cut, 'no offer on screen' in cut)
     ok_('...it says no pay was read, off the distance alone, as the rig sent it',
         cut.startswith('no pay read'))
     ok_('...and names the box as the thing that may have cut it off',
-        'the box may cut off' in cut)
+        'box may cut it off' in cut)
     eq('...and the same card as the parser reads it now, deadline and both ends, '
        'says the same', (nv.get('cutpaynow') or {}).get('detail'), cut)
     notime = (nv.get('notime') or {}).get('detail') or ''
     ok_('a card whose pay read and time did not says exactly that (%r)' % notime,
-        notime.startswith('pay read but no time'))
-    ok_('...and names the box for it too', 'the box may cut it off' in notime)
+        notime.startswith('pay, no time'))
+    ok_('...and names the box for it too', 'box may cut it off' in notime)
     zone = (nv.get('zone') or {}).get('detail') or ''
     ok_('a zone prompt, whose wait reads as minutes, is a reading with no pay (%r)'
         % zone, zone.startswith('no pay read'))
@@ -4754,7 +4772,22 @@ try:
     alone = (nv.get('pickuponly') or {}).get('detail') or ''
     ok_('...and so is one with the pickup alone (%r)' % alone,
         alone.startswith('no pay read'))
-    for key in ('cutpay', 'cutpaynow', 'notime', 'zone', 'deadlineonly', 'pickuponly'):
+    # The one card the rig KNOWS the box cut: the reader found its payout flush
+    # against the top edge and dropped the parse, so the reading is as empty as
+    # BLANK's and only `clipped` tells them apart.
+    clipped = (nv.get('clipped') or {}).get('detail') or ''
+    ok_('a card the reader dropped for a payout at the box\'s edge says so, not '
+        '"no offer on screen" (%r)' % clipped,
+        clipped.startswith('pay at the box edge'))
+    ok_('...and that the pay was not trusted, rather than that none was read',
+        'not trusted' in clipped)
+    # What the panel says under a navigation screen, which is most of every
+    # delivery: measured, so it is said on purpose and its hedge is held.
+    nav = (nv.get('map') or {}).get('detail') or ''
+    ok_('Uber\'s map screen, as the corpus reads it, is a reading with no pay (%r)'
+        % nav, nav.startswith('no pay read'))
+    for key in ('cutpay', 'cutpaynow', 'notime', 'zone', 'deadlineonly', 'pickuponly',
+                'clipped', 'map'):
         s = nv.get(key) or {}
         said = s.get('detail') or ''
         # "a card's pay" is a card the box MAY have cut; what is refused is the
