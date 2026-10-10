@@ -4371,6 +4371,27 @@ view is left alone, because a fit then would pull the map back from wherever
 the driver had panned to; ⛶ Map round again, or a reload of `map.html`, frames
 it.
 
+**"+N mi out of your way" is measured from the card's own fix.** The scanner
+takes the fix once when a card lands and puts it on the offer line beside the
+card's figures, and Map view measures from that — where the car was when the
+platform worked out the card's own distance — and from nothing else. It used to
+be the newest journal row that carried a position, up to twenty minutes old.
+The order in the car keeps its card's fix and size too, so where it ends is
+checked against its own card the same way. A straight line cannot beat the
+road, so a pin farther from a card's fix than that card's distance plus half a
+mile is a pin the map got wrong, and the figure is refused with a line saying
+so: "the map's McDonald's is 21.8 mi from you, so past the card's 9.4 mi" —
+the wrong same-brand branch that used to print "+31.3 mi out of your
+way" on a 9.4-mile job. Only a card with a printed total or two legs the rig
+summed is held against a pin, and never an Early look one: on the one-leg
+"$7 Guaranteed · 7.8 mi + 24 min" cards nobody has seen yet whether the figure
+counts the drive to the restaurant, so the line says "no yardstick yet" — 584
+of the week's 1,166 cards are yardsticks. A card with no fix says "this card
+came up without a GPS fix", and one the gate refused says why ("GPS fix on this
+card too rough to measure from (±129 m)"). The figure that is left is
+straight-line miles, said so on the line, with no minutes and no route through
+where the new job ends.
+
 ### A rig that was blind for a whole shift, and nothing said so
 
 Measured on the owner's own rig, from its own log: one scanner process ran

@@ -265,20 +265,25 @@
        calls a map rather than a texture, on the only sentence no check had
        ever been given.
 
-       Two rows, and the number is measured rather than chosen: the detour
-       line with both of its hedges — "+3.2 mi out of your way — straight
-       lines, not roads, from where you were 12 min ago" — is two rows here,
-       and that line is the only thing this mode produces. One row cannot
-       hold it, so one row was never a budget that could be kept; three rows
-       would be spending map on sentences that explain why there is no
-       figure. The hat takes three for the same reason and no other: the same
-       line is three rows in a 228px column, and a hedge clipped off a number
-       is this project's first fault class.
+       Two rows, and the number is measured rather than chosen: it was set
+       by the detour line with the age-of-fix hedge it carried then — "+3.2 mi
+       out of your way — straight lines, not roads, from where you were 12 min
+       ago" — which was two rows here. That hedge went when the figure began
+       to be measured from the card's own fix; the longest line now is a pin a
+       card contradicts, "the map's McDonald's is 21.8 mi from you, so past
+       the card's 9.4 mi (rig-corrected)", and rpi/test_layout.py holds it
+       whole inside two rows at its widest. Three rows would be spending map
+       on sentences that explain why there is no figure. The hat takes three
+       for the same reason and no other: in a 228px column that line keeps
+       everything before its `, so` clause only with a third row, and a hedge
+       clipped off a number is this project's first fault class.
 
        Clamped rather than hidden, so the ellipsis says that something was
        cut. What it cuts is always the tail, and these lines are written
        load-bearing end first — figure, then the straight-line warning, then
-       the age of the fix, then the count of places with no pin. */
+       the count of places with no pin; a card's figure travels with its
+       hedge in the `, so` clause, so the two are cut together or not at
+       all. */
     #viewWrap:has(#liveMap:not([hidden])) #viewNote {
       /* `block` first and on its own line, and it is not decoration. The rule
          above this one is `display: none`, and a browser that does not know
@@ -307,10 +312,9 @@
      the card rather than a figure. */
   @media (orientation: landscape) and (max-height: 380px) {
     /* One more row for the caption, and the reason is the figure rather than
-       the room. This column is 228px, and the detour line with its two hedges
-       is three rows in it against two at 800x480 — so a two-row cap here
-       would ellipsise ", from where you were 12 min ago" off a distance the
-       driver is about to act on. Measured, the third row costs the map
+       the room. This column is 228px, and the line for a pin a card
+       contradicts takes a third row in it to reach its `, so` clause — so a
+       two-row cap here would ellipsise the place or the map's figure. Measured when the cap was set, the third row cost the map
        155px instead of 172px, and the check under it wants 120. */
     #viewWrap:has(#liveMap:not([hidden])) #viewNote { -webkit-line-clamp: 3; }
     .working .net { display: none; }
@@ -1689,6 +1693,12 @@
   //
   // `undefined` while nothing is held; a string or null once something is.
   var heldEnds;
+  // ...and the card that order came from, as the server kept it: where the car
+  // was when it came up and how far it said the job ran. Map view checks the
+  // held end against these (MV.againstCard). Set beside `heldEnds` from the
+  // same message, and read only while `heldEnds` names an end, so a stale one
+  // can never be measured with.
+  var heldCard = null;
   var dropBusy = false;
   var dropFailed = false;
   // What the failed press was about, so the failure can be forgotten when the
@@ -3284,6 +3294,7 @@
         holdingNow = !!msg.holding;
         heldSig = holdSignature(msg.holding);
         heldEnds = msg.holding ? (msg.holding.dropoff || null) : undefined;
+        heldCard = msg.holding ? (msg.holding.card || null) : null;
         showDrop();
         showDest();
       }
@@ -3412,6 +3423,7 @@
     holdingNow = !!s.holding;
     heldSig = holdSignature(s.holding);
     heldEnds = s.holding ? (s.holding.dropoff || null) : undefined;
+    heldCard = s.holding ? (s.holding.card || null) : null;
     showDrop();
     // ...and what it was read as, so a panel opened or reloaded mid-delivery
     // shows the destination already scanned rather than offering to scan one
@@ -3846,10 +3858,6 @@
   // heading.
   var mapFor = null;
   var mapBusy = false;
-  // Where the car was, off the newest journal row that carries a position.
-  // Measured by the rig's own GPS rather than looked up, which is what makes
-  // it the one point here that can contradict a pin.
-  var carFix = null, carAsked = 0;
 
   /* The words under the map, and the last of them that described what is
      drawn. `lastLine` is not simply the last thing said: "looking up 3
@@ -3944,71 +3952,16 @@
     var names = [o.pickup, o.dropoff, held].filter(Boolean)
       .filter(function (v, i, all) { return all.indexOf(v) === i; });
     return { pickup: o.pickup || null, dropoff: o.dropoff || null,
-             held: held, names: names };
-  }
-
-  /* Where the car is, from the journal rather than from the browser. The
-     panel's browser sits on a LAN address over plain http, where the
-     geolocation API is refused outright, and would answer from wifi if it
-     were not. The rig stamps every row with its own GPS fix — see rpi/gps.py —
-     so the newest row that carries one is where the car was when the last card
-     came up, which on a working shift is minutes old. */
-  /* How old a fix may be before it stops being where the car IS.
-     rpi/gps.py states the failure as a certainty rather than a risk: the app on
-     the phone runs on a timer, so it WILL stop mid-shift, and the newest row
-     that carries a position then stops moving while the car does not. Past
-     this, the anchor is history and the detour measured from it is a claim
-     about a journey nobody is on. */
-  var FIX_STALE_MS = 20 * 60000;
-  // ...and the point past which it is not worth mentioning that it is old.
-  var FIX_AGEING_MS = 4 * 60000;
-
-  function askCar() {
-    var now = Date.now();
-    if (carFix && now - carAsked < 120000) return Promise.resolve(carFix);
-    carAsked = now;
-    return fetch('/api/journal?days=1&limit=400')
-      .then(function (r) { return r.json(); })
-      .then(function (body) {
-        var rows = (body && body.offers) || [];
-        var best = null;
-        rows.forEach(function (row) {
-          // Only a fix rpi/gps.py's gate passed: MV.fixOf reads the row's
-          // `gpsOk` and nothing else. A rough fix is not an anchor for the
-          // figure the driver acts on, whatever row it is on.
-          var at = MV.fixOf(row);
-          if (!at) return;
-          if (!best || (row.at || 0) >= best.at) {
-            // The row's stamp AND how stale the fix already was when the row
-            // was written — rpi/journal.py keeps `gpsAge` for exactly this, and
-            // both were being thrown away here. A position twenty seconds old
-            // is half a mile at fifty miles an hour, and this one anchors the
-            // only figure the mode produces.
-            best = { at: row.at || 0, where: at,
-                     wasOld: (typeof row.gpsAge === 'number' ? row.gpsAge : 0) * 1000 };
-          }
-        });
-        carFix = best ? { lat: best.where.lat, lon: best.where.lon,
-                          age: Math.max(0, now - best.at) + best.wasOld } : null;
-        return carFix;
-      })
-      .catch(function () { return carFix; });
-  }
-
-  /* How old the anchor is NOW, rather than when it was fetched. askCar holds
-     its answer for two minutes, so reading the stored age straight back would
-     under-report by up to that much — and the whole point of carrying it is
-     that it is the number nobody was checking. */
-  function fixAge() {
-    if (!carFix || typeof carFix.age !== 'number') return null;
-    return carFix.age + Math.max(0, Date.now() - carAsked);
-  }
-
-  function spellAge(ms) {
-    var mins = Math.round(ms / 60000);
-    if (mins < 60) return mins + ' min';
-    var hrs = Math.round(mins / 6) / 10;
-    return hrs + 'h';
+             held: held, names: names,
+             // The two cards the line is measured with: this one, whose fix
+             // is where the car was when it came up, and the one the order in
+             // the car came from, whose own fix and distance its end is
+             // checked against. See MV.againstCard.
+             card: onRecord, heldCard: held ? heldCard : null,
+             // The card is part of the key: two cards naming the same places
+             // came up in two places, and the figure is measured from each
+             // one's own fix.
+             key: names.join('|') + '#' + (o.id || '') };
   }
 
   /* A place name, cut to what fits the caption's cap.
@@ -4027,12 +3980,21 @@
      pin it names is marked on the map beside it either way. */
   var PLACE_SHOWN = 20;
 
-  function shortPlace(name) {
+  /* ...and shorter again in the line for a pin a card contradicts, which
+     carries two figures and the rig's repair besides the name. At twenty of
+     the widest letter both of those lines ran past two rows at 800x480; at
+     12 they fit, and the `, so` clause the hat may eat holds the card's
+     figure with its hedge. "McDonald's (Marietta Sq)" is cut on its
+     space, to "McDonald's…". Measured by rpi/test_layout.py. */
+  var DISC_PLACE_SHOWN = 12;
+
+  function shortPlace(name, cap) {
+    var most = cap || PLACE_SHOWN;
     var s = String(name == null ? '' : name).trim();
-    if (s.length <= PLACE_SHOWN) return s;
-    var cut = s.slice(0, PLACE_SHOWN);
+    if (s.length <= most) return s;
+    var cut = s.slice(0, most);
     var space = cut.lastIndexOf(' ');
-    if (space >= PLACE_SHOWN - 8) cut = cut.slice(0, space);
+    if (space >= most - 8) cut = cut.slice(0, space);
     return cut.replace(/[\s,]+$/, '') + '…';
   }
 
@@ -4046,7 +4008,7 @@
       return;
     }
     var want = mapWants();
-    var key = want.names.join('|');
+    var key = want.key;
     if (mapBusy) return;
     if (mapFor === key && theMap) {
       /* Nothing to redraw — but something to SAY. Leaving the map is three
@@ -4137,8 +4099,14 @@
       theMap.invalidateSize();
       requestAnimationFrame(function () { if (theMap) theMap.invalidateSize(); });
 
-      var here = await askCar();
-      if (viewMode !== 'map' || mapFor !== key) return;
+      /* Where the car was when THIS card came up: the fix the scanner took
+         once when the card landed and put on the offer line, which is also
+         where the platform measured the card's own distance from. Only a fix
+         rpi/gps.py's gate passed — MV.fixOf reads `gpsOk` and nothing else.
+         It used to be the newest journal row that carried a position, up to
+         twenty minutes old and cached two more, which is another card's car;
+         that fetch, its cache and its age hedges are gone with it. */
+      var here = MV.cardFix(want.card).at;
 
       var found = {};
       // A box around where the car actually is, which is the whole of what
@@ -4203,19 +4171,15 @@
          ON THE MODE, and only on the mode. A `partial` flag set after the car
          was drawn used to stand in front of this, on the reasoning that
          `mapFor` is frozen for the whole walk so `partial` already implied the
-         mode had changed. The implication runs ONE WAY only: `partial` true
-         here did imply the mode had changed, but the mode changing did not
-         imply `partial`, because `await askCar()` sits between taking the key
-         and putting the first mark up. On this rig that wait is paid on EVERY
-         press — no journal row carries a GPS position (see the measured-week
-         section of AUDITS.md), so `carFix` never caches — and even once rows
-         do carry one it holds for 120s, so the first press of each window
-         still pays the round trip. Measured against the real server over that
-         week's journal, 7-17ms warm and 34-174ms cold on a box 5-8x a Pi 4. A press landing inside that window
-         — ⛶ Phone to look at the card, or ▣ Set box — left the key set with
-         nothing drawn for it, and rpi/test_dashboard.py watched the previous
-         card's three pins sit there while this card's two places were never
-         asked about at all.
+         mode had changed. The implication runs ONE WAY only: the mode can
+         change while nothing of this card is drawn and `partial` is false —
+         a journal fetch for the car's position used to sit between taking
+         the key and the first mark, and rpi/test_dashboard.py watched the
+         previous card's pins stay up while this card's places were never
+         asked about. That fetch is gone (the car is now this card's own fix,
+         on the offer line), but `await MV.needLeaflet` still sits there on
+         the first entry of a page, so the rule is the mode and not what was
+         drawn.
 
          What must NOT be nulled is a key under a live map, and that is what
          the mode clause is for: a drawMap that THROWS would otherwise null it
@@ -4237,7 +4201,7 @@
       // remembered that a newer card was waiting and the map went on showing
       // the old one until the card after that. Caught up here instead, which
       // is also the only place that knows the walk has finished.
-      if (viewMode === 'map' && mapFor !== mapWants().names.join('|')) showMap();
+      if (viewMode === 'map' && mapFor !== mapWants().key) showMap();
     }
   }
 
@@ -4304,11 +4268,11 @@
     // The car first, because every other mark here is a guess and this one is
     // not. A pickup pin a long way from it is a pin to distrust whatever the
     // geocoder said, and the driver can see that in one look.
-    // The one mark here that was MEASURED rather than looked up — and the one
-    // whose age changes what the line under the map is allowed to say.
-    var age = fixAge();
-    put(here, '#7aa2f7', 'where you were',
-        age === null ? null : 'a fix ' + spellAge(age) + ' old', true);
+    // The one mark here that was MEASURED rather than looked up: where the
+    // car was when this card came up, which is what every figure under the
+    // map is measured from. The live dot beside it is where the car is now.
+    put(here, '#7aa2f7', 'where you were when this card came up',
+        here ? '±' + Math.round(want.card.gpsErr) + ' m' : null, true);
     /* Red beats both roles, the same rule the whole-shift map keeps: whether a
        wrong coordinate was a pickup or a dropoff is not the thing to notice
        about it. Drawn rather than hidden, because a pin quietly dropped is the
@@ -4413,16 +4377,6 @@
     var missed = want.names.filter(function (q) { return !found[q]; });
     var dead = missed.filter(function (q) { return found[q] === undefined; });
 
-    /* The anchor's age, which decides whether there is a detour to state at
-       all. "+3.2 mi out of your way" and "this pickup is on your way" are
-       opposite instructions, and which one appears turns on where the car is —
-       so a fix that stopped updating an hour ago does not make the figure
-       vaguer, it makes it a claim about a journey nobody is on. rpi/gps.py
-       says the phone's GPS app runs on a timer and WILL stop mid-shift, so
-       this is the ordinary failure and not a corner. */
-    var age = fixAge();
-    var old = age !== null && age > FIX_STALE_MS;
-
     /* A pin the page can see is wrong may not be one end of a figure the driver
        acts on. That is the header of map-view.js in one sentence: a coordinate
        invented from a misread street, turned into a distance, turned into a
@@ -4433,25 +4387,8 @@
     var badEnd = (want.pickup && wrong[want.pickup]) ? want.pickup
                : (want.held && wrong[want.held]) ? want.held : null;
 
-    var gap = (old || badEnd) ? null : MV.detour(here, pick, held);
-    if (gap !== null) {
-      return (gap < 0.5 ? 'this pickup is on your way'
-                        : '+' + gap.toFixed(1) + ' mi out of your way')
-        + ' — straight lines, not roads'
-        // Said only once it is worth saying. A fix a minute old is what a
-        // working shift looks like and a note about it on every card is a note
-        // nobody reads by the third one.
-        + (age !== null && age > FIX_AGEING_MS
-           ? ', from where you were ' + spellAge(age) + ' ago' : '')
-        + (missed.length
-           ? ' · ' + missed.length + (dead.length ? ' not asked' : ' not found')
-           : '');
-    }
-
     // No detour to state, and WHICH of these it is matters: a driver told
     // nothing assumes the rig checked and found nothing worth saying.
-    if (old) return 'the last position the rig recorded is ' + spellAge(age)
-                  + ' old, so there is nothing current to measure this against';
     // The only line here whose length is not in this file. `badEnd` is a place
     // read off a card, so it is whatever the parser let through — MAX_PLACE is
     // 60 — and 39% of this driver's own places carry an `&`. Both mattered: at
@@ -4464,11 +4401,11 @@
                      + Math.round(wrong[badEnd])
                      + ' mi away — almost certainly a misread name, so no '
                      + 'distance';
-    // "usable", because a row can carry a position gps.py's gate refused, and
-    // MV.fixOf will not anchor on one: "no position" would say the GPS never
-    // answered when it answered too roughly to measure from.
-    if (!here) return 'no usable GPS fix on the recent offers, so there is '
-                    + 'nothing to measure this pickup against';
+    // THIS card's fix, and why there is none: a card that came up with no
+    // fix and one whose fix the gate refused are different states, and "no
+    // position" would say the GPS never answered when it answered too roughly
+    // to measure from. The line names which, with gpsd's own figure.
+    if (!here) return MV.fixLine(MV.cardFix(want.card), 'new');
     if (!want.held) return holdingNow
       ? 'the order in your car has no address on record — ⌖ Dropoff reads it '
         + 'off your phone'
@@ -4490,9 +4427,44 @@
     // ...and the same for the other end of the comparison. `want.held` is
     // already known to be set by the time this is reached, so this one really
     // is the lookup and not the card.
-    return found[want.held] === undefined
+    if (!held) return found[want.held] === undefined
       ? 'could not reach the geocoder for where your order is going'
       : 'the geocoder found nothing for where your order is going';
+
+    /* Every pin is in. Now the two cards, each against its own pin.
+
+       A straight line cannot beat the road, so a pickup pin farther from where
+       the car was when this card came up than the card's own distance (plus
+       half a mile) is a pin the map got wrong: a same-brand branch in the next
+       town, answered as confidently as the right one. That pin printed
+       "+31.3 mi out of your way" on a job whose whole trip was 9.4 mi, and
+       farFrom's 75 miles above cannot see it. MV.againstCard says which card
+       may be held against a pin at all — an Early look card, or one whose
+       distance is not known to start at the car, is "no yardstick yet" — and
+       the line it gives blames the map's answer, never the world. */
+    var said = MV.againstCard(want.card, here, pick,
+                              shortPlace(want.pickup, DISC_PLACE_SHOWN), 'new');
+    if (said) return said;
+    // ...and the order in the car the same way, from ITS card's fix: where
+    // the car was when that card came up is where its distance started.
+    var heldFix = MV.cardFix(want.heldCard);
+    if (!heldFix.at) return MV.fixLine(heldFix, 'held');
+    said = MV.againstCard(want.heldCard, heldFix.at, held,
+                          shortPlace(want.held, DISC_PLACE_SHOWN), 'held');
+    if (said) return said;
+
+    /* The figure, in straight-line miles and named as such. No minutes — a
+       distance turned into time is a pace, and AUDITS.md refuses re-timing at
+       one — and no route through where the new job ends (Settled too). No
+       age of the fix either: it is this card's own, taken when the card
+       landed, and the gate refuses one older than rpi/gps.py's STALE_AFTER. */
+    var gap = MV.detour(here, pick, held);
+    return (gap < 0.5 ? 'this pickup is on your way'
+                      : '+' + gap.toFixed(1) + ' mi out of your way')
+      + ' — straight lines, not roads'
+      + (missed.length
+         ? ' · ' + missed.length + (dead.length ? ' not asked' : ' not found')
+         : '');
   }
 
   // Last, not beside the button it belongs to: it can put the pane into map

@@ -477,6 +477,172 @@
     return out;
   }
 
+  /* --- the card's own disc -------------------------------------------------
+   *
+   * live.html's Map view states one figure, "+N mi out of your way", and it
+   * was measured from the newest journal row that carried a position — up to
+   * twenty minutes old, cached two minutes more — with nothing asking whether
+   * the map had found the right branch. A same-brand pin 21.8 miles from the
+   * car on a job whose whole trip was 9.4 printed "+31.3 mi out of your way":
+   * farFrom's 75 miles cannot see a wrong McDonald's in the next town.
+   *
+   * The CARD can. Its distance counts the drive from the car to the pickup and
+   * on to the end, and a straight line cannot beat the road, so a pin farther
+   * from where the car was when the card came up than the card's own distance
+   * plus SLACK_MI is a pin the map got wrong. The same argument judge() makes
+   * about the two ends of one job, made from the car — so the same rule,
+   * `vouches`, decides whether the figure is one the rig stands behind, and the
+   * same slack. Nothing here becomes a rate, a verdict or a distance on the
+   * panel: it decides only whether the one figure Map view states may be
+   * stated, and says why when it may not.
+   *
+   * The fix is the CARD's: the one the scanner captured once when the card
+   * landed and put on the offer line, which is also the point the platform
+   * measured the card's distance from (give or take the seconds between). Only
+   * one rpi/gps.py's gate passed, through fixOf. A fix the gate refused says
+   * why, in words, rather than reading as no fix at all. */
+  var SLACK_MI = 0.5;
+
+  /* judge()'s yardstick rule, stated once for both of its users: a figure the
+     reader finished (`whole`), did not doubt (`milesUncertain`) and did not
+     set aside (`suspect`). See the long note at judge(). */
+  function vouches(o) {
+    return !!o && !o.milesUncertain && o.whole !== false && !o.suspect;
+  }
+
+  /* Where the car was when this card came up, or why there is nothing to
+     measure from. `why` is null for a card that carried no coordinate at all
+     (no --gps, no answer, or a fix gone stale before the card landed —
+     Phone.fix() hands out none of those), else the gate's own word. */
+  function cardFix(o) {
+    var at = fixOf(o);
+    if (at) return { at: at };
+    return { at: null, why: fixRefused(o),
+             err: (o && typeof o.gpsErr === 'number') ? o.gpsErr : null };
+  }
+
+  /* Whether this card's distance may be held against a pin measured from the
+   * car, and if not, which of four reasons. The verifier's corrections to the
+   * design study, each a clause:
+   *
+   *   none       the card stated no distance.
+   *   untrusted  judge()'s rule refuses it, or rate() doubted one of its
+   *              figures (`doubt`). The offer line carries no `suspect`;
+   *              journal.py sets it whenever `doubt` is set, so `doubt` is the
+   *              same refusal read off the line.
+   *   early      "Early look - Order in progress": 27 of the week's 1,166
+   *              cards. Offered inside a job, and nothing says whether the
+   *              figure starts at the car or at that job's end — counted from
+   *              the end, a right pin is refused.
+   *   shape      neither a printed total (`hasTotal`) nor two legs the rig
+   *              summed. 528 of the week's cards stop here, every one a
+   *              card of one leg, as in "$7 Guaranteed · 7.8 mi + 24 min" —
+   *              DoorDash, by AUDITS.md's own reading — and whether that
+   *              figure counts the drive to the restaurant is not known until
+   *              it is seen. "No yardstick yet", not a guess.
+   *
+   * The SUMMED figure, never `toPickupMiles`: the approach leg alone leaves
+   * only the half mile to absorb the car moving between the platform's
+   * measurement and the rig's fix, and that motion has not been measured.
+   * Measured over the week's 1,166 cards in this order: 10 none, 17
+   * untrusted, 27 early, 528 shape, and 584 yardsticks — 577 of them naming
+   * a pickup, 267 of them carrying a decimal the rig put back. */
+  function cardYardstick(o) {
+    if (!o || typeof o.miles !== 'number' || !isFinite(o.miles) || o.miles <= 0) {
+      return { why: 'none' };
+    }
+    if (!vouches(o) || o.doubt) return { why: 'untrusted' };
+    if (o.earlyLook) return { why: 'early' };
+    if (!(o.hasTotal || (o.legs || 0) >= 2)) return { why: 'shape' };
+    return { miles: o.miles, corrected: !!o.milesCorrected };
+  }
+
+  /* A pin the card contradicts, or null. `yard` is cardYardstick's answer
+     with a figure in it. */
+  function outsideCard(fix, pin, yard) {
+    var crow = crowMiles(fix, pin);
+    return crow > yard.miles + SLACK_MI ? { crow: crow } : null;
+  }
+
+  /* The words, for the two cards Map view measures with: this one ('new')
+     and the one the order in the car came from ('held'). Each is the reason
+     the figure is withheld, said instead of it, and each is reached by a
+     fixture in tests/mapview.test.js. Load-bearing end first, because the
+     caption is clamped at two rows (three on the 3.5" hat) and the clamp cuts
+     the tail. */
+  var FIX_WORDS = {
+    'new': {
+      none: 'this card came up without a GPS fix',
+      rough: 'GPS fix on this card too rough to measure from',
+      unrated: 'GPS on this card gave no accuracy to measure from',
+      nomode: 'GPS on this card had no 2D/3D fix to measure from',
+      other: 'GPS fix on this card was never judged, so nothing to measure from'
+    },
+    held: {
+      none: 'the order in your car came up without a GPS fix, so its end '
+        + 'cannot be checked',
+      rough: 'GPS fix on the order in your car too rough to check its end',
+      unrated: 'GPS on the order in your car gave no accuracy to check its end',
+      nomode: 'GPS on the order in your car had no 2D/3D fix to check its end',
+      other: 'GPS fix on the order in your car was never judged, so its end '
+        + 'cannot be checked'
+    }
+  };
+
+  function fixLine(fix, whose) {
+    var words = FIX_WORDS[whose];
+    var line = words[fix.why === null ? 'none' : fix.why] || words.other;
+    return fix.why === 'rough' && fix.err !== null
+      ? line + ' (±' + Math.round(fix.err) + ' m)' : line;
+  }
+
+  var YARD_WORDS = {
+    'new': {
+      none: 'this card states no distance to check the pickup pin against',
+      untrusted: 'the rig does not trust this card\'s distance, so the pickup '
+        + 'pin cannot be checked',
+      early: 'an Early look card may not measure from your car — no yardstick '
+        + 'yet',
+      shape: 'this kind of card may not count the drive to the pickup — no '
+        + 'yardstick yet'
+    },
+    held: {
+      none: 'the order in your car stated no distance to check its end against',
+      untrusted: 'the rig did not trust the distance on the order in your car, '
+        + 'so its end cannot be checked',
+      early: 'the order in your car was an Early look card — no yardstick yet '
+        + 'for its end',
+      shape: 'the order in your car is a kind of card with no yardstick yet '
+        + 'for its end'
+    }
+  };
+
+  /* The line for a pin this card contradicts, or null when it does not —
+     and, before that, the line for a card that cannot be held against a pin
+     at all. `name` is the place as the panel shows it (live.html cuts it to
+     what fits); `fix` is cardFix's `at`.
+
+     The refusal blames the MAP and makes no claim about the world: the
+     geocoder is asked for one answer, so "no McDonald's within 9.4 mi of you"
+     would be a sentence nobody measured — there may well be one 2 miles away
+     that the map did not return. And "(rig-corrected)" where check_distance
+     put a decimal back, as statedBy() says on the map pages: the figure is
+     the rig's repair, not what the screen printed. */
+  function againstCard(o, fix, pin, name, whose) {
+    var yard = cardYardstick(o);
+    if (!yard.miles) return YARD_WORDS[whose][yard.why];
+    var out = outsideCard(fix, pin, yard);
+    if (!out) return null;
+    // The `, so` clause is the tail the 3.5" hat's clamp may eat, and it
+    // carries the card's figure WITH its hedge, so a clipped line never shows
+    // a number without the words that qualify it (rpi/test_layout.py).
+    var said = yard.miles + ' mi' + (yard.corrected ? ' (rig-corrected)' : '');
+    return 'the map\'s ' + name + ' is ' + out.crow.toFixed(1) + ' mi from '
+      + (whose === 'new'
+         ? 'you, so past the card\'s ' + said
+         : 'your order\'s card, so past its ' + said);
+  }
+
   /* Every place the loaded offers name, once each, in the order first seen. */
   function placesIn(offers) {
     var wanted = [];
@@ -562,8 +728,7 @@
       var crow = (a && b) ? crowMiles(a, b) : null;
       var stated = typeof o.miles === 'number' ? o.miles : null;
       // A figure, and whether that figure is a YARDSTICK. See above.
-      var yardstick = stated !== null && !o.milesUncertain
-                      && o.whole !== false && !o.suspect;
+      var yardstick = stated !== null && vouches(o);
       return { offer: o, from: a, to: b, crow: crow, stated: stated,
                         // Whether `stated` is the card's own figure or the rig's
                // repair of it. check_distance divides by ten to put back a
@@ -572,7 +737,7 @@
                // was the page attributing the rig's arithmetic to the screen.
                corrected: !!o.milesCorrected,
                impossible: (crow !== null && yardstick
-                            && crow > stated + 0.5),
+                            && crow > stated + SLACK_MI),
                // Placed at both ends, holding a figure, and that figure is not
                // one a straight line can contradict. Said rather than left
                // out: a pair that quietly stops being checked looks exactly
@@ -1291,6 +1456,8 @@
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
            detour: detour, fixOf: fixOf, fixRefused: fixRefused,
+           cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
+           againstCard: againstCard, SLACK_MI: SLACK_MI,
            hereDot: hereDot, GPS_REFUSED: GPS_REFUSED,
            anchorFor: anchorFor, boxAround: boxAround,
            localityOf: localityOf, townOf: townOf, townFor: townFor,

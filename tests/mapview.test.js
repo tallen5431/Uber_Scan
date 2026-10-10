@@ -166,6 +166,123 @@ eq('with nowhere to be going, there is no detour to state',
 eq('...nor with nothing to go by way of', MV.detour(HERE, null, AHEAD), null);
 eq('...nor with no idea where the car is', MV.detour(null, HERE, AHEAD), null);
 
+/* ---- the card's own disc --------------------------------------------------
+ *
+ * The design study's wrong-branch case, in invented points round Marietta
+ * Square: a 9.4 mi card, a fix the gate passed, and the map's McDonald's
+ * 21.8 mi north of it — the right branch was 2.1 mi away and the map never
+ * returned it. With the order in the car ending 20.2 mi east, the panel's old
+ * arithmetic printed "+31.3 mi out of your way" off that pin. A straight line
+ * cannot beat the road, so a pin 21.8 mi from where the card came up cannot
+ * be the pickup of a job the card says is 9.4 mi in all. */
+var SQUARE = { lat: 33.9526, lon: -84.5499 };
+var WRONG_BRANCH = { lat: 34.2683, lon: -84.5499 };   // 21.8 mi north
+var RIGHT_BRANCH = { lat: 33.9830, lon: -84.5499 };   // 2.1 mi north
+var HELD_END = { lat: 33.9526, lon: -84.1974 };       // 20.2 mi east
+function card(extra) {
+  return Object.assign({ lat: SQUARE.lat, lon: SQUARE.lon, gpsAge: 0.6,
+                         gpsErr: 27.8, gpsMode: 3, gpsOk: true, gpsWhy: null,
+                         miles: 9.4, hasTotal: true, legs: 1, whole: true,
+                         milesUncertain: false, milesCorrected: false,
+                         earlyLook: false, doubt: null }, extra || {});
+}
+eq('the wrong-branch case is the one the study measured: +31.3 off the pin',
+   MV.detour(SQUARE, WRONG_BRANCH, HELD_END).toFixed(1), '31.3');
+eq('a same-brand pin 21.8 mi from a fresh fix on a 9.4 mi card is refused, '
+   + 'not printed as "+31.3"',
+   MV.againstCard(card(), SQUARE, WRONG_BRANCH, "McDonald's", 'new'),
+   "the map's McDonald's is 21.8 mi from you, so past the card's 9.4 mi");
+eq('...and the right branch, 2.1 mi away, passes',
+   MV.againstCard(card(), SQUARE, RIGHT_BRANCH, "McDonald's", 'new'), null);
+// The half mile of slack is the edge, both sides of it: 9.4 + 0.5 = 9.9.
+var EDGE_IN = { lat: SQUARE.lat + 9.85 / 69.05, lon: SQUARE.lon };
+var EDGE_OUT = { lat: SQUARE.lat + 9.95 / 69.05, lon: SQUARE.lon };
+eq('a pin just inside the card\'s distance plus half a mile passes',
+   MV.againstCard(card(), SQUARE, EDGE_IN, 'X', 'new'), null);
+ok_('...and one just past it is refused',
+    MV.againstCard(card(), SQUARE, EDGE_OUT, 'X', 'new'));
+// The rig's repair is not the screen's figure, as statedBy() says.
+eq('a figure the rig put a decimal back in says so',
+   MV.againstCard(card({ milesCorrected: true }), SQUARE, WRONG_BRANCH,
+                  "McDonald's", 'new'),
+   "the map's McDonald's is 21.8 mi from you, so past the card's 9.4 mi "
+   + '(rig-corrected)');
+// Two legs the rig summed are a yardstick as a printed total is; the summed
+// figure, never the approach leg (`toPickupMiles`), whose only slack would be
+// the half mile against motion nobody has measured.
+eq('two legs the rig summed are a yardstick too',
+   MV.cardYardstick(card({ hasTotal: false, legs: 2 })).miles, 9.4);
+eq('...measured on the summed figure, not the approach leg',
+   MV.cardYardstick(card({ toPickupMiles: 1.2 })).miles, 9.4);
+// Every reason a card is no yardstick, each reached.
+eq('a card that states no distance is no yardstick',
+   MV.againstCard(card({ miles: null }), SQUARE, WRONG_BRANCH, 'X', 'new'),
+   'this card states no distance to check the pickup pin against');
+eq('a card judge() would not trust is no yardstick',
+   MV.againstCard(card({ whole: false }), SQUARE, WRONG_BRANCH, 'X', 'new'),
+   'the rig does not trust this card\'s distance, so the pickup pin cannot '
+   + 'be checked');
+eq('...nor one whose distance the rig doubted',
+   MV.cardYardstick(card({ milesUncertain: true })).why, 'untrusted');
+eq('...nor one rate() doubted a figure of',
+   MV.cardYardstick(card({ doubt: 'speed' })).why, 'untrusted');
+eq('an Early look card is never a yardstick',
+   MV.againstCard(card({ earlyLook: true }), SQUARE, RIGHT_BRANCH, 'X', 'new'),
+   'an Early look card may not measure from your car — no yardstick yet');
+eq('a one-leg card (DoorDash\'s shape) has no yardstick yet',
+   MV.againstCard(card({ hasTotal: false, legs: 1 }), SQUARE, RIGHT_BRANCH,
+                  'X', 'new'),
+   'this kind of card may not count the drive to the pickup — no yardstick '
+   + 'yet');
+
+// The card's own fix, and every reason there is none to measure from.
+eq('a card\'s fix the gate passed is where it is measured from',
+   JSON.stringify(MV.cardFix(card()).at), JSON.stringify(SQUARE));
+eq('a card with no coordinate says it came up without a GPS fix',
+   MV.fixLine(MV.cardFix(card({ lat: null, lon: null, gpsOk: null })), 'new'),
+   'this card came up without a GPS fix');
+eq('a rough fix says it is too rough, with the figure',
+   MV.fixLine(MV.cardFix(card({ gpsErr: 129.2, gpsOk: false, gpsWhy: 'rough' })),
+              'new'),
+   'GPS fix on this card too rough to measure from (±129 m)');
+eq('a fix with no accuracy says so',
+   MV.fixLine(MV.cardFix(card({ gpsErr: null, gpsOk: false, gpsWhy: 'unrated' })),
+              'new'),
+   'GPS on this card gave no accuracy to measure from');
+eq('a fix with no 2D/3D mode says so',
+   MV.fixLine(MV.cardFix(card({ gpsMode: null, gpsOk: false, gpsWhy: 'nomode' })),
+              'new'),
+   'GPS on this card had no 2D/3D fix to measure from');
+eq('a coordinate nobody judged is not a fix either',
+   MV.fixLine(MV.cardFix(card({ gpsOk: undefined, gpsWhy: undefined })), 'new'),
+   'GPS fix on this card was never judged, so nothing to measure from');
+
+// The order in the car, checked against its OWN card the same way.
+eq('the held order\'s end is checked against its own card',
+   MV.againstCard(card({ miles: 9.4 }), SQUARE, HELD_END, 'Powder Springs Rd',
+                  'held'),
+   "the map's Powder Springs Rd is 20.2 mi from your order's card, so past "
+   + 'its 9.4 mi');
+eq('...and passes when its card allows it',
+   MV.againstCard(card({ miles: 22.0 }), SQUARE, HELD_END, 'X', 'held'), null);
+eq('a held order with no card says it has no fix to check its end from',
+   MV.fixLine(MV.cardFix(undefined), 'held'),
+   'the order in your car came up without a GPS fix, so its end cannot be '
+   + 'checked');
+eq('...and a rough one, with the figure',
+   MV.fixLine(MV.cardFix(card({ gpsErr: 88.0, gpsOk: false, gpsWhy: 'rough' })),
+              'held'),
+   'GPS fix on the order in your car too rough to check its end (±88 m)');
+eq('a held order on a one-leg card has no yardstick yet for its end',
+   MV.againstCard(card({ hasTotal: false }), SQUARE, HELD_END, 'X', 'held'),
+   'the order in your car is a kind of card with no yardstick yet for its end');
+eq('...nor on an Early look card',
+   MV.againstCard(card({ earlyLook: true }), SQUARE, HELD_END, 'X', 'held'),
+   'the order in your car was an Early look card — no yardstick yet for its end');
+// judge() and the disc share one rule and one slack, so they cannot drift.
+eq('judge() and the card\'s disc share the half mile',
+   MV.SLACK_MI, 0.5);
+
 /* ---- the box drawn around where the car was ------------------------------
  *
  * Nominatim wants <left>,<top>,<right>,<bottom> — longitude first, and the

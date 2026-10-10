@@ -452,6 +452,14 @@ ok_('...and the misread-name line is the line that uses it',
     re.search(r'if \(badEnd\) return shortPlace\(badEnd\)', live_src)
     is not None)
 WIDEST_PLACE = 'W' * (int(_bound.group(1)) if _bound else 60) + '…'
+# ...and the shorter cut the lines naming a pin a card contradicts use: they
+# carry two figures and the rig's repair besides the name, and at
+# PLACE_SHOWN's twenty widest letters both of those lines ran past two rows
+# at 800x480.
+_disc = re.search(r'var DISC_PLACE_SHOWN = (\d+);', live_src)
+ok_('live.html bounds the place name in the lines a card contradicts',
+    _disc is not None)
+WIDEST_DISC = 'W' * (int(_disc.group(1)) if _disc else 60) + '…'
 CAPTION_LINES = [
     ('no map-view.js',
      'map-view.js did not load, so there is no map here.'),
@@ -466,44 +474,91 @@ CAPTION_LINES = [
      '⛶ Phone puts the picture back.'),
     ('still asking',
      'placing 2 of 3 — still asking'),
-    # The figure, in all four of the shapes it comes in. The last is the
-    # longest this mode can say: the wordier of the two verdicts, a fix old
-    # enough to be worth mentioning, and a place with no pin. `missed` cannot
-    # exceed 1 here — a detour needs the pickup and the held job both placed,
-    # so the dropoff is the only name left to be missing — and `spellAge` is
-    # six characters at most, because past twenty minutes the figure is
-    # withheld and this branch is not reached at all.
+    # The figure, in all the shapes it comes in. The longest is the wordier of
+    # the two verdicts and a place with no pin. `missed` cannot exceed 1 here —
+    # a detour needs the pickup and the held job both placed, so the dropoff
+    # is the only name left to be missing. There is no age of the fix on it
+    # any more: the fix is the card's own, taken when the card landed.
     ('the figure',
      '+3.2 mi out of your way — straight lines, not roads'),
     ('the figure, on your way',
      'this pickup is on your way — straight lines, not roads'),
-    ('the figure and its age',
-     '+3.2 mi out of your way — straight lines, not roads, from where you '
-     'were 12 min ago'),
     ('the figure at its longest',
-     'this pickup is on your way — straight lines, not roads, from where you '
-     'were 12 min ago · 1 not asked',
-     'this pickup is on your way — straight lines, not roads, from where you '
-     'were 12 min ago'),
+     'this pickup is on your way — straight lines, not roads · 1 not asked',
+     'this pickup is on your way — straight lines, not roads'),
     # Both words, because they are not interchangeable anywhere else in this
     # project: "not found" is a geocoder that answered nothing and "not asked"
     # is a lookup that could not be made. Same length, and measured anyway —
     # the rule here is that nothing reaches this row unmeasured.
     ('the figure at its longest, nothing found',
-     'this pickup is on your way — straight lines, not roads, from where you '
-     'were 12 min ago · 1 not found',
-     'this pickup is on your way — straight lines, not roads, from where you '
-     'were 12 min ago'),
-    ('the fix is too old',
-     'the last position the rig recorded is 1.4h old, so there is nothing '
-     'current to measure this against'),
+     'this pickup is on your way — straight lines, not roads · 1 not found',
+     'this pickup is on your way — straight lines, not roads'),
     ('a pin in the wrong state',
      WIDEST_PLACE + ' is 3619 mi away — almost certainly a misread name, '
      'so no distance',
      WIDEST_PLACE + ' is 3619 mi away — almost certainly a misread name'),
-    ('no usable position',
-     'no usable GPS fix on the recent offers, so there is nothing to measure '
-     'this pickup against'),
+    # Why this card, or the one the order in the car came from, gives nothing
+    # to measure from — MV.fixLine's words, every one. The error figure at
+    # four digits: the gate refuses anything over FIX_ERR_MAX, so "rough" can
+    # carry any figure above it.
+    ('this card, no fix',
+     'this card came up without a GPS fix'),
+    ('this card, a rough fix',
+     'GPS fix on this card too rough to measure from (±9999 m)'),
+    ('this card, no accuracy',
+     'GPS on this card gave no accuracy to measure from'),
+    ('this card, no mode',
+     'GPS on this card had no 2D/3D fix to measure from'),
+    ('this card, not judged',
+     'GPS fix on this card was never judged, so nothing to measure from'),
+    ('the held card, no fix',
+     'the order in your car came up without a GPS fix, so its end cannot be '
+     'checked'),
+    ('the held card, a rough fix',
+     'GPS fix on the order in your car too rough to check its end (±9999 m)'),
+    ('the held card, no accuracy',
+     'GPS on the order in your car gave no accuracy to check its end'),
+    ('the held card, no mode',
+     'GPS on the order in your car had no 2D/3D fix to check its end'),
+    ('the held card, not judged',
+     'GPS fix on the order in your car was never judged, so its end cannot '
+     'be checked'),
+    # ...why a card is no yardstick — MV.againstCard's words...
+    ('this card, no distance',
+     'this card states no distance to check the pickup pin against'),
+    ('this card, untrusted',
+     'the rig does not trust this card\'s distance, so the pickup pin cannot '
+     'be checked'),
+    ('this card, Early look',
+     'an Early look card may not measure from your car — no yardstick yet'),
+    ('this card, one leg',
+     'this kind of card may not count the drive to the pickup — no yardstick '
+     'yet'),
+    ('the held card, no distance',
+     'the order in your car stated no distance to check its end against'),
+    ('the held card, untrusted',
+     'the rig did not trust the distance on the order in your car, so its end '
+     'cannot be checked'),
+    ('the held card, Early look',
+     'the order in your car was an Early look card — no yardstick yet for its '
+     'end'),
+    ('the held card, one leg',
+     'the order in your car is a kind of card with no yardstick yet for its '
+     'end'),
+    # ...and a pin a card contradicts, at its widest: the place cut to
+    # DISC_PLACE_SHOWN in its widest letter, a straight line under farFrom's
+    # 75 miles (past that the misread-name line above is said instead), a
+    # three-figure distance, and the rig's own repair named. The 3.5" hat may
+    # eat the `, so` clause — the card's figure and its hedge go together, so
+    # no figure is left without the words that qualify it.
+    ('a pickup this card contradicts',
+     "the map's " + WIDEST_DISC + " is 74.9 mi from you, so past the card's "
+     "99.9 mi (rig-corrected)",
+     "the map's " + WIDEST_DISC + " is 74.9 mi from you"),
+    ('a held end its card contradicts',
+     "the map's " + WIDEST_DISC + " is 74.9 mi from your order's card, so "
+     "past its 99.9 mi (rig-corrected)",
+     "the map's " + WIDEST_DISC + " is 74.9 mi from your order's card"),
     ('the held job has no address',
      'the order in your car has no address on record — ⌖ Dropoff reads it '
      'off your phone'),
@@ -524,10 +579,13 @@ CAPTION_LINES = [
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. THREE entries have one, and they are two judgements: the count of
+# ellipsise. FIVE entries have one, and they are three judgements: the count of
 # places with no pin, whose tail is ` · 1 not asked` or ` · 1 not found`
-# depending on which it was, and the consequence of a pin that is plainly
-# wrong, whose tail is `, so no distance`. Each is the end of its sentence
+# depending on which it was; the consequence of a pin that is plainly
+# wrong, whose tail is `, so no distance`; and the card's own figure beside a
+# pin it contradicts, whose tail is `, so past the card's 9.4 mi` with the
+# rig's repair named inside it, so the figure and its hedge go together.
+# Each is the end of its sentence
 # precisely so that it is what a clamp eats; everything before it is a figure
 # or a hedge on one.
 #
@@ -548,9 +606,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 21)
-eq('...and three of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 3)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 38)
+eq('...and five of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 5)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
@@ -614,19 +672,6 @@ def caption_strings(page_src):
     # Separators and units are not sentences; anything with words in it is.
     return [r for r in out if len(r.strip()) > 4]
 
-
-# ...and one thing the strings alone cannot say: the ORDER the clamp eats from.
-# The detour line is assembled out of two optional clauses, and swapping them
-# changes no literal in this page — so every check above goes on passing while
-# the 3.5" hat starts ellipsising the age of the fix instead of the count of
-# places with no pin. One is a hedge on a distance the driver is about to act
-# on and the other is a tally; which of them is last is the whole reason the
-# cap is survivable, and it lives in the source rather than in any string.
-_detour = live_src[live_src.index("gap < 0.5 ? 'this pickup is on your way'"):
-                   live_src.index('    // No detour to state')]
-_age, _tally = _detour.find('from where you were'), _detour.find(' not asked')
-ok_('the detour line states the age of the fix ahead of the count of '
-    'unplaced pins (%d, %d)' % (_age, _tally), 0 <= _age < _tally)
 
 # --- 📷 Snap, and the row it shares --------------------------------------------
 #
@@ -737,6 +782,18 @@ ok_('...and still says "nothing from the scanner for"',
 
 spoken = caption_strings(live_src)
 ok_('live.html still reads as a page with a map caption in it', len(spoken) > 15)
+# ...and the third writer: the lines that say why a card's fix or distance
+# gives nothing to measure with, and the line for a pin a card contradicts,
+# are worded in map-view.js (MV.fixLine and MV.againstCard), where
+# tests/mapview.test.js reaches every one, and mapLine returns them as they
+# come. Read from the words' tables to the end of againstCard.
+mv_src = open(os.path.join(ROOT, 'map-view.js')).read()
+_mv_words = [r for r in _literal_runs(
+    mv_src[mv_src.index('  var FIX_WORDS = {'):
+           mv_src.index('  /* Every place the loaded offers name')])
+    if len(r.strip()) > 4]
+ok_("map-view.js still words the card's own refusals", len(_mv_words) > 15)
+spoken += _mv_words
 said = ' ## '.join(row[1] for row in CAPTION_LINES)
 eq('every sentence the map caption can say is one this file measures',
    sorted(set(r for r in spoken if r not in said)), [])
@@ -2684,8 +2741,8 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say twenty-one things, so all
-                # twenty-one are put in it and measured. Three rules, and they are not the same
+                # occupant and it can say thirty-eight things, so all
+                # thirty-eight are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
                 #   the cap    — no sentence may take more rows than the clamp

@@ -1044,6 +1044,28 @@ function holdPath() {
   return path.join(path.dirname(JOURNAL_PATH), 'holding.json');
 }
 
+/* The fields of an offer line that say where the car was when the card came
+ * up and how far the card says the job runs — the gate's answer included.
+ *
+ * Kept with the order in the car, because Map view checks the held order's end
+ * against its OWN card: a straight line from where that card came up to where
+ * the map put its end cannot be longer than the distance it printed (plus
+ * MapView.SLACK_MI), and where it is, the map found the wrong end. The order
+ * carried `miles` and nothing else, so its end was a pin with nothing to
+ * contradict it. Copied, never judged here: map-view.js decides what each
+ * field allows (MapView.cardFix, MapView.cardYardstick). */
+var CARD_FIELDS = ['lat', 'lon', 'gpsAge', 'gpsErr', 'gpsMode', 'gpsOk', 'gpsWhy',
+                   'miles', 'whole', 'hasTotal', 'legs', 'milesUncertain',
+                   'milesCorrected', 'earlyLook', 'doubt'];
+
+function cardOf(offer) {
+  var out = {};
+  CARD_FIELDS.forEach(function (k) {
+    if (offer && offer[k] !== undefined) out[k] = offer[k];
+  });
+  return out;
+}
+
 function setHolding(h) {
   scanner.holding = h || null;
   try {
@@ -1152,7 +1174,10 @@ function withStack(read, now) {
   if (!read || !read.ready) return read;
   var held = holding(now);
   read.holding = held
-    ? { pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null }
+    ? { pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
+        // Its card's fix and size, so Map view can check this order's end
+        // against them — see cardOf.
+        card: held.card || null }
     : null;
   read.stack = held
     ? Advice.stack(held, timedLikeTheHeldJob(read),
@@ -2967,6 +2992,9 @@ function statusNow() {
                    // as long as the panel keeps them, which is shorter than
                    // the scanned destination beside it — see forgetPlanner.
                    planner: h.planner || null,
+                   // ...and its card's fix and size, for Map view's check of
+                   // where it ends. See cardOf.
+                   card: h.card || null,
                    heldMs: Math.max(0, Date.now() - h.acceptedAt) } : null;
     }()),
     lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
@@ -4452,7 +4480,11 @@ function route(req, res) {
               // job finished at midnight. Dated from the card, holding()
               // expires it on the card's own clock, which for a prompt
               // press is the same moment.
-              acceptedAt: scanner.offerAt || Date.now()
+              acceptedAt: scanner.offerAt || Date.now(),
+              // ...and where the car was when its card came up, with the
+              // card's own size: what live.html's Map view checks this
+              // order's end against. See cardOf.
+              card: cardOf(marked)
             });
           } else {
             // Through holding() as well: taking the mark back off an order the

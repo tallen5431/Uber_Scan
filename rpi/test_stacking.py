@@ -303,7 +303,19 @@ def put_offer(offer):
 
 
 HELD = {'id': 'held-1', 'pay': 12.0, 'minutes': 30.0, 'billedMinutes': 30.0,
-        'miles': 8.0, 'cost': 2.4, 'perHour': 19.2}
+        'miles': 8.0, 'cost': 2.4, 'perHour': 19.2,
+        # Where the car was when the card came up and the card's own size, as
+        # the offer line carries them (Marietta Square, an invented fix). Map
+        # view checks the held order's end against these, so the hold has to
+        # keep them.
+        'lat': 33.9526, 'lon': -84.5499, 'gpsAge': 0.6, 'gpsErr': 27.8,
+        'gpsMode': 3, 'gpsOk': True, 'gpsWhy': None, 'whole': True,
+        'hasTotal': True, 'legs': 2, 'milesUncertain': False,
+        'milesCorrected': False, 'earlyLook': False, 'doubt': None}
+HELD_CARD = {k: HELD[k] for k in ('lat', 'lon', 'gpsAge', 'gpsErr', 'gpsMode',
+                                  'gpsOk', 'gpsWhy', 'miles', 'whole',
+                                  'hasTotal', 'legs', 'milesUncertain',
+                                  'milesCorrected', 'earlyLook', 'doubt')}
 
 port = free_port()
 journal = os.path.join(work, 'j.jsonl')
@@ -439,6 +451,12 @@ try:
         isinstance((status.get('holding') or {}).get('heldMs'), (int, float)))
     ok_('no timestamp leaks out of it',
         'acceptedAt' not in (status.get('holding') or {}))
+    # ...and the card it came from: where the car was when it came up, the
+    # gate's answer, and the distance it printed. Map view checks where this
+    # order ends against them, and a hold that kept `miles` alone gave its
+    # end nothing to be contradicted by.
+    eq("the order in the car keeps its own card's fix and size",
+       (status.get('holding') or {}).get('card'), HELD_CARD)
 
     # --- and the next offer is measured against it --------------------------
     #
@@ -465,6 +483,8 @@ try:
         # ...and the second reading also says what is being carried, so a panel
         # that missed the mark still knows.
         ok_('the reading names the order being carried', bool(second.get('holding')))
+        eq("...with its card's fix and size, as /api/status gives them",
+           (second.get('holding') or {}).get('card'), HELD_CARD)
 
     # --- put it down --------------------------------------------------------
     done = post(base, '/api/delivered')

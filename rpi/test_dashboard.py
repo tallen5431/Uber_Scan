@@ -2502,6 +2502,18 @@ const framed = (page) => page.waitForFunction(
   // Hoisted out of the block below because two stages need it: the one that
   // drives the map, and the one that proves a stored map mode is refused.
   const MAPSTUB = `
+      // What the offer line carries since the scanner put the card's own fix
+      // on it: where the car was when the card came up, the gate's answer,
+      // and the card's size — a 12 mi printed total, a yardstick. Spread into
+      // the map stages' offers, and the held card into their holds: the held
+      // order came up at the same fix and printed 9 mi in all, which reaches
+      // Powder Springs Rd (7.9 mi off) on a straight line. Invented points.
+      window.__CARD = { lat: 34.010, lon: -84.600, gpsAge: 1.2, gpsErr: 12.0,
+                        gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 12.0,
+                        hasTotal: true, legs: 2, whole: true };
+      window.__HELD = { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                        gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
+                        hasTotal: true, legs: 2, whole: true };
       window.__lmap = null; window.__marks = []; window.__lines = [];
       window.__fit = null; window.__asked = []; window.__circles = [];
       window.L = {
@@ -2560,28 +2572,19 @@ const framed = (page) => page.waitForFunction(
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     await page.addInitScript(MAPSTUB);
-    // The car's own position, off the newest journal row that carries one.
-    // This is the one point on the map that was MEASURED rather than looked
-    // up, and it is what the detour is measured from.
+    // The journal, holding positions the detour must NOT be measured from.
+    // Map view used to anchor on the newest row that carried a fix the gate
+    // passed — another card's car, up to twenty minutes old. These are newer
+    // than any card pushed below and miles from this card's own fix
+    // (34.010, -84.600, on window.__CARD), so a page still asking the journal
+    // puts the car in the wrong place.
     await page.route('**/api/journal*', (route) => route.fulfill({
       status: 200, contentType: 'application/json',
-      // Stamped against the real clock, because the panel now judges the
-      // anchor by its AGE: a fix the phone stopped updating an hour ago is not
-      // a vaguer answer, it is a claim about a journey nobody is on. Epoch
-      // timestamps made every fix here 497156 hours old, which the gate
-      // correctly refused — the fixture was the thing that was wrong.
       body: JSON.stringify({ offers: [
-        // Each with the GPS gate's answer, as rpi/journal.py writes it: a row
-        // with a coordinate and no `gpsOk` is not a position (MV.fixOf).
-        { id: 'old', at: Date.now() - 3600000, lat: 34.500, lon: -84.900,
-          gpsOk: true },
-        { id: 'new', at: Date.now() - 45000, lat: 34.010, lon: -84.600, gpsAge: 1.2,
-          gpsErr: 12.0, gpsMode: 3, gpsOk: true },
-        // NEWER than 'new', and refused by the gate: a mode-3 fix gpsd put at
-        // 129 m. Newest-wins would anchor the detour here.
-        { id: 'rough', at: Date.now() - 20000, lat: 34.300, lon: -84.300, gpsAge: 0.5,
-          gpsErr: 129.2, gpsMode: 3, gpsOk: false, gpsWhy: 'rough' },
-        { id: 'blind', at: Date.now() - 20000 } ] }) }));
+        { id: 'newer', at: Date.now() + 60000, lat: 34.500, lon: -84.900,
+          gpsAge: 0.4, gpsErr: 9.0, gpsMode: 3, gpsOk: true },
+        { id: 'rough', at: Date.now() + 60000, lat: 34.300, lon: -84.300, gpsAge: 0.5,
+          gpsErr: 129.2, gpsMode: 3, gpsOk: false, gpsWhy: 'rough' } ] }) }));
     await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
@@ -2599,10 +2602,12 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                 card: window.__HELD },
       offer: { id: 'o-map', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
                miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta' } }));
+               dropoff: 'Canton Rd, Marietta',
+               ...window.__CARD } }));
     await page.waitForTimeout(400);
     // BEFORE the press. Nothing may have been asked, and the pane is a
     // picture.
@@ -2705,10 +2710,12 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 22.0, grossPerHour: 27.0, pay: 8.0,
       minutes: 16.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                 card: window.__HELD },
       offer: { id: 'o-map-2', pay: 8.0, minutes: 16.0, billedMinutes: 16.0,
                miles: 3.0, cost: 1.0, pickup: 'Canton Rd, Marietta',
-               dropoff: 'Chipotle (Barrett Pkwy)' } }));
+               dropoff: 'Chipotle (Barrett Pkwy)',
+               ...window.__CARD } }));
     await page.waitForTimeout(2500);
     out.mapNext = await page.evaluate(() => ({
       marks: window.__marks.map(function (m) {
@@ -2732,10 +2739,12 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
       minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                 card: window.__HELD },
       offer: { id: 'o-map-3', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
                miles: 3.0, cost: 1.0, pickup: 'Unfindable Rd, Atlantis',
-               dropoff: 'Canton Rd, Marietta' } }));
+               dropoff: 'Canton Rd, Marietta',
+               ...window.__CARD } }));
     // The LAST card's pins must not sit under this card's numbers while these
     // lookups run. o-map-2's pickup was Canton Rd, drawn green; o-map-3 has no
     // placeable pickup of its own, so any green pin on the glass from here on
@@ -2764,9 +2773,11 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
       minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                 card: window.__HELD },
       offer: { id: 'o-map-4', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
-               miles: 3.0, cost: 1.0, dropoff: 'Canton Rd, Marietta' } }));
+               miles: 3.0, cost: 1.0, dropoff: 'Canton Rd, Marietta',
+               ...window.__CARD } }));
     await page.waitForTimeout(1800);
     out.mapNoPickup = await page.evaluate(
       () => document.getElementById('viewNote').textContent.trim());
@@ -2785,10 +2796,12 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 26.0, grossPerHour: 31.0, pay: 11.0,
       minutes: 19.0, miles: 3.5, cost: 1.1, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                 card: window.__HELD },
       offer: { id: 'o-stray', pay: 11.0, minutes: 19.0, billedMinutes: 19.0,
                miles: 3.5, cost: 1.1, pickup: 'W Boise Ave',
-               dropoff: 'Canton Rd, Marietta' } }));
+               dropoff: 'Canton Rd, Marietta',
+               ...window.__CARD } }));
     await page.waitForTimeout(2600);
     out.mapStray = await page.evaluate(() => ({
       note: document.getElementById('viewNote').textContent.trim(),
@@ -2801,10 +2814,12 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
       minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                 card: window.__HELD },
       offer: { id: 'o-map-5', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
                miles: 3.0, cost: 1.0, pickup: '<b>Kroger</b> & Co "Deli"',
-               dropoff: 'Canton Rd, Marietta' } }));
+               dropoff: 'Canton Rd, Marietta',
+               ...window.__CARD } }));
     await page.waitForTimeout(2600);
     // The RAW popup, tags and all — the checks elsewhere strip markup before
     // looking, which is exactly what would hide this.
@@ -2821,7 +2836,8 @@ const framed = (page) => page.waitForFunction(
       ready: true, state: 'go', perHour: 21.0, grossPerHour: 25.0, pay: 7.0,
       minutes: 15.0, miles: 2.0, cost: 0.7, target: 25, band: 15, holding: null,
       offer: { id: 'o-map-6', pay: 7.0, minutes: 15.0, billedMinutes: 15.0,
-               miles: 2.0, cost: 0.7 } }));
+               miles: 2.0, cost: 0.7,
+               ...window.__CARD } }));
     await page.waitForTimeout(900);
     out.mapWentBlank = await page.evaluate(() => ({
       marks: (window.__marks || []).length,
@@ -2838,10 +2854,12 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                 card: window.__HELD },
       offer: { id: 'o-map-7', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
                miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta' } }));
+               dropoff: 'Canton Rd, Marietta',
+               ...window.__CARD } }));
     await page.waitForTimeout(2600);
     out.mapBeforeRound = await page.evaluate(
       () => document.getElementById('viewNote').textContent.trim());
@@ -2979,61 +2997,105 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
-  /* --- an anchor that stopped moving --------------------------------------
+  /* --- what the card's own fix allows ------------------------------------
    *
-   * rpi/gps.py states this as a certainty rather than a risk: the app on the
-   * phone runs on a timer — the one it was written against showed "Runtime
-   * Left 4:48" — so it WILL stop mid-shift. The newest row carrying a position
-   * then stops moving while the car does not, and the detour is measured from
-   * wherever the car was when it stopped.
-   *
-   * That does not make the figure vaguer. "+3.2 mi out of your way" and "this
-   * pickup is on your way" are opposite instructions, and which one appears
-   * turns on the anchor — so a stale fix flips the words, not just the digits.
-   */
+   * The figure is measured from where the car was when THIS card came up, and
+   * each card is held against its own pin: a straight line cannot beat the
+   * road, so a pin farther from a card's fix than the card's own distance plus
+   * half a mile is one the map got wrong. The design study's wrong-branch case
+   * first, in invented points round Marietta Square: a 9.4 mi card, the map's
+   * McDonald's 21.8 mi north, the order in the car ending 20.2 mi east — which
+   * the old arithmetic printed as "+31.3 mi out of your way". Then one card
+   * for every other reason the figure is withheld. */
   {
-    stage = 'an anchor that stopped moving';
+    stage = 'the map mode: what the card\'s own fix allows';
     const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     await page.addInitScript(MAPSTUB);
-    await page.route('**/api/journal*', (route) => route.fulfill({
-      status: 200, contentType: 'application/json',
-      body: JSON.stringify({ offers: [
-        // Two hours old, which is a phone whose GPS app timed out after the
-        // first hour of a shift.
-        { id: 'stale', at: Date.now() - 7200000, lat: 34.010, lon: -84.600,
-          gpsOk: true } ] }) }));
+    await page.addInitScript(() => {
+      window.__SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
+                      gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.4,
+                      hasTotal: true, legs: 1, whole: true };
+    });
     await page.route('**/nominatim.openstreetmap.org/**', (route) => {
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
-      const known = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
-                      'Canton Rd, Marietta': [33.980, -84.500],
-                      'Powder Springs Rd': [33.900, -84.640] }[q];
+      const hit = { "McDonald's": [34.2683, -84.5499],
+                    "McDonald's (Marietta Sq)": [33.9830, -84.5499],
+                    'Held End': [33.9526, -84.1974],
+                    'Roswell St, Marietta': [33.9560, -84.5400] }[q];
       return route.fulfill({ status: 200, contentType: 'application/json',
-        body: JSON.stringify(known ? [{ lat: String(known[0]), lon: String(known[1]),
-                                        display_name: q }] : []) });
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
     });
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
-    await page.evaluate(() => window.__es.push({
-      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
-      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
-      offer: { id: 'o-stale', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta' } }));
+    // One card on the glass. `card` is spread over window.__SQ; `held` over a
+    // hold whose card came up at the Square and printed 22 mi, which reaches
+    // the held end on a straight line.
+    const push = (args) => page.evaluate((a) => {
+      const card = Object.assign({}, window.__SQ, a.card);
+      const held = a.held === null ? null
+        : Object.assign({}, window.__SQ, { miles: 22.0 }, a.held || {});
+      window.__es.push({
+        ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+        minutes: 20.0, miles: 9.4, cost: 1.4, target: 25, band: 15,
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Held End',
+                   card: a.held === undefined || a.held ? held : null },
+        offer: Object.assign({ id: a.id, pay: 14.25, minutes: 20.0,
+                               billedMinutes: 20.0, cost: 1.4,
+                               pickup: a.pickup || "McDonald's",
+                               dropoff: 'Roswell St, Marietta' }, card) });
+    }, args);
+    const note = () => page.evaluate(
+      () => document.getElementById('viewNote').textContent.trim());
+    await push({ id: 'o-wrong' });
     await page.waitForTimeout(300);
-    await page.click('#viewMode');
+    await page.click('#viewMode');            // → scene
     await page.waitForTimeout(150);
-    await page.click('#viewMode');
-    await page.waitForTimeout(4200);
-    out.mapStaleFix = await page.evaluate(() => ({
-      note: document.getElementById('viewNote').textContent.trim(),
-      // The pins are still drawn — the places are real and worth seeing. It is
-      // the FIGURE that is withheld, not the map.
-      marks: (window.__marks || []).length,
-      popups: (window.__marks || []).map(function (m) { return String(m.popup || ''); }) }));
+    await page.click('#viewMode');            // → map
+    await page.waitForTimeout(4200);          // three lookups, a second apart
+    out.mapDisc = { wrong: await note() };
+    out.mapDisc.wrongMarks = await page.evaluate(() => (window.__marks || []).length);
+    // The right branch, 2.1 mi from the car: inside the card, so a figure.
+    await push({ id: 'o-right', pickup: "McDonald's (Marietta Sq)" });
+    await page.waitForTimeout(1800);
+    out.mapDisc.right = await note();
+    // No fix on the card at all: no --gps, or Phone.fix() had none fresh.
+    await push({ id: 'o-nofix', pickup: "McDonald's (Marietta Sq)",
+                 card: { lat: null, lon: null, gpsAge: null, gpsErr: null,
+                         gpsMode: null, gpsOk: null, gpsWhy: null } });
+    // No fix is no box to search in, and the box is part of the geocoder's
+    // cache key, so its three places are asked afresh, a second apart.
+    await page.waitForTimeout(3800);
+    out.mapDisc.noFix = await note();
+    // A fix the gate refused for its quality.
+    await push({ id: 'o-rough', pickup: "McDonald's (Marietta Sq)",
+                 card: { gpsErr: 129.2, gpsOk: false, gpsWhy: 'rough' } });
+    await page.waitForTimeout(1200);
+    out.mapDisc.rough = await note();
+    // DoorDash's one-leg shape: no yardstick yet, whatever the pin.
+    await push({ id: 'o-oneleg', pickup: "McDonald's (Marietta Sq)",
+                 card: { hasTotal: false, legs: 1 } });
+    await page.waitForTimeout(800);
+    out.mapDisc.oneLeg = await note();
+    // An Early look card, which may be measured from the end of a job.
+    await push({ id: 'o-early', pickup: "McDonald's (Marietta Sq)",
+                 card: { earlyLook: true } });
+    await page.waitForTimeout(800);
+    out.mapDisc.early = await note();
+    // The held order's end, 20.2 mi from where ITS card came up, on a card
+    // that printed 9.4 mi.
+    await push({ id: 'o-heldfar', pickup: "McDonald's (Marietta Sq)",
+                 held: { miles: 9.4 } });
+    await page.waitForTimeout(800);
+    out.mapDisc.heldFar = await note();
+    // ...and a hold that carries no card: kept from before the server
+    // stored one, or marked with nothing to copy.
+    await push({ id: 'o-heldbare', pickup: "McDonald's (Marietta Sq)", held: null });
+    await page.waitForTimeout(800);
+    out.mapDisc.heldBare = await note();
     await page.close();
   }
 
@@ -3149,11 +3211,6 @@ const framed = (page) => page.waitForFunction(
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     await page.addInitScript(MAPSTUB);
-    await page.route('**/api/journal*', (route) => route.fulfill({
-      status: 200, contentType: 'application/json',
-      body: JSON.stringify({ offers: [
-        { id: 'fix', at: Date.now() - 30000, lat: 34.010, lon: -84.600,
-          gpsAge: 1.0, gpsOk: true } ] }) }));
     await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
@@ -3173,7 +3230,7 @@ const framed = (page) => page.waitForFunction(
       holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
       offer: { id: 'o-first', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
                miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta' } }));
+               dropoff: 'Canton Rd, Marietta', ...window.__CARD } }));
     await page.waitForTimeout(300);
     await page.click('#viewMode');            // → scene
     await page.waitForTimeout(150);
@@ -3212,12 +3269,10 @@ const framed = (page) => page.waitForFunction(
    * removed layer or a bad coordinate does — and on a panel read while driving
    * an unbounded retry is the whole shift.
    *
-   * The journal answers with NO POSITION ON ANY ROW, which is this rig's real
-   * state: 0 of the owner's 1,166 offers carry one. `askCar` therefore never
-   * caches an answer and every press pays the round trip — measured against
-   * the real server.js over that week's journal at 7-17ms warm and 34-174ms
-   * cold on this box, 5-8x that on a Pi 4. Held open at 900ms here so the
-   * press lands inside it every run rather than one in ten.
+   * A press during the journal fetch for the car's position was the other
+   * case this stage drove. That fetch is gone — the car is the card's own fix,
+   * on the offer line, with nothing awaited for it — so the case it made
+   * reachable went with it, and the walk below is the await that remains.
    */
   {
     stage = 'the map mode: a walk left half way, and a draw that throws';
@@ -3234,11 +3289,6 @@ const framed = (page) => page.waitForFunction(
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     await page.addInitScript(MAPSTUB);
-    await page.route('**/api/journal*', async (route) => {
-      await new Promise((r) => setTimeout(r, 900));
-      return route.fulfill({ status: 200, contentType: 'application/json',
-        body: JSON.stringify({ offers: [{ id: 'nofix', at: Date.now() - 30000 }] }) });
-    });
     // Kept on this side rather than pushed into the page, so recording a
     // question costs nothing and cannot move the timings this stage turns on.
     const askedHere = [];
@@ -3279,27 +3329,6 @@ const framed = (page) => page.waitForFunction(
     await page.click('#viewMode');            // → map
     await page.waitForTimeout(5200);
     out.mapFinally = { settledPins: await pins() };
-
-    /* Left during `askCar`, which is the one real await between taking the key
-       and putting the first mark up. Nothing has been drawn for this card at
-       all when the driver walks away. */
-    stage = 'the map mode: left while the car was being looked up';
-    await page.evaluate((c) => window.__es.push(c),
-                        card('o-fin-2', 'Barrett Pkwy & Cobb Pkwy', 'Dallas Hwy, Marietta'));
-    await page.waitForTimeout(400);           // inside the 900ms journal fetch
-    await page.click('#viewMode');            // map → phone, mid-lookup
-    // askCar answers into a mode that has moved on, the guard under it
-    // returns, and the finally runs with nothing of this card on the glass.
-    await page.waitForTimeout(1800);
-    await page.click('#viewMode');            // phone → scene
-    await page.waitForTimeout(200);
-    await page.click('#viewMode');            // scene → map, same card
-    await page.waitForTimeout(4200);
-    out.mapFinally.leftEarly = {
-      pins: await pins(),
-      asked: askedHere.slice(),
-      note: await page.evaluate(
-        () => document.getElementById('viewNote').textContent.trim()) };
 
     /* ...and left during the WALK, which is the case the comment in the
        finally describes: some of this card's pins are up, none of its words
@@ -5701,19 +5730,23 @@ try:
     fills = [m.get('fill') for m in marks]
     eq('four things are on the map', len(marks), 4)
     # The car first, because every other mark here is a guess and this one is
-    # not: it is the rig's own GPS fix off the newest journal row. A pickup pin
+    # not: it is the rig's own GPS fix, taken when this card landed. A pickup pin
     # a long way from it is a pin to distrust whatever the geocoder said.
     ok_('the car is one of them, from the rig\'s own position (%r)' % (fills,),
         '#7aa2f7' in fills)
     _car = [m for m in marks if m.get('fill') == '#7aa2f7']
-    ok_('...taken off the NEWEST row that carries one, not the first (%r)'
-        % (_car and _car[0].get('ll'),),
-        _car and abs(float(_car[0]['ll'][0]) - 34.010) < 0.001)
-    # A newer row carries a fix rpi/gps.py's gate refused (129 m, mode 3).
-    # Newest-wins would anchor the detour there; MV.fixOf reads `gpsOk`.
-    ok_('a fix the GPS gate refused is not where the detour is measured from (%r)'
-        % (_car and _car[0].get('ll'),),
-        _car and len(_car) == 1 and abs(float(_car[0]['ll'][0]) - 34.300) > 0.1)
+    # The card's own fix, taken when it landed and carried on the offer line —
+    # not the newest journal row carrying one, which the stub puts at
+    # (34.5, -84.9) and stamps newer than this card. askCar read that.
+    ok_('the detour comes from the card\'s own fix, not the newest journal row '
+        'that carries one (%r)' % (_car and _car[0].get('ll'),),
+        _car and len(_car) == 1
+        and abs(float(_car[0]['ll'][0]) - 34.010) < 0.001
+        and abs(float(_car[0]['ll'][1]) + 84.600) < 0.001)
+    ok_('...and the car pin says it is where the card came up, with its error '
+        '(%r)' % (_car and _car[0].get('popup'),),
+        _car and 'when this card came up' in (_car[0].get('popup') or '')
+        and '±12 m' in (_car[0].get('popup') or ''))
     ok_('...and the pickup is drawn in the pickup colour', '#17c964' in fills)
     ok_('...and both dropoffs in the dropoff colour',
         len([f for f in fills if f == '#f5a524']) == 2)
@@ -5782,23 +5815,35 @@ try:
         'no camera view' not in (onerr.get('note') or ''))
     eq('...and the pins stay where they were', onerr.get('marks'), 4)
 
-    # An anchor that stopped moving. rpi/gps.py says the phone's GPS app runs on
-    # a timer and WILL stop mid-shift, so this is the ordinary failure and not a
-    # corner. "+3.2 mi out of your way" and "this pickup is on your way" are
-    # opposite instructions and which one appears turns on where the car is, so
-    # a stale fix flips the words rather than merely blurring the digits.
-    stale = got.get('mapStaleFix') or {}
-    ok_('a two-hour-old fix states no detour at all (%r)' % stale.get('note'),
-        'out of your way' not in (stale.get('note') or '')
-        and 'on your way' not in (stale.get('note') or ''))
-    ok_('...and says how old the position is, rather than going quiet',
-        'old' in (stale.get('note') or '') and 'h' in (stale.get('note') or ''))
-    # The places are real and worth seeing; it is the FIGURE that is withheld.
-    eq('...while still drawing the places', stale.get('marks'), 4)
-    ok_('...and the car pin says how old it is (%r)'
-        % ([p for p in (stale.get('popups') or []) if 'where you were' in p][:1],),
-        any('a fix' in p and 'old' in p
-            for p in (stale.get('popups') or []) if 'where you were' in p))
+    # Each card against its own pin. The study's wrong-branch case first: the
+    # old arithmetic printed "+31.3 mi out of your way" off a same-brand pin
+    # 21.8 mi from a fresh fix on a card whose whole job was 9.4 mi.
+    disc = got.get('mapDisc') or {}
+    eq('a same-brand pin 21.8 mi from a fresh fix on a 9.4 mi card is refused, '
+       'not printed as "+31.3 mi"', disc.get('wrong'),
+       "the map's McDonald's is 21.8 mi from you, so past the card's 9.4 mi")
+    eq('...while every pin is still drawn', disc.get('wrongMarks'), 4)
+    ok_('the right branch, 2.1 mi off, gets the figure (%r)' % disc.get('right'),
+        re.match(r'^\+\d+\.\d mi out of your way — straight lines, not roads$',
+                 disc.get('right') or ''))
+    eq('a card that came up with no fix says so',
+       disc.get('noFix'), 'this card came up without a GPS fix')
+    eq('a card whose fix the gate refused says why, with the figure',
+       disc.get('rough'), 'GPS fix on this card too rough to measure from (±129 m)')
+    eq('a one-leg card has no yardstick yet, so no figure',
+       disc.get('oneLeg'),
+       'this kind of card may not count the drive to the pickup — no yardstick '
+       'yet')
+    eq('an Early look card is never a yardstick',
+       disc.get('early'),
+       'an Early look card may not measure from your car — no yardstick yet')
+    eq("the held order's end is checked against its own card",
+       disc.get('heldFar'),
+       "the map's Held End is 20.2 mi from your order's card, so past its 9.4 mi")
+    eq('a held order with no card of its own is not measured to',
+       disc.get('heldBare'),
+       'the order in your car came up without a GPS fix, so its end cannot be '
+       'checked')
 
     # Thirty frames a second down a phone hotspot, for a picture nobody can
     # see, is a cost that only shows up as a bill.
@@ -5878,25 +5923,6 @@ try:
     _settled = set(fin.get('settledPins') or [])
     ok_('a card whose walk finishes has all three of its places on the glass '
         '(%r)' % (sorted(_settled),), len(_settled) == 3)
-
-    early = fin.get('leftEarly') or {}
-    _early = set(early.get('pins') or [])
-    # Left during askCar — the one real await between taking the key and
-    # putting the first mark up, and on this rig it is paid on EVERY press
-    # because no journal row carries a position for it to cache.
-    ok_('a card left while the car was being looked up is drawn from the start '
-        'on the way back (%r)' % (sorted(_early),),
-        {'34.1,-84.5', '33.95,-84.7'} <= _early)
-    ok_('...and the card before it is off the glass, not restated under this '
-        'card\'s figures', '34.02,-84.58' not in _early)
-    # The name said two and the assertion checked one. Both, now: the point is
-    # that the redraw actually re-ran the lookups rather than repainting from
-    # whatever happened to be cached, and one of the two proves half of that.
-    ok_('...and BOTH its new places were actually asked about (%r)'
-        % ([q for q in (early.get('asked') or [])
-            if q in ('Barrett Pkwy & Cobb Pkwy', 'Dallas Hwy, Marietta')],),
-        {'Barrett Pkwy & Cobb Pkwy', 'Dallas Hwy, Marietta'}
-        <= set(early.get('asked') or []))
 
     _mid = set(fin.get('midWalkPins') or [])
     ok_('a walk still running has some of this card up and not all of it (%r)'
