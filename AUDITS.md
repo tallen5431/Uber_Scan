@@ -879,6 +879,81 @@ screen slate armed, so a navigation screen after the prompt was filed against
 the card before it (reproduced through main(), 18s after); the slate is now
 dropped on every read of a prompt.
 
+**Uber's Est. delivery card was invisible. A town took the line under it as its
+second name. And the card's own route line was read as a divider.** On 8
+October an Uber Eats Early look card reached the rig printing `Est. delivery
+4:15 PM • 8.6 mi`, where all 27 Early look rows in the owner's week print `N min
+(x mi) total`. It parsed to $14.48 and 8.6 mi and nothing else: incomplete,
+`empty`, no verdict, never journalled.
+
+`DELIVER_BY` is widened to that wording in both ports, as one rule, not a
+second. Its distance group, glued on by Uber's bullet, marks where the line
+ends. The merchant and destination are then read from there by the same
+leg-tail code that reads them after a total leg. At the phone's 3:45 PM the card
+is 30 minutes, `fromDeadline`, $23.80/hr CLOSE CALL.
+
+The group's glue is LEG's, measured on the card's own bullet: a glyph on 104 of
+110 readings, a bare space on 6. A bare space still names no place on that
+frame. It carries no charger-badge lookahead. LEG and LONE_MILES now share one
+`NOT_THE_CHARGER`, `(?!\s*from\s+f)`, because the badge is `from f…` on all 476
+of its readings. Before, a merchant called `From The Earth Brewing` cost the
+card both ends and its distance: $28.96/hr, uncosted.
+
+The Jimmy John's snap read the Accept button as `Pverel 8) 4 P`, and the dropoff
+went to the journal as `Shadowood Pkwy SE, Atlanta Pverel`. Now `line_starts()`
+says where the reader began each line. A town that has reached `PLACE_TOWN`
+takes a name from the next line only if that name sits right after the town's
+first name and the line is address-shaped. Refused: 97 readings in 53 rows, all
+furniture or the next field. Kept: `Springs` and `County` wrapped onto their own
+line (68 readings).
+
+`Matching may take longer`, `Includes expected tip` and `Early look` all end a
+place now.
+
+Two shapes the chip had been hiding:
+- **The route line.** Uber's line from the pickup's dot to the destination's
+  reads as a pipe at the head of the lines it crosses. In front of the
+  merchant's bracketed branch it cut the merchant's name off, and row 86
+  published `(Dallas) Bone Creek Xing & River Run Dr, Dallas` as its pickup. In
+  front of an address's wrapped last line it published `NW, Kennesaw` as the
+  dropoff (rows 61, 277, 309). Both are drawing now, not dividers.
+- **Scraps between the comma and the town.** `…, 28 kt Kennesaw` never matched
+  the town rule. Two readings of one address became a two-stop route on the
+  offers page (row 423). Those scraps now come out first, but only after an
+  address-shaped head: row 397's merchant line has a comma in it.
+
+| replay of the 1,166-offer week, both ports, bf/replay → q4/parser-fix | |
+|---|---|
+| rows moved | 174, every one in pickup/dropoff/places |
+| ...moving a published pickup or dropoff | 136 |
+| pay, minutes, miles, deliverBy, verdict, rate, whole, doubt moved | 0 |
+| readings where the ports disagree | 0 before, 0 after |
+| published rows showing one address twice | 15 → 9 |
+| published ends with a scrap before the town | 71 → 12 |
+| published place that was a wrapped town line, now the whole address | rows 277, 363 |
+| row 86 pickup | `(Dallas)` → `Los Portales Mexican Restaurant (Dallas)`, and a dropoff |
+
+*Not better:*
+- Row 61 publishes no place. It had published a merchant fused to half a
+  street, and `Ln, Powder Springs`.
+- Row 412's frames 3 and 4 alone refuse a 61-character merchant and show the
+  destination as their pickup. The window's row keeps the merchant.
+- Longer-wins now picks junk-prefixed readings on rows 1094 (`bane I Cardinal
+  Dr …`) and 1065 (`St Cedar Valley …`).
+- Row 444 holds `…, Kennesaw` beside its `…, Bee`.
+- Row 309 still publishes `SW, Marietta`.
+
+*Not done:*
+- A merchant printed without a bracketed branch is stored fused to its
+  destination. Readings of 18 week rows do this, including the first panel read
+  of row 419. An Est. delivery card with such a merchant inherits it.
+- If Uber moved its estimate while the card is on screen, the window's vote
+  would lag. Measured: three reads at $25.50/hr GO where the card said
+  $23.80/hr CLOSE CALL. No one has seen Uber move one.
+
+39d7a86's decoding re-checked against `toCsv()`: 1,166 of 1,166 cells
+round-trip. 75 mutations, 75 named kills.
+
 ### The order in the car
 
 **A destination scanned while SCREENING lost its provenance the moment the card
@@ -1128,9 +1203,104 @@ the card box from the server's file fails three named checks in
 `tests/crop.test.js`; sending it in frame fractions fails '...the card box as
 fractions of the SCREEN box, clamped to it'.
 
-*Not built yet:* reading EVERY stop off the trip planner. The ⌖ answer is still
-one destination. A reader for the planner page needs real screenshots of it to
-be built and held against, and none are on file.
+*Not built then:* reading EVERY stop off the trip planner. The ⌖ answer was
+one destination, and a reader for the planner page needed a real picture of
+it to be built and held against. Built since, off the rig's own live view of
+one: the Trip Planner entry below.
+
+**⌖ over Uber's Trip Planner answered "not read" with every stop on the screen,
+and its first fix filed a door it could not be sure of and hid the panel's
+warnings.** The planner prints no ZIP. On the rig's own live view of one, the
+read path (fit_for_ocr to 1800, to_grey, preprocess, ocr_lines) gave
+`find_address` → `None`. The press ran out its twelve seconds and said nothing
+was there.
+
+`offer_parser.find_planner` and `findPlanner` now read the planner by its own
+grammar, held to one corpus:
+- the stop header: "Pickup • N order(s)" or "Dropoff • N order(s)", where the
+  bullet may come out as any glyph or not at all, but never a bracket;
+- the name, and "Expected by", through the one `time_of_day`;
+- under "Address", a street held to STREET and a "Town, ST" line held to STATES
+  and TOWN.
+
+Every field that does not read is null, and `find_address` is not loosened. On
+the owner's week, 6,657 texts (5,491 frames plus 1,166 stored texts), none has a
+stop header. parse, rate and find_address are unchanged in both ports, and no
+row changed in the replay against the base parsers.
+
+The trailing "S" in "4821 Kestrel Dr S" is the screen's scroll bar. A lone letter
+after a street suffix is a real quadrant on 7 of the week's 1,802 places, so it
+is dropped only when the town line also carries a tail. Without a ZIP the line
+leaves out the state, because Advice.area returns null on "…, Marietta, GA".
+
+A planner is read only during a press, off the whole-screen read. It answers the
+press at once on its own line and the window shuts: 4 reads in the next five
+seconds against 13 with it open.
+
+**Counting dropoffs on the screen was not counting them on the trip** (found in
+verification). On the rig's live view, one open stop's card is 308 of the list's
+695 rows, so two open stops fill it. On a longer trip, the one dropoff left on
+the glass may be another customer's, and it was being filed with `asked: true`.
+
+`planner_bounded` and `plannerBounded` now require both ends of the list:
+- the "Trip Planner" title with the first stop's header directly under it;
+- "Waybill" after the last header.
+
+What the measurements show:
+- The whole live view lost "Waybill". All five crops of the same pixels to the
+  phone's glass read it, one as "Waypbill".
+- A drawn planner loses its title off the frame at a 900px mount, and reads
+  whole at 850 down to 750.
+- That "Waybill" follows the last stop rather than every stop is read off where
+  it sits on the one planner photographed, which had a single stop.
+
+`planner_destination(stops, bounded)` files the address only when there is one
+dropoff, the list is bounded, and both street and town read. Otherwise it
+returns its reason, `dropoffs`, `list` or `address`, on the planner line as
+`unfiled`. On a planner, find_address's own answer is never taken, asked or
+not. Unprompted, it was "77 Birch Ln NW", one of two customers.
+
+**The panel worked out its own reason, and contradicted itself.** It counted
+dropoffs, which was half the scanner's rule copied. It now shows the scanner's
+reason in its own words, and test_lint holds the two lists together. The "end
+not guessed" line now goes when the button shows an end.
+
+On reload, server.js kept `holding.planner` until another planner replaced it,
+so the note came back next to a green button. `forgetPlanner` now drops it at a
+⌖ press and at a new offer on the record, the moments the panel forgets it. The
+order going already took it.
+
+**The stops took the notice's room.** They are `flex: none`. On the 3.5" hat's
+scene picture, with a dead-journal and too-bright notice:
+- the notice needs 139px; it had 121 on the glass, and 17 once four stops
+  arrived;
+- in the screen picture it went from 93 of 93 to 38.
+
+`showStops` now removes stop lines from the end while the notice is cut,
+counting them ("+ N more stops"), down to "▸ 4 stops: no room to list". That
+leaves the notice 93 of 93 in the screen picture and 95 of 139 in the scene
+picture. Nothing folds at 800x480 or 1024x600.
+
+**keepPlaces.** Planner rows hold names and doors. The scanner says `keep` on
+the line (false under "keepPlaces": false and under --no-journal), and server.js
+writes the row only when it is true. The ⌖ `mark` and `pair` rows still ignore
+the setting. That is older than this work and is named as open in README.md.
+
+The one filed dropoff reaches the maps as a mark row. The other stops have no
+offer to ride on, so they are not plotted.
+
+**Checks that could not fail:**
+- Drop and the press were checked after the one-second tick had already fixed
+  the screen. They are now read in the same turn, the press with stops on the
+  glass.
+- "Kind and time uncut" measured up to the first " · ". It now measures the time
+  itself.
+- The unprompted suppression had no check.
+- Earlier, a corpus state "6A" never reached STATES, and a CSS rule nothing
+  could reach was deleted.
+
+Checks: test_parser, corpus.test.js, parser.test.js, test_scan_pi, test_loop,
+test_server, test_journal, test_dashboard, test_layout, test_lint.
 
 ### The maps, again
 
@@ -1830,6 +2000,123 @@ corners is the condition that blanks the detector. Meanwhile `misses` returns to
 and `wander` are 0.0: the health line prints "corners held, 0px from
 calibration" for the whole shift while the crop is on a rectangle that is not
 the card. Every number downstream is then read off the wrong pixels.
+
+### The camera
+
+**The rig read once in 9.4 days, with the heartbeat beating and the panel saying
+"scanner reading". The panel now says when the camera cannot see, and it says
+only what the rig knows.** The scanner keeps one settled word for what the
+camera can see: `seeing`, `stalled` or `dark`. That word reaches the driver five
+ways:
+- on the heartbeat, as `blind`;
+- in the journal, as `camera` up rows;
+- in the verdict's place on the panel: red, a dashed border, ⚠, and never PASS;
+- as a red connection dot beside "scanner running, cannot see";
+- in doctor's "the camera can see".
+
+Once the panel has been told of a stall, the scanner goes quiet so that
+server.js's silence watchdog restarts it. It does this at most once in ten
+minutes (`STALL_AGAIN`, kept as a `.stalled` note in the handoff directory). A
+stall inside those ten minutes stays up and keeps beating the word. Each stall
+in a run is judged afresh, and only a stall ever leaves the note. Nothing is
+read off a frozen picture: a frozen card re-read on the verify beat had kept the
+watchdog from ever firing.
+
+*Stalled* means a preview frame that is byte-identical to one of the last eight
+frames. A frame with no pixel strictly between its lowest and highest value
+does not count. The watch keeps eight because the camera cycles four buffers and
+a read's extra capture never reaches it. Measured on a fake camera handing back
+its four buffers in turn, three runs each:
+- one frame kept, or four: never called stalled in 12.5 s;
+- eight kept: called stalled at 6.8-7.1 s.
+
+The premise that a working sensor never repeats a frame comes from testcards'
+noise model, not from the IMX519. So every repeat is counted, on the health line
+("N frames since start the same picture as one of the 8 before it — none, if the
+sensor model the stall watch rests on holds for this camera") and on every
+`seen` row (`repeats`). The suites' fake cameras had handed over the same bytes
+1,199 times in 1,200, so they had been modelling a stalled camera all along.
+They now flip a different half of the pixels on every capture; with only two
+patterns taken in turn, a still card was called stalled at 7.3-7.6 s.
+
+*Dark* is AutoGain's `lit` (the box's 90th percentile against LIT_ENOUGH, which
+is 20) staying false for a minute on a hand-drawn box. Its first wording,
+NOTHING IN VIEW / "put the phone in the mount", told a driver whose phone was
+lit in the mount that it was not there. Its second, TOO DARK TO SEE / "No lit
+screen the rig can see in its box", was still more than the rig knows. It is now
+**TOO DARK TO BE SURE**, with the line "The rig may miss an offer arriving in a
+box this dark — check the phone is in the mount with its screen on, and turn its
+brightness up."
+
+Measured on testcards' Uber card in a cabin reading 2, the motion gate's score
+for a card arriving, against the 6.0 it needs (eight noise draws per level,
+spread 0.02 at most):
+
+| mode | box reading → gate score (draws noticed) |
+|---|---|
+| dark | 13 → 5.52 (0/8) |
+| dark | 14 → 5.72 (0/8) or 6.04 (8/8), depending on the brightness behind the reading |
+| dark | 15 → 6.27 (8/8); 19 → 7.90 (8/8) |
+| light | 18 → 2.23 (0/8); 53 → 5.72 (0/8); 56 → 6.03 (8/8) |
+
+The reading cannot tell dark mode from light mode, and under LIT_ENOUGH the gain
+is held. So the most the rig can say is that it cannot be sure of seeing a card
+arrive.
+
+CAMERA STALLED said "The rig restarts it" even while it was sitting a stall out.
+Its line now reads "The rig restarts it at most once in ten minutes; if this
+stays or keeps coming back, reseat its cable."
+
+Found on the way:
+- The check "...and never as too dim" read the wire key `tooDim` off the loop's
+  arguments, where it never appears, and it started the gain at 1.5. Both had to
+  change before the check could fail.
+- A box of pure black kept the previous beat's too_dim through an early return.
+- `repeats` reached the tally but was dropped by the `seen` row.
+- doctor read a dead run's word as current after a power cut that left no stop
+  row. It now asks only while an `rpi/scan_pi.py` process is running, and with
+  nothing scanning it prints "whether the camera can see — not asked" instead of
+  a pass mark beside "the camera can see".
+- doctor's age check imported scan_pi inside the journal's try. A failed import
+  was reported as "the journal file is whole: FAIL" and skipped "the journal can
+  be written". The camera check now has a try of its own.
+- The per-stall reset and the rule that only a stall leaves the note had no
+  checks; removing either now fails a named check.
+- test_loop's runs shared /dev/shm. A stuck read made to leave the note wrote
+  /dev/shm/uberscan-stalled while still passing all four of its checks. Every
+  run now gets a handoff directory of its own.
+
+72 mutations across the three rounds (31 + 31 + 10), each caught by name.
+
+Merged onto the parser, panel, planner and snaps work, the word met two other
+lines of the panel. The line under the verdict had become `noVerdictSaid` (The
+panel, below), and under the word it stays empty. The reading it would be said
+of is the one before the word, or one off a frozen picture, and "box may cut it
+off" would send the driver to ▣ Set box over a camera that cannot see. With the
+guard taken out, "...with no line claiming there is no offer, or a box cutting
+the pay off, on a screen it cannot see" fails at all three panels, reading
+"pay, no time — box may cut it off". The Trip Planner's stops are drawn in the
+same between-offers branch the word takes, so the two share the card, and the
+stops fold for the word's line as for any notice. At 800x480 and 1024x600 the
+line stays whole beside all four stops. On the 3.5" hat's screen picture the
+stops go down to their one counting line and the line keeps 93 of 93px. With
+the fold switched off, the hat's line kept 47 of 93px in the screen picture
+and 26 in the scene one, and "...and its line shows all it says, or the stops
+are down to the one line that counts them" failed by name.
+
+Open:
+- No frame off the real IMX519 has been measured, so the stall premise rests on
+  the `repeats` count from real shifts.
+- A lit dark-mode screen reading 15-19, and some reading 14, is called TOO DARK
+  TO BE SURE, although the gate would notice a card on it. The line says "may",
+  and the word clears at the first read.
+- Dark cannot see an empty mount in daylight, and sees nothing at all on a rig
+  run with a fixed `--gain`.
+- The cv2 `--display` panel and the voice do not say the camera's word.
+- On the 3.5" hat's scene picture the line is cut with no stops under it at
+  all. It has 130px; the dark line needs 139 and the stalled one 162. The check
+  written for the merge found this; the stops did not cause it. The line was
+  measured whole in the phone layout only.
 
 ### The clock
 
@@ -2654,6 +2941,136 @@ every journal reader passes over. On the NucBox the camera and the reader are
 recorded together as not applying. Still open: the 3s answer window against
 the 4s wait is measured only on the development box (3.0ms median, 5.1ms
 worst), and the answer time on the Pi needs measuring.
+
+**The panel said "no offer on screen" over a card whose pay the box had cut
+off.** At 15:45 on 8 Oct the top edge of the card box ran through the middle of
+an Uber Est. delivery card's $14.48. The reader got the tip line, the deadline,
+8.6 mi and both addresses; the reading went out with no verdict, and the line
+under the verdict said "scanner running, no offer on screen", a claim about the
+phone the page has no way to know. `noVerdictSaid` now says what the reading
+got, in words and no figures: "pay at the box edge — not trusted" when the
+reader dropped the read for a payout flush against the box's top edge, "pay, no
+time — box may cut it off" for a payout with no verdict, "no pay read — box may
+cut it off" for a time, deadline, distance or place with no payout, and the old
+sentence only for a reading that got nothing.
+
+*The one card the rig KNOWS the box cut was the one the first version still
+called "no offer".* `money_is_clipped` answers a payout flush against the box's
+top edge with `parse('')`, and emit() sent that as an empty reading with nothing
+saying why, while the scanner's own log said "the payout sat against the top
+edge of the crop" — the tight box of `rpi/README.md` lost the payout that way on
+13 of 42 cards. The 8 Oct card missed that path only because its cut digits read
+as "gg Pit.". emit() now sends `clipped` and the loop passes it
+(`rpi/test_scan_pi.py` 3 checks, `rpi/test_loop.py` 2 through `main()`, three
+mutations).
+
+*Not "a card is in view", which is the obvious sentence and false the other
+way.* Of the corpus's 19 texts that read no payout, 18 read something and 12 of
+those are not cards: the zone prompt (5) and Uber's map screen (7), every one of
+which reads as 39 minutes and 1.0 mi. The map is the navigation screen a whole
+delivery sits under, so "no pay read — box may cut it off" will be up for long
+stretches of every delivery; it claims no card and its hedge is what keeps it
+true there (a fixture off that corpus text holds it). On the real week's 5,491
+stored frames — offer frames, which the navigation screens are not — the no-pay
+line would have shown over the zone prompt and nothing else, 19 frames on five
+prompts.
+
+*Each sentence is no wider than the one it replaced, because `trackNote`
+appends to this line.* The first wordings fitted alone and wrapped beside " ·
+tracking 30px" at 800x480 and on the 3.5" hat, lifting the verdict label 12px
+and 5px where the old sentence with the same note (226 of 228px on the hat) had
+stayed on one line; the suite had measured `track: None` only. Shipped: 143.8,
+144.7 and 150.7px against the old 157.7 at 10px, 230.0, 231.5 and 241.0 against
+252.3 at 16px. `rpi/test_layout.py` measures every sentence alone and beside both
+notes against the old line with the same note, on three panels in both pictures;
+a "page still fits" check that could not fail (#app clips) was deleted, and
+"every letter on the glass" is the one that sees a line run off. 46 checks in
+`rpi/test_dashboard.py` hold what it says, off the rig's own 8 Oct reading
+verbatim and one fixture per field the line is said off, each fixture held to
+the fields emit() writes. Mutations: one per field, the clipped branch, the old
+sentence, a figure on the line, "card in view", a line that needs a place, the
+flag left off the wire or the call, and five wordings or wraps for the layout
+(the lane's own first sentences among them) — each killed by name.
+
+**The offer count lagged a saved card by up to three minutes, and the comment
+beside the mark said marking was the only thing that changes it.** At 15:05 on 8
+Oct the rig's own panel read "✓ 0 · 0 offers" under a card whose row had landed
+27.6s earlier (offerAgeMs 27566). The page now asks five seconds after the
+scanner's `{offer: …}` line (`emit_offer`, sent once the row is appended and the
+file closed), once however many lines arrive in those five seconds (2.8 rows an
+offer on the replayed week, up to ten for one card). A mark inside the window
+answers the pending ask, and a hidden tab is left owing and asks on its first
+visible tick. Replayed one line a card against the week's landing times: 1,099
+asks rather than 1,166, at most nine in any minute — a floor, since a card's
+later rows send lines the export has no times for; counted over the 3,265 rows
+of the replay that measured `WEEK_BYTES`, each frame a read time after the last,
+1,416 asks rather than 3,265, at most ten in a minute. *That is outside the
+"every few minutes" budget of `/api/journal/newest`, on purpose and on
+measurement:* only the first read of the journal pays the whole parse (44-59ms
+on one week, 161-198ms on four); after an append readJournal reads only the new
+bytes and /api/today measured 2.9-3.1ms median, 6.4ms worst on one week,
+4.2-4.5ms and 9.9ms on four. The timer's comment and the README had justified
+three minutes by the full parse as if every ask paid it, beside a second,
+smaller cost for the same request; both now give the one. Twelve checks on the
+page's own clock (Playwright `page.clock`), five mutations, each killed by name.
+
+**A harmless library warning was the scanner's error.** The 8 Oct 15:45 snap has
+`running: true` beside an `error` of leptonica's "Error in boxClipToRectangle:
+box outside rectangle …". server.js stored every stderr chunk as `error`, and the
+panel prints `error` as the reason a scanner is not running. `stderr` is now its
+own field on /api/status, cleared when the next process starts. `error` is set
+only by could-not-start, no-pipes, the watchdog, and the 'close' handler, which
+writes "exited (<code|signal>)" plus the stderr printed with nothing on stdout
+after it: a traceback, not a warning the loop read on past (a warning within
+four seconds of a death that printed nothing is the one case it cannot
+separate). *The obvious fix, promoting the stderr tail at exit, still hangs the
+stale warning on the crash*: mutation S2, read back as "exited (3): Error in
+boxClipToRectangle: …". Eight checks in `rpi/test_server.py` on one stand-in run
+four times under the real server; five mutations, each killed by name.
+
+**A snap was six files, so a series of four was twenty-four, all named alike in a
+Downloads folder.** The driver shares snaps with their assistant and means to
+take a series per offer: waiting, the card, after the accept, the Trip Planner.
+`snaps.html` now saves a snap as one `.html` (⤓ one file). It can also save a
+snap with every newer one (⤓ with the N newer, the series it starts) or the
+ticked ones (⤓ N chosen), as one file, oldest first. This is `GET
+/api/snaps/bundle?snap=…`, built when asked and never stored. Pictures are data:
+URIs, byte for byte. Each record is escaped text in a <pre>, and again byte for
+byte behind a download link. The file has no script and no address outside it:
+opened off the disk at 390x844 with the network off, it asks for nothing and
+draws all three pictures. Each snap can carry a note of up to 80 characters,
+typed on snaps.html so 📷 stays one click. It is kept in snap.json through a
+temporary and a rename, and shown on the list and in the file. SNAPS_KEEP went
+from 40 to 100: the rig's three real snaps are 276kB, 323kB and 246kB, so a
+hundred is about 28MB. Measured over loopback on the development box: one snap
+is 377,751 bytes in 8ms, six are 2.3MB in 25ms, and a hundred are 38MB in 375ms.
+Over ten of those hundreds, /api/status answered within 24ms at worst, the same
+as before the fix. The traps:
+- A <script type="application/json"> block ends at the first `</script`, which
+  tesseract's text can hold, so records travel as data: URIs.
+- <pre> drops a leading newline.
+- `<!--` in a record would swallow the rest of the file.
+- Leaving out a name the rig did not have would hand over three snaps as the
+  four chosen, so the whole request is refused.
+- The stream ignored res.write's "full", so a slow phone had the series read
+  into the Pi's memory behind the first snap. It now waits for drain.
+- An 80-character note with no space pushed snaps.html and the bundle sideways
+  on all six panels.
+
+The lane's verifier found two more, each one question answered in two places:
+- A snap still being taken was refused a note but bundled anyway. A screenshot
+  half written (90,088 of 180,177 bytes) went out as "the rig's screen", under
+  "no snap.json in this folder". stillKeeping() is now asked by pruning, the
+  list, the note and the bundle; the bundle refuses with 409 and the list says
+  "still being kept".
+- A snap.json that is a link was refused by the note but read by the list and
+  the bundle, which carried a file from outside snaps/ into a download.
+  snapRecord now asks snapFiles, so all three say the folder has none.
+
+The verifier also found three false comments and a check that crashed its suite
+instead of failing by name; all are fixed. Forty-five mutations across server.js
+and snaps.html, each caught by name. Still open: the build times are from the
+development box, and the Pi's need measuring.
 
 ### The offers page
 
