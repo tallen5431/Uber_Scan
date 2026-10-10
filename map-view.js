@@ -106,11 +106,108 @@
    *
    * `isFinite` and not merely `typeof`, because a row whose lat came back as
    * NaN would otherwise be counted as a fix and then poison every median it
-   * lands in — one NaN in a sort is enough to make the middle meaningless. */
+   * lands in — one NaN in a sort is enough to make the middle meaningless.
+   *
+   * And only a fix the gate passed. Whether a position is good enough to show
+   * or compare is asked ONCE, by rpi/gps.py's usable(), and its answer is on
+   * the row as `gpsOk` — a mode-3 fix gpsd itself put at 129 m and a clear
+   * sky's were otherwise the same two numbers here. Read, never worked out
+   * again in this file: a second copy of the rule in JavaScript would be a
+   * second answer the first time either moved. A row with no answer at all —
+   * written before the gate existed, or by anything but the rig — is not a
+   * position either; nobody judged it. Every box, accusation, trail dot and
+   * the panel's detour anchor asks this function, so all of them refuse
+   * together. fixRefused says which rows that was, so it is never silent. */
   function fixOf(o) {
-    return (o && typeof o.lat === 'number' && typeof o.lon === 'number'
-            && isFinite(o.lat) && isFinite(o.lon)) ? { lat: o.lat, lon: o.lon }
-                                                   : null;
+    return (o && o.gpsOk === true && typeof o.lat === 'number'
+            && typeof o.lon === 'number' && isFinite(o.lat) && isFinite(o.lon))
+      ? { lat: o.lat, lon: o.lon } : null;
+  }
+
+  /* Why a row that carries a coordinate is not a position, or null.
+   *
+   * The gate's own word (`gpsWhy`: unrated, nomode, rough or stale) or
+   * 'unjudged' for a coordinate nobody judged. Null for a row with no
+   * coordinate at all, which is the ordinary "did not know" and not a refusal.
+   * For the counts beside what fixOf lets through, so a refused fix is a
+   * number on the page rather than a dot that quietly is not there. */
+  function fixRefused(o) {
+    if (!o || typeof o.lat !== 'number' || typeof o.lon !== 'number'
+        || !isFinite(o.lat) || !isFinite(o.lon) || o.gpsOk === true) return null;
+    return o.gpsWhy || 'unjudged';
+  }
+
+  /* --- you are here --------------------------------------------------------
+   *
+   * The heartbeat's newest fix, drawn as a dot with a circle the size of its
+   * own error, on both maps. What this decides and the pages only draw: one
+   * rule for the dot, the circle, the label and the refusal, rather than two
+   * pages each with their own idea of when a dot is too old.
+   *
+   * `fix` is the beat's `gps.fix` — the journal's own fields (lat, lon,
+   * gpsAge, gpsErr, gpsMode, gpsOk, gpsWhy) and `freshFor`, the seconds
+   * rpi/gps.py said this fix had left inside its staleness rule when the beat
+   * was sent. `sinceMs` is how long ago, on the page's own clock, the beat
+   * carrying it arrived.
+   *
+   * Three answers:
+   *   null                     no fix: nothing drawn, nothing said. A rig run
+   *                            without --gps is the driver's choice, and the
+   *                            connection row already says a GPS that stopped.
+   *   { line }                 the gate refused it for its QUALITY: nothing
+   *                            drawn, and the reason said — a dot that quietly
+   *                            is not there reads as a car that is nowhere.
+   *   { lat, lon, err, grey,   a dot, grey once it is older than the rule: the
+   *     label }                gate said `stale`, or the beat stopped coming
+   *                            and the time since it outran `freshFor`. Grey
+   *                            rather than gone, because "where the car WAS"
+   *                            is still worth seeing beside the words saying
+   *                            how long ago that was.
+   *
+   * The age in the label is the fix's age when the beat left plus the time
+   * since it arrived — two durations, never two machines' clocks subtracted —
+   * so a beat that stopped coming does not leave "2 s old" on the glass. */
+  /* One line for each word rpi/gps.py's usable() refuses with except
+     `stale`, which is a grey dot rather than none. Short, because they sit in
+     the map's corner on a 228px column on the 3.5" hat; rpi/test_layout.py
+     measures every one there, and rpi/test_lint.py holds this table to the
+     gate's own words. */
+  var GPS_REFUSED = {
+    unrated: 'GPS gives no accuracy here',
+    nomode: 'GPS reports no 2D/3D fix',
+    rough: 'GPS too rough here'
+  };
+
+  function spellSeconds(s) {
+    if (s < 60) return Math.round(s) + ' s';
+    if (s < 3600) return Math.floor(s / 60) + ' min';
+    return Math.floor(s / 3600) + ' h';
+  }
+
+  function hereDot(fix, sinceMs) {
+    if (!fix || typeof fix.lat !== 'number' || typeof fix.lon !== 'number'
+        || !isFinite(fix.lat) || !isFinite(fix.lon)) return null;
+    var since = Math.max(0, Number(sinceMs) || 0) / 1000;
+    if (fix.gpsOk !== true && fix.gpsWhy !== 'stale') {
+      // `stale` is the one refusal that still has a position worth drawing:
+      // usable() judges quality before age, so a stale fix was a good one.
+      var why = GPS_REFUSED[fix.gpsWhy] || 'GPS fix not judged';
+      return { line: fix.gpsWhy === 'rough' && typeof fix.gpsErr === 'number'
+        ? why + ' (±' + Math.round(fix.gpsErr) + ' m)' : why };
+    }
+    // A fix the gate passed always has an error figure — usable() refuses one
+    // without — so `err` is the circle's radius and the label's figure.
+    var err = fix.gpsErr;
+    var age = typeof fix.gpsAge === 'number' ? fix.gpsAge + since : null;
+    // No `freshFor` is no time left: a fix that does not say how long it stays
+    // inside the rule is grey from the moment it lands, never bright by default.
+    var fresh = typeof fix.freshFor === 'number' ? fix.freshFor : 0;
+    return {
+      lat: fix.lat, lon: fix.lon, err: err,
+      grey: fix.gpsOk !== true || since > fresh,
+      label: '±' + Math.round(err) + ' m · '
+        + (age === null ? 'age unknown' : spellSeconds(age) + ' old')
+    };
   }
 
   /* --- where the car was, which is the whole of the improvement ------------
@@ -1193,7 +1290,9 @@
   }
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
-           detour: detour, fixOf: fixOf, anchorFor: anchorFor, boxAround: boxAround,
+           detour: detour, fixOf: fixOf, fixRefused: fixRefused,
+           hereDot: hereDot, GPS_REFUSED: GPS_REFUSED,
+           anchorFor: anchorFor, boxAround: boxAround,
            localityOf: localityOf, townOf: townOf, townFor: townFor,
     townEndFor: townEndFor,
            straysAmong: straysAmong, farFrom: farFrom, placesIn: placesIn, jobsIn: jobsIn,

@@ -501,9 +501,9 @@ CAPTION_LINES = [
      WIDEST_PLACE + ' is 3619 mi away — almost certainly a misread name, '
      'so no distance',
      WIDEST_PLACE + ' is 3619 mi away — almost certainly a misread name'),
-    ('no position at all',
-     'no position on the recent offers, so there is nothing to measure this '
-     'pickup against'),
+    ('no usable position',
+     'no usable GPS fix on the recent offers, so there is nothing to measure '
+     'this pickup against'),
     ('the held job has no address',
      'the order in your car has no address on record — ⌖ Dropoff reads it '
      'off your phone'),
@@ -750,6 +750,45 @@ if shutil.which('node') is None:
 
 NODE_PATHS = [p for p in (os.environ.get('NODE_PATH'),
                           '/opt/node22/lib/node_modules') if p]
+
+# --- the "you are here" label --------------------------------------------------
+#
+# Every form the label in the map's corner can take, made by the page's own
+# MV.hereDot rather than copied here: one line for each word rpi/gps.py's gate
+# can refuse with (read out of usable() itself, so a fifth word is a fifth
+# line), the line for a fix nobody judged, and the dot's label at its widest —
+# an error figure of two digits, and an age in minutes, in hours, or unknown.
+# The refusal is measured at a four-digit error, which no working receiver
+# reports and a lost one can.
+_gps_src = open(os.path.join(ROOT, 'rpi', 'gps.py'), encoding='utf-8').read()
+_usable = _gps_src[_gps_src.index('\ndef usable('):]
+_usable = _usable[:_usable.index('\ndef ', 1)]
+GATE_WORDS = re.findall(r"return False, '([a-z]+)'", _usable)
+ok_('rpi/gps.py\'s gate refuses with words this file can measure (%r)' % GATE_WORDS,
+    len(GATE_WORDS) >= 3 and 'stale' in GATE_WORDS)
+_here_js = '''
+var MV = require(process.argv[1]), words = JSON.parse(process.argv[2]), out = [];
+var AT = { lat: 33.9526, lon: -84.5499 };
+function at(o) { return Object.assign({}, AT, o); }
+words.forEach(function (w) {
+  if (w === 'stale') return;        // stale is a grey dot, measured as a label
+  out.push(['refused: ' + w,
+            (MV.hereDot(at({ gpsErr: 9999, gpsOk: false, gpsWhy: w }), 0) || {}).line]);
+});
+out.push(['refused: unjudged', (MV.hereDot(at({ gpsOk: false }), 0) || {}).line]);
+out.push(['label, minutes', (MV.hereDot(at({ gpsAge: 3599, gpsErr: 49.9,
+          gpsOk: true, freshFor: 0 }), 0) || {}).label]);
+out.push(['label, hours', (MV.hereDot(at({ gpsAge: 86399, gpsErr: 49.9,
+          gpsOk: true, freshFor: 0 }), 0) || {}).label]);
+out.push(['label, age unknown', (MV.hereDot(at({ gpsAge: null, gpsErr: 49.9,
+          gpsOk: true, freshFor: 0 }), 0) || {}).label]);
+console.log(JSON.stringify(out));
+'''
+HERE_LINES = json.loads(subprocess.run(
+    ['node', '-e', _here_js, os.path.join(ROOT, 'map-view.js'), json.dumps(GATE_WORDS)],
+    capture_output=True, text=True, timeout=60).stdout or '[]')
+eq('every "you are here" form is a sentence the page can say',
+   [name for name, text in HERE_LINES if not text], [])
 env_probe = dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS))
 if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
@@ -759,7 +798,9 @@ DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
        snapPanelsJson, noVerdictJson, noVerdictPanelsJson, plannerJson,
-       plannerPanelsJson] = process.argv.slice(2);
+       plannerPanelsJson, hereJson] = process.argv.slice(2);
+// The "you are here" label's forms, made by MV.hereDot; see HERE_LINES.
+const HERE_LINES = JSON.parse(hereJson);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
 // The Trip Planner's stops and where they are measured; see PLANNER_STOPS.
 const PLANNER = JSON.parse(plannerJson);
@@ -1057,6 +1098,48 @@ const SNAP_MEASURE = (fixture) => {
           };
         });
       }
+      // map.html's "you are here" label, by the page's own rule, in the map's
+      // own box. Leaflet comes from a CDN this harness cannot reach, and the
+      // page's offline path writes its notice over the map's box and takes the
+      // label with it — so the label is put back, as the page's markup has
+      // it, to be measured where it would sit.
+      if (name === 'map.html') {
+        out[panel[0] + ' map here'] = await page.evaluate((lines) => {
+          const box = document.getElementById('map');
+          let note = document.getElementById('hereNote');
+          if (!note) {
+            note = document.createElement('div');
+            note.id = 'hereNote';
+            box.appendChild(note);
+          }
+          const map = box.getBoundingClientRect();
+          const out = {};
+          for (const pair of lines) {
+            note.hidden = false;
+            note.textContent = pair[1];
+            const r = note.getBoundingClientRect();
+            const tops = {};
+            const n = note.firstChild;
+            if (n) {
+              const rg = document.createRange();
+              for (let i = 0; i < n.length; i++) {
+                rg.setStart(n, i);
+                rg.setEnd(n, i + 1);
+                const c = rg.getBoundingClientRect();
+                if (c.width || c.height) tops[Math.round(c.top)] = 1;
+              }
+            }
+            out[pair[0]] = {
+              across: r.left >= map.left + 44 && r.right <= map.right + 0.5,
+              inside: r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
+              rows: Object.keys(tops).length,
+              spills: note.scrollWidth > note.clientWidth + 1,
+              mapH: Math.round(map.height) };
+          }
+          note.hidden = true;
+          return out;
+        }, HERE_LINES);
+      }
       // The thing this panel is mostly used for: reading the phone through it
       // and working it with a bluetooth mouse. That view is only worth having
       // if the picture is bigger than the scene view it replaced, which is a
@@ -1310,6 +1393,42 @@ const SNAP_MEASURE = (fixture) => {
         // sentences fit TODAY; this proves the page is the thing holding them,
         // so a stylesheet edit that drops the rule fails here rather than
         // waiting for a sentence long enough to notice.
+        // ...and the "you are here" label in the map's corner, in every form
+        // it can take: inside the map, clear of Leaflet's zoom buttons (10px
+        // in, 30px wide, a 2px border: 44px), in no more than two rows, and
+        // nothing spilling out of its own box.
+        shown.here = await page.evaluate((lines) => {
+          const note = document.getElementById('hereNote');
+          const map = document.getElementById('liveMap').getBoundingClientRect();
+          const out = {};
+          for (const pair of lines) {
+            note.hidden = false;
+            note.textContent = pair[1];
+            const r = note.getBoundingClientRect();
+            const tops = {};
+            const n = note.firstChild;
+            if (n) {
+              const rg = document.createRange();
+              for (let i = 0; i < n.length; i++) {
+                rg.setStart(n, i);
+                rg.setEnd(n, i + 1);
+                const c = rg.getBoundingClientRect();
+                if (c.width || c.height) tops[Math.round(c.top)] = 1;
+              }
+            }
+            out[pair[0]] = {
+              inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
+                && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
+              clearOfZoom: r.left >= map.left + 44,
+              rows: Object.keys(tops).length,
+              spills: note.scrollWidth > note.clientWidth + 1
+                || note.scrollHeight > note.clientHeight + 1,
+              w: Math.round(r.width), mapW: Math.round(map.width) };
+          }
+          note.hidden = true;
+          note.textContent = '';
+          return out;
+        }, HERE_LINES);
         shown.captionStyle = await page.evaluate(() => {
           const cs = getComputedStyle(document.getElementById('viewNote'));
           return { overflow: cs.overflow,
@@ -2055,7 +2174,7 @@ try:
          json.dumps({'stops': PLANNER_STOPS, 'unfiled': PLANNER_UNFILED,
                      'notes': PLANNER_NOTES, 'notice': PLANNER_NOTICE,
                      'blind': PLANNER_BLIND}),
-         json.dumps(PLANNER_PANELS)],
+         json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -2624,6 +2743,25 @@ try:
                     ok_('...and %r is readable as far as its last hedge at %s '
                         '(%r)' % (name, panel, shots[name]['visible'][-28:]),
                         shots[name]['visible'].startswith(keep))
+                # --- the "you are here" label ---------------------------
+                #
+                # Over the map's top-right corner, so it costs the caption
+                # none of its rows and the map none of its floor. What has to
+                # hold is that every form of it is on the map, clear of the
+                # zoom buttons, whole, and short enough to read at a glance.
+                here = phone.get('here') or {}
+                eq('every "you are here" form was measured at %s' % panel,
+                   sorted(name for name, _t in HERE_LINES if name not in here), [])
+                for name, _t in HERE_LINES:
+                    m = here.get(name) or {}
+                    ok_('the "you are here" %r sits inside the map at %s (%r)'
+                        % (name, panel, m), m.get('inside'))
+                    ok_('...clear of the zoom buttons at %s' % panel,
+                        m.get('clearOfZoom'))
+                    ok_('...in two rows at most, nothing spilling, at %s (%r)'
+                        % (panel, (m.get('rows'), m.get('spills'))),
+                        (m.get('rows') or 9) <= 2 and not m.get('spills'))
+
                 # ...and the way out. A cycle that cannot be completed is worse
                 # than a toggle: the driver pressed once for a look and cannot
                 # get the picture back.
@@ -2670,6 +2808,27 @@ try:
                 ok_('map.html at %s gives the map itself a usable share of the '
                     'glass (%.0f%%, %.0fpx)' % (panel, share * 100, r['subject']),
                     share >= 0.25)
+
+            # ...and its "you are here" label, every form of it, across the
+            # map clear of the zoom buttons and whole on every panel. Inside
+            # the map top to bottom only where the page gives the map room:
+            # on the 3.5" hat this page scrolls and leaves the map about forty
+            # pixels (see may_scroll above), and a two-row label cannot be
+            # inside a forty-pixel map whatever it says.
+            if name == 'map.html':
+                mh = got.get('%s map here' % panel) or {}
+                eq('map.html\'s "you are here" label was measured in every form '
+                   'at %s' % panel,
+                   sorted(k for k, _t in HERE_LINES if k not in mh), [])
+                for k, _t in HERE_LINES:
+                    m = mh.get(k) or {}
+                    ok_('map.html\'s "you are here" %r lies across the map, clear '
+                        'of the zoom buttons, at %s (%r)' % (k, panel, m),
+                        m.get('across') and not m.get('spills'))
+                    if h >= 400:
+                        ok_('...inside it top to bottom, in two rows at most, at '
+                            '%s (%r)' % (panel, (m.get('rows'), m.get('mapH'))),
+                            m.get('inside') and (m.get('rows') or 9) <= 2)
 
             # A line of prose has a width past which it stops being readable.
             # Widening the across-the-screen breakpoint to all of landscape put

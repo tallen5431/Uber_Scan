@@ -845,6 +845,27 @@ for _table in ('BLIND_LABEL', 'BLIND_NOTE'):
        sorted(_blind_words - _named), [])
     eq('...and none it cannot: %s' % _table, sorted(_named - _blind_words), [])
 
+# --- every word the GPS gate refuses with is a line the maps can say --------
+#
+# rpi/gps.py's usable() is the one gate, and it answers with a word. The maps
+# turn each word but `stale` (a grey dot, not a missing one) into the line in
+# their corner, out of map-view.js's GPS_REFUSED. A word the gate learns and
+# the table does not reads "GPS fix not judged", which is false of a fix that
+# was judged. Read out of usable() itself, so a fifth word is asked for.
+_gps_lint = open(os.path.join(ROOT, 'rpi/gps.py'), encoding='utf-8').read()
+_usable_body = _gps_lint[_gps_lint.index('\ndef usable('):]
+_usable_body = _usable_body[:_usable_body.index('\ndef ', 1)]
+_gate_words = set(re.findall(r"return False, '([a-z]+)'", _usable_body))
+ok_('gps.usable() refuses with words (%r)' % sorted(_gate_words),
+    'stale' in _gate_words and len(_gate_words) >= 3)
+_mv_src = open(os.path.join(ROOT, 'map-view.js'), encoding='utf-8').read()
+_mv_m = re.search(r'var GPS_REFUSED = \{(.*?)\};', _mv_src, re.S)
+_mv_named = (set(re.findall(r'(?:\A|[{,])\s*([a-z]+)\s*:', _mv_m.group(1)))
+             if _mv_m else set())
+eq("map-view.js's GPS_REFUSED has a line for every refusal but stale",
+   sorted(_gate_words - {'stale'} - _mv_named), [])
+eq('...and none for a word the gate cannot give', sorted(_mv_named - _gate_words), [])
+
 # --- a request the scan loop takes sits under its own comment --------------
 #
 # The loop takes four requests from the screens one after another, each under

@@ -60,16 +60,73 @@ eq('one value four states away does not move it',
    MV.median([33.9, 34.0, 34.1, 41.8]), 34.05);
 
 /* ---- reading a position off a row --------------------------------------- */
-eq('a row with both numbers carries a fix',
-   JSON.stringify(MV.fixOf({ lat: 33.9, lon: -84.5 })),
+eq('a row with both numbers and the gate\'s yes carries a fix',
+   JSON.stringify(MV.fixOf({ lat: 33.9, lon: -84.5, gpsOk: true })),
    JSON.stringify({ lat: 33.9, lon: -84.5 }));
-eq('a row with neither does not', MV.fixOf({ pay: 12 }), null);
-eq('...nor one with only a latitude', MV.fixOf({ lat: 33.9 }), null);
+eq('a row with neither does not', MV.fixOf({ pay: 12, gpsOk: true }), null);
+eq('...nor one with only a latitude', MV.fixOf({ lat: 33.9, gpsOk: true }), null);
 // NaN is the one that matters. `typeof NaN === 'number'`, so a check that only
 // asked the type would let it through — and one NaN in a sort makes every
 // median it lands in meaningless, which is every box and the shift's centre.
-eq('a NaN is not a position', MV.fixOf({ lat: 33.9, lon: NaN }), null);
-eq('...and neither is an infinity', MV.fixOf({ lat: Infinity, lon: -84.5 }), null);
+eq('a NaN is not a position', MV.fixOf({ lat: 33.9, lon: NaN, gpsOk: true }), null);
+eq('...and neither is an infinity',
+   MV.fixOf({ lat: Infinity, lon: -84.5, gpsOk: true }), null);
+// The gate is rpi/gps.py's usable(), and its answer is on the row. Read here,
+// never worked out again: a mode-3 fix gpsd itself put at 129 m is the same
+// two numbers as a clear sky's, and only `gpsOk` tells them apart.
+eq('a fix the GPS gate refused is no position here',
+   MV.fixOf({ lat: 33.9526, lon: -84.5499, gpsErr: 129.2, gpsMode: 3,
+              gpsOk: false, gpsWhy: 'rough' }), null);
+eq('...nor one nobody judged — a row from before the gate, or not from the rig',
+   MV.fixOf({ lat: 33.9526, lon: -84.5499 }), null);
+eq('...and the refusal says which, so a count can say it',
+   MV.fixRefused({ lat: 33.9526, lon: -84.5499, gpsOk: false, gpsWhy: 'rough' }),
+   'rough');
+eq('...or that nobody judged it',
+   MV.fixRefused({ lat: 33.9526, lon: -84.5499 }), 'unjudged');
+eq('a usable fix is not a refusal',
+   MV.fixRefused({ lat: 33.9526, lon: -84.5499, gpsOk: true }), null);
+eq('...and a row with no coordinate is not one either: it did not know',
+   MV.fixRefused({ pay: 12 }), null);
+
+/* ---- you are here --------------------------------------------------------
+ *
+ * The beat's newest fix, as both maps draw it. Marietta Square, a public
+ * place; 27.8 m is the owner's receiver indoors, 129.2 m a four-satellite fix
+ * real gpsd made mode 3. `freshFor` is how long gps.py said the fix stayed
+ * inside its staleness rule when the beat left. */
+var BEAT = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
+             gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 };
+var dot = MV.hereDot(BEAT, 1400);
+eq('a usable fix is a dot where it is', dot && dot.lat, 33.9526);
+eq('...with a circle the size of its own error', dot && dot.err, 27.8);
+eq('...and a label giving the error and the age', dot && dot.label, '±28 m · 2 s old');
+eq('...not greyed while fresh', dot && dot.grey, false);
+var silent = MV.hereDot(BEAT, 25000);
+// The beat stopped coming. The fix is still where the car WAS, but "2 s old"
+// would be a claim about now, so the age keeps counting and the dot goes grey.
+eq('a dot whose beat stopped coming greys once its time is up',
+   silent && silent.grey, true);
+eq('...and its age keeps counting, not frozen at the beat', silent && silent.label,
+   '±28 m · 26 s old');
+var stale = MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 45.0, gpsErr: 12.0,
+                         gpsMode: 3, gpsOk: false, gpsWhy: 'stale', freshFor: 0 }, 500);
+eq('a fix the gate called stale is drawn grey, where it was',
+   stale && [stale.lat, stale.grey, stale.label].join('|'), '33.9526|true|±12 m · 46 s old');
+var rough = MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 0.5, gpsErr: 129.2,
+                         gpsMode: 3, gpsOk: false, gpsWhy: 'rough' }, 0);
+eq('a rough fix is not drawn, and says why with the figure',
+   rough && [rough.lat, rough.line].join('|'), '|GPS too rough here (±129 m)');
+eq('a fix with no error figure says so rather than vanishing',
+   (MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsOk: false, gpsWhy: 'unrated' }, 0)
+    || {}).line, MV.GPS_REFUSED.unrated);
+eq('no fix at all is nothing drawn and nothing said', MV.hereDot(null, 0), null);
+eq('...and a beat that says no fix is the same', MV.hereDot({ lat: null }, 0), null);
+eq('a fix with no time left on it is grey from the start',
+   (MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 0.5, gpsErr: 12, gpsMode: 3,
+                 gpsOk: true }, 10) || {}).grey, true);
+eq('minutes past the first sixty seconds',
+   (MV.hereDot(BEAT, 185000) || {}).label, '±28 m · 3 min old');
 
 /* ---- straight-line miles ------------------------------------------------ */
 // A degree of latitude is about 69 miles, everywhere.
@@ -179,8 +236,11 @@ ok_('a box near the pole stays a box', isFinite(polar[0]) && polar[2] - polar[0]
 
 /* ---- which place gets searched near where the car actually was ----------- */
 var ROWS = [
-  { pickup: 'Chipotle', dropoff: 'Duval Ct', lat: 33.90, lon: -84.50 },
-  { pickup: 'Chipotle', dropoff: 'Manchester Ln', lat: 33.92, lon: -84.52 },
+  { pickup: 'Chipotle', dropoff: 'Duval Ct', lat: 33.90, lon: -84.50, gpsOk: true },
+  { pickup: 'Chipotle', dropoff: 'Manchester Ln', lat: 33.92, lon: -84.52, gpsOk: true },
+  // A fix rpi/gps.py's gate refused, far off: it must not pull the anchor.
+  { pickup: 'Chipotle', dropoff: 'Kestrel Ct', lat: 34.80, lon: -85.40, gpsOk: false,
+    gpsWhy: 'rough' },
   // The same shop, from a row that never knew where it was — every row the rig
   // wrote before it had a GPS, and every row whose fix had gone stale.
   { pickup: 'Chipotle', dropoff: 'Hereford Ct' },
@@ -918,9 +978,9 @@ function gaps(sent) {
    * the wrong trade. */
   var OFFERS = [
     { pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 12,
-      lat: 33.90, lon: -84.50 },
+      lat: 33.90, lon: -84.50, gpsOk: true },
     { pickup: 'Chipotle', dropoff: 'Far Away Rd', miles: 12,
-      lat: 33.92, lon: -84.52 }
+      lat: 33.92, lon: -84.52, gpsOk: true }
   ];
   // "Far Away Rd" is answered only when asked without a box, which is exactly
   // the shape of a genuinely distant dropoff.

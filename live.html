@@ -626,6 +626,21 @@
   /* Drawn for a driver, not for a desk: the popups on this panel are read at
      arm's length and dismissed with a bluetooth mouse. */
   #liveMap .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
+  /* The "you are here" label, in the map's top-right corner: Leaflet's zoom
+     buttons hold the top-left and its attribution the bottom-right. Above
+     Leaflet's own panes (its controls sit at 800 and 1000), clear of the zoom
+     buttons by the max-width, and allowed to wrap rather than ellipsise,
+     because what an ellipsis would eat is the error figure or the age. Grey
+     with the dot when the fix is older than gps.py's staleness rule.
+     rpi/test_layout.py holds it inside the map at 800x480, 1024x600 and
+     480x320. */
+  #hereNote { position: absolute; top: 8px; right: 8px; z-index: 1001;
+              max-width: calc(100% - 64px); box-sizing: border-box;
+              padding: 2px 8px; border-radius: 10px; font-size: 13px;
+              line-height: 1.35; color: var(--text);
+              background: rgba(11, 13, 16, .85); pointer-events: none; }
+  #hereNote.grey { color: var(--muted); }
+  #hereNote[hidden] { display: none; }
 
   /* Drawing the box to read. The scanner finds the phone by looking for it,
      which is right almost always and useless when it is not — a reflection, a
@@ -847,6 +862,12 @@
          is the press that decides it — the same gate as "Place them on a map"
          on the map page. -->
     <div id="liveMap" hidden></div>
+    <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
+         or why there is no dot: "GPS too rough here (±130 m)". Over the map's
+         corner rather than in the caption below it, which is the detour's row
+         and is clamped to what that line needs. Shown only in Map view, and
+         only with a map under it. See drawHere. -->
+    <div id="hereNote" hidden></div>
     <!-- Where the driver says the card is, when the scanner cannot find it. -->
     <div id="drawnScreen" hidden></div>
     <div id="drawn" hidden></div>
@@ -1304,6 +1325,11 @@
   // whether that was a choice or a fault. A throttling Pi reads slower and
   // said so nowhere. See healthNote() for what reaches the glass.
   var gpsNow = null;
+  // ...and when the beat that carried it arrived, on THIS page's clock. The
+  // beat's `gps.fix` is the newest position with gps.py's judgement on it;
+  // the "you are here" dot ages it from here, so a beat that stops coming
+  // does not leave "2 s old" on the glass. See MV.hereDot.
+  var gpsAt = 0;
   var cpuNow = null;
   var throttledNow = null;
 
@@ -3141,7 +3167,10 @@
       // over a SCANNER PROBLEM if the restart fails, until a beat cleared it.
       if (msg.phase) blind = null;
       // ...and the GPS and the Pi, which only ever ride the beat.
-      if (msg.gps !== undefined) gpsNow = msg.gps || null;
+      if (msg.gps !== undefined) {
+        gpsNow = msg.gps || null;
+        gpsAt = Date.now();
+      }
       if (msg.cpuC !== undefined) cpuNow = typeof msg.cpuC === 'number' ? msg.cpuC : null;
       if (msg.throttled !== undefined) throttledNow = msg.throttled || null;
       // A new offer on the record. `tookState` resets with it — the mark
@@ -3326,6 +3355,9 @@
        * A no-op unless the places actually changed, so a card re-read forty
        * times over is one drawing and no new lookups. */
       if (viewMode === 'map') showMap();
+      // ...and the dot, which moves with every beat while the pins do not. It
+      // moves on the map and the map does not move with it: see drawHere.
+      if (msg.gps !== undefined) drawHere();
       render();
       showConnection();
     };
@@ -3732,10 +3764,14 @@
       // `gone` hands the whole panel to the verdict, which is right when there
       // is no picture and wrong when the pane has a map in it.
       viewWrap.classList.remove('gone');
+      // A fresh Map view frames where the dot is NOW, once. See hereAnchor.
+      hereAnchor = null;
+      hereWanted = true;
       showMap();
     } else if (!viewWrap.classList.contains('gone')) {
       sawAFrame();
     }
+    drawHere();
   }
 
   viewModeBtn.addEventListener('click', function () {
@@ -3822,6 +3858,68 @@
   var lastLine = '';
   var lastBounds = null;
 
+  /* YOU ARE HERE. The heartbeat's newest fix, as a dot with a circle the size
+     of the GPS's own error estimate, and the label in the map's corner. What
+     to draw is MV.hereDot's decision, shared with map.html; the gate behind it
+     is rpi/gps.py's, and nothing here asks it again.
+
+     THE MAP NEVER FOLLOWS THE DOT. Tiles come down the phone's hotspot and
+     what they cost has never been measured, so a view that panned with the
+     car would be spending an unknown amount of a 2GB month on every block
+     driven. Entering Map view fits the view to include where the dot was
+     then — `hereAnchor`, taken once — and after that the dot moves across a
+     map that stays where the driver left it. No control for it on the bar:
+     ⛶ Map is already the press that frames it. */
+  var hereLayer = null;
+  var hereAnchor = null;
+  var hereWanted = false;
+  var hereNote = document.getElementById('hereNote');
+  // What is drawn now — position, error and grey — so the once-a-second tick
+  // that ages the label does not take the dot down and put it back each time,
+  // closing its popup under the driver's pointer.
+  var hereKey = '';
+
+  /* The pins, and the dot's position when this Map view was entered, if it
+     had one: the one fit every draw of this map makes. */
+  function fitView(pins) {
+    var b = hereAnchor ? pins.concat([hereAnchor]) : pins;
+    if (b.length > 1) theMap.fitBounds(b, { padding: [34, 34] });
+    else if (b.length) theMap.setView(b[0], 13);
+  }
+
+  function drawHere() {
+    var onMap = viewMode === 'map' && !!theMap;
+    var d = onMap && MV && gpsNow ? MV.hereDot(gpsNow.fix, Date.now() - gpsAt) : null;
+    hereNote.hidden = !d;
+    hereNote.textContent = d ? (d.line || d.label) : '';
+    hereNote.classList.toggle('grey', !!(d && d.grey));
+    if (!theMap) return;
+    var key = d && !d.line ? [d.lat, d.lon, d.err, d.grey].join('|') : '';
+    if (key !== hereKey) {
+      hereKey = key;
+      if (hereLayer) { theMap.removeLayer(hereLayer); hereLayer = null; }
+      if (!key) return;
+      hereLayer = L.layerGroup().addTo(theMap);
+      var colour = d.grey ? '#8a8f98' : '#38bdf8';
+      // The circle is the GPS's own estimate in metres, not a promise: gpsd
+      // calls its certainty unknown. It is what the receiver claimed, drawn.
+      L.circle([d.lat, d.lon], {
+        radius: d.err, weight: 1, color: colour, opacity: .8,
+        fillColor: colour, fillOpacity: .12, dashArray: d.grey ? '4 5' : null
+      }).addTo(hereLayer);
+      // The age is the corner's to say; a popup is opened once and read later.
+      L.circleMarker([d.lat, d.lon], {
+        radius: 7, weight: 3, color: '#ffffff', fillColor: colour, fillOpacity: 1
+      }).bindPopup('<b>you are here</b><br>±' + Math.round(d.err) + ' m')
+        .addTo(hereLayer);
+    }
+    if (key && hereWanted) {
+      hereWanted = false;
+      hereAnchor = [d.lat, d.lon];
+      fitView(lastBounds || []);
+    }
+  }
+
   function mapSay(text) { viewNote.textContent = text; }
 
   function mapDrew(text) { lastLine = text; mapSay(text); }
@@ -3865,6 +3963,9 @@
         var rows = (body && body.offers) || [];
         var best = null;
         rows.forEach(function (row) {
+          // Only a fix rpi/gps.py's gate passed: MV.fixOf reads the row's
+          // `gpsOk` and nothing else. A rough fix is not an anchor for the
+          // figure the driver acts on, whatever row it is on.
           var at = MV.fixOf(row);
           if (!at) return;
           if (!best || (row.at || 0) >= best.at) {
@@ -3951,11 +4052,8 @@
          brought them back — this button is now that control. */
       mapSay(lastLine);
       theMap.invalidateSize();
-      if (lastBounds && lastBounds.length > 1) {
-        theMap.fitBounds(lastBounds, { padding: [34, 34] });
-      } else if (lastBounds && lastBounds.length) {
-        theMap.setView(lastBounds[0], 13);
-      }
+      if (lastBounds) fitView(lastBounds);
+      drawHere();
       return;
     }
     mapFor = key;
@@ -4257,11 +4355,13 @@
                    opacity: .9 }).addTo(mapLayer);
     }
 
-    if (bounds.length > 1) theMap.fitBounds(bounds, { padding: [34, 34] });
-    else if (bounds.length) theMap.setView(bounds[0], 13);
+    fitView(bounds);
     // Kept so coming back to this same card can put both of them back — the
     // words under the map and the view they describe.
     lastBounds = bounds;
+    // The dot over a new set of pins, redrawn last so it is on top of them.
+    hereKey = '';
+    drawHere();
 
     if (!settled) {
       /* Progress, and nothing that reads as a verdict.
@@ -4354,8 +4454,11 @@
                      + Math.round(wrong[badEnd])
                      + ' mi away — almost certainly a misread name, so no '
                      + 'distance';
-    if (!here) return 'no position on the recent offers, so there is nothing '
-                    + 'to measure this pickup against';
+    // "usable", because a row can carry a position gps.py's gate refused, and
+    // MV.fixOf will not anchor on one: "no position" would say the GPS never
+    // answered when it answered too roughly to measure from.
+    if (!here) return 'no usable GPS fix on the recent offers, so there is '
+                    + 'nothing to measure this pickup against';
     if (!want.held) return holdingNow
       ? 'the order in your car has no address on record — ⌖ Dropoff reads it '
         + 'off your phone'
@@ -4668,6 +4771,9 @@
   setInterval(function () {
     render();
     showConnection();
+    // The dot's age and its grey, which change while nothing arrives — and a
+    // beat that stopped coming is exactly when nothing does.
+    drawHere();
     // The screening state ages out on a clock and nothing arrives to announce
     // it: between cards the scanner can be silent for minutes, which is the
     // whole reason this tick exists. Without it ⌖ Dropoff would stay lit over

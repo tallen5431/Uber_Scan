@@ -2503,7 +2503,7 @@ const framed = (page) => page.waitForFunction(
   // drives the map, and the one that proves a stored map mode is refused.
   const MAPSTUB = `
       window.__lmap = null; window.__marks = []; window.__lines = [];
-      window.__fit = null; window.__asked = [];
+      window.__fit = null; window.__asked = []; window.__circles = [];
       window.L = {
         map: function (node) {
           window.__lmap = { node: node && node.id,
@@ -2512,6 +2512,7 @@ const framed = (page) => page.waitForFunction(
             removeLayer: function (g) {
               window.__marks = window.__marks.filter(function (m) { return m.group !== g; });
               window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
+              window.__circles = window.__circles.filter(function (c) { return c.group !== g; });
             },
             fitBounds: function (b) { window.__fit = b; } };
           return window.__lmap;
@@ -2530,7 +2531,14 @@ const framed = (page) => page.waitForFunction(
                     bindPopup: function (h) { this.popup = h; return this; },
                     addTo: function (g) { this.group = g; window.__lines.push(this);
                                           return this; } };
-          return l; }
+          return l; },
+        // The "you are here" accuracy circle, kept apart from the marks so the
+        // checks on the four job marks count what they always counted.
+        circle: function (ll, opts) {
+          var c = { ll: ll, opts: opts, group: null,
+                    addTo: function (g) { this.group = g; window.__circles.push(this);
+                                          return this; } };
+          return c; }
       };
   `;
 
@@ -2563,8 +2571,16 @@ const framed = (page) => page.waitForFunction(
       // timestamps made every fix here 497156 hours old, which the gate
       // correctly refused — the fixture was the thing that was wrong.
       body: JSON.stringify({ offers: [
-        { id: 'old', at: Date.now() - 3600000, lat: 34.500, lon: -84.900 },
-        { id: 'new', at: Date.now() - 45000, lat: 34.010, lon: -84.600, gpsAge: 1.2 },
+        // Each with the GPS gate's answer, as rpi/journal.py writes it: a row
+        // with a coordinate and no `gpsOk` is not a position (MV.fixOf).
+        { id: 'old', at: Date.now() - 3600000, lat: 34.500, lon: -84.900,
+          gpsOk: true },
+        { id: 'new', at: Date.now() - 45000, lat: 34.010, lon: -84.600, gpsAge: 1.2,
+          gpsErr: 12.0, gpsMode: 3, gpsOk: true },
+        // NEWER than 'new', and refused by the gate: a mode-3 fix gpsd put at
+        // 129 m. Newest-wins would anchor the detour here.
+        { id: 'rough', at: Date.now() - 20000, lat: 34.300, lon: -84.300, gpsAge: 0.5,
+          gpsErr: 129.2, gpsMode: 3, gpsOk: false, gpsWhy: 'rough' },
         { id: 'blind', at: Date.now() - 20000 } ] }) }));
     await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
       const u = new URL(route.request().url());
@@ -2856,6 +2872,100 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  /* --- you are here --------------------------------------------------------
+   *
+   * The heartbeat's newest fix, drawn on the map as a dot inside a circle the
+   * size of its own error, with "±N m · N s old" in the corner. The gate's
+   * answer comes with the fix from rpi/gps.py and the page only reads it: a
+   * rough fix is no dot and a reason, a stale one is grey. And the map never
+   * follows it — tiles cost hotspot data nobody has measured — so the view is
+   * fitted to include it on the way in and then left alone. Marietta Square
+   * and points by it: public places, invented fixes. */
+  {
+    stage = 'the map mode: you are here';
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: [] }) }));
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      const u = new URL(route.request().url());
+      const q = decodeURIComponent(u.searchParams.get('q') || '');
+      const hit = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                    'Canton Rd, Marietta': [33.980, -84.500] }[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    const beat = (fix) => window.__es.push({ alive: true,
+      gps: { state: 'ok', ageSeconds: 0.6, fix: fix } });
+    const GOOD = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
+                   gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 };
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      offer: { id: 'o-here', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.evaluate(beat, GOOD);
+    const look = () => {
+      const n = document.getElementById('hereNote');
+      return {
+        note: n.hidden ? null : n.textContent.trim(),
+        grey: n.classList.contains('grey'),
+        circles: (window.__circles || []).map(function (c) {
+          return { ll: c.ll, radius: c.opts && c.opts.radius,
+                   colour: c.opts && c.opts.color }; }),
+        dots: (window.__marks || []).filter(function (m) {
+          return /you are here/.test(String(m.popup || '')); })
+          .map(function (m) { return m.ll; }),
+        fit: window.__fit, view: window.__view || null };
+    };
+    // Before Map view: a beat with a fix draws nothing and says nothing.
+    await page.waitForTimeout(300);
+    out.hereBefore = await page.evaluate(look);
+    await page.click('#viewMode');            // → scene
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');            // → map
+    await page.waitForTimeout(3000);          // two lookups, a second apart
+    out.hereOn = await page.evaluate(look);
+    // The car moves a kilometre north. The dot follows the car; the map does
+    // not follow the dot.
+    await page.evaluate(() => { window.__fit = null; window.__view = null; });
+    await page.evaluate(beat, Object.assign({}, GOOD, { lat: 33.9616 }));
+    await page.waitForTimeout(300);
+    out.hereMoved = await page.evaluate(look);
+    // The gate refuses the next one for its quality: no dot, and why.
+    await page.evaluate(beat, Object.assign({}, GOOD, { gpsErr: 129.2, gpsOk: false,
+                                                        gpsWhy: 'rough' }));
+    await page.waitForTimeout(300);
+    out.hereRough = await page.evaluate(look);
+    // ...and the next one has gone stale: where the car was, in grey.
+    await page.evaluate(beat, Object.assign({}, GOOD, { gpsAge: 45.0, gpsOk: false,
+                                                        gpsWhy: 'stale', freshFor: 0 }));
+    await page.waitForTimeout(300);
+    out.hereStale = await page.evaluate(look);
+    // A good fix again, and then the beats stop. Nothing arrives, so only the
+    // page's own clock can grey it — and its age has to keep counting.
+    await page.evaluate(beat, Object.assign({}, GOOD, { freshFor: 1.5 }));
+    await page.waitForTimeout(2600);
+    out.hereSilent = await page.evaluate(look);
+    // No fix at all: nothing drawn, nothing said.
+    await page.evaluate(beat, null);
+    await page.waitForTimeout(300);
+    out.hereNone = await page.evaluate(look);
+    // Out of Map view the label goes with the map.
+    await page.evaluate(beat, GOOD);
+    await page.click('#viewMode');            // → phone
+    await page.waitForTimeout(300);
+    out.hereOff = await page.evaluate(look);
+    await page.close();
+  }
+
   /* --- an anchor that stopped moving --------------------------------------
    *
    * rpi/gps.py states this as a certainty rather than a risk: the app on the
@@ -2879,7 +2989,8 @@ const framed = (page) => page.waitForFunction(
       body: JSON.stringify({ offers: [
         // Two hours old, which is a phone whose GPS app timed out after the
         // first hour of a shift.
-        { id: 'stale', at: Date.now() - 7200000, lat: 34.010, lon: -84.600 } ] }) }));
+        { id: 'stale', at: Date.now() - 7200000, lat: 34.010, lon: -84.600,
+          gpsOk: true } ] }) }));
     await page.route('**/nominatim.openstreetmap.org/**', (route) => {
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
@@ -3029,7 +3140,7 @@ const framed = (page) => page.waitForFunction(
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ offers: [
         { id: 'fix', at: Date.now() - 30000, lat: 34.010, lon: -84.600,
-          gpsAge: 1.0 } ] }) }));
+          gpsAge: 1.0, gpsOk: true } ] }) }));
     await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
@@ -5585,6 +5696,11 @@ try:
     ok_('...taken off the NEWEST row that carries one, not the first (%r)'
         % (_car and _car[0].get('ll'),),
         _car and abs(float(_car[0]['ll'][0]) - 34.010) < 0.001)
+    # A newer row carries a fix rpi/gps.py's gate refused (129 m, mode 3).
+    # Newest-wins would anchor the detour there; MV.fixOf reads `gpsOk`.
+    ok_('a fix the GPS gate refused is not where the detour is measured from (%r)'
+        % (_car and _car[0].get('ll'),),
+        _car and len(_car) == 1 and abs(float(_car[0]['ll'][0]) - 34.300) > 0.1)
     ok_('...and the pickup is drawn in the pickup colour', '#17c964' in fills)
     ok_('...and both dropoffs in the dropoff colour',
         len([f for f in fills if f == '#f5a524']) == 2)
@@ -5885,6 +6001,53 @@ try:
         'Scene' in (off.get('label') or ''))
     ok_('...with the map put away', not off.get('mapShown'))
     ok_('...and the picture back', off.get('imgShown'))
+
+    # --- you are here ------------------------------------------------------
+    _hb = got.get('hereBefore') or {}
+    eq('out of Map view a beat\'s fix draws nothing and says nothing',
+       (_hb.get('note'), len(_hb.get('dots') or []), len(_hb.get('circles') or [])),
+       (None, 0, 0))
+    _ho = got.get('hereOn') or {}
+    eq('in Map view the beat\'s fix is a dot where it is',
+       _ho.get('dots'), [[33.9526, -84.5499]])
+    eq('...inside a circle the size of the GPS\'s own error',
+       [c.get('radius') for c in (_ho.get('circles') or [])], [27.8])
+    ok_('...labelled with that error and its age (%r)' % _ho.get('note'),
+        re.match(r'^±28 m · \d+ s old$', _ho.get('note') or ''))
+    eq('...not greyed while fresh', _ho.get('grey'), False)
+    _fit = _ho.get('fit') or []
+    ok_('entering Map view fits the view to include the dot (%r)' % (_fit,),
+        [33.9526, -84.5499] in _fit and len(_fit) > 1)
+    _hm = got.get('hereMoved') or {}
+    eq('the dot moves with the next beat', _hm.get('dots'), [[33.9616, -84.5499]])
+    # The panel re-fits to the card's pins on every message while the map is
+    # up (showMap's same-card branch), so a fit may happen; what may not is a
+    # fit or a view that goes where the dot went.
+    _mfit = _hm.get('fit') or []
+    ok_('...and the map does not move with it (%r, %r)' % (_mfit, _hm.get('view')),
+        [33.9616, -84.5499] not in _mfit and _hm.get('view') != [33.9616, -84.5499])
+    _hr = got.get('hereRough') or {}
+    eq('a fix the gate refused is not drawn',
+       (len(_hr.get('dots') or []), len(_hr.get('circles') or [])), (0, 0))
+    eq('...and the label says why, with the figure', _hr.get('note'),
+       'GPS too rough here (±129 m)')
+    _hs = got.get('hereStale') or {}
+    eq('a fix the gate called stale is drawn where it was, in grey',
+       (_hs.get('dots'), _hs.get('grey'),
+        [c.get('colour') for c in (_hs.get('circles') or [])]),
+       ([[33.9526, -84.5499]], True, ['#8a8f98']))
+    eq('...saying how old', _hs.get('note'), '±28 m · 45 s old')
+    _hq = got.get('hereSilent') or {}
+    ok_('a dot whose beats stopped greys on the page\'s own clock (%r)'
+        % ((_hq.get('grey'), _hq.get('note')),),
+        _hq.get('grey') is True
+        and re.match(r'^±28 m · [2-9] s old$', _hq.get('note') or ''))
+    _hn = got.get('hereNone') or {}
+    eq('no fix is no dot and no words',
+       (_hn.get('note'), len(_hn.get('dots') or []), len(_hn.get('circles') or [])),
+       (None, 0, 0))
+    eq('out of Map view the label goes with the map',
+       (got.get('hereOff') or {}).get('note', 'absent'), None)
 
     # --- 📷 Snap ----------------------------------------------------------
     #

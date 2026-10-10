@@ -72,7 +72,18 @@
     #side { border-left: 0; border-top: 1px solid var(--line);
             max-height: 40dvh; min-height: 0; }
   }
-  #map { min-height: 0; background: var(--panel-2); }
+  #map { min-height: 0; background: var(--panel-2); position: relative; }
+  /* What the "you are here" dot says about itself, or why there is none — in
+     the map's top-right corner, clear of Leaflet's zoom buttons at the left
+     and its attribution at the bottom, above its panes and controls (800 and
+     1000). Wraps rather than ellipsising: the cut would be the figure. */
+  #hereNote { position: absolute; top: 8px; right: 8px; z-index: 1001;
+              max-width: calc(100% - 64px); box-sizing: border-box;
+              padding: 2px 8px; border-radius: 10px; font-size: 13px;
+              line-height: 1.35; color: var(--text);
+              background: rgba(11, 15, 20, .85); pointer-events: none; }
+  #hereNote.grey { color: var(--muted); }
+  #hereNote[hidden] { display: none; }
   #side { border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px;
           font-size: 13px; }
   #side h2 { font-size: 13px; margin: 14px 0 6px; letter-spacing: .04em;
@@ -230,7 +241,9 @@
   </div>
 
   <div class="split">
-    <div id="map"></div>
+    <!-- The "you are here" label lives inside the map's box so it sits over
+         its corner; Leaflet adds its panes beside it and leaves it alone. -->
+    <div id="map"><div id="hereNote" hidden></div></div>
     <div id="side">
       <div class="note" id="sideEmpty">Load a few days, then place them.</div>
       <div id="sideBody" hidden></div>
@@ -253,7 +266,7 @@
 
   var el = {};
   ['days', 'hint', 'block', 'load', 'place', 'forget', 'trail', 'chain', 'status',
-   'map', 'side', 'sideEmpty', 'sideBody'].forEach(function (id) { el[id] = document.getElementById(id); });
+   'map', 'side', 'sideEmpty', 'sideBody', 'hereNote'].forEach(function (id) { el[id] = document.getElementById(id); });
 
   var offers = [];
   var map = null, layer = null, trail = null, order = null;
@@ -268,6 +281,26 @@
   // The marker for each place, by the name the card gave it, so a row in the
   // sidebar can take the map to the pin it is describing.
   var marks = {};
+  // The last pins the view was fitted to, so the dot's first appearance can
+  // join them rather than replace them. See drawHere.
+  var pinBounds = [];
+  // The heartbeat's newest fix, off /api/status, and when the beat carrying it
+  // reached the server, on this page's clock. See askWhere and drawHere.
+  var gpsFix = null, gpsAt = 0;
+  var hereLayer = null, hereAnchor = null;
+  // What is drawn now, so the tick that ages the label does not redraw the dot
+  // under an open popup every second.
+  var hereKey = '';
+  // How often to ask again while the page is on screen, and never while it is
+  // hidden. Inside the twenty seconds gps.py gives a fix, so a working GPS is
+  // never painted grey between two asks. What it costs, measured on the three
+  // status.json files the rig's own 📷 Snaps kept, with this change's fields
+  // added: 1,783 to 1,996 bytes an answer, so at most 718,560 bytes of answers
+  // an hour (1,996 x 360) while the page is open — nothing on the Pi's own
+  // screen, which is the Pi talking to itself, and a cost on the hotspot only
+  // when the page is open from somewhere else.
+  var HERE_EVERY_MS = 10000;
+  var hereAskedAt = Date.now();
 
   /* Everything with no map in it — the geocoder, the rate limit, the box drawn
      around where the car was, the test for a pin that cannot be in this shift —
@@ -557,6 +590,10 @@
         // was computed here for a while and read by nothing — a place whose
         // own rows are silent gets no anchor on purpose, see anchorFor.
         var fixes = sub.map(MV.fixOf).filter(Boolean);
+        // ...and the rows whose position gps.py's gate refused, counted apart:
+        // MV.fixOf will not box a place on one, and a fix that disappears
+        // without a word reads as a rig that never had one.
+        var refusedFixes = sub.filter(function (o) { return !!MV.fixRefused(o); }).length;
         // ...and whether this is the whole window or the newest part of it.
         //
         // The request asks for 5000 and the days box goes to 365. Past the cap
@@ -603,7 +640,10 @@
         say(sub.length + ' offers · ' + withEnds.length + ' name somewhere · '
             + mappable.length + ' name both ends'
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
-                            : ' · none carry a position')
+               : refusedFixes ? ' · none carry a usable position'
+                              : ' · none carry a position')
+            + (refusedFixes ? ' · ' + refusedFixes + ' the GPS called too rough '
+                              + 'to use' : '')
             + whenNote(sub) + filled + short + lostLookups);
         el.place.disabled = withEnds.length === 0;
         redraw();
@@ -826,7 +866,13 @@
         .addTo(layer);
     });
 
-    if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
+    // The dot's position when it first appeared joins the pins in the view,
+    // and never its position since: see drawHere.
+    if (bounds.length) {
+      map.fitBounds(hereAnchor ? bounds.concat([hereAnchor]) : bounds,
+                    { padding: [30, 30] });
+    }
+    pinBounds = bounds;
     sidebar(placed, strays, found);
     // Redrawn with the rest, since the range may have changed under it. If it
     // was not showing it stays not showing — a toggle that turns itself back
@@ -1086,13 +1132,81 @@
   function trailNote() {
     var sub = shown();
     var fixes = sub.filter(function (o) { return !!MV.fixOf(o); }).length;
+    // ...and the rows whose position the GPS gate refused, apart from the rows
+    // that never had one. MV.fixOf drops both from the trail, and "carry none"
+    // said of a fix gps.py judged too rough is a dot gone with the wrong
+    // reason given for it.
+    var refused = sub.filter(function (o) { return !!MV.fixRefused(o); }).length;
+    var none = sub.length - fixes - refused;
     if (el.trail.getAttribute('aria-pressed') !== 'true') return;
     say(fixes + ' position' + (fixes === 1 ? '' : 's') + ' the rig recorded'
-        + (fixes < sub.length
-           ? ' — ' + (sub.length - fixes) + ' of these offers carry none'
+        + (refused ? ' — ' + refused + ' more the GPS called too rough to use, '
+                     + 'and not drawn' : '')
+        + (none > 0
+           ? (refused ? ';' : ' —') + ' ' + none + ' of these offers carry none'
            : '')
         + (fixes ? '. A pin far from every one of these is a pin to distrust.'
                  : '. Nothing here knows where the car was.'));
+  }
+
+  /* --- you are here --------------------------------------------------------
+   *
+   * The heartbeat's newest fix, off /api/status: a dot with a circle the size
+   * of the GPS's own error estimate, and a label in the map's corner. What to
+   * draw is MV.hereDot's decision, shared with the driving panel; the gate
+   * behind it is rpi/gps.py's, and nothing here asks it again. On the NucBox,
+   * which runs no scanner, there is no beat and so nothing at all.
+   *
+   * The view is fitted to include the dot ONCE, the first time there is one,
+   * and never follows it: every pan is tiles down a hotspot whose cost has not
+   * been measured, and the trail and the pins are what this page is for. */
+  function drawHere() {
+    if (!map) return;
+    var d = MV.hereDot(gpsFix, Date.now() - gpsAt);
+    el.hereNote.hidden = !d;
+    el.hereNote.textContent = d ? (d.line || d.label) : '';
+    el.hereNote.classList.toggle('grey', !!(d && d.grey));
+    var key = d && !d.line ? [d.lat, d.lon, d.err, d.grey].join('|') : '';
+    if (key === hereKey) return;
+    hereKey = key;
+    if (hereLayer) { map.removeLayer(hereLayer); hereLayer = null; }
+    if (!key) return;
+    hereLayer = L.layerGroup().addTo(map);
+    var colour = d.grey ? '#8a8f98' : '#38bdf8';
+    // gpsd's estimate, drawn as the receiver claimed it — not a promise.
+    L.circle([d.lat, d.lon], {
+      radius: d.err, weight: 1, color: colour, opacity: .8,
+      fillColor: colour, fillOpacity: .12, dashArray: d.grey ? '4 5' : null
+    }).addTo(hereLayer);
+    // The age is the corner's to say; a popup is opened once and read later.
+    L.circleMarker([d.lat, d.lon], {
+      radius: 6, weight: 2, color: '#ffffff', fillColor: colour, fillOpacity: 1
+    }).bindPopup('<b>you are here</b><br><span class="note">±' + Math.round(d.err)
+                 + ' m</span>').addTo(hereLayer);
+    if (!hereAnchor) {
+      hereAnchor = [d.lat, d.lon];
+      if (pinBounds.length) {
+        map.fitBounds(pinBounds.concat([hereAnchor]), { padding: [30, 30] });
+      } else {
+        map.setView(hereAnchor, 12);
+      }
+    }
+  }
+
+  /* Asked of /api/status, where the last beat already is — the same path the
+     status link reads — rather than a stream of its own. `beat.ageMs` is how
+     long ago the server heard that beat, so the age is two durations and the
+     page never subtracts another machine's clock from its own. */
+  function askWhere() {
+    return fetch('/api/status')
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        var beat = s && s.beat;
+        gpsFix = (beat && beat.gps && beat.gps.fix) || null;
+        gpsAt = Date.now() - (beat && typeof beat.ageMs === 'number' ? beat.ageMs : 0);
+        drawHere();
+      })
+      .catch(function () { /* a page off the network keeps what it had, aging */ });
   }
 
   function esc(s) {
@@ -1606,6 +1720,16 @@
 
   ensureMap();
   load();
+  // Where the car is now, and again every HERE_EVERY_MS while the page is on
+  // screen; the label's age and its grey move every second without asking.
+  askWhere();
+  setInterval(function () {
+    if (!document.hidden && Date.now() - hereAskedAt >= HERE_EVERY_MS) {
+      hereAskedAt = Date.now();
+      askWhere();
+    }
+    drawHere();
+  }, 1000);
 })();
 </script>
 </body>

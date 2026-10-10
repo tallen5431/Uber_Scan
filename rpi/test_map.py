@@ -123,7 +123,7 @@ NOW = int(time.time() * 1000)
 
 
 def offer(i, pickup, dropoff, miles, at=None, where=None, minutes=25.0,
-          whole=True, suspect=False, corrected=False, rate=28.8):
+          whole=True, suspect=False, corrected=False, rate=28.8, rough=None):
     # `whole` and `suspect` are what say whether the distance beside them is a
     # yardstick — see judge() in map-view.js. Defaulted to a clean reading,
     # because that is what nearly every row is; the two rows below that are not
@@ -141,8 +141,16 @@ def offer(i, pickup, dropoff, miles, at=None, where=None, minutes=25.0,
     # Where the car was when the card came up, as rpi/gps.py stamps it. Absent
     # on most of these on purpose: every row written before the rig had a GPS
     # has no position, and the page has to keep working for them.
+    # ...with the GPS gate's answer beside it, as rpi/journal.py writes it now:
+    # a row with a coordinate and no `gpsOk` is not a position to MV.fixOf.
     if where:
         row['lat'], row['lon'], row['gpsAge'] = where[0], where[1], 1.2
+        row.update(gpsErr=12.0, gpsMode=3, gpsOk=True, gpsWhy=None)
+    # ...or a position the gate REFUSED: a mode-3 fix gpsd itself put at 129 m.
+    # Written, because gps.py only reports, and never drawn or boxed on.
+    if rough:
+        row['lat'], row['lon'], row['gpsAge'] = rough[0], rough[1], 0.5
+        row.update(gpsErr=129.2, gpsMode=3, gpsOk=False, gpsWhy='rough')
     return row
 
 
@@ -180,7 +188,10 @@ ROWS = [
     # no destination — and stamped to sit in time BETWEEN two jobs that can be
     # placed. That is what makes the hop spanning it a hop the car did not
     # drive end to end, which the headline must not count as empty miles.
-    offer(3, 'Zaxbys', None, 5.0, at=NOW - 1500000),
+    # ...and the car's position on it was one the GPS gate refused, far off in
+    # Atlanta. Not a dot on the trail and not a box for Zaxbys — but counted,
+    # so a refused fix is a number on the page and not a dot that is missing.
+    offer(3, 'Zaxbys', None, 5.0, at=NOW - 1500000, rough=(33.749, -84.388)),
     # A street the reader got wrong, answered by a real street in Idaho. Nothing
     # about the answer says it is wrong — it has a name, a type and coordinates
     # like every other — and until the page weighed it against the rest of the
@@ -272,6 +283,7 @@ const base = process.argv[2];
 const STUB = `
   window.__pins = []; window.__lines = []; window.__asked = [];
   window.__askedAt = []; window.__boxes = []; window.__dots = [];
+  window.__circles = [];
   window.L = {
     map: function () { return { setView: function (ll) { window.__view = ll; return this; },
       // A removed group takes its dots with it. Without this a toggle that
@@ -285,6 +297,7 @@ const STUB = `
         // its own away, and pressing it twice would leave two sets of dashes
         // over each other.
         window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
+        window.__circles = window.__circles.filter(function (c) { return c.group !== g; });
       },
       addLayer: function () {},
       // Recorded, because which pins get a say in where the map looks is the
@@ -303,6 +316,13 @@ const STUB = `
                                       return this; } };
       return m; },
     divIcon: function (o) { return o; },
+    // The "you are here" accuracy circle, kept apart from the trail's dots.
+    circle: function (ll, opts) {
+      var c = { ll: ll, opts: opts, group: null,
+                addTo: function (g) { this.group = g;
+                  (window.__circles = window.__circles || []).push(this);
+                  return this; } };
+      return c; },
     marker: function (ll, opts) {
       var m = { ll: ll, icon: (opts && opts.icon) || {},
                 bindPopup: function (h) { this.popup = h; return this; },
@@ -640,6 +660,56 @@ const KNOWN = {
     (await (await fetch(base + '/api/places')).json()).places || {}).length;
   out.forget.here = await page.evaluate(() => Object.keys(JSON.parse(
     localStorage.getItem('uberscan.geocode.v1') || '{}')).length);
+
+  /* --- you are here ------------------------------------------------------
+   *
+   * The heartbeat's newest fix, off /api/status, which this test server (run
+   * with no scanner, like the NucBox) has none of — so the beat is supplied
+   * at the network layer, a page of its own for each case. Marietta Square:
+   * a public place, an invented fix. */
+  stage = 'you are here';
+  out.here = {};
+  const GOOD = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
+                 gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 };
+  const lookHere = () => {
+    const n = document.getElementById('hereNote');
+    return { note: n && !n.hidden ? n.textContent.trim() : null,
+             grey: !!(n && n.classList.contains('grey')),
+             circles: (window.__circles || []).map(function (c) {
+               return { ll: c.ll, radius: c.opts && c.opts.radius }; }),
+             dots: window.__dots.filter(function (d) {
+               return /you are here/.test(String(d.popup || '')); })
+               .map(function (d) { return d.ll; }),
+             view: window.__view || null };
+  };
+  for (const [name, fixes] of [['good', [GOOD, Object.assign({}, GOOD, { lat: 33.9616 })]],
+                               ['rough', [Object.assign({}, GOOD, { gpsErr: 129.2,
+                                 gpsOk: false, gpsWhy: 'rough' })]],
+                               ['none', [null]]]) {
+    const hp = await browser.newContext({ viewport: { width: 1200, height: 820 } })
+      .then((c) => c.newPage());
+    await hp.addInitScript(STUB);
+    await hp.route('**/tile.openstreetmap.org/**', (r) => r.fulfill({ status: 200, body: '' }));
+    let which = 0;
+    await hp.route('**/api/status', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ beat: { gps: { state: 'ok', ageSeconds: 0.6,
+                                            fix: fixes[Math.min(which, fixes.length - 1)] },
+                                     ageMs: 900 } }) }));
+    await hp.goto(base + '/map.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await hp.waitForTimeout(1500);
+    out.here[name] = await hp.evaluate(lookHere);
+    if (fixes.length > 1) {
+      // The car moves a kilometre north. The page asks again on its own
+      // cadence; the dot follows the car and the view does not follow the dot.
+      which = 1;
+      await hp.evaluate(() => { window.__view = null; window.__bounds = null; });
+      await hp.waitForTimeout(11500);
+      out.here[name + 'Moved'] = await hp.evaluate(lookHere);
+      out.here[name + 'Moved'].bounds = await hp.evaluate(() => window.__bounds || null);
+    }
+    await hp.close();
+  }
 
   console.log(JSON.stringify(out));
   await browser.close();
@@ -1084,6 +1154,39 @@ try:
         'hidden' in ((got.get('trailOff') or {}).get('status') or ''))
     eq('...and turning it on again draws them once, not twice',
        got.get('trailAgain'), 3)
+    # o3 carries a position the GPS gate refused. It is not one of the three
+    # dots above — MV.fixOf reads `gpsOk` — and it is not silently absent.
+    ok_('a position the GPS gate refused is not on the trail, and is counted (%r)'
+        % (trail.get('status') or '')[:120],
+        '1 more the GPS called too rough to use' in (trail.get('status') or ''))
+    ok_('...and the load line counts it apart from the rows that had none (%r)'
+        % (on_load.get('status') or '')[:160],
+        '1 the GPS called too rough to use' in (on_load.get('status') or ''))
+
+    # --- you are here --------------------------------------------------------
+    here = got.get('here') or {}
+    _hg = here.get('good') or {}
+    eq('the beat\'s fix is a dot on the map where it is', _hg.get('dots'),
+       [[33.9526, -84.5499]])
+    eq('...inside a circle the size of the GPS\'s own error',
+       [c.get('radius') for c in (_hg.get('circles') or [])], [27.8])
+    ok_('...labelled with that error and its age (%r)' % _hg.get('note'),
+        re.match(r'^±28 m · \d+ s old$', _hg.get('note') or ''))
+    eq('...and the view is fitted to it the first time there is one',
+       _hg.get('view'), [33.9526, -84.5499])
+    _hgm = here.get('goodMoved') or {}
+    eq('the dot moves when the page asks again', _hgm.get('dots'),
+       [[33.9616, -84.5499]])
+    eq('...and the map does not move with it',
+       (_hgm.get('view'), _hgm.get('bounds')), (None, None))
+    _hr = here.get('rough') or {}
+    eq('a fix the gate refused is no dot and no circle',
+       (len(_hr.get('dots') or []), len(_hr.get('circles') or [])), (0, 0))
+    eq('...and the label says why, with the figure', _hr.get('note'),
+       'GPS too rough here (±129 m)')
+    _hn = here.get('none') or {}
+    eq('no fix is nothing drawn and nothing said',
+       (_hn.get('note'), len(_hn.get('dots') or [])), (None, 0))
 
     # --- the miles nobody paid for ------------------------------------------
     #
@@ -1446,6 +1549,13 @@ const STUB = `
                 addTo: function (g) { this.group = g; window.__dots.push(m); return m; } };
       return m; },
     divIcon: function (o) { return o; },
+    // The "you are here" accuracy circle, kept apart from the trail's dots.
+    circle: function (ll, opts) {
+      var c = { ll: ll, opts: opts, group: null,
+                addTo: function (g) { this.group = g;
+                  (window.__circles = window.__circles || []).push(this);
+                  return this; } };
+      return c; },
     marker: function (ll, opts) {
       var m = { ll: ll, group: null, bindPopup: function (h) { this.popup = h; return this; },
                 addTo: function (g) { this.group = g; window.__pins.push(this); return this; },
@@ -2144,6 +2254,13 @@ const STUB = `
     circleMarker: function () { return { bindPopup: function () { return this; },
                                          addTo: function () { return this; } }; },
     divIcon: function (o) { return o; },
+    // The "you are here" accuracy circle, kept apart from the trail's dots.
+    circle: function (ll, opts) {
+      var c = { ll: ll, opts: opts, group: null,
+                addTo: function (g) { this.group = g;
+                  (window.__circles = window.__circles || []).push(this);
+                  return this; } };
+      return c; },
     marker: function (ll) {
       var m = { ll: ll, bindPopup: function (h) { this.popup = h; return this; },
                 addTo: function () { window.__pins.push(this); return this; },
