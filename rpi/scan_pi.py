@@ -1997,10 +1997,10 @@ STALL_AGAIN = 600.0
 # So under LIT_ENOUGH (the bar) a light-mode card is not noticed at any reading
 # measured, and a dark-mode one is from 14 or 15 up — by under five per cent at
 # 15 and by about a third at 19. The box's reading cannot tell the two modes
-# apart, so a lit dark-mode screen reading 14 to 19 is called dark although
-# the gate would notice a card landing on it, and a light one at the same
-# reading is not seen at all: what holds for both is that the rig cannot be
-# sure. Above the bar a light card is still missed at 53 and noticed from 56,
+# apart, so a lit dark-mode screen reading 15 to 19, and some reading 14, is
+# called dark although the gate would notice a card landing on it, and a light
+# one at the same reading is not seen at all: what holds for both is that the
+# rig cannot be sure. Above the bar a light card is still missed at 53 and noticed from 56,
 # but there the screen counts as lit and the gain climbs on it, up to twice
 # over a beat (exposure.UP_MAX), or says too dim when it has nothing left to
 # climb with; under it the gain is held, so nothing gets better and nothing but

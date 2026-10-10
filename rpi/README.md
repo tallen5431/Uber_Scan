@@ -4207,20 +4207,20 @@ that round to it:
 (In bold, the first reading over `LIT_ENOUGH`.) So under it a light-mode card
 is not noticed at any reading measured, and a dark-mode one is from 14 or 15
 up — by under five per cent at 15, about a third at 19. The reading cannot
-tell the two modes apart: a lit dark-mode screen reading 14 to 19 is called
-dark although a card landing on it would be seen, and a light one at the same
-reading would not be. Over the bar a light card is still missed at 53 and
-noticed from 56, but there the screen counts as lit and the gain climbs on it —
-up to twice a beat — or says *too dim* when it has nothing left; under it the
-gain is held and nothing gets better. The reader is not the limit: handed the
-dark-mode card reading 4, it read $16.05, 23 min and 8.4 mi. Nothing sends it
-one. Hence **TOO DARK TO BE SURE**, "the rig may miss an offer arriving in a
-box this dark", and a line asking for both remedies. It is still not *too dim*: that is
-a screen the gain counted as lit and spent everything on, this is one it never
-counted, and the same `lit` decides both — `test_exposure` holds that from a
-gain already on its ceiling, the one place *too dim* could fire on a dark box
-at all, and down to a box of pure black, which used to keep the *too dim* of
-the beat before it.
+tell the two modes apart: a lit dark-mode screen reading 15 to 19, and some
+reading 14, is called dark although a card landing on it would be seen, and a
+light one at the same reading would not be. Over the bar a light card is still
+missed at 53 and noticed from 56, but there the screen counts as lit and the
+gain climbs on it — up to twice a beat — or says *too dim* when it has nothing
+left; under it the gain is held and nothing gets better. The reader is not the
+limit: handed the dark-mode card reading 4, it read $16.05, 23 min and 8.4 mi.
+Nothing sends it one. Hence **TOO DARK TO BE SURE**, "the rig may miss an
+offer arriving in a box this dark", and a line asking for both remedies. It is
+still not *too dim*: that is a screen the gain counted as lit and spent
+everything on, this is one it never counted, and the same `lit` decides both —
+`test_exposure` holds that from a gain already on its ceiling, the one place
+*too dim* could fire on a dark box at all, and down to a box of pure black,
+which used to keep the *too dim* of the beat before it.
 
 A read going out clears it, since the rig was looking: most are the motion
 gate's, and the one a card arriving sends is the first sign of it. Reads a timer
