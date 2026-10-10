@@ -522,7 +522,12 @@ try:
     got = it.latest() or {}
     eq('...and latest() says the same of it while it is fresh',
        (got.get('ok', 'absent'), got.get('ageSeconds')), (True, 0.0))
-    clock.now += 21.0
+    clock.now += 6.5
+    # The panel greys a beat's dot when this runs out, on its own clock: the
+    # rule's limit, less the age, from the one place the rule lives.
+    eq('a fix says how long it has left inside the staleness rule',
+       (it.latest() or {}).get('freshFor', 'absent'), 13.5)
+    clock.now += 14.5                           # 21 seconds since it arrived
     eq('past the limit fix() is still None, as it always was', it.fix(), None)
     got = it.latest()
     # The heartbeat's dot: drawn grey where the car was, rather than gone with
@@ -530,6 +535,7 @@ try:
     eq('...while latest() keeps the position, judged stale',
        got and (got['lat'], got['ok'], got['why'], got['ageSeconds']),
        (33.9526, False, 'stale', 21.0))
+    eq('...with no time left on it', (got or {}).get('freshFor', 'absent'), 0.0)
     clock.now -= 3600.0
     got = it.latest()
     eq('a clock run backwards past it gives no age, and stale',

@@ -2070,6 +2070,26 @@ def gps_now(phone, refused=None):
     return GPS_WORDS[s['state']], s.get('ageSeconds'), s.get('error')
 
 
+def beat_fix(phone):
+    """The newest fix whatever its age, as the heartbeat carries it — or None.
+
+    For the panel's "you are here" dot, and in the journal's own seven fields
+    (`lat`, `lon`, `gpsAge`, `gpsErr`, `gpsMode`, `gpsOk`, `gpsWhy`; see
+    JR.fix_fields) so that a page reads a beat's position exactly as it reads
+    a row's. Phone.latest() rather than fix(): a fix past gps.py's twenty
+    seconds is still where the car WAS, judged `stale`, and the panel draws it
+    grey rather than letting it vanish with nothing saying why. The gate's
+    answer comes with it from gps.py; nothing here or on the page asks again.
+
+    ...and `freshFor`, gps.py's count of the seconds this fix has left inside
+    its staleness rule. A beat that stops coming — the scanner gone, the link
+    down — leaves the page holding a fix nobody will re-judge, and this is
+    what lets the page grey it on its own clock without a copy of the rule.
+    """
+    got = phone.latest() if phone is not None else None
+    return dict(JR.fix_fields(got), freshFor=got.get('freshFor')) if got else None
+
+
 def cpu_temp(path=THERMAL):
     """(degrees C, None) or (None, why). One file, millidegrees in it."""
     try:
@@ -2396,10 +2416,11 @@ class UpDown(object):
         self._write('camera', moved[0], **extra)
         return moved[0]
 
-    def beat(self):
-        """What the heartbeat says about the GPS: the settled word, and the
-        newest fix's age as it is now."""
-        return {'state': self.gps.word, 'ageSeconds': self.gps_age}
+    def beat(self, fix=None):
+        """What the heartbeat says about the GPS: the settled word, the
+        newest fix's age as it is now, and `fix` — beat_fix()'s newest
+        position with its quality and the gate's answer, or None."""
+        return {'state': self.gps.word, 'ageSeconds': self.gps_age, 'fix': fix}
 
     def blind(self):
         """What the heartbeat says about the camera: None while it can see,
@@ -2528,7 +2549,34 @@ def planner_destination(stops, bounded):
     return {k: drops[0].get(k) for k in ('line', 'street', 'city', 'state', 'zip')}, None
 
 
-def emit_offer(offer_id, parsed, rate):
+# Uber's "Early look • Order in progress" badge: an offer shown while the
+# driver is still on a job, whose distance may be counted from where that job
+# ends rather than from the car. Said on the offer line so the next thing to
+# measure a pin against a card's own distance can refuse these as a yardstick.
+#
+# Measured over the week's 1,166 offers, every frame text in `scans` and the
+# row's `text`: 27 offers carry it, in 102 of their 105 frames. The OCR spells
+# it "Early look", "Early took" and "Arder in progress", and the two halves
+# each miss on some frame that the other catches (25 and 26 alone, 27 either);
+# this pattern finds all 27 and fires on no other offer that week.
+#
+# Not in parse(), deliberately: nothing judges a card on it, the offer line is
+# its only reader, and a parse() field is a field both ports and the shared
+# corpus must carry. And `False` means only that no frame the reader was given
+# said it: the Est. delivery card snapped on 10 Oct was an Early look card whose
+# crop began below the badge.
+EARLY_LOOK = re.compile(r'\bearly\s*[lt]ook\b|\b[oa]rder\s*in\s*progress\b', re.I)
+
+
+def says_early_look(parsed):
+    """Whether any text this reading was built from carries the badge — the
+    frames the window kept as well as its own, since one frame of five can be
+    the one that caught it."""
+    texts = list(parsed.get('scans') or []) + [parsed.get('text') or '']
+    return any(EARLY_LOOK.search(t or '') for t in texts)
+
+
+def emit_offer(offer_id, parsed, rate, where=None, whole=None):
     """Which offer is now on the record, so the driver can say they took it.
 
     The one thing the rig cannot see is the driver pressing Accept, and it must
@@ -2653,6 +2701,35 @@ def emit_offer(offer_id, parsed, rate):
         # Not a verdict to be mistaken for one: the message still carries no
         # `ready`, so it can neither replace a verdict nor stand in for one.
         'state': rate.get('state'),
+        # What the card says about its own size, for whatever measures a pin
+        # against the card's distance: a straight line from where the car was
+        # cannot be longer than the road, but only on a figure that counts the
+        # drive from the car and that the reader trusts. Read off the reading
+        # the row was written from, not worked out again: `whole` is
+        # OP.is_whole's answer the loop already holds, `hasTotal`, `legs` and
+        # `toPickupMiles` are the window's merge, and the two `miles*` flags
+        # are the parser's own word for a distance it repaired or doubted.
+        # Nothing on this line reads them yet.
+        'whole': bool(whole),
+        'hasTotal': bool(parsed.get('hasTotal')),
+        'legs': parsed.get('legs'),
+        'toPickupMiles': parsed.get('toPickupMiles'),
+        'milesUncertain': bool(parsed.get('milesUncertain')),
+        'milesCorrected': bool(parsed.get('milesCorrected')),
+        'earlyLook': says_early_look(parsed),
+        # ...and where the car was when it came up, in the journal's own seven
+        # fields — `lat`, `lon`, `gpsAge`, `gpsErr`, `gpsMode`, and the gate's
+        # `gpsOk`/`gpsWhy` — built by the same function the row is, from the
+        # SAME fix the row was handed (see where the loop calls this). Two
+        # calls to phone.fix() a few lines apart can straddle the reader
+        # thread storing a newer fix — gpsd sends one a second — and the row
+        # and the line would then put one card in two places, with two ages
+        # and possibly two answers from the gate.
+        #
+        # Not dropped under keepPlaces: like `pickup` and `dropoff` above, this
+        # line is what the panel is showing now, not a record. The journal is
+        # where that setting applies, and fix_fields applies it there.
+        **JR.fix_fields(where),
     }, 'at': int(time.time() * 1000)}), flush=True)
 
 
@@ -3831,10 +3908,14 @@ def main():
             # network — so this cannot make a read slow, and it answers None
             # whenever there is no phone, no answer, or an answer too old to
             # stand for where the car is now.
+            #
+            # ONCE, and the one answer goes to both the row and the offer line
+            # below, judged by the gate on the way out of gps.py. It was asked
+            # inline in this call, and the line had no position at all.
+            where = phone.fix() if phone else None
             written = offer_log.consider(parsed, rate, ms=out['ms']['total'],
                                          locked=out['locked'], whole=whole,
-                                         settled=stable,
-                                         where=phone.fix() if phone else None)
+                                         settled=stable, where=where)
             landed = written is not None
             # Nothing written because there was nothing new to say means an
             # earlier reading of this same card already landed, which is still
@@ -3911,7 +3992,8 @@ def main():
                 if offer_log.id != told_offer or (landed and reading != told_as):
                     told_offer = offer_log.id
                     told_as = reading
-                    emit_offer(offer_log.id, parsed, rate)
+                    emit_offer(offer_log.id, parsed, rate, where=where,
+                               whole=whole)
 
         if args.display:
             cv2.imshow('uber-scan', render_panel(rate, parsed, whole=whole))
@@ -4180,8 +4262,11 @@ def main():
                     # ...and what the rig says about itself: whether the GPS
                     # fix is fresh, the Pi's temperature and throttling. Kept
                     # with the flags so 📷 Snap's reader.json says everything
-                    # the panel was told, not five of its seven things.
-                    extra = {'gps': updown.beat(), 'pi': pi.sample(time.monotonic())}
+                    # the panel was told, not five of its seven things. The
+                    # newest position rides inside `gps`, on the beat that
+                    # already travels to the panel and /api/status.
+                    extra = {'gps': updown.beat(beat_fix(phone)),
+                             'pi': pi.sample(time.monotonic())}
                     emit_alive(**dict(flags, **extra))
                     last_beat = (now_alive, flags, extra)
                     stall_told = flags['blind'] == 'stalled'

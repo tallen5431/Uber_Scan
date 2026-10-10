@@ -461,6 +461,12 @@ class Phone(object):
     def _judged(self, got, age):
         got['ageSeconds'] = round(age, 2) if age >= 0 else None
         got['ok'], got['why'] = usable(got, age=age, stale_after=self.stale_after)
+        # ...and how many more seconds it stays inside the staleness rule, for
+        # whoever is handed it and keeps it: the panel ages a beat's fix on its
+        # own clock once the beat stops coming, and greys it when this runs
+        # out, without a copy of the rule in JavaScript. Zero once stale.
+        got['freshFor'] = (round(self.stale_after - age, 1)
+                           if fresh(age, self.stale_after) else 0.0)
         return got
 
     def state(self):

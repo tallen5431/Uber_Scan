@@ -4473,6 +4473,12 @@ _bjournal = os.path.join(_bdir, 'journal.jsonl')
 open(_bjournal, 'w').close()
 _bfake = os.path.join(_bdir, 'beats.py')
 _bonce = os.path.join(_bdir, 'ran-once')
+# ...and the newest fix, which the beat now carries inside `gps`: the journal's
+# own fields, gps.py's judgement on it, and how long it had left inside the
+# staleness rule. Stale here, as it would be on a beat whose word is stale.
+# Marietta Square, a public place.
+_BFIX = {'lat': 33.9526, 'lon': -84.5499, 'gpsAge': 312.0, 'gpsErr': 12.0,
+         'gpsMode': 3, 'gpsOk': False, 'gpsWhy': 'stale', 'freshFor': 0.0}
 with open(_bfake, 'w') as fh:
     fh.write(
         'import json, os, sys, time\n'
@@ -4482,12 +4488,12 @@ with open(_bfake, 'w') as fh:
         'time.sleep(1.5)\n'
         'print(json.dumps({"alive": True, "at": 5, "tooBright": False,\n'
         '    "tooDim": False, "refindRefused": None, "notSaving": None,\n'
-        '    "gps": {"state": "stale", "ageSeconds": 312.0},\n'
+        '    "gps": {"state": "stale", "ageSeconds": 312.0, "fix": %s},\n'
         '    "cpuC": 71.4, "cpuCWhy": None,\n'
         '    "throttled": {"now": ["under-voltage"], "sinceBoot": ["under-voltage"]},\n'
         '    "throttledWhy": None}), flush=True)\n'
         'time.sleep(4.0)\n'
-        'sys.exit(1)\n' % (_bonce, _bonce))
+        'sys.exit(1)\n' % (_bonce, _bonce, repr(_BFIX)))
 _bproc, _bbase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
                         'SCANNER_ARGS': _bfake}, _bjournal)
 try:
@@ -4500,7 +4506,13 @@ try:
         time.sleep(0.05)
     _bb = (_bs or {}).get('beat') or {}
     eq('the status carries the heartbeat\'s GPS word and fix age',
-       _bb.get('gps'), {'state': 'stale', 'ageSeconds': 312.0})
+       {k: (_bb.get('gps') or {}).get(k) for k in ('state', 'ageSeconds')},
+       {'state': 'stale', 'ageSeconds': 312.0})
+    # The newest position, with its quality and the gate's answer, on the path
+    # the beat already travels: kept whole, not rebuilt from a list of the
+    # fields the server knew about when it was written.
+    eq('the status carries the beat\'s newest fix with its quality and the '
+       'gate\'s answer', (_bb.get('gps') or {}).get('fix'), _BFIX)
     eq('...and the Pi\'s temperature and throttling',
        (_bb.get('cpuC'), _bb.get('throttled')),
        (71.4, {'now': ['under-voltage'], 'sinceBoot': ['under-voltage']}))
@@ -4514,9 +4526,11 @@ try:
     time.sleep(0.5)
     _bstream = [m for m in _bheard if m.get('alive')]
     ok_('the stream carries the same heartbeat to the panel (%d)' % len(_bstream),
-        _bstream and _bstream[0].get('gps') == {'state': 'stale', 'ageSeconds': 312.0}
+        _bstream and (_bstream[0].get('gps') or {}).get('state') == 'stale'
         and _bstream[0].get('cpuC') == 71.4
         and (_bstream[0].get('throttled') or {}).get('now') == ['under-voltage'])
+    eq('...and the same fix, whole', (_bstream[0].get('gps') or {}).get('fix')
+       if _bstream else None, _BFIX)
     # The fake exits four seconds after its beat and is started again; the
     # second run says nothing. What the first one said is not the second's.
     _bgone = None

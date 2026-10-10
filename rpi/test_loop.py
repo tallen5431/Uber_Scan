@@ -295,6 +295,10 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 for k in range(len(frames))]
 
     announced, verdicts, beats, logs, alive, dropoffs = [], [], [], [], [], []
+    # ...and the keywords each offer line was told with: `where` and `whole`
+    # travel that way, and a recorder that kept only the positional arguments
+    # could not see whether the line and the row were handed one fix or two.
+    offer_kw = []
     said_settings = []
     real = (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
             PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
@@ -323,7 +327,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     SP.start_camera = lambda *a, **k: cam
     # Stamped, so a check can ask how soon after something a verdict came.
     SP.emit = lambda *a, **k: verdicts.append((a, k, time.time()))
-    SP.emit_offer = lambda *a, **k: announced.append(a)
+    SP.emit_offer = lambda *a, **k: (announced.append(a), offer_kw.append(k))
 
     def beat(*a, **k):
         beats.append(time.time())
@@ -399,7 +403,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             os.environ.pop(HO.ENV_DIR, None)
         else:
             os.environ[HO.ENV_DIR] = was_handoff
-    return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
+    return dict(rows=rows(), announced=announced, offer_kw=offer_kw,
+                beats=beats, calls=calls[0],
                 submitted=submitted[0], planners=said_planners,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
@@ -905,7 +910,8 @@ _cb = [b for b in _clean['alive'] if 'gps' in b]
 ok_('the loop puts the GPS on the beat (%d of %d beats)' % (len(_cb), len(_clean['alive'])),
     _cb and len(_cb) == len(_clean['alive']))
 eq('...as off, for a rig not asked for a position',
-   _cb[-1].get('gps') if _cb else None, {'state': 'off', 'ageSeconds': None})
+   _cb[-1].get('gps') if _cb else None,
+   {'state': 'off', 'ageSeconds': None, 'fix': None})
 eq('...and the Pi, with all four of its fields',
    sorted((_clean['alive'][-1].get('pi') or {}).keys()) if _clean['alive'] else [],
    ['cpuC', 'cpuCWhy', 'throttled', 'throttledWhy'])
@@ -1313,6 +1319,9 @@ class _StubPhone(object):
     def fix(self):
         return None
 
+    def latest(self):
+        return None
+
     def state(self):
         if self.t0 is None:
             self.t0 = time.time()
@@ -1377,6 +1386,65 @@ ok_('...with the reason it could not be used (%r)' % ((_grl or [{}])[0].get('why
 ok_('...and the beat says lost, not off',
     any((b.get('gps') or {}).get('state') == 'lost' for b in _gr['alive'])
     and not any((b.get('gps') or {}).get('state') == 'off' for b in _gr['alive']))
+
+
+# ONE fix per landing, handed to the row and to the offer line. A receiver
+# that answers differently on every call — a car moving, a thread storing a
+# newer sentence between two asks — is what tells one call from two: with two,
+# the row and the line put one card in two places. Each answer is judged the
+# way gps.Phone judges, so `ok`/`why` travel as they do on the rig. Marietta
+# Square and points north of it, not anywhere the rig has been.
+class _MovingPhone(object):
+    host, port = 'gpsd', 2947
+
+    def __init__(self):
+        self.asked = 0
+
+    def start(self):
+        return self
+
+    def stop(self):
+        pass
+
+    def fix(self):
+        self.asked += 1
+        return {'lat': 33.9526 + self.asked * 0.001, 'lon': -84.5499,
+                'ageSeconds': 0.4, 'mode': 3, 'err': 12.0, 'ok': True,
+                'why': None, 'source': 'gpsd'}
+
+    def latest(self):
+        # The beat's fix, kept apart from the rows' so a check can tell which
+        # one reached the beat.
+        return {'lat': 34.0001, 'lon': -84.5499, 'ageSeconds': 0.4, 'mode': 3,
+                'err': 12.0, 'ok': True, 'why': None, 'freshFor': 19.6,
+                'source': 'gpsd'}
+
+    def state(self):
+        return {'state': 'fixed', 'ageSeconds': 0.4, 'error': None}
+
+
+_mp = _MovingPhone()
+_m = run(lambda n, k: WHOLE, extra_argv=('--gps', 'gpsd'), seconds=15.0,
+         alive_every=0.05, phone=_mp,
+         until=lambda rows, ann, calls: len(ann) >= 1
+         and any(not x.get('kind') for x in rows))
+_mrows = [x for x in _m['rows'] if not x.get('kind')]
+_mkw = _m['offer_kw'][:1] or [{}]
+_mline = SP.JR.fix_fields(_mkw[0].get('where'))
+ok_('a --gps run lands a row and tells its offer (%d rows, %d lines)'
+    % (len(_mrows), len(_m['offer_kw'])), _mrows and _m['offer_kw'])
+eq('the offer line and the row carry the same fix',
+   _mline, {k: (_mrows[:1] or [{}])[0].get(k) for k in SP.JR.FIX_FIELDS})
+ok_('...a real one, judged usable (%r)' % (_mline.get('lat'),),
+    _mline.get('lat') is not None and _mline.get('gpsOk') is True)
+eq('...and the line is told whether the card was whole, as the row was',
+   _mkw[0].get('whole'), (_mrows[:1] or [{}])[0].get('whole'))
+_mbeat = [b['gps'].get('fix') for b in _m['alive'] if (b.get('gps') or {}).get('fix')]
+eq('the beat carries the newest fix with its quality and the gate\'s answer',
+   (_mbeat[-1] if _mbeat else {}).get('lat'), 34.0001)
+eq('...in the journal\'s own fields, and the time it has left inside the rule',
+   sorted((_mbeat[-1] if _mbeat else {}).keys()),
+   sorted(SP.JR.FIX_FIELDS + ('freshFor',)))
 
 # --- the Health object's own account of a Re-find ---------------------------
 # Reachable directly, and worth reaching: the loop above can only ever show one

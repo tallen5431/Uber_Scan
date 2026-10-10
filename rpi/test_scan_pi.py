@@ -1881,6 +1881,57 @@ bare = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0},
 eq('an unrated card falls back to what it printed',
    bare['offer']['billedMinutes'], 21.0)
 
+# --- where the car was, and the card's own yardstick, on the offer line -------
+#
+# A fix as gps.Phone hands it out: judged on the way out. Marietta Square, a
+# public place, at the owner's receiver's indoor figure.
+_where = {'lat': 33.952612345, 'lon': -84.549912345, 'ageSeconds': 1.24,
+          'mode': 3, 'err': 27.8, 'ok': True, 'why': None, 'source': 'gpsd'}
+_card = {'pay': 7.09, 'minutes': 23.0, 'miles': 7.6, 'hasTotal': True,
+         'legs': 1, 'toPickupMiles': None, 'milesUncertain': False,
+         'milesCorrected': True,
+         'scans': ['Q Early took + Order in progress\n$7.09\n23 min (76 mi) total'],
+         'text': '$7.09\n23 min (7.6 mi) total'}
+_rated = {'ready': True, 'perHour': 18.5, 'cardMinutes': 23.0, 'miles': 7.6,
+          'state': 'no'}
+placed = said(lambda: SP.emit_offer('x', _card, _rated, where=_where, whole=True))['offer']
+eq('the offer line carries where the car was, as the journal writes it',
+   [placed.get(k, 'absent') for k in SP.JR.FIX_FIELDS],
+   [33.95261, -84.54991, 1.2, 27.8, 3, True, None])
+eq('...the same seven fields the row is built with',
+   {k: placed.get(k, 'absent') for k in SP.JR.FIX_FIELDS}, SP.JR.fix_fields(_where))
+eq('...and the card\'s own yardstick fields',
+   [placed.get(k, 'absent') for k in ('miles', 'whole', 'hasTotal', 'legs',
+                                      'toPickupMiles', 'milesUncertain',
+                                      'milesCorrected')],
+   [7.6, True, True, 1, None, False, True])
+eq('...and that the card said it was an Early look, even as OCR spelled it',
+   placed.get('earlyLook', 'absent'), True)
+_refused = dict(_where, err=129.2, ok=False, why='rough')
+_rough = said(lambda: SP.emit_offer('x', _card, _rated, where=_refused, whole=True))['offer']
+eq('a fix the gate refused still rides, with the gate\'s answer',
+   (_rough.get('lat'), _rough.get('gpsOk'), _rough.get('gpsWhy')),
+   (33.95261, False, 'rough'))
+_nofix = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0},
+                                    {'ready': False, 'state': 'empty'}))['offer']
+eq('with no fix the line says so in every one of the seven, not by leaving them out',
+   [_nofix.get(k, 'absent') for k in SP.JR.FIX_FIELDS], [None] * len(SP.JR.FIX_FIELDS))
+eq('...and a card that never said Early look does not claim it',
+   _nofix.get('earlyLook', 'absent'), False)
+
+# The badge as the week's OCR actually spelled it, and the words near it that
+# are not it. Measured over 1,166 offers: 27 carry it, and this finds all 27
+# and nothing else.
+for _text, _want in (('Early look • Order in progress', True),
+                     ('Q Early took « Order in progress ?', True),
+                     ('Q Early look -Arder in progress', True),
+                     ('Early took. Order in pr', True),
+                     ('Est. delivery 4:15 PM • 8.6 mi', False),
+                     ('Delivery $12.99 Guaranteed (incl. tips) 7.7 mi + 28 min', False),
+                     ('Nearly lookout point, Marietta', False)):
+    eq('says_early_look(%r)' % _text[:34],
+       SP.says_early_look({'scans': [], 'text': _text}), _want)
+
 CAMERA_TICK = 1.0 / 30.0
 
 
@@ -2247,7 +2298,7 @@ eq('...saying it is the rig starting, with --gps on, and how long the Pi had '
                _start.get('uptime')), ('rig', 'start', True, 4321))
 # The GPS, before the phone has said anything: not yet a word at all.
 eq('the beat says nothing about a GPS that has not answered yet',
-   _ud.beat(), {'state': None, 'ageSeconds': None})
+   _ud.beat(), {'state': None, 'ageSeconds': None, 'fix': None})
 _ud.watch(1000.0, False, ('lost', None, None))
 eq('a GPS still looking is not a row before the hold',
    [r.get('about') for r in _ud_rows()], ['rig'])
@@ -2260,7 +2311,7 @@ _ud.watch(1030.0, False, ('stale', 21.0, 'ConnectionRefusedError: refused'))
 eq('a fix gone stale is not a row until it has stayed stale',
    len(_ud_rows()), 2)
 eq('...and the beat still says ok, with the true age beside it',
-   _ud.beat(), {'state': 'ok', 'ageSeconds': 21.0})
+   _ud.beat(), {'state': 'ok', 'ageSeconds': 21.0, 'fix': None})
 _ud.watch(1090.0, False, ('stale', 81.0, 'ConnectionRefusedError: refused'))
 _st = _ud_rows()[-1]
 eq('...and is one once it has (%r)' % (_st,),
@@ -2341,7 +2392,8 @@ _off_path = os.path.join(tempfile.mkdtemp(), 'j.jsonl')
 _off = SP.UpDown(JR.Journal(_off_path), asked_gps=False, gps_hold=0.0)
 _off.watch(0.0, False, SP.gps_now(None))
 _off.watch(500.0, False, SP.gps_now(None))
-eq('without --gps the beat says off', _off.beat(), {'state': 'off', 'ageSeconds': None})
+eq('without --gps the beat says off', _off.beat(),
+   {'state': 'off', 'ageSeconds': None, 'fix': None})
 eq('...and no GPS row is written', os.path.exists(_off_path), False)
 # ...and --no-journal is no rows at all, quietly.
 eq('with no journal there is nothing to write and nothing raised',
@@ -2494,6 +2546,36 @@ eq('a phone that has never handed over a position is lost',
    SP.gps_now(_Phone('looking', None, 'refused'))[0], 'lost')
 eq('...and gps.py\'s own error rides along', SP.gps_now(_Phone('looking', None, 'refused'))[2],
    'refused')
+
+
+# The beat's position: the newest fix whatever its age, judged by gps.py, in
+# the journal's seven fields so a page reads a beat's fix as it reads a row's.
+class _Latest(object):
+    def __init__(self, got):
+        self.got = got
+
+    def latest(self):
+        return dict(self.got) if self.got else None
+
+    def fix(self):
+        return None                 # past twenty seconds fix() has nothing
+
+
+_stale_fix = {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 45.0, 'mode': 3,
+              'err': 12.0, 'ok': False, 'why': 'stale', 'freshFor': 0.0}
+eq('the beat carries the newest fix even once it is stale, judged so',
+   SP.beat_fix(_Latest(_stale_fix)),
+   {'lat': 33.9526, 'lon': -84.5499, 'gpsAge': 45.0, 'gpsErr': 12.0,
+    'gpsMode': 3, 'gpsOk': False, 'gpsWhy': 'stale', 'freshFor': 0.0})
+eq('...and a fresh one says how long it has left inside the rule',
+   (SP.beat_fix(_Latest(dict(_stale_fix, ageSeconds=6.5, ok=True, why=None,
+                             freshFor=13.5))) or {}).get('freshFor', 'absent'),
+   13.5)
+eq('...and nothing when no fix has ever come', SP.beat_fix(_Latest(None)), None)
+eq('...or when there is no --gps', SP.beat_fix(None), None)
+_bud = SP.UpDown(None, asked_gps=True)
+eq('UpDown\'s beat carries the fix it is handed, beside the settled word',
+   _bud.beat(SP.beat_fix(_Latest(_stale_fix)))['fix']['gpsWhy'], 'stale')
 
 # --- the seen row's window, and the health line it came from -----------------
 _hw = SP.Health()
