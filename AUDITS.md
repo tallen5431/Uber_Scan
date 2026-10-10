@@ -1727,6 +1727,217 @@ every place at a second apiece. `tests/mapview.test.js` pins both directions.
 
 **The server's geocode cache could be lost and the map said nothing.** Since 9f2bd1a, /api/places has answered `unreadable` for a places.json that will not parse. map.html loadPlaces tested only `ok`, which is true on that answer, so it took the empty set in silence. A places.json that exists but cannot be read (EACCES/EISDIR) answered only `stored: null`. The cost is 1,325 places and 24 minutes to rebuild. Fix, overriding plan 4.5, which would have deleted the field as unread: the page reads it and says it on the load line, with the server's reason and the cost ('looked up again'). The read-error case answers `unreadable` too, and ENOENT stays a silent empty cache. Trap: said any earlier, the journal's own line writes over it a moment later. Checks: test_map 'a server cache that will not parse is said on the load line' and its three followers; 'a server with its lookups intact is not said to have lost them' (so the reader can fail both ways); test_server '...and says so too, rather than looking like a fresh box'.
 
+**The maps could not say where the car is now, or how sure the GPS was of
+it.** Both now draw the heartbeat's newest fix as a dot inside a circle the
+size of the GPS's own error, with "±28 m · 2 s old" in the map's corner.
+What to draw is `MV.hereDot`, shared by `live.html`'s Map view and `map.html`,
+and the gate it obeys is `rpi/gps.py`'s (see The GPS, below): nothing in
+JavaScript judges a fix again. A fix the gate refused is no dot, and its
+reason is said in the corner ("GPS too rough here (±129 m)", "GPS gives no
+accuracy here", "GPS reports no 2D/3D fix"), never a dot that silently is not
+there. A stale fix is drawn grey where it was, and a beat that stops coming
+is greyed by the page once gps.py's `freshFor` runs out, its age counting on
+(two durations, never two clocks subtracted). No fix at all is nothing drawn
+and nothing said. The map never follows the dot, because tiles cost hotspot
+data nobody has measured, and there is no new control on the bar. The dot is
+redrawn only when its position, error or grey changes, so the once-a-second
+age tick does not close its popup. Commit c5204a3.
+
+`map.html` asks `/api/status` every 10 s while visible. Measured on the three
+status.json files the rig's own snaps kept, with the new fields added: 1,783
+to 1,996 bytes an answer, at most 718,560 bytes an hour while open from
+elsewhere. The label's fit was measured by `rpi/test_layout.py` on every panel
+for every form it takes, at a four-digit error: inside the map, 44px clear of
+the zoom buttons, at most two rows. On the 3.5" hat `map.html` scrolls and
+leaves the map about forty pixels, so there it is held only to lying across
+the map clear of the buttons.
+
+Checks (mapview 232 → 251, test_map 208 → 219, test_dashboard 917 → 933,
+test_layout 1436 → 1653, test_lint 318 → 321), each made to fail by name:
+`fixOf` ignoring `gpsOk` fails 'a fix the GPS gate refused is no position
+here'; a dot that never greys fails 'a dot whose beat stopped coming greys
+once its time is up'; a rough fix drawn fails 'a rough fix is not drawn, and
+says why with the figure'; the age frozen at the beat fails '...and its age
+keeps counting, not frozen at the beat'; a map that re-anchors on every poll,
+or a panel that follows the dot, fails '...and the map does not move with
+it'; the label left unbounded fails '...clear of the zoom buttons at 480x320'.
+
+*The verifier found the one fit to the dot could come minutes late.* The fit
+belonged to whichever draw first HAD a dot: `live.html` kept `hereWanted`
+standing until a fix came in, and `map.html` fitted "the first time there is
+one". Entering Map view with gpsd still acquiring, then panning away, pulled
+the view back to the car when the fix arrived: a fit on a beat, which is the
+map moving with the GPS. The fit now belongs to the entry. `live.html` clears
+it on the first draw of a Map view with the map built, dot or no dot, and
+`map.html` on its first `/api/status` answer (or that ask failing). A late fix
+is drawn and the view is left alone; ⛶ Map round again, or a reload, frames
+it. Commit 204d3f8. Checks: test_dashboard '...and the view is not fitted to
+it: the one fit was the entry's' (the old `if (hereWanted && key)` puts it
+back and it fails, the fit being the pins plus [33.9706, -84.5499]); test_map
+'...and the view is not fitted to it: the one fit was the first answer's'
+(waiting for a dot fails it, the view going to [33.9526, -84.5499]).
+
+**"+31.3 mi out of your way" was printed for a McDonald's 21.8 mi from the
+car, on a job whose whole trip was 9.4 mi.** Two faults made it. The detour
+line on `live.html`'s Map view was measured from `askCar`: the newest journal
+row carrying a position, up to 20 minutes old and cached 120 s more, which is
+another card's car. And nothing asked whether the map had found the right
+branch of a chain, since `MV.farFrom` only accuses a pin past 75 mi.
+
+Now `here` is `MV.cardFix`: the fix the scanner took once when the card landed
+and put on the offer line, passed by the gate. `askCar`, `carFix`,
+`FIX_STALE_MS`, `FIX_AGEING_MS` and the age hedges are deleted with it, and so
+is the await they put between the key and the first mark. *The `partial`
+entry above describes that await as it was; the one that remains in the
+`finally` is `needLeaflet`.* A pin farther from a card's fix than the card's
+own distance plus `SLACK_MI` (0.5, now shared with `judge()`) is refused, by
+`MV.cardRefuses`, with a line that blames the map, never the world: "wrong
+pin for McDonald's — 21.8 mi from you, past the card's 9.4 mi
+(rig-corrected)". The order in the car keeps its card on the hold (`server.js`
+`cardOf`: the fix, the gate's answer, the miles and the yardstick flags), and
+its end is checked against its OWN card's fix the same way.
+
+Which cards are a yardstick at all is `MV.cardYardstick`: the summed miles,
+never `toPickupMiles`; never an Early look card; only a printed total or two
+summed legs, so a one-leg card (DoorDash's shape) says "no yardstick yet"; and
+a figure `rate()` doubted refuses as a suspect one does. Measured over the
+week's 1,166 cards in that order: 10 none, 17 untrusted, 27 Early look, 528
+one leg, 584 yardsticks (577 naming a pickup, 267 rig-corrected). Instead of
+a figure, a card with no usable fix says which: "this card came up without a
+GPS fix", "GPS fix on this card too rough to measure from (±129 m)", and the
+same for the held card. Commit fc77935.
+
+*The verifier found the refusal reached only after the held order's guards.*
+With nothing in the car, or a held end the geocoder could not place, the same
+McDonald's was drawn as an ordinary green pickup under "nothing in the car to
+compare this against". And a refused pin kept its pickup colour, because only
+`farFrom` turned a pin red: the map and its caption kept two rules for "this
+pin is wrong". `drawMap` now asks `MV.cardRefuses` once per pin and uses the
+one answer for the pin's colour, its popup and the line, where both refusals
+come straight after the misread-name line and before every held-order guard.
+The refusal leads its line because the 3.5" hat's clamp eats the tail:
+measured by `rpi/test_layout.py` at the widest case (12 W's, 74.9, 99.9,
+rig-corrected) the whole line does not fit three rows at 480x320, so the `,
+past` clause is the declared tail and a check holds that what the clamp keeps
+opens with "wrong pin for". `DISC_PLACE_SHOWN` is 12 because at 20 both disc
+lines run past two rows at 800x480. A hold with no card (a holding.json from
+before the server kept one) says "the rig kept no card for the order in your
+car", not that it came up without a fix. And 'judge() and the card's disc
+share the half mile' asserted `SLACK_MI === 0.5` and could not fail; it now
+puts `judge()` at the disc's own edge, 9.85 and 9.95 mi on the same 9.4 mi
+figure. Commit a3cf4e7.
+
+Nothing Settled is reopened: the figure is still straight-line miles with no
+minutes and no route through the new job's end, a pin is only refused and
+coloured, never moved, and no distance reaches the verdict, $/hr or the stack
+line. Checks (mapview 251 → 283, test_dashboard 935 → 943, test_stacking 170
+→ 172, test_layout 1653 → 1768), each made to fail by name, among them:
+`outsideCard` returning null fails 'a same-brand pin 21.8 mi from a fresh fix
+on a 9.4 mi card is refused, not printed as "+31.3"'; the yardstick on
+`toPickupMiles` fails '...measured on the summed figure, not the approach
+leg'; `askCar` put back fails 'the detour comes from the card's own fix, not
+the newest journal row that carries one' and 11 more; the refusal moved back
+behind the held guards fails 'the pin is refused with nothing in the car too,
+not hidden behind "nothing in the car to compare this against"'; a colour that
+ignores the refusal fails '...drawn red, not as the pickup' and two more;
+`setHolding` dropping the card fails "the order in the car keeps its own
+card's fix and size"; `DISC_PLACE_SHOWN` 20 fails '...and nothing is cut short
+at 800x480 (a pickup this card contradicts, a held end its card
+contradicts)'.
+
+### The GPS
+
+**Every position the rig kept was two bare numbers, and `keepPlaces: false`
+kept them anyway.** `rpi/gps.py` kept gpsd's lat and lon and threw away what
+gpsd says about them, so a four-satellite fix and a clear sky's were the same
+downstream. And `rpi/journal.py`'s header said `"keepPlaces": false` turned
+off "a record of where the driver was" while every row kept the coordinate.
+
+Each fix now carries `mode` and `err` (gpsd's eph, in metres, with epx and
+epy when sent; an NMEA fix carries GGA's quality and hdop). There is ONE gate,
+`gps.usable(fix)`: mode 2 or better, an error present and at most
+`FIX_ERR_MAX`, and inside the existing staleness rule, with a word for why
+not (unrated, nomode, rough, stale). The Phone puts the answer on every fix
+it hands out as `ok`/`why`, so nothing downstream asks again, and `MV.fixOf`
+reads `gpsOk`: the box a place is searched in, the trail and the stray test
+all refuse a fix the gate refused, or one nobody judged. The journal writes
+seven fields (lat, lon, gpsAge, gpsErr, gpsMode, gpsOk, gpsWhy) through one
+`fix_fields()`, and `keepPlaces: false` drops all seven. Commit 491518c.
+
+`FIX_ERR_MAX` is 50 m, measured rather than chosen: the owner's VK-162 reads
+eph 27.8 on mode 3 indoors; real gpsd 3.25 made a four-satellite HDOP 6.8
+stream mode 3 with eph 129.2, so mode alone bounds nothing; and on gpsd's NMEA
+path eph is HDOP × 19 (2.6 → 49.4, 2.7 → 51.3). Through the real `MV.detour`,
+20,000 random metro triples with the car moved 50 m in a random direction:
+the "+N mi" figure moved 0.017 mi at the median, 0.054 at p95 and 0.062 at
+most, and the half-mile call flipped on 11 (0.06%). Traps: quality is judged
+before age, so a rough fix that went stale is still `rough` and is never
+greyed in as somewhere the car was; the gate goes stale on the Phone's own
+`stale_after`, not the module's, so one Phone cannot hold two rules. Checks
+(test_gps 99 → 137, test_journal → 405), each made to fail by name, among
+them 'a mode-3 fix at 129.2 m is refused as rough' (a mode-only gate), 'quality
+is judged before age: ...', 'keepPlaces:false writes no position' and 'a fix
+nobody judged is written as not usable'.
+
+*Left failing by it, and not fixed here.* The full run on q5/detour-fix fails
+one check, `rpi/test_offerspage.py` '...near where the car actually was'
+(499 of 500): the offers page's route sheet boxes its lookups on nothing. Its
+fixture rows carry `lat`/`lon` with no `gpsOk`, the shape of a row written
+before the gate, and `MV.fixOf` now refuses such a row as unjudged, which is
+what the gate entry above means it to do. The lane never ran that suite.
+Measured: the same three fixture rows given `gpsOk=True` pass all 500, so the
+fixture is what is stale, not the page. Rows in the real week carry no
+position at all (0 of 1,166), so no driver's history loses a box to this.
+
+**The card reached the panel with no position on it, and the panel borrowed
+one.** `rpi/scan_pi.py` now asks `phone.fix()` ONCE per landing and hands that
+one object to the journal row and to the offer line, which carries the same
+seven fields and the card's yardstick for the detour line above (miles,
+whole, hasTotal, legs, toPickupMiles, milesUncertain, milesCorrected,
+earlyLook). The line keeps them under `keepPlaces: false`, as it keeps pickup
+and dropoff: it is what the panel shows now, not a record. `earlyLook`,
+measured over the week: 27 offers carry "Early look / Order in progress" in
+102 of their 105 frames, OCR spells it "Early took" and "Arder in progress",
+and the pattern finds all 27 and no other offer. It is kept out of `parse()`
+so neither port nor the corpus grows a field no judge reads.
+
+The heartbeat carries the newest fix whatever its age (`Phone.latest()`,
+judged stale past 20 s) plus `freshFor`, so the page greys a dot without a
+copy of the rule. `server.js` needed no change: it relays the beat whole, and
+test_server now holds it to that. Measured: 121 bytes a beat as relayed (240
+→ 361), 108,900 bytes an hour while a panel is open remotely. Commit bdfd374.
+Checks (test_scan_pi 473 → 492, test_loop 261 → 267, test_server 524 → 526,
+test_gps 137 → 139): 'the offer line and the row carry the same fix', against
+a fake receiver answering differently on each call, fails to a second
+`phone.fix()`; 'the beat carries the newest fix even once it is stale, judged
+so' fails to `fix()` in place of `latest()`.
+
+`rpi/README.md` now says how the USB receiver on the owner's rig is run, as
+seen rather than "untried": gpsd 3.22 with `"driver":"u-blox"`, mode 3 at eph
+27.8 m indoors, a static hold that keeps a parked receiver exactly still (so
+a parked scatter test is not an accuracy test), and whether gpsd's u-blox
+path reports the receiver's own accuracy or derives it from HDOP stated as
+unmeasured. "The Pi has no GPS" and a `--gps` help naming only a phone app are
+gone (commits e721a72, 72d61a8).
+
+**A 📷 Snap keeps where the car was whatever `keepPlaces` says, and the
+driver was told otherwise.** status.json is what `/api/status` answered (the
+offer line's fix and the beat's), and reader.json has carried the fix at the
+press, and the card's text, since before any position was added. Neither
+README put a snap outside the setting, so a driver who turned it off was told
+their positions were not kept, with up to a hundred folders of them on the
+Pi. Said rather than honoured, on purpose: status.json is written by
+`server.js`, which does not read the scanner's settings (the reason the mark
+and pair rows already sit on the same list), and a snap is a picture of what
+the panel showed, addresses and all. Dropping only the position from
+reader.json would make a snap that kept the addresses and claimed to follow
+the setting. A later change that makes snaps honour it has to make `server.js`
+aware of `keepPlaces` first. Commit 6f0bac0. Checks: test_loop 'a snap keeps
+where the car was even under keepPlaces:false, as rpi/README.md says' (fails,
+getting None, if `reader_record` drops the fix); test_lint "rpi/README.md's
+keepPlaces text says a 📷 Snap is outside it" and "...and so does
+README.md's".
+
 ### The phone's scanner
 
 **The MILES cell printed the distance from before the repair.** `scan.html`'s
@@ -3669,7 +3880,8 @@ panel for the driver to act on, which the header of `map-view.js` forbids.
 With a pickup and a dropoff the median *is* the midpoint, so both ends come out
 equally far and **both are accused** — the good pin condemned beside the bad one.
 Measured, not reasoned: `straysAmong` on such a pair returns 2. This is why
-`MV.farFrom` exists and is anchored on the car's measured GPS fix instead; see
+`MV.farFrom` exists and is anchored on a measured GPS fix instead (the card's
+own since the detour entry under Done, "The maps, again"); see
 `map-view.js`. *(Done — the panel now marks the wrong pin and withholds the
 figure. Before it, a misread street answered in Idaho produced "+3619.4 mi out
 of your way" on the driving panel.)*
@@ -3870,8 +4082,9 @@ a `near` field that held a *placeholder* rather than a value, every one of the
 1,325 distinct places went to a world-wide geocoder as a bare string — and 47
 came back "nowhere near the rest", up to 7,627 miles out: Papa Johns Pizza,
 McDonald's, Burger King, Wendy's. Fixed by `localityOf`, which reads the town
-back off the driver's own cards. Whether the rig's GPS should be recording a
-position on rows at all is a separate question nobody has asked yet.
+back off the driver's own cards. That was the week before the USB receiver:
+rows written since carry a position with its quality and the gate's answer,
+and `keepPlaces: false` drops it (Done, "The GPS").
 
 ---
 
@@ -4084,10 +4297,11 @@ did not survive are under Settled, "What else the rig could collect".
   position the phone's GPS over the shared hotspot, or a USB receiver on the
   Pi, is nearer, faster and free. Do not join the car to the 2GB hotspot: it
   downloads software updates over Wi-Fi.
-- *Worth doing, lower priority:* a USB GPS receiver on the Pi (about $17), but only with a fix
-  quality gate, because the panel's "+N mi out of your way" would use it;
-  keeping cards that showed a payout but did not parse, for new layouts and
-  the first DoorDash cards; tesseract's per-word confidence on the scans,
+- *Done since:* a USB GPS receiver on the Pi, with the fix quality gate it
+  was conditional on — see Done, "The GPS", and the detour entry under "The
+  maps, again", which is what the gate guards.
+- *Worth doing, lower priority:* keeping cards that showed a payout but did
+  not parse, for new layouts and the first DoorDash cards; tesseract's per-word confidence on the scans,
   collection only, until the doubt pictures show whether it predicts anything.
 
 **Feeding the phone's screen to the Pi over HDMI was researched, not built

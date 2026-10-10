@@ -4187,7 +4187,7 @@ The WATCH command is sent only after a gpsd banner has actually been seen, so
 an app that merely borrowed the port is never sent something it did not
 advertise.
 
-`rpi/test_gps.py` is 99 checks and weighted the way the risk is — a little on
+`rpi/test_gps.py` is 139 checks and weighted the way the risk is — a little on
 parsing a good sentence, most of it on refusing to produce a number. It runs
 against a real socket on a real port, because the framing, the threading and
 the reconnect are the parts most likely to be wrong and a stubbed transport
@@ -8139,7 +8139,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 37 suites, 10,600-odd checks
+npm test                # all 37 suites, 11,100-odd checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -8173,12 +8173,12 @@ python3 rpi/test_exposure.py    # 192 on flicker, brightness, gain and
                                 #     being reported as a phone
 python3 rpi/test_track.py       # 144 on following the phone as it drifts, and
                                 #     on the centre recovery that never fired
-python3 rpi/test_gps.py         #  99 on the position stamped beside a card:
+python3 rpi/test_gps.py         # 139 on the position stamped beside a card:
                                 #     that a fix too old to mean anything is
                                 #     refused rather than rounded, and that a
                                 #     row written before the rig had a GPS
                                 #     still reads
-python3 rpi/test_journal.py     # 391 on keeping one row per offer, on a
+python3 rpi/test_journal.py     # 405 on keeping one row per offer, on a
                                 #     distrusted distance always saying so twice,
                                 #     and on the row agreeing with the screen
                                 #     about why a verdict was withheld
@@ -8190,7 +8190,7 @@ python3 rpi/test_cropbox.py     #  45 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 473 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 492 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
@@ -8211,7 +8211,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 318 on the faults that only surface when a
+python3 rpi/test_lint.py        # 324 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #   75 on the three files the browser and the
@@ -8229,29 +8229,29 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 917 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 943 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 1436 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 1768 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 500 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
-python3 rpi/test_stacking.py    # 170 on judging a second job against the one
+python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 524 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 526 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
                                 #     is not one — and on the CSV export, which
                                 #     is the one thing here that leaves the
                                 #     machine and had no check at all
-python3 rpi/test_map.py         # 208 on the map check page: that it asks
+python3 rpi/test_map.py         # 221 on the map check page: that it asks
                                 #     nobody anything until told to, that it
                                 #     keeps to one geocoder request a second,
                                 #     that it shows what it could not place —
@@ -8259,14 +8259,14 @@ python3 rpi/test_map.py         # 208 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/mapview.test.js      # 232 on the deciding behind both maps, with
+node tests/mapview.test.js      # 283 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward
                                 #     cases — two walks in a row, a cache hit
                                 #     mid-walk, a hotspot that drops — cost
                                 #     milliseconds instead of seconds
-python3 rpi/test_loop.py        # 261 on the scan loop re-telling a card once
+python3 rpi/test_loop.py        # 269 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
