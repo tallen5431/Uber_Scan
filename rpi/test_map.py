@@ -685,7 +685,10 @@ const KNOWN = {
   for (const [name, fixes] of [['good', [GOOD, Object.assign({}, GOOD, { lat: 33.9616 })]],
                                ['rough', [Object.assign({}, GOOD, { gpsErr: 129.2,
                                  gpsOk: false, gpsWhy: 'rough' })]],
-                               ['none', [null]]]) {
+                               ['none', [null]],
+                               // Opened with no fix; the first one comes in
+                               // on the next ask, after a pan, say.
+                               ['late', [null, GOOD]]]) {
     const hp = await browser.newContext({ viewport: { width: 1200, height: 820 } })
       .then((c) => c.newPage());
     await hp.addInitScript(STUB);
@@ -1187,6 +1190,11 @@ try:
     _hn = here.get('none') or {}
     eq('no fix is nothing drawn and nothing said',
        (_hn.get('note'), len(_hn.get('dots') or [])), (None, 0))
+    _hl = here.get('lateMoved') or {}
+    eq('a fix first seen after the page opened is drawn', _hl.get('dots'),
+       [[33.9526, -84.5499]])
+    eq('...and the view is not fitted to it: the one fit was the first answer\'s',
+       (_hl.get('view'), _hl.get('bounds')), (None, None))
 
     # --- the miles nobody paid for ------------------------------------------
     #

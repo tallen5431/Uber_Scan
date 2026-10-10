@@ -4357,7 +4357,11 @@ circle the size of its error, and "±12 m · 2 s old" in the map's corner — gr
 once it is older than the staleness rule, and no dot but a reason when the gate
 refuses it — "GPS too rough here (±129 m)" for that four-satellite fix. The
 map never follows the dot: entering Map view fits the view to include it once,
-and `map.html` does the same the first time it has one.
+and `map.html` does the same on its first answer from the rig. A fix that first
+turns up after that — Map view entered with none — is drawn where it is and the
+view is left alone, because a fit then would pull the map back from wherever
+the driver had panned to; ⛶ Map round again, or a reload of `map.html`, frames
+it.
 
 ### A rig that was blind for a whole shift, and nothing said so
 

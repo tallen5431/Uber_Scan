@@ -2963,6 +2963,19 @@ const framed = (page) => page.waitForFunction(
     await page.click('#viewMode');            // → phone
     await page.waitForTimeout(300);
     out.hereOff = await page.evaluate(look);
+    // Map view entered with NO fix, and the first one turns up afterwards —
+    // in the car, a minute later, after the driver has panned. The one fit
+    // belonged to the entry, which had nothing to include; a fit now is the
+    // map moving with the GPS.
+    await page.evaluate(beat, null);
+    await page.click('#viewMode');            // → scene
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');            // → map, no fix
+    await page.waitForTimeout(300);
+    await page.evaluate(() => { window.__fit = null; window.__view = null; });
+    await page.evaluate(beat, Object.assign({}, GOOD, { lat: 33.9706 }));
+    await page.waitForTimeout(300);
+    out.hereLate = await page.evaluate(look);
     await page.close();
   }
 
@@ -6048,6 +6061,13 @@ try:
        (None, 0, 0))
     eq('out of Map view the label goes with the map',
        (got.get('hereOff') or {}).get('note', 'absent'), None)
+    _hl = got.get('hereLate') or {}
+    eq('a fix first seen after Map view was entered is drawn',
+       _hl.get('dots'), [[33.9706, -84.5499]])
+    _lfit = _hl.get('fit') or []
+    ok_('...and the view is not fitted to it: the one fit was the entry\'s '
+        '(%r, %r)' % (_lfit, _hl.get('view')),
+        [33.9706, -84.5499] not in _lfit and _hl.get('view') != [33.9706, -84.5499])
 
     # --- 📷 Snap ----------------------------------------------------------
     #

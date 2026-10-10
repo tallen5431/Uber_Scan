@@ -3898,7 +3898,8 @@
     if (key !== hereKey) {
       hereKey = key;
       if (hereLayer) { theMap.removeLayer(hereLayer); hereLayer = null; }
-      if (!key) return;
+    }
+    if (key && !hereLayer) {
       hereLayer = L.layerGroup().addTo(theMap);
       var colour = d.grey ? '#8a8f98' : '#38bdf8';
       // The circle is the GPS's own estimate in metres, not a promise: gpsd
@@ -3913,10 +3914,19 @@
       }).bindPopup('<b>you are here</b><br>±' + Math.round(d.err) + ' m')
         .addTo(hereLayer);
     }
-    if (key && hereWanted) {
+    /* The one fit, and only on the first draw of this Map view whatever it
+       found. Waiting for a dot instead left hereWanted standing when the view
+       was entered with no fix, so the first fix to come in — minutes later,
+       after the driver had panned to look at something — pulled the view
+       back to it: a fit on a beat, which is the map moving with the GPS. With
+       no dot at entry there is nothing to include, and ⛶ Map round again is
+       the press that frames it. */
+    if (hereWanted) {
       hereWanted = false;
-      hereAnchor = [d.lat, d.lon];
-      fitView(lastBounds || []);
+      if (key) {
+        hereAnchor = [d.lat, d.lon];
+        fitView(lastBounds || []);
+      }
     }
   }
 

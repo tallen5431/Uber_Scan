@@ -288,6 +288,9 @@
   // reached the server, on this page's clock. See askWhere and drawHere.
   var gpsFix = null, gpsAt = 0;
   var hereLayer = null, hereAnchor = null;
+  // True until the page's first answer from /api/status has been drawn: the
+  // one moment the view may be fitted to the dot. See drawHere.
+  var hereWanted = true;
   // What is drawn now, so the tick that ages the label does not redraw the dot
   // under an open popup every second.
   var hereKey = '';
@@ -1157,9 +1160,13 @@
    * behind it is rpi/gps.py's, and nothing here asks it again. On the NucBox,
    * which runs no scanner, there is no beat and so nothing at all.
    *
-   * The view is fitted to include the dot ONCE, the first time there is one,
+   * The view is fitted to include the dot ONCE, on the page's first answer,
    * and never follows it: every pan is tiles down a hotspot whose cost has not
-   * been measured, and the trail and the pins are what this page is for. */
+   * been measured, and the trail and the pins are what this page is for. Not
+   * "the first time there is one": opened with no fix, a page that waited for
+   * one pulled the view back to the car whenever the first fix came in —
+   * after the driver had panned off to the trail — which is a fit on a beat.
+   * A reload is the press that frames it, as ⛶ Map is on the panel. */
   function drawHere() {
     if (!map) return;
     var d = MV.hereDot(gpsFix, Date.now() - gpsAt);
@@ -1183,7 +1190,7 @@
       radius: 6, weight: 2, color: '#ffffff', fillColor: colour, fillOpacity: 1
     }).bindPopup('<b>you are here</b><br><span class="note">±' + Math.round(d.err)
                  + ' m</span>').addTo(hereLayer);
-    if (!hereAnchor) {
+    if (hereWanted && !hereAnchor) {
       hereAnchor = [d.lat, d.lon];
       if (pinBounds.length) {
         map.fitBounds(pinBounds.concat([hereAnchor]), { padding: [30, 30] });
@@ -1205,8 +1212,13 @@
         gpsFix = (beat && beat.gps && beat.gps.fix) || null;
         gpsAt = Date.now() - (beat && typeof beat.ageMs === 'number' ? beat.ageMs : 0);
         drawHere();
+        hereWanted = false;
       })
-      .catch(function () { /* a page off the network keeps what it had, aging */ });
+      .catch(function () {
+        // A page off the network keeps what it had, aging — and an answer
+        // that never came is still the one this page had to fit to.
+        hereWanted = false;
+      });
   }
 
   function esc(s) {
