@@ -42,8 +42,12 @@ Three things this deliberately does not do:
 
     It is a real trade. This is a record of where the driver was and when, it
     lives on a card in a vehicle, and it is copied to a machine at home. Setting
-    `"keepPlaces": false` alongside the other settings turns it off and changes
-    nothing else in this file. The Trip Planner rows server.js writes follow it
+    `"keepPlaces": false` alongside the other settings turns it off: no places,
+    and no position either — `lat`, `lon` and the five `gps*` fields beside
+    them (see fix_fields) — and nothing else in this file changes. Until the
+    position went too, this paragraph said the record of where the driver was
+    could be turned off while every row went on carrying the coordinate the
+    rig's GPS gave. The Trip Planner rows server.js writes follow it
     too (the scanner says `keep` on the planner line); the ⌖ mark and pair rows
     server.js writes do not yet, which README.md names as open.
   * it does not fail. A full card, a read-only filesystem or a missing directory
@@ -589,9 +593,10 @@ class OfferLog:
 
     def __init__(self, journal, keep_places=True):
         self.journal = journal
-        # Whether to store where an offer went. On by default because a record
-        # nobody can match to a remembered job is hard to check, and checking it
-        # is the point; `"keepPlaces": false` in the settings turns it off.
+        # Whether to store where an offer went, and where the car was when it
+        # came up. On by default because a record nobody can match to a
+        # remembered job is hard to check, and checking it is the point;
+        # `"keepPlaces": false` in the settings turns both off.
         self.keep_places = keep_places
         self.episode = None          # the accumulator's episode being recorded
         self.id = None
@@ -1382,17 +1387,16 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # `gpsAge` is kept because it is the difference between a position and a
         # claim. A fix a second old is where the car was; one nineteen seconds
         # old is a third of a mile of motorway ago, and a reader months later
-        # can only tell those apart if the number is written down.
-        # Both or neither. Half a coordinate is not half a position, it is no
-        # position with a number attached — and a `lat` on its own is exactly
-        # the shape a reader would test for before drawing a pin. gps.py cannot
-        # produce one, because parse_line refuses a fix missing either half;
-        # this is the same rule stated where the row is built, so that a caller
-        # handing over a dict from somewhere else cannot write one in.
-        'lat': _pair(where, 'lat'),
-        'lon': _pair(where, 'lon'),
-        'gpsAge': (_round(where.get('ageSeconds'), 1)
-                   if _pair(where, 'lat') is not None else None),
+        # can only tell those apart if the number is written down. `gpsErr`
+        # and `gpsMode` for the same reason, and `gpsOk`/`gpsWhy` because they
+        # are the one gate's answer — see fix_fields, which is also what the
+        # offer line scan_pi.py prints is built from.
+        #
+        # And all seven go with `"keepPlaces": false`. This file's own header
+        # promised that setting turned off "a record of where the driver was
+        # and when", and until now it dropped the addresses and kept the
+        # coordinates.
+        **fix_fields(where, keep_places),
         # Whether the merged reading had stopped moving. Recorded rather than
         # required: a card whose OCR never settles is exactly the marginal
         # reading worth studying later, and refusing to write it would leave
@@ -1434,7 +1438,7 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # the map. It stays a fair trade to be aware of: this is a record of
         # where the driver was and when, it lives on a card in a vehicle and is
         # copied to a machine at home, and `"keepPlaces": false` in the settings
-        # turns it off without touching anything else.
+        # turns it off, with the position above, and touches nothing else.
         'places': list(places or []),
         # Which of those is which. `places` is what the card printed and is what
         # the offers page shows; these two say which end is the shop and which
@@ -1475,6 +1479,49 @@ def _round(value, places):
     if not isinstance(value, (int, float)):
         return None
     return round(value, places) if places else int(round(value))
+
+
+# The fields a position is written as, in this order, on an offer row and on
+# the offer line scan_pi.py prints. One list, so the two cannot drift.
+FIX_FIELDS = ('lat', 'lon', 'gpsAge', 'gpsErr', 'gpsMode', 'gpsOk', 'gpsWhy')
+
+
+def fix_fields(where, keep_places=True):
+    """A fix from gps.Phone, as the seven fields in FIX_FIELDS.
+
+    All None when there is no position — no `--gps`, no answer, a stale fix,
+    half a coordinate — and all None under `"keepPlaces": false`, which is a
+    choice not to keep where the driver was.
+
+    `gpsOk` and `gpsWhy` are COPIED from the fix, never worked out here: the
+    gate is gps.usable(), and Phone puts its answer on every fix it hands out
+    as `ok` and `why`. A dict handed in from anywhere else carries no answer,
+    and is written as not usable with no reason — nobody judged it, so nothing
+    may be shown or compared from it. Every reader of these rows asks `gpsOk`
+    and nothing else; see MV.fixOf.
+
+    Both or neither for the coordinate. Half a coordinate is not half a
+    position, it is no position with a number attached — and a `lat` on its
+    own is exactly the shape a reader would test for before drawing a pin.
+    gps.py cannot produce one, because parse_line refuses a fix missing either
+    half; this is the same rule stated where the row is built, so that a
+    caller handing over a dict from somewhere else cannot write one in. And
+    nothing about a fix is written without the fix: an age, an error or an
+    answer with no coordinate under it is a number in a column that reads as a
+    GPS having worked.
+    """
+    lat, lon = _pair(where, 'lat'), _pair(where, 'lon')
+    if lat is None or not keep_places:
+        return dict.fromkeys(FIX_FIELDS)
+    mode = where.get('mode')
+    ok = where.get('ok') is True
+    return {'lat': lat, 'lon': lon,
+            'gpsAge': _round(where.get('ageSeconds'), 1),
+            'gpsErr': _round(where.get('err'), 1),
+            'gpsMode': (mode if isinstance(mode, int)
+                        and not isinstance(mode, bool) else None),
+            'gpsOk': ok,
+            'gpsWhy': None if ok else where.get('why')}
 
 
 def _pair(where, which):

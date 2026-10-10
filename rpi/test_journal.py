@@ -1160,6 +1160,48 @@ for _name, _absent in (('no GPS configured at all', None),
     eq('%s leaves the row without a latitude' % _name, _r['lat'], None)
     eq('...and without a longitude', _r['lon'], None)
     eq('...and without an age', _r['gpsAge'], None)
+    eq('...and without any of the fix\'s other fields',
+       [_r[k] for k in JR.FIX_FIELDS], [None] * len(JR.FIX_FIELDS))
+
+# What the fix says about itself, and the gate's answer, beside it. Marietta
+# Square: a public place. 27.8 m is the owner's receiver indoors; 129.2 m is a
+# four-satellite mode-3 fix real gpsd produced.
+_good = {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 1.24, 'mode': 3,
+         'err': 27.8, 'ok': True, 'why': None, 'source': 'gpsd'}
+_r = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g4', seq=1,
+                where=_good)
+eq('a fix\'s error and mode reach the row beside it',
+   (_r['gpsErr'], _r['gpsMode']), (27.8, 3))
+eq('...and the gate\'s answer, copied', (_r['gpsOk'], _r['gpsWhy']), (True, None))
+_rough = dict(_good, err=129.2, ok=False, why='rough')
+_r = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g5', seq=1,
+                where=_rough)
+eq('a refused fix is still written, with why it was refused',
+   (_r['lat'], _r['gpsErr'], _r['gpsOk'], _r['gpsWhy']),
+   (33.9526, 129.2, False, 'rough'))
+# The gate is gps.usable() and nothing here repeats it: a dict that never went
+# through gps.Phone carries no answer, and nobody may draw or compare from it.
+_r = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g6', seq=1,
+                where={'lat': 33.9526, 'lon': -84.5499, 'mode': 3, 'err': 5.0,
+                       'ageSeconds': 1.0})
+eq('a fix nobody judged is written as not usable, not judged here',
+   (_r['gpsOk'], _r['gpsWhy']), (False, None))
+
+# keepPlaces off is a choice not to keep where the driver was. It dropped the
+# addresses and went on writing the coordinate, which is the record the header
+# said it turned off.
+_kp_dir = tempfile.mkdtemp()
+_kp_log = JR.OfferLog(JR.Journal(os.path.join(_kp_dir, 'kp.jsonl')),
+                      keep_places=False)
+_kp_acc = OfferAccumulator()
+_kp = _kp_acc.add(P.parse(_CARD), now=1_700_000_000.0)
+_kp_row = _kp_log.consider(_kp, P.rate(_kp, MONEY), now=1_700_000_000.0,
+                           locked=True, where=_good)
+ok_('keepPlaces:false still writes the offer', _kp_row is not None)
+eq('keepPlaces:false writes no position',
+   [(_kp_row or {}).get(k, 'absent') for k in JR.FIX_FIELDS],
+   [None] * len(JR.FIX_FIELDS))
+shutil.rmtree(_kp_dir, ignore_errors=True)
 
 # A row written before any of this existed reads back the same way, which is
 # what stops the map inventing a pin for a year of history.

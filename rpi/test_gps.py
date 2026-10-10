@@ -15,6 +15,7 @@ the clock is faked, because twenty seconds of staleness per case is twenty
 seconds nobody should spend.
 """
 
+import json
 import os
 import socket
 import sys
@@ -190,6 +191,78 @@ eq('a boolean is not a latitude', G.parse_line(
     '{"class":"TPV","mode":3,"lat":true,"lon":true}'), None)
 eq('nor is a string', G.parse_line(
     '{"class":"TPV","mode":3,"lat":"34.0","lon":"-84.6"}'), None)
+
+# --- what a fix says about itself ---------------------------------------------
+#
+# Kept, and judged in one place. Marietta Square, a public place, rather than
+# anywhere the rig has actually been. The figures are real ones: 27.8 m is the
+# owner's VK-162 on mode 3 indoors (epx 17.8, epy 12.8), and 129.2 m is what
+# real gpsd 3.25 made of a four-satellite stream at HDOP 6.8 — still mode 3.
+
+def tpv(**fields):
+    msg = {'class': 'TPV', 'lat': 33.9526, 'lon': -84.5499}
+    msg.update(fields)
+    return json.dumps(msg)
+
+
+got = G.parse_line(tpv(mode=3, eph=129.2, epx=80.1, epy=95.3))
+eq('a 3D fix keeps its error estimate', got and got.get('err'), 129.2)
+eq('...and its mode', got and got.get('mode'), 3)
+eq('...and its two halves when gpsd sends them',
+   got and (got.get('epx'), got.get('epy')), (80.1, 95.3))
+eq('a 2D fix says it is 2D', (G.parse_line(tpv(mode=2, eph=12.0)) or {}).get('mode'), 2)
+got = G.parse_line(tpv(mode=3))
+eq('a TPV gpsd sent without eph has no error estimate, not a zero',
+   got and got.get('err', 'absent'), None)
+ok_('...and is still a fix: gps.py refuses nothing new', got is not None)
+eq('...and has no halves it was not sent', got and ('epx' in got or 'epy' in got), False)
+eq('a TPV with no mode stated keeps None for it, not a guess',
+   (G.parse_line(tpv(eph=12.0)) or {}).get('mode', 'absent'), None)
+got = G.parse_line(RMC)
+eq('an RMC says nothing about its quality, and None says so',
+   (got.get('mode', 'absent'), got.get('err', 'absent')), (None, None))
+got = G.parse_line(GGA)
+eq('a GGA keeps its fix quality and HDOP',
+   (got.get('quality'), got.get('hdop')), (1, 0.9))
+eq('...and turns neither into metres', got.get('err', 'absent'), None)
+
+# The gate. One function, one answer, and a word for why not.
+eq('the owner\'s indoor fix is usable',
+   G.usable({'mode': 3, 'err': 27.8, 'ageSeconds': 1.0}), (True, None))
+eq('a mode-3 fix at 129.2 m is refused as rough — mode bounds nothing',
+   G.usable({'mode': 3, 'err': 129.2, 'ageSeconds': 1.0}), (False, 'rough'))
+eq('a fix exactly at FIX_ERR_MAX is usable',
+   G.usable({'mode': 3, 'err': G.FIX_ERR_MAX, 'ageSeconds': 1.0}), (True, None))
+eq('...and one a tenth over it is not',
+   G.usable({'mode': 3, 'err': G.FIX_ERR_MAX + 0.1, 'ageSeconds': 1.0}),
+   (False, 'rough'))
+eq('a 2D fix inside the limit is usable',
+   G.usable({'mode': 2, 'err': 20.0, 'ageSeconds': 1.0}), (True, None))
+eq('a fix with no error estimate is refused as unrated',
+   G.usable({'mode': 3, 'err': None, 'ageSeconds': 1.0}), (False, 'unrated'))
+eq('...which is every NMEA fix, which states none',
+   G.usable(dict(G.parse_line(GGA), ageSeconds=1.0)), (False, 'unrated'))
+eq('a fix with an error but no mode is refused as nomode',
+   G.usable({'mode': None, 'err': 20.0, 'ageSeconds': 1.0}), (False, 'nomode'))
+eq('...and so is mode 1, which is no fix at all',
+   G.usable({'mode': 1, 'err': 20.0, 'ageSeconds': 1.0}), (False, 'nomode'))
+eq('a fix past the age rule is refused as stale',
+   G.usable({'mode': 3, 'err': 20.0, 'ageSeconds': G.STALE_AFTER + 0.5}),
+   (False, 'stale'))
+eq('...and one exactly at it is not',
+   G.usable({'mode': 3, 'err': 20.0, 'ageSeconds': G.STALE_AFTER}), (True, None))
+eq('a fix nobody can date is stale',
+   G.usable({'mode': 3, 'err': 20.0, 'ageSeconds': None}), (False, 'stale'))
+eq('the caller\'s unrounded age is the one judged',
+   G.usable({'mode': 3, 'err': 20.0, 'ageSeconds': 20.0}, age=20.004),
+   (False, 'stale'))
+# A stale fix is drawn grey where it was; a rough one is not drawn at all. So a
+# rough fix that has also gone stale must still say rough, or the panel would
+# grey in a position that was never good enough to show.
+eq('quality is judged before age: a rough fix that went stale is rough',
+   G.usable({'mode': 3, 'err': 129.2, 'ageSeconds': 600.0}), (False, 'rough'))
+eq('a boolean is not an error estimate',
+   G.usable({'mode': 3, 'err': True, 'ageSeconds': 1.0}), (False, 'unrated'))
 
 # Not everything on the wire is a position, and most of it is not.
 for noise in ('$GPGSV,3,1,11,01,45,123,35*4D', 'hello', '$GPRMC,182049.00,A',
@@ -417,6 +490,71 @@ try:
     it.stop()
 finally:
     phone.close()
+
+# The gate's answer leaves with the fix, end to end over a real socket: the
+# scan loop hands Phone.fix() to the journal and the offer line, and the
+# heartbeat hands Phone.latest() to the panel, so this is where `ok` and `why`
+# either arrive or do not.
+clock = Clock()
+phone = FakePhone(greet='{"class":"VERSION","release":"3.22"}',
+                  script=[tpv(mode=3, eph=129.2) + '\r\n'])
+try:
+    it = G.Phone(phone.address, stale_after=20.0, clock=clock).start()
+    ok_('a rough fix arrives', waited(lambda: it.fix() is not None))
+    got = it.fix() or {}
+    eq('...and is handed out, not refused — gps.py only reports',
+       (got.get('lat'), got.get('err')), (33.9526, 129.2))
+    eq('...with the gate\'s answer on it',
+       (got.get('ok', 'absent'), got.get('why', 'absent')), (False, 'rough'))
+    it.stop()
+finally:
+    phone.close()
+
+clock = Clock()
+phone = FakePhone(greet='{"class":"VERSION","release":"3.22"}',
+                  script=[tpv(mode=3, eph=27.8, epx=17.8, epy=12.8) + '\r\n'])
+try:
+    it = G.Phone(phone.address, stale_after=20.0, clock=clock).start()
+    ok_('a good fix arrives', waited(lambda: it.fix() is not None))
+    got = it.fix() or {}
+    eq('...and is usable', (got.get('ok', 'absent'), got.get('why', 'absent')),
+       (True, None))
+    got = it.latest() or {}
+    eq('...and latest() says the same of it while it is fresh',
+       (got.get('ok', 'absent'), got.get('ageSeconds')), (True, 0.0))
+    clock.now += 21.0
+    eq('past the limit fix() is still None, as it always was', it.fix(), None)
+    got = it.latest()
+    # The heartbeat's dot: drawn grey where the car was, rather than gone with
+    # nothing saying why.
+    eq('...while latest() keeps the position, judged stale',
+       got and (got['lat'], got['ok'], got['why'], got['ageSeconds']),
+       (33.9526, False, 'stale', 21.0))
+    clock.now -= 3600.0
+    got = it.latest()
+    eq('a clock run backwards past it gives no age, and stale',
+       got and (got['ageSeconds'], got['why']), (None, 'stale'))
+    it.stop()
+finally:
+    phone.close()
+
+# The phone's own limit is the gate's limit. Phone(stale_after=5) refusing at
+# five seconds while the gate waited for twenty would be two staleness rules.
+clock = Clock()
+phone = FakePhone(greet='{"class":"VERSION","release":"3.22"}',
+                  script=[tpv(mode=3, eph=27.8) + '\r\n'])
+try:
+    it = G.Phone(phone.address, stale_after=5.0, clock=clock).start()
+    ok_('a fix arrives for a five-second limit', waited(lambda: it.fix() is not None))
+    clock.now += 6.0
+    eq('the gate goes stale on the phone\'s own limit, not the module\'s',
+       (it.latest() or {}).get('why'), 'stale')
+    it.stop()
+finally:
+    phone.close()
+
+eq('latest() with nothing received is None, not an empty fix',
+   G.Phone('127.0.0.1:9').latest(), None)
 
 # The app's timer runs out mid-stream: one sentence, then the socket closes.
 # What must happen is that the fix ages out and the reader keeps trying.

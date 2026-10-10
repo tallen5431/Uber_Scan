@@ -1,10 +1,27 @@
-"""Where the rig is, when the phone is willing to say.
+"""Where the rig is, when the receiver is willing to say.
 
-    python3 rpi/gps.py --from 100.75.197.117:2947
+    python3 rpi/gps.py --from 127.0.0.1               # gpsd on the Pi
+    python3 rpi/gps.py --from 100.75.197.117:2947     # a phone's server app
 
-The Pi has no GPS and no clock. The phone in the mount has both, and a GPS
-server app on it will hand them out over TCP on port 2947 — gpsd's port — to
-anything that asks. This is the thing that asks.
+Anything that speaks on TCP port 2947 — gpsd's port — can hand the rig a
+position, and this is the thing that asks. It was written for a phone in the
+mount running a GPS server app, because the Pi had no GPS of its own. It has
+one now: a VK-162 (u-blox 7) on USB, read by gpsd on the Pi, and on the owner's
+rig `--from 127.0.0.1` reads it. Both routes are still served, and everything
+below about a source that stops is as true of a USB lead knocked out as of an
+app on a timer.
+
+WHAT A FIX SAYS ABOUT ITSELF, WHICH IS NOW KEPT. A position is only as good as
+the receiver's own account of it, and that account used to be thrown away here:
+gpsd's `mode` and its error estimate `eph` arrived on every TPV and were
+dropped, so a fix from four satellites at an HDOP of 6.8 and one from a clear
+sky were the same two numbers to everything downstream. Each fix now carries
+`mode` and `err` (gpsd's `eph`, metres), and `epx`/`epy` when sent; an NMEA
+sentence carries what it gives — GGA its fix `quality` and `hdop` — and None
+for what it does not. This file REPORTS them and refuses nothing it did not
+refuse before. Whether a fix is good enough to show or compare is `usable()`'s
+question, asked in one place, and its answer travels on the fix as `ok` and
+`why`.
 
 WHY IT IS WORTH HAVING. The geocoder is the weak link in everything this rig
 says about *where*. Handed "Chipotle" it answers with a Chipotle, and handed a
@@ -28,7 +45,10 @@ drives with. So:
     written against showed "Runtime Left 4:48" — so it WILL stop mid-shift, and
     a position forty minutes old presented as a position is exactly the
     confidently-wrong number this project exists to avoid. Returning None is
-    always available and always honest.
+    always available and always honest. `latest()` is the one exception, and
+    it says so on what it returns: the heartbeat hands the panel the newest fix
+    whatever its age, judged `stale` past the limit, so a dot that stopped
+    moving is drawn grey rather than vanishing with nothing saying why.
   * It reconnects quietly and for ever. A car loses its hotspot constantly and
     a line of log for each attempt would bury everything else.
 
@@ -82,6 +102,33 @@ DEFAULT_PORT = 2947
 # — which branch of a chain, which end of a metro — is asked at a scale where a
 # third of a mile is nothing.
 STALE_AFTER = 20.0
+
+# How rough a fix may be, in metres of gpsd's own error estimate (`eph`), and
+# still be used for anything shown or compared. Provisional: the first week of
+# logged shifts is what sets it, from how often a moving car stays inside it.
+#
+# Why an error figure and not the mode: MODE BOUNDS NOTHING. Run through real
+# gpsd 3.25 by the design study (gpsuses/verify-3/run.out), a four-satellite
+# stream at HDOP 6.8 came out mode 3 with eph 129.2 m, every TPV of it — and a
+# stream whose GSA said 2D but whose GGA carried an altitude was promoted to
+# mode 3 too. A gate on `mode == 3` alone would have passed all of them.
+#
+# Why 50: the owner's VK-162 read eph 27.8 m on mode 3 indoors (epx 17.8, epy
+# 12.8), so a working receiver sits well inside it. Where gpsd derives eph
+# from HDOP (its NMEA path: eph = HDOP x 19 m — measured, HDOP 2.6 gave 49.4
+# and 2.7 gave 51.3), 50 m is HDOP 2.6 or better. And at the scale of the one
+# figure a position feeds today, it is small: moving the car 50 m in a random
+# direction moved live.html's "+N mi out of your way" by 0.017 mi at the
+# median, 0.054 at p95 and 0.062 at most (the 2 x 50 m bound), over 20,000
+# random metro triples through the real MV.detour, and flipped the half-mile
+# call on 11 of them (0.06%). The 129.2 m fix moved it by up to 0.160 mi. So
+# 50 m is not where the detour's error lives — the pins are — and the limit is
+# there to refuse a fix that says it is lost, not to grade a working one.
+#
+# eph is a model: gpsd's own documentation calls its certainty unknown, and it
+# cannot see multipath. The parked-scatter check in the first week is what says
+# whether it is an honest bound on this receiver.
+FIX_ERR_MAX = 50.0
 
 # Long enough that a phone which accepted the connection and then stopped
 # talking is noticed, short enough that stop() is honoured promptly.
@@ -182,12 +229,69 @@ def _sane(lat, lon):
     return True
 
 
+def _number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v
+
+
+def fresh(age, stale_after=STALE_AFTER):
+    """The staleness rule, stated once: an age in seconds, on the local
+    monotonic clock, no older than `stale_after` and not negative.
+
+    fix(), state() and usable() all ask this, on the same unrounded age, so the
+    position, the word and the gate cannot disagree about the last tenth of a
+    second before a fix goes stale. A missing age is not fresh: a fix nobody
+    can date cannot be said to be where the car is now.
+    """
+    return _number(age) and 0 <= age <= stale_after
+
+
+def usable(fix, age=None, stale_after=STALE_AFTER):
+    """(True, None) when a fix may be shown or compared, else (False, why).
+
+    THE gate, and the only one. Nothing on the panel, the maps or the journal
+    asks this question again: Phone puts the answer on every fix it hands out
+    as `ok` and `why`, journal rows write it as `gpsOk` and `gpsWhy`, and the
+    pages read those. A second copy in JavaScript would be a second rule the
+    first time either moved.
+
+    `why` is one word, and the pages phrase it — live.html and map.html each
+    name every word below, and rpi/test_lint.py holds them to this function:
+
+      unrated  no error estimate in metres: an NMEA sentence, which states
+               none, or a TPV gpsd sent without `eph`
+      nomode   no 2D or 3D mode stated
+      rough    an error estimate over FIX_ERR_MAX
+      stale    older than `stale_after` (or of no known age)
+
+    Quality before age, deliberately. A stale fix is drawn grey where it was,
+    and only a fix that was good when it arrived has a "where it was" worth
+    drawing; a rough one is not drawn at all.
+
+    `age` is the caller's unrounded figure when it has one; otherwise the
+    fix's own `ageSeconds`.
+    """
+    err = fix.get('err')
+    if not _number(err):
+        return False, 'unrated'
+    mode = fix.get('mode')
+    if not (_number(mode) and mode >= 2):
+        return False, 'nomode'
+    if err > FIX_ERR_MAX:
+        return False, 'rough'
+    if not fresh(fix.get('ageSeconds') if age is None else age, stale_after):
+        return False, 'stale'
+    return True, None
+
+
 def parse_line(line):
     """One line from the phone -> a fix, or None.
 
     Returns a dict with at least lat and lon, or None for anything that is not
     a position: a gpsd banner, a sentence with no fix in it, a corrupt one, a
     blank. None is not an error here — most lines are not positions.
+
+    Every fix carries `mode` and `err` (metres), None where the line did not
+    say. Kept, not judged: see usable().
     """
     line = (line or '').strip()
     if not line:
@@ -212,7 +316,18 @@ def parse_line(line):
             return None
         if not _sane(lat, lon):
             return None
-        out = {'lat': float(lat), 'lon': float(lon), 'source': 'gpsd'}
+        out = {'lat': float(lat), 'lon': float(lon), 'source': 'gpsd',
+               # What the receiver says about this position: 2 or 3, and its
+               # horizontal error estimate in metres. Dropped here until now,
+               # so a four-satellite fix gpsd itself put at 129 m and a clear
+               # sky's were indistinguishable downstream. None when not sent.
+               'mode': int(mode) if _number(mode) else None,
+               'err': float(msg['eph']) if _number(msg.get('eph')) else None}
+        # ...and its two halves, longitude-wise and latitude-wise, only when
+        # sent: reported, never judged on.
+        for half in ('epx', 'epy'):
+            if _number(msg.get(half)):
+                out[half] = float(msg[half])
         for here, there in (('speed', 'speed'), ('heading', 'track'),
                             ('altitude', 'alt')):
             v = msg.get(there)
@@ -237,7 +352,9 @@ def parse_line(line):
         lat, lon = _degrees(f[3], f[4]), _degrees(f[5], f[6])
         if not _sane(lat, lon):
             return None
-        out = {'lat': lat, 'lon': lon, 'source': 'nmea'}
+        # RMC says valid or void and nothing about how good: no mode, no error.
+        out = {'lat': lat, 'lon': lon, 'source': 'nmea', 'mode': None,
+               'err': None}
         try:
             # Knots on the wire; metres per second everywhere in this file, to
             # match what gpsd reports, so that a caller never has to ask which
@@ -258,7 +375,17 @@ def parse_line(line):
     lat, lon = _degrees(f[2], f[3]), _degrees(f[4], f[5])
     if not _sane(lat, lon):
         return None
-    out = {'lat': lat, 'lon': lon, 'source': 'nmea'}
+    # GGA's fix quality (1 GPS, 2 DGPS, ...) and HDOP, which are what it gives.
+    # Neither is a mode or a distance: HDOP is a ratio, and turning it into
+    # metres takes a constant this file would be inventing — gpsd uses 19 m
+    # for it — so `err` stays None and usable() says `unrated`.
+    out = {'lat': lat, 'lon': lon, 'source': 'nmea', 'mode': None,
+           'err': None, 'quality': int(f[6]) if f[6].isdigit() else None}
+    if len(f) > 8:
+        try:
+            out['hdop'] = float(f[8])
+        except (TypeError, ValueError):
+            pass
     if len(f) > 9:
         try:
             out['altitude'] = float(f[9])
@@ -304,16 +431,37 @@ class Phone(object):
         A copy, not the stored dict: a caller that kept the reference and read
         it later would be reading whatever the thread had written since, which
         is a fix with no timestamp attached to it.
+
+        Judged on the way out: `ok` and `why` are usable()'s answer for this
+        fix at this age, so whoever stores or sends it sends the answer with
+        it. A fix past `stale_after` is still None here, exactly as before.
         """
+        got, age = self._newest()
+        if got is None or not fresh(age, self.stale_after):
+            return None
+        return self._judged(got, age)
+
+    def latest(self):
+        """The newest fix whatever its age, judged — or None if none came.
+
+        For the heartbeat and nothing that records: the panel draws where the
+        car was, grey once the fix is `stale`, and a fix that went stale would
+        otherwise leave the dot to vanish with nothing saying why. A clock
+        that ran backwards past it gives no age and `stale`, as state() does.
+        """
+        got, age = self._newest()
+        return None if got is None else self._judged(got, age)
+
+    def _newest(self):
         with self._lock:
             if self._fix is None:
-                return None
-            age = self._clock() - self._at
-            if age > self.stale_after or age < 0:
-                return None
-            out = dict(self._fix)
-        out['ageSeconds'] = round(age, 2)
-        return out
+                return None, None
+            return dict(self._fix), self._clock() - self._at
+
+    def _judged(self, got, age):
+        got['ageSeconds'] = round(age, 2) if age >= 0 else None
+        got['ok'], got['why'] = usable(got, age=age, stale_after=self.stale_after)
+        return got
 
     def state(self):
         """A word for the dashboard, and why, when there is a why.
@@ -343,11 +491,11 @@ class Phone(object):
         # 'fixed' would put a green light on a subsystem that is not running,
         # which is this project's own worst failure shape in miniature.
         #
-        # Judged on the unrounded age, the same comparison fix() makes, so the
-        # word and the position can never disagree about the last tenth of a
-        # second before a fix goes stale.
+        # Judged on the unrounded age by fresh(), the same rule fix() and
+        # usable() ask, so the word and the position can never disagree about
+        # the last tenth of a second before a fix goes stale.
         if fix is not None and word != 'off':
-            word = 'fixed' if 0 <= since <= self.stale_after else 'stale'
+            word = 'fixed' if fresh(since, self.stale_after) else 'stale'
         return {'state': word, 'error': why, 'lines': lines,
                 'ageSeconds': (round(since, 1)
                                if since is not None and since >= 0 else None),
@@ -451,10 +599,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--from', dest='address', required=True,
                     metavar='HOST[:PORT]',
-                    help='the phone running the GPS server app, e.g. '
-                         '100.75.197.117:2947 — its Tailscale address rather '
-                         'than its hotspot one, so it keeps working when the '
-                         'rig is on wifi at home')
+                    help='where gpsd or a GPS server app is listening: '
+                         '127.0.0.1 for gpsd and a USB receiver on the Pi, or '
+                         'a phone\'s Tailscale address, e.g. '
+                         '100.75.197.117:2947, rather than its hotspot one, so '
+                         'it keeps working when the rig is on wifi at home')
     ap.add_argument('--seconds', type=float, default=30.0,
                     help='how long to watch for (0 = until interrupted)')
     ap.add_argument('--stale', type=float, default=STALE_AFTER)
@@ -468,8 +617,13 @@ def main(argv=None):
         while args.seconds <= 0 or time.time() - started < args.seconds:
             got = phone.fix()
             if got:
-                line = '%.5f, %.5f  (%s, %.1fs old)' % (
-                    got['lat'], got['lon'], got['source'], got['ageSeconds'])
+                # ...and what the receiver says about it, and the gate's
+                # answer, because "it prints positions" is not the same as
+                # "the rig will use them".
+                line = '%.5f, %.5f  (%s, %.1fs old, mode %s, err %s m) %s' % (
+                    got['lat'], got['lon'], got['source'], got['ageSeconds'],
+                    got.get('mode'), got.get('err'),
+                    'usable' if got['ok'] else 'refused: %s' % got['why'])
             else:
                 s = phone.state()
                 line = '%s%s' % (s['state'],
@@ -488,8 +642,9 @@ def main(argv=None):
     s = phone.state()
     print('no fix. %s%s' % (s['state'], ' — %s' % s['error'] if s['error'] else ''),
           file=sys.stderr)
-    print('Check the app is running and showing a GPS lock, that the address '
-          'is right, and that the rig can reach it: nc -z %s %d'
+    print('Check gpsd (or the phone\'s app) is running and has a lock — '
+          '`gpspipe -w -n 10` on the Pi shows what gpsd hears — that the '
+          'address is right, and that the rig can reach it: nc -z %s %d'
           % (phone.host, phone.port), file=sys.stderr)
     return 1
 
