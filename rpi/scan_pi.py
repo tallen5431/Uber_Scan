@@ -775,12 +775,13 @@ def age_ms(stamp, now):
 
 
 def beat_extra(beat):
-    """The rest of a kept beat as the wire carried it: `gps` (is the fix fresh)
-    and the Pi's fields, spread the way emit_alive spreads them.
+    """The rest of a kept beat as the wire carried it: `gps` (is the fix fresh,
+    and the fix the maps drew) and the Pi's fields, spread the way emit_alive
+    spreads them.
 
-    `gps` here is the fix's freshness the panel was shown; reader.json's own
-    `gps` beside it is the link to the phone's app and the fix itself. Two
-    different questions, both worth having in a snap.
+    `gps` here is what the panel was shown, as of that beat; reader.json's own
+    `gps` beside it is the link to gpsd or the phone's app and the fix as it
+    is at the press. Two different moments, both worth having in a snap.
     """
     extra = beat[2] if len(beat) > 2 else {}
     out = {'gps': extra.get('gps')}
@@ -1779,8 +1780,10 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
     position, and a rig with no `--gps` wrote rows exactly like it — 0 of the
     1,166 on the owner's week carry one, and nothing anywhere said whether that
     was a choice or a fault. A Pi that is throttling reads slower and says so
-    nowhere. `gps` is `{state, ageSeconds}` — the word UpDown has settled on,
-    which is the same word the journal is told, and how old the newest fix is.
+    nowhere. `gps` is `{state, ageSeconds, fix}` — the word UpDown has settled
+    on, which is the same word the journal is told, how old the newest fix is,
+    and that fix itself with its quality and the gate's answer (beat_fix), for
+    the maps' "you are here" dot.
     `pi` is PiHealth.sample()'s four fields, spread onto the beat as names of
     their own the way the four above are: the page reads `cpuC` and
     `throttled`, and the reason beside each null goes on to /api/status.
@@ -2937,10 +2940,12 @@ def main():
                          'confirming frame alongside the first, which is 56%% '
                          'of the wall clock for the same evidence')
     ap.add_argument('--gps', default=None, metavar='HOST[:PORT]',
-                    help='a phone running a GPS server app, e.g. '
-                         '100.75.197.117:2947 — its Tailscale address rather '
-                         'than its hotspot one, so it keeps working wherever '
-                         'the rig is. Each offer is then stamped with where the '
+                    help='where gpsd or a GPS server app is listening: '
+                         '127.0.0.1 for gpsd and the USB receiver on the Pi, '
+                         'or a phone\'s Tailscale address, e.g. '
+                         '100.75.197.117:2947, rather than its hotspot one, so '
+                         'it keeps working wherever the rig is. Each offer is '
+                         'then stamped with where the '
                          'car was, which is what lets the map page resolve a '
                          'place near you rather than near anywhere. Off unless '
                          'given, and a phone that is not answering costs '
@@ -3038,7 +3043,7 @@ def main():
         scanner.quad, scale=track_scale,
         calibrated=np.array(cfg['quad'], dtype=np.float32))
 
-    # Where the car is, when a phone is willing to say. Off unless --gps was
+    # Where the car is, when gpsd or a phone is willing to say. Off unless --gps was
     # given, and a bad address is a line on stderr rather than a refusal to
     # start: the rig's job is to read offers, and it does that whether or not
     # anything knows where it is doing it. See rpi/gps.py, which is most
