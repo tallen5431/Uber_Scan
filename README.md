@@ -346,7 +346,9 @@ Two things it is careful about:
   changes nothing else, and the Trip Planner's stops follow it too. A
   destination read off the phone is still written on the `mark` and `pair`
   rows server.js writes whatever it says — the server does not read that
-  setting — and that is open. `--no-journal` keeps no record at all. Either way
+  setting — and that is open. A 📷 Snap keeps the card's places and the car's
+  position whatever it says too: it is a picture of what the panel showed,
+  kept on the Pi and not synced home. `--no-journal` keeps no record at all. Either way
   `rpi/journal.jsonl` is gitignored and, like everything under `rpi/`, the
   server refuses to serve the file itself.
 

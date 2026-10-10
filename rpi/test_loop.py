@@ -2296,6 +2296,34 @@ eq('a card on record that has not reached the journal is said as not landed',
    SP.reader_record(None, 1790000000.0, offer_log=_OnRecord()).get('offer'),
    {'id': '1790000000000-1605', 'landed': False})
 
+# A snap is a picture of what the panel showed, and `"keepPlaces": false` is a
+# rule about the journal. rpi/README.md says a snap keeps the fix and the
+# card's text whatever that setting says; this holds the code to that, so a
+# snap that started honouring keepPlaces would have to change what the README
+# tells the driver too. Marietta Square: a public place, an invented fix.
+class _KeepsNoPlaces(object):
+    id, landed_id, keep_places = '1790000000000-1606', None, False
+
+
+class _FixAt(object):
+    def state(self):
+        return 'ok'
+
+    def fix(self):
+        return {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 0.6,
+                'mode': 3, 'err': 27.8, 'ok': True, 'why': None}
+
+
+_snap_read = {'at': 1790000000.0, 'wholeScreen': False, 'crop': None,
+              'text': '$4.21 Jimmy John\'s Marietta Sq', 'parsed': {}, 'rate': None}
+_snap_rec = SP.reader_record(_snap_read, 1790000001.0,
+                             offer_log=_KeepsNoPlaces(), phone=_FixAt())
+eq('a snap keeps where the car was even under keepPlaces:false, as '
+   'rpi/README.md says',
+   ((_snap_rec.get('gps') or {}).get('fix') or {}).get('lat'), 33.9526)
+eq('...and the card\'s own text, places and all',
+   (_snap_rec.get('read') or {}).get('text'), '$4.21 Jimmy John\'s Marietta Sq')
+
 # The counters a snap reports are the ones the health line would, as they
 # stand, and asking for them does not start a new window.
 _h = SP.Health()

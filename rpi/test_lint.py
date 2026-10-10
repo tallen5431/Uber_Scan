@@ -916,6 +916,21 @@ _readme = open(os.path.join(ROOT, 'README.md')).read()
 ok_('the record of what has been audited is readable', len(_audits) > 500)
 ok_('...and the README points at it', 'AUDITS.md' in _readme)
 
+# What `"keepPlaces": false` does not reach, said where the setting is. The
+# offer line and the heartbeat carry the car's position now, and a 📷 Snap
+# keeps both (status.json) and the fix at the press (reader.json) whatever
+# the setting says — test_loop holds reader_record to that. Both READMEs
+# list what the setting misses; a snap left off that list is a driver told
+# their positions are not kept, with a hundred folders of them on the Pi.
+_kp_rpi = re.search(r'"settings": \{ "keepPlaces": false \}(.*?)\n### ',
+                    _readme_rpi, re.S)
+_kp_top = re.search(r"`\"keepPlaces\":\s+false` alongside(.*?)\n\n", _readme, re.S)
+ok_("rpi/README.md's keepPlaces text says a 📷 Snap is outside it",
+    bool(_kp_rpi) and '📷 Snap' in _kp_rpi.group(1)
+    and 'whatever `keepPlaces` says' in _kp_rpi.group(1))
+ok_("...and so does README.md's",
+    bool(_kp_top) and '📷 Snap' in _kp_top.group(1))
+
 # The keypad's withheld verdict, in the one page that tells a driver how to use
 # the keypad. README said that answer came "on the rig only", while ui.js blanks
 # the headline and every figure under it on four reasons and refuses LOG on

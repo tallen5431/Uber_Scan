@@ -2843,6 +2843,14 @@ server.js writes the row only when it may. Two kinds of row server.js writes do
 NOT follow it yet, and that is open rather than settled: a destination read off
 the phone — the ⌖ `mark` row, and the ends on a `pair` row — is written
 whatever this says, because the server does not read the scanner's settings.
+And a 📷 Snap is not the journal: it is a press that keeps what the panel was
+showing, and keeps it whatever `keepPlaces` says. Its `status.json` holds the
+offer line — pickup, dropoff, and where the car was when the card landed with
+that fix's quality — and the heartbeat's newest fix; its `reader.json` holds
+the card's text and the fix at the press. They stay in `rpi/snaps/` on the Pi,
+gitignored, and only the newest hundred (`SNAPS_KEEP`, oldest removed first);
+the sync does not copy them home, but **⤓ one file** on `snaps.html` is made to
+be sent somewhere, places and all.
 
 ### How well the three card shapes actually read
 
