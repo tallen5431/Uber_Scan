@@ -30,6 +30,10 @@ rpi/.settings.json*
 # committed it, and is refused on the first frame — for its age, or for a
 # folder that is not there — and logged.
 rpi/.snap.json*
+# ...and the scan loop's note to the run after it that it went quiet over a
+# stalled camera. Committed, every checkout would hold back the first restart
+# a stalled camera on that machine asks for.
+rpi/.stalled*
 rpi/live-frame.jpg*
 # Advisory between this project's own scripts, so a second one says which pid
 # holds the camera instead of dying with a traceback about a device. It contains

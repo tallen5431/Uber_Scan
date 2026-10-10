@@ -30,6 +30,46 @@ def check(name, ok, detail='', fix=''):
     return ok
 
 
+def scanner_running():
+    """Whether a scanner is running on this machine.
+
+    Read off /proc, where every process's command line is: the autopilot execs
+    `python3 rpi/scan_pi.py`, so the scanner is the python whose script is that
+    file — and not an editor that has it open. UBERSCAN_PROC stands in for
+    /proc, the way UBERSCAN_SYNC_TIMER stands in for the timer, so the answer
+    can be checked on a machine with no scanner running. Nothing found there is
+    no: a machine without a /proc has no scanner of this rig's on it either.
+    """
+    proc = os.environ.get('UBERSCAN_PROC') or '/proc'
+    try:
+        pids = [p for p in os.listdir(proc) if p.isdigit()]
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open(os.path.join(proc, pid, 'cmdline'), 'rb') as fh:
+                argv = fh.read().split(b'\0')
+        except OSError:
+            continue
+        if (len(argv) > 1 and b'python' in os.path.basename(argv[0])
+                and os.path.basename(argv[1]) == b'scan_pi.py'):
+            return True
+    return False
+
+
+def rig_age_ms(stamp_ms, now_ms):
+    """How long before `now_ms` a journal stamp was, or None where the clock
+    cannot say — scan_pi.age_ms, on the journal's milliseconds. Its rule, not a
+    copy of it: server.js's clockAge is the same rule for the server's side.
+    Imported here and not at the top, because a preflight on a Pi that cannot
+    import the scanner has its own lines above to say so; this is only asked
+    with a scanner running. That scanner is another process, and may be
+    another python: an import that fails here is said on the camera's own
+    line, by the try round it."""
+    import scan_pi as SP
+    return SP.age_ms(stamp_ms / 1000.0, now_ms / 1000.0)
+
+
 def check_import(module, package, apt=True):
     try:
         m = __import__(module)
@@ -305,6 +345,96 @@ def main():
                   'follows it. Give the Pi a network before a shift and let NTP '
                   'land before scanning starts.' % worst)
 
+            # ...and whether the camera can see, by the rig's own last word.
+            #
+            # The rig was blind for a whole shift and nothing said so: one
+            # read in 9.4 days, the heartbeat beating throughout, the panel
+            # saying "scanner reading". The scanner now writes `camera` up rows
+            # when it stops being able to see — a stalled feed, or a box too
+            # dark for it to be sure of seeing a card arrive — and when it can
+            # again, and this reads the newest of them. Only the newest RUN's:
+            # a start or a stop ends what the run before it said, because the
+            # camera's word is about a process.
+            #
+            # ...and only while a scanner is running to stand by it. A run the
+            # engine's power cut writes no stop, and with nothing started since,
+            # its word was read as now: a camera stalled "for" every hour the Pi
+            # had been off, and the remedy for a camera on a rig whose trouble
+            # was that the scanner would not start. So with nothing scanning
+            # the camera is not asked about at all, and the line says so under
+            # a name that claims nothing — "ok  the camera can see  not asked"
+            # was a pass mark over a question nobody had put — with what a run
+            # that ended with no stop last said, and no age.
+            #
+            # Not blocking either way: too dark to be sure can as well be a
+            # phone in the driver's pocket as a fault, and a stalled camera is
+            # restarted by the rig itself.
+            #
+            # In a try of its own. The age is the scanner's rule, which means
+            # importing scan_pi (see rig_age_ms), and a preflight run under a
+            # python that cannot was reported as "the journal file is whole:
+            # FAIL" — the wrong line — and took "the journal can be written"
+            # below with it.
+            try:
+                said = None
+                for r in rows:
+                    if not isinstance(r, dict) or r.get('kind') != 'up':
+                        continue
+                    if r.get('about') == 'camera':
+                        said = r
+                    elif r.get('about') == 'rig' and r.get('state') in ('start', 'stop'):
+                        said = None
+                state = (said or {}).get('state')
+                if not scanner_running():
+                    check('whether the camera can see', True,
+                          'not asked — nothing is scanning%s' % (
+                              '; its last run ended with no stop, saying %s'
+                              % ('the camera had stalled' if state == 'stalled'
+                                 else 'its box was too dark to be sure of '
+                                      'seeing a card arrive')
+                              if state in ('stalled', 'dark') else ''))
+                else:
+                    blind = state in ('stalled', 'dark')
+                    when = ''
+                    if blind:
+                        at, lasted = said.get('at'), said.get('forSeconds')
+                        began = (at - lasted * 1000
+                                 if isinstance(at, (int, float)) and isinstance(lasted, int)
+                                 else None)
+                        # An age only off two readings of a clock that was set,
+                        # by the scanner's own rule for it rather than a copy
+                        # of it here.
+                        age = None if began is None else rig_age_ms(began, JR.now_ms())
+                        if age is None:
+                            when = ', since a time the clock cannot place'
+                        else:
+                            mins = age / 60000.0
+                            when = (', for %d min' % round(mins) if mins < 90
+                                    else ', for %.1f hours' % (mins / 60))
+                    check('the camera can see', not blind,
+                          'stalled — the same picture, byte for byte%s' % when
+                          if state == 'stalled' else
+                          'too dark to be sure of seeing a card arrive — the box '
+                          'read %s of 255, which the gain does not count as a lit '
+                          'screen%s' % (said.get('bright'), when)
+                          if blind else
+                          'nothing on record says it cannot',
+                          'the camera is handing over one picture over and over. '
+                          'The rig restarts it on its own, at most once in ten '
+                          'minutes; if this stays or keeps coming back, power '
+                          'down and reseat the camera\'s ribbon cable at both ends.'
+                          if state == 'stalled' else
+                          'a dim screen reads the same as an empty mount, so: '
+                          'check the phone is in the mount with its screen on, '
+                          'and turn its brightness up. If it is there and bright, '
+                          'the box is drawn somewhere else — press ▣ Set box on '
+                          'the driving screen and draw it again; if that is '
+                          'right too, restart the scanner, which is what brought '
+                          'the rig\'s own blind week to an end.')
+            except Exception as e:                            # noqa: BLE001
+                check('the camera can see', False,
+                      'could not be asked (%s: %s)' % (type(e).__name__, e))
+
         # ...and whether a row can still be ADDED to it, which is a different
         # question and the one the rig actually depends on.
         #
@@ -535,7 +665,8 @@ def main():
     blocking = [r for r in failed
                 if 'espeak' not in r[0] and 'calibration' not in r[0] and 'focus' not in r[0]
                 and 'autofocus' not in r[0] and 'reading engine' not in r[0]
-                and 'scratch space' not in r[0] and 'backed up' not in r[0]]
+                and 'scratch space' not in r[0] and 'backed up' not in r[0]
+                and 'can see' not in r[0]]
 
     print()
     # The next step is the autopilot, which aims, calibrates and scans on its

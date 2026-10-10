@@ -486,6 +486,24 @@ for i in range(1, 31):
     g.update(lit_card(g.gain, dim=VERY_DIM), 100.0 + i * 6.0)
 eq('...and held on darkness alone when nothing is tracking', g.gain, 1.5)
 
+# ...and that answer is kept as `lit`, because the scan loop asks it too: on a
+# rig with nothing tracking the corners — the owner's, whose box is drawn by
+# hand — 'dark' (TOO DARK TO BE SURE) is this staying no, so the panel and the
+# gain cannot disagree about whether the box holds a lit screen.
+eq('...and says so as `lit`, for the loop to ask', g.lit, False)
+g = EX.AutoGain(gain=1.5, every=6.0)
+eq('a controller that has not looked has no answer yet', g.lit, None)
+g.update(lit_card(1.5), 100.0)
+eq('a lit card with nothing tracking is lit', g.lit, True)
+# A box reading exactly nothing is the darkest case there is, and it used to
+# return before the answer was worked out — so `lit` said whatever the beat
+# before it had.
+g.update(np.zeros((60, 40), np.uint8), 106.0)
+eq('...and a box of pure black, after it, is not', g.lit, False)
+g.update(lit_card(1.5, dim=VERY_DIM), 112.0, has_screen=True)
+eq('the tracker\'s word is believed over the brightness, here as for the gain',
+   g.lit, True)
+
 # --- running out of light, and saying so -----------------------------------
 #
 # `too_bright` has always been reported: gain on its floor, no shorter rung,
@@ -500,8 +518,44 @@ for i in range(1, 31):
 eq('...and it spends everything it has first', g.gain, EX.GAIN_LIMITS[1])
 ok_('a phone the camera cannot make up for is reported', g.too_dim)
 ok_('...and not as the opposite complaint', not g.too_bright)
+# ...nor as too dark to be sure, which is the scan loop's word for `lit` staying
+# false: too dim is a screen counted as lit that the camera has run out of
+# light for, and the two are told apart by that one answer.
+eq('...and as a lit screen, which too dark to be sure is not', g.lit, True)
+
+# That answer is only what keeps them apart where too_dim could fire at all:
+# gain on its ceiling and nothing longer to lengthen to. Every other check of
+# a dark box starts at 1.5, where the gain never climbs on darkness and
+# too_dim is false whatever its guard says — so a too_dim that stopped asking
+# `lit` passed them all. Here a controller of its own is already at the ceiling
+# over a lit screen with nothing tracking when the box goes too dark to count
+# as lit. Not a contrived start: a 📷 Snap off the owner's rig at 15:05 on
+# 8 Oct, in daylight, has the gain at 7.16 of its 8.0.
+gc = EX.AutoGain(gain=EX.GAIN_LIMITS[1], every=6.0)
+gc.update(lit_card(gc.gain, dim=0.1), 100.0)
+eq('a controller on its ceiling, a lit screen still under target and nothing '
+   'tracking, is too dim', (gc.lit, gc.too_dim), (True, True))
+gc.update(np.full((60, 40), 10, np.uint8), 106.0)
+eq('...and when the box goes too dark to count as lit, it is dark and not too '
+   'dim: the same `lit` decides both', (gc.lit, gc.too_dim), (False, False))
+# ...and when it goes to pure black, the darkest dark there is. That box takes
+# an early return, before too_dim is worked out, and it kept the beat before's
+# too_dim: the panel was told too dim and too dark to be sure over one box.
+gc = EX.AutoGain(gain=EX.GAIN_LIMITS[1], every=6.0)
+gc.update(lit_card(gc.gain, dim=0.1), 100.0)
+gc.update(np.zeros((60, 40), np.uint8), 106.0)
+eq('...and a box gone to pure black after it is dark and not too dim either',
+   (gc.too_dim, gc.lit), (False, False))
+# ...where nothing vouches for a screen. A tracker that still holds the phone
+# is believed, and a screen it can see reading nothing is too dim indeed.
+gc = EX.AutoGain(gain=EX.GAIN_LIMITS[1], every=6.0)
+gc.update(lit_card(gc.gain, dim=0.1), 100.0, has_screen=True)
+gc.update(np.zeros((60, 40), np.uint8), 106.0, has_screen=True)
+eq('...while a black screen the tracker still holds keeps its complaint',
+   (gc.too_dim, gc.lit), (True, True))
 
 # It clears when the light does, or it is a notice the driver learns to ignore.
+# The controller that ran out above, not the one beside it.
 for i in range(31, 61):
     g.update(lit_card(g.gain, dim=1.0), 100.0 + i * 6.0, has_screen=True)
 ok_('the complaint clears when the phone is turned back up', not g.too_dim)

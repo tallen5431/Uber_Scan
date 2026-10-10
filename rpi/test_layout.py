@@ -330,6 +330,11 @@ READABILITY = [
     ('--warn', '--warn-dim', 4.5, 'the words CLOSE CALL'),
     ('--no', '--no-dim', 4.5, 'the word PASS'),
     ('--doubt', '--doubt-dim', 4.5, 'the word on a refused reading'),
+    # A rig that cannot see: the word where the verdict goes and the line under
+    # it, both red on the page's own black — live.html's `.verdict.blind`. The
+    # line is ordinary-sized text, so it is held to 4.5 and not to the 3:1 the
+    # big word would be allowed.
+    ('--no', '--bg', 4.5, 'the words on a rig that cannot see, and the line under them'),
 ]
 
 palette = dict(re.findall(r'(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;',
@@ -717,6 +722,13 @@ PLANNER_PANELS = NOVERDICT_PANELS
 # them the longest notSaving the scanner has been seen to send.
 PLANNER_NOTICE = {'notSaving': 'Offers are NOT being saved: [Errno 30] Read-only '
                                'file system', 'tooBright': True}
+# ...and the camera's word, which takes the same between-offers branch the stops
+# are drawn in: a rig that cannot see puts its word where the verdict goes and
+# its line where the notice goes, with whatever stops a press read before it
+# still on the card. The two came from two lines of work and met only in the
+# merge, so nothing had measured them together. Both words, since each has a
+# line of its own.
+PLANNER_BLIND = ['dark', 'stalled']
 # ...and the two strings that fixture copies have to still be the page's, or it
 # measures a line the page no longer writes.
 ok_('live.html still writes the median as "/hr an offer"', "'/hr an offer'" in live_src)
@@ -1822,6 +1834,28 @@ const SNAP_MEASURE = (fixture) => {
       await ctx.close();
     }
   }
+  // ...and under the camera's word, whose line is the notice while it holds.
+  for (const panel of PLANNER_PANELS) {
+    for (const view of ['screen', 'scene']) {
+      for (const word of PLANNER.blind) {
+        const { ctx, page } = await plannerPage(panel, view);
+        await page.evaluate((w) => {
+          window.__es.push({ alive: true, at: 1, tooBright: false, tooDim: false,
+                             refindRefused: null, notSaving: null, blind: w });
+          window.__es.push({ ready: false, state: 'empty', track: null, places: [], text: '' });
+        }, word);
+        await page.waitForTimeout(150);
+        const before = await measurePlanner(page, PLANNER_STOPS);
+        await pushPlanner(page, PLANNER_STOPS, PLANNER.unfiled);
+        out[panel[0] + ' ' + view + ' planner blind ' + word] = {
+          before: before, after: await measurePlanner(page, PLANNER_STOPS),
+          label: await page.evaluate(() =>
+            document.getElementById('verdictLabel').textContent.trim()) };
+        await page.close();
+        await ctx.close();
+      }
+    }
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -2019,7 +2053,8 @@ try:
          json.dumps(SNAP_PANELS), json.dumps(NOVERDICT),
          json.dumps(NOVERDICT_PANELS),
          json.dumps({'stops': PLANNER_STOPS, 'unfiled': PLANNER_UNFILED,
-                     'notes': PLANNER_NOTES, 'notice': PLANNER_NOTICE}),
+                     'notes': PLANNER_NOTES, 'notice': PLANNER_NOTICE,
+                     'blind': PLANNER_BLIND}),
          json.dumps(PLANNER_PANELS)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
@@ -2217,6 +2252,52 @@ try:
             if panel != '480x320':
                 eq('...and where the card has room for both, all four stops and the '
                    'line under them at %s' % where, len(_texts), 5)
+
+    # ...and under the camera's word. Its line is red and says what to do —
+    # reseat the cable, turn the phone up — and a rig that cannot see has no
+    # verdict to show, so the line is the card's whole message; the stops give
+    # way to it on the rule they give way to any notice by. Held to the same
+    # floor: the line whole, or the stops down to the one line counting them,
+    # and the line keeping what it had without them less that one line.
+    # Measured: whole beside all four stops and the note at 800x480 and
+    # 1024x600 in both pictures, and on the 3.5" hat's screen picture with the
+    # stops down to their one line (93 of 93px). With the fold switched off the
+    # hat's line kept 47 of 93px in the screen picture and 26 in the scene one.
+    # The scene picture on the hat is short of room for this line with no
+    # stops at all — 130px of the 139 the dark line needs, of the 162 the
+    # stalled one does — which is the line's own, not the stops'. The line was
+    # measured whole only in the phone layout (rpi/test_dashboard.py, a rig
+    # that cannot see), which is the screen picture's.
+    _BLIND_WORD = {'dark': 'TOO DARK TO BE SURE', 'stalled': 'CAMERA STALLED'}
+    for panel, w, h in PLANNER_PANELS:
+        for view in ('screen', 'scene'):
+            for word in PLANNER_BLIND:
+                where = '%s, %s view, %s' % (panel, view, word)
+                pm = got.get('%s %s planner blind %s' % (panel, view, word)) or {}
+                was, now = pm.get('before') or {}, pm.get('after') or {}
+                ok_('the Trip Planner\'s stops were measured under the camera\'s word '
+                    'at %s' % where, (was.get('warn') or {}).get('shown') and now.get('shown'))
+                if not ((was.get('warn') or {}).get('shown') and now.get('shown')):
+                    continue
+                _texts = [l['text'] for l in now.get('lines') or []]
+                _listed = sum(1 for t in _texts if re.match(r'^▸ (Pickup|Dropoff)\b', t))
+                _counted = sum(int(m.group(1)) for m in (_MORE.match(t) or _FLOOR.match(t)
+                                                         for t in _texts) if m)
+                eq('...every stop listed or counted under it at %s (%r)' % (where, _texts),
+                   _listed + _counted, len(PLANNER_STOPS))
+                _ww, _wn = was.get('warn') or {}, now.get('warn') or {}
+                _floor = len(_texts) == 1 and bool(_FLOOR.match(_texts[0]))
+                ok_('...and its line shows all it says, or the stops are down to the '
+                    'one line that counts them, at %s (line %s of %spx; %d lines)'
+                    % (where, _wn.get('client'), _wn.get('need'), len(_texts)),
+                    _wn.get('need', 0) <= _wn.get('client', 0) + 1 or _floor)
+                ok_('...and its line keeps what it showed without them, less that one '
+                    'line at most, at %s (%spx before, %spx after, the line %.1fpx)'
+                    % (where, _ww.get('client'), _wn.get('client'), now.get('cost') or 0),
+                    _wn.get('client', 0) >= min(_ww.get('client', 0), _wn.get('need', 0))
+                    - ((now.get('cost') or 0) if _floor else 0) - 1)
+                eq('...and the word itself, in the card, at %s' % where,
+                   (pm.get('label'), now.get('labelIn')), (_BLIND_WORD[word], True))
 
     for panel, w, h in PANELS:
         dashboard = w > h and h <= 620

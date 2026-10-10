@@ -1011,6 +1011,12 @@ def save_config(path, cfg):
 
 LORES = (640, 480)
 
+# How many buffers the camera cycles through. Named because the stall watch
+# looks back over twice this many preview frames — see Repeats — since a camera
+# stuck handing back a ring of stale buffers repeats a frame this many captures
+# apart rather than on the next one.
+CAMERA_BUFFERS = 4
+
 # The table of full-field-of-view IMX519 modes used to be copied out here as
 # well, with its own paragraph explaining that the two smaller modes are
 # *cropped* out of the sensor rather than scaled down. Nothing in this file read
@@ -1034,7 +1040,7 @@ def start_camera(cfg, exposure_us, gain, lens):
         main={'size': main_size, 'format': 'RGB888'},
         lores={'size': LORES, 'format': 'YUV420'},
         raw={'size': main_size},
-        buffer_count=4,
+        buffer_count=CAMERA_BUFFERS,
     ))
 
     cam.start()
@@ -1325,6 +1331,13 @@ class Health:
         # answered in two places, and the second would be the one nothing
         # could correct.
         self.screens_kept = 0
+        # Preview frames that were the same picture, byte for byte, as one just
+        # before them — Repeats' evidence of a stalled camera. A run total, and
+        # the measurement the stall watch rests on: that a working camera never
+        # hands one over is testcards' sensor model, not the IMX519, and a
+        # count above nought on a line from a shift that read is this camera
+        # saying otherwise. See STALL_SAY.
+        self.repeats = 0
         self.gain = None
         self.bright = None
         self.banding = None
@@ -1442,6 +1455,7 @@ class Health:
                 'streetNoAddress': self.street_seen_no_address,
                 'addressAsOffer': self.address_refused_as_offer,
                 'screensKept': self.screens_kept,
+                'repeats': self.repeats,
                 'relocks': self.relocks, 'rebaselines': self.rebaselines,
                 'bright': self.bright, 'banding': self.banding,
                 'gain': self.gain, 'exposure': self.exposure,
@@ -1518,6 +1532,16 @@ class Health:
             bits.append('%d screen%s since start recorded as following a card'
                         % (self.screens_kept,
                            '' if self.screens_kept == 1 else 's'))
+        # Said as the premise it is, not as a fact about the sensor: that a
+        # working camera hands over none is testcards' model, and this count
+        # is how this camera answers it. "A live camera's never are" claimed
+        # the answer before any real frame had been asked.
+        if self.repeats:
+            bits.append('%d frame%s since start the same picture as one of the '
+                        '%d before it — none, if the sensor model the stall '
+                        'watch rests on holds for this camera'
+                        % (self.repeats, '' if self.repeats == 1 else 's',
+                           2 * CAMERA_BUFFERS))
         # Brightness and banding, because "the picture looks dark" and "the
         # screen looks wavy" are things a person notices and a log should be
         # able to confirm or deny with a number.
@@ -1723,7 +1747,7 @@ def not_saving_notice(log):
 
 
 def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
-               not_saving=None, gps=None, pi=None):
+               not_saving=None, blind=None, gps=None, pi=None):
     """The beat, and the conditions that have to reach the driver without one.
 
     `tooBright` rides here rather than on a reading because the state it
@@ -1760,24 +1784,37 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
     `pi` is PiHealth.sample()'s four fields, spread onto the beat as names of
     their own the way the four above are: the page reads `cpuC` and
     `throttled`, and the reason beside each null goes on to /api/status.
+
+    `blind` is the camera's word when it cannot see — 'stalled' or 'dark',
+    UpDown's settled word and so the journal's — and None while it can. It
+    rides here for the reason all of these do and more than any of them: a rig
+    that cannot see produces no readings at all, so this beat is the only
+    message left to carry the news. It was the one condition with no channel:
+    the owner's rig read once in 9.4 days, beating every four seconds, and the
+    panel said "scanner reading" for all of it. A word and not a sentence, like
+    `tooDim`, because the page needs two things from it — a label short enough
+    to stand where the verdict stands, and the line saying what to do — and
+    only the page knows how much room it has for each.
     """
     beat = {'alive': True, 'at': int(time.time() * 1000)}
-    beat.update(alive_flags(too_bright, too_dim, refind_refused, not_saving))
+    beat.update(alive_flags(too_bright, too_dim, refind_refused, not_saving,
+                            blind))
     beat['gps'] = gps
     beat.update(pi or {})
     print(json.dumps(beat), flush=True)
 
 
 def alive_flags(too_bright=False, too_dim=False, refind_refused=None,
-                not_saving=None):
-    """The beat's four conditions as the wire carries them.
+                not_saving=None, blind=None):
+    """The beat's five conditions as the wire carries them.
 
     Its own function so 📷 Snap's reader.json says the last beat in the words
-    the beat said it, rather than in a second spelling of the same four.
+    the beat said it, rather than in a second spelling of the same five.
     """
     return {'tooBright': bool(too_bright), 'tooDim': bool(too_dim),
             'refindRefused': refind_refused or None,
-            'notSaving': not_saving or None}
+            'notSaving': not_saving or None,
+            'blind': blind or None}
 
 
 def emit_reading():
@@ -1836,6 +1873,152 @@ PHONE_HOLD = 60.0
 # and does not come back by itself — so this is a wait for the stumble to
 # clear, not for the fault to.
 GPS_HOLD = 60.0
+
+# --- a rig that cannot see, and says so ----------------------------------------
+#
+# Measured on the owner's own rig, from its own log: one scanner process ran
+# from 27 Sep to 8 Oct without a restart and made ONE read in 814,077 seconds —
+# its read counter went 1092 to 1093 across 9.4 days, a full shift of offers on
+# 7 Oct among them — with the screen reading 1-2 of 205 in the reads either
+# side. The heartbeat beat throughout, the panel said "scanner reading", and
+# nothing reached the journal. A restart at 02:38 brought reading straight back.
+# Whether the phone was out of the mount or too dim to see in it, or the
+# camera's feed had stalled, is not known, so a dark box and a stalled feed are
+# both watched for, and both are one word: what the camera can see. 'seeing',
+# 'stalled' or 'dark', on the beat as `blind` (None while seeing) and in the
+# journal as `camera` rows.
+#
+# STALLED is the camera handing over the very same picture, byte for byte, as
+# one of the few frames before it. Not a still picture — the SAME one. A live
+# sensor does not do that: its noise moves pixels on every frame however still
+# the scene, and two frames agreeing on all 307,200 of them is not something
+# noise does. Measured with the sensor model the suites' own cards are
+# drawn with (testcards.mount's sigma of 3 a sensor pixel, drawn fresh for each
+# frame and shrunk to the 640x480 preview), over 59 consecutive pairs at each of
+# three cabins — two as dark as the owner's, whose box read 2 and 3 of 205
+# against the owner's 1-2, and the suites' empty mount at 24: no pair alike,
+# and the fewest pixels that differed between any two frames was 102,285 of the
+# 307,200. The suites' fake cameras were the opposite — a still render handed
+# over every time: replayed at their own pace, a capture every 10ms for 12
+# seconds, 1,199 of 1,200 consecutive pairs were identical, the one exception
+# being the card arriving — so they now differ frame to frame the way a sensor
+# does, and the stall is what a fake does when it is told to freeze.
+#
+# Against the frames before it, not only the last one, because the camera
+# cycles CAMERA_BUFFERS buffers: one stuck handing the same ring back would
+# never repeat on the very next frame. Twice that many, because a read takes a
+# capture the watch never sees. See Repeats, which measured both and what they
+# cost.
+#
+# That is a model, not the IMX519. No frame off the real sensor exists here to
+# measure, so the rig measures it itself: every repeat is counted from start
+# (Health.repeats), the health line says how many there were, and every `seen`
+# row carries the count to the copy machine. A working camera that repeats a
+# frame now and then would show it there, on a shift that read, long before
+# six seconds of them made a stall.
+#
+# A frame is no evidence when nothing in it can show noise. Every pixel on one
+# of its two extremes is that frame: a flat one — a box of black, a sensor at
+# full well — and one that is black clamped against full well, the two places
+# a sensor's noise is clipped away. Two of those match whatever the camera is
+# doing, so a repeat of one is not counted, and darkness is the other watcher's
+# to judge. A frame with a single pixel between its extremes carries noise, and
+# a repeat of it is a repeat.
+#
+# One repeat is therefore already proof, and the hold is not there to doubt it.
+# It is there because of what a frozen picture does while it lasts: frozen on an
+# offer card, the verify beat goes on re-reading the same card every few
+# seconds and every reading comes back fresh, so the panel paints a live,
+# confident verdict about a card that left the phone long ago. VERIFY_MAX is
+# how long this rig already lets a verdict outlive its card — the ceiling on a
+# replaced card going unnoticed — and a frozen camera is given no longer.
+STALL_SAY = VERIFY_MAX
+
+# A restart cures a stall — the owner's did, at once — and it is the only cure
+# this rig has, so a stall is answered by going quiet for server.js's watchdog
+# to restart. But nothing limited how often: a camera a restart does NOT cure
+# stalls again in the first seconds of every run, and the cycle — STALL_SAY's
+# six seconds to say it, SILENT_MS's thirty of silence, server.js's backoff,
+# capped at a minute — goes round all night, writing a start, a camera stalled
+# and a rig restart row every time, while the panel flicks between the
+# autopilot starting up and CAMERA STALLED. Were the premise above wrong for
+# this sensor, the same loop would run on a working camera every time the scene
+# sat still.
+#
+# So a stall asks for a restart at most once every STALL_AGAIN. Going quiet over
+# one leaves a note for the run after it (handoff.STALLED), and a stall said
+# while that note is younger than this stays up instead: it goes on beating the
+# stall to the panel and comparing every frame, so a camera that comes back is
+# seen on the frame it does — and it goes quiet for the next restart only when
+# the note has aged out. One restart in ten minutes, six an hour at most, where
+# only the backoff limited it before; and a second stall that soon after a
+# restart is a camera whose cable wants reseating, which the panel says.
+#
+# The note's age is its mtime against the wall clock, handoff.age's idiom. A
+# clock that steps between the two makes the age wrong for that one note: a
+# step back reads as a note from the future and the restart is asked for, as
+# it was before this existed, and the backoff still bounds it.
+STALL_AGAIN = 600.0
+
+# DARK is the box the rig reads holding nothing it counts as a lit screen, for
+# as long as a phone has to be gone before it is news. Asked only where nothing
+# tracks the corners — a box drawn by hand, or --no-track — because there the
+# tracker's `phone gone` cannot fire, and on the owner's rig the box IS drawn by
+# hand. Where the tracker runs it answers this already and a second row about
+# the same absence would be the same question asked twice.
+#
+# "No lit screen" is not a threshold of its own. It is AutoGain's `lit` — the
+# window's brightness against exposure.LIT_ENOUGH, the same answer the gain
+# already refuses to brighten an empty mount on — so the rig cannot call a box
+# empty for the gain and full for the panel. The hold is PHONE_HOLD, for the
+# same reason: a minute outlasts a glance, on either kind of rig.
+#
+# It does NOT say the phone is gone, because brightness cannot tell a missing
+# phone from a dim one: this repo has a lit screen on record reading 4 and a
+# night-time card reading 6 (exposure.LIT_ENOUGH's own note), and the owner's
+# reads either side of the blind week were 1-2. Nor that the rig cannot see a
+# card arrive — that too is more than it knows. What it can say is that it
+# cannot be SURE of seeing one. Under LIT_ENOUGH the gain does not rise on its
+# own — that is the guard — and the motion gate, which is what sends a read
+# when a card lands, scores a card arriving by how much the box changed, and in
+# a dim box nothing changes by much. Measured on testcards' Uber card mounted
+# 1200px wide in a cabin reading 2, as dark as the owner's, the screen turned
+# down by scaling it and a fresh draw of the sensor noise for each frame: the
+# gate's score against its CHANGE_T of 6.0 for the card arriving over the map,
+# by what the box read before it came (AutoGain's own reading of it). Eight
+# draws of the noise at each level near either line moved a score by 0.02 at
+# most; two scores to a reading are two brightnesses that round to it:
+#
+#   light mode   7 -> 0.62   11 -> 1.28   18 -> 2.23 | 23 -> 2.48   46 -> 5.39
+#                                                      53 -> 5.72   56 -> 6.03
+#   dark mode    3 -> 1.26    8 -> 3.21   13 -> 5.20, 5.52   14 -> 5.72, 6.04
+#                                          15 -> 6.27   17 -> 7.08   19 -> 7.90
+#
+# So under LIT_ENOUGH (the bar) a light-mode card is not noticed at any reading
+# measured, and a dark-mode one is from 14 or 15 up — by under five per cent at
+# 15 and by about a third at 19. The box's reading cannot tell the two modes
+# apart, so a lit dark-mode screen reading 15 to 19, and some reading 14, is
+# called dark although the gate would notice a card landing on it, and a light
+# one at the same reading is not seen at all: what holds for both is that the
+# rig cannot be sure. Above the bar a light card is still missed at 53 and noticed from 56,
+# but there the screen counts as lit and the gain climbs on it, up to twice
+# over a beat (exposure.UP_MAX), or says too dim when it has nothing left to
+# climb with; under it the gain is held, so nothing gets better and nothing but
+# this says so. (The reader itself is not the limit: handed the dark-mode card
+# reading 4, it read $16.05, 23 min and 8.4 mi. Nothing sends it one.)
+#
+# The word is therefore 'dark', the panel's is TOO DARK TO BE SURE, and the
+# remedy it gives covers both causes — the phone in the mount, its screen on
+# and turned up. That is also what keeps it apart from `tooDim`: that is a
+# screen the gain counted as lit and spent everything on, this is one it never
+# counted, and AutoGain decides both off the same `lit`.
+#
+# Not on a pass where a read went out — the rig was looking. Most reads are the
+# motion gate's, and the one a card arriving sends is the first sign of it,
+# seconds before the gain's next look at the box. Reads a timer sends count
+# too (the verify beat, a resample or dropoff window, a deferred trigger),
+# which can only hold the word back, never bring it on.
+
 
 # How often to ask the Pi how hot it is and whether it is throttling. The
 # temperature is a file read; the throttling is a process (vcgencmd), which is
@@ -1969,12 +2152,17 @@ class Held(object):
     news has to last `hold` seconds first. Each change is at least `hold` apart
     from the next bad one, so however a state flickers the journal gains at
     most two rows a `hold`.
+
+    `holds` gives a bad word a hold of its own, for a state with two kinds of
+    bad news that are not equally patient — the camera's, where a stalled feed
+    is said far sooner than a dark box.
     """
 
-    def __init__(self, word, hold, quick=()):
+    def __init__(self, word, hold, quick=(), holds=None):
         self.word = word
         self.hold = hold
         self.quick = quick
+        self.holds = holds or {}
         self._next = None
         self._since = None
 
@@ -1986,10 +2174,91 @@ class Held(object):
         if raw != self._next:
             self._next, self._since = raw, now
         lasted = now - self._since
-        if raw in self.quick or lasted >= self.hold:
+        if raw in self.quick or lasted >= self.holds.get(raw, self.hold):
             self.word, self._next = raw, None
             return raw, lasted
         return None
+
+
+class Repeats(object):
+    """Whether each preview frame is the same picture as one of the few before
+    it — the stall watch's evidence. See STALL_SAY.
+
+    Keeps copies of the last `keep` frames, so a camera stuck handing back its
+    ring of buffers is caught as surely as one handing back a single frame.
+    Twice CAMERA_BUFFERS and not once, because the loop does not see every
+    capture: a read pairs its frame with the next one (`pair_reads`), and that
+    capture never comes past here. A buffer whose last turn was a read's
+    partner was last seen two turns back, so with only four kept, every read
+    on the verify beat broke the run of repeats and the hold began again.
+    Measured on the suites' fake camera handing back four buffers in turn, at
+    the real STALL_SAY, three runs each: one kept or four, no stall said in
+    the 12.5 seconds of it; eight kept, the row written 6.8 to 7.1 seconds
+    after the freeze every time.
+
+    A sparse sample of each is compared first, as bytes: on a working camera
+    it differs at once, so a whole frame is only compared when its sample
+    matched, which is to say on a stall. Measured on the development machine,
+    two sets of nine runs of 4,000 frames each: on frames that differed from
+    the last in half their pixels, medians of 0.026 and 0.025ms a frame against
+    the last eight, where the last one alone, compared whole and copied as it
+    was, took 0.027 and 0.028ms; on a stall, where every compare matches and
+    the frame's extremes are asked as well, 0.134 and 0.127ms against 0.068
+    and 0.069ms — paid only while there is nothing to read.
+    """
+
+    # One pixel in this many each way: 1,200 of the preview's 307,200.
+    SAMPLE = 16
+
+    def __init__(self, keep=2 * CAMERA_BUFFERS):
+        self.keep = keep
+        self._kept = []
+        self._samples = []
+        self._slot = 0
+
+    def seen(self, luma):
+        """True when `luma` is a frame already handed over, byte for byte, and
+        one that would show a sensor's noise if there were any — see STALL_SAY.
+        Keeps a copy of it either way."""
+        sample = luma[::self.SAMPLE, ::self.SAMPLE].tobytes()
+        same = any(old == sample and np.array_equal(luma, self._kept[i])
+                   for i, old in enumerate(self._samples))
+        if same:
+            # Every pixel on one of the frame's two extremes — flat, or black
+            # clamped against full well — leaves noise nowhere to show.
+            lo, hi = int(luma.min()), int(luma.max())
+            same = bool(np.any((luma > lo) & (luma < hi)))
+        if len(self._kept) < self.keep:
+            self._kept.append(luma.copy())
+            self._samples.append(sample)
+        else:
+            # Into the oldest copy's own memory, rather than a new one a frame.
+            # A copy and not the frame itself: `luma` may be a view onto the
+            # request's buffer, which goes back to the camera.
+            np.copyto(self._kept[self._slot], luma)
+            self._samples[self._slot] = sample
+            self._slot = (self._slot + 1) % self.keep
+        return same
+
+
+def sight_now(frozen, lit, reading):
+    """What the camera can see this moment, unsettled: 'stalled', 'dark' or
+    'seeing'. See STALL_SAY and the note under it.
+
+    `frozen`: Repeats.seen() said this frame had been handed over before.
+    `lit`: AutoGain's `lit` where nothing tracks the corners, else None — the
+    tracker's rigs answer this with the phone rows. `reading`: a read was
+    handed over since this was last asked, so the rig was looking — see the
+    note under STALL_SAY for which reads those are.
+
+    A stall outranks the dark: a frozen picture is dark or lit as it happened
+    to be when it froze, and says nothing about the box now.
+    """
+    if frozen:
+        return 'stalled'
+    if lit is False and not reading:
+        return 'dark'
+    return 'seeing'
 
 
 class UpDown(object):
@@ -1997,8 +2266,8 @@ class UpDown(object):
 
         {v, kind: 'up', id: 'up-<run>-<n>', seq: 1, at, about, state, ...}
 
-    `about` is 'rig', 'phone' or 'gps', so 'lost' on its own is never asked to
-    say what was lost.
+    `about` is 'rig', 'phone', 'gps' or 'camera', so 'lost' on its own is never
+    asked to say what was lost.
 
       rig    start   once the loop is about to run, with `gps` (whether --gps
                      was given) and `uptime` (seconds since the Pi booted)
@@ -2007,10 +2276,22 @@ class UpDown(object):
                      which is the point — a start with no stop before it marks
                      a run that ended without one, and `uptime` on that start
                      says whether the Pi went down with it.
+             restart the loop has gone quiet so the supervisor kills and
+                     restarts it, with `why`: a read stuck past READ_STUCK_S,
+                     or a camera stalled (at most once in STALL_AGAIN). The
+                     SIGKILL that follows leaves no stop, so this is the row
+                     that says it was asked for.
       phone  gone    the camera has not found the screen for PHONE_HOLD
              back    it has again
       gps    ok / stale / lost, settled over GPS_HOLD, with `ageSeconds` (the
                      newest fix's age) and `why` (gps.py's own error, if any)
+      camera stalled the same picture, byte for byte, as one of the frames
+                     before it, for STALL_SAY
+             dark    nothing the gain counts as a lit screen in the box for
+                     PHONE_HOLD, with nothing tracking the corners; with
+                     `bright`, what it read. Not "no phone": a dim one reads
+                     the same — see the note under STALL_SAY
+             seeing  either of those over
 
     Every change carries `forSeconds`: how long the new state had already
     lasted when it was written, so a 'gone' says when it really began.
@@ -2041,12 +2322,23 @@ class UpDown(object):
     before NTP and the rows after it are still 1, 2, 3.
     """
 
-    def __init__(self, journal, asked_gps, phone_hold=None, gps_hold=None):
+    def __init__(self, journal, asked_gps, phone_hold=None, gps_hold=None,
+                 stall_say=None):
         self.journal = journal
         # Read here rather than as defaults, so a check that shortens the module
         # constant reaches the loop's own instance.
-        self.phone = Held('back', PHONE_HOLD if phone_hold is None else phone_hold,
-                          quick=('back',))
+        phone_hold = PHONE_HOLD if phone_hold is None else phone_hold
+        self.phone = Held('back', phone_hold, quick=('back',))
+        # What the camera can see. A box too dark to be sure of seeing a card
+        # arrive in, on a rig with nothing tracking it, may be a phone gone or
+        # one turned down, so it waits as long as a phone does; a stall is said
+        # far sooner — see STALL_SAY.
+        self.camera = Held('seeing', phone_hold, quick=('seeing',),
+                           holds={'stalled': STALL_SAY if stall_say is None
+                                  else stall_say})
+        # When the camera's word last changed, on the caller's clock, so the
+        # restart can say how long a stall had lasted.
+        self.camera_since = None
         # None, not 'ok', before the phone has said anything: the beat would
         # otherwise say 'ok' about a GPS that has not produced a position, and
         # the page and the status endpoint would both repeat it.
@@ -2075,9 +2367,15 @@ class UpDown(object):
     def stop(self):
         return self._write('rig', 'stop')
 
-    def watch(self, now, lost, gps):
+    def restart(self, why):
+        return self._write('rig', 'restart', why=why)
+
+    def watch(self, now, lost, gps, sight='seeing', bright=None):
         """`lost`: the tracker's word, or None with nothing tracking.
-        `gps`: gps_now()'s (word, ageSeconds, why)."""
+        `gps`: gps_now()'s (word, ageSeconds, why). `sight`: sight_now()'s
+        word, and `bright` the box's brightness to put on a 'dark' row.
+
+        Returns the camera's new word when it changed, else None."""
         if lost is not None:
             moved = self.phone.update('gone' if lost else 'back', now)
             if moved:
@@ -2088,11 +2386,25 @@ class UpDown(object):
         if moved:
             self._write('gps', moved[0], forSeconds=int(moved[1]),
                         ageSeconds=age, why=why)
+        moved = self.camera.update(sight, now)
+        if not moved:
+            return None
+        self.camera_since = now - moved[1]
+        extra = {'forSeconds': int(moved[1])}
+        if moved[0] == 'dark':
+            extra['bright'] = None if bright is None else round(bright, 1)
+        self._write('camera', moved[0], **extra)
+        return moved[0]
 
     def beat(self):
         """What the heartbeat says about the GPS: the settled word, and the
         newest fix's age as it is now."""
         return {'state': self.gps.word, 'ageSeconds': self.gps_age}
+
+    def blind(self):
+        """What the heartbeat says about the camera: None while it can see,
+        else the settled word, 'stalled' or 'dark'."""
+        return None if self.camera.word == 'seeing' else self.camera.word
 
 
 def emit_dropoff(address, ms=None, asked=True):
@@ -2768,7 +3080,29 @@ def main():
     # is told again, because the first was what the panel, the order in the
     # car and the pair row were built from. See below.
     told_as = None
-    stuck_said = False
+    # Whether the loop has already said why it went quiet. See where it goes.
+    quiet_said = False
+    # The last few preview frames, and whether the newest was the same picture
+    # as one of them. See STALL_SAY.
+    repeats = Repeats()
+    frozen = False
+    # Whether a beat has carried the stall yet. The loop goes quiet over a
+    # stall only once the panel has been told, so the silence that follows is
+    # one the driver has a reason for.
+    stall_told = False
+    # Whether the log has said this stall is being sat out rather than
+    # restarted, because the last restart for one was too recent; and whether
+    # this stall has gone quiet for one, after which the note it left is for
+    # the run after it and not for this stall to sit out. See STALL_AGAIN.
+    stall_held_said = False
+    stall_asked = False
+    # A read handed over since the camera's word was last asked. A flag and not
+    # `reader.busy`, which with --no-thread is never true when the word is
+    # asked — the read is done and collected inside the pass that hands it
+    # over — so a card arriving in a dark box landed its verdict under TOO DARK
+    # TO BE SURE until the gain's next look, up to six seconds on. On the
+    # threaded path the busy reader says nothing the flag has not already said.
+    looked = False
     frames = 0
     last_snapshot = 0.0
     # How long the camera actually leaves between frames, smoothed. Measured
@@ -3626,6 +3960,14 @@ def main():
             'clipped': tally.get('clipped'), 'medianMs': tally.get('medianMs'),
             'tooDim': tally.get('tooDim'), 'tooBright': tally.get('tooBright'),
             'corners': tally.get('corners'), 'relocks': tally.get('relocks'),
+            # ...and how many preview frames since start were the same picture
+            # as one just before, which is the measurement the stall watch
+            # rests on (see STALL_SAY): nought on a working camera by the
+            # suites' sensor model, and no frame off the IMX519 itself has ever
+            # been measured. In the tally and dropped here, it reached a log in
+            # the car and nothing else; on this row it reaches the copy
+            # machine from every shift that read.
+            'repeats': tally.get('repeats'),
             # ...and how hot the Pi was and whether it was throttling while
             # these cards went past: a throttled Pi reads slower, and the
             # median above is where that would show.
@@ -3714,13 +4056,48 @@ def main():
             if collect():
                 break
 
-            # The phone and the GPS, every pass, on the monotonic clock: the
-            # wall clock jumps by decades when NTP arrives, and a hold timed
-            # across that would write a minute's absence about a phone that was
-            # never gone. Both reads are a lock and a dict.
-            updown.watch(time.monotonic(),
-                         tracker.status()['lost'] if tracker is not None else None,
-                         gps_now(phone, gps_refused))
+            # The phone, the GPS and what the camera can see, every pass, on the
+            # monotonic clock: the wall clock jumps by decades when NTP arrives,
+            # and a hold timed across that would write a minute's absence about
+            # a phone that was never gone. Every read here is a lock, a dict or
+            # a flag the frame below already set.
+            #
+            # The box's light is AutoGain's answer, and only where nothing
+            # tracks the corners — see the note under STALL_SAY.
+            sight = updown.watch(
+                time.monotonic(),
+                tracker.status()['lost'] if tracker is not None else None,
+                gps_now(phone, gps_refused),
+                sight_now(frozen,
+                          auto_gain.lit if (tracker is None and auto_gain is not None)
+                          else None,
+                          looked),
+                auto_gain.bright if auto_gain is not None else None)
+            looked = False
+            if sight == 'stalled':
+                # Both are this stall's. A camera that came back by itself and
+                # stalls again in the same run is asked about afresh: kept from
+                # the last one, a stall this run had gone quiet over asked for
+                # a second restart seconds after the first, its own note unread.
+                stall_held_said = stall_asked = False
+                log('camera stalled: it has handed over the same picture, byte '
+                    'for byte, for %ds. Nothing new can be read off it; the '
+                    'panel says so, and once it has, this '
+                    'goes quiet so the supervisor restarts the camera — unless '
+                    'it did that less than %ds ago'
+                    % (int(time.monotonic() - updown.camera_since), STALL_AGAIN))
+            elif sight == 'dark':
+                log('too dark to be sure of seeing a card arrive: the box has '
+                    'held nothing the gain counts as a lit screen for %ds '
+                    '(screen brightness %s/%d), where a light-mode card '
+                    'arriving does not move the motion gate far enough to send '
+                    'a read — is the phone in the mount, its screen on and '
+                    'turned up?'
+                    % (int(time.monotonic() - updown.camera_since),
+                       '?' if auto_gain.bright is None else '%d' % round(auto_gain.bright),
+                       round(EX.TARGET_BRIGHT)))
+            elif sight == 'seeing':
+                log('the camera can see again')
 
             # ...and a word to say the loop is turning, on a beat the driving
             # page's staleness test comfortably clears. See ALIVE_EVERY: a
@@ -3731,30 +4108,83 @@ def main():
             # fault worth showing.
             if args.json:
                 now_alive = time.time()
+                quiet = None
+                # Whether it is a stall going quiet, which leaves a note.
+                over_stall = False
                 if reader.busy and reader.since is not None \
                         and now_alive - reader.since > READ_STUCK_S:
-                    # No heartbeat for a rig whose reader has gone: the
-                    # silence is the message, and the supervisor restarts
-                    # on it. Said once, in the log nobody reads, for the
-                    # day somebody does.
-                    if not stuck_said:
-                        stuck_said = True
-                        log('a read has been in flight for %ds — the reader is '
-                            'stuck; going quiet so the supervisor restarts this'
-                            % int(now_alive - reader.since))
-                elif now_alive - last_alive > ALIVE_EVERY:
+                    quiet = ('a read has been in flight for %ds — the reader is '
+                             'stuck' % int(now_alive - reader.since))
+                elif updown.blind() == 'stalled' and stall_told:
+                    # The same way out, for the same reason. A camera that hands
+                    # over one picture for ever is not cured by waiting — the
+                    # owner's ran 9.4 days that way and a restart cured it at
+                    # once — and the supervisor's restart is the cure this rig
+                    # already has, counted where a wedge is counted (`wedged`
+                    # on /api/status). Only once a beat has carried the stall,
+                    # so the panel is holding the reason when the beats stop.
+                    #
+                    # ...and not again within STALL_AGAIN of the last time, so
+                    # a stall a restart does not cure is not restarted all
+                    # night. Until then this stays up and goes on beating it.
+                    again = None if stall_asked else HO.age(HO.STALLED, now_alive)
+                    if again is not None and 0 <= again < STALL_AGAIN:
+                        if not stall_held_said:
+                            stall_held_said = True
+                            log('the camera has stalled again %ds after a run '
+                                'here went quiet to be restarted over one; a '
+                                'restart has not kept it working, so this stays '
+                                'up and says so, and asks again once that is '
+                                '%ds old — if it keeps on, reseat the camera\'s '
+                                'cable' % (int(again), STALL_AGAIN))
+                    else:
+                        over_stall = stall_asked = True
+                        quiet = ('the camera has handed over the same picture '
+                                 'for %ds — it has stalled'
+                                 % int(time.monotonic() - updown.camera_since))
+                if quiet:
+                    # No heartbeat for a rig whose reader or camera has gone:
+                    # the silence is the message, and the supervisor restarts
+                    # on it. Said once, in the log and in the journal — where
+                    # it is the only account the run gets, since the SIGKILL
+                    # that answers it leaves no stop row.
+                    if not quiet_said:
+                        quiet_said = True
+                        log('%s; going quiet so the supervisor restarts this'
+                            % quiet)
+                        updown.restart(quiet)
+                        # ...and, over a stall, the note that holds the next
+                        # one back — see STALL_AGAIN. One that cannot be
+                        # written leaves the next stall restarted as before,
+                        # which is said here rather than found out then.
+                        if over_stall:
+                            try:
+                                with open(HO.path(HO.STALLED), 'w'):
+                                    pass
+                            except (IOError, OSError) as e:
+                                log('could not leave the note that holds back '
+                                    'the next restart over a stall (%s)' % e)
+                elif now_alive - last_alive > ALIVE_EVERY or sight:
+                    # ...and at once, not on the beat, when what the camera can
+                    # see has changed. The panel puts a blind rig's word where
+                    # the verdict goes, and a card arriving as the phone goes
+                    # back in the mount must not wait four seconds behind the
+                    # word that it cannot see.
+                    quiet_said = False
                     last_alive = now_alive
                     flags = {'too_bright': health.too_bright,
                              'too_dim': health.too_dim,
                              'refind_refused': health.refind_notice(now_alive),
-                             'not_saving': not_saving_notice(offer_log)}
+                             'not_saving': not_saving_notice(offer_log),
+                             'blind': updown.blind()}
                     # ...and what the rig says about itself: whether the GPS
                     # fix is fresh, the Pi's temperature and throttling. Kept
                     # with the flags so 📷 Snap's reader.json says everything
-                    # the panel was told, not four of its six things.
+                    # the panel was told, not five of its seven things.
                     extra = {'gps': updown.beat(), 'pi': pi.sample(time.monotonic())}
                     emit_alive(**dict(flags, **extra))
                     last_beat = (now_alive, flags, extra)
+                    stall_told = flags['blind'] == 'stalled'
 
             # 📷 Snap, asking for what only this process has. Here, after the
             # read that finished and before the capture, so the answer is the
@@ -3775,6 +4205,12 @@ def main():
                 buf = request.make_buffer('lores')
                 luma = np.frombuffer(buf, dtype=np.uint8,
                                      count=LORES[0] * LORES[1]).reshape((LORES[1], LORES[0]))
+                # The same picture as one of the last few, byte for byte, which
+                # a live sensor never hands over — see STALL_SAY and Repeats.
+                # Counted for the whole run, so the health line can say whether
+                # this camera ever does.
+                frozen = repeats.seen(luma)
+                health.repeats += frozen
                 now = time.time()
                 if last_tick is not None:
                     gap = now - last_tick
@@ -4285,6 +4721,18 @@ def main():
                         and tracker.disputing(now):
                     read_wanted, do_read = True, False
 
+                # ...and nothing at all off a camera that has stalled. Its
+                # picture is the past: frozen on an offer card, the verify beat
+                # went on re-reading that card and every verdict came back
+                # looking fresh. It is also the silence the restart needs:
+                # server.js counts a reading, and the `reading` notice every
+                # read sends, as the loop speaking, so a frozen card read every
+                # few seconds would keep its watchdog from ever firing. Dropped,
+                # not deferred: there is nothing new to read until the camera
+                # is.
+                if updown.blind() == 'stalled':
+                    read_wanted, do_read = False, False
+
                 # One read at a time, and never a trigger thrown away.
                 #
                 # Two reads at once would be four tesseract instances on a Pi's
@@ -4414,6 +4862,7 @@ def main():
                           time.time(),
                           scanner.geometry(whole=dropoff_asked
                                            and time.time() < dropoff_until))
+            looked = True
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.
             if args.json:

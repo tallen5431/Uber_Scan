@@ -443,6 +443,19 @@
   /* The working goes; the rate keeps its box and shows nothing. */
   .verdict.doubt .working { display: none; }
   .verdict.doubt .rate-value { color: var(--doubt); }
+  /* A rig that cannot see — see `blind` in the script. Red, because it is the
+     one state on this page where the rig is not working at all, and red only
+     where PASS is not: no red fill but the page's own black, a dashed border
+     where every verdict's is solid, a warning sign where PASS has its cross,
+     and words that are not a verdict. The line under it is red as well, on
+     that black at 6.15:1 — the instruction is half the warning. Here and not
+     in styles.css: the keypad and the phone's scanner have no camera of the
+     rig's to lose. */
+  .verdict.blind { background: var(--bg); border-color: var(--no);
+                   border-style: dashed; }
+  .verdict.blind .verdict-label { color: var(--no); }
+  .verdict.blind .verdict-label::before { content: '\26A0\00a0'; }
+  .verdict.blind .notice { color: var(--no); }
   .stale { opacity: .35; }
   /* Diagnostics, not a heading. It was uppercase with wide tracking, which
      made a line of read timings shout louder than the verdict above it. */
@@ -1231,8 +1244,60 @@
   // rides the heartbeat.
   var notSaving = null;
 
+  // What the camera cannot see, in the scanner's word — 'stalled' or 'dark' —
+  // or null while it can.
+  //
+  // The one state on this page that means the rig is not working at all, and
+  // the one it had no channel for. The owner's rig read once in 9.4 days: the
+  // heartbeat came every four seconds, the connection line said "scanner
+  // reading" throughout, and a full shift of offers went past a box that was
+  // dark, or a camera handing over one picture for ever — the log cannot say
+  // which. So it is not a note on the connection line, which is muted on
+  // purpose and for things that can wait for the next stop. It takes the
+  // verdict's place — see render() — because a stalled camera frozen on an
+  // offer card goes on re-reading that card, and the verdict it paints looks
+  // as live as any other while it is about a card long gone.
+  var blind = null;
+
+  // What the verdict's place says while that lasts: the word where the verdict
+  // goes, the line under it saying what to do. Short, because on the 3.5" hat
+  // the line shares a narrow column with the phone's picture, and red, in this
+  // page's own style. rpi/test_dashboard.py holds both whole inside the card
+  // at 800x480, 1024x600 and 480x320, with the bar where it was.
+  //
+  // `dark` says what the rig knows and no more. It is nothing in the box the
+  // gain counts as a lit screen, and a phone in the mount turned down low
+  // reads exactly like an empty mount — this repo has lit screens on record
+  // at 4 and 6, and the owner's box read 1-2 in the reads either side of the
+  // blind week. It was NOTHING IN VIEW, "put the phone in the mount", which
+  // told a driver whose phone was in the mount and lit that it was not, and
+  // never offered the remedy that would have worked. Then it was TOO DARK TO
+  // SEE, "no lit screen the rig can see", which is still more than is known:
+  // a lit dark-mode screen reading 15 to 19 is under the bar, and the motion
+  // gate notices a card arriving on it — 6.27 at 15 and 7.90 at 19 against
+  // the 6.0 it needs, on all eight draws of the sensor noise at each — where
+  // a light-mode one reading 18 scores 2.23 and is missed on all eight. The
+  // box's reading cannot tell the two apart, so what is known is that the rig
+  // cannot be SURE of seeing an offer arrive. The word says that, and the
+  // line asks for both remedies. See the note under STALL_SAY in
+  // rpi/scan_pi.py, which has the rest of the measurements.
+  //
+  // `stalled` says how often the rig restarts it, and "stays" as well as
+  // "keeps coming back": a stall within ten minutes of the last restart over
+  // one is sat out with the word left on the glass, not restarted
+  // (STALL_AGAIN in scan_pi.py). "The rig restarts it" said otherwise for
+  // those ten minutes.
+  var BLIND_LABEL = { stalled: 'CAMERA STALLED', dark: 'TOO DARK TO BE SURE' };
+  var BLIND_NOTE = {
+    stalled: 'The camera is sending the same picture over and over. The rig '
+           + 'restarts it at most once in ten minutes; if this stays or keeps '
+           + 'coming back, reseat its cable.',
+    dark: 'The rig may miss an offer arriving in a box this dark — check the '
+        + 'phone is in the mount with its screen on, and turn its brightness up.'
+  };
+
   // The GPS, as the scanner has settled it, and the Pi's own report on itself.
-  // Off the heartbeat like the four above, for the same reason: every reading
+  // Off the heartbeat like the five above, for the same reason: every reading
   // goes on arriving perfect while either is wrong. A phone whose GPS app has
   // timed out costs every offer row from then on its position, and on the
   // owner's week 0 of 1,166 rows carried one with nothing anywhere saying
@@ -2357,21 +2422,34 @@
 
   function render() {
     var r = last;
-    if (!r || !r.ready) {
+    // A rig that cannot see takes this branch with a reading on hand too. Its
+    // newest reading is from before it went blind — a dark box has made none
+    // for a minute — or, from a camera frozen on a card, is that card read
+    // again and again, as fresh-looking as a real one. Either way there is no
+    // verdict on this rig to show, and the word for why goes where it would.
+    if (!r || !r.ready || blind) {
       // Before the first offer the useful thing to show is setup progress, so
       // the page doubles as the aiming instructions.
       var p = phase || {};
       // Not `no`. A fault is not a verdict, and painting the panel in the PASS
       // red means a glance at a dead scanner reads as "decline this offer" —
       // the driver acts on a decision nothing made.
-      el.verdict.className = 'verdict ' + (p.phase === 'error' ? 'fault' : 'empty');
+      //
+      // `blind` IS red, and is still not `no`: no fill, a dashed border — no
+      // solid border on this screen means anything but a verdict — a warning
+      // sign where the verdict's mark goes, and words that are not PASS. It is
+      // the one state here where the rig is not working at all, and the muted
+      // grey of a fault is how a whole shift went past unread.
+      el.verdict.className = 'verdict ' + (blind ? 'blind'
+        : p.phase === 'error' ? 'fault' : 'empty');
       // A card under the reader is not "waiting for an offer", and saying so
       // was the panel's least honest second and a half. Not while aiming or
       // faulted: both of those are about the rig rather than about a card, and
       // both are what the driver is there to fix.
       var busy = readingAt && (Date.now() - readingAt) < READING_MS
                  && p.phase !== 'error' && p.phase !== 'aim';
-      el.verdictLabel.textContent = busy ? 'READING THE CARD'
+      el.verdictLabel.textContent = blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
+        : busy ? 'READING THE CARD'
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER');
       // Only while aiming, where the number means pixels and says so. On any
       // other phase this put a four-digit camera measurement in the position
@@ -2402,7 +2480,10 @@
       // for a reason the others only half share: between offers there is no
       // reading to hang it off, and the journal is just as dead between offers
       // as during one.
-      var setup = [notSaving || '', tooBright ? TOO_BRIGHT : '',
+      // The camera's line before all of them: every other note here is about
+      // a reading, and while it holds there is none coming.
+      var setup = [blind ? BLIND_NOTE[blind] || '' : '',
+                   notSaving || '', tooBright ? TOO_BRIGHT : '',
                    tooDim ? TOO_DIM : '',
                    refindRefused || '', p.message || ''].filter(Boolean);
       el.warn.textContent = setup.join(' ');
@@ -2421,7 +2502,16 @@
         : (quiet > STALE_MS
             ? 'nothing from the scanner for ' + Math.round(quiet / 1000)
               + 's — it may have stopped'
-            : (busy ? 'working out the pay, the time and the distance'
+            // Nothing while blind: the word above and the connection line
+            // below already say it. Every sentence noVerdictSaid() has is
+            // about a picture the rig has just said it cannot trust: "no
+            // offer on screen" is a claim about a screen it cannot see, and
+            // "box may cut it off" would send the driver to ▣ Set box over a
+            // camera that is stalled or a box too dark to read. The reading
+            // it would be said of is the last one before the word, too: the
+            // word clears at the next read.
+            : (blind ? ''
+               : busy ? 'working out the pay, the time and the distance'
                : (r ? noVerdictSaid(r) + trackNote(r) : '')));
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
       el.working.hidden = true;
@@ -2914,12 +3004,20 @@
       // pane dims on the same READ_STALE_MS and #detail prints its age. A
       // reader that has gone for good stops the heartbeat at READ_STUCK_S in
       // scan_pi.py, and the branch above says "nothing from the scanner".
-      el.conn.textContent = 'scanner reading';
+      //
+      // ...and "reading" is not what a rig that cannot see is doing. This line
+      // said it for the whole of the owner's blind 9.4 days, over a loop that
+      // was turning and reading nothing; with the camera's word on the beat it
+      // says what is true, beside the red word where the verdict goes.
+      el.conn.textContent = blind ? 'scanner running, cannot see' : 'scanner reading';
       note = healthNote();
     }
     el.health.textContent = note;
     el.health.hidden = !note;
-    el.dot.classList.toggle('on', alive
+    // ...and the dot with it. A rig that cannot see is not reading offers,
+    // which is the one thing the dot is for; left green it said "reading"
+    // beside the words saying it could not.
+    el.dot.classList.toggle('on', alive && !blind
       && !(scannerState && (!scannerState.enabled || !scannerState.running)));
   }
 
@@ -3032,6 +3130,16 @@
       // channel that rode a reading would be carried by messages that
       // contradict it.
       if (msg.notSaving !== undefined) notSaving = msg.notSaving || null;
+      // ...and the camera, which has nothing else to ride: a rig that cannot
+      // see sends no readings at all.
+      if (msg.blind !== undefined) blind = msg.blind || null;
+      // A phase is the autopilot speaking, and the autopilot only speaks for a
+      // process that has just started — rpi/scan_pi.py sends no phase at all.
+      // So the camera's word, which belonged to the process before it, goes:
+      // a stalled camera is the one thing here that ends in a restart, and
+      // held over it would stand in the verdict's place through CHECKING, and
+      // over a SCANNER PROBLEM if the restart fails, until a beat cleared it.
+      if (msg.phase) blind = null;
       // ...and the GPS and the Pi, which only ever ride the beat.
       if (msg.gps !== undefined) gpsNow = msg.gps || null;
       if (msg.cpuC !== undefined) cpuNow = typeof msg.cpuC === 'number' ? msg.cpuC : null;

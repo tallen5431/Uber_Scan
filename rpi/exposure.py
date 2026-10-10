@@ -433,6 +433,10 @@ class AutoGain:
         # nothing at all about why.
         self.too_bright = False
         self.too_dim = False
+        # Whether the last beat found a lit screen to aim at — the tracker's
+        # word where there is one, the brightness against LIT_ENOUGH where
+        # there is not. None until a beat has run. See update().
+        self.lit = None
 
     def update(self, gray, now, has_screen=None):
         """The camera controls to apply, or {} to leave the camera alone.
@@ -483,12 +487,33 @@ class AutoGain:
         self.last = now
 
         bright = self.bright = brightness(gray)
-        if bright <= 0:
-            return {}
 
         # Whether there is a screen to aim at. The tracker's answer where there
         # is one; the brightness as a last resort where there is not.
-        lit_screen = has_screen if has_screen is not None else bright >= LIT_ENOUGH
+        #
+        # Kept as `lit`, and worked out ABOVE the return for a black window
+        # rather than below it, because the scan loop asks it too: on a rig
+        # with nothing tracking the corners it is the one answer to "is there
+        # a lit screen in the box at all", and scan_pi's 'dark' — TOO DARK TO
+        # BE SURE on the panel — is that answer staying no. Below the return,
+        # a box reading exactly 0 — the darkest case there is — left `lit`
+        # saying whatever the last beat said.
+        #
+        # The same `lit` gates `too_dim` below, which is what keeps the two
+        # apart: too dim is a screen counted as lit and given everything, dark
+        # is one never counted. test_exposure starts a controller at its
+        # ceiling to hold that, since only there could too_dim fire at all.
+        lit_screen = self.lit = (has_screen if has_screen is not None
+                                 else bright >= LIT_ENOUGH)
+        if bright <= 0:
+            # ...and on this return too, which comes before too_dim is worked
+            # out. A box gone to pure black under a screen that had been too
+            # dim kept too_dim from the beat before, and the beat carried both
+            # at once: too dim, and too dark to be sure, over one box —
+            # measured on a controller at its ceiling, lit False and too_dim
+            # True. A screen the tracker still vouches for keeps its complaint.
+            self.too_dim = self.too_dim and lit_screen
+            return {}
 
         light = self.gain * (self.exposure or 1.0)
 
