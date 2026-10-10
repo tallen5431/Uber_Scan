@@ -2193,7 +2193,7 @@ connection dot, just above the bar of buttons — not on the bar, which holds si
 | `camera.jpg` | the live picture the scanner last wrote, with its age |
 | `status.json` | what `/api/status` would have answered at the press: the reading on the panel, the reader's text when the reading carries it, the offer on record and the order in the car |
 | `reader.jpg` | the card the scanner last read — the greyscale crop as it came off the warp, which `preprocess()` then turned into tesseract's input |
-| `reader.json` | the scanner's own account of that read: when, and how long before it answered; the text, the parse and the rate; whether it was a ⌖ read of the whole screen; the offer it has on record and the card's episode; its health counters as they stand; the flags its last heartbeat carried; and the phone's GPS state and fix, or "gps off" |
+| `reader.json` | the scanner's own account of that read: when, and how long before it answered; the text, the parse and the rate; whether it was a ⌖ read of the whole screen; the offer it has on record and the card's episode; its health counters as they stand; the flags its last heartbeat carried; and the GPS's state and its fix, with the gate's `ok`/`why` on it, or "gps off" |
 | `snap.json` | which of those it kept, and for each one it did not, why |
 
 **Why the scanner is asked.** Everything above `reader.jpg` is what the
@@ -4050,21 +4050,26 @@ a real street somewhere; both come back with the same confidence.
 
 So `rpi/gps.py` is now wired in. `--gps HOST[:PORT]` on the scanner, and every
 offer row carries `lat`, `lon` and `gpsAge` — where the car was when the card
-came up, and how old that fix was. Absent whenever it is not known, which is
-most rows: no `--gps`, no answer, or a fix over twenty seconds old all produce
-the same honest nothing.
+came up, and how old that fix was — and beside them `gpsErr` and `gpsMode`,
+what the receiver said about that fix, and `gpsOk`/`gpsWhy`, the one GPS
+gate's answer (see *A USB receiver on the Pi* below). Absent whenever it is not
+known, which is most rows: no `--gps`, no answer, or a fix over twenty seconds
+old all produce the same honest nothing. `"keepPlaces": false` drops all seven
+along with the places.
 
 **It is off until you pass it, and `npm start` does not pass it for you.** The
 server spawns the autopilot, which hands anything it does not recognise down to
 the scanner, so the whole route is one environment variable:
 
 ```sh
-SCANNER_ARGS="--gps 100.x.y.z" npm start      # the phone's Tailscale address
+SCANNER_ARGS="--gps 127.0.0.1" npm start      # gpsd and a USB receiver on the Pi
+SCANNER_ARGS="--gps 100.x.y.z" npm start      # or a phone's Tailscale address
 ```
 
-The phone's GPS server app listens on 2947 and the port can be left off. Under
-systemd it goes in the unit's `Environment=` line, next to the other
-`SCANNER_ARGS` flags.
+gpsd and the phone's GPS server apps both listen on 2947 and the port can be
+left off. Under systemd it goes in the unit's `Environment=` line, next to the
+other `SCANNER_ARGS` flags; on the owner's rig it is the `SCANNER_ARGS` line in
+`Start.sh`.
 
 Without it nothing is broken and nothing says so either, because there is
 nothing to say: rows carry no position, `map.html` searches on the typed hint
@@ -4080,8 +4085,9 @@ coming* below.
 Nominatim's `viewbox` with `bounded=1`. Sixty miles: generous enough that no
 real delivery is refused, tight enough that the nearest street of the same name
 in another state is. A place is boxed **only when the rows that named it carried
-a position** — the middle of the whole range was tried as a fallback and
-deliberately dropped, because on a journal where only the last week has
+a position the GPS gate passed** (`gpsOk`; a refused one is counted on the
+status line and not used) — the middle of the whole range was tried as a
+fallback and deliberately dropped, because on a journal where only the last week has
 positions it would box a place from eight months and two cities ago to last
 week's metro and refuse it.
 
@@ -4117,9 +4123,10 @@ as a stray. That is the whole feature in one row.
 
 ### Asking the phone where it is
 
-The Pi has no GPS and no clock. The phone in the mount has both, and a GPS
-server app on it hands them out over TCP on port 2947 — gpsd's port — to
-anything that asks. `rpi/gps.py` is the thing that asks.
+The Pi has no clock, and it had no GPS until the USB receiver below. The phone
+in the mount has both, and a GPS server app on it hands them out over TCP on
+port 2947 — gpsd's port — to anything that asks. `rpi/gps.py` is the thing that
+asks, and gpsd on the Pi answers it the same way.
 
 It is worth having because the geocoder is the weak link in everything this rig
 says about *where*. Handed "Chipotle" it answers with a Chipotle; handed a
@@ -4286,10 +4293,71 @@ can say all of this too.
 All of it is collection. Nothing divides by these rows and nothing reads them
 into a verdict.
 
-**The phone-free alternative, not built:** a USB GPS receiver on the Pi. gps.py
-already speaks gpsd's protocol, so the expected route is gpsd on the Pi and
-`--gps 127.0.0.1` — untried here — and AUDITS.md's note on it stands: it wants
-a fix-quality gate before anything on the panel uses its position.
+### A USB receiver on the Pi
+
+The phone-free route is on the owner's rig now: a VK-162 (a u-blox 7) on the
+Pi's USB, gpsd reading it, and `rpi/gps.py --from 127.0.0.1` reading gpsd —
+verified there, on the rig.
+
+**What it was seen to do.** gpsd 3.22 on Raspberry Pi OS opened it with
+`"driver":"u-blox"`. Indoors, its TPV lines carried mode 3, `eph` 27.8 m,
+`epx` 17.8, `epy` 12.8 and `ecefpAcc` 15.7. And parked, it holds latitude and
+longitude **exactly** still — a static hold — so ten minutes in the driveway
+says nothing about how accurate it is: a scatter test needs the car moving, or
+a log long enough to see the hold let go. Whether gpsd's u-blox path reports
+this receiver's own accuracy as `eph` or works it out from HDOP has not been
+measured here.
+
+**Setting it up on the Pi:**
+
+```sh
+sudo apt install gpsd gpsd-clients
+# /etc/default/gpsd
+DEVICES="/dev/ttyACM0"
+GPSD_OPTIONS="-n"          # keep reading with no client, so a fix is warm when the scanner asks
+USBAUTO="true"
+sudo systemctl restart gpsd
+# ModemManager, where it is installed, opens new /dev/ttyACM* devices to see
+# whether they are modems, and the receiver is one of those. The rig has no modem:
+sudo systemctl disable --now ModemManager
+gpspipe -w -n 10           # what gpsd hears: look for "class":"TPV" with "mode":3
+python3 rpi/gps.py --from 127.0.0.1    # what the rig makes of it, gate and all
+```
+
+Then `SCANNER_ARGS="--gps 127.0.0.1"` in `Start.sh` (or the unit's
+`Environment=` line) — the same flag as a phone, at gpsd's address.
+
+**Logging shifts, beside the scanner and never instead of it:**
+
+```sh
+mkdir -p ~/gpslog
+gpspipe -w -uu -o ~/gpslog/$(date +%F).jsonl
+```
+
+`-uu` stamps every line with the Pi's own clock, which is what lets a log line
+be put beside a journal row. The log is raw gpsd JSON and stays on the Pi; it
+is what the first week's numbers come from — how often a moving car stays
+inside the gate, and where it loses the sky — and nothing on the panel reads it.
+
+**One gate, in one place.** Every fix carries what the receiver said about it
+— `mode`, and `err`, gpsd's `eph` in metres — and `gps.usable()` decides once
+whether it is good enough to show or compare: a 2D or 3D mode, an error
+estimate, at most `FIX_ERR_MAX` (50 m to start; the first week sets it), and
+inside the twenty-second staleness rule. Its answer travels on the fix as
+`ok`/`why` and on every row as `gpsOk`/`gpsWhy`, and nothing downstream asks
+again: the map boxes, the trail, the stray test and the panel's detour anchor
+all read `gpsOk`. Mode alone bounds nothing — real gpsd made a four-satellite
+stream at HDOP 6.8 mode 3 with an `eph` of 129 m — and an NMEA source, which
+states no error in metres, is refused as `unrated`. gps.py itself only reports:
+a rough fix is still written down, with why it was refused.
+
+**You are here.** The heartbeat carries the newest fix with its quality and
+the gate's answer, and the panel's Map view and `map.html` draw it: a dot, a
+circle the size of its error, and "±12 m · 2 s old" in the map's corner — grey
+once it is older than the staleness rule, and no dot but a reason when the gate
+refuses it — "GPS too rough here (±129 m)" for that four-satellite fix. The
+map never follows the dot: entering Map view fits the view to include it once,
+and `map.html` does the same the first time it has one.
 
 ### A rig that was blind for a whole shift, and nothing said so
 
@@ -7953,6 +8021,8 @@ anyone watches the camera from home.
 | the sync asking where the copy is up to | 5–10MB | six small requests an hour while the rig is on |
 | Tailscale keeping its tunnel up | 10–50MB | not measured here; it varies with how often the connection changes |
 | clock, address lookups | under 5MB | tiny requests |
+| `map.html` asking where the car is | at most 0.72MB an hour, only while it is open | `/api/status` every 10 seconds while the page is on screen, for the "you are here" dot: 1,783 to 1,996 bytes an answer, measured on the rig's own snapped status.json files with the dot's fields added. Free on the Pi's own screen; a cost only when the page is open from elsewhere |
+| map tiles | not measured | OpenStreetMap's tiles, fetched by the browser for the panel's Map view and for `map.html`, only while a map is on screen. The view never follows the car — it is fitted once on the way in — so a map left alone fetches nothing more, and every pan or zoom fetches more. What a shift of Map view costs has never been measured, so nothing in this table counts it |
 
 **Watching the live camera over the VPN is what spends it.** The scene view is
 a 480px JPEG at quality 60, about 20KB (measured on the test frame), and while
@@ -7961,6 +8031,9 @@ a second, roughly 2GB an hour. The panel on the rig's own screen costs nothing
 — that is the Pi talking to itself — and so does the phone when it is on the
 same hotspot as the rig, because Tailscale finds the direct path. Reading the
 offers page or the panel's numbers from home is a few kilobytes a refresh.
+The panel's stream carries a heartbeat every four seconds, and the GPS fix on
+it is 121 of each beat's bytes as the server relays it (240 without, 361 with)
+— 108,900 bytes an hour while a panel is open from somewhere else.
 
 Two more things that can spend a month's plan in one go: an `apt upgrade` (do
 it at home on Wi-Fi), and putting the phone itself on the hotspot — the driver
