@@ -485,14 +485,15 @@ KINDS = [
 # whose dropoff the geocoder cannot place at all, which is what a badly
 # misread street looks like from here.
 #
-# The first two carry a GPS fix, so their lookups get boxed around where the
-# car actually was; the third deliberately does not, so the case of a place
+# The first two carry a GPS fix the gate passed (gpsOk, as a row written since
+# the gate carries it: MV.fixOf refuses an unjudged fix), so their lookups get
+# boxed around where the car actually was; the third deliberately does not, so the case of a place
 # with no anchor is on the page too.
 MAPPED = [
     dict(offer(0, state='go', pickup='Chastain Rd NW, Kennesaw',
-               dropoff='Oak Ln, Marietta'), lat=34.02, lon=-84.61),
+               dropoff='Oak Ln, Marietta'), lat=34.02, lon=-84.61, gpsOk=True),
     dict(offer(1, state='warn', pickup='Chastain Rd NW, Kennesaw'),
-         lat=34.02, lon=-84.61),
+         lat=34.02, lon=-84.61, gpsOk=True),
     offer(2, state='no', pickup='Chastain Rd NW, Kennesaw',
           dropoff='Zzqx Nowhere Blvd'),
     # A card that printed "Customer dropoff" and no address, whose destination
@@ -500,7 +501,7 @@ MAPPED = [
     # this row has an end at all.
     dict(offer(3, state='go', pickup='Chastain Rd NW, Kennesaw',
                dropoff='Oak Ln, Marietta', scanned=True),
-         lat=34.02, lon=-84.61),
+         lat=34.02, lon=-84.61, gpsOk=True),
     # The same two ends, three miles apart on the card and four and a half on
     # the map — which the sheet used to answer with "one of these pins is
     # wrong". This reading is `suspect`: the rig is not standing behind its own

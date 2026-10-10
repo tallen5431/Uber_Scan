@@ -1879,15 +1879,14 @@ them 'a mode-3 fix at 129.2 m is refused as rough' (a mode-only gate), 'quality
 is judged before age: ...', 'keepPlaces:false writes no position' and 'a fix
 nobody judged is written as not usable'.
 
-*Left failing by it, and not fixed here.* The full run on q5/detour-fix fails
-one check, `rpi/test_offerspage.py` '...near where the car actually was'
-(499 of 500): the offers page's route sheet boxes its lookups on nothing. Its
-fixture rows carry `lat`/`lon` with no `gpsOk`, the shape of a row written
-before the gate, and `MV.fixOf` now refuses such a row as unjudged, which is
-what the gate entry above means it to do. The lane never ran that suite.
-Measured: the same three fixture rows given `gpsOk=True` pass all 500, so the
-fixture is what is stale, not the page. Rows in the real week carry no
-position at all (0 of 1,166), so no driver's history loses a box to this.
+*Left failing by it, then fixed in the fixture.* The full run on q5/detour-fix
+failed one check, `rpi/test_offerspage.py` '...near where the car actually was'
+(499 of 500): its fixture rows carried `lat`/`lon` with no `gpsOk`, the shape of
+a row written before the gate, and `MV.fixOf` now refuses such a row as
+unjudged, which is what the gate entry above means it to do. The fixture was
+stale, not the page: the three rows now carry `gpsOk=True` and all 500 pass.
+Rows in the real week carry no position at all (0 of 1,166), so no driver's
+history loses a box to this.
 
 **The card reached the panel with no position on it, and the panel borrowed
 one.** `rpi/scan_pi.py` now asks `phone.fix()` ONCE per landing and hands that
