@@ -133,9 +133,10 @@ class FakeCam(object):
     on every capture — a stalled camera, which is what the dither above
     exists to tell apart from a still one — or, with `ring`, the last `ring`
     pictures in turn: a camera stuck handing back its buffers, no frame the
-    same as the one before it. `noise=False` leaves the dither off, for the
-    pictures that repeat on a working camera: ones with nothing in them that
-    could show noise."""
+    same as the one before it. A list of (from, to) spans instead is a camera
+    that stalls and comes back, `to` None for one that stays stalled.
+    `noise=False` leaves the dither off, for the pictures that repeat on a
+    working camera: ones with nothing in them that could show noise."""
 
     def __init__(self, offer, empty, appear_at=0.4, fail_after=None, freeze_at=None,
                  noise=True, ring=1):
@@ -162,8 +163,12 @@ class FakeCam(object):
         self.history = (self.history + [self.lores])[-self.ring:]
 
     def frozen(self):
-        return (self.freeze_at is not None
-                and time.time() - self.started >= self.freeze_at)
+        if self.freeze_at is None:
+            return False
+        t = time.time() - self.started
+        spans = (self.freeze_at if isinstance(self.freeze_at, (list, tuple))
+                 else [(self.freeze_at, None)])
+        return any(a <= t and (b is None or t < b) for a, b in spans)
 
     def capture_request(self):
         self.captures += 1
@@ -214,7 +219,13 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     the loop's own thread makes is answered and counted rather than hanging
     the suite. `handoff`: a directory to point the button-press files at, so a
     request written here cannot be eaten by a scanner running on the same
-    machine, nor this one eat theirs. `fail_after`: (n, exception) for the
+    machine, nor this one eat theirs — and one of its own when none is given,
+    because the loop writes there too: going quiet over a stall leaves a note
+    (scan_pi.STALL_AGAIN), and a run that left one in the shared directory
+    would hold back the real scanner's next restart on this machine for ten
+    minutes. Measured before this: with a stuck read made to leave the note
+    too, the stuck-read run below wrote /dev/shm/uberscan-stalled and passed
+    all four of its checks. `fail_after`: (n, exception) for the
     camera — see FakeCam. `phone`: what gps.Phone hands back, for a --gps run.
     `freeze_at`: the camera stalls this many seconds in — see FakeCam, and
     `ring` there — and `stall_say` stands in for scan_pi.STALL_SAY,
@@ -225,7 +236,9 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     the full well that makes the gain look again at once.
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
-    it began, and the exception main() raised, if any."""
+    it began, the exception main() raised, if any, and the handoff directory."""
+    if not handoff:
+        handoff = tempfile.mkdtemp()
     offer = TC.mount(TC.uberx_screen(), 1200)
     quad = PL.detect_screen_quad(offer)
     work = tempfile.mkdtemp()
@@ -311,8 +324,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     SP.emit_alive = beat
     SP.log = lambda m: logs.append(m)
     was_handoff = os.environ.get(HO.ENV_DIR)
-    if handoff:
-        os.environ[HO.ENV_DIR] = handoff
+    os.environ[HO.ENV_DIR] = handoff
     PL.Scanner.look_many = look
     if health_every is not None:
         SP.HEALTH_EVERY = health_every
@@ -374,16 +386,28 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         SP.ALIVE_EVERY = was_alive_every
         SP.REFIND_NOTICE_S = was_refind_s
         SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY, SP.STALL_AGAIN = was_holds
-        if handoff:
-            if was_handoff is None:
-                os.environ.pop(HO.ENV_DIR, None)
-            else:
-                os.environ[HO.ENV_DIR] = was_handoff
+        if was_handoff is None:
+            os.environ.pop(HO.ENV_DIR, None)
+        else:
+            os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, beats=beats, calls=calls[0],
                 submitted=submitted[0],
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
-                raised=raised)
+                raised=raised, handoff=handoff)
+
+
+def _stall_note_age(handoff):
+    """handoff.age of the stall note in `handoff`, as the loop would read it."""
+    was = os.environ.get(HO.ENV_DIR)
+    os.environ[HO.ENV_DIR] = handoff
+    try:
+        return HO.age(HO.STALLED)
+    finally:
+        if was is None:
+            os.environ.pop(HO.ENV_DIR, None)
+        else:
+            os.environ[HO.ENV_DIR] = was
 
 
 FRAG = '$16.05 20 min (7.3 mi) trip'
@@ -555,6 +579,12 @@ _stuck_rs = [x.get('why') for x in r['rows']
              if x.get('kind') == 'up' and x.get('state') == 'restart']
 ok_('...and the journal says the rig asked to be restarted, and why (%r)' % _stuck_rs,
     len(_stuck_rs) == 1 and 'stuck' in (_stuck_rs[0] or ''))
+# ...and leaves no note that it went quiet over a stalled camera, because it
+# did not. The note holds back the next stall's restart for STALL_AGAIN, so a
+# stuck reader's restart that left one would leave a camera stalling in the
+# ten minutes after it on the glass, not restarted.
+eq('...and leaves no note holding back a stalled camera\'s restart',
+   _stall_note_age(r['handoff']), None)
 
 # --- a Re-find the rig cannot honour has to say so on the beat ---------------
 # Pressing Re-find is the driver saying the outline is wrong, so from that press
@@ -932,19 +962,7 @@ ok_('...over a run that did lose the phone for them (%r)'
 # Every stall here has a handoff directory of its own: going quiet over one
 # leaves a note there (STALL_AGAIN), and a note left in the shared one would
 # hold back the next run's restart — this suite's, or another's on the machine.
-def _stall_note_age(handoff):
-    """handoff.age of the stall note in `handoff`, as the loop would read it."""
-    was = os.environ.get(HO.ENV_DIR)
-    os.environ[HO.ENV_DIR] = handoff
-    try:
-        return HO.age(HO.STALLED)
-    finally:
-        if was is None:
-            os.environ.pop(HO.ENV_DIR, None)
-        else:
-            os.environ[HO.ENV_DIR] = was
-
-
+# run() gives every run one of its own for that reason.
 _slho = tempfile.mkdtemp()
 _sl = run(lambda n, k: WHOLE, seconds=8.0, freeze_at=1.5, stall_say=1.0,
           alive_every=0.5, handoff=_slho)
@@ -1030,6 +1048,34 @@ _ag_told = [t for t, b in zip(_ag['beats'], _ag['alive']) if b.get('blind') == '
 eq('...and still nothing read off the frozen picture while it does',
    (bool(_ag_told), [round(t - _ag_told[0], 1) for a, k, t in _ag['verdicts']
                      if _ag_told and t > _ag_told[0] + 0.5]), (True, []))
+
+# ...and every stall is its own, in a run that sees more than one. A camera
+# that comes back by itself after the run has gone quiet over it is beating
+# again before the watchdog's thirty seconds are up, so nothing restarts it,
+# and the same run meets the next stall. Here: the first goes quiet and leaves
+# its note; the camera comes back; the second is inside STALL_AGAIN of that
+# note and stays up; it comes back again; the third stays up as well and says
+# so in the log again. A run that kept the first stall's answer asked for a
+# second restart a few seconds after the first, its own note unread, and said
+# nothing in the log about the third.
+_3ho = tempfile.mkdtemp()
+_3 = run(lambda n, k: WHOLE, seconds=11.5,
+         freeze_at=[(1.5, 4.0), (5.0, 7.0), (8.0, None)], stall_say=1.0,
+         alive_every=0.5, handoff=_3ho)
+eq('a camera that stalls three times in a run, coming back between, is written '
+   'as stalled three times',
+   [u[1] for u in _ups(_3['rows']) if u[0] == 'camera'],
+   ['stalled', 'seeing', 'stalled', 'seeing', 'stalled'])
+eq('...the first going quiet for its restart, and only the first: the note it '
+   'left holds back the next two',
+   len([x for x in _3['rows'] if x.get('kind') == 'up' and x.get('state') == 'restart']), 1)
+eq('...each of those said in the log as staying up, with the cable named',
+   sum(1 for l in _3['logs'] if 'stays up' in l and 'cable' in l), 2)
+_3_gap = time.time() - _3['beats'][-1] if _3['beats'] else None
+ok_('...and the run up at the end, beating the last to the panel (last beat '
+    '%.1fs ago, saying %r)' % (_3_gap or 0, _3['alive'][-1].get('blind')
+                               if _3['alive'] else None),
+    _3_gap is not None and _3_gap < 1.5 and _3['alive'][-1].get('blind') == 'stalled')
 
 # ...and once that restart is STALL_AGAIN old, it asks again. The note is left
 # as the loop begins, and STALL_AGAIN cut to six seconds: the stall is said
