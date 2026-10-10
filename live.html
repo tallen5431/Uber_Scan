@@ -1241,16 +1241,31 @@
   // the line shares a narrow column with the phone's picture, and red, in this
   // page's own style. rpi/test_dashboard.py holds both whole inside the card
   // at 800x480, 1024x600 and 480x320, with the bar where it was.
-  var BLIND_LABEL = { stalled: 'CAMERA STALLED', dark: 'NOTHING IN VIEW' };
+  //
+  // `dark` says what the rig knows and no more. It is nothing in the box the
+  // gain counts as a lit screen, and a phone in the mount turned down low
+  // reads exactly like an empty mount — this repo has lit screens on record
+  // at 4 and 6, and the owner's box read 1-2 in the reads either side of the
+  // blind week. It was NOTHING IN VIEW, "put the phone in the mount", which
+  // told a driver whose phone was in the mount and lit that it was not, and
+  // never offered the remedy that would have worked. So the word is what is
+  // true either way, and the line asks for both. See the note under
+  // STALL_SAY in rpi/scan_pi.py for why a box that dim cannot count on seeing
+  // a card arrive, whatever is in it.
+  //
+  // `stalled` says "stays" as well as "keeps coming back": the rig restarts a
+  // stalled camera at most once in ten minutes (STALL_AGAIN in scan_pi.py), and
+  // a stall inside that is sat out with the word left on the glass.
+  var BLIND_LABEL = { stalled: 'CAMERA STALLED', dark: 'TOO DARK TO SEE' };
   var BLIND_NOTE = {
     stalled: 'The camera is sending the same picture over and over. The rig '
-           + 'restarts it; if this keeps coming back, reseat its cable.',
-    dark: 'Nothing lit in the box the rig reads — put the phone in the mount '
-        + 'with its screen on.'
+           + 'restarts it; if this stays or keeps coming back, reseat its cable.',
+    dark: 'No lit screen the rig can see in its box — check the phone is in '
+        + 'the mount with its screen on, and turn its brightness up.'
   };
 
   // The GPS, as the scanner has settled it, and the Pi's own report on itself.
-  // Off the heartbeat like the four above, for the same reason: every reading
+  // Off the heartbeat like the five above, for the same reason: every reading
   // goes on arriving perfect while either is wrong. A phone whose GPS app has
   // timed out costs every offer row from then on its position, and on the
   // owner's week 0 of 1,166 rows carried one with nothing anywhere saying
@@ -2608,7 +2623,10 @@
     }
     el.health.textContent = note;
     el.health.hidden = !note;
-    el.dot.classList.toggle('on', alive
+    // ...and the dot with it. A rig that cannot see is not reading offers,
+    // which is the one thing the dot is for; left green it said "reading"
+    // beside the words saying it could not.
+    el.dot.classList.toggle('on', alive && !blind
       && !(scannerState && (!scannerState.enabled || !scannerState.running)));
   }
 

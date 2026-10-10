@@ -494,13 +494,25 @@ class AutoGain:
         # Kept as `lit`, and worked out ABOVE the return for a black window
         # rather than below it, because the scan loop asks it too: on a rig
         # with nothing tracking the corners it is the one answer to "is there
-        # a lit screen in the box at all", and scan_pi's "nothing in view" is
-        # that answer staying no. Below the return, a box reading exactly 0 —
-        # the darkest case there is — left `lit` saying whatever the last
-        # beat said.
+        # a lit screen in the box at all", and scan_pi's 'dark' — TOO DARK TO
+        # SEE on the panel — is that answer staying no. Below the return, a box
+        # reading exactly 0 — the darkest case there is — left `lit` saying
+        # whatever the last beat said.
+        #
+        # The same `lit` gates `too_dim` below, which is what keeps the two
+        # apart: too dim is a screen counted as lit and given everything, dark
+        # is one never counted. test_exposure starts a controller at its
+        # ceiling to hold that, since only there could too_dim fire at all.
         lit_screen = self.lit = (has_screen if has_screen is not None
                                  else bright >= LIT_ENOUGH)
         if bright <= 0:
+            # ...and on this return too, which comes before too_dim is worked
+            # out. A box gone to pure black under a screen that had been too
+            # dim kept too_dim from the beat before, and the beat carried both
+            # at once: too dim, and too dark to see, over one box — measured on
+            # a controller at its ceiling, lit False and too_dim True. A screen
+            # the tracker still vouches for keeps its complaint.
+            self.too_dim = self.too_dim and lit_screen
             return {}
 
         light = self.gain * (self.exposure or 1.0)

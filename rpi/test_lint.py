@@ -179,6 +179,10 @@ FALLBACKS = (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS,
              HO.SNAP, HO.FRAME_LEGACY)
 for base in FALLBACKS:
     ok_('the fallback %s is ignored' % base, is_ignored(base))
+# ...and the scan loop's note to the run after it. Its name is built the same
+# way, so the scan above cannot see it, and it is no request, so it is not one
+# of the list.
+ok_('the fallback %s is ignored' % HO.STALLED, is_ignored(HO.STALLED))
 
 # Every one of them is written through a temporary and renamed into place, and
 # the temporary names are not all `<name>.part`: the crop endpoint appends a pid

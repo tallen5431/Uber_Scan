@@ -30,6 +30,44 @@ def check(name, ok, detail='', fix=''):
     return ok
 
 
+def scanner_running():
+    """Whether a scanner is running on this machine.
+
+    Read off /proc, where every process's command line is: the autopilot execs
+    `python3 rpi/scan_pi.py`, so the scanner is the python whose script is that
+    file — and not an editor that has it open. UBERSCAN_PROC stands in for
+    /proc, the way UBERSCAN_SYNC_TIMER stands in for the timer, so the answer
+    can be checked on a machine with no scanner running. Nothing found there is
+    no: a machine without a /proc has no scanner of this rig's on it either.
+    """
+    proc = os.environ.get('UBERSCAN_PROC') or '/proc'
+    try:
+        pids = [p for p in os.listdir(proc) if p.isdigit()]
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open(os.path.join(proc, pid, 'cmdline'), 'rb') as fh:
+                argv = fh.read().split(b'\0')
+        except OSError:
+            continue
+        if (len(argv) > 1 and b'python' in os.path.basename(argv[0])
+                and os.path.basename(argv[1]) == b'scan_pi.py'):
+            return True
+    return False
+
+
+def rig_age_ms(stamp_ms, now_ms):
+    """How long before `now_ms` a journal stamp was, or None where the clock
+    cannot say — scan_pi.age_ms, on the journal's milliseconds. Its rule, not a
+    copy of it: server.js's clockAge is the same rule for the server's side.
+    Imported here and not at the top, because a preflight on a Pi that cannot
+    import the scanner has its own lines above to say so; this is only asked
+    with a scanner running, which has imported it already."""
+    import scan_pi as SP
+    return SP.age_ms(stamp_ms / 1000.0, now_ms / 1000.0)
+
+
 def check_import(module, package, apt=True):
     try:
         m = __import__(module)
@@ -310,13 +348,23 @@ def main():
             # The rig was blind for a whole shift and nothing said so: one
             # read in 9.4 days, the heartbeat beating throughout, the panel
             # saying "scanner reading". The scanner now writes `camera` up rows
-            # when it stops being able to see — a stalled feed, or a box with
-            # nothing lit in it — and when it can again, and this reads the
-            # newest of them. Only the newest RUN's: a start or a stop ends what
-            # the run before it said, because the camera's word is about a
-            # process and that process is gone. Not blocking: nothing in view
-            # can as well be a phone in the driver's pocket as a fault, and a
-            # stalled camera is restarted by the rig itself.
+            # when it stops being able to see — a stalled feed, or a box too
+            # dark to see a card arrive in — and when it can again, and this
+            # reads the newest of them. Only the newest RUN's: a start or a stop
+            # ends what the run before it said, because the camera's word is
+            # about a process.
+            #
+            # ...and only while a scanner is running to stand by it. A run the
+            # engine's power cut writes no stop, and with nothing started since,
+            # its word was read as now: a camera stalled "for" every hour the Pi
+            # had been off, and the remedy for a camera on a rig whose trouble
+            # was that the scanner would not start. So a word with no
+            # scanner behind it is said as what that run last said, with no
+            # age, and fails nothing.
+            #
+            # Not blocking either way: too dark to see can as well be a phone
+            # in the driver's pocket as a fault, and a stalled camera is
+            # restarted by the rig itself.
             said = None
             for r in rows:
                 if not isinstance(r, dict) or r.get('kind') != 'up':
@@ -326,37 +374,44 @@ def main():
                 elif r.get('about') == 'rig' and r.get('state') in ('start', 'stop'):
                     said = None
             state = (said or {}).get('state')
-            blind = state in ('stalled', 'dark')
+            blind = state in ('stalled', 'dark') and scanner_running()
             when = ''
             if blind:
                 at, lasted = said.get('at'), said.get('forSeconds')
-                now_ms = JR.now_ms()
                 began = (at - lasted * 1000
                          if isinstance(at, (int, float)) and isinstance(lasted, int)
                          else None)
-                # An age only off two readings of a clock that was set — the
-                # same floor as the check above, and for the same reason.
-                if (began is None or began < _SY.CLOCK_BELIEVABLE_AFTER
-                        or now_ms < _SY.CLOCK_BELIEVABLE_AFTER or began > now_ms):
+                # An age only off two readings of a clock that was set, by the
+                # scanner's own rule for it rather than a copy of it here.
+                age = None if began is None else rig_age_ms(began, JR.now_ms())
+                if age is None:
                     when = ', since a time the clock cannot place'
                 else:
-                    mins = (now_ms - began) / 60000.0
+                    mins = age / 60000.0
                     when = (', for %d min' % round(mins) if mins < 90
                             else ', for %.1f hours' % (mins / 60))
             check('the camera can see', not blind,
                   'stalled — the same picture, byte for byte%s' % when
-                  if state == 'stalled' else
-                  'nothing in view — the box held no lit screen (it read %s of '
-                  '255)%s' % (said.get('bright'), when) if state == 'dark' else
+                  if blind and state == 'stalled' else
+                  'too dark to see — nothing in the box the gain counts as a lit '
+                  'screen (it read %s of 255)%s' % (said.get('bright'), when)
+                  if blind else
+                  'not asked — nothing is scanning; its last run ended with no '
+                  'stop, saying %s' % ('the camera had stalled' if state == 'stalled'
+                                       else 'its box was too dark to see')
+                  if state in ('stalled', 'dark') else
                   'nothing on record says it cannot',
                   'the camera is handing over one picture over and over. The rig '
-                  'restarts it on its own; if this keeps coming back, power down '
-                  'and reseat the camera\'s ribbon cable at both ends.'
+                  'restarts it on its own, at most once in ten minutes; if this '
+                  'stays or keeps coming back, power down and reseat the '
+                  'camera\'s ribbon cable at both ends.'
                   if state == 'stalled' else
-                  'nothing lit is in the box the rig reads: put the phone in the '
-                  'mount with its screen on, and bright enough to see. If it is '
-                  'there and lit, the box is drawn somewhere else — press ▣ Set '
-                  'box on the driving screen and draw it again.')
+                  'a dim screen reads the same as an empty mount, so: check the '
+                  'phone is in the mount with its screen on, and turn its '
+                  'brightness up. If it is there and bright, the box is drawn '
+                  'somewhere else — press ▣ Set box on the driving screen and '
+                  'draw it again; if that is right too, restart the scanner, '
+                  'which is what brought the rig\'s own blind week to an end.')
 
         # ...and whether a row can still be ADDED to it, which is a different
         # question and the one the rig actually depends on.

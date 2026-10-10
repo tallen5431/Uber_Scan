@@ -3348,6 +3348,7 @@ const framed = (page) => page.waitForFunction(
       bar: JSON.stringify([].slice.call(document.querySelector('.bottombar').children).map(box)),
       fits: d.scrollWidth <= d.clientWidth + 1 && d.scrollHeight <= d.clientHeight + 1,
       phone: document.body.classList.contains('phoneview'),
+      dot: document.getElementById('dot').classList.contains('on'),
     };
   };
   for (const panel of [['800x480', 800, 480], ['1024x600', 1024, 600], ['480x320', 480, 320]]) {
@@ -5425,6 +5426,11 @@ try:
            _st.get('rate'), '')
         eq('[%s] ...the connection line no longer saying it is reading' % _pn,
            _st.get('conn'), 'scanner running, cannot see')
+        # ...nor the dot beside it, which is the page's one answer to "is
+        # anything still reading offers". Green there and red words beside it
+        # was the same question answered twice, two ways.
+        eq('[%s] ...and the dot beside it red with them, green while it could see'
+           % _pn, (_see.get('dot'), _st.get('dot')), (True, False))
         eq('[%s] ...and the bar where it was, every control the same' % _pn,
            _st.get('bar'), _see.get('bar'))
         ok_('[%s] ...nor the page grown past the glass' % _pn, _st.get('fits'))
@@ -5432,20 +5438,31 @@ try:
            'place back' % _pn, (_b.get('frozenRead') or {}).get('label'),
            'CAMERA STALLED')
         _dk = _b.get('dark') or {}
-        eq('[%s] a box with nothing lit is named for what it means' % _pn,
-           (_panel(_dk), _dk.get('label')), ('verdict blind', 'NOTHING IN VIEW'))
+        # A box too dark to see in. Named for what the rig knows, which is not
+        # whether the phone is there: a phone turned down low reads the same as
+        # an empty mount, so a word or a line saying it is gone tells a driver
+        # whose phone is in the mount and lit that it is not — and the remedy
+        # that works, the brightness, went unsaid.
+        eq('[%s] a box too dark to see in is named for what the rig knows' % _pn,
+           (_panel(_dk), _dk.get('label')), ('verdict blind', 'TOO DARK TO SEE'))
         ok_('[%s] ...with its own line, whole inside the card (%r)'
             % (_pn, _dk.get('note')),
-            'Nothing lit' in (_dk.get('note') or '') and _dk.get('noteIn')
+            _dk.get('note') and _dk.get('noteIn')
             and _dk.get('noteWhole') and _dk.get('labelIn'))
+        ok_('[%s] ...asking for the phone in the mount AND its brightness up, '
+            'since a dim one reads the same as none (%r)' % (_pn, _dk.get('note')),
+            'in the mount' in (_dk.get('note') or '')
+            and 'brightness up' in (_dk.get('note') or ''))
         eq('[%s] ...and the bar where it was' % _pn, _dk.get('bar'), _see.get('bar'))
         _bk = _b.get('back') or {}
         eq('[%s] seeing again gives the verdict back' % _pn,
            (_bk.get('cls'), _bk.get('label'), _bk.get('rate'), _bk.get('conn')),
            (_see.get('cls'), _see.get('label'), _see.get('rate'), 'scanner reading'))
+        eq('[%s] ...the dot red while it was too dark to see, and green again'
+           % _pn, (_dk.get('dot'), _bk.get('dot')), (False, True))
         _id = _b.get('idleDark') or {}
         eq('[%s] between offers it is said in place of WAITING FOR AN OFFER' % _pn,
-           (_panel(_id), _id.get('label')), ('verdict blind', 'NOTHING IN VIEW'))
+           (_panel(_id), _id.get('label')), ('verdict blind', 'TOO DARK TO SEE'))
         eq('[%s] ...with no line claiming there is no offer on a screen it cannot see'
            % _pn, _id.get('detail'), '')
         eq('[%s] a word this page was not taught still takes the place' % _pn,

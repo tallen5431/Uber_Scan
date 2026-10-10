@@ -10,6 +10,9 @@ the scanner notices within a frame or two and acts.
     .settings.json  a mile costs this much
     .snap.json      say what you last read, into this 📷 Snap folder
 
+...and one the scanner leaves for the scanner after it, `.stalled`: when it
+last went quiet to be restarted over a stalled camera. See STALLED below.
+
 Files rather than a socket or a signal, because the scanner is sometimes a child
 of the web server and sometimes a systemd unit that has never heard of it, and a
 file works identically either way.
@@ -184,6 +187,13 @@ SETTINGS = '.settings.json'
 # server has stopped waiting on must not be written into later. See
 # snap_requested in scan_pi.py and askReader in server.js.
 SNAP = '.snap.json'
+# "I went quiet to be restarted over a stalled camera" — not a request from the
+# web side but the scan loop's note to its own successor, the one thing it has
+# to remember across the SIGKILL that restarts it. Empty: its mtime is the
+# stamp, read through age() like `.dropoff`'s. Kept here, which is RAM where
+# there is any, because a reboot is a restart of its own and the note should
+# not outlive one. See STALL_AGAIN in scan_pi.py; server.js never reads it.
+STALLED = '.stalled'
 
 
 # The live picture is the seventh file the two sides share, and it moved here

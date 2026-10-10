@@ -64,9 +64,12 @@ import track as TR                                            # noqa: E402
 ok = bad = 0
 LORES = (640, 480)
 CAP = (2328, 1748)
-# Two scatterings of one level of sensor noise, taken in turn. See FakeCam._lores.
-DITHER = [np.random.RandomState(seed).randint(0, 2, LORES[0] * LORES[1]).astype(np.uint8)
-          for seed in (11, 12)]
+# One level of sensor noise in half the pixels, a different half every frame:
+# a window into one long random run, moved along by the frame's number. See
+# FakeCam._lores.
+NOISE_SPAN = 1 << 14
+NOISE = np.random.RandomState(11).randint(0, 2, LORES[0] * LORES[1] + NOISE_SPAN) \
+    .astype(np.uint8)
 
 
 def eq(name, got, want):
@@ -142,15 +145,18 @@ class FakeCam(object):
         """The preview stream's buffer for `frame`, with a sensor's noise.
 
         YUV420 puts the Y plane first, which is all the loop reads. The noise
-        is the lowest bit of a scattering of pixels, flipped by one of two
-        patterns in turn: a real camera never hands over the same picture
-        twice, these frames are renders that would, and the loop reads a
-        repeated picture as a stalled camera (scan_pi.STALL_SAY). See the same
-        thing in test_loop.py, which says what it measured.
+        is the lowest bit of half the pixels, a different half every frame: a
+        real camera never hands over the same picture twice, these frames are
+        renders that would, and the loop reads a repeated picture as a stalled
+        camera (scan_pi.STALL_SAY). Not a few patterns in turn: the stall
+        watch looks back over eight frames, so patterns taken in turn come
+        round inside it. See the same thing in test_loop.py, which says what
+        it measured.
         """
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
-        return np.concatenate([small.ravel() ^ DITHER[self.frames % 2],
+        off = self.frames % NOISE_SPAN
+        return np.concatenate([small.ravel() ^ NOISE[off:off + LORES[0] * LORES[1]],
                                np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
 
     def capture_request(self):
@@ -2327,11 +2333,60 @@ eq('...and a stall is still a stall on a pass a read went out — the verify '
    SP.sight_now(True, True, True), 'stalled')
 eq('a box with no lit screen and no read in flight is dark',
    SP.sight_now(False, False, False), 'dark')
-eq('...but not on a pass a read went out: the motion gate saw something move',
+eq('...but not on a pass a read went out: the rig was looking',
    SP.sight_now(False, False, True), 'seeing')
 eq('...nor where nothing asked the box\'s light — a tracked rig, or fixed gain',
    SP.sight_now(False, None, False), 'seeing')
 eq('a lit box is seen', SP.sight_now(False, True, False), 'seeing')
+
+# What `frozen` is: Repeats, over the preview frames. Frames that differ the
+# way a sensor's do, one level in half their pixels, each its own.
+_rng = np.random.RandomState(5)
+_base = _rng.randint(1, 200, (LORES[1], LORES[0])).astype(np.uint8)
+_fr = [_base ^ _rng.randint(0, 2, _base.shape).astype(np.uint8) for _ in range(12)]
+_rp = SP.Repeats()
+eq('frames a working camera hands over are never repeats',
+   [_rp.seen(f) for f in _fr[:6]], [False] * 6)
+eq('...and one the same as the frame before it is', _rp.seen(_fr[5].copy()), True)
+# Twice the camera's buffers: a ring of them, with a read's unseen partner
+# capture in it, comes round that far apart. test_loop drives it.
+_keep = 2 * SP.CAMERA_BUFFERS
+_rp = SP.Repeats()
+for _f in _fr[:_keep]:
+    _rp.seen(_f)
+eq('...as is one the same as the frame %d before it: a camera handing back its '
+   'ring of buffers, a read\'s partner among them' % _keep,
+   _rp.seen(_fr[0].copy()), True)
+_rp = SP.Repeats()
+for _f in _fr[:_keep + 1]:
+    _rp.seen(_f)
+eq('...but not one from further back than that',
+   _rp.seen(_fr[0].copy()), False)
+# The sample is only where to start looking. A frame alike in every pixel it
+# samples and different in one it does not is a different frame.
+_rp = SP.Repeats()
+_rp.seen(_fr[0])
+_near = _fr[0].copy()
+_near[1, 1] ^= 1
+ok_('the fixture differs from its frame only where the sample does not look',
+    np.array_equal(_near[::SP.Repeats.SAMPLE, ::SP.Repeats.SAMPLE],
+                   _fr[0][::SP.Repeats.SAMPLE, ::SP.Repeats.SAMPLE])
+    and not np.array_equal(_near, _fr[0]))
+eq('a frame alike in its sample and not in one pixel elsewhere is not a repeat',
+   _rp.seen(_near), False)
+# ...and a picture with nothing in it that could show noise is no evidence.
+for _what, _pic in (('one flat value', np.full(_base.shape, 37, np.uint8)),
+                    ('black against full well and nothing between',
+                     np.where(_base > 100, 255, 0).astype(np.uint8))):
+    _rp = SP.Repeats()
+    _rp.seen(_pic)
+    eq('a picture of %s, repeated, is not a repeat' % _what, _rp.seen(_pic.copy()), False)
+_two = np.where(_base > 100, 255, 0).astype(np.uint8)
+_two[2, 2] = 128
+_rp = SP.Repeats()
+_rp.seen(_two)
+eq('...but one pixel between its extremes is a pixel that would carry noise, '
+   'and the repeat counts', _rp.seen(_two.copy()), True)
 
 # One state, two kinds of bad news with holds of their own.
 _hc = SP.Held('seeing', 60.0, quick=('seeing',), holds={'stalled': 6.0})

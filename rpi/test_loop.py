@@ -32,6 +32,7 @@ the camera can see a card. A check that needs one there must ask the camera
 
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -90,20 +91,36 @@ class Request(object):
         pass
 
 
-# A sensor's noise, as far as the stall watch can tell: the lowest bit of a
-# scattering of pixels, flipped by one of two patterns taken in turn.
+# A sensor's noise, as far as the stall watch can tell: the lowest bit of half
+# the pixels flipped, a different half on every capture.
 #
 # A real camera never hands over the same picture twice — every pixel carries
 # its own noise — and these are renders, which do: replayed at this fake's own
 # pace, a capture every 10ms for 12 seconds, 1,199 of 1,200 consecutive pairs
-# of frames were identical, the one exception being the card arriving. The loop now reads a repeated picture as a stalled camera
-# (scan_pi.STALL_SAY), so without this every fake here would be a camera that
-# stalled the moment its card stopped moving. One level of difference is all
-# it takes and nothing else can see it: measured on this suite's card, its
-# empty cabin and a black one, the two patterns move the motion gate by 0.50 at
-# most, against the 2.0 it calls still.
-DITHER = [np.random.RandomState(seed).randint(0, 2, LORES[0] * LORES[1]).astype(np.uint8)
-          for seed in (11, 12)]
+# of frames were identical, the one exception being the card arriving. The
+# loop reads a repeated picture as a stalled camera (scan_pi.STALL_SAY), so
+# without this every fake here would be a camera that stalled the moment its
+# card stopped moving. One level of difference is all it takes and nothing
+# else can see it: measured on this suite's card, its empty cabin and a black
+# one, two captures 1, 2, 5, 100 or 3,000 apart move the motion gate by 0.505
+# at most, against the 2.0 it calls still.
+#
+# A different half on EVERY capture, as a sensor's is, and not a few patterns
+# taken in turn. That was two, which the watch's eight frames back
+# (scan_pi.Repeats) see straight through: run that way, the still card below
+# was written as stalled 7.3 to 7.6 seconds in, three runs of three, with
+# nearly 400 frames counted as repeats on the health line. Each capture's half
+# is a window into one long random run, moved along by the capture's number,
+# so no two are alike for NOISE_SPAN captures — longer than any run here.
+NOISE_SPAN = 1 << 14
+NOISE = np.random.RandomState(11).randint(0, 2, LORES[0] * LORES[1] + NOISE_SPAN) \
+    .astype(np.uint8)
+
+
+def dither(n):
+    """Capture `n`'s noise: one level, in half the preview's pixels."""
+    off = n % NOISE_SPAN
+    return NOISE[off:off + LORES[0] * LORES[1]]
 
 
 class FakeCam(object):
@@ -114,18 +131,23 @@ class FakeCam(object):
     supervisor's SIGTERM as _stop_on_sigterm turns it into one.
     `freeze_at`: from this many seconds in, hand over the very same picture
     on every capture — a stalled camera, which is what the dither above
-    exists to tell apart from a still one. `noise=False` leaves the dither
-    off, for the one picture that repeats on a working camera: a flat one."""
+    exists to tell apart from a still one — or, with `ring`, the last `ring`
+    pictures in turn: a camera stuck handing back its buffers, no frame the
+    same as the one before it. `noise=False` leaves the dither off, for the
+    pictures that repeat on a working camera: ones with nothing in them that
+    could show noise."""
 
     def __init__(self, offer, empty, appear_at=0.4, fail_after=None, freeze_at=None,
-                 noise=True):
+                 noise=True, ring=1):
         self.offer, self.empty = offer, empty
         self.appear_at = appear_at
         self.started = time.time()
         self.fail_after = fail_after
         self.freeze_at = freeze_at
         self.noise = noise
+        self.ring = ring
         self.captures = 0
+        self.history = []
         self._show()
 
     def _show(self):
@@ -134,9 +156,10 @@ class FakeCam(object):
         grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
         small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA).ravel()
         if self.noise:
-            small = small ^ DITHER[self.captures % 2]
+            small = small ^ dither(self.captures)
         self.lores = np.concatenate([small,
                                      np.full(LORES[0] * LORES[1] // 2, 128, np.uint8)])
+        self.history = (self.history + [self.lores])[-self.ring:]
 
     def frozen(self):
         return (self.freeze_at is not None
@@ -148,6 +171,8 @@ class FakeCam(object):
             raise self.fail_after[1]
         if not self.frozen():
             self._show()
+        else:
+            self.lores = self.history[self.captures % len(self.history)]
         time.sleep(0.01)
         return Request(self)
 
@@ -181,7 +206,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         clipped_for=None, dropoff_window=None, whole_text=None, fitted=None,
         fitted_for=None, hang_on_loop=True,
         fail_after=None, phone_hold=None, gps_hold=None, phone=None,
-        freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None):
+        freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None,
+        ring=1, stall_again=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -190,9 +216,11 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     request written here cannot be eaten by a scanner running on the same
     machine, nor this one eat theirs. `fail_after`: (n, exception) for the
     camera — see FakeCam. `phone`: what gps.Phone hands back, for a --gps run.
-    `freeze_at`: the camera stalls this many seconds in — see FakeCam — and
-    `stall_say` stands in for scan_pi.STALL_SAY. `empty`: what the mount
-    shows with no card in it, TC.blank() unless a check needs it darker.
+    `freeze_at`: the camera stalls this many seconds in — see FakeCam, and
+    `ring` there — and `stall_say` stands in for scan_pi.STALL_SAY,
+    `stall_again` for scan_pi.STALL_AGAIN. `empty`:
+    what the mount shows with no card in it, TC.blank() unless a check needs
+    it darker.
     `offer_dim`: the card at that share of its brightness — lit, and short of
     the full well that makes the gain look again at once.
     Returns the journal rows, the announcements, the alive beats and what rode
@@ -213,7 +241,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     if offer_dim is not None:
         offer = (offer.astype(np.float32) * offer_dim).astype(np.uint8)
     cam = FakeCam(offer, TC.blank() if empty is None else empty, appear_at=appear_at,
-                  fail_after=fail_after, freeze_at=freeze_at, noise=noise)
+                  fail_after=fail_after, freeze_at=freeze_at, noise=noise, ring=ring)
     # Handed out so a check can ask what is really in the mount right now. The
     # stubbed reader answers with whatever text the check asked for whether or
     # not there is a card in front of it, so an announced offer is NOT evidence
@@ -299,13 +327,16 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     was_refind_s = SP.REFIND_NOTICE_S
     if refind_notice_s is not None:
         SP.REFIND_NOTICE_S = refind_notice_s
-    was_holds = (SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY)
+    was_holds = (SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY,
+                 SP.STALL_AGAIN)
     if phone_hold is not None:
         SP.PHONE_HOLD = phone_hold
     if gps_hold is not None:
         SP.GPS_HOLD = gps_hold
     if stall_say is not None:
         SP.STALL_SAY = stall_say
+    if stall_again is not None:
+        SP.STALL_AGAIN = stall_again
     if phone is not None:
         SP.GPS.Phone = lambda address: phone
     deadline = time.time() + seconds
@@ -342,7 +373,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.REFIND_NOTICE_S = was_refind_s
-        SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY = was_holds
+        SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY, SP.STALL_AGAIN = was_holds
         if handoff:
             if was_handoff is None:
                 os.environ.pop(HO.ENV_DIR, None)
@@ -439,6 +470,12 @@ eq('a seen row carries the window\'s reads and how they went (%r)'
     if k not in _first], [])
 ok_('...with the reads counted, not a placeholder',
     isinstance(_first.get('reads'), int) and _first.get('reads') >= 1)
+# ...and the stall watch's own evidence: frames since start that were the same
+# picture as one just before. Nought here, a working camera with a sensor's
+# noise, over a still card read again and again — and on the row, because the
+# premise it measures is the suites' model and only a real shift can test it.
+eq('...and how many frames since start were a picture handed over again, '
+   'which on a working camera is none', _first.get('repeats', 'not on the row'), 0)
 eq('...and the corners in the health line\'s own word', _first.get('corners') in
    ('held', 'lost', 'stuck'), True)
 # This machine has no thermal zone and no vcgencmd, so both are null — and the
@@ -891,8 +928,26 @@ ok_('...over a run that did lose the phone for them (%r)'
 # every capture is the same picture byte for byte. The stub reader goes on
 # answering the card, which is what the verify beat re-reading a frozen card
 # looks like — readings that look fresh, about a card long gone.
+#
+# Every stall here has a handoff directory of its own: going quiet over one
+# leaves a note there (STALL_AGAIN), and a note left in the shared one would
+# hold back the next run's restart — this suite's, or another's on the machine.
+def _stall_note_age(handoff):
+    """handoff.age of the stall note in `handoff`, as the loop would read it."""
+    was = os.environ.get(HO.ENV_DIR)
+    os.environ[HO.ENV_DIR] = handoff
+    try:
+        return HO.age(HO.STALLED)
+    finally:
+        if was is None:
+            os.environ.pop(HO.ENV_DIR, None)
+        else:
+            os.environ[HO.ENV_DIR] = was
+
+
+_slho = tempfile.mkdtemp()
 _sl = run(lambda n, k: WHOLE, seconds=8.0, freeze_at=1.5, stall_say=1.0,
-          alive_every=0.5)
+          alive_every=0.5, handoff=_slho)
 _slups = _ups(_sl['rows'])
 ok_('a camera handing over the same picture is written as stalled (%r)' % _slups,
     ('camera', 'stalled') in _slups)
@@ -914,6 +969,10 @@ eq('...the last beat it sent being the one that told the panel why',
    _sl['alive'][-1].get('blind') if _sl['alive'] else None, 'stalled')
 eq('...said once in the log', sum(1 for l in _sl['logs']
                                   if 'going quiet' in l and 'stalled' in l), 1)
+_sl_note = _stall_note_age(_slho)
+ok_('...leaving the run after it a note that it went quiet over a stall '
+    '(%r seconds old)' % (_sl_note,),
+    _sl_note is not None and 0 <= _sl_note < 8.0)
 # ...and nothing more is read off the frozen picture once the stall is said.
 # Frozen on a card, the verify beat re-read it every few seconds, each verdict
 # as fresh-looking as a real one — and server.js counts a reading as the loop
@@ -924,16 +983,133 @@ _sl_after = [round(t - _sl_told[0], 1) for a, k, t in _sl['verdicts']
 eq('...and no reading of the frozen card comes after it, to keep the loop '
    'sounding alive', (bool(_sl_told), _sl_after), (True, []))
 
+# ...but not restarted again within STALL_AGAIN of the last time. A camera a
+# restart does not cure stalls again in the first seconds of the run after it,
+# and nothing but server.js's backoff stopped the watchdog's restart going
+# round all night, three rows a time. Here the run before has just gone quiet
+# over a stall — its note is fresh — and this one's camera stalls as well.
+def _leave_stall_note(handoff, ahead=0.0):
+    """The note a run leaves as it goes quiet over a stall, in `handoff`,
+    stamped `ahead` seconds past the clock."""
+    was = os.environ.get(HO.ENV_DIR)
+    os.environ[HO.ENV_DIR] = handoff
+    try:
+        with open(HO.path(HO.STALLED), 'w'):
+            pass
+        if ahead:
+            stamp = time.time() + ahead
+            os.utime(HO.path(HO.STALLED), (stamp, stamp))
+    finally:
+        if was is None:
+            os.environ.pop(HO.ENV_DIR, None)
+        else:
+            os.environ[HO.ENV_DIR] = was
+
+
+_agho = tempfile.mkdtemp()
+_leave_stall_note(_agho)
+_ag = run(lambda n, k: WHOLE, seconds=8.0, freeze_at=1.5, stall_say=1.0,
+          alive_every=0.5, handoff=_agho)
+_agups = _ups(_ag['rows'])
+ok_('a stall soon after a restart over one is still written, and still told '
+    'the panel (%r)' % _agups,
+    ('camera', 'stalled') in _agups
+    and any(b.get('blind') == 'stalled' for b in _ag['alive']))
+eq('...but no second restart is asked for inside STALL_AGAIN',
+   [x.get('why') for x in _ag['rows']
+    if x.get('kind') == 'up' and x.get('state') == 'restart'], [])
+_ag_gap = time.time() - _ag['beats'][-1] if _ag['beats'] else None
+ok_('...the loop staying up, beating the stall to the panel to the end (last '
+    'beat %.1fs ago, saying %r)' % (_ag_gap or 0, _ag['alive'][-1].get('blind')
+                                    if _ag['alive'] else None),
+    _ag_gap is not None and _ag_gap < 1.5
+    and _ag['alive'][-1].get('blind') == 'stalled')
+eq('...said once in the log, with the cable named',
+   sum(1 for l in _ag['logs'] if 'stays up' in l and 'cable' in l), 1)
+_ag_told = [t for t, b in zip(_ag['beats'], _ag['alive']) if b.get('blind') == 'stalled'][:1]
+eq('...and still nothing read off the frozen picture while it does',
+   (bool(_ag_told), [round(t - _ag_told[0], 1) for a, k, t in _ag['verdicts']
+                     if _ag_told and t > _ag_told[0] + 0.5]), (True, []))
+
+# ...and once that restart is STALL_AGAIN old, it asks again. The note is left
+# as the loop begins, and STALL_AGAIN cut to six seconds: the stall is said
+# under it and sat out, then goes quiet when the note ages past it.
+_aaho = tempfile.mkdtemp()
+_aa_noted = []
+
+
+def _note_as_it_begins(rows, ann, calls):
+    if not _aa_noted:
+        _aa_noted.append(time.time())
+        _leave_stall_note(_aaho)
+    return False
+
+
+_aa = run(lambda n, k: WHOLE, seconds=12.0, freeze_at=1.5, stall_say=1.0,
+          alive_every=0.5, handoff=_aaho, stall_again=6.0, until=_note_as_it_begins)
+_aa_st = [t for t, b in zip(_aa['beats'], _aa['alive']) if b.get('blind') == 'stalled']
+_aa_rs = [x for x in _aa['rows'] if x.get('kind') == 'up' and x.get('state') == 'restart']
+_aa_gap = time.time() - _aa['beats'][-1] if _aa['beats'] else None
+ok_('...and asks again once the last restart is STALL_AGAIN old: the stall sat '
+    'out first (%.1fs of beats saying it), then a restart row and quiet (last '
+    'beat %.1fs ago)' % ((_aa_st[-1] - _aa_st[0]) if _aa_st else 0, _aa_gap or 0),
+    _aa_st and _aa_st[-1] - _aa_st[0] >= 0.9 and len(_aa_rs) == 1
+    and _aa_gap is not None and _aa_gap > 3.0)
+# ...and a note stamped ahead of the clock is not a young one. Its age is its
+# mtime against the wall clock, so a clock stepped back since it was left reads
+# as a note not yet written — and a stall under it asks for its restart, as it
+# did before the note existed, with server.js's backoff still bounding it.
+_afho = tempfile.mkdtemp()
+_leave_stall_note(_afho, ahead=3600.0)
+_af = run(lambda n, k: WHOLE, seconds=8.0, freeze_at=1.5, stall_say=1.0,
+          alive_every=0.5, handoff=_afho)
+eq('a stall under a note stamped an hour ahead of the clock asks for its '
+   'restart rather than sitting it out',
+   len([x for x in _af['rows'] if x.get('kind') == 'up' and x.get('state') == 'restart']), 1)
+# ...and every repeat is counted on the health line. That a working camera
+# never hands one over rests on testcards' sensor model and not on the IMX519,
+# whose frames nobody here has — so the rig's own log is where it gets
+# measured, and a frozen camera is what a count looks like. The health line
+# only speaks after reads, so the card reads as a fragment — which keeps the
+# resample window reading every half second for four — and the stall is held
+# off past the run, so nothing stops those reads.
+_rep = run(lambda n, k: FRAG, seconds=6.0, freeze_at=1.0, stall_say=60.0,
+           alive_every=0.5, health_every=0.2)
+_rep_lines = [l for l in _rep['logs'] if l.startswith('health') and 'same picture' in l]
+ok_('a frozen camera\'s repeated frames are counted on the health line (%r)'
+    % (_rep_lines[-1:],),
+    _rep_lines and re.search(r'\b\d+ frames since start the same picture',
+                             _rep_lines[-1]))
+
+# The stall again, from a camera stuck handing back its ring of buffers: the
+# last CAMERA_BUFFERS pictures in turn, so no frame is the same as the one
+# before it and a watch that only looked one back saw a working camera. At the
+# real STALL_SAY, which is where the verify beat's reads come in: each takes a
+# capture the watch never sees, and a watch that kept only CAMERA_BUFFERS
+# frames lost the run of repeats on every one and never said it.
+_ring = run(lambda n, k: WHOLE, seconds=12.0, freeze_at=1.5, alive_every=0.5,
+            ring=SP.CAMERA_BUFFERS, handoff=tempfile.mkdtemp(),
+            until=lambda rows, ann, calls: ('camera', 'stalled') in _ups(rows))
+ok_('a camera handing back its ring of buffers, no frame the same as the one '
+    'before, is written as stalled at the real hold, reads and all (%r)'
+    % _ups(_ring['rows']),
+    ('camera', 'stalled') in _ups(_ring['rows']) and _ring['submitted'] >= 2)
+
 # ...and a still card is not a stall. A sensor's noise differs from frame to
 # frame however still the picture, which is what the fakes' dither stands for,
 # and this card sits still for 8.6s at the real STALL_SAY.
-_still = run(lambda n, k: WHOLE, seconds=9.0, alive_every=0.5)
+_still = run(lambda n, k: WHOLE, seconds=9.0, alive_every=0.5, health_every=1.0)
 eq('a card sitting still past the stall\'s hold is not a stall',
    [u for u in _ups(_still['rows']) if u[0] == 'camera'], [])
 eq('...and no beat says it cannot see',
    [b.get('blind') for b in _still['alive'] if b.get('blind')], [])
 ok_('...on a run long enough to have said so (%d beats)' % len(_still['beats']),
     _still['beats'] and _still['beats'][-1] - _still['beats'][0] > SP.STALL_SAY)
+_still_health = [l for l in _still['logs'] if l.startswith('health')]
+eq('...and its health lines count no repeated frame, on %d of them'
+   % len(_still_health),
+   (bool(_still_health), [l for l in _still_health if 'same picture' in l]),
+   (True, []))
 
 # ...nor is a picture that is one flat value all over, repeated. Two of those
 # match whatever the camera is doing — a box of black, a sensor at full well —
@@ -943,8 +1119,21 @@ _flat = run(lambda n, k: '', seconds=5.0, appear_at=1e9, noise=False,
             stall_say=1.0, alive_every=0.5)
 eq('a flat picture repeated is not a stall',
    [u for u in _ups(_flat['rows']) if u[0] == 'camera'], [])
+# ...nor one that is black clamped against full well and nothing between: the
+# two places a sensor's noise is clipped away, so nothing in the picture could
+# show any. Split where the preview's pixels split, so no pixel is a blend.
+_split = np.zeros((CAP[1], CAP[0], 3), np.uint8)
+_split[:, CAP[0] // 2:] = 255
+_railcam = []
+_rails = run(lambda n, k: '', seconds=5.0, appear_at=1e9, noise=False, empty=_split,
+             stall_say=1.0, alive_every=0.5, cam_out=_railcam)
+eq('the fixture really is two values and nothing between',
+   sorted(set(_railcam[0].lores[:LORES[0] * LORES[1]].tolist())) if _railcam else None,
+   [0, 255])
+eq('a picture of black against full well, repeated, is not a stall either',
+   [u for u in _ups(_rails['rows']) if u[0] == 'camera'], [])
 
-# --- a box with nothing lit in it ---------------------------------------------
+# --- a box too dark to see in -------------------------------------------------
 #
 # The other half: the owner's screen read 1-2 of 205 in the reads either side of
 # the blind week. The box drawn by hand — --no-track here, the other rig with
@@ -952,6 +1141,11 @@ eq('a flat picture repeated is not a stall',
 # four seconds in. Reads answer nothing until there is a card in the mount, so
 # the rig is not reading a card it cannot see. A long beat, so the beats that
 # come are the ones a change sends.
+#
+# The gain starts on its ceiling, and the one place too_dim could fire on that
+# box at all: from the usual 1.5 the gain never climbs on darkness. Not a
+# contrived start: a 📷 Snap off the owner's rig at 15:05 on 8 Oct, in
+# daylight, has the box at 218 with the gain at 7.16 of its 8.0.
 _dkcam = []
 _DARK = np.full((CAP[1], CAP[0], 3), 1, np.uint8)
 
@@ -962,6 +1156,7 @@ def _dk_text(n, k):
 
 _dk = run(_dk_text, extra_argv=['--no-track'], seconds=14.0, appear_at=4.0,
           empty=_DARK, phone_hold=1.0, alive_every=30.0, cam_out=_dkcam,
+          config_extra={'analogueGain': SP.EX.GAIN_LIMITS[1]},
           until=lambda rows, ann, calls: ('camera', 'seeing') in _ups(rows) and ann)
 _dkups = _ups(_dk['rows'])
 ok_('a box with nothing lit in it is written as dark, with nothing tracking (%r)'
@@ -975,9 +1170,18 @@ ok_('...with what the box read, under what a lit screen reads (%r)'
 _dkbeats = [(t, b) for t, b in zip(_dk['beats'], _dk['alive'])]
 ok_('...the beat carries it, at once rather than on the next beat',
     any(b.get('blind') == 'dark' for _, b in _dkbeats))
-eq('...and never as too dim, which is a lit screen out of light',
-   [b.get('tooDim') for _, b in _dkbeats if b.get('blind') == 'dark' and b.get('tooDim')],
-   [])
+# Asked by the name the loop hands emit_alive, `too_dim`. This asked for the
+# wire's `tooDim` off the loop's own arguments, which is never there, so it
+# held whatever the gain did — the start at 1.5 was not the only reason it
+# could not fail. Measured with too_dim no longer asking `lit`: the log said
+# the phone was dimmer than the camera could make up for, the beat that said
+# dark carried too_dim True, and this passed. A beat without the key is not
+# taken as "not too dim" either.
+_dk_dim = [b.get('too_dim', 'not on the beat') for _, b in _dkbeats
+           if b.get('blind') == 'dark']
+eq('...and never as too dim, with the gain on its ceiling: too dim is a screen '
+   'the gain counted as lit, and this one it never did (%r)' % (_dk_dim,),
+   (bool(_dk_dim), [d for d in _dk_dim if d is not False]), (True, []))
 ok_('...and the card arriving is seeing again (%r)' % _dkups,
     ('camera', 'seeing') in _dkups
     and _dkups.index(('camera', 'dark')) < _dkups.index(('camera', 'seeing')))
@@ -1468,7 +1672,6 @@ eq('a clipped read is not recorded as the screen after a card',
 # its folder and the loop answers into it once. Driven through main() the way
 # the dropoff and crop-box requests are, with the request written as server.js
 # writes it: JSON naming the folder, renamed into place.
-import re                                                     # noqa: E402
 import socket as _socket                                      # noqa: E402
 import threading as _threading                                # noqa: E402
 

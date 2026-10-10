@@ -659,13 +659,35 @@ for _n, _rows in (('one.jsonl', [_crow(0, _cnow)]), ('none.jsonl', [])):
 #
 # The owner's rig read once in 9.4 days, beating all the while, and nothing on
 # any screen said so. The scanner now writes `camera` rows when it cannot see —
-# a stalled feed, a box with nothing lit in it — and when it can again; the
-# preflight is what a driver runs when nothing works, so it says which.
+# a stalled feed, a box too dark to see a card arrive in — and when it can
+# again; the preflight is what a driver runs when nothing works, so it says
+# which.
 def _cam(run, n, at, state, lasted, **extra):
     row = _uprow(run, n, at, 'camera', state)
     row.update(forSeconds=lasted, **extra)
     return row
 
+
+# The camera's word stands only while a scanner runs to stand by it, which the
+# preflight reads off /proc. These stand in for it: one machine with the
+# scanner running as the autopilot execs it, and one with nothing scanning but
+# two things that mention it — an editor with the file open, and the suites
+# driving the loop in-process.
+def _proc(name, cmdlines):
+    root = os.path.join(_clock_dir, name)
+    for pid, argv in cmdlines.items():
+        os.makedirs(os.path.join(root, str(pid)))
+        with open(os.path.join(root, str(pid), 'cmdline'), 'wb') as fh:
+            fh.write(b'\0'.join(argv) + b'\0')
+    os.makedirs(os.path.join(root, 'self'), exist_ok=True)
+    return root
+
+
+_PROC_ON = _proc('proc_on', {4242: [b'/usr/bin/python3',
+                                    b'/home/pi/Uber_Scan/rpi/scan_pi.py',
+                                    b'--json', b'--speak']})
+_PROC_OFF = _proc('proc_off', {77: [b'vim', b'rpi/scan_pi.py'],
+                               78: [b'python3', b'rpi/test_loop.py']})
 
 _r1 = '7a1b2c3d4e5f'
 # Taken here rather than reusing the clock section's: preflights have run since
@@ -673,12 +695,14 @@ _r1 = '7a1b2c3d4e5f'
 _camnow = int(time.time() * 1000)
 _seeing_rows = [_uprow(_r1, 1, _camnow - 3600000, 'rig', 'start'),
                 _crow(700, _camnow - 3000000)]
-_ok_run = run(JOURNAL=_clock_journal('cam_ok.jsonl', _seeing_rows))
+_ok_run = run(JOURNAL=_clock_journal('cam_ok.jsonl', _seeing_rows),
+              UBERSCAN_PROC=_PROC_ON)
 eq('a rig that has said nothing about its camera passes',
    findings(_ok_run.stdout).get('the camera can see'), True)
 
-_stalled = run(JOURNAL=_clock_journal('cam_stalled.jsonl', _seeing_rows + [
-    _cam(_r1, 2, _camnow - 7200000 + 6000, 'stalled', 6)]))
+_stalledj = _clock_journal('cam_stalled.jsonl', _seeing_rows + [
+    _cam(_r1, 2, _camnow - 7200000 + 6000, 'stalled', 6)])
+_stalled = run(JOURNAL=_stalledj, UBERSCAN_PROC=_PROC_ON)
 eq('a camera the rig last called stalled fails',
    findings(_stalled.stdout).get('the camera can see'), False)
 _stline = [l for l in _stalled.stdout.splitlines() if 'camera can see' in l]
@@ -693,21 +717,26 @@ eq('...and blocks nothing: the rig restarts a stalled camera itself',
 # by the row, eleven by the dark.
 _darkj = _clock_journal('cam_dark.jsonl', _seeing_rows + [
     _cam(_r1, 2, _camnow - 600000, 'dark', 60, bright=1.6)])
-_dark = run(JOURNAL=_darkj)
+_dark = run(JOURNAL=_darkj, UBERSCAN_PROC=_PROC_ON)
 eq('a box the rig last called dark fails',
    findings(_dark.stdout).get('the camera can see'), False)
 _dkline = [l for l in _dark.stdout.splitlines() if 'camera can see' in l]
-ok_('...saying nothing is in view, what it read, and for how long — from when '
-    'it began, not when it was written (%r)' % _dkline[:1],
-    any('nothing in view' in l and '1.6 of 255' in l and 'for 11 min' in l
+ok_('...saying too dark to see, what it read, and for how long — from when it '
+    'began, not when it was written (%r)' % _dkline[:1],
+    any('too dark to see' in l and '1.6 of 255' in l and 'for 11 min' in l
         for l in _dkline))
+# The box cannot tell a phone missing from a phone turned down, so neither can
+# the remedy: both, and the brightness first among them.
+ok_('...with a fix for a dim phone as well as a missing one',
+    'turn its brightness up' in _dark.stdout and 'in the mount' in _dark.stdout)
 eq('...and blocks nothing either: a phone in a pocket is not a broken rig',
    blocking_count(_dark.stdout), blocking_count(_ok_run.stdout))
 
 eq('a camera that can see again passes',
    findings(run(JOURNAL=_clock_journal('cam_back.jsonl', _seeing_rows + [
        _cam(_r1, 2, _camnow - 600000, 'stalled', 6),
-       _cam(_r1, 3, _camnow - 500000, 'seeing', 0)])).stdout).get('the camera can see'),
+       _cam(_r1, 3, _camnow - 500000, 'seeing', 0)]),
+       UBERSCAN_PROC=_PROC_ON).stdout).get('the camera can see'),
    True)
 # The word is the PROCESS's. A stalled camera ends in a restart, and the new
 # run's start is where the old run's account stops — its camera has not been
@@ -716,17 +745,37 @@ eq('...and so does one whose run has ended since: the word was that process\'s',
    findings(run(JOURNAL=_clock_journal('cam_restarted.jsonl', _seeing_rows + [
        _cam(_r1, 2, _camnow - 600000, 'stalled', 6),
        _uprow(_r1, 3, _camnow - 590000, 'rig', 'restart'),
-       _uprow('0f9e8d7c6b5a', 1, _camnow - 560000, 'rig', 'start')])).stdout)
+       _uprow('0f9e8d7c6b5a', 1, _camnow - 560000, 'rig', 'start')]),
+       UBERSCAN_PROC=_PROC_ON).stdout)
    .get('the camera can see'), True)
 eq('...as does one stopped cleanly since',
    findings(run(JOURNAL=_clock_journal('cam_stopped.jsonl', _seeing_rows + [
        _cam(_r1, 2, _camnow - 600000, 'dark', 60, bright=1.0),
-       _uprow(_r1, 3, _camnow - 500000, 'rig', 'stop')])).stdout)
+       _uprow(_r1, 3, _camnow - 500000, 'rig', 'stop')]),
+       UBERSCAN_PROC=_PROC_ON).stdout)
+   .get('the camera can see'), True)
+# ...and one that ended with neither: the engine's power cut writes no stop,
+# and with nothing started since, the dead run's word was read as now — a
+# camera "stalled for 2.0 hours" here, across however long the Pi was off,
+# and the cable as the fix for a scanner that would not start. With nothing
+# scanning, the word is that run's last and not the camera's now.
+_gone = run(JOURNAL=_stalledj, UBERSCAN_PROC=_PROC_OFF)
+eq('a stall from a run that ended with no stop, and nothing scanning since — an '
+   'editor with scan_pi.py open, or the suites driving the loop, being no '
+   'scanner — fails nothing', findings(_gone.stdout).get('the camera can see'), True)
+_goneline = [l for l in _gone.stdout.splitlines() if 'camera can see' in l]
+ok_('...saying what that run last said, with no age (%r)' % _goneline[:1],
+    any('not asked' in l and 'had stalled' in l and ' for ' not in l
+        for l in _goneline))
+eq('...and a machine with no /proc to read has no scanner on it either',
+   findings(run(JOURNAL=_stalledj,
+                UBERSCAN_PROC=os.path.join(_clock_dir, 'no-such-proc')).stdout)
    .get('the camera can see'), True)
 # An age only off a clock that was set: a row written before NTP is not "for
 # 29,000 days".
 _preclock = run(JOURNAL=_clock_journal('cam_preclock.jsonl', [
-    _uprow(_r1, 1, 25000, 'rig', 'start'), _cam(_r1, 2, 31000, 'stalled', 6)]))
+    _uprow(_r1, 1, 25000, 'rig', 'start'), _cam(_r1, 2, 31000, 'stalled', 6)]),
+    UBERSCAN_PROC=_PROC_ON)
 _pcline = [l for l in _preclock.stdout.splitlines() if 'camera can see' in l]
 ok_('a stall stamped before the clock was set says so rather than an age (%r)'
     % _pcline[:1], any('clock cannot place' in l for l in _pcline))
