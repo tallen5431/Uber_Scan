@@ -495,9 +495,9 @@ class AutoGain:
         # rather than below it, because the scan loop asks it too: on a rig
         # with nothing tracking the corners it is the one answer to "is there
         # a lit screen in the box at all", and scan_pi's 'dark' — TOO DARK TO
-        # SEE on the panel — is that answer staying no. Below the return, a box
-        # reading exactly 0 — the darkest case there is — left `lit` saying
-        # whatever the last beat said.
+        # BE SURE on the panel — is that answer staying no. Below the return,
+        # a box reading exactly 0 — the darkest case there is — left `lit`
+        # saying whatever the last beat said.
         #
         # The same `lit` gates `too_dim` below, which is what keeps the two
         # apart: too dim is a screen counted as lit and given everything, dark
@@ -509,9 +509,9 @@ class AutoGain:
             # ...and on this return too, which comes before too_dim is worked
             # out. A box gone to pure black under a screen that had been too
             # dim kept too_dim from the beat before, and the beat carried both
-            # at once: too dim, and too dark to see, over one box — measured on
-            # a controller at its ceiling, lit False and too_dim True. A screen
-            # the tracker still vouches for keeps its complaint.
+            # at once: too dim, and too dark to be sure, over one box —
+            # measured on a controller at its ceiling, lit False and too_dim
+            # True. A screen the tracker still vouches for keeps its complaint.
             self.too_dim = self.too_dim and lit_screen
             return {}
 

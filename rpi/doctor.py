@@ -63,7 +63,9 @@ def rig_age_ms(stamp_ms, now_ms):
     copy of it: server.js's clockAge is the same rule for the server's side.
     Imported here and not at the top, because a preflight on a Pi that cannot
     import the scanner has its own lines above to say so; this is only asked
-    with a scanner running, which has imported it already."""
+    with a scanner running. That scanner is another process, and may be
+    another python: an import that fails here is said on the camera's own
+    line, by the try round it."""
     import scan_pi as SP
     return SP.age_ms(stamp_ms / 1000.0, now_ms / 1000.0)
 
@@ -349,69 +351,89 @@ def main():
             # read in 9.4 days, the heartbeat beating throughout, the panel
             # saying "scanner reading". The scanner now writes `camera` up rows
             # when it stops being able to see — a stalled feed, or a box too
-            # dark to see a card arrive in — and when it can again, and this
-            # reads the newest of them. Only the newest RUN's: a start or a stop
-            # ends what the run before it said, because the camera's word is
-            # about a process.
+            # dark for it to be sure of seeing a card arrive — and when it can
+            # again, and this reads the newest of them. Only the newest RUN's:
+            # a start or a stop ends what the run before it said, because the
+            # camera's word is about a process.
             #
             # ...and only while a scanner is running to stand by it. A run the
             # engine's power cut writes no stop, and with nothing started since,
             # its word was read as now: a camera stalled "for" every hour the Pi
             # had been off, and the remedy for a camera on a rig whose trouble
-            # was that the scanner would not start. So a word with no
-            # scanner behind it is said as what that run last said, with no
-            # age, and fails nothing.
+            # was that the scanner would not start. So with nothing scanning
+            # the camera is not asked about at all, and the line says so under
+            # a name that claims nothing — "ok  the camera can see  not asked"
+            # was a pass mark over a question nobody had put — with what a run
+            # that ended with no stop last said, and no age.
             #
-            # Not blocking either way: too dark to see can as well be a phone
-            # in the driver's pocket as a fault, and a stalled camera is
+            # Not blocking either way: too dark to be sure can as well be a
+            # phone in the driver's pocket as a fault, and a stalled camera is
             # restarted by the rig itself.
-            said = None
-            for r in rows:
-                if not isinstance(r, dict) or r.get('kind') != 'up':
-                    continue
-                if r.get('about') == 'camera':
-                    said = r
-                elif r.get('about') == 'rig' and r.get('state') in ('start', 'stop'):
-                    said = None
-            state = (said or {}).get('state')
-            blind = state in ('stalled', 'dark') and scanner_running()
-            when = ''
-            if blind:
-                at, lasted = said.get('at'), said.get('forSeconds')
-                began = (at - lasted * 1000
-                         if isinstance(at, (int, float)) and isinstance(lasted, int)
-                         else None)
-                # An age only off two readings of a clock that was set, by the
-                # scanner's own rule for it rather than a copy of it here.
-                age = None if began is None else rig_age_ms(began, JR.now_ms())
-                if age is None:
-                    when = ', since a time the clock cannot place'
+            #
+            # In a try of its own. The age is the scanner's rule, which means
+            # importing scan_pi (see rig_age_ms), and a preflight run under a
+            # python that cannot was reported as "the journal file is whole:
+            # FAIL" — the wrong line — and took "the journal can be written"
+            # below with it.
+            try:
+                said = None
+                for r in rows:
+                    if not isinstance(r, dict) or r.get('kind') != 'up':
+                        continue
+                    if r.get('about') == 'camera':
+                        said = r
+                    elif r.get('about') == 'rig' and r.get('state') in ('start', 'stop'):
+                        said = None
+                state = (said or {}).get('state')
+                if not scanner_running():
+                    check('whether the camera can see', True,
+                          'not asked — nothing is scanning%s' % (
+                              '; its last run ended with no stop, saying %s'
+                              % ('the camera had stalled' if state == 'stalled'
+                                 else 'its box was too dark to be sure of '
+                                      'seeing a card arrive')
+                              if state in ('stalled', 'dark') else ''))
                 else:
-                    mins = age / 60000.0
-                    when = (', for %d min' % round(mins) if mins < 90
-                            else ', for %.1f hours' % (mins / 60))
-            check('the camera can see', not blind,
-                  'stalled — the same picture, byte for byte%s' % when
-                  if blind and state == 'stalled' else
-                  'too dark to see — nothing in the box the gain counts as a lit '
-                  'screen (it read %s of 255)%s' % (said.get('bright'), when)
-                  if blind else
-                  'not asked — nothing is scanning; its last run ended with no '
-                  'stop, saying %s' % ('the camera had stalled' if state == 'stalled'
-                                       else 'its box was too dark to see')
-                  if state in ('stalled', 'dark') else
-                  'nothing on record says it cannot',
-                  'the camera is handing over one picture over and over. The rig '
-                  'restarts it on its own, at most once in ten minutes; if this '
-                  'stays or keeps coming back, power down and reseat the '
-                  'camera\'s ribbon cable at both ends.'
-                  if state == 'stalled' else
-                  'a dim screen reads the same as an empty mount, so: check the '
-                  'phone is in the mount with its screen on, and turn its '
-                  'brightness up. If it is there and bright, the box is drawn '
-                  'somewhere else — press ▣ Set box on the driving screen and '
-                  'draw it again; if that is right too, restart the scanner, '
-                  'which is what brought the rig\'s own blind week to an end.')
+                    blind = state in ('stalled', 'dark')
+                    when = ''
+                    if blind:
+                        at, lasted = said.get('at'), said.get('forSeconds')
+                        began = (at - lasted * 1000
+                                 if isinstance(at, (int, float)) and isinstance(lasted, int)
+                                 else None)
+                        # An age only off two readings of a clock that was set,
+                        # by the scanner's own rule for it rather than a copy
+                        # of it here.
+                        age = None if began is None else rig_age_ms(began, JR.now_ms())
+                        if age is None:
+                            when = ', since a time the clock cannot place'
+                        else:
+                            mins = age / 60000.0
+                            when = (', for %d min' % round(mins) if mins < 90
+                                    else ', for %.1f hours' % (mins / 60))
+                    check('the camera can see', not blind,
+                          'stalled — the same picture, byte for byte%s' % when
+                          if state == 'stalled' else
+                          'too dark to be sure of seeing a card arrive — the box '
+                          'read %s of 255, which the gain does not count as a lit '
+                          'screen%s' % (said.get('bright'), when)
+                          if blind else
+                          'nothing on record says it cannot',
+                          'the camera is handing over one picture over and over. '
+                          'The rig restarts it on its own, at most once in ten '
+                          'minutes; if this stays or keeps coming back, power '
+                          'down and reseat the camera\'s ribbon cable at both ends.'
+                          if state == 'stalled' else
+                          'a dim screen reads the same as an empty mount, so: '
+                          'check the phone is in the mount with its screen on, '
+                          'and turn its brightness up. If it is there and bright, '
+                          'the box is drawn somewhere else — press ▣ Set box on '
+                          'the driving screen and draw it again; if that is '
+                          'right too, restart the scanner, which is what brought '
+                          'the rig\'s own blind week to an end.')
+            except Exception as e:                            # noqa: BLE001
+                check('the camera can see', False,
+                      'could not be asked (%s: %s)' % (type(e).__name__, e))
 
         # ...and whether a row can still be ADDED to it, which is a different
         # question and the one the rig actually depends on.

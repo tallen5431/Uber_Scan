@@ -94,13 +94,14 @@ class Request(object):
 # A sensor's noise, as far as the stall watch can tell: the lowest bit of half
 # the pixels flipped, a different half on every capture.
 #
-# A real camera never hands over the same picture twice — every pixel carries
-# its own noise — and these are renders, which do: replayed at this fake's own
-# pace, a capture every 10ms for 12 seconds, 1,199 of 1,200 consecutive pairs
-# of frames were identical, the one exception being the card arriving. The
-# loop reads a repeated picture as a stalled camera (scan_pi.STALL_SAY), so
-# without this every fake here would be a camera that stalled the moment its
-# card stopped moving. One level of difference is all it takes and nothing
+# A real camera, on testcards' model of its sensor, never hands over the same
+# picture twice — every pixel carries its own noise; whether the IMX519 agrees
+# is what scan_pi's repeats count is for — and these are renders, which do:
+# replayed at this fake's own pace, a capture every 10ms for 12 seconds, 1,199
+# of 1,200 consecutive pairs of frames were identical, the one exception being
+# the card arriving. The loop reads a repeated picture as a stalled camera
+# (scan_pi.STALL_SAY), so without this every fake here would be a camera that
+# stalled the moment its card stopped moving. One level of difference is all it takes and nothing
 # else can see it: measured on this suite's card, its empty cabin and a black
 # one, two captures 1, 2, 5, 100 or 3,000 apart move the motion gate by 0.505
 # at most, against the 2.0 it calls still.
@@ -495,9 +496,10 @@ eq('a seen row carries the window\'s reads and how they went (%r)'
 ok_('...with the reads counted, not a placeholder',
     isinstance(_first.get('reads'), int) and _first.get('reads') >= 1)
 # ...and the stall watch's own evidence: frames since start that were the same
-# picture as one just before. Nought here, a working camera with a sensor's
-# noise, over a still card read again and again — and on the row, because the
-# premise it measures is the suites' model and only a real shift can test it.
+# picture as one of the eight before. Nought here, a working camera with a
+# sensor's noise, over a still card read again and again — and on the row,
+# because the premise it measures is the suites' model and only a real shift
+# can test it.
 eq('...and how many frames since start were a picture handed over again, '
    'which on a working camera is none', _first.get('repeats', 'not on the row'), 0)
 eq('...and the corners in the health line\'s own word', _first.get('corners') in
@@ -1179,7 +1181,7 @@ eq('the fixture really is two values and nothing between',
 eq('a picture of black against full well, repeated, is not a stall either',
    [u for u in _ups(_rails['rows']) if u[0] == 'camera'], [])
 
-# --- a box too dark to see in -------------------------------------------------
+# --- a box too dark to be sure of seeing in -----------------------------------
 #
 # The other half: the owner's screen read 1-2 of 205 in the reads either side of
 # the blind week. The box drawn by hand — --no-track here, the other rig with

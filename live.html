@@ -1248,20 +1248,29 @@
   // at 4 and 6, and the owner's box read 1-2 in the reads either side of the
   // blind week. It was NOTHING IN VIEW, "put the phone in the mount", which
   // told a driver whose phone was in the mount and lit that it was not, and
-  // never offered the remedy that would have worked. So the word is what is
-  // true either way, and the line asks for both. See the note under
-  // STALL_SAY in rpi/scan_pi.py for why a box that dim cannot count on seeing
-  // a card arrive, whatever is in it.
+  // never offered the remedy that would have worked. Then it was TOO DARK TO
+  // SEE, "no lit screen the rig can see", which is still more than is known:
+  // a lit dark-mode screen reading 15 to 19 is under the bar, and the motion
+  // gate notices a card arriving on it — 6.27 at 15 and 7.90 at 19 against
+  // the 6.0 it needs, on all eight draws of the sensor noise at each — where
+  // a light-mode one reading 18 scores 2.23 and is missed on all eight. The
+  // box's reading cannot tell the two apart, so what is known is that the rig
+  // cannot be SURE of seeing an offer arrive. The word says that, and the
+  // line asks for both remedies. See the note under STALL_SAY in
+  // rpi/scan_pi.py, which has the rest of the measurements.
   //
-  // `stalled` says "stays" as well as "keeps coming back": the rig restarts a
-  // stalled camera at most once in ten minutes (STALL_AGAIN in scan_pi.py), and
-  // a stall inside that is sat out with the word left on the glass.
-  var BLIND_LABEL = { stalled: 'CAMERA STALLED', dark: 'TOO DARK TO SEE' };
+  // `stalled` says how often the rig restarts it, and "stays" as well as
+  // "keeps coming back": a stall within ten minutes of the last restart over
+  // one is sat out with the word left on the glass, not restarted
+  // (STALL_AGAIN in scan_pi.py). "The rig restarts it" said otherwise for
+  // those ten minutes.
+  var BLIND_LABEL = { stalled: 'CAMERA STALLED', dark: 'TOO DARK TO BE SURE' };
   var BLIND_NOTE = {
     stalled: 'The camera is sending the same picture over and over. The rig '
-           + 'restarts it; if this stays or keeps coming back, reseat its cable.',
-    dark: 'No lit screen the rig can see in its box — check the phone is in '
-        + 'the mount with its screen on, and turn its brightness up.'
+           + 'restarts it at most once in ten minutes; if this stays or keeps '
+           + 'coming back, reseat its cable.',
+    dark: 'The rig may miss an offer arriving in a box this dark — check the '
+        + 'phone is in the mount with its screen on, and turn its brightness up.'
   };
 
   // The GPS, as the scanner has settled it, and the Pi's own report on itself.

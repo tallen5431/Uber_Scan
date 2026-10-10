@@ -5420,6 +5420,13 @@ try:
         ok_('[%s] ...and the line saying what to do, red as well (%r)'
             % (_pn, _st.get('note')),
             'same picture' in (_st.get('note') or '') and _st.get('noteColor') == _red)
+        # A stall within ten minutes of the last restart over one is sat out,
+        # not restarted (STALL_AGAIN in scan_pi.py), and the beat cannot tell
+        # the panel which this is. "The rig restarts it" was untrue for those
+        # ten minutes; how often it does is true of both.
+        ok_('[%s] ...saying how often the rig restarts it, which is true of a '
+            'stall it is sitting out as well (%r)' % (_pn, _st.get('note')),
+            'at most once in ten minutes' in (_st.get('note') or ''))
         ok_('[%s] ...the word and the line whole, inside the card, on the glass'
             % _pn, _st.get('labelIn') and _st.get('noteIn') and _st.get('noteWhole'))
         eq('[%s] ...and no rate: the frozen card\'s figure is not vouched for' % _pn,
@@ -5438,13 +5445,17 @@ try:
            'place back' % _pn, (_b.get('frozenRead') or {}).get('label'),
            'CAMERA STALLED')
         _dk = _b.get('dark') or {}
-        # A box too dark to see in. Named for what the rig knows, which is not
-        # whether the phone is there: a phone turned down low reads the same as
-        # an empty mount, so a word or a line saying it is gone tells a driver
-        # whose phone is in the mount and lit that it is not — and the remedy
-        # that works, the brightness, went unsaid.
-        eq('[%s] a box too dark to see in is named for what the rig knows' % _pn,
-           (_panel(_dk), _dk.get('label')), ('verdict blind', 'TOO DARK TO SEE'))
+        # A box too dark to be sure of seeing in. Named for what the rig knows,
+        # which is not whether the phone is there: a phone turned down low
+        # reads the same as an empty mount, so a word or a line saying it is
+        # gone tells a driver whose phone is in the mount and lit that it is
+        # not — and the remedy that works, the brightness, went unsaid. Nor
+        # whether a card arriving would be seen: on a lit dark-mode screen
+        # reading 15 to 19 the motion gate notices it, on a light one at the
+        # same reading it does not, and the reading cannot tell them apart.
+        eq('[%s] a box too dark to be sure of seeing in is named for what the '
+           'rig knows' % _pn,
+           (_panel(_dk), _dk.get('label')), ('verdict blind', 'TOO DARK TO BE SURE'))
         ok_('[%s] ...with its own line, whole inside the card (%r)'
             % (_pn, _dk.get('note')),
             _dk.get('note') and _dk.get('noteIn')
@@ -5453,16 +5464,23 @@ try:
             'since a dim one reads the same as none (%r)' % (_pn, _dk.get('note')),
             'in the mount' in (_dk.get('note') or '')
             and 'brightness up' in (_dk.get('note') or ''))
+        # "No lit screen the rig can see in its box" was this line, in red
+        # between every offer, over a lit dark-mode screen the gate would have
+        # caught a card on.
+        ok_('[%s] ...saying the rig may miss an offer, not that there is no lit '
+            'screen (%r)' % (_pn, _dk.get('note')),
+            'may miss an offer' in (_dk.get('note') or '')
+            and 'lit screen' not in (_dk.get('note') or ''))
         eq('[%s] ...and the bar where it was' % _pn, _dk.get('bar'), _see.get('bar'))
         _bk = _b.get('back') or {}
         eq('[%s] seeing again gives the verdict back' % _pn,
            (_bk.get('cls'), _bk.get('label'), _bk.get('rate'), _bk.get('conn')),
            (_see.get('cls'), _see.get('label'), _see.get('rate'), 'scanner reading'))
-        eq('[%s] ...the dot red while it was too dark to see, and green again'
+        eq('[%s] ...the dot red while it was too dark to be sure, and green again'
            % _pn, (_dk.get('dot'), _bk.get('dot')), (False, True))
         _id = _b.get('idleDark') or {}
         eq('[%s] between offers it is said in place of WAITING FOR AN OFFER' % _pn,
-           (_panel(_id), _id.get('label')), ('verdict blind', 'TOO DARK TO SEE'))
+           (_panel(_id), _id.get('label')), ('verdict blind', 'TOO DARK TO BE SURE'))
         eq('[%s] ...with no line claiming there is no offer on a screen it cannot see'
            % _pn, _id.get('detail'), '')
         eq('[%s] a word this page was not taught still takes the place' % _pn,

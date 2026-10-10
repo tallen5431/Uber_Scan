@@ -146,8 +146,8 @@ class FakeCam(object):
 
         YUV420 puts the Y plane first, which is all the loop reads. The noise
         is the lowest bit of half the pixels, a different half every frame: a
-        real camera never hands over the same picture twice, these frames are
-        renders that would, and the loop reads a repeated picture as a stalled
+        real camera, on testcards' model of its sensor, never hands over the
+        same picture twice, these frames are renders that would, and the loop reads a repeated picture as a stalled
         camera (scan_pi.STALL_SAY). Not a few patterns in turn: the stall
         watch looks back over eight frames, so patterns taken in turn come
         round inside it. See the same thing in test_loop.py, which says what

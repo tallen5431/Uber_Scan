@@ -488,8 +488,8 @@ eq('...and held on darkness alone when nothing is tracking', g.gain, 1.5)
 
 # ...and that answer is kept as `lit`, because the scan loop asks it too: on a
 # rig with nothing tracking the corners — the owner's, whose box is drawn by
-# hand — 'dark' (TOO DARK TO SEE) is this staying no, so the panel and the gain
-# cannot disagree about whether the box holds a lit screen.
+# hand — 'dark' (TOO DARK TO BE SURE) is this staying no, so the panel and the
+# gain cannot disagree about whether the box holds a lit screen.
 eq('...and says so as `lit`, for the loop to ask', g.lit, False)
 g = EX.AutoGain(gain=1.5, every=6.0)
 eq('a controller that has not looked has no answer yet', g.lit, None)
@@ -518,10 +518,10 @@ for i in range(1, 31):
 eq('...and it spends everything it has first', g.gain, EX.GAIN_LIMITS[1])
 ok_('a phone the camera cannot make up for is reported', g.too_dim)
 ok_('...and not as the opposite complaint', not g.too_bright)
-# ...nor as too dark to see, which is the scan loop's word for `lit` staying
+# ...nor as too dark to be sure, which is the scan loop's word for `lit` staying
 # false: too dim is a screen counted as lit that the camera has run out of
 # light for, and the two are told apart by that one answer.
-eq('...and as a lit screen, which too dark to see is not', g.lit, True)
+eq('...and as a lit screen, which too dark to be sure is not', g.lit, True)
 
 # That answer is only what keeps them apart where too_dim could fire at all:
 # gain on its ceiling and nothing longer to lengthen to. Every other check of
@@ -540,7 +540,7 @@ eq('...and when the box goes too dark to count as lit, it is dark and not too '
    'dim: the same `lit` decides both', (gc.lit, gc.too_dim), (False, False))
 # ...and when it goes to pure black, the darkest dark there is. That box takes
 # an early return, before too_dim is worked out, and it kept the beat before's
-# too_dim: the panel was told too dim and too dark to see over one box.
+# too_dim: the panel was told too dim and too dark to be sure over one box.
 gc = EX.AutoGain(gain=EX.GAIN_LIMITS[1], every=6.0)
 gc.update(lit_card(gc.gain, dim=0.1), 100.0)
 gc.update(np.zeros((60, 40), np.uint8), 106.0)

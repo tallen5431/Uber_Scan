@@ -721,9 +721,12 @@ _dark = run(JOURNAL=_darkj, UBERSCAN_PROC=_PROC_ON)
 eq('a box the rig last called dark fails',
    findings(_dark.stdout).get('the camera can see'), False)
 _dkline = [l for l in _dark.stdout.splitlines() if 'camera can see' in l]
-ok_('...saying too dark to see, what it read, and for how long — from when it '
-    'began, not when it was written (%r)' % _dkline[:1],
-    any('too dark to see' in l and '1.6 of 255' in l and 'for 11 min' in l
+# Too dark to be SURE: a lit dark-mode screen under the gain's bar still moves
+# the motion gate when a card lands on it, and the box cannot tell it from a
+# light one, which does not — see the note under STALL_SAY in scan_pi.py.
+ok_('...saying too dark to be sure of seeing a card arrive, what it read, and '
+    'for how long — from when it began, not when it was written (%r)' % _dkline[:1],
+    any('too dark to be sure' in l and '1.6 of 255' in l and 'for 11 min' in l
         for l in _dkline))
 # The box cannot tell a phone missing from a phone turned down, so neither can
 # the remedy: both, and the brightness first among them.
@@ -759,18 +762,24 @@ eq('...as does one stopped cleanly since',
 # camera "stalled for 2.0 hours" here, across however long the Pi was off,
 # and the cable as the fix for a scanner that would not start. With nothing
 # scanning, the word is that run's last and not the camera's now.
+# ...and under a name that claims nothing: "ok  the camera can see  not asked"
+# was a pass mark beside a question nobody had put.
 _gone = run(JOURNAL=_stalledj, UBERSCAN_PROC=_PROC_OFF)
+_gonef = findings(_gone.stdout)
 eq('a stall from a run that ended with no stop, and nothing scanning since — an '
    'editor with scan_pi.py open, or the suites driving the loop, being no '
-   'scanner — fails nothing', findings(_gone.stdout).get('the camera can see'), True)
+   'scanner — fails nothing, and is not said as a camera that can see',
+   (_gonef.get('whether the camera can see'), _gonef.get('the camera can see')),
+   (True, None))
 _goneline = [l for l in _gone.stdout.splitlines() if 'camera can see' in l]
 ok_('...saying what that run last said, with no age (%r)' % _goneline[:1],
     any('not asked' in l and 'had stalled' in l and ' for ' not in l
         for l in _goneline))
+_noproc = findings(run(JOURNAL=_stalledj,
+                       UBERSCAN_PROC=os.path.join(_clock_dir, 'no-such-proc')).stdout)
 eq('...and a machine with no /proc to read has no scanner on it either',
-   findings(run(JOURNAL=_stalledj,
-                UBERSCAN_PROC=os.path.join(_clock_dir, 'no-such-proc')).stdout)
-   .get('the camera can see'), True)
+   (_noproc.get('whether the camera can see'), _noproc.get('the camera can see')),
+   (True, None))
 # An age only off a clock that was set: a row written before NTP is not "for
 # 29,000 days".
 _preclock = run(JOURNAL=_clock_journal('cam_preclock.jsonl', [
@@ -780,8 +789,28 @@ _pcline = [l for l in _preclock.stdout.splitlines() if 'camera can see' in l]
 ok_('a stall stamped before the clock was set says so rather than an age (%r)'
     % _pcline[:1], any('clock cannot place' in l for l in _pcline))
 
+# ...and a preflight that cannot work the age out says so on the camera's line.
+# The age is the scanner's own rule, so asking it imports scan_pi, and run
+# under a python without the scanner's modules — here a cv2 that will not
+# import — that failure came out as "the journal file is whole: FAIL", the
+# wrong line, and "the journal can be written" was never asked.
+_nocv = tempfile.mkdtemp()
+with open(os.path.join(_nocv, 'cv2.py'), 'w') as _fh:
+    _fh.write("raise ImportError('no cv2 for this python')\n")
+_nocvrun = run(JOURNAL=_stalledj, UBERSCAN_PROC=_PROC_ON,
+               PYTHONPATH=_nocv + os.pathsep + os.environ.get('PYTHONPATH', ''))
+_nocvf = findings(_nocvrun.stdout)
+_nocvline = [l for l in _nocvrun.stdout.splitlines() if 'camera can see' in l]
+eq('a camera\'s age this python cannot work out fails the camera\'s line and '
+   'no other: the journal still whole, and still asked whether it can be '
+   'written (%r)' % _nocvline[:1],
+   (_nocvf.get('the camera can see'), any('could not be asked' in l for l in _nocvline),
+    _nocvf.get('the journal file is whole'), 'the journal can be written' in _nocvf),
+   (False, True, True, True))
+
 import shutil as _shutil
 _shutil.rmtree(_clock_dir, ignore_errors=True)
+_shutil.rmtree(_nocv, ignore_errors=True)
 _shutil.rmtree(_work, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad

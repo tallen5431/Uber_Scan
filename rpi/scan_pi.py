@@ -1532,10 +1532,16 @@ class Health:
             bits.append('%d screen%s since start recorded as following a card'
                         % (self.screens_kept,
                            '' if self.screens_kept == 1 else 's'))
+        # Said as the premise it is, not as a fact about the sensor: that a
+        # working camera hands over none is testcards' model, and this count
+        # is how this camera answers it. "A live camera's never are" claimed
+        # the answer before any real frame had been asked.
         if self.repeats:
-            bits.append('%d frame%s since start the same picture as one just '
-                        'before — a live camera\'s never are'
-                        % (self.repeats, '' if self.repeats == 1 else 's'))
+            bits.append('%d frame%s since start the same picture as one of the '
+                        '%d before it — none, if the sensor model the stall '
+                        'watch rests on holds for this camera'
+                        % (self.repeats, '' if self.repeats == 1 else 's',
+                           2 * CAMERA_BUFFERS))
         # Brightness and banding, because "the picture looks dark" and "the
         # screen looks wavy" are things a person notices and a log should be
         # able to confirm or deny with a number.
@@ -1970,32 +1976,41 @@ STALL_AGAIN = 600.0
 # It does NOT say the phone is gone, because brightness cannot tell a missing
 # phone from a dim one: this repo has a lit screen on record reading 4 and a
 # night-time card reading 6 (exposure.LIT_ENOUGH's own note), and the owner's
-# reads either side of the blind week were 1-2. What it can say is that the
-# rig will not see a card arrive. Under LIT_ENOUGH the gain does not rise on its
+# reads either side of the blind week were 1-2. Nor that the rig cannot see a
+# card arrive — that too is more than it knows. What it can say is that it
+# cannot be SURE of seeing one. Under LIT_ENOUGH the gain does not rise on its
 # own — that is the guard — and the motion gate, which is what sends a read
 # when a card lands, scores a card arriving by how much the box changed, and in
 # a dim box nothing changes by much. Measured on testcards' Uber card mounted
 # 1200px wide in a cabin reading 2, as dark as the owner's, the screen turned
 # down by scaling it and a fresh draw of the sensor noise for each frame: the
 # gate's score against its CHANGE_T of 6.0 for the card arriving over the map,
-# by what the box read before it came (AutoGain's own reading of it):
+# by what the box read before it came (AutoGain's own reading of it). Eight
+# draws of the noise at each level near either line moved a score by 0.02 at
+# most; two scores to a reading are two brightnesses that round to it:
 #
-#   light mode    7 -> 0.62   11 -> 1.28   18 -> 2.23 | 23 -> 2.48   46 -> 5.39
-#   dark mode     3 -> 1.26    8 -> 3.21   13 -> 5.20   15 -> 6.27   17 -> 7.08
+#   light mode   7 -> 0.62   11 -> 1.28   18 -> 2.23 | 23 -> 2.48   46 -> 5.39
+#                                                      53 -> 5.72   56 -> 6.03
+#   dark mode    3 -> 1.26    8 -> 3.21   13 -> 5.20, 5.52   14 -> 5.72, 6.04
+#                                          15 -> 6.27   17 -> 7.08   19 -> 7.90
 #
-# So under LIT_ENOUGH (the bar) a light-mode card is never noticed and a
-# dark-mode one only from about 15, by under five per cent. Above it a light
-# card is missed too until about 55, but there the screen counts as lit and the
-# gain climbs on it, up to twice over a beat (exposure.UP_MAX), or says too
-# dim when it has nothing left to climb with; under it the gain is held, so
-# nothing gets better and nothing but this says so. (The reader itself is not
-# the limit: handed the dark-mode card reading 4, it read $16.05, 23 min and
-# 8.4 mi. Nothing sends it one.)
+# So under LIT_ENOUGH (the bar) a light-mode card is not noticed at any reading
+# measured, and a dark-mode one is from 14 or 15 up — by under five per cent at
+# 15 and by about a third at 19. The box's reading cannot tell the two modes
+# apart, so a lit dark-mode screen reading 14 to 19 is called dark although
+# the gate would notice a card landing on it, and a light one at the same
+# reading is not seen at all: what holds for both is that the rig cannot be
+# sure. Above the bar a light card is still missed at 53 and noticed from 56,
+# but there the screen counts as lit and the gain climbs on it, up to twice
+# over a beat (exposure.UP_MAX), or says too dim when it has nothing left to
+# climb with; under it the gain is held, so nothing gets better and nothing but
+# this says so. (The reader itself is not the limit: handed the dark-mode card
+# reading 4, it read $16.05, 23 min and 8.4 mi. Nothing sends it one.)
 #
-# The word is therefore 'dark', the panel's is TOO DARK TO SEE, and the remedy
-# it gives covers both causes — the phone in the mount, its screen on and
-# turned up. That is also what keeps it apart from `tooDim`: that is a screen
-# the gain counted as lit and spent everything on, this is one it never
+# The word is therefore 'dark', the panel's is TOO DARK TO BE SURE, and the
+# remedy it gives covers both causes — the phone in the mount, its screen on
+# and turned up. That is also what keeps it apart from `tooDim`: that is a
+# screen the gain counted as lit and spent everything on, this is one it never
 # counted, and AutoGain decides both off the same `lit`.
 #
 # Not on a pass where a read went out — the rig was looking. Most reads are the
@@ -2314,10 +2329,10 @@ class UpDown(object):
         # constant reaches the loop's own instance.
         phone_hold = PHONE_HOLD if phone_hold is None else phone_hold
         self.phone = Held('back', phone_hold, quick=('back',))
-        # What the camera can see. A box too dark to see a card arrive in, on
-        # a rig with nothing tracking it, may be a phone gone or one turned
-        # down, so it waits as long as a phone does; a stall is said far
-        # sooner — see STALL_SAY.
+        # What the camera can see. A box too dark to be sure of seeing a card
+        # arrive in, on a rig with nothing tracking it, may be a phone gone or
+        # one turned down, so it waits as long as a phone does; a stall is said
+        # far sooner — see STALL_SAY.
         self.camera = Held('seeing', phone_hold, quick=('seeing',),
                            holds={'stalled': STALL_SAY if stall_say is None
                                   else stall_say})
@@ -2997,8 +3012,8 @@ def main():
     # `reader.busy`, which with --no-thread is never true when the word is
     # asked — the read is done and collected inside the pass that hands it
     # over — so a card arriving in a dark box landed its verdict under TOO DARK
-    # TO SEE until the gain's next look, up to six seconds on. On the threaded
-    # path the busy reader says nothing the flag has not already said.
+    # TO BE SURE until the gain's next look, up to six seconds on. On the
+    # threaded path the busy reader says nothing the flag has not already said.
     looked = False
     frames = 0
     last_snapshot = 0.0
@@ -3912,18 +3927,24 @@ def main():
                 auto_gain.bright if auto_gain is not None else None)
             looked = False
             if sight == 'stalled':
+                # Both are this stall's. A camera that came back by itself and
+                # stalls again in the same run is asked about afresh: kept from
+                # the last one, a stall this run had gone quiet over asked for
+                # a second restart seconds after the first, its own note unread.
                 stall_held_said = stall_asked = False
                 log('camera stalled: it has handed over the same picture, byte '
-                    'for byte, for %ds, which a live sensor never does. Nothing '
-                    'new can be read; the panel says so, and once it has, this '
+                    'for byte, for %ds. Nothing new can be read off it; the '
+                    'panel says so, and once it has, this '
                     'goes quiet so the supervisor restarts the camera — unless '
                     'it did that less than %ds ago'
                     % (int(time.monotonic() - updown.camera_since), STALL_AGAIN))
             elif sight == 'dark':
-                log('too dark to see: the box has held nothing the gain counts '
-                    'as a lit screen for %ds (screen brightness %s/%d), so a '
-                    'card arriving would not move the motion gate — is the '
-                    'phone in the mount, its screen on and turned up?'
+                log('too dark to be sure of seeing a card arrive: the box has '
+                    'held nothing the gain counts as a lit screen for %ds '
+                    '(screen brightness %s/%d), where a light-mode card '
+                    'arriving does not move the motion gate far enough to send '
+                    'a read — is the phone in the mount, its screen on and '
+                    'turned up?'
                     % (int(time.monotonic() - updown.camera_since),
                        '?' if auto_gain.bright is None else '%d' % round(auto_gain.bright),
                        round(EX.TARGET_BRIGHT)))

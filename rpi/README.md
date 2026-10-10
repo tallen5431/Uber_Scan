@@ -123,8 +123,11 @@ that the camera driver does not block on: a read stuck past `READ_STUCK_S`, and
 a camera that keeps handing over **the very same picture**. The scanner goes
 quiet on purpose for either, once it has said why — in its log and as a
 `restart` row in the journal, since the SIGKILL that follows leaves no stop
-row — and the watchdog does the rest. See *A rig that was blind for a whole
-shift* below.
+row — and the watchdog does the rest. A stall goes quiet at most once in ten
+minutes (`STALL_AGAIN`): one inside that stays up, beating the stall to the
+panel, and is not restarted until the ten minutes are out — a camera a restart
+does not cure would otherwise be restarted all night. See *A rig that was blind
+for a whole shift* below.
 
 ### Or as its own service
 
@@ -4054,7 +4057,8 @@ twenty seconds, or a fix lost for thirty, is not a row either: bad news has to
 last its hold, good news is written at once, so however the phone or the GPS
 flickers, each costs at most two rows a minute. Nothing about the phone is
 written with nothing tracking it (`--no-track`, or a box drawn by hand); there,
-the camera's `dark` row is what says the box went too dark to see in.
+the camera's `dark` row is what says the box went too dark for the rig to be
+sure of seeing a card arrive in it.
 
 The `seen` rows — still one per two-minute window **with cards in it** — now
 carry the rest of that window's health line too: `reads`, `failed`,
@@ -4133,12 +4137,14 @@ goes on re-reading that card and painting a live-looking verdict about it, and
 **That a working camera never repeats a frame is the model's claim, not the
 IMX519's** — no frame off the real sensor exists here to measure. So the rig
 measures it: every repeat is counted from start, the two-minute health line
-says `N frames since start the same picture as one just before` whenever there
-are any, and every `seen` row carries the count as `repeats` — so it reaches
-the copy machine from every shift that read, not only a log in the car. On such
-a shift that number should be nought; anything else is this camera saying the
-premise is wrong, long before six seconds of repeats in a row could make a
-stall of it.
+says `N frames since start the same picture as one of the 8 before it — none,
+if the sensor model the stall watch rests on holds for this camera` whenever
+there are any, and every `seen` row carries the count as `repeats` — so it
+reaches the copy machine from every shift that read, not only a log in the
+car. On such a shift that number should be nought; anything else is this
+camera saying the premise is wrong, long before six seconds of repeats in a
+row could make a stall of it. (The line used to end "a live camera's never
+are", the premise stated as the sensor's fact.)
 
 **A stalled camera is not cured by waiting** — the owner's ran 9.4 days that way
 — so once a heartbeat has told the panel, the scanner goes quiet exactly as a
@@ -4177,31 +4183,39 @@ phone in the mount with its screen on". Brightness cannot tell a missing phone
 from a dim one — this repo has a lit screen on record reading 4 and a night-time
 card reading 6, and the owner's reads either side of the blind week were 1-2 —
 so a driver whose phone was in the mount and lit was told it was not, and the
-remedy that would have worked went unsaid. What the rig *can* say is that it
-will not see a card arrive. Under `LIT_ENOUGH` the gain does not rise on its
-own, and the motion gate — what sends a read when a card lands — scores the
-card by how much the box changed. Measured on the suites' Uber card mounted
-1200px wide in a cabin reading 2, as dark as the owner's, with the screen
-turned down and a fresh draw of sensor noise for every frame — the gate's score
-for the card arriving over the map, against the 6.0 it needs, by what AutoGain
-read off the box before it came:
+remedy that would have worked went unsaid. **Nor that the rig cannot see a card
+arrive**, which it said next: TOO DARK TO SEE, "no lit screen the rig can see
+in its box". What the rig *can* say is that it cannot be sure of seeing one.
+Under `LIT_ENOUGH` the gain does not rise on its own, and the motion gate —
+what sends a read when a card lands — scores the card by how much the box
+changed. Measured on the suites' Uber card mounted 1200px wide in a cabin
+reading 2, as dark as the owner's, with the screen turned down and a fresh
+draw of sensor noise for every frame — the gate's score for the card arriving
+over the map, against the 6.0 it needs, by what AutoGain read off the box
+before it came. Eight draws of the noise at each level near either line moved
+a score by 0.02 at most; two scores under one reading are two brightnesses
+that round to it:
 
-| light mode, the box read | 7 | 11 | 18 | **23** | 28 | 46 | 58 |
-|---|---|---|---|---|---|---|---|
-| the card arriving scored | 0.62 | 1.28 | 2.23 | 2.48 | 2.88 | 5.39 | 6.10 |
+| light mode, the box read | 7 | 11 | 18 | **23** | 28 | 46 | 53 | 56 |
+|---|---|---|---|---|---|---|---|---|
+| the card arriving scored | 0.62 | 1.28 | 2.23 | 2.48 | 2.88 | 5.39 | 5.72 | 6.03 |
 
-| dark mode, the box read | 3 | 8 | 11 | 13 | 15 | 17 | **22** |
-|---|---|---|---|---|---|---|---|
-| the card arriving scored | 1.26 | 3.21 | 4.35 | 5.20 | 6.27 | 7.08 | 9.08 |
+| dark mode, the box read | 3 | 8 | 13 | 14 | 15 | 17 | 19 | **22** |
+|---|---|---|---|---|---|---|---|---|
+| the card arriving scored | 1.26 | 3.21 | 5.20, 5.52 | 5.72, 6.04 | 6.27 | 7.08 | 7.90 | 9.08 |
 
 (In bold, the first reading over `LIT_ENOUGH`.) So under it a light-mode card
-is never noticed and a dark-mode one only from about 15, by under five per
-cent. Over it a light card is missed too until about 55, but there the screen
-counts as lit and the gain climbs on it — up to twice a beat — or says *too
-dim* when it has nothing left; under it the gain is held and nothing gets
-better. The reader is not the limit: handed the dark-mode card reading 4, it
-read $16.05, 23 min and 8.4 mi. Nothing sends it one. Hence **TOO DARK TO
-SEE**, and a line asking for both remedies. It is still not *too dim*: that is
+is not noticed at any reading measured, and a dark-mode one is from 14 or 15
+up — by under five per cent at 15, about a third at 19. The reading cannot
+tell the two modes apart: a lit dark-mode screen reading 14 to 19 is called
+dark although a card landing on it would be seen, and a light one at the same
+reading would not be. Over the bar a light card is still missed at 53 and
+noticed from 56, but there the screen counts as lit and the gain climbs on it —
+up to twice a beat — or says *too dim* when it has nothing left; under it the
+gain is held and nothing gets better. The reader is not the limit: handed the
+dark-mode card reading 4, it read $16.05, 23 min and 8.4 mi. Nothing sends it
+one. Hence **TOO DARK TO BE SURE**, "the rig may miss an offer arriving in a
+box this dark", and a line asking for both remedies. It is still not *too dim*: that is
 a screen the gain counted as lit and spent everything on, this is one it never
 counted, and the same `lit` decides both — `test_exposure` holds that from a
 gain already on its ceiling, the one place *too dim* could fire on a dark box
@@ -4228,8 +4242,8 @@ line whole inside the card, and every control on the bar exactly where it was.
 
 | the panel says | when | what to do |
 |---|---|---|
-| **CAMERA STALLED** | the same picture for `STALL_SAY` | nothing, at first: the rig restarts it itself — six seconds to say it, then the watchdog's thirty of silence, then however long the restart takes — at most once in ten minutes. If it stays or keeps coming back, power down and reseat the camera's ribbon cable |
-| **TOO DARK TO SEE** | nothing the gain counts as a lit screen in the box for a minute, on a rig with nothing tracking the corners | check the phone is in the mount with its screen on, and turn its brightness up; if it is there and bright, the box is drawn somewhere else — ▣ Set box |
+| **CAMERA STALLED** | the same picture for `STALL_SAY` | nothing, at first: the rig restarts it itself — six seconds to say it, then the watchdog's thirty of silence, then however long the restart takes — at most once in ten minutes, which its line says, since a stall inside the ten minutes stays on the glass unrestarted. If it stays or keeps coming back, power down and reseat the camera's ribbon cable |
+| **TOO DARK TO BE SURE** | nothing the gain counts as a lit screen in the box for a minute, on a rig with nothing tracking the corners | check the phone is in the mount with its screen on, and turn its brightness up; if it is there and bright, the box is drawn somewhere else — ▣ Set box |
 
 A word the beat sends that the page was not taught reads **CANNOT SEE**. A
 phase message — the autopilot speaking for a restarted process — clears it,
@@ -4237,15 +4251,19 @@ since the word belonged to the process before.
 
 `doctor.py` reads the newest `camera` row of the newest run and fails *the
 camera can see* while it says stalled or dark **and a scanner is running** to
-stand by it, with how long — without blocking, since too dark to see can as
+stand by it, with how long — without blocking, since too dark to be sure can as
 well be a phone in a pocket as a fault. The age is `scan_pi.age_ms`'s, the
-scanner's own rule for a clock that may not be set. A run the engine's power cut
-writes no stop, and its last word used to be read as now — a camera stalled
-"for" every hour the Pi had been off, with a camera's remedy for a scanner that
-would not start; with nothing running (read off `/proc`; `UBERSCAN_PROC`
-stands in for it in the tests) the line passes as *not asked* and says what
-that run last said, with no age. `📷 Snap`'s reader.json carries `blind` with
-the rest of the last beat.
+scanner's own rule for a clock that may not be set; a preflight that cannot
+import the scanner to ask it says so on that line, where it used to fail *the
+journal file is whole* and skip *the journal can be written*. A run the
+engine's power cut writes no stop, and its last word used to be read as now — a
+camera stalled "for" every hour the Pi had been off, with a camera's remedy for
+a scanner that would not start. With nothing running (read off `/proc`;
+`UBERSCAN_PROC` stands in for it in the tests) the camera is not asked about:
+the line is *whether the camera can see — not asked*, never a pass mark beside
+*the camera can see*, and says what a run that ended with no stop last said,
+with no age. `📷 Snap`'s reader.json carries `blind` with the rest of the last
+beat.
 
 ### A page nothing linked to, five buttons one press from dead, and a backup with a hole in it
 
