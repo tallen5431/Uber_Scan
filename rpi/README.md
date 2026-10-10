@@ -4380,15 +4380,20 @@ The order in the car keeps its card's fix and size too, so where it ends is
 checked against its own card the same way. A straight line cannot beat the
 road, so a pin farther from a card's fix than that card's distance plus half a
 mile is a pin the map got wrong, and the figure is refused with a line saying
-so: "the map's McDonald's is 21.8 mi from you, so past the card's 9.4 mi" —
+so: "wrong pin for McDonald's — 21.8 mi from you, past the card's 9.4 mi" —
 the wrong same-brand branch that used to print "+31.3 mi out of your
-way" on a 9.4-mile job. Only a card with a printed total or two legs the rig
+way" on a 9.4-mile job. The refusal leads, so the 3.5" hat's clamp can only
+ever cut the card's figure off the end, never the words saying the pin is
+wrong. The pin is drawn red with the same answer, and it is refused whether or
+not anything is in the car. Only a card with a printed total or two legs the rig
 summed is held against a pin, and never an Early look one: on the one-leg
 "$7 Guaranteed · 7.8 mi + 24 min" cards nobody has seen yet whether the figure
 counts the drive to the restaurant, so the line says "no yardstick yet" — 584
 of the week's 1,166 cards are yardsticks. A card with no fix says "this card
 came up without a GPS fix", and one the gate refused says why ("GPS fix on this
-card too rough to measure from (±129 m)"). The figure that is left is
+card too rough to measure from (±129 m)"). An order in the car whose card the
+rig did not keep — a hold saved before the card was — says that, not that it
+had no fix. The figure that is left is
 straight-line miles, said so on the line, with no minutes and no route through
 where the new job ends.
 

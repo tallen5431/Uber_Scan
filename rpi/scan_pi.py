@@ -2712,7 +2712,12 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
         # OP.is_whole's answer the loop already holds, `hasTotal`, `legs` and
         # `toPickupMiles` are the window's merge, and the two `miles*` flags
         # are the parser's own word for a distance it repaired or doubted.
-        # Nothing on this line reads them yet.
+        # Read by map-view.js MapView.cardYardstick, which decides whether
+        # Map view may hold this card against a pin, and copied onto the
+        # order in the car by server.js cardOf. `toPickupMiles` is carried and
+        # deliberately NOT read there: the approach leg alone leaves only the
+        # half mile of slack for the car moving between the platform's
+        # measurement and this fix, and that motion has not been measured.
         'whole': bool(whole),
         'hasTotal': bool(parsed.get('hasTotal')),
         'legs': parsed.get('legs'),

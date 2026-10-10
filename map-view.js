@@ -457,13 +457,14 @@
    * the "out of your way" figure.
    *
    * What the panel has that a whole-shift map does not is an anchor that is not
-   * a guess: the car's own GPS fix off the journal row. Distance from THAT is
+   * a guess: the GPS fix the scanner put on THIS card's offer line when the
+   * card came up (cardFix, below). Distance from THAT is
    * a claim about one lookup rather than a vote among lookups, and it is the
    * same argument map.html already makes for drawing the trail — the measured
    * thing is the only one that can contradict a pin without being the same kind
    * of thing as the pin.
    *
-   * No anchor, no accusation. A rig whose rows carry no position knows nothing
+   * No anchor, no accusation. A card that came up with no fix knows nothing
    * new about these places and must not start guessing on thinner evidence. */
   function farFrom(anchor, found, miles) {
     var far = miles || FAR_MILES;
@@ -515,6 +516,10 @@
      (no --gps, no answer, or a fix gone stale before the card landed —
      Phone.fix() hands out none of those), else the gate's own word. */
   function cardFix(o) {
+    // No card at all is not a card without a fix: a hold read back from a
+    // holding.json written before the server kept the card has none, and
+    // "came up without a GPS fix" said of it is a claim nobody measured.
+    if (!o) return { at: null, why: 'nocard', err: null };
     var at = fixOf(o);
     if (at) return { at: at };
     return { at: null, why: fixRefused(o),
@@ -564,6 +569,21 @@
     return crow > yard.miles + SLACK_MI ? { crow: crow } : null;
   }
 
+  /* Whether this card refuses this pin, as a fact rather than a sentence:
+     null for a pin it allows AND for a card that is no yardstick (that is a
+     figure withheld, not a pin refused). live.html asks this once per pin and
+     uses the one answer twice — the pin's colour and the line under the map —
+     so the map and its caption cannot keep two rules for "this pin is
+     wrong". */
+  function cardRefuses(o, fix, pin) {
+    if (!fix || !pin) return null;
+    var yard = cardYardstick(o);
+    if (!yard.miles) return null;
+    var out = outsideCard(fix, pin, yard);
+    return out ? { crow: out.crow, miles: yard.miles,
+                   corrected: yard.corrected } : null;
+  }
+
   /* The words, for the two cards Map view measures with: this one ('new')
      and the one the order in the car came from ('held'). Each is the reason
      the figure is withheld, said instead of it, and each is reached by a
@@ -579,6 +599,8 @@
       other: 'GPS fix on this card was never judged, so nothing to measure from'
     },
     held: {
+      nocard: 'the rig kept no card for the order in your car, so its end '
+        + 'cannot be checked',
       none: 'the order in your car came up without a GPS fix, so its end '
         + 'cannot be checked',
       rough: 'GPS fix on the order in your car too rough to check its end',
@@ -627,20 +649,24 @@
      would be a sentence nobody measured — there may well be one 2 miles away
      that the map did not return. And "(rig-corrected)" where check_distance
      put a decimal back, as statedBy() says on the map pages: the figure is
-     the rig's repair, not what the screen printed. */
+     the rig's repair, not what the screen printed.
+
+     THE REFUSAL LEADS. This read "the map's McDonald's is 21.8 mi from you,
+     so past the card's 9.4 mi", and the 3.5" hat's clamp may eat what follows
+     the comma, which left "the map's McDonald's is 21.8 mi from you": a
+     distance with nothing saying the pin is refused, read at a glance as a
+     pickup 21.8 mi away. "wrong pin" is now the first two words, so whatever
+     a clamp keeps says the pin is wrong (rpi/test_layout.py). */
   function againstCard(o, fix, pin, name, whose) {
     var yard = cardYardstick(o);
     if (!yard.miles) return YARD_WORDS[whose][yard.why];
-    var out = outsideCard(fix, pin, yard);
+    var out = cardRefuses(o, fix, pin);
     if (!out) return null;
-    // The `, so` clause is the tail the 3.5" hat's clamp may eat, and it
-    // carries the card's figure WITH its hedge, so a clipped line never shows
-    // a number without the words that qualify it (rpi/test_layout.py).
-    var said = yard.miles + ' mi' + (yard.corrected ? ' (rig-corrected)' : '');
-    return 'the map\'s ' + name + ' is ' + out.crow.toFixed(1) + ' mi from '
+    var said = out.miles + ' mi' + (out.corrected ? ' (rig-corrected)' : '');
+    return 'wrong pin for ' + name + ' — ' + out.crow.toFixed(1) + ' mi from '
       + (whose === 'new'
-         ? 'you, so past the card\'s ' + said
-         : 'your order\'s card, so past its ' + said);
+         ? 'you, past the card\'s ' + said
+         : 'your order\'s card, past its ' + said);
   }
 
   /* Every place the loaded offers name, once each, in the order first seen. */
@@ -1457,7 +1483,8 @@
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
            detour: detour, fixOf: fixOf, fixRefused: fixRefused,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
-           againstCard: againstCard, SLACK_MI: SLACK_MI,
+           againstCard: againstCard, cardRefuses: cardRefuses,
+           SLACK_MI: SLACK_MI,
            hereDot: hereDot, GPS_REFUSED: GPS_REFUSED,
            anchorFor: anchorFor, boxAround: boxAround,
            localityOf: localityOf, townOf: townOf, townFor: townFor,

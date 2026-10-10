@@ -191,7 +191,7 @@ eq('the wrong-branch case is the one the study measured: +31.3 off the pin',
 eq('a same-brand pin 21.8 mi from a fresh fix on a 9.4 mi card is refused, '
    + 'not printed as "+31.3"',
    MV.againstCard(card(), SQUARE, WRONG_BRANCH, "McDonald's", 'new'),
-   "the map's McDonald's is 21.8 mi from you, so past the card's 9.4 mi");
+   "wrong pin for McDonald's — 21.8 mi from you, past the card's 9.4 mi");
 eq('...and the right branch, 2.1 mi away, passes',
    MV.againstCard(card(), SQUARE, RIGHT_BRANCH, "McDonald's", 'new'), null);
 // The half mile of slack is the edge, both sides of it: 9.4 + 0.5 = 9.9.
@@ -205,7 +205,7 @@ ok_('...and one just past it is refused',
 eq('a figure the rig put a decimal back in says so',
    MV.againstCard(card({ milesCorrected: true }), SQUARE, WRONG_BRANCH,
                   "McDonald's", 'new'),
-   "the map's McDonald's is 21.8 mi from you, so past the card's 9.4 mi "
+   "wrong pin for McDonald's — 21.8 mi from you, past the card's 9.4 mi "
    + '(rig-corrected)');
 // Two legs the rig summed are a yardstick as a printed total is; the summed
 // figure, never the approach leg (`toPickupMiles`), whose only slack would be
@@ -261,12 +261,18 @@ eq('a coordinate nobody judged is not a fix either',
 eq('the held order\'s end is checked against its own card',
    MV.againstCard(card({ miles: 9.4 }), SQUARE, HELD_END, 'Powder Springs Rd',
                   'held'),
-   "the map's Powder Springs Rd is 20.2 mi from your order's card, so past "
+   "wrong pin for Powder Springs Rd — 20.2 mi from your order's card, past "
    + 'its 9.4 mi');
 eq('...and passes when its card allows it',
    MV.againstCard(card({ miles: 22.0 }), SQUARE, HELD_END, 'X', 'held'), null);
-eq('a held order with no card says it has no fix to check its end from',
+// A hold with no card is not a card without a fix: a holding.json written
+// before the server kept the card has none, and nobody measured its GPS.
+eq('a held order with no card says no card was kept, not that it had no fix',
    MV.fixLine(MV.cardFix(undefined), 'held'),
+   'the rig kept no card for the order in your car, so its end cannot be '
+   + 'checked');
+eq('...while a held card that came up with no coordinate says that',
+   MV.fixLine(MV.cardFix(card({ lat: null, lon: null, gpsOk: null })), 'held'),
    'the order in your car came up without a GPS fix, so its end cannot be '
    + 'checked');
 eq('...and a rough one, with the figure',
@@ -280,8 +286,31 @@ eq('...nor on an Early look card',
    MV.againstCard(card({ earlyLook: true }), SQUARE, HELD_END, 'X', 'held'),
    'the order in your car was an Early look card — no yardstick yet for its end');
 // judge() and the disc share one rule and one slack, so they cannot drift.
-eq('judge() and the card\'s disc share the half mile',
-   MV.SLACK_MI, 0.5);
+// This asserted MV.SLACK_MI === 0.5, which says nothing about judge(): with
+// judge's edge moved to 0.7 every check here still passed. So judge() is put
+// at the disc's own edge, both sides, on the same 9.4 mi figure.
+function judgedAt(pin) {
+  return MV.judge([{ pickup: 'a', dropoff: 'b', miles: 9.4, whole: true }],
+                  { a: SQUARE, b: pin })[0].impossible;
+}
+eq('judge() and the card\'s disc share the half mile: both pass just inside',
+   JSON.stringify([judgedAt(EDGE_IN), MV.cardRefuses(card(), SQUARE, EDGE_IN)]),
+   '[false,null]');
+eq('...and both refuse just past it',
+   JSON.stringify([judgedAt(EDGE_OUT), !!MV.cardRefuses(card(), SQUARE, EDGE_OUT)]),
+   '[true,true]');
+// cardRefuses is the fact live.html colours the pin by and words the line
+// from: a figure withheld is not a pin refused, so a card with no yardstick
+// refuses nothing, however far the pin.
+eq('a card that is no yardstick refuses no pin, however far',
+   MV.cardRefuses(card({ earlyLook: true }), SQUARE, WRONG_BRANCH), null);
+eq('...nor does a card with no fix to measure from',
+   MV.cardRefuses(card(), null, WRONG_BRANCH), null);
+eq('the wrong branch is refused with the figures the line states',
+   JSON.stringify(MV.cardRefuses(card({ milesCorrected: true }), SQUARE,
+                                 WRONG_BRANCH),
+                  function (k, v) { return k === 'crow' ? v.toFixed(1) : v; }),
+   '{"crow":"21.8","miles":9.4,"corrected":true}');
 
 /* ---- the box drawn around where the car was ------------------------------
  *

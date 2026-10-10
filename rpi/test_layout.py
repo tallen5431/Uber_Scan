@@ -514,6 +514,9 @@ CAPTION_LINES = [
     ('the held card, no fix',
      'the order in your car came up without a GPS fix, so its end cannot be '
      'checked'),
+    ('the held order, no card kept',
+     'the rig kept no card for the order in your car, so its end cannot be '
+     'checked'),
     ('the held card, a rough fix',
      'GPS fix on the order in your car too rough to check its end (±9999 m)'),
     ('the held card, no accuracy',
@@ -548,17 +551,22 @@ CAPTION_LINES = [
     # ...and a pin a card contradicts, at its widest: the place cut to
     # DISC_PLACE_SHOWN in its widest letter, a straight line under farFrom's
     # 75 miles (past that the misread-name line above is said instead), a
-    # three-figure distance, and the rig's own repair named. The 3.5" hat may
-    # eat the `, so` clause — the card's figure and its hedge go together, so
-    # no figure is left without the words that qualify it.
+    # three-figure distance, and the rig's own repair named. These declared
+    # ", so past the card's 9.4 mi" as what the hat's clamp may eat, and what
+    # that left readable was "the map's McDonald's is 21.8 mi from you" — a
+    # distance with nothing saying the pin is refused, read at a glance as a
+    # pickup that far away. The refusal now LEADS: whatever the clamp keeps
+    # starts "wrong pin for", so the figure it keeps is the size of the map's
+    # mistake and cannot be read as the job's. The `, past` clause carries the
+    # card's figure with its hedge, so those two still go together.
     ('a pickup this card contradicts',
-     "the map's " + WIDEST_DISC + " is 74.9 mi from you, so past the card's "
+     "wrong pin for " + WIDEST_DISC + " — 74.9 mi from you, past the card's "
      "99.9 mi (rig-corrected)",
-     "the map's " + WIDEST_DISC + " is 74.9 mi from you"),
+     "wrong pin for " + WIDEST_DISC + " — 74.9 mi from you"),
     ('a held end its card contradicts',
-     "the map's " + WIDEST_DISC + " is 74.9 mi from your order's card, so "
+     "wrong pin for " + WIDEST_DISC + " — 74.9 mi from your order's card, "
      "past its 99.9 mi (rig-corrected)",
-     "the map's " + WIDEST_DISC + " is 74.9 mi from your order's card"),
+     "wrong pin for " + WIDEST_DISC + " — 74.9 mi from your order's card"),
     ('the held job has no address',
      'the order in your car has no address on record — ⌖ Dropoff reads it '
      'off your phone'),
@@ -583,8 +591,10 @@ CAPTION_LINES = [
 # places with no pin, whose tail is ` · 1 not asked` or ` · 1 not found`
 # depending on which it was; the consequence of a pin that is plainly
 # wrong, whose tail is `, so no distance`; and the card's own figure beside a
-# pin it contradicts, whose tail is `, so past the card's 9.4 mi` with the
-# rig's repair named inside it, so the figure and its hedge go together.
+# pin it contradicts, whose tail is `, past the card's 9.4 mi` with the
+# rig's repair named inside it, so the figure and its hedge go together —
+# behind "wrong pin for", which the clamp never reaches, so the part kept
+# readable is a refusal and never a bare distance.
 # Each is the end of its sentence
 # precisely so that it is what a clamp eats; everything before it is a figure
 # or a hedge on one.
@@ -606,7 +616,7 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 38)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 39)
 eq('...and five of its entries declare a tail the clamp may eat',
    len(_DECLARED), 5)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
@@ -618,7 +628,14 @@ for _name, _text, _keep in CAPTION_LINES:
         _text.startswith(_keep))
     _drop = _text[len(_keep):]
     ok_('...and drops only a whole clause off %r (%r)' % (_name, _drop),
-        _drop == '' or _drop.startswith(' · ') or _drop.startswith(', so '))
+        _drop == '' or _drop.startswith(' · ') or _drop.startswith(', so ')
+        or _drop.startswith(', past '))
+    # ...and a line that names a pin a card contradicts says so BEFORE any
+    # figure, in what the clamp keeps. Its kept part used to be "the map's
+    # McDonald's is 21.8 mi from you": a distance, refusal clipped off.
+    if 'contradicts' in _name:
+        ok_('...and what the clamp keeps of %r opens with the refusal' % _name,
+            _keep.startswith('wrong pin for '))
 
 # ...and the list above has to stay the whole list, or a tenth sentence is
 # written and measured by nothing. So the page is read for every string the

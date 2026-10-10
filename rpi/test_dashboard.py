@@ -3041,8 +3041,9 @@ const framed = (page) => page.waitForFunction(
       window.__es.push({
         ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
         minutes: 20.0, miles: 9.4, cost: 1.4, target: 25, band: 15,
-        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Held End',
-                   card: a.held === undefined || a.held ? held : null },
+        holding: a.nohold ? null
+          : { pay: 9.0, minutes: 18.0, dropoff: 'Held End',
+              card: a.held === undefined || a.held ? held : null },
         offer: Object.assign({ id: a.id, pay: 14.25, minutes: 20.0,
                                billedMinutes: 20.0, cost: 1.4,
                                pickup: a.pickup || "McDonald's",
@@ -3050,6 +3051,15 @@ const framed = (page) => page.waitForFunction(
     }, args);
     const note = () => page.evaluate(
       () => document.getElementById('viewNote').textContent.trim());
+    // The colour and the words of the pin the panel names, so the map and the
+    // line under it are seen to keep one rule for "this pin is wrong".
+    const pinOf = (popupHas) => page.evaluate((h) => {
+      const m = (window.__marks || []).filter(
+        (k) => String(k.popup || '').indexOf(h) >= 0)[0];
+      return m ? { fill: m.opts && m.opts.fillColor,
+                   popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
+                     .replace(/\s+/g, ' ').trim() } : null;
+    }, popupHas);
     await push({ id: 'o-wrong' });
     await page.waitForTimeout(300);
     await page.click('#viewMode');            // → scene
@@ -3058,6 +3068,15 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(4200);          // three lookups, a second apart
     out.mapDisc = { wrong: await note() };
     out.mapDisc.wrongMarks = await page.evaluate(() => (window.__marks || []).length);
+    out.mapDisc.wrongPin = await pinOf('pick this one up');
+    // The same wrong branch with NOTHING in the car. The refusal is about the
+    // pin, so it must not wait behind the guards for the held order: this
+    // used to be an ordinary green pickup under "nothing in the car to
+    // compare this against".
+    await push({ id: 'o-wrong-alone', nohold: true });
+    await page.waitForTimeout(1200);
+    out.mapDisc.alone = await note();
+    out.mapDisc.alonePin = await pinOf('pick this one up');
     // The right branch, 2.1 mi from the car: inside the card, so a figure.
     await push({ id: 'o-right', pickup: "McDonald's (Marietta Sq)" });
     await page.waitForTimeout(1800);
@@ -3091,6 +3110,8 @@ const framed = (page) => page.waitForFunction(
                  held: { miles: 9.4 } });
     await page.waitForTimeout(800);
     out.mapDisc.heldFar = await note();
+    out.mapDisc.heldFarPin = await pinOf('order in your car');
+    out.mapDisc.heldFarPick = await pinOf('pick this one up');
     // ...and a hold that carries no card: kept from before the server
     // stored one, or marked with nothing to copy.
     await push({ id: 'o-heldbare', pickup: "McDonald's (Marietta Sq)", held: null });
@@ -5821,8 +5842,21 @@ try:
     disc = got.get('mapDisc') or {}
     eq('a same-brand pin 21.8 mi from a fresh fix on a 9.4 mi card is refused, '
        'not printed as "+31.3 mi"', disc.get('wrong'),
-       "the map's McDonald's is 21.8 mi from you, so past the card's 9.4 mi")
+       "wrong pin for McDonald's — 21.8 mi from you, past the card's 9.4 mi")
     eq('...while every pin is still drawn', disc.get('wrongMarks'), 4)
+    # ...and the pin itself says so: the line and the map keep one rule for
+    # "this pin is wrong". Only farFrom's 75 miles used to turn a pin red, so
+    # the refused McDonald's stayed the pickup's green under its refusal.
+    eq('...and the pin the card refuses is drawn red, not as the pickup',
+       (disc.get('wrongPin') or {}).get('fill'), '#f31260')
+    ok_('...saying in its popup why (%r)' % (disc.get('wrongPin') or {}).get('popup'),
+        'past its 9.4 mi, so this pin is wrong'
+        in ((disc.get('wrongPin') or {}).get('popup') or ''))
+    eq('the pin is refused with nothing in the car too, not hidden behind '
+       '"nothing in the car to compare this against"', disc.get('alone'),
+       "wrong pin for McDonald's — 21.8 mi from you, past the card's 9.4 mi")
+    eq('...and drawn red there as well',
+       (disc.get('alonePin') or {}).get('fill'), '#f31260')
     ok_('the right branch, 2.1 mi off, gets the figure (%r)' % disc.get('right'),
         re.match(r'^\+\d+\.\d mi out of your way — straight lines, not roads$',
                  disc.get('right') or ''))
@@ -5839,10 +5873,16 @@ try:
        'an Early look card may not measure from your car — no yardstick yet')
     eq("the held order's end is checked against its own card",
        disc.get('heldFar'),
-       "the map's Held End is 20.2 mi from your order's card, so past its 9.4 mi")
+       "wrong pin for Held End — 20.2 mi from your order's card, past its 9.4 mi")
+    eq("...and the held end its card refuses is drawn red",
+       (disc.get('heldFarPin') or {}).get('fill'), '#f31260')
+    eq("...while the pickup its own card allows keeps the pickup's green",
+       (disc.get('heldFarPick') or {}).get('fill'), '#17c964')
+    # A hold with no card is a card the rig did not keep (a holding.json from
+    # before the server stored one), not a card that came up with no fix.
     eq('a held order with no card of its own is not measured to',
        disc.get('heldBare'),
-       'the order in your car came up without a GPS fix, so its end cannot be '
+       'the rig kept no card for the order in your car, so its end cannot be '
        'checked')
 
     # Thirty frames a second down a phone hotspot, for a picture nobody can

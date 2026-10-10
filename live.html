@@ -270,20 +270,20 @@
        out of your way — straight lines, not roads, from where you were 12 min
        ago" — which was two rows here. That hedge went when the figure began
        to be measured from the card's own fix; the longest line now is a pin a
-       card contradicts, "the map's McDonald's is 21.8 mi from you, so past
+       card contradicts, "wrong pin for McDonald's — 21.8 mi from you, past
        the card's 9.4 mi (rig-corrected)", and rpi/test_layout.py holds it
        whole inside two rows at its widest. Three rows would be spending map
        on sentences that explain why there is no figure. The hat takes three
        for the same reason and no other: in a 228px column that line keeps
-       everything before its `, so` clause only with a third row, and a hedge
-       clipped off a number is this project's first fault class.
+       everything before its `, past` clause only with a third row, and a
+       hedge clipped off a number is this project's first fault class.
 
        Clamped rather than hidden, so the ellipsis says that something was
        cut. What it cuts is always the tail, and these lines are written
        load-bearing end first — figure, then the straight-line warning, then
        the count of places with no pin; a card's figure travels with its
-       hedge in the `, so` clause, so the two are cut together or not at
-       all. */
+       hedge in the `, past` clause, so the two are cut together or not at
+       all, behind "wrong pin for", which no clamp reaches. */
     #viewWrap:has(#liveMap:not([hidden])) #viewNote {
       /* `block` first and on its own line, and it is not decoration. The rule
          above this one is `display: none`, and a browser that does not know
@@ -313,7 +313,7 @@
   @media (orientation: landscape) and (max-height: 380px) {
     /* One more row for the caption, and the reason is the figure rather than
        the room. This column is 228px, and the line for a pin a card
-       contradicts takes a third row in it to reach its `, so` clause — so a
+       contradicts takes a third row in it to reach its `, past` clause — so a
        two-row cap here would ellipsise the place or the map's figure. Measured when the cap was set, the third row cost the map
        155px instead of 172px, and the check under it wants 120. */
     #viewWrap:has(#liveMap:not([hidden])) #viewNote { -webkit-line-clamp: 3; }
@@ -3983,8 +3983,8 @@
   /* ...and shorter again in the line for a pin a card contradicts, which
      carries two figures and the rig's repair besides the name. At twenty of
      the widest letter both of those lines ran past two rows at 800x480; at
-     12 they fit, and the `, so` clause the hat may eat holds the card's
-     figure with its hedge. "McDonald's (Marietta Sq)" is cut on its
+     12 they fit, and the `, past` clause the hat may eat holds the card's
+     figure with its hedge, behind "wrong pin for". "McDonald's (Marietta Sq)" is cut on its
      space, to "McDonald's…". Measured by rpi/test_layout.py. */
   var DISC_PLACE_SHOWN = 12;
 
@@ -4265,6 +4265,19 @@
     var drop = want.dropoff ? found[want.dropoff] : null;
     var held = want.held ? found[want.held] : null;
 
+    /* ...and which pins a CARD refuses: farther from where that card came up
+       than its own distance plus half a mile (MV.cardRefuses). Asked once
+       here and used for both the pin and the line under it. The line used to
+       ask on its own, behind the guards for the order in the car, so with
+       nothing held the study's wrong McDonald's was an ordinary green pickup
+       under "nothing in the car to compare this against" — and even when the
+       line did refuse it, the pin stayed green, because only farFrom turned
+       a pin red. One answer, two uses, so the map and its caption cannot
+       disagree about which pin is wrong. */
+    var off = { pick: MV.cardRefuses(want.card, here, pick),
+                held: MV.cardRefuses(want.heldCard,
+                                     MV.cardFix(want.heldCard).at, held) };
+
     // The car first, because every other mark here is a guess and this one is
     // not. A pickup pin a long way from it is a pin to distrust whatever the
     // geocoder said, and the driver can see that in one look.
@@ -4277,12 +4290,15 @@
        wrong coordinate was a pickup or a dropoff is not the thing to notice
        about it. Drawn rather than hidden, because a pin quietly dropped is the
        driver wondering where their dropoff went. */
-    function colourFor(name, role) {
-      return wrong[name] ? '#f31260' : role;
+    function colourFor(name, role, refused) {
+      return (wrong[name] || refused) ? '#f31260' : role;
     }
-    function sayFor(name, said) {
+    function sayFor(name, said, refused) {
       return wrong[name]
         ? said + ' — ' + Math.round(wrong[name]) + ' mi from you, so this pin is wrong'
+        : refused
+        ? said + ' — ' + refused.crow.toFixed(1) + ' mi from where its card came '
+          + 'up, past its ' + refused.miles + ' mi, so this pin is wrong'
         : said;
     }
     /* Ringed, and that is one rule covering all four marks rather than a
@@ -4299,11 +4315,11 @@
        red disc. And where this card's dropoff IS the held order's destination,
        mapWants already dedupes the lookup and the two land as a solid disc
        inside a ring, which is exactly what that means. */
-    put(held, colourFor(want.held, '#f5a524'),
-        sayFor(want.held, 'where the order in your car is going'), want.held,
-        true);
-    put(pick, colourFor(want.pickup, '#17c964'),
-        sayFor(want.pickup, 'pick this one up'), want.pickup);
+    put(held, colourFor(want.held, '#f5a524', off.held),
+        sayFor(want.held, 'where the order in your car is going', off.held),
+        want.held, true);
+    put(pick, colourFor(want.pickup, '#17c964', off.pick),
+        sayFor(want.pickup, 'pick this one up', off.pick), want.pickup);
     put(drop, colourFor(want.dropoff, '#f5a524'),
         sayFor(want.dropoff, 'and drop it here'), want.dropoff);
 
@@ -4358,7 +4374,7 @@
     // the order in the car is going, because that order HAS to be delivered;
     // where the new job ends after that is a further guess, and a parameter
     // nothing reads is a parameter that will one day be read by mistake.
-    mapDrew(mapLine(want, found, here, pick, held, wrong));
+    mapDrew(mapLine(want, found, here, pick, held, wrong, off));
   }
 
   /* The one line of words under the map, and the only figure this mode
@@ -4366,7 +4382,7 @@
      on my way, or behind me — and it says in the same breath that it is a
      straight line and not a road, because a driver acting on it is acting on
      three geocoded points. */
-  function mapLine(want, found, here, pick, held, wrong) {
+  function mapLine(want, found, here, pick, held, wrong, off) {
     /* Why a place has no pin, in the three kinds this project keeps apart
        everywhere else — because only one of them is about the rig's reading.
        An empty answer is stored as null; a lookup that could not be MADE is
@@ -4401,6 +4417,23 @@
                      + Math.round(wrong[badEnd])
                      + ' mi away — almost certainly a misread name, so no '
                      + 'distance';
+    /* A pin a CARD refuses, next — before anything is asked about the order
+       in the car, because the refusal is about the pin and holds whether or
+       not anything is held. A straight line cannot beat the road, so a
+       pickup pin farther from where the car was when this card came up than
+       the card's own distance (plus half a mile) is a pin the map got wrong:
+       a same-brand branch in the next town, answered as confidently as the
+       right one. That pin printed "+31.3 mi out of your way" on a job whose
+       whole trip was 9.4 mi, and farFrom's 75 miles above cannot see it. The
+       held order's end the same way, from ITS card's fix. `off` is drawMap's
+       one answer, the same one that turned the pin red. */
+    if (off.pick) return MV.againstCard(want.card, here, pick,
+                                        shortPlace(want.pickup, DISC_PLACE_SHOWN),
+                                        'new');
+    if (off.held) return MV.againstCard(want.heldCard,
+                                        MV.cardFix(want.heldCard).at, held,
+                                        shortPlace(want.held, DISC_PLACE_SHOWN),
+                                        'held');
     // THIS card's fix, and why there is none: a card that came up with no
     // fix and one whose fix the gate refused are different states, and "no
     // position" would say the GPS never answered when it answered too roughly
@@ -4431,22 +4464,18 @@
       ? 'could not reach the geocoder for where your order is going'
       : 'the geocoder found nothing for where your order is going';
 
-    /* Every pin is in. Now the two cards, each against its own pin.
-
-       A straight line cannot beat the road, so a pickup pin farther from where
-       the car was when this card came up than the card's own distance (plus
-       half a mile) is a pin the map got wrong: a same-brand branch in the next
-       town, answered as confidently as the right one. That pin printed
-       "+31.3 mi out of your way" on a job whose whole trip was 9.4 mi, and
-       farFrom's 75 miles above cannot see it. MV.againstCard says which card
-       may be held against a pin at all — an Early look card, or one whose
-       distance is not known to start at the car, is "no yardstick yet" — and
-       the line it gives blames the map's answer, never the world. */
+    /* Every pin is in and no card refused one. What is left is whether each
+       card COULD have: MV.againstCard says which card may be held against a
+       pin at all — an Early look card, or one whose distance is not known to
+       start at the car, is "no yardstick yet" — and a figure checked against
+       nothing is withheld, said instead of printed. A pin it refuses was
+       returned above, so here it answers the yardstick or nothing. */
     var said = MV.againstCard(want.card, here, pick,
                               shortPlace(want.pickup, DISC_PLACE_SHOWN), 'new');
     if (said) return said;
     // ...and the order in the car the same way, from ITS card's fix: where
-    // the car was when that card came up is where its distance started.
+    // the car was when that card came up is where its distance started. A
+    // hold with no card at all says that, not "no GPS fix" (MV.cardFix).
     var heldFix = MV.cardFix(want.heldCard);
     if (!heldFix.at) return MV.fixLine(heldFix, 'held');
     said = MV.againstCard(want.heldCard, heldFix.at, held,
