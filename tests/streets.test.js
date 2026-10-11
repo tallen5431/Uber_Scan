@@ -118,7 +118,13 @@ ok_('a footway reaching the exporter is dropped by its own list, and a way with 
     /kept 0 ways.*0 unnamed, 1 other highway, 1 no location/.test(r.said));
 
 /* ---- names --------------------------------------------------------------- */
-function m(name) { var x = S.match(ix, name); return x.names.join(' | ') + ' (' + x.how + ')'; }
+// Every street of the fixture is inside this box; the OCR rule is asked only
+// inside a box (a card's disc), so the name checks are asked in one.
+var ALL = S.boxOf('-84.6,34.0,-84.4,33.8');
+function m(name, box) {
+  var x = S.match(ix, name, box === undefined ? ALL : box);
+  return x.names.join(' | ') + ' (' + x.how + ')';
+}
 eq('the card\'s "Trl" finds OSM\'s "Trail"', m('Foxglove Trl'), 'Foxglove Trail (exact)');
 eq('...and "Court" finds an OSM name written "Ct": abbreviations both ways',
    m('Bramble Court'), 'Bramble Ct (exact)');
@@ -131,7 +137,18 @@ eq('...and "NE" finds neither: two directionals that differ never match',
    m('Church St NE'), ' (null)');
 eq('one letter read wrong in a street word: "Tri" for Trl', m('Foxglove Tri'),
    'Foxglove Trail (ocr)');
-eq('...and in a long word: "Wen Rd" for Wren Road', m('Wen Rd'), 'Wren Road (ocr)');
+eq('...and in a long word: "Foxgiove Trl" for Foxglove Trail', m('Foxgiove Trl'),
+   'Foxglove Trail (ocr)');
+eq('...but only the letter the reader is seen to misread, i for l: "Wen Rd" is not '
+   + 'Wren Road', m('Wen Rd'), ' (null)');
+eq('...and never with no box to keep the guess to: "Foxglove Tri" asked of the whole '
+   + 'index', m('Foxglove Tri', null), ' (null)');
+// Juniper Circle is at 33.965-33.969; this box is south of it.
+eq('...and only among the names inside the box: "Junlper Cir" in a box short of '
+   + 'Juniper Circle finds nothing', m('Junlper Cir', S.boxOf('-84.56,33.959,-84.551,33.95')),
+   ' (null)');
+eq('...where one holding it finds it', m('Junlper Cir', S.boxOf('-84.56,33.97,-84.54,33.96')),
+   'Juniper Circle (ocr)');
 eq('...never one street word for another: "Pine St" is not Pine Court', m('Pine St'), ' (null)');
 eq('a name the index holds exactly is never widened to its neighbour: Heron Way '
    + 'is not also Herron Way', m('Heron Way'), 'Heron Way (exact)');
@@ -166,12 +183,34 @@ eq('...nor "Cobb Pkwy S" "S Cobb Pkwy NW", whose S is before the name and NW aft
 eq('...but one more on one side still matches: "Lincoln Trace Ave SE" finds '
    + '"S Lincoln Trace Ave SE"', S.match(tiny(['S Lincoln Trace Avenue SE']),
                                           'Lincoln Trace Ave SE').how, 'dir');
+// tiny()'s one way is at 0,0; a box round it, as a card's disc would be.
+var NEAR = [-1, -1, 1, 1];
 eq('"17th St NW" is not "12th Street Northwest": no OCR letter is a digit',
-   S.match(tiny(['12th Street Northwest']), '17th St NW').how, null);
+   S.match(tiny(['12th Street Northwest']), '17th St NW', NEAR).how, null);
 eq('"Parliament Ct" is not "Parliament Street"', S.match(tiny(['Parliament Street']),
-                                                          'Parliament Ct').how, null);
-eq('"Oat Ln" is not "Oak Lane": no OCR letter in a word under four letters',
-   S.match(tiny(['Oak Lane']), 'Oat Ln').how, null);
+                                                          'Parliament Ct', NEAR).how, null);
+// ...and that holds of every pair of street words, so St is never read as
+// Ct: none is another with the one letter the reader misreads.
+var vocab = Object.keys(S.TYPES).map(function (k) { return S.TYPES[k]; })
+  .concat(Object.keys(S.DIRS).map(function (k) { return S.DIRS[k]; }));
+eq('no street word is another street word read one letter wrong',
+   vocab.filter(function (a) {
+     return vocab.some(function (b) { return S.ocrMay(a, b); });
+   }).join(' '), '');
+eq('"Ell Ct" is not "Eli Court": no OCR letter in a word under four letters',
+   S.match(tiny(['Eli Court']), 'Ell Ct', NEAR).how, null);
+eq('"Beach St" is not "Beech St", both on the week\'s cards: a, e and any letter but '
+   + 'i and l are never read for each other', S.match(tiny(['Beech Street']), 'Beach St',
+                                                      NEAR).how, null);
+// Ellis Street is held across town; Eliis Street, one OCR letter from it,
+// inside the card's box. The card printed a name the index holds.
+var twoPlaces = S.build({ format: S.FORMAT, e: 6, names: ['Ellis Street', 'Eliis Street'],
+                          nodes: [-84500000, 33900000, 100, 0, 100000, 100000, 100, 0],
+                          ways: [[[0], [0, 1]], [[1], [2, 1]]] });
+eq('a name the index holds anywhere is never read as another inside the box: '
+   + '"Ellis St" is not the box\'s "Eliis Street"',
+   S.match(twoPlaces, 'Ellis St', S.boxOf('-84.41,34.01,-84.39,33.99')).names.join(),
+   'Ellis Street');
 
 /* ---- where two streets meet --------------------------------------------- */
 function meets(a, b, box) {

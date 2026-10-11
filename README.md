@@ -295,11 +295,17 @@ What it answers, `GET /api/streets/cross?a=&b=&box=` and
   the disc then tells them apart); the same after dropping the OCR's litter — one- and two-letter
   tokens after the street's type printed short ("Ct re ou NW"), never a word
   before the type, which is the name ("Ol Canton Rd" is not Canton Road), and
-  never a digit; and with one letter misread in one word ("Tri" for
-  Trl, "PI" for Pl, "Biue" for Blue) — never a digit (12th St NW and 17th St
-  NW, both on the week's cards, stay apart), never one street word for another
-  (Parliament Ct and Parliament St, both on the cards), never in a word under
-  four letters unless it is a street word. Each of the week's 722 cross-street
+  never a digit; and with one letter misread in one word — only i for l
+  or l for i ("Tri" for Trl, "PI" for Pl, "Biue" for Blue), which is 177 of
+  the 190 one-letter-for-another differences between two frames of one card
+  on the week's address lines, while any letter for any letter matched Beach
+  St (Acworth) to Beech St (Marietta), both on the cards; never in a word under
+  four letters unless it is a street word; only among the names inside the
+  card's disc; and only when no rule before it found the name anywhere. So
+  12th St NW and 17th St NW, and Parliament Ct and Parliament St, all on the
+  cards, stay apart. A type the reader misreads the same way in every frame
+  is refused: "Cedar Ridge Or" (for Dr) is on the cards and finds nothing.
+  Each of the week's 722 cross-street
   halves, asked of an index holding every other half, matched another in 29
   cases: 28 the same street by reading, and bare "Peachtree St", which
   matched both Peachtree St NE and Peachtree St SW — two streets, and where

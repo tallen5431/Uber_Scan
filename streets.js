@@ -31,16 +31,20 @@
  *              last type, printed short ("Ct re ou NW", "Dr Ss R SW") — never
  *              a word before it, which is the name ("Ol Canton Rd" is not
  *              Canton Road), and never a digit (see cleaned).
- *   ocr        one letter, in one word, read wrong ("Tri" for Trl, "PI" for
- *              Pl, "Biue" for Blue, "DOr" for Dr) — never a digit (12th and
- *              13th are different streets), never one street word for another
- *              (St and Ct are different streets), and never in a word of the
- *              index shorter than four letters unless it is a street word
- *              ("Oak" and "Oat" are different streets).
+ *   ocr        one letter, in one word, read wrong — and only the letter the
+ *              reader is seen to misread, i for l or l for i ("Tri" for Trl,
+ *              "PI" for Pl, "Biue" for Blue; see OCR_LETTERS), so never a
+ *              digit (12th and 13th are different streets) and never Pine for
+ *              Pike; never one street word for another (St and Ct are
+ *              different streets); never in a word of the index shorter than
+ *              four letters unless it is a street word ("Oak" and "Oat" are
+ *              different streets); and only among the names inside the box
+ *              asked, when no rule before it found the name anywhere.
  *
- * Measured over the 390 distinct cross-street dropoffs of the week (780
- * halves) — see the commit that added this file for the counts. A name this
- * cannot match is refused by name, never guessed at. */
+ * Measured over the 390 distinct cross-street dropoffs of the week (722
+ * distinct halves) and over every street-like string the week's cards and
+ * frames carry — see the commits for the counts. A name this cannot match
+ * is refused by name, never guessed at. */
 'use strict';
 
 var fs = require('fs');
@@ -200,13 +204,31 @@ function oneEdit(a, b) {
   return ca === cb.slice(1) ? ['', cb[0]] : false;
 }
 
+/* The one letter the reader is SEEN to misread, both ways: "i" for "l" and
+ * "l" for "i". Measured on the week's frames (week.csv `scans`, 5,491 of
+ * them): two frames of one card, compared word for word on the lines that
+ * read as an address in both, differ by one letter in a word 277 times
+ * (lowercased, as this compares; case alone left out). 190 put one letter
+ * for another, and 177 of those are i/l ("Tri"/"Trl", "Bivd"/"Blvd",
+ * "PI"/"Pl"); the other 13 are h/k 5, a/n 4 and four single ones, none in a
+ * street's name. 39 put a digit for a letter (5 for S, 31) and 48 add or drop
+ * one ("Smyrn" for Smyrna, 13), which is also how real streets differ (Oak
+ * and Oaks, Spring and Springs). Any letter for any letter matched real,
+ * different streets the week's cards and frames carry — Beach St (Acworth)
+ * and Beech St (Marietta), Olive St SW and Oliver St — and Pine/Pike,
+ * Rose/Ross, Bell/Ball, Reed/Reid and Allen/Allan are all one letter apart.
+ * A misread the reader makes the same way in every frame cannot be seen this
+ * way ("Or" for Dr: "Cedar Ridge Or" and "Ottley Or NE" on the week's cards)
+ * and is refused. No two street words are one i/l apart, so St is never read
+ * as Ct (tests/streets.test.js holds that). */
+var OCR_LETTERS = { il: true, li: true };
+
 /* Whether asked word `q` may be the index's word `w` read one letter wrong. */
 function ocrMay(q, w) {
   var e = oneEdit(q, w);
   if (!e) return false;
-  if (/\d/.test(e[0] + e[1])) return false;           // 12th is not 13th
-  if (isWord(q) && isWord(w)) return false;           // St is not Ct
-  return isWord(w) || w.length >= 4;                  // Oak is not Oat
+  if (!OCR_LETTERS[e[0] + e[1]]) return false;        // Pine is not Pike
+  return isWord(w) || w.length >= 4;                  // Ell is not Eli
 }
 
 /* --- the index ----------------------------------------------------------- */
@@ -281,8 +303,14 @@ function load(file) {
 
 /* Which of the index's names a name asked for is, and by which rule:
    { names: [as OSM spells them], how: 'exact'|'dir'|'junk'|'ocr'|null,
-     keys: [...] }. */
-function match(ix, asked) {
+     keys: [...] }. The `ocr` rule is asked only inside `box` ([w, s, e, n]),
+   of the names with a way reaching into it, and never with no box: a
+   misread letter is a guess between names, and the card's own disc is what
+   keeps the guess to the streets that could be the one meant. And only when
+   no rule before it found the name ANYWHERE, so a name the index holds as
+   printed is never read as another inside the box ("Pike St" across town is
+   not this box's "Pine St"). */
+function match(ix, asked, box) {
   var q = words(asked);
   var tries = [q];
   var c = cleaned(asked);
@@ -305,6 +333,7 @@ function match(ix, asked) {
     }).map(function (o) { return o.key; });
     if (near.length) return found(near, how || 'dir');
   }
+  if (!box) return { names: [], how: null, keys: [] };
   for (t = 0; t < tries.length; t++) {
     var sq = split(tries[t]);
     var hits = ix.keys.filter(function (o) {
@@ -316,7 +345,8 @@ function match(ix, asked) {
           diff = i;
         }
       }
-      return diff >= 0 && ocrMay(sq.base[diff], o.sp.base[diff]);
+      return diff >= 0 && ocrMay(sq.base[diff], o.sp.base[diff])
+        && waysIn(ix, [o.key], box).length > 0;
     }).map(function (o) { return o.key; });
     if (hits.length) return found(hits, 'ocr');
   }
@@ -427,7 +457,7 @@ var MEETS_MAX = 50;
    that share a node meet there; ways that cross without one (a bridge, or a
    junction mapped without its node) meet where their segments cross. */
 function cross(ix, a, b, box) {
-  var ma = match(ix, a), mb = match(ix, b);
+  var ma = match(ix, a, box), mb = match(ix, b, box);
   var out = { a: { names: ma.names, how: ma.how, ways: 0 },
               b: { names: mb.names, how: mb.how, ways: 0 }, meets: [], cutAt: null };
   if (!ma.keys.length || !mb.keys.length) return out;
@@ -500,7 +530,7 @@ var POINTS_MAX = 8000;
    all of it), each [[lat, lon], ...], cut at the box's edge. A way that
    leaves the box and comes back is two lines. */
 function stretch(ix, name, box, most) {
-  var m = match(ix, name);
+  var m = match(ix, name, box);
   var out = { names: m.names, how: m.how, lines: [], points: 0, cutAt: null };
   if (!m.keys.length) return out;
   var cap = most || POINTS_MAX;
