@@ -4177,6 +4177,9 @@
           if (got.why === 'unreachable') {
             // Today's path for this place and every one after it, under the
             // same press: one dead NucBox is not three timeouts in a row.
+            // Only this: a question the relay REFUSED ('refused') is a bug
+            // here, kept below and said as one, never handed to the public
+            // map to answer instead.
             want.nbxDown = got.error;
             askPublic.push(q);
             continue;
@@ -4614,7 +4617,18 @@
     // map, which is the bigger thing to know about the line.
     // Keyed on MV.NbxSearch's own words for it, so nothing but caption text
     // is written as a literal here (rpi/test_layout.py measures every one).
-    var roadDown = { unreachable: ' · NucBox router down', noroute: ' · no road found' };
+    // The last three are a road figure the router DID give and this page
+    // will not state: a point it moved more than MV.SNAP_MI to reach a road,
+    // a figure below zero by more than the panel's rounding (OSRM's fastest
+    // road direct, a shorter slower one by the pickup — MV.ROAD_SAME_MI),
+    // and the relay refusing the question, which is a bug here.
+    var roadDown = { unreachable: ' · NucBox router down', noroute: ' · no road found',
+                     snap: ' · a pin over ' + MV.SNAP_MI + ' mi off road',
+                     otherroads: ' · router took different roads',
+                     refused: ' · road question refused, a bug' };
+    // One or the other, the search first. Both together ran past two rows at
+    // 800x480 (rpi/test_layout.py), and with the search down the line still
+    // says it is straight lines, not roads — only the road's reason goes.
     var nucbox = want.nbxDown ? ' · NucBox down, public map used'
       : (road && road.why && roadDown[road.why]) || '';
     if (road && isFinite(road.miles)) {

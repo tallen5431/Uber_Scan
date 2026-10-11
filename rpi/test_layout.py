@@ -608,6 +608,23 @@ CAPTION_LINES = [
      'this pickup is on your way — straight lines, not roads · 1 not found '
      '· no road found',
      'this pickup is on your way — straight lines, not roads'),
+    # ...and a road figure the router DID give and the page will not state:
+    # a point moved more than MV.SNAP_MI to reach a road, a figure below zero
+    # past the panel's rounding, the relay refusing the road question (a bug).
+    # Never with the search's own note: with " · NucBox down, public map used"
+    # before it, every one of these ran past two rows at 800x480.
+    ('the figure, a pin off the roads',
+     'this pickup is on your way — straight lines, not roads · 1 not found '
+     '· a pin over 0.2 mi off road',
+     'this pickup is on your way — straight lines, not roads'),
+    ('the figure, the router took other roads',
+     'this pickup is on your way — straight lines, not roads · 1 not found '
+     '· router took different roads',
+     'this pickup is on your way — straight lines, not roads'),
+    ('the figure, the road question refused',
+     'this pickup is on your way — straight lines, not roads · 1 not found '
+     '· road question refused, a bug',
+     'this pickup is on your way — straight lines, not roads'),
     # ...and why the NucBox gave no pin — MV.nbxRefusal's words, every one, at
     # the widest name, three-figure distances and the rig's repair named. The
     # refusal LEADS, as the disc's own lines do, so what a clamp keeps opens
@@ -650,22 +667,33 @@ CAPTION_LINES = [
      "no pin for " + WIDEST_DISC + " — 10 found"),
     ('no pin, a cross street',
      "no pin for " + WIDEST_DISC + " — cross streets are not searched yet"),
+    ('no pin, a door the map does not hold',
+     "no pin for " + WIDEST_DISC + " — street found, not that door"),
+    ('no pin, a list cut at the limit',
+     "no pin for " + WIDEST_DISC + " — too many to be sure · the NucBox lists 10 "
+     "at most",
+     "no pin for " + WIDEST_DISC + " — too many to be sure"),
+    ('no pin, the rig refused the question',
+     "no pin for " + WIDEST_DISC + " — a bug: the rig refused the question"),
 ]
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. SEVENTEEN entries have one, and they are four judgements: the count
-# of places with no pin, whose tail is ` · 1 not asked` or ` · 1 not found`
-# depending on which it was, with the NucBox's note after it where a service
-# did not answer (` · NucBox down, public map used`, ` · NucBox router down`,
-# ` · no road found`); the consequence of a pin that is plainly
+# ellipsise. TWENTY-ONE entries have one, and they are four judgements: the
+# count of places with no pin, whose tail is ` · 1 not asked` or ` · 1 not
+# found` depending on which it was, with the NucBox's note after it where a
+# service did not answer or its road was not stated (` · NucBox down, public
+# map used`, ` · NucBox router down`, ` · no road found`, ` · a pin over 0.2
+# mi off road`, ` · router took different roads`, ` · road question refused,
+# a bug`); the consequence of a pin that is plainly
 # wrong, whose tail is `, so no distance`; the card's own figure beside a
 # pin it contradicts, whose tail is `, past the card's 9.4 mi` with the
 # rig's repair named inside it, so the figure and its hedge go together —
 # behind "wrong pin for", which the clamp never reaches, so the part kept
 # readable is a refusal and never a bare distance; and the disc the NucBox
-# searched in, ` · within 99.9 mi (rig-corrected) of you, nearest 74.9 mi`,
-# behind "no pin for" and the few words saying why, the same way round.
+# searched in, ` · within 99.9 mi (rig-corrected) of you, nearest 74.9 mi`
+# (or the limit a cut list stopped at), behind "no pin for" and the few words
+# saying why, the same way round.
 # Each is the end of its sentence
 # precisely so that it is what a clamp eats; everything before it is a figure
 # or a hedge on one.
@@ -687,9 +715,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 55)
-eq('...and seventeen of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 17)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 61)
+eq('...and twenty-one of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 21)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
@@ -2833,8 +2861,8 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say fifty-five things, so all
-                # fifty-five are put in it and measured. Three rules, and they are not the same
+                # occupant and it can say sixty-one things, so all
+                # sixty-one are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
                 #   the cap    — no sentence may take more rows than the clamp

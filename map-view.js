@@ -602,13 +602,23 @@
    *        street= search for "1985 Cobb Parkway NW". The name is not asked:
    *        the address is the more exact of the two.
    *   "Shadowood Pkwy SE, Atlanta"            street= "Shadowood Pkwy SE";
-   *   "4821 Kestrel Dr, Marietta"             the town is NOT sent. Measured:
-   *        the Trip Planner's door line too.   q=Shadowood Pkwy SE, Atlanta, GA
-   *                                            found 0 and the street alone
-   *        in the box found 2, in Cumberland. Uber's town is the postal town
-   *        and OSM's is the place (Atlanta against Cumberland; Marietta
-   *        against Kennesaw for 1985 Cobb Parkway), so the town is only a
-   *        tie-breaker among candidates that already fit.
+   *   "4821 Kestrel Dr, Marietta"             the town is NOT sent, and NOT
+   *        the Trip Planner's door line too.   used. Measured: q=Shadowood
+   *                                            Pkwy SE, Atlanta, GA found 0
+   *        and the street alone in the box found 2, in Cumberland. Uber's
+   *        town is the postal town and OSM's is the place (Atlanta against
+   *        Cumberland; Marietta against Kennesaw for 1985 Cobb Parkway). It
+   *        was kept as a tie-break among candidates inside the disc, and that
+   *        is the same mistake one step later. Probed: Shadowood Parkway in
+   *        Cumberland and a namesake 1.35 mi off whose OSM address said
+   *        Atlanta, both inside a 3.0 mi card's disc, and the card's
+   *        "Atlanta" pinned the namesake — chosen by the one word the real
+   *        install showed disagrees with OSM. Two that fit and disagree are
+   *        a refusal, whatever the card's town says.
+   *        A street with a house number is a door: it is pinned only where
+   *        the answer HAS that number (see hasDoor) — Nominatim asked for
+   *        a door it does not hold answers the street instead, at the same
+   *        confidence, and that was pinned as the door.
    *   "A & B, Town"                           cross streets: NOT searched.
    *        Nominatim answers ONE point for a whole street (Cobb Parkway NW
    *        came back as one result), so the corner of two cannot be asked of
@@ -627,21 +637,34 @@
     // card's edge ("Culver's (1275 Hwy" is how the reader often leaves it).
     var br = /\(\s*(\d+[A-Za-z]?\s+[^()]*?)\s*\)?\s*$/.exec(s);
     if (br && /[A-Za-z]{3}/.test(br[1])) {
-      return { kind: 'street', street: br[1].replace(/[\s,.]+$/, ''), town: null,
-               door: true };
+      return streetPlan(br[1].replace(/[\s,.]+$/, ''));
     }
     var comma = s.indexOf(',');
     if (comma > 0 && s.slice(0, comma).indexOf('(') < 0) {
       var street = s.slice(0, comma).trim();
       if (/&/.test(street)) return { kind: 'cross' };
-      // The town is the next part with a lowercase letter in it — "GA 30075"
-      // is a state and a ZIP, not a town — and it goes no further than the
-      // tie-break below.
-      var town = s.slice(comma + 1).split(',').map(function (t) { return t.trim(); })
-        .filter(function (t) { return /[a-z]/.test(t); })[0] || null;
-      return { kind: 'street', street: street, town: town, door: /^\d/.test(street) };
+      return streetPlan(street);
     }
     return { kind: 'name', q: s.replace(/\s*\([^()]*\)?\s*$/, '').trim() || s };
+  }
+
+  // A street, and its house number when it opens with one ("1985", "12A").
+  function streetPlan(street) {
+    var no = /^(\d+[A-Za-z]?)\b/.exec(street);
+    return { kind: 'street', street: street, door: !!no, house: no ? no[1] : null };
+  }
+
+  /* Whether an answer is the door asked for, not just its street. Nominatim
+     writes a house number as its own part of display_name, first for a bare
+     address ("1985, Cobb Parkway, Kennesaw, ..." — the real install's three
+     answers for 1985 Cobb Parkway) and second after a named place
+     ("McDonald's, 1155, Roswell Street Northeast, ..."); a street answered
+     for a door it does not hold has no number there ("Kestrel Drive,
+     Marietta, ..."). Only those first two parts are read: the postcode is a
+     bare number too, and always after the town and county. */
+  function hasDoor(hit, house) {
+    var parts = String(hit.name || '').toLowerCase().split(/\s*,\s*/).slice(0, 2);
+    return parts.indexOf(String(house).toLowerCase()) >= 0;
   }
 
   /* The disc a place is searched in: the card's fix, and the card's own
@@ -695,24 +718,37 @@
   }
 
   /* Which candidate, if any. `hits` is what the NucBox answered ({lat, lon,
-   * name}); `disc` is discFor's answer or null; `plan` is searchPlan's.
+   * name}); `disc` is discFor's answer or null; `plan` is searchPlan's;
+   * `cutAt` is the server's limit when the list stopped at it, else null.
    *
    *   { at, n }                    one fits, or every one that fits agrees
-   *                                (the middle of them is the pin), or the
-   *                                town picks out agreeing ones (byTown)
+   *                                (the middle of them is the pin)
+   *   { why: 'capped', n }         the list was cut at n, the limit: neither
+   *                                "only one fits" nor "none fits" is proven
+   *                                of it, whatever is inside
+   *   { why: 'nodoor', n }         a door was asked and only its street came
+   *                                back
    *   { why: 'none', nearest, n }  none inside the disc; `nearest` is how
    *                                far the closest one the box held was, or
    *                                null when it held none at all
    *   { why: 'several', n }        n fit and they are not one place
    *
-   * The town is never a filter, only a tie-break: a candidate is first
-   * inside the disc and only then asked whether its address names the town,
-   * because the card's town is the postal one and OSM's is not. */
-  function pickInDisc(hits, disc, plan) {
+   * CAPPED, refused outright. The other honest rule was to ask again in a
+   * tighter box — but the box asked is already the disc's own (discBox), so
+   * there is no tighter box that still holds the whole disc, and asking a
+   * smaller one would leave part of the card's distance unsearched. One rule,
+   * one question, and the driver is told it was too many. */
+  function pickInDisc(hits, disc, plan, cutAt) {
     var all = (hits || []).filter(function (h) {
       return h && typeof h.lat === 'number' && typeof h.lon === 'number'
         && isFinite(h.lat) && isFinite(h.lon);
     });
+    if (cutAt) return { at: null, why: 'capped', n: cutAt };
+    if (plan && plan.door && all.length) {
+      var doors = all.filter(function (h) { return hasDoor(h, plan.house); });
+      if (!doors.length) return { at: null, why: 'nodoor', n: all.length };
+      all = doors;
+    }
     var inside = disc ? all.filter(function (h) {
       return crowMiles(disc.at, h) <= disc.miles;
     }) : all;
@@ -727,19 +763,10 @@
       return { at: null, why: 'none', nearest: nearest, n: 0 };
     }
     var within = (plan && plan.kind === 'street' && !plan.door) ? STREET_AGREE_MI : AGREE_MI;
-    function pin(list, byTown) {
-      var mid = middleOf(list);
-      return { at: { lat: mid.lat, lon: mid.lon, name: list[0].name || '',
-                     kind: list[0].kind || '', bounded: !!disc, nbx: true },
-               n: inside.length, byTown: !!byTown };
-    }
-    if (agreeing(inside, within)) return pin(inside, false);
-    var town = plan && plan.town ? plan.town.toLowerCase() : null;
-    if (town) {
-      var named = inside.filter(function (h) {
-        return String(h.name || '').toLowerCase().split(/\s*,\s*/).indexOf(town) >= 0;
-      });
-      if (named.length && agreeing(named, within)) return pin(named, true);
+    if (agreeing(inside, within)) {
+      var mid = middleOf(inside);
+      return { at: { lat: mid.lat, lon: mid.lon, name: inside[0].name || '' },
+               n: inside.length };
     }
     return { at: null, why: 'several', n: inside.length };
   }
@@ -841,12 +868,31 @@
      hat's three rows at the widest name, so they go together after the
      refusal instead. It blames the search, never the world: "none fit the
      card" is a fact about what the NucBox holds, not a claim that no
-     McDonald's exists there. Three kinds reach here — none, several (`n`),
-     a cross street — and anything else is no line at all. */
+     McDonald's exists there. Six kinds reach here — none, several (`n`), a
+     cross street, a list cut at the limit, a street answered for a door,
+     and the rig's own server refusing the question — and anything else is
+     no line at all. The last is a bug in this page, said as one: the server
+     refuses only questions shaped wrong, and falling back to the public map
+     for it would hide the bug behind an answer. */
+  // The four refusals that say the same whatever the disc, keyed on
+  // pickInDisc's and NbxSearch.place's `why`. The bug's reason (the server's
+  // `error`) is not on the panel: with it, the line ran past two rows at
+  // 800x480 (rpi/test_layout.py), and a driver cannot act on it.
+  var NBX_WORDS = {
+    cross: function () { return 'cross streets are not searched yet'; },
+    capped: function (res) {
+      return 'too many to be sure · the NucBox lists ' + res.n + ' at most';
+    },
+    nodoor: function () { return 'street found, not that door'; },
+    refused: function () { return 'a bug: the rig refused the question'; }
+  };
+
   function nbxRefusal(res, disc, name, whose) {
     if (!res || res.at) return null;
     var lead = 'no pin for ' + name + ' — ';
-    if (res.why === 'cross') return lead + 'cross streets are not searched yet';
+    if (Object.prototype.hasOwnProperty.call(NBX_WORDS, res.why)) {
+      return lead + NBX_WORDS[res.why](res);
+    }
     var none = res.why === 'none';
     if (!none && !res.n) return null;
     var mine = whose === 'new';
@@ -1612,9 +1658,18 @@
   // One limiter, the Geocoder's, at this object's own gap.
   NbxSearch.prototype.paced = Geocoder.prototype.paced;
 
-  /* Ask, or say why not. Resolves { hits } on an answer and { unreachable:
-     error } when the NucBox (or this server) could not be asked — the one
-     case the page falls back to the public geocoder for. Never rejects. */
+  /* Ask, or say why not. Never rejects. Resolves:
+       the answer        { ok, ... }, kept for the page's life; OSRM's
+                         { noRoute } too (an answer about the points)
+       { unreachable }   the server's `unreachable: true` (the NucBox did not
+                         answer) or `configured: false` (none is set any
+                         more), or this rig's server not answering at all —
+                         the cases the page falls back to the public map for
+       { refused }       anything else: the relay refused the question as
+                         this page put it (a 400, a 404 for a path it does
+                         not have). That is a bug here, not a NucBox that is
+                         down, and is said as one rather than quietly asked
+                         of the public map instead. */
   NbxSearch.prototype.get = function (path) {
     var self = this;
     if (Object.prototype.hasOwnProperty.call(this.cache, path)) {
@@ -1628,18 +1683,19 @@
           self.cache[path] = body;
           return body;
         }
-        // A noRoute answer is an answer; everything else not ok is the
-        // NucBox, or this server, not answering the question.
-        if (body && body.noRoute) return body;
-        return { unreachable: (body && body.error) || ('the server said ' + r.status) };
+        var why = (body && body.error) || ('the server said ' + r.status);
+        if (body && (body.unreachable === true || body.configured === false)) {
+          return { unreachable: why };
+        }
+        return { refused: why };
       });
     }, function (e) {
       return { unreachable: 'this rig\'s server did not answer (' + ((e && e.message) || e) + ')' };
     });
   };
 
-  /* One place, inside its disc: pickInDisc's answer, or { why: 'cross' }, or
-     { why: 'unreachable', error }. */
+  /* One place, inside its disc: pickInDisc's answer, or { why: 'cross' },
+     { why: 'unreachable', error } or { why: 'refused', error }. */
   NbxSearch.prototype.place = function (place, disc) {
     var plan = searchPlan(place);
     if (!plan) return Promise.resolve({ at: null, why: 'none', nearest: null, n: 0 });
@@ -1650,11 +1706,13 @@
              + (box ? '&viewbox=' + encodeURIComponent(box) : '');
     return this.get(path).then(function (body) {
       if (body.unreachable) return { at: null, why: 'unreachable', error: body.unreachable };
-      return pickInDisc(body.hits, disc, plan);
+      if (body.refused) return { at: null, why: 'refused', error: body.refused };
+      return pickInDisc(body.hits, disc, plan, body.cutAt);
     });
   };
 
-  /* Road metres along points [{lat, lon}, ...], or { why } — never minutes:
+  /* Road metres along points [{lat, lon}, ...] and how far OSRM moved each
+     point to reach a road ({ metres, snaps }), or { why } — never minutes:
      server.js drops OSRM's duration before it reaches a page. */
   NbxSearch.prototype.road = function (points) {
     var path = '/route?points=' + points.map(function (p) {
@@ -1662,24 +1720,39 @@
     }).join(';');
     return this.get(path).then(function (body) {
       if (body.unreachable) return { why: 'unreachable', error: body.unreachable };
-      if (!body.ok || typeof body.metres !== 'number') {
-        return { why: 'noroute', error: body.error || 'no road' };
-      }
-      return { metres: body.metres };
+      if (body.refused) return { why: 'refused', error: body.refused };
+      if (body.noRoute) return { why: 'noroute', error: body.error };
+      return { metres: body.metres, snaps: body.snaps };
     });
   };
 
   var METRES_PER_MILE = 1609.344;
 
+  /* How far OSRM may move a point to reach a road before the road figure is
+     not about that point: a fifth of a mile, AGREE_MI — the distance within
+     which this file already calls two answers one place. A pin moved farther
+     than that is routed from somewhere else (the far side of a mall, the
+     motorway beside a field). Chosen, not measured, the same as AGREE_MI. */
+  var SNAP_MI = AGREE_MI;
+
+  /* How far below zero the road detour may come before it is not believed.
+     OSRM routes the FASTEST road, not the shortest, so car -> pickup -> end
+     can come out shorter in miles than the car -> end it chose: the pickup
+     pulled it onto a shorter, slower road, and "on your way" would hide a
+     real detour (in time, which this panel may not state). A pickup on the
+     very road OSRM chose direct gives the same metres both ways, so the only
+     slack needed is the panel's own rounding: anything above -0.05 mi is
+     "0.0" to one decimal, which is what the figure is written to. */
+  var ROAD_SAME_MI = 0.05;
+
   /* The detour by road: car -> pickup -> where the order in the car is
      going, less car -> that end. The same three points and the same
      subtraction as detour() above, and nothing else: no minutes (a distance
      turned into time is a pace — Settled), and never a route through where
-     the new job ends (Settled). Resolves { miles } or { why }. Below zero is
-     possible, because OSRM picks the FASTEST road and not the shortest, so
-     going by the pickup can come out a few yards shorter than the route it
-     chose direct; that is "on your way", which the caller's half-mile cut
-     already says. */
+     the new job ends (Settled). Resolves { miles } or { why }:
+       'snap'        a point was moved more than SNAP_MI to reach a road
+       'otherroads'  the figure came out below -ROAD_SAME_MI (see above)
+     besides the road's own unreachable / refused / noroute. */
   NbxSearch.prototype.detour = function (from, via, to) {
     if (!from || !via || !to) return Promise.resolve({ why: 'missing' });
     var self = this;
@@ -1687,7 +1760,16 @@
       if (by.why) return by;
       return self.road([from, to]).then(function (direct) {
         if (direct.why) return direct;
-        return { miles: (by.metres - direct.metres) / METRES_PER_MILE };
+        // Five snaps, one per point asked; server.js answers no route
+        // without them, so a short list is a server from before this.
+        var snaps = (by.snaps || []).concat(direct.snaps || []);
+        if (snaps.length !== 5) {
+          return { why: 'unreachable', error: 'the router did not say how far it moved each point' };
+        }
+        if (!(Math.max.apply(null, snaps) / METRES_PER_MILE <= SNAP_MI)) return { why: 'snap' };
+        var miles = (by.metres - direct.metres) / METRES_PER_MILE;
+        if (miles < -ROAD_SAME_MI) return { why: 'otherroads' };
+        return { miles: miles };
       });
     });
   };
@@ -1829,5 +1911,6 @@
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            NbxSearch: NbxSearch, nbxSettings: nbxSettings,
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,
-           NBX_GAP_MS: NBX_GAP_MS };
+           NBX_GAP_MS: NBX_GAP_MS, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,
+           hasDoor: hasDoor };
 }));

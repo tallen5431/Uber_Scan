@@ -3237,6 +3237,33 @@ const framed = (page) => page.waitForFunction(
         r.noRoadWant = await page.evaluate(() => window.MapView.detour(
           { lat: 33.9526, lon: -84.5499 }, { lat: 34.0010, lon: -84.5560 },
           { lat: 33.8779, lon: -84.4600 }));
+        // A pickup the fake's road by is 400 m SHORTER than its road direct
+        // (OSRM's fastest road direct, a shorter one by the pickup).
+        await push({ id: 'n-waffle', pickup: 'Waffle House' });
+        await page.waitForTimeout(1500);
+        r.otherRoads = await note();
+        // A pickup the fake's router moves 450 m to reach a road.
+        await push({ id: 'n-farm', pickup: 'Farm Stand' });
+        await page.waitForTimeout(1500);
+        r.snap = await note();
+        r.snapWant = await page.evaluate(() => window.MapView.detour(
+          { lat: 33.9526, lon: -84.5499 }, { lat: 33.9650, lon: -84.5350 },
+          { lat: 33.8779, lon: -84.4600 }));
+        // Twelve branches, the list cut at ten, one inside the 3.0 mi card.
+        await push({ id: 'n-cut', pickup: 'Starbucks' });
+        await page.waitForTimeout(1500);
+        r.cut = await note();
+        r.cutPick = await pick();
+        // A door the NucBox holds only the street of.
+        await push({ id: 'n-door', pickup: "Jimmy John's (4821 Kestrel Dr)" });
+        await page.waitForTimeout(1500);
+        r.door = await note();
+        r.doorPick = await pick();
+        // A place name longer than the relay will pass on: refused by this
+        // rig's own server, which is a bug in the question, not a NucBox down.
+        await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
+        await page.waitForTimeout(1500);
+        r.bug = await note();
       }
       r.publicAsked = publicAsked;
       out.nbx[which] = r;
@@ -6080,8 +6107,11 @@ try:
         both.get('earlyPick') and abs(both['earlyPick'][0] - 34.001) < 0.001)
     eq('...and the router not asked for a figure the card refuses',
        both.get('routesAfter'), both.get('routesBefore'))
+    # " · 1 not found" is the dropoff: the two Church Streets both sit inside
+    # this 9.4 mi card's disc, and with the card's town no longer breaking
+    # the tie they are refused as two that disagree.
     _m = re.match(r'^\+(\d+\.\d) mi out of your way — straight lines, not roads'
-                  r' · no road found$', both.get('noRoad') or '')
+                  r' · 1 not found · no road found$', both.get('noRoad') or '')
     ok_('a route the router says has no road leaves the straight line, and says '
         'so (%r)' % both.get('noRoad'),
         _m and abs(float(_m.group(1)) - (both.get('noRoadWant') or 0)) < 0.051)
@@ -6100,6 +6130,30 @@ try:
        ['Church St, Marietta', "McDonald's (Marietta Sq)", 'Shadowood Pkwy SE, Atlanta'])
     eq('...and with the NucBox set and answering, the public map is asked nothing',
        (both.get('publicAsked'), noroad.get('publicAsked')), ([], []))
+    # A road figure the router gave and the panel will not state: the road by
+    # the pickup shorter than the road direct is OSRM's fastest-not-shortest
+    # (map-view.js ROAD_SAME_MI), never "on your way by road".
+    eq('a road detour below zero is not "on your way by road": the straight '
+       'line stands and says the router took different roads', both.get('otherRoads'),
+       'this pickup is on your way — straight lines, not roads · router took '
+       'different roads')
+    _m = re.match(r'^\+(\d+\.\d) mi out of your way — straight lines, not roads'
+                  r' · a pin over 0\.2 mi off road$', both.get('snap') or '')
+    ok_('a pickup the router moved 450 m to reach a road leaves the straight '
+        'line, and says a pin is over 0.2 mi off road (%r)' % both.get('snap'),
+        _m and abs(float(_m.group(1)) - (both.get('snapWant') or 0)) < 0.051)
+    eq('twelve branches cut at ten, one inside the card, are too many to be sure, '
+       'not pinned', (both.get('cut'), both.get('cutPick')),
+       ("no pin for Starbucks — too many to be sure · the NucBox lists 10 at most",
+        None))
+    ok_('a door the NucBox holds only the street of is refused, not pinned as the '
+        'door (%r)' % both.get('door'),
+        re.match(r"^no pin for Jimmy.* — street found, not that door$",
+                 both.get('door') or '') and both.get('doorPick') is None)
+    ok_('a question this rig\'s server refuses is said as a bug, never as the '
+        'NucBox down (%r)' % both.get('bug'),
+        re.match(r'^no pin for Q+… — a bug: the rig refused the question$',
+                 both.get('bug') or ''))
     _lines = [v for r in (both, noroad, nosearch) for k, v in r.items()
               if isinstance(v, str)]
     eq('no NucBox line on the panel speaks of minutes',

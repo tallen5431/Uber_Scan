@@ -935,25 +935,25 @@ async function nucbox() {
   }
   function hitsOf(list) {
     return list.map(function (h) {
-      return { lat: Number(h.lat), lon: Number(h.lon), name: h.display_name, kind: h.type };
+      return { lat: Number(h.lat), lon: Number(h.lon), name: h.display_name };
     });
   }
 
   /* What is asked, by the shape of the string. */
   eq('a bracket that opens with a house number is asked as that street',
      JSON.stringify(MV.searchPlan("Jimmy John's (1985 Cobb Parkway NW)")),
-     JSON.stringify({ kind: 'street', street: '1985 Cobb Parkway NW', town: null,
-                      door: true }));
+     JSON.stringify({ kind: 'street', street: '1985 Cobb Parkway NW', door: true,
+                      house: '1985' }));
   eq('...and one the card\'s edge cut off is still the street',
      MV.searchPlan("Culver's (1275 Hwy").street, '1275 Hwy');
-  eq('"Street, Town" is the street, with the town kept only to break a tie',
+  eq('"Street, Town" is the street, the town not kept at all',
      JSON.stringify(MV.searchPlan('Shadowood Pkwy SE, Atlanta Pverel')),
-     JSON.stringify({ kind: 'street', street: 'Shadowood Pkwy SE',
-                      town: 'Atlanta Pverel', door: false }));
-  eq('...and the Trip Planner\'s door line the same, its state and ZIP no town',
+     JSON.stringify({ kind: 'street', street: 'Shadowood Pkwy SE', door: false,
+                      house: null }));
+  eq('...and the Trip Planner\'s door line the same, a door with its number',
      JSON.stringify(MV.searchPlan('77 Birch Ln NW, Roswell, GA 30075')),
-     JSON.stringify({ kind: 'street', street: '77 Birch Ln NW', town: 'Roswell',
-                      door: true }));
+     JSON.stringify({ kind: 'street', street: '77 Birch Ln NW', door: true,
+                      house: '77' }));
   eq('cross streets are not asked of a search that answers one point a street',
      MV.searchPlan('Birch Ln & Kestrel Dr, Roswell').kind, 'cross');
   eq('a merchant is asked by name, its "(Plaza)" dropped',
@@ -996,13 +996,22 @@ async function nucbox() {
   var street = MV.pickInDisc(hitsOf(FAKE.SHADOWOOD), d94,
                              MV.searchPlan('Shadowood Pkwy SE, Atlanta'));
   ok_('a street answered in two pieces 0.275 mi apart is one street, pinned between them',
-      street.at && Math.abs(street.at.lat - 33.8779) < 0.0001 && !street.byTown);
+      street.at && Math.abs(street.at.lat - 33.8779) < 0.0001);
   var church = hitsOf(FAKE.CHURCH);
   var tie = MV.pickInDisc(church, d94, MV.searchPlan('Church St, Marietta'));
-  eq('two streets of one name in two towns, both inside: the card\'s town breaks the tie',
-     tie.at && [tie.at.lat, tie.byTown].join(','), '33.958,true');
-  eq('...and a town that names neither leaves them refused, not guessed',
-     MV.pickInDisc(church, d94, MV.searchPlan('Church St, Atlanta')).why, 'several');
+  eq('two streets of one name in two towns, both inside, are refused whatever '
+     + 'the card\'s town says', JSON.stringify([tie.at, tie.why, tie.n]),
+     JSON.stringify([null, 'several', 2]));
+  /* The verifier's probe: the street in Cumberland and a namesake 1.35 mi
+     off whose OSM address says Atlanta, both inside a 3.0 mi card. The
+     card's postal "Atlanta" pinned the namesake when the town broke ties. */
+  var shadow2 = MV.pickInDisc(
+    [{ lat: 33.94, lon: -84.52, name: 'Shadowood Parkway Southeast, Cumberland, Cobb County, Georgia' },
+     { lat: 33.925, lon: -84.505, name: 'Shadowood Parkway Southeast, Atlanta, Fulton County, Georgia' }],
+    MV.discFor(card({ miles: 3.0 })), MV.searchPlan('Shadowood Pkwy SE, Atlanta'));
+  eq('...so "Shadowood Pkwy SE, Atlanta" with a namesake in OSM\'s Atlanta 1.35 mi '
+     + 'off is refused, not pinned on the word Atlanta',
+     JSON.stringify([shadow2.at, shadow2.why]), JSON.stringify([null, 'several']));
   eq('...and the town is never a filter: a lone candidate in another town is used',
      (MV.pickInDisc(church.slice(1), d94, MV.searchPlan('Church St, Marietta')).at || {}).lat,
      33.883);
@@ -1031,6 +1040,63 @@ async function nucbox() {
   eq('a cross street', MV.nbxRefusal({ why: 'cross' }, d94, 'Birch Ln…', 'new'),
      'no pin for Birch Ln… — cross streets are not searched yet');
   eq('a pin is no refusal', MV.nbxRefusal(one, d94, "McDonald's", 'new'), null);
+
+  /* A door asked, its street answered: never pinned as the door. */
+  var d30 = MV.discFor(card({ miles: 3.0 }));
+  var kestrel = MV.pickInDisc(hitsOf(FAKE.KESTREL), d30, MV.searchPlan('4821 Kestrel Dr, Marietta'));
+  eq('a house number answered only by its street is refused, not pinned as the door',
+     JSON.stringify([kestrel.at, kestrel.why]), JSON.stringify([null, 'nodoor']));
+  eq('...in words that say the street was found and not the door',
+     MV.nbxRefusal(kestrel, d30, '4821 Kestrel Dr, Marietta', 'new'),
+     'no pin for 4821 Kestrel Dr, Marietta — street found, not that door');
+  eq('...while the same street asked with no number is pinned as the street',
+     (MV.pickInDisc(hitsOf(FAKE.KESTREL), d30, MV.searchPlan('Kestrel Dr, Marietta')).at || {}).lat,
+     33.97);
+  ok_('...and a door is read off the first two parts of the name, so the '
+      + 'postcode is never taken for the house number',
+      MV.hasDoor({ name: '1985, Cobb Parkway, Kennesaw' }, '1985')
+      && MV.hasDoor({ name: "McDonald's, 1155, Roswell Street Northeast" }, '1155')
+      && !MV.hasDoor({ name: 'Kestrel Drive, Marietta, Cobb County, Georgia, 30060' }, '30060'));
+
+  /* A list cut at the limit proves nothing about what is inside the disc. */
+  var sb = hitsOf(FAKE.STARBUCKS.slice(0, 10));
+  var sbOne = MV.pickInDisc(sb, d30, MV.searchPlan('Starbucks'), null);
+  eq('ten candidates with one inside a 3.0 mi card would pin that one if the '
+     + 'list were whole', sbOne.at && sbOne.at.lat, 33.9671);
+  var sbCut = MV.pickInDisc(sb, d30, MV.searchPlan('Starbucks'), 10);
+  eq('...and cut at the limit, it is refused: "only one fits" is not proven',
+     JSON.stringify([sbCut.at, sbCut.why, sbCut.n]), JSON.stringify([null, 'capped', 10]));
+  eq('...nor is "none fits" of a cut list',
+     MV.pickInDisc(sb.slice(1), d30, MV.searchPlan('Starbucks'), 10).why, 'capped');
+  eq('...in words that say there were too many to be sure',
+     MV.nbxRefusal(sbCut, d30, 'Starbucks', 'new'),
+     'no pin for Starbucks — too many to be sure · the NucBox lists 10 at most');
+  eq('a question the rig refused is said as a bug',
+     MV.nbxRefusal({ at: null, why: 'refused', error: 'refused: limit' }, d30, 'X', 'new'),
+     'no pin for X — a bug: the rig refused the question');
+
+  /* The road figure's two refusals, at their bounds, off a stub of the relay. */
+  function stubRoad(by, direct, snapBy, snapDirect) {
+    return new MV.NbxSearch({ gap: 0, fetch: function (u) {
+      var three = decodeURIComponent(u).split(';').length === 3;
+      return Promise.resolve({ ok: true, status: 200, json: function () {
+        return Promise.resolve(three ? { ok: true, metres: by, snaps: snapBy || [3, 3, 3] }
+                                     : { ok: true, metres: direct, snaps: snapDirect || [3, 3] });
+      } });
+    } });
+  }
+  var P1 = { lat: 33.95, lon: -84.55 }, P2 = { lat: 33.96, lon: -84.54 }, P3 = { lat: 33.97, lon: -84.53 };
+  eq('a road detour a hair below zero (-0.037 mi) is the panel\'s 0.0 and stands',
+     ((await stubRoad(1000, 1060).detour(P1, P2, P3)).miles || 0).toFixed(3), '-0.037');
+  eq('...past the rounding (-0.062 mi) the router took different roads, and no '
+     + 'figure is stated', JSON.stringify(await stubRoad(1000, 1100).detour(P1, P2, P3)),
+     JSON.stringify({ why: 'otherroads' }));
+  eq('a point the router moved 321 m (under 0.2 mi) to reach a road leaves the figure',
+     typeof (await stubRoad(3000, 2000, [3, 321, 3]).detour(P1, P2, P3)).miles, 'number');
+  eq('...and one moved 323 m (over 0.2 mi) refuses it, on either route',
+     JSON.stringify([await stubRoad(3000, 2000, [3, 323, 3]).detour(P1, P2, P3),
+                     await stubRoad(3000, 2000, null, [323, 3]).detour(P1, P2, P3)]),
+     JSON.stringify([{ why: 'snap' }, { why: 'snap' }]));
 
   /* Through the real server.js and the fake NucBox. */
   var fake = await new Promise(function (r) { FAKE.start(r); });
@@ -1068,6 +1134,16 @@ async function nucbox() {
     got = await nbx.place("Jimmy John's (1985 Cobb Parkway NW)", d94);
     ok_('a bracketed door is pinned at 1985, Cobb Parkway, Kennesaw — the postal '
         + 'town on the card was never asked', got.at && /^1985, Cobb Parkway, Kennesaw/.test(got.at.name));
+    got = await nbx.place('4821 Kestrel Dr, Marietta', d94);
+    eq('through the server, a door the NucBox answers with only its street is '
+       + 'refused as the street', [got.at, got.why].join(','), ',nodoor');
+    got = await nbx.place('Starbucks', MV.discFor(card({ miles: 3.0 })));
+    eq('...and twelve Starbucks cut at ten, one inside a 3.0 mi card, are too many '
+       + 'to be sure', [got.at, got.why, got.n].join(','), ',capped,10');
+    got = await nbx.place('X'.repeat(121), d94);
+    eq('...and a question the relay refuses is a bug said with its reason, not a '
+       + 'NucBox that is down', [got.why, got.error].join(' | '),
+       'refused | q must be 1 to 120 printable characters');
     n0 = fake.asked.length;
     got = await nbx.place('Birch Ln & Kestrel Dr, Roswell', d94);
     eq('a cross street is refused without asking anybody',
@@ -1088,6 +1164,15 @@ async function nucbox() {
         asked.every(function (u) { return u.split('?')[0].split(';').length <= 3; }));
     eq('a route the router says has no road is said as no road, not as a figure',
        (await nbx.detour(SQ, { lat: 34.0010, lon: -84.5560 }, S)).why, 'noroute');
+    eq('...and one it refuses with any other code is the router down, not "no road"',
+       (await nbx.detour(SQ, { lat: 34.1, lon: -84.6 }, S)).why, 'unreachable');
+    var W = { lat: Number(FAKE.WAFFLE[0].lat), lon: Number(FAKE.WAFFLE[0].lon) };
+    eq('through the server, a pickup the road by is 400 m shorter than the road '
+       + 'direct is no figure: the router took different roads',
+       JSON.stringify(await nbx.detour(SQ, W, S)), JSON.stringify({ why: 'otherroads' }));
+    var Fm = { lat: Number(FAKE.FARM[0].lat), lon: Number(FAKE.FARM[0].lon) };
+    eq('...and a pickup the router moved 450 m to reach a road is no figure either',
+       JSON.stringify(await nbx.detour(SQ, Fm, S)), JSON.stringify({ why: 'snap' }));
     eq('the real install\'s own route, Marietta Square to Five Points: 31307.4 m',
        (await nbx.road([SQ, { lat: 33.7490, lon: -84.3880 }])).metres, 31307.4);
 

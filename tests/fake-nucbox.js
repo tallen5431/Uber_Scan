@@ -119,10 +119,10 @@ var STARBUCKS = [place(51, 33.9671, -84.5499, 'amenity', 'cafe', 'Starbucks',
    routing the fastest road direct and a shorter, slower one by the pickup —
    and Farm Stand sits 450 m from the nearest road, so OSRM moves it that
    far before routing. Each one branch, invented, inside a 3.0 mi card. */
-var WAFFLE = [place(61, 33.9300, -84.5100, 'amenity', 'restaurant', 'Waffle House',
+var WAFFLE = [place(71, 33.9300, -84.5100, 'amenity', 'restaurant', 'Waffle House',
                     'Waffle House, 300, Example Road, Marietta, Cobb County, Georgia, '
                     + '30060, United States')];
-var FARM = [place(62, 33.9650, -84.5350, 'shop', 'farm', 'Farm Stand',
+var FARM = [place(72, 33.9650, -84.5350, 'shop', 'farm', 'Farm Stand',
                   'Farm Stand, Marietta, Cobb County, Georgia, 30060, United States')];
 
 var CHURCH = [
