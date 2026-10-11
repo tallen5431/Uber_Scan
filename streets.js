@@ -22,8 +22,10 @@
  *              so "Foxglove Trl" finds OSM's "Foxglove Trail" and "Bramble
  *              Court" finds an OSM name written "Bramble Ct".
  *   dir        a directional on one side only ("Peachtree St" against OSM's
- *              "Peachtree Street Northeast"); two that differ never match —
- *              in Atlanta "NW" and "SE" are different streets.
+ *              "Peachtree Street Northeast"); two names each with one the
+ *              other lacks never match, wherever they stand — in Atlanta "NW"
+ *              and "SE" are different streets, and "Main St NW" is not "S
+ *              Main St" (see dirsAgree, and its own risk there).
  *   junk       the same two, after the OCR's litter is dropped: tokens of one
  *              or two letters that are not a street word after the street's
  *              last type, printed short ("Ct re ou NW", "Dr Ss R SW") — never
@@ -114,9 +116,39 @@ function split(ws) {
            post: ws.slice(b).join(' ') };
 }
 
-// Directionals agree when they are the same or one side has none.
+/* Directionals agree when neither name has one the other lacks a match for:
+   before the name and after it, each the same or missing on one side, AND
+   every one of one name's among the other's. So none against any agrees
+   ("Marietta Pkwy" against "N Marietta Pkwy NW"), and one more on one side
+   ("Lincoln Trace Ave SE" against "S Lincoln Trace Ave SE"; "North Ave"
+   against "North Avenue Northwest", whose first word is a directional too).
+   Before and after apart were the whole rule, and so "Main St NW" agreed
+   with "S Main St" (one had nothing before, the other nothing after) and
+   "Peachtree Rd NW" with "NE Peachtree Rd"; the whole names apart were not
+   enough either, "Cobb Pkwy S" being inside "S Cobb Pkwy NW" by that alone.
+   On the week's 1,197 distinct street names off the cards, each asked of
+   all the others, the old rule matched two that differ ("Peachtree Rd NW"
+   and "NE Peachtree Rd") and this does not.
+   ITS OWN RISK, kept: a directional on one side only is a street the card
+   printed short, or another street. Of this rule's 112 pairs on those
+   names, 18 put a leading N, S, E or W against none — West Barrett Pkwy and
+   Barrett Pkwy, S Cobb Pkwy and Cobb Pkwy, N Roberts Rd and Roberts Rd, E
+   Stone Bridge Run and Stone Bridge Run among them — and in Atlanta that can
+   be a different street (West Paces Ferry Rd is not Paces Ferry Rd). What
+   stands between them and a pin is the card's disc: a corner is where the
+   two names MEET inside it, and a stretch of two streets apart is refused. */
+function dirsOf(sp) {
+  return (sp.pre ? sp.pre.split(' ') : []).concat(sp.post ? sp.post.split(' ') : []);
+}
+function within(a, b) {
+  return a.every(function (d) { return b.indexOf(d) >= 0; });
+}
 function dirsAgree(x, y) {
-  return (x.pre === y.pre || !x.pre || !y.pre) && (x.post === y.post || !x.post || !y.post);
+  if (!((x.pre === y.pre || !x.pre || !y.pre) && (x.post === y.post || !x.post || !y.post))) {
+    return false;
+  }
+  var a = dirsOf(x), b = dirsOf(y);
+  return within(a, b) || within(b, a);
 }
 
 /* The OCR's litter dropped from the words of `name`, or the same words when

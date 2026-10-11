@@ -287,8 +287,12 @@ What it answers, `GET /api/streets/cross?a=&b=&box=` and
 * **Names** are matched in four steps, the first that finds anything winning:
   exactly, after case, punctuation and the USPS abbreviations both ways
   (Trl/Trail, Pkwy/Parkway, NW/Northwest …); with a directional on one side
-  only (two that differ never match — in Atlanta NW and SE are different
-  streets); the same after dropping the OCR's litter — one- and two-letter
+  only (two names each with one the other lacks never match, wherever they
+  stand — in Atlanta NW and SE are different streets, and "Main St NW" is not
+  "S Main St"; one on one side only is the rule's own risk: 18 of its 112
+  pairs on the week's card names put a leading N, S, E or W against none, West
+  Barrett Pkwy against Barrett Pkwy, which can be another street, and only
+  the disc then tells them apart); the same after dropping the OCR's litter — one- and two-letter
   tokens after the street's type printed short ("Ct re ou NW"), never a word
   before the type, which is the name ("Ol Canton Rd" is not Canton Road), and
   never a digit; and with one letter misread in one word ("Tri" for

@@ -158,6 +158,14 @@ eq('a lone digit is a route\'s number, never litter: "Old Hwy 5" is not "Old Hig
 eq('nothing is dropped after a type spelled out, which may be the name: "Orange '
    + 'Grove PI" is not "Orange Grove"', S.match(tiny(['Orange Grove']), 'Orange Grove PI').how,
    null);
+eq('"Main St NW" is not "S Main St": two names each with a directional the other '
+   + 'lacks never match, before or after', S.match(tiny(['S Main Street']), 'Main St NW').how,
+   null);
+eq('...nor "Cobb Pkwy S" "S Cobb Pkwy NW", whose S is before the name and NW after',
+   S.match(tiny(['S Cobb Parkway NW']), 'Cobb Pkwy S').how, null);
+eq('...but one more on one side still matches: "Lincoln Trace Ave SE" finds '
+   + '"S Lincoln Trace Ave SE"', S.match(tiny(['S Lincoln Trace Avenue SE']),
+                                          'Lincoln Trace Ave SE').how, 'dir');
 eq('"17th St NW" is not "12th Street Northwest": no OCR letter is a digit',
    S.match(tiny(['12th Street Northwest']), '17th St NW').how, null);
 eq('"Parliament Ct" is not "Parliament Street"', S.match(tiny(['Parliament Street']),
