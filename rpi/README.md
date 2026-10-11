@@ -4397,6 +4397,18 @@ had no fix. The figure that is left is
 straight-line miles, said so on the line, with no minutes and no route through
 where the new job ends.
 
+**With the NucBox's search and router set** (`NUCBOX_SEARCH`,
+`NUCBOX_ROUTER`; see the main README, *The NucBox at home*), the same disc
+does its refusing before a pin is drawn: each place is searched inside its
+card's disc on the NucBox's own Nominatim, a pin is used only when one
+candidate fits or all that fit agree, and the line says which it was when none
+is used ("no pin for McDonald's — 2 fit the card and disagree · within 9.4 mi
+of you"). The figure becomes road miles from the NucBox's OSRM, labelled
+"+N road mi out of your way", over the same three points and behind every
+refusal above — still no minutes, still never through the new job's end. A
+NucBox that does not answer leaves today's public geocoder and straight line,
+and the line's tail says so. With neither setting, nothing here changes.
+
 ### A rig that was blind for a whole shift, and nothing said so
 
 Measured on the owner's own rig, from its own log: one scanner process ran

@@ -167,6 +167,123 @@ being executed rather than served. Everything in it except `server.js` is
 browser code, and Node has no `document`. Point the host at `server.js`, or let
 it read `package.json`, and it will serve instead.
 
+## The NucBox at home: a map search and a road router
+
+The NucBox that keeps the copy of the journal also runs the two map services
+the driving panel's **Map view** can use instead of the public ones: its own
+Nominatim (place search) and its own OSRM (road routing), both built from the
+Georgia extract of OpenStreetMap. The rig reaches them over Tailscale; the
+browser never does — `server.js` relays two narrow questions to them and
+nothing else.
+
+### What was run on the NucBox
+
+OSRM, car profile, multi-level Dijkstra, port 5000, from the directory holding
+the Georgia `.osm.pbf` (Geofabrik names it `georgia-latest.osm.pbf`; use the
+name of the file you have):
+
+```sh
+docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/car.lua /data/georgia-latest.osm.pbf
+docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/georgia-latest.osrm
+docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/georgia-latest.osrm
+docker run -t -i -p 5000:5000 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld /data/georgia-latest.osrm
+```
+
+Nominatim 4.5, image `mediagis/nominatim:4.5`, `PBF_PATH` pointing at the
+extract, `THREADS=4`, its database in the named volume `nominatim-data`,
+served on port 8088. It gets **its own copy of the `.pbf` in `~/nominatim`**,
+because the image chowns what is mounted at `/nominatim` and doing that to the
+directory OSRM reads from is a surprise nobody wants. The container-side paths
+below are the image's own README's for 4.5, not something this repo measured:
+
+```sh
+mkdir -p ~/nominatim && cp georgia-latest.osm.pbf ~/nominatim/
+docker run -it -e PBF_PATH=/nominatim/data/georgia-latest.osm.pbf -e THREADS=4 \
+  -v nominatim-data:/var/lib/postgresql/16/main -v ~/nominatim:/nominatim/data \
+  -p 8088:8080 --name nominatim mediagis/nominatim:4.5
+```
+
+**TIGER (US house numbers) was not imported.** The setting name that turns it
+on for this image was not found, and the import ran without it. House numbers
+in Cobb County are there anyway, from OSM itself (below); elsewhere a street
+may have none.
+
+### What the real install answered
+
+Measured against the driver's NucBox at `100.x.y.z`:
+
+| Asked | Answered |
+|---|---|
+| route Marietta Square (-84.5499,33.9526) → Five Points (-84.3880,33.7490) | 31307.4 m (19.5 road mi); OSRM's 1659.8 s is free-flow and is never used |
+| `q=McDonald's`, `viewbox=-84.65,34.04,-84.45,33.87`, `bounded=1`, `limit=10` | 10 branches, all inside the box, each with a house number and street ("McDonald's, 2700, Windy Hill Road Southeast, Cumberland, Marietta, Cobb County, 30067") |
+| `q=Shadowood Pkwy SE, Atlanta, GA` | nothing |
+| `street=Shadowood Parkway Southeast` in a bounded box, no town | 2, in Cumberland, Cobb County |
+| `street=1985 Cobb Parkway` in a bounded box | 3, at "1985, Cobb Parkway, Kennesaw" |
+| `q=Dave's Hot Chicken` | nothing — it is not in OSM |
+| Cobb Parkway NW | one point for the whole street |
+
+So: Uber's abbreviations (Pkwy, SE) are fine, and Uber's **town is the postal
+town**, which often is not OSM's (Atlanta against Cumberland; Marietta against
+Kennesaw for 1985 Cobb Parkway). A place is therefore searched **inside an
+area and never by its town**; the town only breaks a tie. And because a
+street comes back as one point, "the stretch of a street inside the circle"
+and cross streets ("A & B, Town") are not answerable this way — they wait for
+a street index built from the Georgia file, and until then the panel says
+"cross streets are not searched yet" rather than pinning one of the two.
+
+### Setting it on the rig
+
+Two settings in the server's environment, beside `PORT` and `JOURNAL`, empty
+by default — and **empty is exactly the old behaviour**: the panel asks the
+server whether either is set, hears no, and searches the public geocoder at
+one a second as it always has.
+
+```sh
+NUCBOX_SEARCH=http://100.x.y.z:8088 NUCBOX_ROUTER=http://100.x.y.z:5000 npm start
+```
+
+Under systemd they are two more `Environment=` lines in the unit (`sudo
+systemctl edit uberscan`, then under `[Service]`); on the owner's rig they go
+on the line in `Start.sh` that starts the server. The server prints both at
+startup when either is set, and `curl localhost:8080/api/nbx` says which it
+has. On the NucBox itself the same two settings point at
+`http://127.0.0.1:8088` and `:5000`. `NUCBOX_TIMEOUT_MS` (3000) is how long
+the server waits for either before saying the NucBox did not answer.
+
+### What the panel does with them
+
+Only after **⛶ Map**, the same press that is the consent to look places up at
+all:
+
+* **Search.** Each place is searched inside its card's **disc** — where the
+  car was when that card came up (its GPS fix), out to the card's own
+  distance plus half a mile — for up to ten candidates. A pin is used only if
+  exactly one candidate is inside the disc, or every one inside is the same
+  place. A merchant is searched by name; a bracketed door ("Jimmy John's (1985
+  Cobb Parkway NW)") by that street address, the town ignored; "Street, Town"
+  and the Trip Planner's door line by the street, the town only breaking a
+  tie. Every refusal is said under the map, refusal first: "no pin for
+  McDonald's — 2 fit the card and disagree · within 9.4 mi of you", "...none
+  fit the card · within 0.6 mi of you, nearest 1.2 mi". A card with no yardstick
+  is searched within sixty miles, one with no fix across Georgia, under the
+  same one-or-all-agree rule.
+* **Road.** "+N mi out of your way" becomes **"+N road mi out of your way"**:
+  the road from the car by the new pickup to where the order in the car is
+  going, less the road from the car straight there. Never minutes — OSRM's
+  durations have no traffic in them and the server drops them before a page
+  can see them — and never a route through where the new job ends. Every
+  refusal the straight line makes still stands; the router is asked only
+  where the straight figure would have been printed.
+* **When the NucBox does not answer**, the panel falls back to the public
+  geocoder for the places it could not ask, and to straight lines for the
+  figure, and says which: "· NucBox down, public map used", "· NucBox router
+  down". A router that answers there is no road between the points (OSRM's
+  NoRoute) leaves the straight line too, with "· no road found".
+
+`map.html` and the offers page still use the public geocoder: they place a
+whole window of offers rather than one card's disc, and choosing among
+candidates there is a different question that has not been answered.
+
 ## Files
 
 | Path | |
@@ -178,7 +295,7 @@ it read `package.json`, and it will serve instead.
 | `server.js` | Zero-dependency static server; the Node entry point |
 | `journal.html` | Every offer the scanner kept, and what it adds up to |
 | `map.html` | Puts a whole range of places on a map, to check whether the rig is right about where the work happened — one pin per place, with the pins that landed in another state drawn in red and listed rather than allowed to set the view, a toggle for the positions the rig's own GPS recorded — only those its one fix-quality gate passed, with the refused ones counted — and a dot for where the car is now, with a circle the size of the GPS's own error. Needs a network; asks nothing until you press the button |
-| `map-view.js` | The deciding behind both maps with no map in it — the geocoder, its one-request-a-second rule, the box drawn around where the car was, and the test for a pin that cannot be in this shift. Runs under Node, which is what lets the rate limit be checked against a fake clock |
+| `map-view.js` | The deciding behind both maps with no map in it — the geocoder, its one-request-a-second rule, the box drawn around where the car was, the test for a pin that cannot be in this shift, and the panel's NucBox search inside a card's disc and its road detour (see *The NucBox at home*). Runs under Node, which is what lets the rate limit be checked against a fake clock |
 | `live.html` | The driving screen: the rig's verdict, the phone as the camera sees it, and the controls used while moving |
 | `snaps.html` | Every **📷 Snap** the rig has kept, newest first, with a link to open or save each file. The control is on the driving screen, in the row with the connection dot; one press keeps a screenshot of the rig's own display, the camera's last picture with its age, and what `/api/status` said, and says which of those it could not keep and why. **⤓ one file** saves a snap as a single `.html` to share — the pictures inside it, the records as text and as the files themselves, nothing it needs a network for; tick several, or take one **with the newer** ones (the series it starts), and they are one file, oldest first. A snap can carry a short note ("trip planner"), typed here so the press on the driving screen stays one click. Linked from the offers page. See [rpi/README.md](rpi/README.md) for the screenshot tool it needs |
 | `scan.html`, `scan.js`, `scan.css` | The phone's own scanner — a photo of the offer card, read on the phone; see [SCANNING.md](SCANNING.md) |
