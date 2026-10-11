@@ -970,6 +970,13 @@ async function nucbox() {
   eq('cross streets are not asked of a search that answers one point a street',
      JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr, Roswell')),
      JSON.stringify({ kind: 'cross', a: 'Birch Ln', b: 'Kestrel Dr' }));
+  // 63 of the week's 403 corner dropoffs came off the card with no comma, a
+  // town or the OCR's litter run on after the second street: those go to
+  // Nominatim as a name, as they always did, never to the street index
+  // (README "Corners and streets").
+  eq('a corner with no comma before its town is asked as a name, not as a corner',
+     JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr NE Roswell')),
+     JSON.stringify({ kind: 'name', q: 'Birch Ln & Kestrel Dr NE Roswell' }));
   eq('...and three names, or an empty one, are not a corner',
      JSON.stringify([MV.searchPlan('Atami Grill & Sushi Atwater Dr & Kolora Chase, Smyrna'),
                      MV.searchPlan(' & Kolora Chase, Smyrna')]),

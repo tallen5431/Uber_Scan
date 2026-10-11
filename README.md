@@ -313,13 +313,15 @@ What it answers, `GET /api/streets/cross?a=&b=&box=` and
   never sent and never used.
 
 Measured: the suite's synthetic streets load in 1 ms. The real metro's size
-is not known here; **estimated** at about 84,000 named ways and 800,000 nodes
-(roughly 21,000 road miles at a node every 40 m), a synthetic grid that size
-took the exporter 3.8 s (OPL to index) at 286 MB, made a 10.5 MB file, and
-loaded in 0.6 s at a 139 MB heap (243 MB resident); three times that took 12.4
-s at 809 MB, 31.8 MB, and 1.8 s at 401 MB heap (543 MB resident) — all in the
-container this was written in, not on the NucBox. The osmium steps on the
-real 341 MB file were not measured.
+is **not known** here, and every figure that follows is for a synthetic grid
+of an **estimated** size — an estimate of about 84,000 named ways and 800,000
+nodes (itself from an estimate of roughly 21,000 road miles at a node every
+40 m), not a count. A grid that size took the exporter 3.8 s (OPL to index)
+at 286 MB, made a 10.5 MB file, and loaded in 0.6 s at a 139 MB heap (243 MB
+resident); three times that estimate took 12.4 s at 809 MB, 31.8 MB, and 1.8
+s at 401 MB heap (543 MB resident) — all in the container this was written
+in, not on the NucBox. The osmium steps on the real 341 MB file were not
+measured; the exporter and the server print the real figures when run.
 
 ### Setting it on the rig
 
@@ -334,10 +336,14 @@ NUCBOX_SEARCH=http://100.x.y.z:8088 NUCBOX_ROUTER=http://100.x.y.z:5000 \
 ```
 
 `NUCBOX_STREETS` is the NucBox's own `server.js` (its `PORT`), the one with
-`NUCBOX_STREETS_FILE` set. Under systemd they are more `Environment=` lines in
-the unit (`sudo systemctl edit uberscan`, then under `[Service]`); on the
-owner's rig they go on the line in `Start.sh` that starts the server. The
-server prints all three at startup when any is set, and `curl
+`NUCBOX_STREETS_FILE` set. **It is asked only alongside `NUCBOX_SEARCH`**:
+the panel asks the street index from inside its NucBox search, so with
+`NUCBOX_SEARCH` empty every place — corners and streets too — goes to the
+public geocoder as before, and `NUCBOX_STREETS` alone does nothing. Under
+systemd they are more `Environment=` lines in the unit (`sudo systemctl
+edit uberscan`, then under `[Service]`); on the owner's rig they go on the
+line in `Start.sh` that starts the server. The server prints all three at
+startup when any is set, and `curl
 localhost:8080/api/nbx` says which it has. On the NucBox itself the same
 settings point at `http://127.0.0.1:8088`, `:5000` and its own port.
 `NUCBOX_TIMEOUT_MS` (3000) is how long
@@ -389,9 +395,15 @@ all:
   refusal first: "no pin for Juniper Cir… — 2 corners fit the card · within
   3 mi of you", "...none fit the card", "...its streets run together"
   (two names carried by one road), "...a street name not on the NucBox",
-  "...not two street names". A street with no number is its stretch
-  inside the disc — refused as "2 fit the card and disagree" when it is two
-  streets of one name more than a mile apart — and its pin goes at the point
+  "...not two street names". A corner is read as one only from the part
+  before the card's comma: the 63 of the week's 403 corner dropoffs that
+  came off the card with no comma (the reader lost it, and a town or the
+  OCR's litter often runs on after the second street: "...& Maple Dr NE
+  Atlanta ll O Gok") are asked of Nominatim as a name, as before — the
+  NucBox's inside the card's disc — and never of the street index. A
+  street with no number is its stretch inside the disc — refused as "2 fit
+  the card and disagree" when it is two streets of one name more than a
+  mile apart — and its pin goes at the point
   of the stretch nearest the car, as a mark only: the card names the street,
   not where on it, so **no figure is measured to that point**. The figure
   is the straight line's at every point of the stretch, and it is stated
