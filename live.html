@@ -3841,8 +3841,9 @@
    * confidently wrong and silent. The one figure that leaves this function is
    * the detour, and it is stated under the pins it was computed from, on a map
    * the driver pressed a button to open, in straight-line miles that are named
-   * as straight-line miles. It never touches #perHour, the verdict, or the
-   * stack line.
+   * as straight-line miles — or, with the NucBox's router set, road miles named
+   * as road miles, over the same three points. It never touches #perHour, the
+   * verdict, or the stack line.
    *
    * AND NOTHING IS LOOKED UP UNTIL THE BUTTON IS PRESSED. Some of these places
    * are where customers live, the rig itself never sends them anywhere, and
@@ -3851,6 +3852,9 @@
    * so a reload cannot ask on nobody's behalf. */
   var MV = window.MapView;
   var mapGeo = null;
+  // The NucBox's search and router, through this rig's server; made the
+  // first time a walk finds either set (MV.NbxSearch, and showMap below).
+  var mapNbx = null;
   var theMap = null, mapLayer = null;
   // Which set of places is drawn, so a card re-read forty times a second does
   // not re-draw forty times, and so an answer that arrives after the driver
@@ -3961,7 +3965,11 @@
              // The card is part of the key: two cards naming the same places
              // came up in two places, and the figure is measured from each
              // one's own fix.
-             key: names.join('|') + '#' + (o.id || '') };
+             key: names.join('|') + '#' + (o.id || ''),
+             // What the NucBox said about these places on this walk: a
+             // refusal per place, with the disc it was made in, and why the
+             // NucBox could not be asked at all (and the public map was).
+             nbxWhy: {}, nbxDown: null };
   }
 
   /* A place name, cut to what fits the caption's cap.
@@ -4138,14 +4146,57 @@
         if (viewMode !== 'map' || mapFor !== key) return;
         drawMap(want, found, here, false);
       }
-      await mapGeo.walk(want.names, function () { return box; }, found, landed);
-      // Asked again without the box, exactly as the other two pages do it: a
-      // box is a claim that the answer is within sixty miles of the car, and a
-      // genuinely distant dropoff must not be lost to a feature meant to find
-      // things.
-      var refused = want.names.filter(function (q) { return box && !found[q]; });
-      if (refused.length) {
-        await mapGeo.walk(refused, function () { return null; }, found, landed);
+
+      /* The NucBox at home, when this rig's server has it set (see server.js
+         nbxRoute and MV.NbxSearch). Asked AFTER the car is down, so the one
+         local question never delays the first mark. With neither setting,
+         `nbx` is both false and everything below this is exactly the walk
+         this page always made — the public geocoder, the box, the wide
+         retry. Asked at every walk rather than kept: it is one question to
+         this rig's own server, and a kept answer is a second copy of a
+         setting that lives there. */
+      var nbx = await MV.nbxSettings();
+      if (viewMode !== 'map' || mapFor !== key) return;
+      if ((nbx.search || nbx.route) && !mapNbx) mapNbx = new MV.NbxSearch();
+      var askPublic = want.names;
+      if (nbx.search) {
+        /* Each place inside ITS card's disc: this card's for its own pickup
+           and dropoff, the held card's for where the order in the car is
+           going. A refusal is kept with the disc it was made in, so the line
+           under the map can say what was searched and what was found. */
+        var discs = { card: MV.discFor(want.card), held: MV.discFor(want.heldCard) };
+        askPublic = [];
+        for (var n = 0; n < want.names.length; n++) {
+          var q = want.names[n];
+          if (want.nbxDown) { askPublic.push(q); continue; }
+          var whose = (q === want.held && q !== want.pickup && q !== want.dropoff)
+            ? 'held' : 'new';
+          var disc = whose === 'held' ? discs.held : discs.card;
+          var got = await mapNbx.place(q, disc);       // eslint-disable-line no-await-in-loop
+          if (viewMode !== 'map' || mapFor !== key) return;
+          if (got.why === 'unreachable') {
+            // Today's path for this place and every one after it, under the
+            // same press: one dead NucBox is not three timeouts in a row.
+            want.nbxDown = got.error;
+            askPublic.push(q);
+            continue;
+          }
+          found[q] = got.at || null;
+          if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
+          landed();
+        }
+      }
+      if (askPublic.length) {
+        await mapGeo.walk(askPublic, function () { return box; }, found, landed);
+        // Asked again without the box, exactly as the other two pages do it: a
+        // box is a claim that the answer is within sixty miles of the car, and a
+        // genuinely distant dropoff must not be lost to a feature meant to find
+        // things. Never for a place the NucBox answered: its disc IS the
+        // claim, and asking wide is how a wrong branch gets a pin.
+        var refused = askPublic.filter(function (q) { return box && !found[q]; });
+        if (refused.length) {
+          await mapGeo.walk(refused, function () { return null; }, found, landed);
+        }
       }
 
       // The driver has been shown a different card since these went out. The
@@ -4153,7 +4204,24 @@
       // numbers — a confidently wrong answer, which is the one thing this
       // panel may never produce.
       if (viewMode !== 'map' || mapFor !== key) return;
-      drawMap(want, found, here, true);
+
+      /* The detour by road, when the router is set and only when the line
+         would state a figure at all: every refusal mapRefusal makes — a pin
+         farFrom or a card's disc refuses, no fix, no yardstick, nothing held
+         — stands exactly as it does for the straight line, and no point the
+         panel will not measure from is sent anywhere. Asked here, inside the
+         walk and under the busy guard, so a driver who leaves Map view while
+         it is in flight cannot come back to the previous card's line. */
+      var road;
+      if (nbx.route) {
+        var j = mapJudge(want, found, here);
+        if (mapRefusal(want, found, here, j) === null) {
+          mapSay('measuring the detour by road…');
+          road = await mapNbx.detour(here, j.pick, j.held);
+          if (viewMode !== 'map' || mapFor !== key) return;
+        }
+      }
+      drawMap(want, found, here, true, road);
     } finally {
       mapBusy = false;
       /* A walk the driver walked away from leaves this card marked as drawn
@@ -4238,10 +4306,11 @@
     lastBounds = null;
   }
 
-  /* `settled` is false while places are still being asked about, and the tail
-     of this function is the whole of what it changes: pins and lines go up as
-     they land, and not one geocoded CLAIM is made until every answer is in. */
-  function drawMap(want, found, here, settled) {
+  /* What the pins are, and which of them cannot be right — asked once, by
+     drawMap for the colours and the line, and by showMap for whether the line
+     will state a figure at all (and so whether to ask the router). One answer
+     for both, so the road is never measured past a refusal the map makes. */
+  function mapJudge(want, found, here) {
     /* Which of these pins cannot be where it says it is.
        A geocoder handed a misread street answers with a real street somewhere,
        at the same confidence as a right one, and this pane has two or three
@@ -4251,16 +4320,6 @@
        than looked up, so the accusation is made against that. No fix, no
        accusation. */
     var wrong = MV.farFrom(here, found);
-
-    if (mapLayer) theMap.removeLayer(mapLayer);
-    mapLayer = L.layerGroup().addTo(theMap);
-    var bounds = [];
-    function put(at, colour, label, name, ring) {
-      if (!at) return;
-      mapDot(at, colour, label, name, ring).addTo(mapLayer);
-      bounds.push([at.lat, at.lon]);
-    }
-
     var pick = want.pickup ? found[want.pickup] : null;
     var drop = want.dropoff ? found[want.dropoff] : null;
     var held = want.held ? found[want.held] : null;
@@ -4277,6 +4336,25 @@
     var off = { pick: MV.cardRefuses(want.card, here, pick),
                 held: MV.cardRefuses(want.heldCard,
                                      MV.cardFix(want.heldCard).at, held) };
+    return { wrong: wrong, pick: pick, drop: drop, held: held, off: off };
+  }
+
+  /* `settled` is false while places are still being asked about, and the tail
+     of this function is the whole of what it changes: pins and lines go up as
+     they land, and not one geocoded CLAIM is made until every answer is in.
+     `road` is the router's detour when one was asked for (see showMap). */
+  function drawMap(want, found, here, settled, road) {
+    var j = mapJudge(want, found, here);
+    var wrong = j.wrong, pick = j.pick, drop = j.drop, held = j.held, off = j.off;
+
+    if (mapLayer) theMap.removeLayer(mapLayer);
+    mapLayer = L.layerGroup().addTo(theMap);
+    var bounds = [];
+    function put(at, colour, label, name, ring) {
+      if (!at) return;
+      mapDot(at, colour, label, name, ring).addTo(mapLayer);
+      bounds.push([at.lat, at.lon]);
+    }
 
     // The car first, because every other mark here is a guess and this one is
     // not. A pickup pin a long way from it is a pin to distrust whatever the
@@ -4370,28 +4448,30 @@
       return;
     }
 
-    // `drop` is deliberately not passed. The detour is car -> pickup -> where
-    // the order in the car is going, because that order HAS to be delivered;
-    // where the new job ends after that is a further guess, and a parameter
-    // nothing reads is a parameter that will one day be read by mistake.
-    mapDrew(mapLine(want, found, here, pick, held, wrong, off));
+    mapDrew(mapLine(want, found, here, j, road));
   }
 
   /* The one line of words under the map, and the only figure this mode
      produces. It answers the question the driver asked it for — is this pickup
-     on my way, or behind me — and it says in the same breath that it is a
-     straight line and not a road, because a driver acting on it is acting on
-     three geocoded points. */
-  function mapLine(want, found, here, pick, held, wrong, off) {
-    /* Why a place has no pin, in the three kinds this project keeps apart
-       everywhere else — because only one of them is about the rig's reading.
-       An empty answer is stored as null; a lookup that could not be MADE is
-       not stored at all, so the next press asks again. Reporting the second as
-       the first told a driver in a dead spot on I-75 that a dozen of their
-       streets do not exist, and they went looking at the crop for a fault that
-       was the tunnel. */
-    var missed = want.names.filter(function (q) { return !found[q]; });
-    var dead = missed.filter(function (q) { return found[q] === undefined; });
+     on my way, or behind me — and it says in the same breath whether that is
+     a straight line or the road, because a driver acting on it is acting on
+     three geocoded points. Every reason not to state it first (mapRefusal),
+     and only then the figure (mapFigure). */
+  function mapLine(want, found, here, j, road) {
+    var stop = mapRefusal(want, found, here, j);
+    // `drop` is deliberately not passed. The detour is car -> pickup -> where
+    // the order in the car is going, because that order HAS to be delivered;
+    // where the new job ends after that is a further guess, and a parameter
+    // nothing reads is a parameter that will one day be read by mistake. The
+    // router is asked about the same three points and no others.
+    return stop !== null ? stop : mapFigure(want, found, here, j.pick, j.held, road);
+  }
+
+  /* Why the figure is not stated, in words, or null when it may be. showMap
+     asks this too, before it asks the router, so the road is measured only
+     where the straight line would have been stated. */
+  function mapRefusal(want, found, here, j) {
+    var pick = j.pick, held = j.held, off = j.off, wrong = j.wrong;
 
     /* A pin the page can see is wrong may not be one end of a figure the driver
        acts on. That is the header of map-view.js in one sentence: a coordinate
@@ -4434,6 +4514,25 @@
                                         MV.cardFix(want.heldCard).at, held,
                                         shortPlace(want.held, DISC_PLACE_SHOWN),
                                         'held');
+    /* ...and a pin the NucBox would not choose, for the same reason and in
+       the same place in the order: it is the disc's refusal made before a
+       pin was drawn instead of after (MV.pickInDisc) — none of its
+       candidates inside the card's distance, several that disagree, or a
+       cross street it cannot search — and it holds whether or not anything
+       is in the car. The dropoff's refusal is not here: the figure does not
+       use it, and it is counted in the figure's " · 1 not found". */
+    var nbxNo = want.nbxWhy || {};
+    if (want.pickup && nbxNo[want.pickup]) {
+      return MV.nbxRefusal(nbxNo[want.pickup].res, nbxNo[want.pickup].disc,
+                           shortPlace(want.pickup, DISC_PLACE_SHOWN), 'new');
+    }
+    if (want.held && want.held !== want.pickup && nbxNo[want.held]) {
+      // In the words of the disc it was searched in: the held card's, unless
+      // this card's dropoff is the same place and was searched in this one's.
+      return MV.nbxRefusal(nbxNo[want.held].res, nbxNo[want.held].disc,
+                           shortPlace(want.held, DISC_PLACE_SHOWN),
+                           nbxNo[want.held].whose);
+    }
     // THIS card's fix, and why there is none: a card that came up with no
     // fix and one whose fix the gate refused are different states, and "no
     // position" would say the GPS never answered when it answered too roughly
@@ -4481,19 +4580,53 @@
     said = MV.againstCard(want.heldCard, heldFix.at, held,
                           shortPlace(want.held, DISC_PLACE_SHOWN), 'held');
     if (said) return said;
+    return null;
+  }
 
-    /* The figure, in straight-line miles and named as such. No minutes — a
-       distance turned into time is a pace, and AUDITS.md refuses re-timing at
-       one — and no route through where the new job ends (Settled too). No
-       age of the fix either: it is this card's own, taken when the card
-       landed, and the gate refuses one older than rpi/gps.py's STALE_AFTER. */
+  /* The figure. No minutes — a distance turned into time is a pace, and
+     AUDITS.md refuses re-timing at one; OSRM's duration has no traffic in it
+     and server.js drops it before it can reach this page — and no route
+     through where the new job ends (Settled too). No age of the fix either:
+     it is this card's own, taken when the card landed, and the gate refuses
+     one older than rpi/gps.py's STALE_AFTER.
+
+     By ROAD when the NucBox's router answered (`road.miles`, MV.NbxSearch's
+     detour: road car -> pickup -> held end, less road car -> held end) and
+     labelled "road mi", so the two figures are never mistaken for each
+     other; otherwise in straight lines, labelled as it always was, with the
+     reason the road is missing said in the tail where there was one. Same
+     half-mile cut for both. */
+  function mapFigure(want, found, here, pick, held, road) {
+    /* Why a place has no pin, in the three kinds this project keeps apart
+       everywhere else — because only one of them is about the rig's reading.
+       An empty answer is stored as null; a lookup that could not be MADE is
+       not stored at all, so the next press asks again. Reporting the second as
+       the first told a driver in a dead spot on I-75 that a dozen of their
+       streets do not exist, and they went looking at the crop for a fault that
+       was the tunnel. */
+    var missed = want.names.filter(function (q) { return !found[q]; });
+    var dead = missed.filter(function (q) { return found[q] === undefined; });
+    var count = missed.length
+      ? ' · ' + missed.length + (dead.length ? ' not asked' : ' not found')
+      : '';
+    // Which of the NucBox's services did not answer, if one was asked. The
+    // search first: its absence means every pin here came from the public
+    // map, which is the bigger thing to know about the line.
+    // Keyed on MV.NbxSearch's own words for it, so nothing but caption text
+    // is written as a literal here (rpi/test_layout.py measures every one).
+    var roadDown = { unreachable: ' · NucBox router down', noroute: ' · no road found' };
+    var nucbox = want.nbxDown ? ' · NucBox down, public map used'
+      : (road && road.why && roadDown[road.why]) || '';
+    if (road && isFinite(road.miles)) {
+      return (road.miles < 0.5 ? 'this pickup is on your way by road'
+                               : '+' + road.miles.toFixed(1) + ' road mi out of your way')
+        + count + nucbox;
+    }
     var gap = MV.detour(here, pick, held);
     return (gap < 0.5 ? 'this pickup is on your way'
                       : '+' + gap.toFixed(1) + ' mi out of your way')
       + ' — straight lines, not roads'
-      + (missed.length
-         ? ' · ' + missed.length + (dead.length ? ' not asked' : ' not found')
-         : '');
+      + count + nucbox;
   }
 
   // Last, not beside the button it belongs to: it can put the pane into map

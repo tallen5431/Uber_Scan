@@ -583,18 +583,89 @@ CAPTION_LINES = [
      'could not reach the geocoder for where your order is going'),
     ('the geocoder had nothing, held',
      'the geocoder found nothing for where your order is going'),
+    # The NucBox's lines (README "The NucBox at home"). Measuring the road is
+    # progress, said while the router is asked. The road figure is labelled
+    # "road mi" and carries no hedge of its own; the straight line keeps its
+    # label and says in its tail which of the NucBox's services did not
+    # answer — the search first, because then every pin is the public map's.
+    # Each at its longest: a place with no pin and the NucBox note together.
+    ('measuring by road',
+     'measuring the detour by road…'),
+    ('the road figure',
+     '+13.2 road mi out of your way'),
+    ('the road figure at its longest',
+     'this pickup is on your way by road · 1 not found · NucBox down, public map used',
+     'this pickup is on your way by road'),
+    ('the figure, the NucBox down',
+     'this pickup is on your way — straight lines, not roads · 1 not asked '
+     '· NucBox down, public map used',
+     'this pickup is on your way — straight lines, not roads'),
+    ('the figure, its router down',
+     'this pickup is on your way — straight lines, not roads · 1 not found '
+     '· NucBox router down',
+     'this pickup is on your way — straight lines, not roads'),
+    ('the figure, no road found',
+     'this pickup is on your way — straight lines, not roads · 1 not found '
+     '· no road found',
+     'this pickup is on your way — straight lines, not roads'),
+    # ...and why the NucBox gave no pin — MV.nbxRefusal's words, every one, at
+    # the widest name, three-figure distances and the rig's repair named. The
+    # refusal LEADS, as the disc's own lines do, so what a clamp keeps opens
+    # with "no pin for" and says why in a few words; the disc's figures, with
+    # the repair beside them, are the declared tail. Written first with the
+    # figures inside the sentence, six of these ran past three rows on the hat.
+    ('no pin, none in this card',
+     "no pin for " + WIDEST_DISC + " — none fit the card · within 99.9 mi "
+     "(rig-corrected) of you, nearest 74.9 mi",
+     "no pin for " + WIDEST_DISC + " — none fit the card"),
+    ('no pin, none in the held card',
+     "no pin for " + WIDEST_DISC + " — none fit its card · within 99.9 mi "
+     "(rig-corrected), nearest 74.9 mi",
+     "no pin for " + WIDEST_DISC + " — none fit its card"),
+    ('no pin, none in sixty miles of the held card',
+     "no pin for " + WIDEST_DISC + " — none found · within 60 mi of your "
+     "order's card, nearest 74.9 mi",
+     "no pin for " + WIDEST_DISC + " — none found"),
+    ('no pin, nothing at all',
+     "no pin for " + WIDEST_DISC + " — the NucBox found nothing for it"),
+    ('no pin, several in this card',
+     "no pin for " + WIDEST_DISC + " — 10 fit the card and disagree · within "
+     "99.9 mi (rig-corrected) of you",
+     "no pin for " + WIDEST_DISC + " — 10 fit the card and disagree"),
+    ('no pin, several in the held card',
+     "no pin for " + WIDEST_DISC + " — 10 fit its card and disagree · within "
+     "99.9 mi (rig-corrected)",
+     "no pin for " + WIDEST_DISC + " — 10 fit its card and disagree"),
+    ('no pin, several in sixty miles of the held card',
+     "no pin for " + WIDEST_DISC + " — 10 found and they disagree · within 60 mi "
+     "of your order's card",
+     "no pin for " + WIDEST_DISC + " — 10 found and they disagree"),
+    ('no pin, several with no fix',
+     "no pin for " + WIDEST_DISC + " — 10 found · no GPS fix to choose between "
+     "them",
+     "no pin for " + WIDEST_DISC + " — 10 found"),
+    ('no pin, several with no fix on the held card',
+     "no pin for " + WIDEST_DISC + " — 10 found · no GPS fix on your order's "
+     "card to choose between them",
+     "no pin for " + WIDEST_DISC + " — 10 found"),
+    ('no pin, a cross street',
+     "no pin for " + WIDEST_DISC + " — cross streets are not searched yet"),
 ]
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. FIVE entries have one, and they are three judgements: the count of
-# places with no pin, whose tail is ` · 1 not asked` or ` · 1 not found`
-# depending on which it was; the consequence of a pin that is plainly
-# wrong, whose tail is `, so no distance`; and the card's own figure beside a
+# ellipsise. SEVENTEEN entries have one, and they are four judgements: the count
+# of places with no pin, whose tail is ` · 1 not asked` or ` · 1 not found`
+# depending on which it was, with the NucBox's note after it where a service
+# did not answer (` · NucBox down, public map used`, ` · NucBox router down`,
+# ` · no road found`); the consequence of a pin that is plainly
+# wrong, whose tail is `, so no distance`; the card's own figure beside a
 # pin it contradicts, whose tail is `, past the card's 9.4 mi` with the
 # rig's repair named inside it, so the figure and its hedge go together —
 # behind "wrong pin for", which the clamp never reaches, so the part kept
-# readable is a refusal and never a bare distance.
+# readable is a refusal and never a bare distance; and the disc the NucBox
+# searched in, ` · within 99.9 mi (rig-corrected) of you, nearest 74.9 mi`,
+# behind "no pin for" and the few words saying why, the same way round.
 # Each is the end of its sentence
 # precisely so that it is what a clamp eats; everything before it is a figure
 # or a hedge on one.
@@ -616,9 +687,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 39)
-eq('...and five of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 5)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 55)
+eq('...and seventeen of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 17)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
@@ -636,6 +707,10 @@ for _name, _text, _keep in CAPTION_LINES:
     if 'contradicts' in _name:
         ok_('...and what the clamp keeps of %r opens with the refusal' % _name,
             _keep.startswith('wrong pin for '))
+    # ...and the NucBox's refusals the same way: "no pin for" first.
+    if _name.startswith('no pin'):
+        ok_('...and what the clamp keeps of %r opens with the refusal' % _name,
+            _keep.startswith('no pin for '))
 
 # ...and the list above has to stay the whole list, or a tenth sentence is
 # written and measured by nothing. So the page is read for every string the
@@ -2758,8 +2833,8 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say thirty-eight things, so all
-                # thirty-eight are put in it and measured. Three rules, and they are not the same
+                # occupant and it can say fifty-five things, so all
+                # fifty-five are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
                 #   the cap    — no sentence may take more rows than the clamp

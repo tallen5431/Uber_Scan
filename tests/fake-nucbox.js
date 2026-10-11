@@ -127,12 +127,17 @@ function miles(a, b) {
 }
 
 /* A road a quarter longer than the straight line, leg by leg — except the
-   one route measured on the real install, which answers what it answered. */
+   one route measured on the real install, which answers what it answered,
+   and any route touching 1985 Cobb Parkway, which answers OSRM's own
+   "no road" (HTTP 400, code NoRoute) so a suite can see that said. */
 function route(coords) {
   var pts = coords.split(';').map(function (c) { return c.split(',').map(Number); });
   var near = function (p, lon, lat) {
     return Math.abs(p[0] - lon) < 1e-6 && Math.abs(p[1] - lat) < 1e-6;
   };
+  if (pts.some(function (p) { return Math.abs(p[0] + 84.5560) < 5e-4 && Math.abs(p[1] - 34.0010) < 5e-4; })) {
+    return null;
+  }
   if (pts.length === 2 && near(pts[0], -84.5499, 33.9526) && near(pts[1], -84.3880, 33.7490)) {
     return routeBody(pts, [31307.4], [1659.8]);
   }
@@ -178,7 +183,11 @@ function start(done) {
       return json(200, search(u.query));
     }
     var m = /^\/route\/v1\/driving\/([-0-9.,;]+)$/.exec(u.pathname);
-    if (m) return json(200, route(m[1]));
+    if (m) {
+      var r = route(m[1]);
+      return r ? json(200, r)
+        : json(400, { code: 'NoRoute', message: 'Impossible route between points' });
+    }
     json(400, { code: 'InvalidUrl', message: 'URL string malformed close to position 1' });
   });
   server.listen(0, '127.0.0.1', function () {

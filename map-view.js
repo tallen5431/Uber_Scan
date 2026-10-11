@@ -830,39 +830,44 @@
   }
 
   /* Why the NucBox gave no pin, in words, or null when it gave one. `res` is
-     pickInDisc's answer (or searchPlan's 'cross'), `disc` the disc it was
-     searched in, `name` the place cut to fit, `whose` 'new' or 'held' as
-     above. Like againstCard, the refusal leads — "no pin for" is the first
-     three words, so whatever the hat's clamp keeps says there is no pin — and
-     the nearest candidate is the declared tail, the figure that says how far
-     off the map's best guess was. It blames the search, never the world:
-     "none within the card's 9.4 mi" is a fact about what the NucBox holds,
-     not a claim that no McDonald's exists there. */
+     pickInDisc's answer (or searchPlan's cross-street one), `disc` the disc
+     it was searched in, `name` the place cut to fit, `whose` 'new' or 'held'
+     as above. Like againstCard, the refusal leads — "no pin for" is the first
+     three words, so whatever the hat's clamp keeps says there is no pin, and
+     why in a few words ("none fit the card", "2 fit the card and disagree").
+     The disc's figures follow as the declared tail, " · within 9.4 mi of
+     you, nearest 1.2 mi": measured by rpi/test_layout.py, with the figure
+     and the rig's repair inside the sentence six of these ran past the
+     hat's three rows at the widest name, so they go together after the
+     refusal instead. It blames the search, never the world: "none fit the
+     card" is a fact about what the NucBox holds, not a claim that no
+     McDonald's exists there. Three kinds reach here — none, several (`n`),
+     a cross street — and anything else is no line at all. */
   function nbxRefusal(res, disc, name, whose) {
     if (!res || res.at) return null;
     var lead = 'no pin for ' + name + ' — ';
     if (res.why === 'cross') return lead + 'cross streets are not searched yet';
-    var region = null;
-    if (disc) {
-      var said = disc.card === null ? BOX_MILES + ' mi'
-        : disc.card + ' mi' + (disc.corrected ? ' (rig-corrected)' : '');
-      region = whose === 'new'
-        ? (disc.card === null ? said : 'the card\'s ' + said) + ' of you'
-        : said + ' of your order\'s card';
+    var none = res.why === 'none';
+    if (!none && !res.n) return null;
+    var mine = whose === 'new';
+    if (!disc) {
+      return none ? lead + 'the NucBox found nothing for it'
+        : lead + res.n + ' found · no GPS fix '
+          + (mine ? '' : 'on your order\'s card ') + 'to choose between them';
     }
-    if (res.why === 'none') {
-      return region === null ? lead + 'the NucBox found nothing for it'
-        : lead + 'none within ' + region
-          + (res.nearest !== null && res.nearest !== undefined
-             ? ', nearest ' + res.nearest.toFixed(1) + ' mi' : '');
+    var where = mine ? ' of you' : ' of your order\'s card';
+    var near = (none && res.nearest !== null && res.nearest !== undefined)
+      ? ', nearest ' + res.nearest.toFixed(1) + ' mi' : '';
+    if (disc.card === null) {
+      return lead + (none ? 'none found' : res.n + ' found and they disagree')
+        + ' · within ' + BOX_MILES + ' mi' + where + near;
     }
-    if (res.why === 'several') {
-      return region === null
-        ? lead + res.n + ' found, and no GPS fix '
-          + (whose === 'new' ? '' : 'on your order\'s card ') + 'to choose between them'
-        : lead + res.n + ' within ' + region + ', and they disagree';
-    }
-    return null;
+    // "its card" is the order in the car's, and says whose distance it is;
+    // " of your order's card" after it as well ran past two rows at 800x480.
+    var card = mine ? 'the card' : 'its card';
+    return lead + (none ? 'none fit ' + card : res.n + ' fit ' + card + ' and disagree')
+      + ' · within ' + disc.card + ' mi' + (disc.corrected ? ' (rig-corrected)' : '')
+      + (mine ? where : '') + near;
   }
 
   /* Every place the loaded offers name, once each, in the order first seen. */
@@ -1582,8 +1587,8 @@
    * No one-a-second rule: that is the public server's, and this one is the
    * driver's own. Still paced, at NBX_GAP_MS, so a page that one day loops by
    * mistake cannot flood a NucBox that is also serving the copy of the
-   * journal. Ten a second is ten times what the panel ever asks (three places
-   * a card).
+   * journal. A card asks at most five questions — three places and two
+   * routes — so the pacing costs a card at most four gaps, 0.4 s.
    *
    * Answers are kept in memory for the page's life, keyed on the question
    * actually sent. Not in the device's store and not in /api/places: those

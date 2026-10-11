@@ -292,7 +292,10 @@ def _emitted_keys():
 
 DRIVER = r'''
 const { chromium } = require('playwright');
-const [base, panelsJson, readingsJson, framesJson] = process.argv.slice(2);
+const [base, panelsJson, readingsJson, framesJson, nbxJson] = process.argv.slice(2);
+// The NucBox servers and the fake behind them, when the suite started them.
+const NBX = nbxJson ? JSON.parse(nbxJson) : null;
+const FAKE = NBX ? NBX.fake : null;
 const FRAMES = JSON.parse(framesJson || '{}');
 const PANELS = JSON.parse(panelsJson), READINGS = JSON.parse(readingsJson);
 
@@ -3013,6 +3016,13 @@ const framed = (page) => page.waitForFunction(
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     await page.addInitScript(MAPSTUB);
+    // What this page asked of the NucBox relay. The server here has none set,
+    // which is the ordinary install: the page may ask whether one is, and
+    // nothing else, and every line below is the line it always was.
+    const nbxAsked = [];
+    page.on('request', (r) => {
+      if (/\/api\/nbx/.test(r.url())) nbxAsked.push(new URL(r.url()).pathname);
+    });
     await page.addInitScript(() => {
       window.__SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
                       gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.4,
@@ -3117,7 +3127,122 @@ const framed = (page) => page.waitForFunction(
     await push({ id: 'o-heldbare', pickup: "McDonald's (Marietta Sq)", held: null });
     await page.waitForTimeout(800);
     out.mapDisc.heldBare = await note();
+    out.mapDisc.nbxAsked = nbxAsked;
     await page.close();
+  }
+
+  /* --- the map mode on the NucBox -------------------------------------------
+   *
+   * Three more copies of the real server.js, each pointed at the one fake
+   * NucBox the suites share (tests/fake-nucbox.js, the real install's
+   * answer shapes) or at nothing: `both` has its search and router, `noRoad`
+   * its search and a router that is not there, `noSearch` a search that is
+   * not there and its router. Cards at Marietta Square; the fake's
+   * McDonald's are 2.10, 5.49, 10.64 and 21.81 mi from it, and Shadowood
+   * Parkway's two pieces 7.27 mi, in Cumberland. Every point invented round
+   * public places. */
+  if (NBX) {
+    stage = 'the map mode on the NucBox';
+    out.nbx = {};
+    for (const which of ['both', 'noRoad', 'noSearch']) {
+      const srv = NBX[which];
+      const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                                .then((c) => c.newPage());
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await page.addInitScript(MAPSTUB);
+      const publicAsked = [];
+      // The public geocoder, for the one server whose NucBox search is not
+      // there: what the page falls back to, under the same press.
+      await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+        const u = new URL(route.request().url());
+        const q = decodeURIComponent(u.searchParams.get('q') || '');
+        publicAsked.push(q);
+        const hit = { "McDonald's (Marietta Sq)": [33.9830, -84.5499],
+                      'Shadowood Pkwy SE, Atlanta': [33.8779, -84.4600],
+                      'Church St, Marietta': [33.9580, -84.5520] }[q];
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                        display_name: q }] : []) });
+      });
+      await page.goto(srv + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+      const SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 12.0,
+                   gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 3.0,
+                   hasTotal: true, legs: 2, whole: true };
+      const push = (a) => page.evaluate((x) => {
+        const card = Object.assign({}, x.SQ, x.card || {});
+        window.__es.push({
+          ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+          minutes: 20.0, miles: card.miles, cost: 1.4, target: 25, band: 15,
+          holding: { pay: 9.0, minutes: 18.0, dropoff: 'Shadowood Pkwy SE, Atlanta',
+                     card: Object.assign({}, x.SQ, { miles: 9.4 }) },
+          offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
+                                 billedMinutes: 20.0, cost: 1.4,
+                                 pickup: x.pickup || "McDonald's (Marietta Sq)",
+                                 dropoff: 'Church St, Marietta' }, card) });
+      }, Object.assign({ SQ: SQ }, a));
+      const note = () => page.evaluate(
+        () => document.getElementById('viewNote').textContent.trim());
+      const pick = () => page.evaluate(() => {
+        const m = (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('pick this one up') >= 0)[0];
+        return m ? m.ll : null;
+      });
+      const r = {};
+      await push({ id: 'n-one' });
+      await page.waitForTimeout(300);
+      await page.click('#viewMode');            // → scene
+      await page.waitForTimeout(150);
+      await page.click('#viewMode');            // → map
+      // Three NucBox questions and two routes, or the public map's three at
+      // a second apart: long enough for either.
+      await page.waitForTimeout(which === 'noSearch' ? 6000 : 2500);
+      r.one = await note();
+      r.onePick = await pick();
+      // What the figure should be off the fake's own road (a quarter longer
+      // than the straight line, leg by leg), worked out with the page's MV.
+      r.oneWant = await page.evaluate(() => {
+        const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
+        const A = { lat: 33.9830, lon: -84.5499 }, S = { lat: 33.8779, lon: -84.4600 };
+        return 1.25 * MV.detour(C, A, S);
+      });
+      if (which === 'both') {
+        // The same branch on a 9.4 mi card: two branches fit and disagree.
+        await push({ id: 'n-several', pickup: "McDonald's", card: { miles: 9.4 } });
+        await page.waitForTimeout(1500);
+        r.several = await note();
+        r.severalPick = await pick();
+        // A card 1.25 mi from the nearest branch, printing 0.6 mi.
+        await push({ id: 'n-none', pickup: "McDonald's",
+                     card: { lat: 33.9700, lon: -84.5650, miles: 0.6 } });
+        await page.waitForTimeout(1500);
+        r.none = await note();
+        // An Early look card whose bracketed door IS found: the card's own
+        // refusal stands exactly as it does for the straight line.
+        r.routesBefore = (await (await fetch(FAKE + '/__asked')).json())
+          .filter((u) => /^\/route/.test(u)).length;
+        await push({ id: 'n-early', pickup: "Jimmy John's (1985 Cobb Parkway NW)",
+                     card: { earlyLook: true } });
+        await page.waitForTimeout(1500);
+        r.early = await note();
+        r.earlyPick = await pick();
+        r.routesAfter = (await (await fetch(FAKE + '/__asked')).json())
+          .filter((u) => /^\/route/.test(u)).length;
+        // The same door on a card that IS a yardstick: pinned, and the
+        // router says there is no road from it (the fake's NoRoute).
+        await push({ id: 'n-noroad', pickup: "Jimmy John's (1985 Cobb Parkway NW)",
+                     card: { miles: 9.4 } });
+        await page.waitForTimeout(1500);
+        r.noRoad = await note();
+        r.noRoadWant = await page.evaluate(() => window.MapView.detour(
+          { lat: 33.9526, lon: -84.5499 }, { lat: 34.0010, lon: -84.5560 },
+          { lat: 33.8779, lon: -84.4600 }));
+      }
+      r.publicAsked = publicAsked;
+      out.nbx[which] = r;
+      await page.close();
+    }
+    out.nbxAsked = await (await fetch(FAKE + '/__asked')).json();
   }
 
   /* --- the map over a card that names nowhere ------------------------------
@@ -4146,6 +4271,28 @@ proc = subprocess.Popen(
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 base = 'http://127.0.0.1:%d' % port
 
+# The NucBox at home, faked once for the three suites that need it (see
+# tests/fake-nucbox.js), and three more copies of the real server pointed at
+# it, or at a port nothing listens on. The main server above has neither
+# setting, which is the ordinary install.
+nbx_fake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_fake_url = 'http://127.0.0.1:%d' % json.loads(nbx_fake.stdout.readline())['port']
+_nowhere = 'http://127.0.0.1:%d' % free_port()
+nbx_procs, NBX = [], {'fake': _fake_url}
+for _which, _search, _route in (('both', _fake_url, _fake_url),
+                                ('noRoad', _fake_url, _nowhere),
+                                ('noSearch', _nowhere, _fake_url)):
+    _port = free_port()
+    _j = os.path.join(work, 'journal-%s.jsonl' % _which)
+    open(_j, 'w').close()
+    nbx_procs.append(subprocess.Popen(
+        ['node', os.path.join(ROOT, 'server.js')],
+        env=dict(os.environ, SCANNER='0', PORT=str(_port), HTTPS_PORT='0', JOURNAL=_j,
+                 NUCBOX_SEARCH=_search, NUCBOX_ROUTER=_route, NUCBOX_TIMEOUT_MS='800'),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    NBX[_which] = 'http://127.0.0.1:%d' % _port
+
 try:
     for _ in range(120):
         try:
@@ -4155,6 +4302,15 @@ try:
             time.sleep(0.1)
     else:
         raise RuntimeError('the server never came up')
+    for _which in ('both', 'noRoad', 'noSearch'):
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(NBX[_which] + '/api/status', timeout=1).read()
+                break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError('the %s NucBox server never came up' % _which)
 
     # Two pictures the rig can send: the landscape scene it writes while it
     # is aiming, and the portrait phone it writes once it has found one.
@@ -4220,7 +4376,7 @@ try:
     readings = READINGS
     proc2 = subprocess.run(
         ['node', driver, base, json.dumps(PANELS), json.dumps(READINGS),
-         json.dumps(FRAMES)],
+         json.dumps(FRAMES), json.dumps(NBX)],
         env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
                  PW_EXES=json.dumps([
                      os.environ.get('CHROMIUM', ''),
@@ -5884,6 +6040,70 @@ try:
        disc.get('heldBare'),
        'the rig kept no card for the order in your car, so its end cannot be '
        'checked')
+    # With no NucBox set — this server has neither setting — the page asks
+    # whether one is, at each walk, and nothing else: every line above is the
+    # line it always was, off the public geocoder.
+    _nasked = disc.get('nbxAsked') or []
+    ok_('with no NucBox set, the panel only asks whether one is (%r)'
+        % sorted(set(_nasked)), _nasked and set(_nasked) == {'/api/nbx'})
+
+    # The NucBox at home: search inside the card's disc, the road by OSRM.
+    nb = got.get('nbx') or {}
+    both, noroad, nosearch = nb.get('both') or {}, nb.get('noRoad') or {}, nb.get('noSearch') or {}
+    _want = both.get('oneWant') or 0
+    _m = re.match(r'^\+(\d+\.\d) road mi out of your way$', both.get('one') or '')
+    ok_('with the router set, the detour is in road miles from OSRM, labelled '
+        '"road mi" (%r, %.2f wanted)' % (both.get('one'), _want),
+        _m and abs(float(_m.group(1)) - _want) < 0.051)
+    eq('...off the branch the disc kept: the 3.0 mi card\'s McDonald\'s is the '
+       'one 2.1 mi north', both.get('onePick'), [33.983, -84.5499])
+    _routes = [u for u in (got.get('nbxAsked') or []) if u.startswith('/route')]
+    ok_('...and the router was asked about car, pickup and held end, never the '
+        'new job\'s end (%d routes)' % len(_routes),
+        _routes and all(len(u.split('?')[0].split(';')) <= 3 for u in _routes)
+        and not any('33.95800' in u for u in _routes))
+    _streets = [u for u in (got.get('nbxAsked') or []) if 'street=Shadowood' in u]
+    ok_('the held end "Shadowood Pkwy SE, Atlanta" is asked as the street alone, '
+        'the town left out (%r)' % _streets[:1],
+        _streets and not any('Atlanta' in u or 'city=' in u for u in _streets))
+    eq('a 9.4 mi card\'s McDonald\'s is refused as two that disagree, not pinned',
+       (both.get('several'), both.get('severalPick')),
+       ("no pin for McDonald's — 2 fit the card and disagree · within 9.4 mi of you",
+        None))
+    eq('a 0.6 mi card with the nearest branch 1.25 mi off is refused with the '
+       'distance', both.get('none'),
+       "no pin for McDonald's — none fit the card · within 0.6 mi of you, nearest 1.2 mi")
+    eq('an Early look card is still no yardstick with its door found on the '
+       'NucBox', both.get('early'),
+       'an Early look card may not measure from your car — no yardstick yet')
+    ok_('...its door pinned all the same, at 1985 Cobb Parkway (%r)' % both.get('earlyPick'),
+        both.get('earlyPick') and abs(both['earlyPick'][0] - 34.001) < 0.001)
+    eq('...and the router not asked for a figure the card refuses',
+       both.get('routesAfter'), both.get('routesBefore'))
+    _m = re.match(r'^\+(\d+\.\d) mi out of your way — straight lines, not roads'
+                  r' · no road found$', both.get('noRoad') or '')
+    ok_('a route the router says has no road leaves the straight line, and says '
+        'so (%r)' % both.get('noRoad'),
+        _m and abs(float(_m.group(1)) - (both.get('noRoadWant') or 0)) < 0.051)
+    _m = re.match(r'^\+(\d+\.\d) mi out of your way — straight lines, not roads'
+                  r' · NucBox router down$', noroad.get('one') or '')
+    ok_('a router that is not there leaves the straight line, labelled as ever, '
+        'and says so (%r)' % noroad.get('one'),
+        _m and abs(float(_m.group(1)) - _want / 1.25) < 0.051)
+    _m = re.match(r'^\+(\d+\.\d) road mi out of your way · NucBox down, '
+                  r'public map used$', nosearch.get('one') or '')
+    ok_('a NucBox search that is not there falls back to the public map under '
+        'the same press, and says so (%r)' % nosearch.get('one'),
+        _m and abs(float(_m.group(1)) - _want) < 0.051)
+    eq('...which was asked the places, as it always was',
+       sorted(set(nosearch.get('publicAsked') or [])),
+       ['Church St, Marietta', "McDonald's (Marietta Sq)", 'Shadowood Pkwy SE, Atlanta'])
+    eq('...and with the NucBox set and answering, the public map is asked nothing',
+       (both.get('publicAsked'), noroad.get('publicAsked')), ([], []))
+    _lines = [v for r in (both, noroad, nosearch) for k, v in r.items()
+              if isinstance(v, str)]
+    eq('no NucBox line on the panel speaks of minutes',
+       [v for v in _lines if re.search(r'\bmin', v)], [])
 
     # Thirty frames a second down a phone hotspot, for a picture nobody can
     # see, is a cost that only shows up as a bill.
@@ -6574,6 +6794,8 @@ finally:
         proc.wait(timeout=5)
     except Exception:
         proc.kill()
+    for _p in nbx_procs + [nbx_fake]:
+        _p.kill()
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d dashboard checks passed' % ok)

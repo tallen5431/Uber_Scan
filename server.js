@@ -4356,8 +4356,11 @@ var NBX_TIMEOUT_MS = Number(process.env.NUCBOX_TIMEOUT_MS) > 0
  * NucBox that did not answer is asked again next time. Oldest out first. */
 var NBX_CACHE_MAX = 500;
 var nbxCache = new Map();
-/* The most an answer may be. Ten search results are about 4 KB; a three-point
- * route with overview=false is under 2 KB. Anything near this is not one. */
+/* The most an answer may be. Ten search results in jsonv2's shape, each with
+ * the real install's "McDonald's, 2700, Windy Hill Road Southeast, ..." name,
+ * are 4,891 bytes (measured on tests/fake-nucbox.js); a three-point route
+ * with overview=false and 84-character waypoint hints is 786. Anything near
+ * this is not one. */
 var NBX_BODY_MAX = 256 * 1024;
 // How long a search term may be: the parser's MAX_PLACE is 60, so 120 is
 // room for a whole bracketed address and nothing a page of this rig sends.
@@ -4393,12 +4396,18 @@ function nbxAsk(target, done) {
       chunks.push(c);
     });
     up.on('end', function () {
-      if (up.statusCode !== 200) {
-        return end('the NucBox answered ' + up.statusCode);
-      }
       var parsed;
       try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-      catch (e) { return end('the NucBox answered something that is not JSON'); }
+      catch (e) { parsed = undefined; }
+      // OSRM says "no road between these" as HTTP 400 with its own `code`
+      // ("NoRoute"), which is an answer about the points and not a NucBox
+      // that failed; it is handed on for the route reply to say so. Any
+      // other status is the NucBox not answering the question.
+      if (up.statusCode !== 200
+          && !(up.statusCode === 400 && parsed && typeof parsed.code === 'string')) {
+        return end('the NucBox answered ' + up.statusCode);
+      }
+      if (parsed === undefined) return end('the NucBox answered something that is not JSON');
       end(null, parsed);
     });
     up.on('error', function (e) { end('the NucBox stopped answering (' + (e.code || e.message) + ')'); });

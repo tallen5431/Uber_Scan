@@ -4771,6 +4771,12 @@ try:
                            '-84.3880,33.7490')
         ok_('...and three points is a route too (%r)' % (_r,),
             _s == 200 and isinstance(_r.get('metres'), (int, float)))
+        # OSRM's own "no road between these" is HTTP 400 with code NoRoute: an
+        # answer about the points, not a NucBox that failed.
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.5560,34.0010')
+        eq('the router saying there is no road is an answer, not unreachable',
+           (_s, _r.get('ok'), _r.get('noRoute'), _r.get('unreachable')),
+           (200, False, True, None))
 
         # Not an open proxy: every other parameter, path and shape is refused,
         # by name, and none of them reaches the NucBox.

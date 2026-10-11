@@ -1011,18 +1011,23 @@ async function nucbox() {
   eq('none inside, the card\'s words',
      MV.nbxRefusal(far, MV.discFor(card({ lat: 33.97, lon: -84.565, miles: 0.6 })),
                    "McDonald's", 'new'),
-     "no pin for McDonald's — none within the card's 0.6 mi of you, nearest 1.2 mi");
+     "no pin for McDonald's — none fit the card · within 0.6 mi of you, nearest 1.2 mi");
   eq('several, the card\'s words',
      MV.nbxRefusal(two, d94, "McDonald's", 'new'),
-     "no pin for McDonald's — 2 within the card's 9.4 mi of you, and they disagree");
+     "no pin for McDonald's — 2 fit the card and disagree · within 9.4 mi of you");
   eq('several, the held card\'s words, with the rig\'s repair named',
      MV.nbxRefusal(two, MV.discFor(card({ miles: 22, milesCorrected: true })), 'Held End',
                    'held'),
-     "no pin for Held End — 2 within 22 mi (rig-corrected) of your order's card, and "
-     + 'they disagree');
+     'no pin for Held End — 2 fit its card and disagree · within 22 mi (rig-corrected)');
   eq('several with no fix to choose by',
      MV.nbxRefusal({ at: null, why: 'several', n: 10 }, null, "McDonald's", 'new'),
-     "no pin for McDonald's — 10 found, and no GPS fix to choose between them");
+     "no pin for McDonald's — 10 found · no GPS fix to choose between them");
+  eq('none within the sixty miles of a card with no yardstick',
+     MV.nbxRefusal({ why: 'none', nearest: null }, MV.discFor(card({ legs: 1, hasTotal: false })),
+                   'X', 'held'),
+     "no pin for X — none found · within 60 mi of your order's card");
+  eq('an answer of no kind this knows is no line at all',
+     MV.nbxRefusal({ at: null, why: 'unreachable' }, d94, 'X', 'new'), null);
   eq('a cross street', MV.nbxRefusal({ why: 'cross' }, d94, 'Birch Ln…', 'new'),
      'no pin for Birch Ln… — cross streets are not searched yet');
   eq('a pin is no refusal', MV.nbxRefusal(one, d94, "McDonald's", 'new'), null);
@@ -1081,6 +1086,8 @@ async function nucbox() {
     var asked = fake.asked.filter(function (u) { return /^\/route/.test(u); });
     ok_('...and the router was never asked about any fourth point (' + asked.length + ' routes)',
         asked.every(function (u) { return u.split('?')[0].split(';').length <= 3; }));
+    eq('a route the router says has no road is said as no road, not as a figure',
+       (await nbx.detour(SQ, { lat: 34.0010, lon: -84.5560 }, S)).why, 'noroute');
     eq('the real install\'s own route, Marietta Square to Five Points: 31307.4 m',
        (await nbx.road([SQ, { lat: 33.7490, lon: -84.3880 }])).metres, 31307.4);
 
