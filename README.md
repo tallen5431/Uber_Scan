@@ -167,14 +167,15 @@ being executed rather than served. Everything in it except `server.js` is
 browser code, and Node has no `document`. Point the host at `server.js`, or let
 it read `package.json`, and it will serve instead.
 
-## The NucBox at home: a map search and a road router
+## The NucBox at home: a map search, a road router and a street index
 
-The NucBox that keeps the copy of the journal also runs the two map services
-the driving panel's **Map view** can use instead of the public ones: its own
+The NucBox that keeps the copy of the journal also runs the map services the
+driving panel's **Map view** can use instead of the public ones: its own
 Nominatim (place search) and its own OSRM (road routing), both built from the
-Georgia extract of OpenStreetMap. The rig reaches them over Tailscale; the
-browser never does — `server.js` relays two narrow questions to them and
-nothing else.
+Georgia extract of OpenStreetMap, and a **street index** made from the same
+file and answered by the NucBox's own `server.js` (where two streets meet, and
+the stretch of one). The rig reaches them over Tailscale; the browser never
+does — `server.js` relays a few narrow questions to them and nothing else.
 
 ### What was run on the NucBox
 
@@ -233,28 +234,102 @@ area and never by its town**, and the town is not used to choose among what
 comes back either: as a tie-break it pinned a namesake 1.35 mi from the right
 street because its OSM address said the card's postal town. And because a
 street comes back as one point, "the stretch of a street inside the circle"
-and cross streets ("A & B, Town") are not answerable this way — they wait for
-a street index built from the Georgia file, and until then the panel says
-"cross streets are not searched yet" rather than pinning one of the two.
+and cross streets ("A & B, Town") are not answerable this way — they are the
+street index's (below). Without it the panel says "no pin for … — no street
+index to ask" rather than pinning one of the two.
+
+### The street index
+
+Uber prints most dropoffs as a corner — 403 of the week's 1,166, 390 different
+ones ("Foothill Trl & Northwoods Dr, Marietta") — to keep the customer's
+address off the card. Where two streets meet is a question about the street
+graph, which is in the Georgia file, so it is answered from that: once, on the
+NucBox, `tools/street_index.py` keeps every **named** way a car is driven on
+(motorway down to residential and living_street, the `_link`s, and named
+`service` drives — an apartment complex's or a shopping centre's own drive,
+where dropoffs often are; never a footway, path, track or building) inside the
+driver's metro, `-85.00,33.50,-83.95,34.40` (every town the week's cards name,
+Cartersville and White to Suwanee, Lithonia and Union City, with a margin),
+and writes one JSON file. `osmium-tool` cuts the file (apt, 1.16.0 on Ubuntu
+24.04); the rest is Python's standard library. Run from the repo on the
+NucBox:
+
+```sh
+sudo apt install osmium-tool
+python3 tools/street_index.py ~/osrm/georgia-latest.osm.pbf ~/streets.json
+```
+
+It prints what it kept and dropped, how long osmium and the index took, and
+the file's size; `--bbox W,S,E,N` takes another area. Then the NucBox's own
+server loads it at start:
+
+```sh
+NUCBOX_STREETS_FILE=~/streets.json npm start      # on the NucBox
+```
+
+(under systemd, an `Environment=NUCBOX_STREETS_FILE=` line with the full
+path — systemd does not expand `~`) and prints "Street index: N names, W
+ways, M nodes from …, loaded in X ms,
+heap Y MB" — the real figures, which nobody has yet read off the NucBox.
+`curl localhost:8080/api/streets` says the same. A file that is set and cannot
+be read is said at start and on every question, never as "no such street".
+
+What it answers, `GET /api/streets/cross?a=&b=&box=` and
+`/api/streets/stretch?name=&box=` (box `left,top,right,bottom`, optional):
+
+* **Where two streets meet** — ways that share a node meet there, and ways
+  that cross without one (a bridge) where their segments cross. Points within
+  100 m of each other are one meeting, so a road across a dual carriageway is
+  one corner, not two, and each meeting says how far its points spread: two
+  names carried by one road meet along all of it.
+* **A street's stretch** — the polylines of its ways inside the box, cut at
+  the box's edge, at most 8000 points (or none, said as cut).
+* **Names** are matched in four steps, the first that finds anything winning:
+  exactly, after case, punctuation and the USPS abbreviations both ways
+  (Trl/Trail, Pkwy/Parkway, NW/Northwest …); with a directional on one side
+  only (two that differ never match — in Atlanta NW and SE are different
+  streets); the same after dropping the OCR's litter ("Ct re ou NW", a town
+  glued on with no comma); and with one letter misread in one word ("Tri" for
+  Trl, "PI" for Pl, "Biue" for Blue) — never a digit (12th St NW and 17th St
+  NW, both on the week's cards, stay apart), never one street word for another
+  (Parliament Ct and Parliament St, both on the cards), never in a word under
+  four letters unless it is a street word. Each of the week's 715 cross-street
+  halves, asked of an index holding every other half, matched another in 37
+  cases: 36 the same street by reading, and bare "Peachtree St", which
+  matched both Peachtree St NE and Peachtree St SW — two streets, and where
+  each meets the other name is what decides between them. The card's town is
+  never sent and never used.
+
+Measured: the suite's synthetic streets load in 1 ms. The real metro's size
+is not known here; **estimated** at about 84,000 named ways and 800,000 nodes
+(roughly 21,000 road miles at a node every 40 m), a synthetic grid that size
+took the exporter 3.8 s (OPL to index) at 286 MB, made a 10.5 MB file, and
+loaded in 0.6 s at a 139 MB heap (243 MB resident); three times that took 12.4
+s at 809 MB, 31.8 MB, and 1.8 s at 401 MB heap (543 MB resident) — all in the
+container this was written in, not on the NucBox. The osmium steps on the
+real 341 MB file were not measured.
 
 ### Setting it on the rig
 
-Two settings in the server's environment, beside `PORT` and `JOURNAL`, empty
-by default — and **empty is exactly the old behaviour**: the panel asks the
-server whether either is set, hears no, and searches the public geocoder at
+Three settings in the server's environment, beside `PORT` and `JOURNAL`,
+empty by default — and **empty is exactly the old behaviour**: the panel asks
+the server whether any is set, hears no, and searches the public geocoder at
 one a second as it always has.
 
 ```sh
-NUCBOX_SEARCH=http://100.x.y.z:8088 NUCBOX_ROUTER=http://100.x.y.z:5000 npm start
+NUCBOX_SEARCH=http://100.x.y.z:8088 NUCBOX_ROUTER=http://100.x.y.z:5000 \
+  NUCBOX_STREETS=http://100.x.y.z:8080 npm start
 ```
 
-Under systemd they are two more `Environment=` lines in the unit (`sudo
-systemctl edit uberscan`, then under `[Service]`); on the owner's rig they go
-on the line in `Start.sh` that starts the server. The server prints both at
-startup when either is set, and `curl localhost:8080/api/nbx` says which it
-has. On the NucBox itself the same two settings point at
-`http://127.0.0.1:8088` and `:5000`. `NUCBOX_TIMEOUT_MS` (3000) is how long
-the server waits for either before saying the NucBox did not answer — the
+`NUCBOX_STREETS` is the NucBox's own `server.js` (its `PORT`), the one with
+`NUCBOX_STREETS_FILE` set. Under systemd they are more `Environment=` lines in
+the unit (`sudo systemctl edit uberscan`, then under `[Service]`); on the
+owner's rig they go on the line in `Start.sh` that starts the server. The
+server prints all three at startup when any is set, and `curl
+localhost:8080/api/nbx` says which it has. On the NucBox itself the same
+settings point at `http://127.0.0.1:8088`, `:5000` and its own port.
+`NUCBOX_TIMEOUT_MS` (3000) is how long
+the server waits for any of them before saying the NucBox did not answer — the
 whole question, connecting included, so a NucBox whose address routes
 nowhere is given up on in that time too. Before that was so, a listener
 that never accepted held the server 5 s on Node 22 and was still being waited
@@ -295,6 +370,24 @@ all:
   road it chose direct — "· router took different roads"), and one where
   OSRM had to move a point more than 0.2 mi to reach a road ("· a pin over
   0.2 mi off road").
+* **Corners and streets, with the street index set.** A corner the card
+  prints is asked as its two streets inside the card's disc, and pinned where
+  they meet when one meeting is inside it, or every one inside is the same
+  place (a fifth of a mile, as for any candidates). Otherwise it is refused,
+  refusal first: "no pin for Juniper Cir… — 2 corners fit the card · within
+  3 mi of you", "...none fit the card", "...its streets run together"
+  (two names carried by one road), "...a street name not on the NucBox",
+  "...not two street names". A street with no number is its stretch
+  inside the disc — refused as "2 fit the card and disagree" when it is two
+  streets of one name more than a mile apart — and pinned at **the point of
+  the stretch nearest the car**: the card names the street, not where on it,
+  and the road figure needs one point. A figure measured to such a pin says
+  so: "+2.3 road mi out of your way · street pinned nearest you" — the one
+  note after the count, so with the NucBox's search down it gives way to
+  "· NucBox down, public map used", and it takes the place of a road's
+  reason (the label already says "straight lines, not roads"). The stretch
+  itself is kept with the pin for the map to draw. A street the index does
+  not hold (outside its metro, say) is asked of Nominatim as before.
 * **When the NucBox does not answer**, the panel falls back to the public
   geocoder for the places it could not ask, and to straight lines for the
   figure, and says which: "· NucBox down, public map used", "· NucBox router

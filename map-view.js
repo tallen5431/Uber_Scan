@@ -619,11 +619,15 @@
    *        the answer HAS that number (see hasDoor) — Nominatim asked for
    *        a door it does not hold answers the street instead, at the same
    *        confidence, and that was pinned as the door.
-   *   "A & B, Town"                           cross streets: NOT searched.
-   *        Nominatim answers ONE point for a whole street (Cobb Parkway NW
-   *        came back as one result), so the corner of two cannot be asked of
-   *        it. A street index built from the Georgia file is a later piece of
-   *        work, and until then this says so rather than pinning one street.
+   *   "A & B, Town"                           cross streets: a and b, asked of
+   *        the NucBox's street index (NbxSearch.corner), never of Nominatim,
+   *        which answers ONE point for a whole street (Cobb Parkway NW came
+   *        back as one result), so the corner of two cannot be asked of it.
+   *        With no street index set this says so rather than pinning one
+   *        street; three names, or an empty one, are not a corner.
+   *   "Street, Town" with no number, when the street index is set: its
+   *        stretch inside the disc (NbxSearch.stretch), not Nominatim's one
+   *        point for it.
    *   anything else                           the merchant's name, q=, with
    *        a trailing "(Plaza)" or "(Town)" dropped — "Kroger (Shiloh
    *        Square)" is asked as Kroger, and the disc chooses among them.
@@ -642,7 +646,11 @@
     var comma = s.indexOf(',');
     if (comma > 0 && s.slice(0, comma).indexOf('(') < 0) {
       var street = s.slice(0, comma).trim();
-      if (/&/.test(street)) return { kind: 'cross' };
+      if (/&/.test(street)) {
+        var two = street.split('&').map(function (x) { return x.trim(); });
+        return two.length === 2 && two[0] && two[1]
+          ? { kind: 'cross', a: two[0], b: two[1] } : { kind: 'cross', a: null, b: null };
+      }
       return streetPlan(street);
     }
     return { kind: 'name', q: s.replace(/\s*\([^()]*\)?\s*$/, '').trim() || s };
@@ -732,6 +740,8 @@
    *                                far the closest one the box held was, or
    *                                null when it held none at all
    *   { why: 'several', n }        n fit and they are not one place
+   *   { why: 'together', n }       a corner (`plan.kind` 'cross') whose two
+   *                                streets run together inside the disc
    *
    * CAPPED, refused outright. The other honest rule was to ask again in a
    * tighter box — but the box asked is already the disc's own (discBox), so
@@ -762,6 +772,13 @@
       }
       return { at: null, why: 'none', nearest: nearest, n: 0 };
     }
+    // A corner is a few tens of metres across. Two names carried by one road
+    // share every node of it, and the street index answers that as ONE
+    // meeting as long as the road (`spanM`): not a corner anybody can pin,
+    // and its middle is somewhere along the road, not where the card meant.
+    if (plan && plan.kind === 'cross' && inside.some(function (h) {
+      return h.spanM > AGREE_MI * METRES_PER_MILE;
+    })) return { at: null, why: 'together', n: inside.length };
     var within = (plan && plan.kind === 'street' && !plan.door) ? STREET_AGREE_MI : AGREE_MI;
     if (agreeing(inside, within)) {
       var mid = middleOf(inside);
@@ -769,6 +786,154 @@
                n: inside.length };
     }
     return { at: null, why: 'several', n: inside.length };
+  }
+
+  /* --- the stretch of a street inside the disc ------------------------------
+   *
+   * The street index answers a numberless street ("Shadowood Pkwy SE,
+   * Atlanta") as its polylines inside the disc's box, each [[lat, lon], ...];
+   * these keep the parts inside the disc itself and choose a point on them.
+   * Flat geometry in miles round one origin for the projections — over a
+   * disc a few miles across that is well under a hundredth of a mile from
+   * crowMiles — and crowMiles itself for every in-or-out decision, so a point
+   * kept here is inside by the same rule pickInDisc holds a pin to. */
+  function flat(o) {
+    var k = 69.0 * Math.cos(o.lat * Math.PI / 180);
+    return function (p) { return { x: (p.lon - o.lon) * k, y: (p.lat - o.lat) * 69.0 }; };
+  }
+
+  function lerp(a, b, t) {
+    return { lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t };
+  }
+
+  // Where along a-b (0..1) is nearest `o`, flat.
+  function nearestT(a, b, o, xy) {
+    var A = xy(a), B = xy(b), O = xy(o);
+    var dx = B.x - A.x, dy = B.y - A.y, len = dx * dx + dy * dy;
+    return len ? Math.max(0, Math.min(1, ((O.x - A.x) * dx + (O.y - A.y) * dy) / len)) : 0;
+  }
+
+  // The last point from `inP` towards `outP` that is inside the disc.
+  function edgeOf(inP, outP, disc) {
+    var lo = 0, hi = 1;
+    for (var i = 0; i < 40; i++) {
+      var mid = (lo + hi) / 2;
+      if (crowMiles(disc.at, lerp(inP, outP, mid)) <= disc.miles) lo = mid; else hi = mid;
+    }
+    return lerp(inP, outP, lo);
+  }
+
+  /* The parts of `lines` inside the disc, as runs of {lat, lon}: a line that
+     leaves the disc and comes back is two runs, each ending at the edge. */
+  function clipToDisc(lines, disc) {
+    var xy = flat(disc.at), runs = [];
+    (lines || []).forEach(function (line) {
+      var run = null;
+      for (var i = 0; i + 1 < line.length; i++) {
+        var a = { lat: line[i][0], lon: line[i][1] }, b = { lat: line[i + 1][0], lon: line[i + 1][1] };
+        var ina = crowMiles(disc.at, a) <= disc.miles, inb = crowMiles(disc.at, b) <= disc.miles;
+        var from = null, to = null;
+        if (ina && inb) { from = a; to = b; }
+        else if (ina) { from = a; to = edgeOf(a, b, disc); }
+        else if (inb) { from = edgeOf(b, a, disc); to = b; }
+        else {
+          // Both ends out: the segment may still pass through.
+          var m = lerp(a, b, nearestT(a, b, disc.at, xy));
+          if (crowMiles(disc.at, m) <= disc.miles) { from = edgeOf(m, a, disc); to = edgeOf(m, b, disc); }
+        }
+        if (!from) continue;
+        // A run goes on only through a point inside the disc: a segment that
+        // starts outside starts a new run, so no run ever bridges the outside.
+        if (!ina || !run) { run = [from]; runs.push(run); }
+        run.push(to);
+      }
+    });
+    return runs;
+  }
+
+  // The nearest point of `runs` to `o`, and how far it is.
+  function nearestOn(runs, o) {
+    var xy = flat(o), best = null;
+    runs.forEach(function (run) {
+      for (var i = 0; i + 1 < run.length; i++) {
+        var p = lerp(run[i], run[i + 1], nearestT(run[i], run[i + 1], o, xy));
+        var d = crowMiles(o, p);
+        if (!best || d < best.miles) best = { at: p, miles: d };
+      }
+    });
+    return best;
+  }
+
+  /* How many streets the runs are: runs closer than STREET_AGREE_MI, chained,
+     are one — the rule that already says when Nominatim's pieces of a street
+     are one street. One street split into many ways shares its nodes, so its
+     runs touch; a dual carriageway's two are tens of metres apart; two
+     Church Streets in two towns are miles apart. */
+  function streetsAmong(runs) {
+    var group = runs.map(function (r, i) { return i; });
+    function root(i) { while (group[i] !== i) i = group[i]; return i; }
+    // Each run's box, flat, so two runs whose boxes are farther apart than
+    // the rule are told apart without measuring every point of both.
+    var xy = flat(runs[0][0]);
+    var boxes = runs.map(function (r) {
+      var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      r.forEach(function (p) {
+        var q = xy(p);
+        b.x0 = Math.min(b.x0, q.x); b.y0 = Math.min(b.y0, q.y);
+        b.x1 = Math.max(b.x1, q.x); b.y1 = Math.max(b.y1, q.y);
+      });
+      return b;
+    });
+    for (var i = 0; i < runs.length; i++) {
+      for (var j = i + 1; j < runs.length; j++) {
+        if (root(i) === root(j)) continue;
+        var bi = boxes[i], bj = boxes[j];
+        var gx = Math.max(0, bi.x0 - bj.x1, bj.x0 - bi.x1);
+        var gy = Math.max(0, bi.y0 - bj.y1, bj.y0 - bi.y1);
+        // A margin of a hundredth of a mile for the flat measure against
+        // crowMiles; past it, no point of one is within the rule of the other.
+        if (Math.sqrt(gx * gx + gy * gy) > STREET_AGREE_MI + 0.01) continue;
+        var near = runs[i].some(function (p) {
+          var hit = nearestOn([runs[j]], p);
+          return hit && hit.miles <= STREET_AGREE_MI;
+        }) || runs[j].some(function (p) {
+          var hit = nearestOn([runs[i]], p);
+          return hit && hit.miles <= STREET_AGREE_MI;
+        });
+        if (near) group[root(i)] = root(j);
+      }
+    }
+    return runs.filter(function (r, i) { return root(i) === i; }).length;
+  }
+
+  /* A numberless street's pin from its stretch: pickInDisc's answers, the
+   * same refusals in the same words ('none' with how far the nearest part
+   * was, 'several' for streets of one name that are not one street).
+   *
+   * THE PIN IS THE POINT OF THE STRETCH NEAREST THE CAR (`car`, or the
+   * disc's own centre when there is none) — a choice, not a finding: the
+   * card names the street, not where on it, and road miles need one point.
+   * Nearest is the choice that makes the road figure smallest for this end
+   * of it, and the panel's figure says when it rests on one
+   * (live.html mapFigure). The pin carries the kept stretch as `stretch`,
+   * [[lat, lon], ...] per run, for the map to draw, and `nearestOf: true`. */
+  function stretchInDisc(lines, disc, car, name) {
+    var runs = clipToDisc(lines, disc);
+    if (!runs.length) {
+      var all = (lines || []).map(function (l) {
+        return l.map(function (p) { return { lat: p[0], lon: p[1] }; });
+      });
+      var near = nearestOn(all, disc.at);
+      return { at: null, why: 'none', nearest: near ? near.miles : null, n: 0 };
+    }
+    var streets = streetsAmong(runs);
+    if (streets > 1) return { at: null, why: 'several', n: streets };
+    var pin = nearestOn(runs, car || disc.at).at;
+    return { at: { lat: pin.lat, lon: pin.lon, name: name || '', nearestOf: true,
+                   stretch: runs.map(function (r) {
+                     return r.map(function (p) { return [p.lat, p.lon]; });
+                   }) },
+             n: runs.length };
   }
 
   /* The words, for the two cards Map view measures with: this one ('new')
@@ -868,24 +1033,43 @@
      hat's three rows at the widest name, so they go together after the
      refusal instead. It blames the search, never the world: "none fit the
      card" is a fact about what the NucBox holds, not a claim that no
-     McDonald's exists there. Six kinds reach here — none, several (`n`), a
-     cross street, a list cut at the limit, a street answered for a door,
+     McDonald's exists there. These kinds reach here — none, several (`n`),
+     and their two for a corner, `nomeet` and `corners` ("2 corners fit
+     the card"; none inside is "none fit the card" as for any candidates, and
+     "its streets do not meet" with no card to measure by); a cross street with
+     no street index to ask, or that is not two names, or that names a
+     street the index does not hold, or two that run together; a list cut
+     at the limit, a stretch too long to send, a street answered for a door,
      and the rig's own server refusing the question — and anything else is
      no line at all. The last is a bug in this page, said as one: the server
      refuses only questions shaped wrong, and falling back to the public map
      for it would hide the bug behind an answer. */
-  // The four refusals that say the same whatever the disc, keyed on
+  // The refusals that say the same whatever the disc, keyed on
   // pickInDisc's and NbxSearch.place's `why`. The bug's reason (the server's
   // `error`) is not on the panel: with it, the line ran past two rows at
   // 800x480 (rpi/test_layout.py), and a driver cannot act on it.
   var NBX_WORDS = {
-    cross: function () { return 'cross streets are not searched yet'; },
+    cross: function () { return 'no street index to ask'; },
+    notwo: function () { return 'not two street names'; },
+    nostreet: function () { return 'a street name not on the NucBox'; },
+    together: function () { return 'its streets run together'; },
     capped: function (res) {
       return 'too many to be sure · the NucBox lists ' + res.n + ' at most';
+    },
+    long: function (res) {
+      return 'street too long to be sure · the NucBox sends ' + res.n + ' points at most';
     },
     nodoor: function () { return 'street found, not that door'; },
     refused: function () { return 'a bug: the rig refused the question'; }
   };
+
+  /* pickInDisc's two answers that are worded against the disc — nothing
+     inside it, or several that are not one place — for candidates, and for
+     the meetings of a corner's two streets ("2 corners fit the card", "no
+     corner fits the card"). Worded "corners" because "its streets meet in 2
+     places in the card" ran past two rows at 800x480 (rpi/test_layout.py). */
+  var DISC_KINDS = { none: { none: true }, nomeet: { none: true, corner: true },
+                     several: {}, corners: { corner: true } };
 
   function nbxRefusal(res, disc, name, whose) {
     if (!res || res.at) return null;
@@ -893,25 +1077,33 @@
     if (Object.prototype.hasOwnProperty.call(NBX_WORDS, res.why)) {
       return lead + NBX_WORDS[res.why](res);
     }
-    var none = res.why === 'none';
-    if (!none && !res.n) return null;
+    var kind = Object.prototype.hasOwnProperty.call(DISC_KINDS, res.why)
+      ? DISC_KINDS[res.why] : null;
+    if (!kind || (!kind.none && !res.n)) return null;
+    var none = !!kind.none, corner = !!kind.corner;
     var mine = whose === 'new';
     if (!disc) {
-      return none ? lead + 'the NucBox found nothing for it'
-        : lead + res.n + ' found · no GPS fix '
+      return none ? lead + (corner ? 'its streets do not meet' : 'the NucBox found nothing for it')
+        : lead + res.n + (corner ? ' corners' : '') + ' found · no GPS fix '
           + (mine ? '' : 'on your order\'s card ') + 'to choose between them';
     }
     var where = mine ? ' of you' : ' of your order\'s card';
     var near = (none && res.nearest !== null && res.nearest !== undefined)
       ? ', nearest ' + res.nearest.toFixed(1) + ' mi' : '';
     if (disc.card === null) {
-      return lead + (none ? 'none found' : res.n + ' found and they disagree')
+      return lead + (none ? (corner ? 'its streets do not meet' : 'none found')
+                          : res.n + (corner ? ' corners found' : ' found and they disagree'))
         + ' · within ' + BOX_MILES + ' mi' + where + near;
     }
     // "its card" is the order in the car's, and says whose distance it is;
     // " of your order's card" after it as well ran past two rows at 800x480.
     var card = mine ? 'the card' : 'its card';
-    return lead + (none ? 'none fit ' + card : res.n + ' fit ' + card + ' and disagree')
+    // A corner with no meeting inside the card is said as any candidates
+    // are: "no corner in the card" with the disc's tail ran past two rows at
+    // 800x480 (rpi/test_layout.py), and "none fit the card" is as true of it.
+    return lead + (none ? 'none fit ' + card
+                        : res.n + (corner ? ' corners fit ' + card
+                                          : ' fit ' + card + ' and disagree'))
       + ' · within ' + disc.card + ' mi' + (disc.corrected ? ' (rig-corrected)' : '')
       + (mine ? where : '') + near;
   }
@@ -1695,19 +1887,88 @@
   };
 
   /* One place, inside its disc: pickInDisc's answer, or { why: 'cross' },
-     { why: 'unreachable', error } or { why: 'refused', error }. */
-  NbxSearch.prototype.place = function (place, disc) {
+     { why: 'unreachable', error } or { why: 'refused', error }.
+     `opts.streets` is whether this rig's server has the NucBox's street
+     index set (nbxSettings): with it a cross street is asked as a corner
+     and a numberless street as its stretch; without it, as before. And
+     `opts.car` is where the car is, for the point of a stretch nearest it
+     (stretchInDisc). The card's town is never sent and never used. */
+  NbxSearch.prototype.place = function (place, disc, opts) {
+    opts = opts || {};
     var plan = searchPlan(place);
     if (!plan) return Promise.resolve({ at: null, why: 'none', nearest: null, n: 0 });
-    if (plan.kind === 'cross') return Promise.resolve({ at: null, why: 'cross', n: 0 });
+    if (plan.kind === 'cross') {
+      return opts.streets ? this.corner(plan, disc)
+        : Promise.resolve({ at: null, why: 'cross', n: 0 });
+    }
+    if (plan.kind === 'street' && !plan.door && opts.streets && disc) {
+      var self = this;
+      // A street the index does not hold — a name outside the metro it was
+      // cut to, or one with no drivable way of that name — is asked of the
+      // search as it always was, under the same disc.
+      return this.stretch(plan, disc, opts.car).then(function (res) {
+        return res.why === 'nostreet' ? self.search(plan, disc) : res;
+      });
+    }
+    return this.search(plan, disc);
+  };
+
+  // A refusal from the relay, or null when `body` is an answer.
+  function nbxDown(body) {
+    if (body.unreachable) return { at: null, why: 'unreachable', error: body.unreachable };
+    if (body.refused) return { at: null, why: 'refused', error: body.refused };
+    return null;
+  }
+
+  /* Where the two streets of a corner meet, inside the disc, chosen by
+     pickInDisc as any other candidates are: one meeting inside, or several
+     that are one place (AGREE_MI — a dual carriageway's corners the index
+     did not already join), is the pin; meetings that are not one place are
+     `corners`, none inside is `nomeet` with how far the nearest was, and a
+     name the index does not hold at all is `nostreet`. */
+  NbxSearch.prototype.corner = function (plan, disc) {
+    if (!plan.a) return Promise.resolve({ at: null, why: 'notwo', n: 0 });
+    var box = discBox(disc);
+    var path = '/cross?a=' + encodeURIComponent(plan.a) + '&b=' + encodeURIComponent(plan.b)
+             + (box ? '&box=' + encodeURIComponent(box) : '');
+    return this.get(path).then(function (body) {
+      var down = nbxDown(body);
+      if (down) return down;
+      if (!body.a.names.length || !body.b.names.length) return { at: null, why: 'nostreet', n: 0 };
+      if (body.cutAt) return { at: null, why: 'capped', n: body.cutAt };
+      var called = body.a.names[0] + ' & ' + body.b.names[0];
+      var res = pickInDisc(body.meets.map(function (m) {
+        return { lat: m.lat, lon: m.lon, spanM: m.spanM, name: called };
+      }), disc, plan, null);
+      if (res.why === 'several') res.why = 'corners';
+      else if (res.why === 'none') res.why = 'nomeet';
+      return res;
+    });
+  };
+
+  /* A numberless street as its stretch inside the disc (stretchInDisc), or
+     `nostreet` for a name the index does not hold, or `long` for a stretch
+     the NucBox would not send whole. */
+  NbxSearch.prototype.stretch = function (plan, disc, car) {
+    var path = '/stretch?name=' + encodeURIComponent(plan.street)
+             + '&box=' + encodeURIComponent(discBox(disc));
+    return this.get(path).then(function (body) {
+      var down = nbxDown(body);
+      if (down) return down;
+      if (!body.names.length) return { at: null, why: 'nostreet', n: 0 };
+      if (body.cutAt) return { at: null, why: 'long', n: body.cutAt };
+      return stretchInDisc(body.lines, disc, car, body.names[0]);
+    });
+  };
+
+  // Nominatim, inside the disc: the search this page always made.
+  NbxSearch.prototype.search = function (plan, disc) {
     var box = discBox(disc);
     var path = '/search?' + (plan.kind === 'name' ? 'q=' + encodeURIComponent(plan.q)
                                                   : 'street=' + encodeURIComponent(plan.street))
              + (box ? '&viewbox=' + encodeURIComponent(box) : '');
     return this.get(path).then(function (body) {
-      if (body.unreachable) return { at: null, why: 'unreachable', error: body.unreachable };
-      if (body.refused) return { at: null, why: 'refused', error: body.refused };
-      return pickInDisc(body.hits, disc, plan, body.cutAt);
+      return nbxDown(body) || pickInDisc(body.hits, disc, plan, body.cutAt);
     });
   };
 
@@ -1774,15 +2035,18 @@
     });
   };
 
-  /* Whether this rig's server has the NucBox set, as { search, route }; both
-     false when it says so, when it is a server from before this existed, or
-     when it cannot be reached. Asked once per walk, at the press. */
+  /* Whether this rig's server has the NucBox set, as { search, route,
+     streets }; all false when it says so, when it is a server from before
+     this existed, or when it cannot be reached. Asked once per walk, at the
+     press. */
   function nbxSettings(fetchFn) {
     var f = fetchFn || function (u) { return fetch(u); };
     return Promise.resolve().then(function () { return f('/api/nbx'); })
       .then(function (r) { return r.ok ? r.json() : {}; })
-      .then(function (b) { return { search: !!(b && b.search), route: !!(b && b.route) }; },
-            function () { return { search: false, route: false }; });
+      .then(function (b) {
+        return { search: !!(b && b.search), route: !!(b && b.route),
+                 streets: !!(b && b.streets) };
+      }, function () { return { search: false, route: false, streets: false }; });
   }
 
   /* Every place in one range, looked up near where the car was, judged, and
@@ -1909,6 +2173,7 @@
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS,
            searchPlan: searchPlan, discFor: discFor, discBox: discBox,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
+           clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,
            NbxSearch: NbxSearch, nbxSettings: nbxSettings,
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,
            NBX_GAP_MS: NBX_GAP_MS, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,

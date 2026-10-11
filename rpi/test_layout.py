@@ -604,6 +604,17 @@ CAPTION_LINES = [
      'this pickup is on your way — straight lines, not roads · 1 not found '
      '· NucBox router down',
      'this pickup is on your way — straight lines, not roads'),
+    # ...and a figure measured to a numberless street's pin, which is the
+    # point of its stretch nearest the car (MV.stretchInDisc): the one note
+    # after the count, in place of a road's reason. With the router's reason
+    # after it as well, or the search's, it ran past two rows at 800x480.
+    ('the road figure, to a street\'s nearest point',
+     '+13.2 road mi out of your way · 1 not found · street pinned nearest you',
+     '+13.2 road mi out of your way'),
+    ('the figure, to a street\'s nearest point',
+     'this pickup is on your way — straight lines, not roads · 1 not found '
+     '· street pinned nearest you',
+     'this pickup is on your way — straight lines, not roads'),
     ('the figure, no road found',
      'this pickup is on your way — straight lines, not roads · 1 not found '
      '· no road found',
@@ -665,8 +676,52 @@ CAPTION_LINES = [
      "no pin for " + WIDEST_DISC + " — 10 found · no GPS fix on your order's "
      "card to choose between them",
      "no pin for " + WIDEST_DISC + " — 10 found"),
-    ('no pin, a cross street',
-     "no pin for " + WIDEST_DISC + " — cross streets are not searched yet"),
+    ('no pin, a cross street with no street index',
+     "no pin for " + WIDEST_DISC + " — no street index to ask"),
+    # ...and a corner asked of the street index (README "The NucBox at
+    # home"): its streets meeting in several places, in none, running
+    # together, one of them not in the index, or not two names at all; and a
+    # numberless street's stretch too long to send. Fifty meetings is the
+    # index's own limit, so the widest count it can say. Written first as
+    # "its streets meet in 50 places in the card" and "...do not meet in the
+    # card", four of these ran past two rows at 800x480 (and "no corner fits
+    # the card" and "no corner in the card" one each, so a corner with none
+    # inside the card is said in "none fit the card"'s own words), and
+    # "cross streets need the NucBox street index", "...need the street
+    # index" and "its streets run together, no one corner" past three on the
+    # hat.
+    ('no pin, a corner in several places in this card',
+     "no pin for " + WIDEST_DISC + " — 50 corners fit the card · "
+     "within 99.9 mi (rig-corrected) of you",
+     "no pin for " + WIDEST_DISC + " — 50 corners fit the card"),
+    ('no pin, a corner in several places in the held card',
+     "no pin for " + WIDEST_DISC + " — 50 corners fit its card · "
+     "within 99.9 mi (rig-corrected)",
+     "no pin for " + WIDEST_DISC + " — 50 corners fit its card"),
+    ('no pin, a corner in several places in sixty miles of the held card',
+     "no pin for " + WIDEST_DISC + " — 50 corners found · within 60 mi "
+     "of your order's card",
+     "no pin for " + WIDEST_DISC + " — 50 corners found"),
+    ('no pin, a corner in several places with no fix on the held card',
+     "no pin for " + WIDEST_DISC + " — 50 corners found · no GPS fix on "
+     "your order's card to choose between them",
+     "no pin for " + WIDEST_DISC + " — 50 corners found"),
+    ('no pin, a corner not in sixty miles of the held card',
+     "no pin for " + WIDEST_DISC + " — its streets do not meet · within 60 mi of "
+     "your order's card, nearest 74.9 mi",
+     "no pin for " + WIDEST_DISC + " — its streets do not meet"),
+    ('no pin, a corner that never meets',
+     "no pin for " + WIDEST_DISC + " — its streets do not meet"),
+    ('no pin, a corner whose streets run together',
+     "no pin for " + WIDEST_DISC + " — its streets run together"),
+    ('no pin, a street not on the NucBox',
+     "no pin for " + WIDEST_DISC + " — a street name not on the NucBox"),
+    ('no pin, not two street names',
+     "no pin for " + WIDEST_DISC + " — not two street names"),
+    ('no pin, a stretch too long to send',
+     "no pin for " + WIDEST_DISC + " — street too long to be sure · the NucBox sends "
+     "8000 points at most",
+     "no pin for " + WIDEST_DISC + " — street too long to be sure"),
     ('no pin, a door the map does not hold',
      "no pin for " + WIDEST_DISC + " — street found, not that door"),
     ('no pin, a list cut at the limit',
@@ -679,21 +734,24 @@ CAPTION_LINES = [
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. TWENTY-ONE entries have one, and they are four judgements: the
+# ellipsise. TWENTY-NINE entries have one, and they are four judgements: the
 # count of places with no pin, whose tail is ` · 1 not asked` or ` · 1 not
-# found` depending on which it was, with the NucBox's note after it where a
-# service did not answer or its road was not stated (` · NucBox down, public
-# map used`, ` · NucBox router down`, ` · no road found`, ` · a pin over 0.2
-# mi off road`, ` · router took different roads`, ` · road question refused,
-# a bug`); the consequence of a pin that is plainly
+# found` depending on which it was, with one note after it: the NucBox's
+# search down (` · NucBox down, public map used`), else ` · street pinned
+# nearest you` where the figure is measured to the point of a street's
+# stretch nearest the car, else why the road was not stated (` · NucBox
+# router down`, ` · no road found`, ` · a pin over 0.2 mi off road`, ` ·
+# router took different roads`, ` · road question refused, a bug`); the
+# consequence of a pin that is plainly
 # wrong, whose tail is `, so no distance`; the card's own figure beside a
 # pin it contradicts, whose tail is `, past the card's 9.4 mi` with the
 # rig's repair named inside it, so the figure and its hedge go together —
 # behind "wrong pin for", which the clamp never reaches, so the part kept
 # readable is a refusal and never a bare distance; and the disc the NucBox
 # searched in, ` · within 99.9 mi (rig-corrected) of you, nearest 74.9 mi`
-# (or the limit a cut list stopped at), behind "no pin for" and the few words
-# saying why, the same way round.
+# (or the limit a cut list or a stretch stopped at), behind "no pin for" and
+# the few words saying why — a corner's "its streets meet in 50 places" among
+# them — the same way round.
 # Each is the end of its sentence
 # precisely so that it is what a clamp eats; everything before it is a figure
 # or a hedge on one.
@@ -715,9 +773,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 61)
-eq('...and twenty-one of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 21)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 73)
+eq('...and twenty-nine of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 29)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
@@ -2861,8 +2919,8 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say sixty-one things, so all
-                # sixty-one are put in it and measured. Three rules, and they are not the same
+                # occupant and it can say seventy-three things, so all
+                # seventy-three are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
                 #   the cap    — no sentence may take more rows than the clamp

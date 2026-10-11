@@ -4412,6 +4412,13 @@ rounding or a point was moved more than 0.2 mi to a road. A
 NucBox that does not answer leaves today's public geocoder and straight line,
 and the line's tail says so. With neither setting, nothing here changes.
 
+**With its street index set too** (`NUCBOX_STREETS`), a corner the card prints
+("Foothill Trl & Northwoods Dr") is pinned where those two streets meet inside
+the card's disc, and refused when they meet in more than one place there ("no
+pin for … — 2 corners fit the card") or nowhere; a street
+with no number is its stretch inside the disc, pinned at the point nearest the
+car, and the figure measured to that point ends "· street pinned nearest you".
+
 ### A rig that was blind for a whole shift, and nothing said so
 
 Measured on the owner's own rig, from its own log: one scanner process ran

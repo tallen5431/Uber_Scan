@@ -3144,7 +3144,7 @@ const framed = (page) => page.waitForFunction(
   if (NBX) {
     stage = 'the map mode on the NucBox';
     out.nbx = {};
-    for (const which of ['both', 'noRoad', 'noSearch']) {
+    for (const which of ['both', 'noRoad', 'noSearch', 'streets']) {
       const srv = NBX[which];
       const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                                 .then((c) => c.newPage());
@@ -3174,8 +3174,9 @@ const framed = (page) => page.waitForFunction(
         window.__es.push({
           ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
           minutes: 20.0, miles: card.miles, cost: 1.4, target: 25, band: 15,
-          holding: { pay: 9.0, minutes: 18.0, dropoff: 'Shadowood Pkwy SE, Atlanta',
-                     card: Object.assign({}, x.SQ, { miles: 9.4 }) },
+          holding: { pay: 9.0, minutes: 18.0,
+                     dropoff: x.held || 'Shadowood Pkwy SE, Atlanta',
+                     card: Object.assign({}, x.SQ, { miles: 9.4 }, x.heldCard || {}) },
           offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
                                  billedMinutes: 20.0, cost: 1.4,
                                  pickup: x.pickup || "McDonald's (Marietta Sq)",
@@ -3186,6 +3187,11 @@ const framed = (page) => page.waitForFunction(
       const pick = () => page.evaluate(() => {
         const m = (window.__marks || []).filter(
           (k) => String(k.popup || '').indexOf('pick this one up') >= 0)[0];
+        return m ? m.ll : null;
+      });
+      const heldPin = () => page.evaluate(() => {
+        const m = (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('where the order in your car is going') >= 0)[0];
         return m ? m.ll : null;
       });
       const r = {};
@@ -3264,6 +3270,37 @@ const framed = (page) => page.waitForFunction(
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
         await page.waitForTimeout(1500);
         r.bug = await note();
+      }
+      if (which === 'streets') {
+        /* The street index, on the NucBox's own server, relayed. The held
+           order going to a CORNER of the synthetic streets (tests/fixtures/
+           streets.osm), 0.5 mi north of the Square: pinned where its two
+           streets meet, and the road measured to it. */
+        await push({ id: 's-corner', held: 'Foxglove Trl & Northgate Dr, Marietta',
+                     heldCard: { miles: 3.0 } });
+        await page.waitForTimeout(1500);
+        r.corner = await note();
+        r.cornerHeld = await heldPin();
+        r.cornerWant = await page.evaluate(() => 1.25 * window.MapView.detour(
+          { lat: 33.9526, lon: -84.5499 }, { lat: 33.9830, lon: -84.5499 },
+          { lat: 33.96, lon: -84.55 }));
+        // A loop meeting the other street twice inside the held card's disc.
+        await push({ id: 's-twice', held: 'Juniper Cir & Northgate Dr, Marietta',
+                     heldCard: { miles: 3.0 } });
+        await page.waitForTimeout(1500);
+        r.twice = await note();
+        r.twiceHeld = await heldPin();
+        // A numberless street the index holds: its stretch inside the held
+        // card's disc, pinned at the point nearest the car, and the figure
+        // says it rests on that point.
+        await push({ id: 's-stretch', held: 'Larkspur Pkwy SE, Atlanta',
+                     heldCard: { miles: 3.0 } });
+        await page.waitForTimeout(1500);
+        r.stretch = await note();
+        r.stretchHeld = await heldPin();
+        r.stretchWant = await page.evaluate(() => 1.25 * window.MapView.detour(
+          { lat: 33.9526, lon: -84.5499 }, { lat: 33.9830, lon: -84.5499 },
+          { lat: 33.948, lon: -84.552 }));
       }
       r.publicAsked = publicAsked;
       out.nbx[which] = r;
@@ -4307,16 +4344,35 @@ nbx_fake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js
 _fake_url = 'http://127.0.0.1:%d' % json.loads(nbx_fake.stdout.readline())['port']
 _nowhere = 'http://127.0.0.1:%d' % free_port()
 nbx_procs, NBX = [], {'fake': _fake_url}
-for _which, _search, _route in (('both', _fake_url, _fake_url),
-                                ('noRoad', _fake_url, _nowhere),
-                                ('noSearch', _nowhere, _fake_url)):
+# ...and the NucBox's own server.js holding the street index of the synthetic
+# streets round Marietta Square (tests/fixtures/streets.osm, through the real
+# exporter from osmium's committed OPL), for `streets`, which relays to it.
+_idx = os.path.join(work, 'streets.json')
+subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'street_index.py'),
+                os.path.join(ROOT, 'tests', 'fixtures', 'streets.osm'), _idx,
+                '--opl', os.path.join(ROOT, 'tests', 'fixtures', 'streets.opl')],
+               check=True, capture_output=True)
+_nuc_port = free_port()
+_nuc_j = os.path.join(work, 'journal-nucbox.jsonl')
+open(_nuc_j, 'w').close()
+nbx_procs.append(subprocess.Popen(
+    ['node', os.path.join(ROOT, 'server.js')],
+    env=dict(os.environ, SCANNER='0', PORT=str(_nuc_port), HTTPS_PORT='0', JOURNAL=_nuc_j,
+             NUCBOX_STREETS_FILE=_idx),
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+NBX['nucbox'] = 'http://127.0.0.1:%d' % _nuc_port
+for _which, _search, _route, _streets in (('both', _fake_url, _fake_url, ''),
+                                          ('noRoad', _fake_url, _nowhere, ''),
+                                          ('noSearch', _nowhere, _fake_url, ''),
+                                          ('streets', _fake_url, _fake_url, NBX['nucbox'])):
     _port = free_port()
     _j = os.path.join(work, 'journal-%s.jsonl' % _which)
     open(_j, 'w').close()
     nbx_procs.append(subprocess.Popen(
         ['node', os.path.join(ROOT, 'server.js')],
         env=dict(os.environ, SCANNER='0', PORT=str(_port), HTTPS_PORT='0', JOURNAL=_j,
-                 NUCBOX_SEARCH=_search, NUCBOX_ROUTER=_route, NUCBOX_TIMEOUT_MS='800'),
+                 NUCBOX_SEARCH=_search, NUCBOX_ROUTER=_route, NUCBOX_STREETS=_streets,
+                 NUCBOX_TIMEOUT_MS='800'),
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     NBX[_which] = 'http://127.0.0.1:%d' % _port
 
@@ -4329,7 +4385,7 @@ try:
             time.sleep(0.1)
     else:
         raise RuntimeError('the server never came up')
-    for _which in ('both', 'noRoad', 'noSearch'):
+    for _which in ('both', 'noRoad', 'noSearch', 'nucbox', 'streets'):
         for _ in range(120):
             try:
                 urllib.request.urlopen(NBX[_which] + '/api/status', timeout=1).read()
@@ -6154,7 +6210,32 @@ try:
         'NucBox down (%r)' % both.get('bug'),
         re.match(r'^no pin for Q+… — a bug: the rig refused the question$',
                  both.get('bug') or ''))
-    _lines = [v for r in (both, noroad, nosearch) for k, v in r.items()
+    # The street index, relayed to the NucBox's own server.js. A held end
+    # the index does not hold (Shadowood Parkway) is asked of the search as
+    # before, so the first card's line is the one `both` drew.
+    st = nb.get('streets') or {}
+    eq('with the street index set, a street it does not hold is pinned by the '
+       'search as before, the same line', st.get('one'), both.get('one'))
+    _m = re.match(r'^\+(\d+\.\d) road mi out of your way$', st.get('corner') or '')
+    ok_('the order in the car going to a corner is pinned where its two streets meet '
+        'and measured to by road (%r, %r, %.2f wanted)'
+        % (st.get('corner'), st.get('cornerHeld'), st.get('cornerWant') or 0),
+        _m and abs(float(_m.group(1)) - (st.get('cornerWant') or 0)) < 0.051
+        and st.get('cornerHeld') == [33.96, -84.55])
+    ok_('a corner whose streets meet twice inside its card is refused, not pinned '
+        '(%r)' % st.get('twice'),
+        re.match(r'^no pin for Juniper.* — 2 corners fit its card · within 3 mi$',
+                 st.get('twice') or '') and st.get('twiceHeld') is None)
+    _m = re.match(r'^\+(\d+\.\d) road mi out of your way · street pinned nearest you$',
+                  st.get('stretch') or '')
+    ok_('a numberless street is pinned at the point of its stretch nearest the car, '
+        'and the figure says it rests on it (%r, %r)' % (st.get('stretch'), st.get('stretchHeld')),
+        _m and abs(float(_m.group(1)) - (st.get('stretchWant') or 0)) < 0.051
+        and st.get('stretchHeld')
+        and abs(st['stretchHeld'][0] - 33.948) < 1e-6 and abs(st['stretchHeld'][1] + 84.552) < 1e-6)
+    eq('...and with the NucBox answering, the public map is asked nothing',
+       st.get('publicAsked'), [])
+    _lines = [v for r in (both, noroad, nosearch, st) for k, v in r.items()
               if isinstance(v, str)]
     eq('no NucBox line on the panel speaks of minutes',
        [v for v in _lines if re.search(r'\bmin', v)], [])

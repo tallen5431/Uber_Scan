@@ -4172,7 +4172,10 @@
           var whose = (q === want.held && q !== want.pickup && q !== want.dropoff)
             ? 'held' : 'new';
           var disc = whose === 'held' ? discs.held : discs.card;
-          var got = await mapNbx.place(q, disc);       // eslint-disable-line no-await-in-loop
+          // `here` for a numberless street's pin: the point of its stretch
+          // nearest the car (MV.stretchInDisc), when the street index is set.
+          var got = await mapNbx.place(q, disc,        // eslint-disable-line no-await-in-loop
+                                       { streets: nbx.streets, car: here });
           if (viewMode !== 'map' || mapFor !== key) return;
           if (got.why === 'unreachable') {
             // Today's path for this place and every one after it, under the
@@ -4520,8 +4523,10 @@
     /* ...and a pin the NucBox would not choose, for the same reason and in
        the same place in the order: it is the disc's refusal made before a
        pin was drawn instead of after (MV.pickInDisc) — none of its
-       candidates inside the card's distance, several that disagree, or a
-       cross street it cannot search — and it holds whether or not anything
+       candidates inside the card's distance, several that disagree, a
+       corner whose streets meet in several places or not at all inside it,
+       or a cross street with no street index to ask (MV.nbxRefusal has every
+       kind) — and it holds whether or not anything
        is in the car. The dropoff's refusal is not here: the figure does not
        use it, and it is counted in the figure's " · 1 not found". */
     var nbxNo = want.nbxWhy || {};
@@ -4629,8 +4634,20 @@
     // One or the other, the search first. Both together ran past two rows at
     // 800x480 (rpi/test_layout.py), and with the search down the line still
     // says it is straight lines, not roads — only the road's reason goes.
+    // A pin that stands for a whole street, not a door or a corner: the
+    // point of the street's stretch inside its card's disc nearest the car
+    // (MV.stretchInDisc). The figure is measured to that point, which the
+    // card never named, so the line says the figure rests on it.
+    var along = (pick && pick.nearestOf) || (held && held.nearestOf)
+      ? ' · street pinned nearest you' : '';
+    // ONE note after the count. The search down comes first, because then
+    // the pins are the public map's; then the street's nearest point, a
+    // hedge on the figure itself; then why the road is missing, which the
+    // label already says in "straight lines, not roads". Either of the first
+    // two with a road reason after it ran past two rows at 800x480
+    // (rpi/test_layout.py).
     var nucbox = want.nbxDown ? ' · NucBox down, public map used'
-      : (road && road.why && roadDown[road.why]) || '';
+      : along || (road && road.why && roadDown[road.why]) || '';
     if (road && isFinite(road.miles)) {
       return (road.miles < 0.5 ? 'this pickup is on your way by road'
                                : '+' + road.miles.toFixed(1) + ' road mi out of your way')

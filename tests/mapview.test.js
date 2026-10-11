@@ -925,6 +925,19 @@ function startServer(env) {
   });
 }
 
+// The street index of tests/fixtures/streets.osm, made by the real exporter
+// from osmium's committed OPL into a directory of its own.
+function streetIndex() {
+  var path = require('path'), fs = require('fs'), os = require('os');
+  var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mvidx-'));
+  var file = path.join(dir, 'streets.json');
+  require('child_process').execFileSync('python3', [
+    path.join(__dirname, '..', 'tools', 'street_index.py'),
+    path.join(__dirname, 'fixtures', 'streets.osm'), file,
+    '--opl', path.join(__dirname, 'fixtures', 'streets.opl')], { stdio: 'ignore' });
+  return { file: file, drop: function () { fs.rmSync(dir, { recursive: true, force: true }); } };
+}
+
 async function nucbox() {
   var FAKE = require('./fake-nucbox.js');
   var SQ = { lat: 33.9526, lon: -84.5499 };
@@ -955,7 +968,12 @@ async function nucbox() {
      JSON.stringify({ kind: 'street', street: '77 Birch Ln NW', door: true,
                       house: '77' }));
   eq('cross streets are not asked of a search that answers one point a street',
-     MV.searchPlan('Birch Ln & Kestrel Dr, Roswell').kind, 'cross');
+     JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr, Roswell')),
+     JSON.stringify({ kind: 'cross', a: 'Birch Ln', b: 'Kestrel Dr' }));
+  eq('...and three names, or an empty one, are not a corner',
+     JSON.stringify([MV.searchPlan('Atami Grill & Sushi Atwater Dr & Kolora Chase, Smyrna'),
+                     MV.searchPlan(' & Kolora Chase, Smyrna')]),
+     JSON.stringify([{ kind: 'cross', a: null, b: null }, { kind: 'cross', a: null, b: null }]));
   eq('a merchant is asked by name, its "(Plaza)" dropped',
      JSON.stringify(MV.searchPlan("McDonald's (Marietta Sq)")),
      JSON.stringify({ kind: 'name', q: "McDonald's" }));
@@ -1037,8 +1055,9 @@ async function nucbox() {
      "no pin for X — none found · within 60 mi of your order's card");
   eq('an answer of no kind this knows is no line at all',
      MV.nbxRefusal({ at: null, why: 'unreachable' }, d94, 'X', 'new'), null);
-  eq('a cross street', MV.nbxRefusal({ why: 'cross' }, d94, 'Birch Ln…', 'new'),
-     'no pin for Birch Ln… — cross streets are not searched yet');
+  eq('a cross street with no street index to ask',
+     MV.nbxRefusal({ why: 'cross' }, d94, 'Birch Ln…', 'new'),
+     'no pin for Birch Ln… — no street index to ask');
   eq('a pin is no refusal', MV.nbxRefusal(one, d94, "McDonald's", 'new'), null);
 
   /* A door asked, its street answered: never pinned as the door. */
@@ -1099,22 +1118,93 @@ async function nucbox() {
      JSON.stringify([{ why: 'snap' }, { why: 'snap' }]));
 
   /* Through the real server.js and the fake NucBox. */
+  /* A numberless street's stretch, kept inside the disc (MV.stretchInDisc).
+     Lines are [[lat, lon], ...], as the street index sends them. */
+  var d1 = MV.discFor(card({ miles: 0.5 }));                  // 1.0 mi round the Square
+  var across = [[[SQ.lat, -84.60], [SQ.lat, -84.50]]];         // through it, ends far out
+  var runs = MV.clipToDisc(across, d1);
+  var ends = runs.length === 1 ? [runs[0][0], runs[0][runs[0].length - 1]] : [];
+  ok_('a segment with both ends outside the disc is kept for the part through it, '
+      + 'cut at the edge (' + ends.map(function (p) { return MV.crowMiles(SQ, p).toFixed(4); }) + ')',
+      ends.length === 2 && ends.every(function (p) {
+        var d = MV.crowMiles(SQ, p);
+        return d <= 1.0 && d > 0.999;
+      }));
+  var inOut = [[[SQ.lat, -84.5499], [SQ.lat, -84.53], [SQ.lat + 0.001, -84.53],
+                [SQ.lat + 0.001, -84.5499]]];                  // out east and back
+  eq('...and a line that leaves the disc and comes back is two runs, never a '
+     + 'chord across the outside', MV.clipToDisc(inOut, d1).length, 2);
+  var lark = [[[33.948, -84.565], [33.948, -84.56], [33.948, -84.552]],
+              [[33.88, -84.47], [33.88, -84.46]]];             // the fixture's Larkspur
+  var d3 = MV.discFor(card({ miles: 3.0 }));
+  var st3 = MV.stretchInDisc(lark, d3, SQ, 'Larkspur Parkway Southeast');
+  eq('a stretch is pinned at its point nearest the car — here its east end',
+     st3.at && [st3.at.lat, st3.at.lon, st3.at.nearestOf].join(','), '33.948,-84.552,true');
+  eq('...and with the car at its west end, there: the pin is the car\'s, not the street\'s',
+     (MV.stretchInDisc(lark, d3, { lat: 33.948, lon: -84.58 }, 'L').at || {}).lon, -84.565);
+  eq('...carrying the part of the street inside the disc, to be drawn',
+     JSON.stringify(st3.at && st3.at.stretch), JSON.stringify([lark[0]]));
+  var st94 = MV.stretchInDisc(lark, d94, SQ, 'L');
+  eq('two stretches of one name 6.4 mi apart, both inside a 9.4 mi card, are two '
+     + 'streets, refused', JSON.stringify([st94.at, st94.why, st94.n]),
+     JSON.stringify([null, 'several', 2]));
+  var stOut = MV.stretchInDisc([lark[1]], d3, SQ, 'L');
+  eq('...and a stretch wholly outside the disc is none, with how far it was',
+     [stOut.why, stOut.nearest && stOut.nearest.toFixed(1)].join(','), 'none,6.8');
+
+  /* The words for a corner. */
+  eq('a corner whose streets meet twice in the card',
+     MV.nbxRefusal({ why: 'corners', n: 2 }, d3, 'Juniper Cir…', 'new'),
+     'no pin for Juniper Cir… — 2 corners fit the card · within 3 mi of you');
+  eq('...and that do not meet in it, with the nearest meeting',
+     MV.nbxRefusal({ why: 'nomeet', nearest: 1.21 }, d3, 'X', 'held'),
+     'no pin for X — none fit its card · within 3 mi, nearest 1.2 mi');
+  eq('...and with no fix at all', MV.nbxRefusal({ why: 'nomeet', nearest: null }, null, 'X', 'new'),
+     'no pin for X — its streets do not meet');
+  eq('...and that run together', MV.nbxRefusal({ why: 'together', n: 1 }, d3, 'X', 'new'),
+     'no pin for X — its streets run together');
+  eq('...and that names a street the NucBox does not hold',
+     MV.nbxRefusal({ why: 'nostreet' }, d3, 'X', 'new'),
+     'no pin for X — a street name not on the NucBox');
+  eq('...and that is not two names', MV.nbxRefusal({ why: 'notwo' }, d3, 'X', 'new'),
+     'no pin for X — not two street names');
+  eq('a stretch too long to send', MV.nbxRefusal({ why: 'long', n: 8000 }, d3, 'X', 'new'),
+     'no pin for X — street too long to be sure · the NucBox sends 8000 points at most');
+  // A corner list the index cut at its limit, off a stub of the relay.
+  var cutCorner = await new MV.NbxSearch({ gap: 0, fetch: function () {
+    return Promise.resolve({ ok: true, status: 200, json: function () {
+      return Promise.resolve({ ok: true, a: { names: ['A'] }, b: { names: ['B'] },
+                               meets: [], cutAt: 50 });
+    } });
+  } }).place('A St & B St, Town', d3, { streets: true });
+  eq('...and a corner list cut at its limit is too many to be sure, not "none meet"',
+     [cutCorner.why, cutCorner.n].join(','), 'capped,50');
+
   var fake = await new Promise(function (r) { FAKE.start(r); });
   var fb = 'http://127.0.0.1:' + fake.port;
-  var on = await startServer({ NUCBOX_SEARCH: fb, NUCBOX_ROUTER: fb });
+  // The NucBox's own server.js holding the street index of the fixture
+  // streets (tests/streets.test.js), made by the real exporter from
+  // osmium's OPL.
+  var idx = streetIndex();
+  var nuc = await startServer({ NUCBOX_STREETS_FILE: idx.file });
+  var nucShort = await startServer({ NUCBOX_STREETS_FILE: idx.file,
+                                     NUCBOX_STREETS_POINTS_MAX: '5' });
+  var on = await startServer({ NUCBOX_SEARCH: fb, NUCBOX_ROUTER: fb, NUCBOX_STREETS: nuc.base });
+  var onShort = await startServer({ NUCBOX_SEARCH: fb, NUCBOX_STREETS: nucShort.base });
   var off = await startServer({});
   var down = await startServer({ NUCBOX_SEARCH: 'http://127.0.0.1:9',
-                                 NUCBOX_ROUTER: 'http://127.0.0.1:9' });
+                                 NUCBOX_ROUTER: 'http://127.0.0.1:9',
+                                 NUCBOX_STREETS: 'http://127.0.0.1:9' });
   try {
     function via(srv) { return function (u) { return fetch(srv.base + u); }; }
-    eq('with nothing set the page is told neither is, and does what it always did',
+    eq('with nothing set the page is told none is, and does what it always did',
        JSON.stringify(await MV.nbxSettings(via(off))),
-       JSON.stringify({ search: false, route: false }));
-    eq('...and set, both', JSON.stringify(await MV.nbxSettings(via(on))),
-       JSON.stringify({ search: true, route: true }));
-    eq('...and a server that cannot be reached is neither, not a page that stops',
+       JSON.stringify({ search: false, route: false, streets: false }));
+    eq('...and set, all three', JSON.stringify(await MV.nbxSettings(via(on))),
+       JSON.stringify({ search: true, route: true, streets: true }));
+    eq('...and a server that cannot be reached is none, not a page that stops',
        JSON.stringify(await MV.nbxSettings(function () { return Promise.reject(new Error('x')); })),
-       JSON.stringify({ search: false, route: false }));
+       JSON.stringify({ search: false, route: false, streets: false }));
 
     var nbx = new MV.NbxSearch({ base: on.base + '/api/nbx' });
     var got = await nbx.place("McDonald's", MV.discFor(card({ miles: 3.0 })));
@@ -1148,6 +1238,73 @@ async function nucbox() {
     got = await nbx.place('Birch Ln & Kestrel Dr, Roswell', d94);
     eq('a cross street is refused without asking anybody',
        [got.why, fake.asked.length - n0].join(','), 'cross,0');
+
+    /* Corners and stretches, through this rig's server to the NucBox's
+       street index. The fixture's corners are a few tenths of a mile from
+       the Square; its Juniper Circle meets Northgate Drive twice. */
+    var ST = { streets: true, car: SQ };
+    var nbxS = new MV.NbxSearch({ base: on.base + '/api/nbx' });
+    got = await nbxS.place('Foxglove Trl & Northgate Dr, Marietta', d3, ST);
+    eq('a corner the card names is pinned where its two streets meet',
+       got.at && [got.at.lat, got.at.lon, got.at.name].join(','),
+       '33.96,-84.55,Foxglove Trail & Northgate Drive');
+    eq('...as the card\'s reader misread it too ("Foxglove Tri")',
+       ((await nbxS.place('Foxglove Tri & Northgate Dr, Marietta', d3, ST)).at || {}).lat, 33.96);
+    var askedS = Object.keys(nbxS.cache).join(' ');
+    ok_('...asked as its two streets inside the disc\'s box, the town left at home ('
+        + askedS.slice(0, 90) + ')',
+        /\/cross\?a=Foxglove%20Trl&b=Northgate%20Dr&box=/.test(askedS) && !/Marietta/.test(askedS));
+    got = await nbxS.place('Wren Rd & Kestrel Pkwy SE, Marietta', d3, ST);
+    eq('a road across a dual carriageway is one corner, between the two',
+       got.at && [got.at.lat, got.at.lon].join(','), '33.9451,-84.5455');
+    got = await nbxS.place('Juniper Cir & Northgate Dr, Marietta', d3, ST);
+    eq('two streets that meet in two places inside the card are refused, not pinned '
+       + 'at one', JSON.stringify([got.at, got.why, got.n]), JSON.stringify([null, 'corners', 2]));
+    got = await nbxS.place('Juniper Cir & Northgate Dr, Marietta',
+                           MV.discFor(card({ miles: 0.2 })), ST);
+    eq('...and where neither is inside the card, none, with the nearest',
+       [got.why, got.nearest && got.nearest.toFixed(1)].join(','), 'nomeet,0.9');
+    got = await nbxS.place('Church St SE & Northgate Dr, Marietta', d3, ST);
+    eq('two streets that do not meet at all are said not to meet',
+       [got.why, got.nearest].join(','), 'nomeet,');
+    got = await nbxS.place('Larkspur Pkwy SE & Old Mill Rd, Atlanta', d3, ST);
+    eq('two names of one road meet along all of it: refused as no one corner',
+       got.why, 'together');
+    got = await nbxS.place('Pine St & Wren Rd, Marietta', d3, ST);
+    eq('a street name the index does not hold is said, not matched to Pine Court',
+       got.why, 'nostreet');
+    got = await nbxS.place('Larkspur Pkwy SE, Atlanta', d3, ST);
+    eq('a numberless street is its stretch inside the card, pinned nearest the car',
+       got.at && [got.at.lat, got.at.lon, got.at.nearestOf, got.at.stretch.length].join(','),
+       '33.948,-84.552,true,1');
+    ok_('...every point of the stretch inside the disc',
+        got.at && got.at.stretch[0].every(function (p) {
+          return MV.crowMiles(SQ, { lat: p[0], lon: p[1] }) <= d3.miles;
+        }));
+    got = await nbxS.place('Larkspur Pkwy SE, Atlanta', d94, ST);
+    eq('...and its two stretches 6.4 mi apart inside a 9.4 mi card are refused',
+       [got.why, got.n].join(','), 'several,2');
+    got = await nbxS.place('Shadowood Pkwy SE, Atlanta', d94, ST);
+    ok_('a street the index does not hold is asked of the search as before, and '
+        + 'pinned by it (' + (got.at && got.at.name) + ')',
+        got.at && /Cumberland/.test(got.at.name) && !got.at.nearestOf
+        && Object.keys(nbxS.cache).some(function (u) {
+          return /^\/stretch\?name=Shadowood/.test(u);
+        }) && Object.keys(nbxS.cache).some(function (u) {
+          return /^\/search\?street=Shadowood/.test(u);
+        }));
+    got = await new MV.NbxSearch({ base: onShort.base + '/api/nbx' })
+      .place('Larkspur Pkwy SE, Atlanta', d3, ST);
+    eq('a stretch the NucBox would not send whole is refused as too long',
+       [got.why, got.n].join(','), 'long,5');
+    got = await new MV.NbxSearch({ base: down.base + '/api/nbx' })
+      .place('Foxglove Trl & Northgate Dr, Marietta', d3, ST);
+    eq('a street index that does not answer is unreachable, the page\'s cue for the '
+       + 'public map', got.why, 'unreachable');
+    var none0 = Object.keys(nbxS.cache).length;
+    got = await nbxS.place('Atami Grill & Sushi Atwater Dr & Kolora Chase, Smyrna', d3, ST);
+    eq('three names before the comma are not a corner, and nobody is asked',
+       [got.why, Object.keys(nbxS.cache).length - none0].join(','), 'notwo,0');
 
     /* The road. */
     var A = { lat: 33.983, lon: -84.5499 }, S = { lat: 33.8779, lon: -84.46 };
@@ -1200,7 +1357,8 @@ async function nucbox() {
       return /\bmin/.test(w);
     }).length, 0);
   } finally {
-    on.stop(); off.stop(); down.stop();
+    on.stop(); off.stop(); down.stop(); nuc.stop(); nucShort.stop(); onShort.stop();
+    idx.drop();
     fake.server.close();
   }
 }
