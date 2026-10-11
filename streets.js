@@ -25,10 +25,10 @@
  *              "Peachtree Street Northeast"); two that differ never match —
  *              in Atlanta "NW" and "SE" are different streets.
  *   junk       the same two, after the OCR's litter is dropped: tokens of one
- *              or two letters that are not a street word ("Ct re ou NW",
- *              "Dr Ss R SW"), a lone digit ("Hills 4 Ln"), and words after the
- *              street's last type or directional ("Kiowa Dr NE Marietta", a
- *              card whose comma the reader lost).
+ *              or two letters that are not a street word after the street's
+ *              last type, printed short ("Ct re ou NW", "Dr Ss R SW") — never
+ *              a word before it, which is the name ("Ol Canton Rd" is not
+ *              Canton Road), and never a digit (see cleaned).
  *   ocr        one letter, in one word, read wrong ("Tri" for Trl, "PI" for
  *              Pl, "Biue" for Blue, "DOr" for Dr) — never a digit (12th and
  *              13th are different streets), never one street word for another
@@ -86,19 +86,23 @@ function isType(t) { return TYPE_WORDS[t] === true; }
 function isDir(t) { return DIR_WORDS[t] === true; }
 function isWord(t) { return isType(t) || isDir(t); }
 
-/* A name as words, each in its short form. Apostrophes go without a gap
+/* A name as words, as printed: lowercase. Apostrophes go without a gap
    ("O'Neal" is "oneal", "N'W" is "nw"); every other mark is a gap. */
-function words(name) {
+function printed(name) {
   return String(name == null ? '' : name).toLowerCase()
     .replace(/['‘’`]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim().split(' ')
-    .filter(Boolean)
-    .map(function (t) {
-      return Object.prototype.hasOwnProperty.call(TYPES, t) ? TYPES[t]
-        : Object.prototype.hasOwnProperty.call(DIRS, t) ? DIRS[t] : t;
-    });
+    .filter(Boolean);
 }
+
+function short(t) {
+  return Object.prototype.hasOwnProperty.call(TYPES, t) ? TYPES[t]
+    : Object.prototype.hasOwnProperty.call(DIRS, t) ? DIRS[t] : t;
+}
+
+// ...and each in its short form.
+function words(name) { return printed(name).map(short); }
 
 /* Leading and trailing directionals apart from the rest. A name that is
    nothing but directionals keeps them as its base. */
@@ -115,21 +119,42 @@ function dirsAgree(x, y) {
   return (x.pre === y.pre || !x.pre || !y.pre) && (x.post === y.post || !x.post || !y.post);
 }
 
-/* The OCR's litter dropped, or the same words when there is none (see the
-   note at the top). */
-function cleaned(ws) {
-  var out = ws.filter(function (t) {
-    if (isWord(t)) return true;
-    if (/^\d$/.test(t)) return false;
-    return !(t.length <= 2 && /[a-z]/.test(t));
+/* The OCR's litter dropped from the words of `name`, or the same words when
+ * there is none: tokens of one or two letters that are not a street word,
+ * AFTER the name's last street type — and only when the card printed that
+ * type in its USPS short form ("Ct", "Ln", "Rd"; or "Way", whose short form
+ * is itself). Nothing before that type is ever dropped: it is the name.
+ *
+ * Measured on the week's cross-street halves (605 distinct, from the
+ * dropoffs that carry a comma and so reach the index): of the one- and
+ * two-letter tokens that are not street words, 23 come before the type and
+ * 21 where there is no type at all — real initials among them ("J R Rd",
+ * "Richard D Sailors Pkwy", "Hosea L Williams Dr") beside litter ("Gj
+ * Cumberland Creek Way"), not to be told apart by their letters. Dropped
+ * anyway, "Ol Canton Rd" (Old Canton Road misread) was asked as Canton Road,
+ * a different street whose corner was a mile off; "La Vista Rd" as Vista
+ * Rd, "Mc Donough Blvd" as Donough Blvd. The 17 after the type are litter
+ * ("Ct re ou NW", "Rd ay tt ra NW", "Dr Ss R SW") but for two: "Orange Grove
+ * PI SW" and "Cedar Ridge Or", the TYPE misread after a spelled-out word that
+ * is also a street word — so after a type spelled out ("Grove", "Ridge",
+ * "Way") nothing is dropped. This drops litter from 9 of the 605 and nothing
+ * else. A lone digit is never dropped: after the type it is the route's
+ * number (5 of the 6 there, "Georgia State Route 9"), and the old rule, which
+ * dropped it and every word after the last type, asked "Old Hwy 41 Kennesaw"
+ * as Old Hwy; before the type it is litter ("Twin Branch 4 Rd"), and the name
+ * is refused for it. Words after the last type were dropped as a town the
+ * reader glued on ("Westover Ln NW Kennesaw"): every one of those in the week
+ * is a dropoff with no comma, which map-view.js asks of Nominatim and never
+ * of this, while on the dropoffs that do reach this the same rule hit 12
+ * halves and 8 of them lost a route's number. */
+function cleaned(name) {
+  var raw = printed(name), ws = raw.map(short);
+  var last = -1;
+  ws.forEach(function (t, i) { if (i > 0 && isType(t)) last = i; });
+  if (last < 0 || Object.prototype.hasOwnProperty.call(TYPES, raw[last])) return ws;
+  return ws.filter(function (t, i) {
+    return i <= last || isWord(t) || !/^[a-z]{1,2}$/.test(t);
   });
-  var last = -1, typed = false;
-  out.forEach(function (t, i) {
-    if (isWord(t)) last = i;
-    if (i > 0 && isType(t)) typed = true;
-  });
-  if (typed && last >= 0 && last < out.length - 1) out = out.slice(0, last + 1);
-  return out;
 }
 
 // Whether two words are one edit apart (and not the same).
@@ -228,7 +253,7 @@ function load(file) {
 function match(ix, asked) {
   var q = words(asked);
   var tries = [q];
-  var c = cleaned(q);
+  var c = cleaned(asked);
   if (c.length && c.join(' ') !== q.join(' ')) tries.push(c);
   function found(list, how) {
     var names = [], keys = [];

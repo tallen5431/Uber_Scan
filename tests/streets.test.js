@@ -135,10 +135,12 @@ eq('...and in a long word: "Wen Rd" for Wren Road', m('Wen Rd'), 'Wren Road (ocr
 eq('...never one street word for another: "Pine St" is not Pine Court', m('Pine St'), ' (null)');
 eq('a name the index holds exactly is never widened to its neighbour: Heron Way '
    + 'is not also Herron Way', m('Heron Way'), 'Heron Way (exact)');
-eq('the OCR\'s litter is dropped: "Foxglove Trl x 4"', m('Foxglove Trl x 4'),
-   'Foxglove Trail (junk)');
-eq('...and a town the reader glued on: "Northgate Dr NE Marietta"',
-   m('Northgate Dr NE Marietta'), 'Northgate Drive (junk)');
+eq('the OCR\'s litter is dropped after the street\'s type: "Foxglove Trl x"',
+   m('Foxglove Trl x'), 'Foxglove Trail (junk)');
+// The town a reader glued on is only ever on a dropoff with no comma, which
+// map-view.js asks of Nominatim and never of this (see cleaned).
+eq('...but a word after the type is not dropped as a town: "Northgate Dr NE '
+   + 'Marietta" is refused', m('Northgate Dr NE Marietta'), ' (null)');
 eq('a name nothing like any street finds nothing', m('Quintessence Blvd'), ' (null)');
 // Guards measured on the week's real names (see the commit): each kept two
 // real, different streets apart.
@@ -146,6 +148,16 @@ function tiny(names) {
   return S.build({ format: S.FORMAT, e: 6, names: names, nodes: [0, 0, 1, 1],
                    ways: names.map(function (n, i) { return [[i], [0, 1]]; }) });
 }
+// "Ol Canton Rd" is the card's Old Canton Road with its first word misread;
+// dropped as litter it was asked as Canton Road, a different street whose
+// corner was a mile off.
+eq('"Ol Canton Rd" is not Canton Road: a word before the type is the name, never litter',
+   S.match(tiny(['Canton Road', 'Old Canton Road']), 'Ol Canton Rd').how, null);
+eq('a lone digit is a route\'s number, never litter: "Old Hwy 5" is not "Old Highway"',
+   S.match(tiny(['Old Highway']), 'Old Hwy 5').how, null);
+eq('nothing is dropped after a type spelled out, which may be the name: "Orange '
+   + 'Grove PI" is not "Orange Grove"', S.match(tiny(['Orange Grove']), 'Orange Grove PI').how,
+   null);
 eq('"17th St NW" is not "12th Street Northwest": no OCR letter is a digit',
    S.match(tiny(['12th Street Northwest']), '17th St NW').how, null);
 eq('"Parliament Ct" is not "Parliament Street"', S.match(tiny(['Parliament Street']),

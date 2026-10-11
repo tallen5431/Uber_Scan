@@ -288,14 +288,16 @@ What it answers, `GET /api/streets/cross?a=&b=&box=` and
   exactly, after case, punctuation and the USPS abbreviations both ways
   (Trl/Trail, Pkwy/Parkway, NW/Northwest …); with a directional on one side
   only (two that differ never match — in Atlanta NW and SE are different
-  streets); the same after dropping the OCR's litter ("Ct re ou NW", a town
-  glued on with no comma); and with one letter misread in one word ("Tri" for
+  streets); the same after dropping the OCR's litter — one- and two-letter
+  tokens after the street's type printed short ("Ct re ou NW"), never a word
+  before the type, which is the name ("Ol Canton Rd" is not Canton Road), and
+  never a digit; and with one letter misread in one word ("Tri" for
   Trl, "PI" for Pl, "Biue" for Blue) — never a digit (12th St NW and 17th St
   NW, both on the week's cards, stay apart), never one street word for another
   (Parliament Ct and Parliament St, both on the cards), never in a word under
-  four letters unless it is a street word. Each of the week's 715 cross-street
-  halves, asked of an index holding every other half, matched another in 37
-  cases: 36 the same street by reading, and bare "Peachtree St", which
+  four letters unless it is a street word. Each of the week's 722 cross-street
+  halves, asked of an index holding every other half, matched another in 29
+  cases: 28 the same street by reading, and bare "Peachtree St", which
   matched both Peachtree St NE and Peachtree St SW — two streets, and where
   each meets the other name is what decides between them. The card's town is
   never sent and never used.
