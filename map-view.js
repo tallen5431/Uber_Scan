@@ -912,11 +912,10 @@
    *
    * THE PIN IS THE POINT OF THE STRETCH NEAREST THE CAR (`car`, or the
    * disc's own centre when there is none) — a choice, not a finding: the
-   * card names the street, not where on it, and road miles need one point.
-   * Nearest is the choice that makes the road figure smallest for this end
-   * of it, and the panel's figure says when it rests on one
-   * (live.html mapFigure). The pin carries the kept stretch as `stretch`,
-   * [[lat, lon], ...] per run, for the map to draw, and `nearestOf: true`. */
+   * card names the street, not where on it. It is where the map puts the
+   * mark, and nothing more: no figure is measured to it (stretchSpan says
+   * why, and what the figure is instead). The pin carries the kept stretch
+   * as `stretch`, [[lat, lon], ...] per run, and `nearestOf: true`. */
   function stretchInDisc(lines, disc, car, name) {
     var runs = clipToDisc(lines, disc);
     if (!runs.length) {
@@ -934,6 +933,69 @@
                      return r.map(function (p) { return [p.lat, p.lon]; });
                    }) },
              n: runs.length };
+  }
+
+  /* How far out of the way, when an end is a numberless street: the figure
+   * at EVERY point of its stretch inside the card's disc, because the card
+   * says the street and not where on it. `lo` and `hi` are the least and
+   * most of MV.detour over those points (over both stretches when both ends
+   * are streets), and the figure is `stated` only when it is ONE answer
+   * wherever on the street the stop is: under ON_WAY_MI everywhere ("on
+   * your way" is true of all of it), or past it everywhere and less than
+   * ON_WAY_MI from least to most, said as the range. Anything else is
+   * refused, with how long the street runs in the disc (spanRefusal).
+   *
+   * Every point means every vertex and a point every SPAN_STEP_MI between
+   * (wider on a long street, so no stretch is more than SPAN_POINTS points
+   * and its own vertices): along a straight piece the detour is greatest at
+   * one of its ends, so `hi` is exact, and `lo` is within a step of the
+   * least.
+   *
+   * It replaced a figure measured to the pin, the point nearest the car,
+   * hedged on the line as "street pinned nearest you" — and nearest the car
+   * is not even the point that makes the figure smallest. On a street
+   * running 8 mi north-south a mile east of the car, in a 6.5 mi disc
+   * (tests/mapview.test.js holds these), true +1.5 was shown as +0.6, true
+   * +0.7 as "on your way", true +0.4 as +5.1. */
+  var ON_WAY_MI = 0.5;
+  var SPAN_STEP_MI = 0.02;
+  var SPAN_POINTS = 400;
+
+  // A pin as the points it may stand for, and how long its stretch is.
+  function spanPoints(pin) {
+    if (!pin.stretch) return { points: [pin], miles: 0 };
+    var runs = pin.stretch.map(function (r) {
+      return r.map(function (p) { return { lat: p[0], lon: p[1] }; });
+    });
+    var miles = 0;
+    runs.forEach(function (r) {
+      for (var i = 0; i + 1 < r.length; i++) miles += crowMiles(r[i], r[i + 1]);
+    });
+    var step = Math.max(SPAN_STEP_MI, miles / SPAN_POINTS), out = [];
+    runs.forEach(function (r) {
+      out.push(r[0]);
+      for (var i = 0; i + 1 < r.length; i++) {
+        var k = Math.max(1, Math.ceil(crowMiles(r[i], r[i + 1]) / step));
+        for (var j = 1; j <= k; j++) out.push(lerp(r[i], r[i + 1], j / k));
+      }
+    });
+    return { points: out, miles: miles };
+  }
+
+  function stretchSpan(car, pick, held) {
+    if (!car || !pick || !held || !(pick.stretch || held.stretch)) return null;
+    var ps = spanPoints(pick), hs = spanPoints(held);
+    var lo = Infinity, hi = -Infinity;
+    ps.points.forEach(function (p) {
+      hs.points.forEach(function (h) {
+        var d = detour(car, p, h);
+        if (d < lo) lo = d;
+        if (d > hi) hi = d;
+      });
+    });
+    return { lo: lo, hi: hi, miles: Math.max(ps.miles, hs.miles),
+             whose: ps.miles >= hs.miles ? 'new' : 'held',
+             stated: hi < ON_WAY_MI || (lo >= ON_WAY_MI && hi - lo < ON_WAY_MI) };
   }
 
   /* The words, for the two cards Map view measures with: this one ('new')
@@ -1106,6 +1168,17 @@
                                           : ' fit ' + card + ' and disagree'))
       + ' · within ' + disc.card + ' mi' + (disc.corrected ? ' (rig-corrected)' : '')
       + (mine ? where : '') + near;
+  }
+
+  /* Why a figure to a numberless street is not stated (stretchSpan): where
+     on it the stop is changes the answer, and the card does not say. The
+     refusal leads, as the disc's own lines do, and says how much street
+     there is to be anywhere on; `name` is the place cut to fit, `whose`
+     'new' (this card's disc) or 'held' (the held card's). */
+  function spanRefusal(span, name, whose) {
+    if (!span || span.stated) return null;
+    return 'no figure for ' + name + ' — the street runs ' + span.miles.toFixed(1)
+      + ' mi in ' + (whose === 'new' ? 'the card' : 'its card');
   }
 
   /* Every place the loaded offers name, once each, in the order first seen. */
@@ -2174,6 +2247,8 @@
            searchPlan: searchPlan, discFor: discFor, discBox: discBox,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,
+           stretchSpan: stretchSpan, spanRefusal: spanRefusal, ON_WAY_MI: ON_WAY_MI,
+           SPAN_STEP_MI: SPAN_STEP_MI,
            NbxSearch: NbxSearch, nbxSettings: nbxSettings,
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,
            NBX_GAP_MS: NBX_GAP_MS, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,

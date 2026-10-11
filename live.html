@@ -3968,8 +3968,10 @@
              key: names.join('|') + '#' + (o.id || ''),
              // What the NucBox said about these places on this walk: a
              // refusal per place, with the disc it was made in, and why the
-             // NucBox could not be asked at all (and the public map was).
-             nbxWhy: {}, nbxDown: null };
+             // NucBox could not be asked at all (and the public map was) —
+             // and how many it answered before that, so "public map used"
+             // is never said of a pin the NucBox gave.
+             nbxWhy: {}, nbxDown: null, nbxAnswered: 0 };
   }
 
   /* A place name, cut to what fits the caption's cap.
@@ -4188,6 +4190,7 @@
             continue;
           }
           found[q] = got.at || null;
+          want.nbxAnswered++;
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
           landed();
         }
@@ -4222,9 +4225,17 @@
       if (nbx.route) {
         var j = mapJudge(want, found, here);
         if (mapRefusal(want, found, here, j) === null) {
-          mapSay('measuring the detour by road…');
-          road = await mapNbx.detour(here, j.pick, j.held);
-          if (viewMode !== 'map' || mapFor !== key) return;
+          // ...and never to a numberless street's pin: the router measures
+          // one point, and the card says the street, not where on it. Its
+          // figure is MV.stretchSpan's, over the whole stretch, in straight
+          // lines, and the line says why there is no road figure.
+          if (MV.stretchSpan(here, j.pick, j.held)) {
+            road = { why: 'street' };
+          } else {
+            mapSay('measuring the detour by road…');
+            road = await mapNbx.detour(here, j.pick, j.held);
+            if (viewMode !== 'map' || mapFor !== key) return;
+          }
         }
       }
       drawMap(want, found, here, true, road);
@@ -4588,6 +4599,17 @@
     said = MV.againstCard(want.heldCard, heldFix.at, held,
                           shortPlace(want.held, DISC_PLACE_SHOWN), 'held');
     if (said) return said;
+    /* ...and a numberless street whose figure depends on where along it the
+       stop is: MV.stretchSpan measures the figure at every point of its
+       stretch inside the card's disc, and where those are not one answer
+       the line says how long the street runs there instead of choosing a
+       point. Measured to the point nearest the car, this showed true +1.5
+       as +0.6 and true +0.4 as +5.1 (tests/mapview.test.js). */
+    var span = MV.stretchSpan(here, pick, held);
+    if (span && !span.stated) {
+      return MV.spanRefusal(span, shortPlace(span.whose === 'new' ? want.pickup : want.held,
+                                             DISC_PLACE_SHOWN), span.whose);
+    }
     return null;
   }
 
@@ -4618,7 +4640,7 @@
       ? ' · ' + missed.length + (dead.length ? ' not asked' : ' not found')
       : '';
     // Which of the NucBox's services did not answer, if one was asked. The
-    // search first: its absence means every pin here came from the public
+    // search first: its absence means the pins after it came from the public
     // map, which is the bigger thing to know about the line.
     // Keyed on MV.NbxSearch's own words for it, so nothing but caption text
     // is written as a literal here (rpi/test_layout.py measures every one).
@@ -4626,36 +4648,43 @@
     // will not state: a point it moved more than MV.SNAP_MI to reach a road,
     // a figure below zero by more than the panel's rounding (OSRM's fastest
     // road direct, a shorter slower one by the pickup — MV.ROAD_SAME_MI),
-    // and the relay refusing the question, which is a bug here.
+    // and the relay refusing the question, which is a bug here. And
+    // `street`, a road figure the router was never asked for: an end that is
+    // a numberless street, whose figure is the straight line's over its
+    // whole stretch (MV.stretchSpan; showMap).
     var roadDown = { unreachable: ' · NucBox router down', noroute: ' · no road found',
                      snap: ' · a pin over ' + MV.SNAP_MI + ' mi off road',
                      otherroads: ' · router took different roads',
-                     refused: ' · road question refused, a bug' };
+                     refused: ' · road question refused, a bug',
+                     street: ' · whole street, no road figure' };
     // One or the other, the search first. Both together ran past two rows at
     // 800x480 (rpi/test_layout.py), and with the search down the line still
     // says it is straight lines, not roads — only the road's reason goes.
-    // A pin that stands for a whole street, not a door or a corner: the
-    // point of the street's stretch inside its card's disc nearest the car
-    // (MV.stretchInDisc). The figure is measured to that point, which the
-    // card never named, so the line says the figure rests on it.
-    var along = (pick && pick.nearestOf) || (held && held.nearestOf)
-      ? ' · street pinned nearest you' : '';
-    // ONE note after the count. The search down comes first, because then
-    // the pins are the public map's; then the street's nearest point, a
-    // hedge on the figure itself; then why the road is missing, which the
-    // label already says in "straight lines, not roads". Either of the first
-    // two with a road reason after it ran past two rows at 800x480
-    // (rpi/test_layout.py).
-    var nucbox = want.nbxDown ? ' · NucBox down, public map used'
-      : along || (road && road.why && roadDown[road.why]) || '';
+    // "public map used" when the NucBox answered nothing before it went
+    // down; when it answered some places first — a corner, a street's
+    // stretch — those pins are its own, and the line says the public map
+    // had only the rest.
+    var nucbox = want.nbxDown
+      ? (want.nbxAnswered ? ' · NucBox down, public map for the rest'
+                          : ' · NucBox down, public map used')
+      : (road && road.why && roadDown[road.why]) || '';
+    var cut = MV.ON_WAY_MI;
     if (road && isFinite(road.miles)) {
-      return (road.miles < 0.5 ? 'this pickup is on your way by road'
+      return (road.miles < cut ? 'this pickup is on your way by road'
                                : '+' + road.miles.toFixed(1) + ' road mi out of your way')
         + count + nucbox;
     }
-    var gap = MV.detour(here, pick, held);
-    return (gap < 0.5 ? 'this pickup is on your way'
-                      : '+' + gap.toFixed(1) + ' mi out of your way')
+    /* An end that is a numberless street: the figure wherever on it the stop
+       is (MV.stretchSpan; mapRefusal refused it where that is not one
+       answer). "On your way" is true of all of it, or the least and the most
+       as a range, so nothing is measured to a point the card never named.
+       The range needs no hedge after it: it IS the hedge, in the figure's
+       own place, where no clamp reaches. */
+    var span = MV.stretchSpan(here, pick, held);
+    var lo = span ? span.lo : MV.detour(here, pick, held), hi = span ? span.hi : lo;
+    var most = hi.toFixed(1) === lo.toFixed(1) ? '' : '–' + hi.toFixed(1);
+    return (hi < cut ? 'this pickup is on your way'
+                     : '+' + lo.toFixed(1) + most + ' mi out of your way')
       + ' — straight lines, not roads'
       + count + nucbox;
   }

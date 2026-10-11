@@ -1142,7 +1142,7 @@ async function nucbox() {
      st3.at && [st3.at.lat, st3.at.lon, st3.at.nearestOf].join(','), '33.948,-84.552,true');
   eq('...and with the car at its west end, there: the pin is the car\'s, not the street\'s',
      (MV.stretchInDisc(lark, d3, { lat: 33.948, lon: -84.58 }, 'L').at || {}).lon, -84.565);
-  eq('...carrying the part of the street inside the disc, to be drawn',
+  eq('...carrying the part of the street inside the disc, for the figure along it',
      JSON.stringify(st3.at && st3.at.stretch), JSON.stringify([lark[0]]));
   var st94 = MV.stretchInDisc(lark, d94, SQ, 'L');
   eq('two stretches of one name 6.4 mi apart, both inside a 9.4 mi card, are two '
@@ -1151,6 +1151,84 @@ async function nucbox() {
   var stOut = MV.stretchInDisc([lark[1]], d3, SQ, 'L');
   eq('...and a stretch wholly outside the disc is none, with how far it was',
      [stOut.why, stOut.nearest && stOut.nearest.toFixed(1)].join(','), 'none,6.8');
+
+  /* The figure to a numberless street (MV.stretchSpan): the detour at every
+     point of its stretch in the disc, stated only where it is one answer.
+     The cases are q8v/nearest.js's, where the figure was measured to the
+     pin nearest the car: a street running 8 mi north-south a mile east of
+     the car, in a 6.5 mi disc, showed true +1.5 as +0.6, true +0.7 as "on
+     your way" and true +0.4 as +5.1. */
+  var CAR = { lat: 33.95, lon: -84.55 };
+  function mi(eastMi, northMi) {
+    return { lat: CAR.lat + northMi / 69.0,
+             lon: CAR.lon + eastMi / (69.0 * Math.cos(CAR.lat * Math.PI / 180)) };
+  }
+  function road(x0, y0, x1, y1) {
+    var line = [];
+    for (var k = 0; k <= 80; k++) {
+      var q = mi(x0 + (x1 - x0) * k / 80, y0 + (y1 - y0) * k / 80);
+      line.push([q.lat, q.lon]);
+    }
+    return [line];
+  }
+  function spanOf(lines, discMi, pickAt, truth) {
+    var dsc = { at: CAR, miles: discMi, card: discMi, corrected: false };
+    var pin = MV.stretchInDisc(lines, dsc, CAR, 'S').at;
+    var sp = MV.stretchSpan(CAR, pickAt, pin);
+    return { sp: sp, pinFig: MV.detour(CAR, pickAt, pin), truth: MV.detour(CAR, pickAt, truth) };
+  }
+  var longRoad = road(1, -4, 1, 4);
+  var cases = [spanOf(longRoad, 6.5, mi(1, 0.5), mi(1, -3)),
+               spanOf(longRoad, 6.5, mi(1, 0.2), mi(1, 3)),
+               spanOf(longRoad, 6.5, mi(0.5, 3), mi(1, 3))];
+  eq('a figure to the pin nearest the car was wrong by up to five miles: true '
+     + '+1.5, +0.7, +0.4 against the pin\'s',
+     cases.map(function (c) { return c.truth.toFixed(1) + '/' + c.pinFig.toFixed(1); }).join(' '),
+     '1.5/0.6 0.7/0.2 0.4/5.1');
+  eq('...and each is refused now: the figure along the street runs from 0.0 to as '
+     + 'much as 5.9, not one answer',
+     cases.map(function (c) { return c.sp.stated + ' ' + c.sp.lo.toFixed(1) + '-' + c.sp.hi.toFixed(1); })
+       .join(', '), 'false 0.0-1.5, false 0.0-1.1, false 0.0-5.9');
+  eq('...in words that lead with the refusal and say how long the street runs in '
+     + 'the card', MV.spanRefusal(cases[0].sp, 'Long St', 'held'),
+     'no figure for Long St — the street runs 8.0 mi in its card');
+  eq('...or this card\'s', MV.spanRefusal(cases[0].sp, 'Long St', 'new'),
+     'no figure for Long St — the street runs 8.0 mi in the card');
+  var short6 = spanOf(road(-0.3, 2, 0.3, 2), 4, mi(1, 0), mi(-0.2, 2));
+  eq('a 0.6 mi street whose figure goes from +1.1 to +1.4 along it is stated, as that '
+     + 'range, with the truth (+1.3) inside it',
+     [short6.sp.stated, short6.sp.lo.toFixed(1), short6.sp.hi.toFixed(1),
+      short6.truth >= short6.sp.lo && short6.truth <= short6.sp.hi].join(','),
+     'true,1.1,1.4,true');
+  eq('...and no words to refuse it with', MV.spanRefusal(short6.sp, 'S', 'new'), null);
+  var wide15 = spanOf(road(-0.75, 2, 0.75, 2), 4, mi(1, 0), mi(0.6, 2));
+  eq('the same street 1.5 mi long goes from +0.9 to +1.5: half a mile or more apart '
+     + 'is refused', [wide15.sp.stated, wide15.sp.lo.toFixed(1), wide15.sp.hi.toFixed(1)].join(','),
+     'false,0.9,1.5');
+  var onWay = spanOf(road(-0.15, 3, 0.15, 3), 4, mi(0, 1), mi(0.1, 3));
+  eq('a short street straight ahead is "on your way" from every point of it',
+     [onWay.sp.stated, onWay.sp.hi < MV.ON_WAY_MI].join(','), 'true,true');
+  // A held end on a street 2 mi ahead, the pickup 1 mi ahead: the figure
+  // is 0 where the street crosses the way straight on, and grows either side.
+  function heldOn(x0, x1) {
+    return { lat: 0, lon: 0, stretch: [[[mi(x0, 2).lat, mi(x0, 2).lon],
+                                        [mi(x1, 2).lat, mi(x1, 2).lon]]] };
+  }
+  // The cut "on your way" is said under. A span across it is refused even
+  // when it is narrow: "on your way" at one end and not at the other.
+  var straddle = MV.stretchSpan(CAR, mi(0, 1), heldOn(2, 3));
+  eq('a figure from +0.4 to +0.6 is refused: "on your way" at one end, not the other',
+     [straddle.stated, straddle.lo.toFixed(1), straddle.hi.toFixed(1)].join(','),
+     'false,0.4,0.6');
+  // ...and measured at every point, not at the ends: a street 6 mi long
+  // crossing the way has its least, 0, in the middle, where both its ends
+  // are +0.6. Measured at its ends it was +0.6 at both, stated as one figure.
+  var across = MV.stretchSpan(CAR, mi(0, 1), heldOn(-3, 3));
+  eq('...and measured along the street, not at its ends: one crossing the way ahead '
+     + 'has its least, 0.0, in the middle, so it is refused',
+     [across.stated, across.lo.toFixed(1), across.hi.toFixed(1)].join(','), 'false,0.0,0.6');
+  eq('no stretch at either end is no span: the figure is the pins\' own',
+     MV.stretchSpan(CAR, mi(0, 1), mi(0, 2)), null);
 
   /* The words for a corner. */
   eq('a corner whose streets meet twice in the card',

@@ -4416,8 +4416,11 @@ and the line's tail says so. With neither setting, nothing here changes.
 ("Foothill Trl & Northwoods Dr") is pinned where those two streets meet inside
 the card's disc, and refused when they meet in more than one place there ("no
 pin for … — 2 corners fit the card") or nowhere; a street
-with no number is its stretch inside the disc, pinned at the point nearest the
-car, and the figure measured to that point ends "· street pinned nearest you".
+with no number is its stretch inside the disc, marked at the point nearest the
+car, and its figure is the straight line's over the whole stretch — "on your
+way" or a range ("+3.7–4.2 mi out of your way") when that is one answer along
+it, and otherwise refused ("no figure for … — the street runs 1.4 mi in its
+card"), never measured to the mark.
 
 ### A rig that was blind for a whole shift, and nothing said so
 

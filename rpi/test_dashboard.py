@@ -3180,7 +3180,7 @@ const framed = (page) => page.waitForFunction(
           offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
                                  billedMinutes: 20.0, cost: 1.4,
                                  pickup: x.pickup || "McDonald's (Marietta Sq)",
-                                 dropoff: 'Church St, Marietta' }, card) });
+                                 dropoff: x.dropoff || 'Church St, Marietta' }, card) });
       }, Object.assign({ SQ: SQ }, a));
       const note = () => page.evaluate(
         () => document.getElementById('viewNote').textContent.trim());
@@ -3270,6 +3270,16 @@ const framed = (page) => page.waitForFunction(
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
         await page.waitForTimeout(1500);
         r.bug = await note();
+        // The NucBox answering the pickup and then going quiet: "Slow Place"
+        // answers past NUCBOX_TIMEOUT_MS, so the dropoff and the held end are
+        // the public map's, and the pickup's pin is still the NucBox's. What
+        // it asked the public map is taken out of `publicAsked`, which says
+        // what the other cards asked of it: nothing.
+        const askedBefore = publicAsked.length;
+        await push({ id: 'n-slow', dropoff: 'Slow Place' });
+        await page.waitForTimeout(4000);
+        r.downLater = await note();
+        r.downLaterAsked = publicAsked.splice(askedBefore);
       }
       if (which === 'streets') {
         /* The street index, on the NucBox's own server, relayed. The held
@@ -3292,15 +3302,36 @@ const framed = (page) => page.waitForFunction(
         r.twiceHeld = await heldPin();
         // A numberless street the index holds: its stretch inside the held
         // card's disc, pinned at the point nearest the car, and the figure
-        // says it rests on that point.
+        // the straight line's at every point of the stretch — worked out
+        // here at a thousand points along the fixture's Larkspur Parkway
+        // (33.948, -84.565 to -84.552), not by the page's MV.stretchSpan.
+        const routesAt = async () => (await (await fetch(FAKE + '/__asked')).json())
+          .filter((u) => /^\/route/.test(u)).length;
+        r.stretchRoutesBefore = await routesAt();
         await push({ id: 's-stretch', held: 'Larkspur Pkwy SE, Atlanta',
                      heldCard: { miles: 3.0 } });
         await page.waitForTimeout(1500);
         r.stretch = await note();
         r.stretchHeld = await heldPin();
-        r.stretchWant = await page.evaluate(() => 1.25 * window.MapView.detour(
-          { lat: 33.9526, lon: -84.5499 }, { lat: 33.9830, lon: -84.5499 },
-          { lat: 33.948, lon: -84.552 }));
+        r.stretchRoutesAfter = await routesAt();
+        r.stretchWant = await page.evaluate(() => {
+          const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
+          const A = { lat: 33.9830, lon: -84.5499 };
+          let lo = Infinity, hi = -Infinity;
+          for (let i = 0; i <= 1000; i++) {
+            const d = MV.detour(C, A, { lat: 33.948, lon: -84.565 + 0.013 * i / 1000 });
+            lo = Math.min(lo, d); hi = Math.max(hi, d);
+          }
+          return [lo, hi];
+        });
+        // ...and one whose figure is not one answer along it: Northgate
+        // Drive runs 1.4 mi north from the Square, and the figure goes from
+        // +1.8 at its north end to +4.2 at its south.
+        await push({ id: 's-long', held: 'Northgate Dr, Marietta',
+                     heldCard: { miles: 3.0 } });
+        await page.waitForTimeout(1500);
+        r.longStreet = await note();
+        r.longStreetHeld = await heldPin();
       }
       r.publicAsked = publicAsked;
       out.nbx[which] = r;
@@ -6181,6 +6212,15 @@ try:
     ok_('a NucBox search that is not there falls back to the public map under '
         'the same press, and says so (%r)' % nosearch.get('one'),
         _m and abs(float(_m.group(1)) - _want) < 0.051)
+    # ...and the NucBox going quiet after it answered the pickup: that pin is
+    # its own, so the line does not say the public map placed everything.
+    _m = re.match(r'^\+(\d+\.\d) road mi out of your way · 1 not found · NucBox down, '
+                  r'public map for the rest$', both.get('downLater') or '')
+    ok_('a NucBox that answers the pickup and then goes quiet says the public map had '
+        'only the rest (%r)' % both.get('downLater'),
+        _m and abs(float(_m.group(1)) - _want) < 0.051
+        and 'Slow Place' in (both.get('downLaterAsked') or [])
+        and "McDonald's (Marietta Sq)" not in (both.get('downLaterAsked') or []))
     eq('...which was asked the places, as it always was',
        sorted(set(nosearch.get('publicAsked') or [])),
        ['Church St, Marietta', "McDonald's (Marietta Sq)", 'Shadowood Pkwy SE, Atlanta'])
@@ -6226,13 +6266,26 @@ try:
         '(%r)' % st.get('twice'),
         re.match(r'^no pin for Juniper.* — 2 corners fit its card · within 3 mi$',
                  st.get('twice') or '') and st.get('twiceHeld') is None)
-    _m = re.match(r'^\+(\d+\.\d) road mi out of your way · street pinned nearest you$',
-                  st.get('stretch') or '')
-    ok_('a numberless street is pinned at the point of its stretch nearest the car, '
-        'and the figure says it rests on it (%r, %r)' % (st.get('stretch'), st.get('stretchHeld')),
-        _m and abs(float(_m.group(1)) - (st.get('stretchWant') or 0)) < 0.051
-        and st.get('stretchHeld')
+    # The figure to a numberless street is the straight line's wherever on
+    # its stretch the stop is, as a range — never one figure measured to the
+    # pin, a point the card never named (map-view.js stretchSpan).
+    _sw = st.get('stretchWant') or [0, 0]
+    _m = re.match(r'^\+(\d+\.\d)–(\d+\.\d) mi out of your way — straight lines, not roads'
+                  r' · whole street, no road figure$', st.get('stretch') or '')
+    ok_('a numberless street\'s figure is the range along its stretch in the card, '
+        'in straight lines, and says why there is no road figure (%r, %.2f-%.2f wanted)'
+        % (st.get('stretch'), _sw[0], _sw[1]),
+        _m and abs(float(_m.group(1)) - _sw[0]) < 0.051
+        and abs(float(_m.group(2)) - _sw[1]) < 0.051)
+    ok_('...its pin at the point of the stretch nearest the car (%r)' % (st.get('stretchHeld'),),
+        st.get('stretchHeld')
         and abs(st['stretchHeld'][0] - 33.948) < 1e-6 and abs(st['stretchHeld'][1] + 84.552) < 1e-6)
+    eq('...and the router not asked: it measures one point, and the card names a street',
+       st.get('stretchRoutesAfter'), st.get('stretchRoutesBefore'))
+    ok_('a numberless street whose figure is not one answer along it is refused, '
+        'with how long it runs in the card (%r)' % st.get('longStreet'),
+        re.match(r'^no figure for Northgate.* — the street runs 1\.4 mi in its card$',
+                 st.get('longStreet') or '') and st.get('longStreetHeld'))
     eq('...and with the NucBox answering, the public map is asked nothing',
        st.get('publicAsked'), [])
     _lines = [v for r in (both, noroad, nosearch, st) for k, v in r.items()

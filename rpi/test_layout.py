@@ -600,21 +600,30 @@ CAPTION_LINES = [
      'this pickup is on your way — straight lines, not roads · 1 not asked '
      '· NucBox down, public map used',
      'this pickup is on your way — straight lines, not roads'),
+    # ...and the NucBox down after it answered a place — a corner, a street's
+    # stretch — whose pin is its own, so the public map had only the rest.
+    ('the road figure, the NucBox down after a place',
+     'this pickup is on your way by road · 1 not found · NucBox down, public '
+     'map for the rest',
+     'this pickup is on your way by road'),
     ('the figure, its router down',
      'this pickup is on your way — straight lines, not roads · 1 not found '
      '· NucBox router down',
      'this pickup is on your way — straight lines, not roads'),
-    # ...and a figure measured to a numberless street's pin, which is the
-    # point of its stretch nearest the car (MV.stretchInDisc): the one note
-    # after the count, in place of a road's reason. With the router's reason
-    # after it as well, or the search's, it ran past two rows at 800x480.
-    ('the road figure, to a street\'s nearest point',
-     '+13.2 road mi out of your way · 1 not found · street pinned nearest you',
-     '+13.2 road mi out of your way'),
-    ('the figure, to a street\'s nearest point',
-     'this pickup is on your way — straight lines, not roads · 1 not found '
-     '· street pinned nearest you',
-     'this pickup is on your way — straight lines, not roads'),
+    # ...and a figure to a numberless street: the straight line's at every
+    # point of its stretch in the card (MV.stretchSpan), a range when its
+    # least and most print differently. The range is in what the clamp
+    # keeps, so the figure is never a single number for a point the card
+    # never named; the router is not asked, and the tail says why — or, the
+    # NucBox down after it answered the street, that instead.
+    ('the figure, anywhere on a street',
+     '+13.2–13.6 mi out of your way — straight lines, not roads · 1 not found '
+     '· whole street, no road figure',
+     '+13.2–13.6 mi out of your way — straight lines, not roads'),
+    ('the figure, anywhere on a street, the NucBox down after it',
+     '+13.2–13.6 mi out of your way — straight lines, not roads · 1 not asked '
+     '· NucBox down, public map for the rest',
+     '+13.2–13.6 mi out of your way — straight lines, not roads'),
     ('the figure, no road found',
      'this pickup is on your way — straight lines, not roads · 1 not found '
      '· no road found',
@@ -730,18 +739,25 @@ CAPTION_LINES = [
      "no pin for " + WIDEST_DISC + " — too many to be sure"),
     ('no pin, the rig refused the question',
      "no pin for " + WIDEST_DISC + " — a bug: the rig refused the question"),
+    # ...and a numberless street pinned, whose figure is not one answer along
+    # its stretch in the card (MV.spanRefusal): refused, with how long it runs.
+    ('no figure, a street that runs through this card',
+     "no figure for " + WIDEST_DISC + " — the street runs 99.9 mi in the card"),
+    ('no figure, a street that runs through the held card',
+     "no figure for " + WIDEST_DISC + " — the street runs 99.9 mi in its card"),
 ]
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. TWENTY-NINE entries have one, and they are four judgements: the
+# ellipsise. THIRTY entries have one, and they are four judgements: the
 # count of places with no pin, whose tail is ` · 1 not asked` or ` · 1 not
 # found` depending on which it was, with one note after it: the NucBox's
-# search down (` · NucBox down, public map used`), else ` · street pinned
-# nearest you` where the figure is measured to the point of a street's
-# stretch nearest the car, else why the road was not stated (` · NucBox
-# router down`, ` · no road found`, ` · a pin over 0.2 mi off road`, ` ·
-# router took different roads`, ` · road question refused, a bug`); the
+# search down (` · NucBox down, public map used`, or `...public map for the
+# rest` when it answered a place first), else why the road was not stated
+# (` · NucBox router down`, ` · no road found`, ` · a pin over 0.2 mi off
+# road`, ` · router took different roads`, ` · road question refused, a
+# bug`, ` · whole street, no road figure`) — never a hedge on the figure,
+# which a figure to a street carries as its range, in what is kept; the
 # consequence of a pin that is plainly
 # wrong, whose tail is `, so no distance`; the card's own figure beside a
 # pin it contradicts, whose tail is `, past the card's 9.4 mi` with the
@@ -750,7 +766,7 @@ CAPTION_LINES = [
 # readable is a refusal and never a bare distance; and the disc the NucBox
 # searched in, ` · within 99.9 mi (rig-corrected) of you, nearest 74.9 mi`
 # (or the limit a cut list or a stretch stopped at), behind "no pin for" and
-# the few words saying why — a corner's "its streets meet in 50 places" among
+# the few words saying why — a corner's "50 corners fit the card" among
 # them — the same way round.
 # Each is the end of its sentence
 # precisely so that it is what a clamp eats; everything before it is a figure
@@ -773,9 +789,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 73)
-eq('...and twenty-nine of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 29)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 76)
+eq('...and thirty of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 30)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:

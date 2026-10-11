@@ -391,19 +391,25 @@ all:
   (two names carried by one road), "...a street name not on the NucBox",
   "...not two street names". A street with no number is its stretch
   inside the disc — refused as "2 fit the card and disagree" when it is two
-  streets of one name more than a mile apart — and pinned at **the point of
-  the stretch nearest the car**: the card names the street, not where on it,
-  and the road figure needs one point. A figure measured to such a pin says
-  so: "+2.3 road mi out of your way · street pinned nearest you" — the one
-  note after the count, so with the NucBox's search down it gives way to
-  "· NucBox down, public map used", and it takes the place of a road's
-  reason (the label already says "straight lines, not roads"). The stretch
-  itself is kept with the pin for the map to draw. A street the index does
-  not hold (outside its metro, say) is asked of Nominatim as before.
+  streets of one name more than a mile apart — and its pin goes at the point
+  of the stretch nearest the car, as a mark only: the card names the street,
+  not where on it, so **no figure is measured to that point**. The figure
+  is the straight line's at every point of the stretch, and it is stated
+  only when that is one answer: "this pickup is on your way" when it is
+  under half a mile everywhere, or the range when it is past half a mile
+  everywhere and less than half a mile from least to most ("+3.7–4.2 mi out
+  of your way — straight lines, not roads · whole street, no road figure").
+  Otherwise it is refused, with how long the street runs there: "no figure
+  for Northgate… — the street runs 1.4 mi in its card". Measured to the
+  point nearest the car, a street running 8 mi past the car showed a true
+  +1.5 as +0.6 and a true +0.4 as +5.1. The router is not asked: it
+  measures one point. A street the index does not hold (outside its metro,
+  say) is asked of Nominatim as before.
 * **When the NucBox does not answer**, the panel falls back to the public
   geocoder for the places it could not ask, and to straight lines for the
   figure, and says which: "· NucBox down, public map used", "· NucBox router
-  down". A router that answers there is no road between the points (OSRM's
+  down" — and "· NucBox down, public map for the rest" when it answered some
+  places first, whose pins are still its own. A router that answers there is no road between the points (OSRM's
   NoRoute, and only that) leaves the straight line too, with "· no road
   found"; any other refusal from OSRM is the router down. A question the
   rig's own server refuses is a bug in the page, said as one ("no pin for X
