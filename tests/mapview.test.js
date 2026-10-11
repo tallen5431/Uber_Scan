@@ -886,6 +886,233 @@ function gaps(sent) {
   return sent.slice(1).map(function (s, i) { return s.at - sent[i].at; });
 }
 
+/* ---- the NucBox: searching inside the card's disc, and the road -----------
+ *
+ * Against the REAL server.js, relaying to tests/fake-nucbox.js — the one fake
+ * NucBox the three suites share, in the real install's answer shapes — so
+ * what is checked is the page's half and the server's half together, through
+ * real HTTP. Every point is invented round Marietta Square (33.9526,
+ * -84.5499) and the public places near it; distances from the Square,
+ * measured with crowMiles: the fake's McDonald's are 2.10 mi (north), 5.49
+ * (Cumberland), 10.64 (Kennesaw) and 21.81 (Acworth); Shadowood Parkway's two
+ * pieces are 7.27 away and 0.275 apart; 1985 Cobb Parkway is 3.36; the two
+ * Church Streets 0.39 (Marietta) and 5.23 (Smyrna). */
+function startServer(env) {
+  var cp = require('child_process'), path = require('path'), os = require('os');
+  var fs = require('fs'), net = require('net');
+  return new Promise(function (resolve, reject) {
+    var probe = net.createServer().listen(0, '127.0.0.1', function () {
+      var port = probe.address().port;
+      probe.close(function () {
+        var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mvnbx-'));
+        var proc = cp.spawn('node', [path.join(__dirname, '..', 'server.js')], {
+          env: Object.assign({}, process.env, env, {
+            PORT: String(port), HTTPS_PORT: '0', SCANNER: '0',
+            JOURNAL: path.join(dir, 'journal.jsonl') }),
+          stdio: 'ignore' });
+        var base = 'http://127.0.0.1:' + port;
+        var tries = 0;
+        (function poll() {
+          fetch(base + '/api/status').then(function () {
+            resolve({ base: base, stop: function () { proc.kill(); } });
+          }, function () {
+            if (++tries > 100) { proc.kill(); reject(new Error('server never came up')); }
+            else setTimeout(poll, 100);
+          });
+        }());
+      });
+    });
+  });
+}
+
+async function nucbox() {
+  var FAKE = require('./fake-nucbox.js');
+  var SQ = { lat: 33.9526, lon: -84.5499 };
+  function card(o) {
+    return Object.assign({ lat: SQ.lat, lon: SQ.lon, gpsAge: 0.6, gpsErr: 12, gpsMode: 3,
+                           gpsOk: true, gpsWhy: null, miles: 9.4, hasTotal: true,
+                           legs: 2, whole: true }, o || {});
+  }
+  function hitsOf(list) {
+    return list.map(function (h) {
+      return { lat: Number(h.lat), lon: Number(h.lon), name: h.display_name, kind: h.type };
+    });
+  }
+
+  /* What is asked, by the shape of the string. */
+  eq('a bracket that opens with a house number is asked as that street',
+     JSON.stringify(MV.searchPlan("Jimmy John's (1985 Cobb Parkway NW)")),
+     JSON.stringify({ kind: 'street', street: '1985 Cobb Parkway NW', town: null,
+                      door: true }));
+  eq('...and one the card\'s edge cut off is still the street',
+     MV.searchPlan("Culver's (1275 Hwy").street, '1275 Hwy');
+  eq('"Street, Town" is the street, with the town kept only to break a tie',
+     JSON.stringify(MV.searchPlan('Shadowood Pkwy SE, Atlanta Pverel')),
+     JSON.stringify({ kind: 'street', street: 'Shadowood Pkwy SE',
+                      town: 'Atlanta Pverel', door: false }));
+  eq('...and the Trip Planner\'s door line the same, its state and ZIP no town',
+     JSON.stringify(MV.searchPlan('77 Birch Ln NW, Roswell, GA 30075')),
+     JSON.stringify({ kind: 'street', street: '77 Birch Ln NW', town: 'Roswell',
+                      door: true }));
+  eq('cross streets are not asked of a search that answers one point a street',
+     MV.searchPlan('Birch Ln & Kestrel Dr, Roswell').kind, 'cross');
+  eq('a merchant is asked by name, its "(Plaza)" dropped',
+     JSON.stringify(MV.searchPlan("McDonald's (Marietta Sq)")),
+     JSON.stringify({ kind: 'name', q: "McDonald's" }));
+
+  /* The disc: the card's fix, its distance plus the half mile. */
+  var d94 = MV.discFor(card());
+  eq('a card with a fix and a yardstick is searched in its own distance plus '
+     + 'the half mile', d94.miles, 9.9);
+  eq('...a card with a fix and no yardstick in the sixty miles the public box '
+     + 'stands for', JSON.stringify([MV.discFor(card({ legs: 1, hasTotal: false })).miles,
+                                     MV.discFor(card({ legs: 1, hasTotal: false })).card]),
+     JSON.stringify([60, null]));
+  eq('...and a card with no fix the gate passed in nothing',
+     MV.discFor(card({ gpsOk: false, gpsWhy: 'rough', gpsErr: 129.2 })), null);
+  var vb = MV.discBox(d94).split(',').map(Number);
+  ok_('the box asked for holds the whole disc (' + vb.join(',') + ')',
+      [{ lat: SQ.lat + 9.9 / 69, lon: SQ.lon }, { lat: SQ.lat - 9.9 / 69, lon: SQ.lon },
+       { lat: SQ.lat, lon: SQ.lon + 9.9 / (69 * Math.cos(SQ.lat * Math.PI / 180)) },
+       { lat: SQ.lat, lon: SQ.lon - 9.9 / (69 * Math.cos(SQ.lat * Math.PI / 180)) }]
+        .every(function (p) {
+          return p.lon >= vb[0] && p.lat <= vb[1] && p.lon <= vb[2] && p.lat >= vb[3];
+        }));
+
+  /* Choosing among the candidates — pickInDisc, on all four branches at once,
+     so the disc and not the box is what decides. */
+  var mcd = hitsOf(FAKE.MCD);
+  var one = MV.pickInDisc(mcd, MV.discFor(card({ miles: 3.0 })), MV.searchPlan("McDonald's"));
+  eq('the disc keeps the one branch inside a 3.0 mi card\'s distance, of four',
+     one.at && [one.at.lat, one.at.lon, one.n].join(','), '33.983,-84.5499,1');
+  var two = MV.pickInDisc(mcd, d94, MV.searchPlan("McDonald's"));
+  eq('...and refuses two inside a 9.4 mi card that are not one place',
+     JSON.stringify([two.at, two.why, two.n]), JSON.stringify([null, 'several', 2]));
+  var far = MV.pickInDisc(mcd, MV.discFor(card({ lat: 33.9700, lon: -84.5650, miles: 0.6 })),
+                          MV.searchPlan("McDonald's"));
+  eq('...and refuses when none is inside, saying how far the nearest was',
+     JSON.stringify([far.at, far.why, typeof far.nearest === 'number' ? far.nearest.toFixed(2) : null]),
+     JSON.stringify([null, 'none', '1.25']));
+  var street = MV.pickInDisc(hitsOf(FAKE.SHADOWOOD), d94,
+                             MV.searchPlan('Shadowood Pkwy SE, Atlanta'));
+  ok_('a street answered in two pieces 0.275 mi apart is one street, pinned between them',
+      street.at && Math.abs(street.at.lat - 33.8779) < 0.0001 && !street.byTown);
+  var church = hitsOf(FAKE.CHURCH);
+  var tie = MV.pickInDisc(church, d94, MV.searchPlan('Church St, Marietta'));
+  eq('two streets of one name in two towns, both inside: the card\'s town breaks the tie',
+     tie.at && [tie.at.lat, tie.byTown].join(','), '33.958,true');
+  eq('...and a town that names neither leaves them refused, not guessed',
+     MV.pickInDisc(church, d94, MV.searchPlan('Church St, Atlanta')).why, 'several');
+  eq('...and the town is never a filter: a lone candidate in another town is used',
+     (MV.pickInDisc(church.slice(1), d94, MV.searchPlan('Church St, Marietta')).at || {}).lat,
+     33.883);
+
+  /* The words. The refusal leads, so the clamp keeps "no pin for". */
+  eq('none inside, the card\'s words',
+     MV.nbxRefusal(far, MV.discFor(card({ lat: 33.97, lon: -84.565, miles: 0.6 })),
+                   "McDonald's", 'new'),
+     "no pin for McDonald's — none within the card's 0.6 mi of you, nearest 1.2 mi");
+  eq('several, the card\'s words',
+     MV.nbxRefusal(two, d94, "McDonald's", 'new'),
+     "no pin for McDonald's — 2 within the card's 9.4 mi of you, and they disagree");
+  eq('several, the held card\'s words, with the rig\'s repair named',
+     MV.nbxRefusal(two, MV.discFor(card({ miles: 22, milesCorrected: true })), 'Held End',
+                   'held'),
+     "no pin for Held End — 2 within 22 mi (rig-corrected) of your order's card, and "
+     + 'they disagree');
+  eq('several with no fix to choose by',
+     MV.nbxRefusal({ at: null, why: 'several', n: 10 }, null, "McDonald's", 'new'),
+     "no pin for McDonald's — 10 found, and no GPS fix to choose between them");
+  eq('a cross street', MV.nbxRefusal({ why: 'cross' }, d94, 'Birch Ln…', 'new'),
+     'no pin for Birch Ln… — cross streets are not searched yet');
+  eq('a pin is no refusal', MV.nbxRefusal(one, d94, "McDonald's", 'new'), null);
+
+  /* Through the real server.js and the fake NucBox. */
+  var fake = await new Promise(function (r) { FAKE.start(r); });
+  var fb = 'http://127.0.0.1:' + fake.port;
+  var on = await startServer({ NUCBOX_SEARCH: fb, NUCBOX_ROUTER: fb });
+  var off = await startServer({});
+  var down = await startServer({ NUCBOX_SEARCH: 'http://127.0.0.1:9',
+                                 NUCBOX_ROUTER: 'http://127.0.0.1:9' });
+  try {
+    function via(srv) { return function (u) { return fetch(srv.base + u); }; }
+    eq('with nothing set the page is told neither is, and does what it always did',
+       JSON.stringify(await MV.nbxSettings(via(off))),
+       JSON.stringify({ search: false, route: false }));
+    eq('...and set, both', JSON.stringify(await MV.nbxSettings(via(on))),
+       JSON.stringify({ search: true, route: true }));
+    eq('...and a server that cannot be reached is neither, not a page that stops',
+       JSON.stringify(await MV.nbxSettings(function () { return Promise.reject(new Error('x')); })),
+       JSON.stringify({ search: false, route: false }));
+
+    var nbx = new MV.NbxSearch({ base: on.base + '/api/nbx' });
+    var got = await nbx.place("McDonald's", MV.discFor(card({ miles: 3.0 })));
+    eq('through the server, a 3.0 mi card\'s McDonald\'s is the one 2.1 mi north',
+       got.at && [got.at.lat, got.at.lon].join(','), '33.983,-84.5499');
+    got = await nbx.place("McDonald's (Marietta Sq)", d94);
+    eq('...and a 9.4 mi card\'s is refused as two that disagree',
+       [got.why, got.n].join(','), 'several,2');
+    var n0 = fake.asked.length;
+    got = await nbx.place('Shadowood Pkwy SE, Atlanta', d94);
+    var sent = fake.asked.slice(n0).join(' ');
+    ok_('"Shadowood Pkwy SE, Atlanta" is pinned in Cumberland, where OSM has it',
+        got.at && /Cumberland/.test(got.at.name));
+    ok_('...asked as the street alone, the town left at home (' + sent + ')',
+        /street=Shadowood%20Pkwy%20SE&/.test(sent) && !/Atlanta/i.test(sent)
+        && !/city=/.test(sent));
+    got = await nbx.place("Jimmy John's (1985 Cobb Parkway NW)", d94);
+    ok_('a bracketed door is pinned at 1985, Cobb Parkway, Kennesaw — the postal '
+        + 'town on the card was never asked', got.at && /^1985, Cobb Parkway, Kennesaw/.test(got.at.name));
+    n0 = fake.asked.length;
+    got = await nbx.place('Birch Ln & Kestrel Dr, Roswell', d94);
+    eq('a cross street is refused without asking anybody',
+       [got.why, fake.asked.length - n0].join(','), 'cross,0');
+
+    /* The road. */
+    var A = { lat: 33.983, lon: -84.5499 }, S = { lat: 33.8779, lon: -84.46 };
+    var road = await nbx.detour(SQ, A, S);
+    var by = await nbx.road([SQ, A, S]), direct = await nbx.road([SQ, S]);
+    eq('the road detour is road(car, pickup, held end) less road(car, held end), in miles',
+       road.miles, (by.metres - direct.metres) / 1609.344);
+    ok_('...a real figure off the router (' + (road.miles || 0).toFixed(2) + ' road mi)',
+        road.miles > 0.5);
+    eq('...and nothing in it but miles: no minutes anywhere',
+       Object.keys(road).join(','), 'miles');
+    var asked = fake.asked.filter(function (u) { return /^\/route/.test(u); });
+    ok_('...and the router was never asked about any fourth point (' + asked.length + ' routes)',
+        asked.every(function (u) { return u.split('?')[0].split(';').length <= 3; }));
+    eq('the real install\'s own route, Marietta Square to Five Points: 31307.4 m',
+       (await nbx.road([SQ, { lat: 33.7490, lon: -84.3880 }])).metres, 31307.4);
+
+    /* A NucBox that is not there is said, and is the page's cue for the
+       public geocoder — never "nothing there". */
+    var gone = new MV.NbxSearch({ base: down.base + '/api/nbx' });
+    got = await gone.place("McDonald's", d94);
+    eq('an unreachable NucBox is said as unreachable, with the server\'s reason',
+       [got.why, got.error].join(' | '),
+       'unreachable | the NucBox did not answer (ECONNREFUSED)');
+    eq('...and its router the same', (await gone.detour(SQ, A, S)).why, 'unreachable');
+    got = await new MV.NbxSearch({ base: 'http://127.0.0.1:9/api/nbx' }).place("McDonald's", d94);
+    ok_('...and this rig\'s own server not answering is unreachable too (' + got.error + ')',
+        got.why === 'unreachable' && /did not answer/.test(got.error));
+    var noSet = new MV.NbxSearch({ base: off.base + '/api/nbx' });
+    eq('...and a server with no NucBox set is not mistaken for an answer',
+       (await noSet.place("McDonald's", d94)).why, 'unreachable');
+
+    /* No minutes anywhere in what the NucBox path can put on the panel. */
+    var words = [MV.nbxRefusal(far, d94, 'X', 'new'), MV.nbxRefusal(two, d94, 'X', 'held'),
+                 MV.nbxRefusal({ why: 'several', n: 3 }, null, 'X', 'held'),
+                 MV.nbxRefusal({ why: 'none', nearest: null }, null, 'X', 'new'),
+                 MV.nbxRefusal({ why: 'cross' }, null, 'X', 'new')];
+    eq('no NucBox line speaks of minutes', words.filter(function (w) {
+      return /\bmin/.test(w);
+    }).length, 0);
+  } finally {
+    on.stop(); off.stop(); down.stop();
+    fake.server.close();
+  }
+}
+
 (async function () {
   var A = fakeGeo({ 'one': { lat: 33.9, lon: -84.5 },
                     'two': { lat: 33.91, lon: -84.51 },
@@ -1440,6 +1667,8 @@ function gaps(sent) {
   eq('a ranking that does not beat chance puts nothing on a pin',
      Object.keys(MV.standings({ real: false, matched: true,
                                 groups: held.groups })).length, 0);
+
+  await nucbox();
 
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' map-view checks passed');
