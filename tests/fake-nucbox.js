@@ -27,10 +27,15 @@
  * route answer on purpose: server.js must drop it, and a suite can only see
  * that if it was there.
  *
- * Also: "Church St" is two streets of that name in two towns (for the town
- * tie-break), "Slow Place" answers after two and a half seconds (for the timeout), and
- * GET /__asked lists every question this fake was asked, so a suite can read
- * exactly what left the rig. */
+ * Also: "Church St" is two streets of that name in two towns (two that fit
+ * and disagree, whatever the card's town), "Slow Place" answers after two and
+ * a half seconds (for the timeout), "4821 Kestrel Dr" answers its street and
+ * not the door, "Starbucks" is twelve branches cut at the limit, "Waffle
+ * House" is a pickup the road by is shorter than the road direct, "Farm
+ * Stand" is 450 m from a road, a point at 34.1, -84.6 is refused by the
+ * router with a code that is not NoRoute, and GET /__asked lists every
+ * question this fake was asked, so a suite can read exactly what left the
+ * rig. */
 'use strict';
 
 var http = require('http');
@@ -85,6 +90,41 @@ var COBB_1985 = [
         '1985, Cobb Parkway, Kennesaw, Cobb County, Georgia, 30152, United States')
 ];
 
+/* A door Nominatim does not hold: asked for "4821 Kestrel Dr" it answers the
+   street, with no number in the name — what the real one does for a house
+   number it lacks, at the same confidence. Invented. */
+var KESTREL = [
+  place(41, 33.9700, -84.5300, 'highway', 'residential', 'Kestrel Drive',
+        'Kestrel Drive, Marietta, Cobb County, Georgia, 30060, United States')
+];
+
+/* Twelve branches of one chain: one a mile north of the Square, and eleven
+   in the corners of a 3.5 mi disc's box, 4.4 mi out — inside the box and
+   outside the disc. The list is cut at the limit asked (ten), so "only one
+   fits" is unproven of it. */
+var STARBUCKS = [place(51, 33.9671, -84.5499, 'amenity', 'cafe', 'Starbucks',
+                       'Starbucks, 100, North Park Square, Marietta, Cobb County, '
+                       + 'Georgia, 30060, United States')];
+[[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(function (c, k) {
+  for (var i = 0; i < 3 && STARBUCKS.length < 12; i++) {
+    var lat = 33.9526 + c[0] * (0.045 - i * 0.001), lon = -84.5499 + c[1] * (0.055 - i * 0.001);
+    STARBUCKS.push(place(52 + k * 3 + i, lat, lon, 'amenity', 'cafe', 'Starbucks',
+                         'Starbucks, ' + (200 + k * 3 + i) + ', Corner Road, Marietta, '
+                         + 'Cobb County, Georgia, 30060, United States'));
+  }
+});
+
+/* Two pickups the ROUTER treats specially (route() below): through Waffle
+   House the road via it comes out 400 m SHORTER than the road direct — OSRM
+   routing the fastest road direct and a shorter, slower one by the pickup —
+   and Farm Stand sits 450 m from the nearest road, so OSRM moves it that
+   far before routing. Each one branch, invented, inside a 3.0 mi card. */
+var WAFFLE = [place(61, 33.9300, -84.5100, 'amenity', 'restaurant', 'Waffle House',
+                    'Waffle House, 300, Example Road, Marietta, Cobb County, Georgia, '
+                    + '30060, United States')];
+var FARM = [place(62, 33.9650, -84.5350, 'shop', 'farm', 'Farm Stand',
+                  'Farm Stand, Marietta, Cobb County, Georgia, 30060, United States')];
+
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
         'Church Street, Marietta, Cobb County, Georgia, 30060, United States'),
@@ -109,9 +149,13 @@ function search(q) {
     // install, whatever the street: OSM's town is not Uber's.
     if (term.indexOf(',') >= 0) all = [];
     else if (term === "mcdonald's") all = MCD;
+    else if (term === 'starbucks') all = STARBUCKS;
+    else if (term === 'waffle house') all = WAFFLE;
+    else if (term === 'farm stand') all = FARM;
   } else if (q.street !== undefined) {
     if (/^shadowood (pkwy|parkway)/.test(term)) all = SHADOWOOD;
     else if (/^1985 cobb (pkwy|parkway)/.test(term)) all = COBB_1985;
+    else if (/^4821 kestrel (dr|drive)/.test(term)) all = KESTREL;
     else if (/^church st/.test(term)) all = CHURCH;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
@@ -138,6 +182,9 @@ function route(coords) {
   if (pts.some(function (p) { return Math.abs(p[0] + 84.5560) < 5e-4 && Math.abs(p[1] - 34.0010) < 5e-4; })) {
     return null;
   }
+  // Any point at 34.1, -84.6 is a question OSRM refuses with a code that is
+  // NOT NoRoute: the router failing, never "no road".
+  if (pts.some(function (p) { return near(p, -84.6, 34.1); })) return 'InvalidQuery';
   if (pts.length === 2 && near(pts[0], -84.5499, 33.9526) && near(pts[1], -84.3880, 33.7490)) {
     return routeBody(pts, [31307.4], [1659.8]);
   }
@@ -147,7 +194,19 @@ function route(coords) {
     legs.push(m);
     secs.push(Math.round(m / 13.4 * 10) / 10);
   }
+  // By Waffle House: 400 m shorter than the road direct, the whole of it
+  // taken off the last leg.
+  if (pts.length === 3 && near(pts[1], Number(WAFFLE[0].lon), Number(WAFFLE[0].lat))) {
+    var direct = Math.round(miles(pts[0], pts[2]) * 1.25 * 1609.344 * 10) / 10;
+    legs[1] = Math.round((direct - 400 - legs[0]) * 10) / 10;
+  }
   return routeBody(pts, legs, secs);
+}
+
+// How far OSRM moved each point to reach a road: 3.1 m, except Farm Stand.
+function snapOf(p) {
+  return Math.abs(p[0] - Number(FARM[0].lon)) < 1e-6 && Math.abs(p[1] - Number(FARM[0].lat)) < 1e-6
+    ? 450.0 : 3.1;
 }
 
 function routeBody(pts, legs, secs) {
@@ -161,7 +220,7 @@ function routeBody(pts, legs, secs) {
       weight_name: 'routability', weight: sum(secs), duration: sum(secs), distance: sum(legs)
     }],
     waypoints: pts.map(function (p) {
-      return { hint: 'fake', distance: 3.1, name: '', location: p };
+      return { hint: 'fake', distance: snapOf(p), name: '', location: p };
     })
   };
 }
@@ -185,6 +244,7 @@ function start(done) {
     var m = /^\/route\/v1\/driving\/([-0-9.,;]+)$/.exec(u.pathname);
     if (m) {
       var r = route(m[1]);
+      if (typeof r === 'string') return json(400, { code: r, message: 'Query string malformed' });
       return r ? json(200, r)
         : json(400, { code: 'NoRoute', message: 'Impossible route between points' });
     }
@@ -196,7 +256,8 @@ function start(done) {
 }
 
 module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
-                   COBB_1985: COBB_1985, CHURCH: CHURCH };
+                   COBB_1985: COBB_1985, CHURCH: CHURCH, KESTREL: KESTREL,
+                   STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM };
 
 if (require.main === module) {
   start(function (f) { console.log(JSON.stringify({ port: f.port })); });

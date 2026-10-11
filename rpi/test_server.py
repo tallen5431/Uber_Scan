@@ -4716,7 +4716,7 @@ try:
     finally:
         stop(_p0)
     # A setting that is not an http(s) URL is said and ignored, never tried.
-    _p0, _b0 = start({'SCANNER': '0', 'NUCBOX_SEARCH': 'ftp://100.x.y.z:8088'}, _nj)
+    _p0, _b0 = start({'SCANNER': '0', 'NUCBOX_SEARCH': 'ftp://127.0.0.1:8088'}, _nj)
     try:
         eq('a NUCBOX_SEARCH that is not an http(s) URL is treated as unset',
            get(_b0, '/api/nbx')['search'], False)
@@ -4734,7 +4734,9 @@ try:
         eq('a chain search answers the branches inside the box, bounded',
            (_s, len(_hits)), (200, 2))
         eq('...each as where it is and what it is called, and nothing else',
-           sorted(set(k for h in _hits for k in h)), ['kind', 'lat', 'lon', 'name'])
+           sorted(set(k for h in _hits for k in h)), ['lat', 'lon', 'name'])
+        eq('...and a list shorter than the limit is said to be whole',
+           sorted(_r.keys()) + [_r.get('cutAt')], ['cutAt', 'hits', 'ok', None])
         ok_('...with its house number and street, as the real install answered',
             "McDonald's, 2700, Windy Hill Road Southeast, Cumberland" in
             ' '.join(h['name'] for h in _hits))
@@ -4753,6 +4755,11 @@ try:
         eq('...asked as street= alone, no city, no town', _asked()[-1],
            '/search?format=jsonv2&limit=10&street=Shadowood%20Pkwy%20SE'
            '&viewbox=-84.65%2C34.04%2C-84.45%2C33.87&bounded=1')
+        # Twelve branches, ten asked for: the list stopped at the limit, and
+        # says so, so the page cannot read "only one fits" off a cut list.
+        _s, _r = _nbx(_b1, '/api/nbx/search?q=Starbucks&viewbox=-84.62,34.01,-84.48,33.90')
+        eq('a search that stops at the limit says where it was cut (cutAt 10)',
+           (_s, len(_r.get('hits') or []), _r.get('cutAt')), (200, 10, 10))
         # The same question twice is asked of the NucBox once.
         _n = len(_asked())
         _nbx(_b1, "/api/nbx/search?q=McDonald%27s&viewbox=-84.65,34.04,-84.45,33.87")
@@ -4761,7 +4768,8 @@ try:
         # The route the driver measured on the real install.
         _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
         eq('a route answers the road metres OSRM gave (31307.4 m on the real '
-           'install)', (_s, _r), (200, {'ok': True, 'metres': 31307.4}))
+           'install), and how far it moved each point to reach a road',
+           (_s, _r), (200, {'ok': True, 'metres': 31307.4, 'snaps': [3.1, 3.1]}))
         no_('...and no duration in any form: minutes from a pace are refused',
             re.search(r'dur|second|minute|weight', json.dumps(_r)))
         eq('...asked with overview off, the points as the page wrote them',
@@ -4777,6 +4785,17 @@ try:
         eq('the router saying there is no road is an answer, not unreachable',
            (_s, _r.get('ok'), _r.get('noRoute'), _r.get('unreachable')),
            (200, False, True, None))
+        # ...and ONLY NoRoute. OSRM sends its other refusals the same way, as
+        # HTTP 400 with a string code; those are the router not answering —
+        # said as unreachable and never kept, so the next press asks again.
+        _n = len(_asked())
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.6,34.1')
+        eq('a router refusing the question with a code that is not NoRoute is '
+           'down, not "no road"', (_s, _r.get('unreachable'), _r.get('noRoute'), _r.get('error')),
+           (502, True, None, 'the NucBox router answered InvalidQuery, not a route'))
+        _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.6,34.1')
+        eq('...and is not cached: asked twice, the router was asked twice',
+           len(_asked()), _n + 2)
 
         # Not an open proxy: every other parameter, path and shape is refused,
         # by name, and none of them reaches the NucBox.
@@ -4838,6 +4857,56 @@ try:
         eq('...and so is its router', (_s, _r.get('unreachable')), (502, True))
     finally:
         stop(_p2)
+
+    # One that never ACCEPTS: a listener whose backlog is full, so the
+    # connect itself never completes — the shape of a NucBox whose Tailscale
+    # address routes nowhere. The fake above accepts and then stalls, which
+    # a socket's idle timer catches; this is the case it did not. Measured
+    # before the fix, with NUCBOX_TIMEOUT_MS 500: Node 22 answered at
+    # 5009 ms (its global agent's own socket timeout), and an Agent of Node
+    # 18's kind was still waiting at 15021 ms. Asked here with its own long
+    # client timeout, so a server that hangs fails the checks by name
+    # rather than throwing out of the suite.
+    _hole = socket.socket()
+    _hole.bind(('127.0.0.1', 0))
+    _hole.listen(0)
+    _fill = []
+    for _ in range(4):
+        _c = socket.socket()
+        _c.setblocking(False)
+        try:
+            _c.connect(_hole.getsockname())
+        except (BlockingIOError, OSError):
+            pass
+        _fill.append(_c)
+    _hole_url = 'http://127.0.0.1:%d' % _hole.getsockname()[1]
+    _p3, _b3 = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hole_url, 'NUCBOX_ROUTER': _hole_url,
+                      'NUCBOX_TIMEOUT_MS': '800'}, _nj)
+    try:
+        def _slow_ask(path):
+            t0 = time.time()
+            try:
+                with urllib.request.urlopen(_b3 + path, timeout=30) as r:
+                    out = (r.status, json.loads(r.read().decode('utf-8')))
+            except urllib.error.HTTPError as e:
+                out = (e.code, json.loads(e.read().decode('utf-8')))
+            except Exception as e:  # a hang past 30 s, said as the check's failure
+                out = (None, {'error': repr(e)})
+            return out, time.time() - t0
+        (_s, _r), _took = _slow_ask("/api/nbx/search?q=McDonald%27s")
+        eq('a NucBox that never accepts the connection is reported unreachable '
+           'within NUCBOX_TIMEOUT_MS',
+           (_s, _r.get('unreachable'), _r.get('error')),
+           (502, True, 'the NucBox did not answer within 0.8 s'))
+        ok_('...after the timeout, connecting included (%.2fs)' % _took, _took < 2.0)
+        (_s, _r), _took = _slow_ask('/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
+        ok_('...and so is its router (%r, %.2fs)' % (_s, _took),
+            _s == 502 and _r.get('unreachable') is True and _took < 2.0)
+    finally:
+        stop(_p3)
+        for _c in _fill:
+            _c.close()
+        _hole.close()
 finally:
     _fake.kill()
     shutil.rmtree(_ndir, ignore_errors=True)

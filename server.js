@@ -4362,6 +4362,12 @@ var nbxCache = new Map();
  * with overview=false and 84-character waypoint hints is 786. Anything near
  * this is not one. */
 var NBX_BODY_MAX = 256 * 1024;
+/* How many candidates a search asks for. Ten: enough for every branch of a
+ * chain inside a disc the size of a card's distance, mostly — the real
+ * install answered ten McDonald's in a 0.2-degree box round Marietta, which
+ * is exactly this many, so a list that comes back this long is said to be
+ * cut (`cutAt`) and the page will not claim "only one fits" from it. */
+var NBX_LIMIT = 10;
 // How long a search term may be: the parser's MAX_PLACE is 60, so 120 is
 // room for a whole bracketed address and nothing a page of this rig sends.
 var NBX_TERM_MAX = 120;
@@ -4373,18 +4379,38 @@ function nbxRemember(key, value) {
 }
 
 /* One question to the NucBox. `done(err, parsedJson)`; `err` is always a
- * sentence about the NucBox, never about the place. */
+ * sentence about the NucBox, never about the place.
+ *
+ * THE TIMEOUT IS A WALL CLOCK over the whole question, connecting included.
+ * It used to be req.setTimeout, which is a socket's IDLE timer and is only
+ * armed on a socket that exists: against a host that never accepts (a
+ * listener with its backlog full, or an address nothing routes to) it did
+ * not fire at 0.5 s. Measured: on Node 22 the global agent's own 5 s socket
+ * timeout ended it at 5009 ms, still saying "did not answer within 0.5 s";
+ * with an Agent of Node 18's kind (no socket timeout of its own) it was still
+ * waiting at 15021 ms, and the verifier saw ~127 s against 10.255.255.1 —
+ * the kernel's SYN retries — the whole of it holding live.html's mapBusy, so
+ * every Map press in that time returned without doing anything. A timer
+ * started here, before the connect, cleared by the first ending of any kind,
+ * and destroying the request when it fires, is the one thing that means
+ * what the sentence says. */
 function nbxAsk(target, done) {
   var u;
   try { u = new URL(target); } catch (e) { return done('the NucBox address is not a URL'); }
   var lib = u.protocol === 'https:' ? https : http;
   var finished = false;
+  var req = null;
+  var timer = setTimeout(function () {
+    end('the NucBox did not answer within ' + (NBX_TIMEOUT_MS / 1000) + ' s');
+    if (req) req.destroy();
+  }, NBX_TIMEOUT_MS);
   function end(err, body) {
     if (finished) return;
     finished = true;
+    clearTimeout(timer);
     done(err, body);
   }
-  var req = lib.get(target, { headers: { 'Accept': 'application/json' } }, function (up) {
+  req = lib.get(target, { headers: { 'Accept': 'application/json' } }, function (up) {
     var chunks = [], size = 0;
     up.on('data', function (c) {
       size += c.length;
@@ -4399,10 +4425,12 @@ function nbxAsk(target, done) {
       var parsed;
       try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
       catch (e) { parsed = undefined; }
-      // OSRM says "no road between these" as HTTP 400 with its own `code`
-      // ("NoRoute"), which is an answer about the points and not a NucBox
-      // that failed; it is handed on for the route reply to say so. Any
-      // other status is the NucBox not answering the question.
+      // OSRM answers its refusals as HTTP 400 with its own string `code`,
+      // and they are handed on for the route reply to tell apart — there,
+      // and only there (nbxRoute): "NoRoute" is an answer about the points;
+      // every other code (InvalidQuery, InvalidValue, NoSegment, TooBig...)
+      // is the router not answering. Any other status is the NucBox not
+      // answering the question.
       if (up.statusCode !== 200
           && !(up.statusCode === 400 && parsed && typeof parsed.code === 'string')) {
         return end('the NucBox answered ' + up.statusCode);
@@ -4411,10 +4439,6 @@ function nbxAsk(target, done) {
       end(null, parsed);
     });
     up.on('error', function (e) { end('the NucBox stopped answering (' + (e.code || e.message) + ')'); });
-  });
-  req.setTimeout(NBX_TIMEOUT_MS, function () {
-    end('the NucBox did not answer within ' + (NBX_TIMEOUT_MS / 1000) + ' s');
-    req.destroy();
   });
   req.on('error', function (e) {
     end('the NucBox did not answer (' + (e.code || e.message) + ')');
@@ -4472,10 +4496,9 @@ function nbxRoute(req, res) {
       return reply(400, { ok: false, error: term + ' must be 1 to ' + NBX_TERM_MAX
                                             + ' printable characters' });
     }
-    // Ten, fixed here: enough for every branch of a chain inside a disc the
-    // size of a card's distance (the real install answered ten McDonald's in
-    // a 0.2-degree box), and the page decides among them.
-    target = NBX.search + '/search?format=jsonv2&limit=10&' + term + '='
+    // NBX_LIMIT, fixed here, and the page decides among them — told
+    // whether the list stopped at it (`cutAt` below).
+    target = NBX.search + '/search?format=jsonv2&limit=' + NBX_LIMIT + '&' + term + '='
            + encodeURIComponent(said);
     if (sq.q.viewbox !== undefined) {
       var corners = sq.q.viewbox.split(',');
@@ -4496,37 +4519,64 @@ function nbxRoute(req, res) {
   }
   if (nbxCache.has(target)) return reply(200, nbxCache.get(target));
   nbxAsk(target, function (err, body) {
-    if (err) {
-      // The one case a page falls back on, so it is told apart from every
-      // answer by a field, not by guessing from a status code.
-      return reply(502, { ok: false, unreachable: true, error: err });
-    }
+    // `unreachable: true` is the field a page falls back to the public map
+    // on (map-view.js NbxSearch.get), as is `configured: false` above: both
+    // say there is no NucBox to ask. Every other refusal here — a 400 for a
+    // question this relay will not pass on, a 404 for a path it does not
+    // have — is the page asking wrongly, a bug, and the page says so rather
+    // than quietly asking somebody else.
+    var down = function (why) {
+      reply(502, { ok: false, unreachable: true, error: why });
+    };
+    if (err) return down(err);
     var out;
     if (which === 'search') {
       if (!Array.isArray(body)) {
-        return reply(502, { ok: false, unreachable: true,
-                            error: 'the NucBox search answered something that is not a list' });
+        return down('the NucBox search answered something that is not a list');
       }
-      // What the page reads and nothing else: where, and what it is called.
-      out = { ok: true, hits: body.map(function (h) {
+      // What the page reads and nothing else: where, and what it is called
+      // (the name is where a house number shows, map-view.js hasDoor) — and
+      // the limit, as `cutAt`, when the list stopped at it (null when it did
+      // not). A full list is not "every one in the box": Nominatim ranks by
+      // importance, not by distance, so an eleventh inside the card's disc
+      // may be the one that was not sent, and "only one fits" cannot be said
+      // of a list that was cut.
+      out = { ok: true, cutAt: body.length >= NBX_LIMIT ? NBX_LIMIT : null,
+              hits: body.map(function (h) {
         return { lat: Number(h.lat), lon: Number(h.lon),
-                 name: String(h.display_name || ''), kind: String(h.type || '') };
+                 name: String(h.display_name || '') };
       }).filter(function (h) { return isFinite(h.lat) && isFinite(h.lon); }) };
+    } else if (body && body.code === 'NoRoute') {
+      // An answer, and kept: the router saying there is no road between
+      // these points will say it again. ONLY this code. Every other one OSRM
+      // sends with its 400 used to be relayed as "no road" too, and cached,
+      // so a router refusing the question read as a fact about the map until
+      // this server restarted; those fall to `down` below — never cached,
+      // and the page says "NucBox router down".
+      out = { ok: false, noRoute: true,
+              error: 'the router found no road between these points (NoRoute)' };
     } else {
       var r0 = body && body.code === 'Ok' && Array.isArray(body.routes) && body.routes[0];
+      // How far OSRM moved each point to reach a road (its waypoints[].
+      // distance, metres), one per point asked, in order. A pin snapped a
+      // long way is a route from somewhere else; the page refuses the road
+      // figure past its bound and says so (map-view.js SNAP_MI).
+      var wps = body && Array.isArray(body.waypoints) ? body.waypoints : [];
+      var snaps = wps.map(function (w) { return w && w.distance; });
       if (!r0 || typeof r0.distance !== 'number' || !isFinite(r0.distance)) {
-        // An answer, and kept: the router saying there is no road between
-        // these points will say it again.
-        out = { ok: false, noRoute: true,
-                error: 'the router found no road between these points ('
-                       + String((body && body.code) || '?') + ')' };
-      } else {
-        // The distance ONLY. OSRM's `duration` is a free-flow estimate with
-        // no traffic in it, and minutes from a pace are refused outright
-        // (AUDITS.md, Settled: "Do not re-time an offer at a pace"), so it is
-        // dropped here, where no page can ever be handed it.
-        out = { ok: true, metres: r0.distance };
+        return down('the NucBox router answered ' + String((body && body.code) || '?').slice(0, 40)
+                    + ', not a route');
       }
+      if (snaps.length !== pts.length || !snaps.every(function (d) {
+        return typeof d === 'number' && isFinite(d) && d >= 0;
+      })) {
+        return down('the NucBox router answered without how far it moved each point');
+      }
+      // The distance ONLY. OSRM's `duration` is a free-flow estimate with
+      // no traffic in it, and minutes from a pace are refused outright
+      // (AUDITS.md, Settled: "Do not re-time an offer at a pace"), so it is
+      // dropped here, where no page can ever be handed it.
+      out = { ok: true, metres: r0.distance, snaps: snaps };
     }
     nbxRemember(target, out);
     reply(200, out);
