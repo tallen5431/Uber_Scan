@@ -1,7 +1,7 @@
 """Where the rig is, when the receiver is willing to say.
 
     python3 rpi/gps.py --from 127.0.0.1               # gpsd on the Pi
-    python3 rpi/gps.py --from 100.75.197.117:2947     # a phone's server app
+    python3 rpi/gps.py --from 100.x.y.z:2947     # a phone's server app
 
 Anything that speaks on TCP port 2947 — gpsd's port — can hand the rig a
 position, and this is the thing that asks. It was written for a phone in the
@@ -608,7 +608,7 @@ def main(argv=None):
                     help='where gpsd or a GPS server app is listening: '
                          '127.0.0.1 for gpsd and a USB receiver on the Pi, or '
                          'a phone\'s Tailscale address, e.g. '
-                         '100.75.197.117:2947, rather than its hotspot one, so '
+                         '100.x.y.z:2947, rather than its hotspot one, so '
                          'it keeps working when the rig is on wifi at home')
     ap.add_argument('--seconds', type=float, default=30.0,
                     help='how long to watch for (0 = until interrupted)')

@@ -4146,7 +4146,7 @@ into a lookup bounded to where the car actually was.
 Try it before anything depends on it:
 
 ```sh
-python3 rpi/gps.py --from 100.75.197.117:2947
+python3 rpi/gps.py --from 100.x.y.z:2947
 ```
 
 That address should be the phone's **Tailscale** one rather than its hotspot

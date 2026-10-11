@@ -2948,7 +2948,7 @@ def main():
                     help='where gpsd or a GPS server app is listening: '
                          '127.0.0.1 for gpsd and the USB receiver on the Pi, '
                          'or a phone\'s Tailscale address, e.g. '
-                         '100.75.197.117:2947, rather than its hotspot one, so '
+                         '100.x.y.z:2947, rather than its hotspot one, so '
                          'it keeps working wherever the rig is. Each offer is '
                          'then stamped with where the '
                          'car was, which is what lets the map page resolve a '

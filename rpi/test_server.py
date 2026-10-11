@@ -4672,6 +4672,170 @@ finally:
     stop(_eproc)
     shutil.rmtree(_edir, ignore_errors=True)
 
+# --- the NucBox's search and router, relayed ---------------------------------
+#
+# server.js relays two questions to the NucBox at home and nothing else. The
+# NucBox here is tests/fake-nucbox.js — the one fake the three suites share —
+# answering in the real install's shapes (Nominatim 4.5 jsonv2, OSRM route),
+# and it lists what it was asked at /__asked, so these checks read exactly what
+# left the rig rather than what the server says it sent.
+_fake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_fake_base = 'http://127.0.0.1:%d' % json.loads(_fake.stdout.readline())['port']
+
+
+def _asked():
+    return json.loads(urllib.request.urlopen(_fake_base + '/__asked', timeout=5).read())
+
+
+def _nbx(base, path):
+    s, body, _h = raw(base, path)
+    try:
+        return s, json.loads(body)
+    except ValueError:
+        return s, body
+
+
+_ndir = tempfile.mkdtemp()
+_nj = os.path.join(_ndir, 'journal.jsonl')
+open(_nj, 'w').close()
+try:
+    # Nothing set: the ordinary install, and today. The page asks /api/nbx
+    # first and does what it always did on this answer.
+    _p0, _b0 = start({'SCANNER': '0'}, _nj)
+    try:
+        _before = len(_asked())
+        eq('with no NucBox set, /api/nbx says neither is set',
+           get(_b0, '/api/nbx'), {'ok': True, 'search': False, 'route': False})
+        _s, _r = _nbx(_b0, "/api/nbx/search?q=McDonald%27s")
+        eq('...and a search is refused as not set here, not as unreachable',
+           (_s, _r.get('configured'), _r.get('unreachable')), (404, False, None))
+        _s, _r = _nbx(_b0, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
+        eq('...and so is a route', (_s, _r.get('configured')), (404, False))
+        eq('...and nothing at all reached a NucBox', len(_asked()), _before)
+    finally:
+        stop(_p0)
+    # A setting that is not an http(s) URL is said and ignored, never tried.
+    _p0, _b0 = start({'SCANNER': '0', 'NUCBOX_SEARCH': 'ftp://100.x.y.z:8088'}, _nj)
+    try:
+        eq('a NUCBOX_SEARCH that is not an http(s) URL is treated as unset',
+           get(_b0, '/api/nbx')['search'], False)
+    finally:
+        stop(_p0)
+
+    _p1, _b1 = start({'SCANNER': '0', 'NUCBOX_SEARCH': _fake_base,
+                      'NUCBOX_ROUTER': _fake_base + '/', 'NUCBOX_TIMEOUT_MS': '800'}, _nj)
+    try:
+        eq('with both set, /api/nbx says both are',
+           get(_b1, '/api/nbx'), {'ok': True, 'search': True, 'route': True})
+        # The real install's own question: McDonald's in a box round Marietta.
+        _s, _r = _nbx(_b1, "/api/nbx/search?q=McDonald%27s&viewbox=-84.65,34.04,-84.45,33.87")
+        _hits = _r.get('hits') or []
+        eq('a chain search answers the branches inside the box, bounded',
+           (_s, len(_hits)), (200, 2))
+        eq('...each as where it is and what it is called, and nothing else',
+           sorted(set(k for h in _hits for k in h)), ['kind', 'lat', 'lon', 'name'])
+        ok_('...with its house number and street, as the real install answered',
+            "McDonald's, 2700, Windy Hill Road Southeast, Cumberland" in
+            ' '.join(h['name'] for h in _hits))
+        _last = _asked()[-1]
+        eq('...asked of the NucBox with ten candidates, jsonv2, bounded — set '
+           'here, not by the page',
+           _last, '/search?format=jsonv2&limit=10&q=McDonald%27s'
+                  '&viewbox=-84.65%2C34.04%2C-84.45%2C33.87&bounded=1')
+        # A street, with no town — the page never sends one, and nothing
+        # here adds one.
+        _s, _r = _nbx(_b1, '/api/nbx/search?street=Shadowood%20Pkwy%20SE'
+                           '&viewbox=-84.65,34.04,-84.45,33.87')
+        eq('a street search finds the two pieces of Shadowood Parkway, in '
+           'Cumberland', [h['name'].split(', ')[1] for h in _r.get('hits') or []],
+           ['Cumberland', 'Cumberland'])
+        eq('...asked as street= alone, no city, no town', _asked()[-1],
+           '/search?format=jsonv2&limit=10&street=Shadowood%20Pkwy%20SE'
+           '&viewbox=-84.65%2C34.04%2C-84.45%2C33.87&bounded=1')
+        # The same question twice is asked of the NucBox once.
+        _n = len(_asked())
+        _nbx(_b1, "/api/nbx/search?q=McDonald%27s&viewbox=-84.65,34.04,-84.45,33.87")
+        eq('the same search a second time is answered from the cache', len(_asked()), _n)
+
+        # The route the driver measured on the real install.
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
+        eq('a route answers the road metres OSRM gave (31307.4 m on the real '
+           'install)', (_s, _r), (200, {'ok': True, 'metres': 31307.4}))
+        no_('...and no duration in any form: minutes from a pace are refused',
+            re.search(r'dur|second|minute|weight', json.dumps(_r)))
+        eq('...asked with overview off, the points as the page wrote them',
+           _asked()[-1], '/route/v1/driving/-84.5499,33.9526;-84.3880,33.7490'
+                         '?overview=false')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.5499,33.9830;'
+                           '-84.3880,33.7490')
+        ok_('...and three points is a route too (%r)' % (_r,),
+            _s == 200 and isinstance(_r.get('metres'), (int, float)))
+
+        # Not an open proxy: every other parameter, path and shape is refused,
+        # by name, and none of them reaches the NucBox.
+        _n = len(_asked())
+        for _path, _want in (
+                ("/api/nbx/search?q=McDonald%27s&limit=50", 'refused: limit'),
+                ("/api/nbx/search?q=McDonald%27s&format=xml", 'refused: format'),
+                ("/api/nbx/search?q=McDonald%27s&bounded=0", 'refused: bounded'),
+                ('/api/nbx/search?q=a&street=b', 'one of q or street'),
+                ('/api/nbx/search?q=a&q=b', 'given more than once: q'),
+                ('/api/nbx/search', 'one of q or street'),
+                ('/api/nbx/search?q=' + 'x' * 121, 'q must be 1 to 120'),
+                ('/api/nbx/search?q=a&viewbox=1,2,3', 'viewbox is'),
+                ('/api/nbx/search?q=a&viewbox=-84.6,34,-84.4,9999', 'viewbox is'),
+                ('/api/nbx/route?points=-84.5,33.9', 'points is two or three'),
+                ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8;-84.3,33.7;-84.2,33.6',
+                 'points is two or three'),
+                ('/api/nbx/route?points=-84.5,33.9;../../etc', 'points is two or three'),
+                ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8&alternatives=true',
+                 'refused: alternatives'),
+                ('/api/nbx/table?points=-84.5,33.9;-84.4,33.8', 'no such NucBox endpoint'),
+                ('/api/nbx/../search?q=a', None)):
+            _s, _r = _nbx(_b1, _path)
+            ok_('the relay refuses %s (%r)' % (_path[:60], _r),
+                _s in (400, 404) and (_want is None or _want in str(_r.get('error', ''))))
+        eq('...and not one of those reached the NucBox', len(_asked()), _n)
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                _b1 + '/api/nbx/search?q=a', data=b'{}', method='POST'), timeout=5)
+            _s = 200
+        except urllib.error.HTTPError as e:
+            _s = e.code
+        eq('...and it answers GET only', _s, 405)
+
+        # A NucBox that does not answer in time is said, with the time.
+        _t0 = time.time()
+        _s, _r = _nbx(_b1, '/api/nbx/search?q=Slow%20Place')
+        eq('a NucBox slower than NUCBOX_TIMEOUT_MS is reported unreachable',
+           (_s, _r.get('unreachable'), _r.get('error')),
+           (502, True, 'the NucBox did not answer within 0.8 s'))
+        ok_('...after the timeout, not after the NucBox (%.1fs)' % (time.time() - _t0),
+            time.time() - _t0 < 2.0)
+        _n = len(_asked())
+        _nbx(_b1, '/api/nbx/search?q=Slow%20Place')
+        eq('...and that is not cached: the next press asks again', len(_asked()), _n + 1)
+    finally:
+        stop(_p1)
+
+    # One that is not there at all.
+    _dead = free_port()
+    _p2, _b2 = start({'SCANNER': '0', 'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _dead,
+                      'NUCBOX_ROUTER': 'http://127.0.0.1:%d' % _dead}, _nj)
+    try:
+        _s, _r = _nbx(_b2, "/api/nbx/search?q=McDonald%27s")
+        eq('a NucBox that is not there is said plainly, with the reason',
+           (_s, _r.get('unreachable'), _r.get('error')),
+           (502, True, 'the NucBox did not answer (ECONNREFUSED)'))
+        _s, _r = _nbx(_b2, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
+        eq('...and so is its router', (_s, _r.get('unreachable')), (502, True))
+    finally:
+        stop(_p2)
+finally:
+    _fake.kill()
+    shutil.rmtree(_ndir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -4298,6 +4298,232 @@ function handler(req, res) {
  * every mark already in a journal was written without it. */
 var MARK_VIA = ['panel', 'offers', 'review'];
 
+/* --- the NucBox's map services: a search and a router, at home -------------
+ *
+ * The NucBox runs Nominatim (Georgia) and OSRM (car profile, Georgia) behind
+ * Tailscale. Two settings name them, and they are this server's settings the
+ * way PORT, JOURNAL and SYNC_TOKEN are: its environment, set where the server
+ * is started (the unit's `Environment=` lines, or Start.sh on the owner's
+ * rig). Empty by default, and empty is today: GET /api/nbx answers both false,
+ * the two endpoints below answer "not set here", and no page asks either.
+ *
+ *   NUCBOX_SEARCH   Nominatim's base, e.g. http://100.x.y.z:8088
+ *   NUCBOX_ROUTER   OSRM's base,      e.g. http://100.x.y.z:5000
+ *
+ * On the NucBox itself the same two endpoints work against its own copy
+ * (http://127.0.0.1:8088 and :5000), because nothing here knows which machine
+ * it is on.
+ *
+ * WHY THROUGH HERE AND NOT FROM THE BROWSER. The panel is served from this
+ * machine and is all that talks to it; a browser asking the NucBox directly
+ * would need the NucBox's address in the page, Tailscale on whatever opened
+ * the page, and CORS on two servers nobody configured for it. And this is
+ * the one place that can say plainly when the NucBox did not answer, with
+ * the reason, rather than a page seeing a failed fetch.
+ *
+ * NOT AN OPEN PROXY. Two fixed paths upstream, with only the parameters they
+ * need, each checked for shape; anything else is refused by name before a
+ * byte leaves. The browser cannot choose the host, the path, the format or
+ * the limit. Security is out of scope on this rig (it is all behind a VPN),
+ * but a relay that forwards whatever it is handed is a different thing from
+ * an endpoint that answers one question, and it costs nothing to be the
+ * second. */
+function nbxBase(name) {
+  var v = String(process.env[name] || '').trim();
+  if (!v) return null;
+  var u;
+  try { u = new URL(v); } catch (e) { u = null; }
+  if (!u || (u.protocol !== 'http:' && u.protocol !== 'https:')) {
+    // Said at startup and treated as unset, so a typo is not a silent
+    // "unreachable" on every press of the map.
+    console.error(name + ' is not an http(s) URL (' + v + '), so it is ignored');
+    return null;
+  }
+  return v.replace(/\/+$/, '');
+}
+var NBX = { search: nbxBase('NUCBOX_SEARCH'), route: nbxBase('NUCBOX_ROUTER') };
+/* Short, because the one caller is a panel read while driving and the
+ * alternative it falls back to is already there. Three seconds is chosen,
+ * not measured: nobody has timed the real install over Tailscale, and a
+ * NucBox that takes longer than this to name ten branches is one the driver
+ * is better off not waiting for. NUCBOX_TIMEOUT_MS moves it (the suites use
+ * it). */
+var NBX_TIMEOUT_MS = Number(process.env.NUCBOX_TIMEOUT_MS) > 0
+  ? Number(process.env.NUCBOX_TIMEOUT_MS) : 3000;
+/* A small cache of answers, in memory only. The NucBox's data changes when
+ * the driver re-imports Georgia, not between two presses, and a card re-read
+ * forty times a second must not ask forty times. Only answers are kept — a
+ * NucBox that did not answer is asked again next time. Oldest out first. */
+var NBX_CACHE_MAX = 500;
+var nbxCache = new Map();
+/* The most an answer may be. Ten search results are about 4 KB; a three-point
+ * route with overview=false is under 2 KB. Anything near this is not one. */
+var NBX_BODY_MAX = 256 * 1024;
+// How long a search term may be: the parser's MAX_PLACE is 60, so 120 is
+// room for a whole bracketed address and nothing a page of this rig sends.
+var NBX_TERM_MAX = 120;
+
+function nbxRemember(key, value) {
+  nbxCache.delete(key);
+  nbxCache.set(key, value);
+  while (nbxCache.size > NBX_CACHE_MAX) nbxCache.delete(nbxCache.keys().next().value);
+}
+
+/* One question to the NucBox. `done(err, parsedJson)`; `err` is always a
+ * sentence about the NucBox, never about the place. */
+function nbxAsk(target, done) {
+  var u;
+  try { u = new URL(target); } catch (e) { return done('the NucBox address is not a URL'); }
+  var lib = u.protocol === 'https:' ? https : http;
+  var finished = false;
+  function end(err, body) {
+    if (finished) return;
+    finished = true;
+    done(err, body);
+  }
+  var req = lib.get(target, { headers: { 'Accept': 'application/json' } }, function (up) {
+    var chunks = [], size = 0;
+    up.on('data', function (c) {
+      size += c.length;
+      if (size > NBX_BODY_MAX) {
+        end('the NucBox answered with more than ' + NBX_BODY_MAX + ' bytes');
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    up.on('end', function () {
+      if (up.statusCode !== 200) {
+        return end('the NucBox answered ' + up.statusCode);
+      }
+      var parsed;
+      try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      catch (e) { return end('the NucBox answered something that is not JSON'); }
+      end(null, parsed);
+    });
+    up.on('error', function (e) { end('the NucBox stopped answering (' + (e.code || e.message) + ')'); });
+  });
+  req.setTimeout(NBX_TIMEOUT_MS, function () {
+    end('the NucBox did not answer within ' + (NBX_TIMEOUT_MS / 1000) + ' s');
+    req.destroy();
+  });
+  req.on('error', function (e) {
+    end('the NucBox did not answer (' + (e.code || e.message) + ')');
+  });
+}
+
+/* The query, or the reason it is refused. `allowed` is every key this
+ * endpoint reads; a key outside it, or one given twice, refuses the request
+ * whole rather than being dropped — a page that sent it is not this one. */
+function nbxQuery(req, allowed) {
+  var q = url.parse(req.url, true).query;
+  var others = Object.keys(q).filter(function (k) { return allowed.indexOf(k) < 0; });
+  if (others.length) return { error: 'refused: ' + others.join(', ') };
+  var twice = Object.keys(q).filter(function (k) { return typeof q[k] !== 'string'; });
+  if (twice.length) return { error: 'given more than once: ' + twice.join(', ') };
+  return { q: q };
+}
+
+// "lon,lat" — finite, and on the planet — handed on exactly as written, so
+// the NucBox's cache and this one see the same question the page asked.
+function nbxPoint(s) {
+  var m = /^(-?\d{1,3}(?:\.\d{1,7})?),(-?\d{1,2}(?:\.\d{1,7})?)$/.exec(String(s));
+  if (!m) return null;
+  return (Math.abs(Number(m[1])) <= 180 && Math.abs(Number(m[2])) <= 90)
+    ? m[1] + ',' + m[2] : null;
+}
+
+function nbxRoute(req, res) {
+  var reply = function (code, body) {
+    send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8' });
+  };
+  var p = req.url.split('?')[0];
+  if (p === '/api/nbx') {
+    // What the page asks first, so with nothing set it does what it always
+    // did. Whether, not where: the addresses stay on this machine.
+    return reply(200, { ok: true, search: !!NBX.search, route: !!NBX.route });
+  }
+  var which = p === '/api/nbx/search' ? 'search' : p === '/api/nbx/route' ? 'route' : null;
+  if (!which) return reply(404, { ok: false, error: 'no such NucBox endpoint' });
+  if (!NBX[which]) {
+    return reply(404, { ok: false, configured: false,
+                        error: 'no NucBox ' + which + ' is set on this machine ('
+                               + (which === 'search' ? 'NUCBOX_SEARCH' : 'NUCBOX_ROUTER') + ')' });
+  }
+  var target;
+  if (which === 'search') {
+    var sq = nbxQuery(req, ['q', 'street', 'viewbox']);
+    if (sq.error) return reply(400, { ok: false, error: sq.error });
+    var term = sq.q.q !== undefined ? 'q' : sq.q.street !== undefined ? 'street' : null;
+    if (!term || (sq.q.q !== undefined && sq.q.street !== undefined)) {
+      return reply(400, { ok: false, error: 'one of q or street, not both and not neither' });
+    }
+    var said = sq.q[term].trim();
+    if (!said || said.length > NBX_TERM_MAX || /[\u0000-\u001f]/.test(said)) {
+      return reply(400, { ok: false, error: term + ' must be 1 to ' + NBX_TERM_MAX
+                                            + ' printable characters' });
+    }
+    // Ten, fixed here: enough for every branch of a chain inside a disc the
+    // size of a card's distance (the real install answered ten McDonald's in
+    // a 0.2-degree box), and the page decides among them.
+    target = NBX.search + '/search?format=jsonv2&limit=10&' + term + '='
+           + encodeURIComponent(said);
+    if (sq.q.viewbox !== undefined) {
+      var corners = sq.q.viewbox.split(',');
+      var a = corners.length === 4 && nbxPoint(corners[0] + ',' + corners[1]);
+      var b = corners.length === 4 && nbxPoint(corners[2] + ',' + corners[3]);
+      if (!a || !b) return reply(400, { ok: false, error: 'viewbox is left,top,right,bottom' });
+      target += '&viewbox=' + encodeURIComponent(a + ',' + b) + '&bounded=1';
+    }
+  } else {
+    var rq = nbxQuery(req, ['points']);
+    if (rq.error) return reply(400, { ok: false, error: rq.error });
+    var pts = String(rq.q.points || '').split(';').map(nbxPoint);
+    if (pts.length < 2 || pts.length > 3 || pts.some(function (x) { return !x; })) {
+      return reply(400, { ok: false, error: 'points is two or three lon,lat pairs, ;-separated' });
+    }
+    target = NBX.route + '/route/v1/driving/'
+           + pts.join(';') + '?overview=false';
+  }
+  if (nbxCache.has(target)) return reply(200, nbxCache.get(target));
+  nbxAsk(target, function (err, body) {
+    if (err) {
+      // The one case a page falls back on, so it is told apart from every
+      // answer by a field, not by guessing from a status code.
+      return reply(502, { ok: false, unreachable: true, error: err });
+    }
+    var out;
+    if (which === 'search') {
+      if (!Array.isArray(body)) {
+        return reply(502, { ok: false, unreachable: true,
+                            error: 'the NucBox search answered something that is not a list' });
+      }
+      // What the page reads and nothing else: where, and what it is called.
+      out = { ok: true, hits: body.map(function (h) {
+        return { lat: Number(h.lat), lon: Number(h.lon),
+                 name: String(h.display_name || ''), kind: String(h.type || '') };
+      }).filter(function (h) { return isFinite(h.lat) && isFinite(h.lon); }) };
+    } else {
+      var r0 = body && body.code === 'Ok' && Array.isArray(body.routes) && body.routes[0];
+      if (!r0 || typeof r0.distance !== 'number' || !isFinite(r0.distance)) {
+        // An answer, and kept: the router saying there is no road between
+        // these points will say it again.
+        out = { ok: false, noRoute: true,
+                error: 'the router found no road between these points ('
+                       + String((body && body.code) || '?') + ')' };
+      } else {
+        // The distance ONLY. OSRM's `duration` is a free-flow estimate with
+        // no traffic in it, and minutes from a pace are refused outright
+        // (AUDITS.md, Settled: "Do not re-time an offer at a pace"), so it is
+        // dropped here, where no page can ever be handed it.
+        out = { ok: true, metres: r0.distance };
+      }
+    }
+    nbxRemember(target, out);
+    reply(200, out);
+  });
+}
+
 function route(req, res) {
   // Noting what happened to an offer: which ones were taken, and which to hide.
   //
@@ -4775,6 +5001,11 @@ function route(req, res) {
    * anyway, which is why it is stored beside the journal on whichever host the
    * driver points the page at — the NUC, if that is where they do map checks.
    */
+  // The NucBox's search and router, relayed — see nbxRoute.
+  if (req.method === 'GET' && /^\/api\/nbx(\/|$)/.test(req.url.split('?')[0])) {
+    return nbxRoute(req, res);
+  }
+
   if (req.url.split('?')[0] === '/api/places') {
     var placesPath = path.join(path.dirname(JOURNAL_PATH), 'places.json');
     var placesReply = function (code, body) {
@@ -5939,6 +6170,14 @@ if (process.env.JOURNAL) {
     console.error('  sudo mkdir -p ' + dir + ' && sudo chown $USER ' + dir);
     console.error('  or point JOURNAL somewhere under your home directory.');
   });
+}
+
+// The NucBox's services, when set, so a map that falls back to the public one
+// can be traced to a setting rather than guessed at. Nothing is said when
+// neither is set: that is the ordinary install and today's behaviour.
+if (NBX.search || NBX.route) {
+  console.log('\nNucBox search: ' + (NBX.search || 'not set (NUCBOX_SEARCH)')
+              + '\nNucBox router: ' + (NBX.route || 'not set (NUCBOX_ROUTER)'));
 }
 
 if (scannerEnabled()) {
