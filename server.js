@@ -33,6 +33,9 @@ var spawn = require('child_process').spawn;
 // it was written. A relative require resolves against this file's directory,
 // not the cwd, so it survives however the server is started.
 var Advice = require('./advice.js');
+// The NucBox's street index (see "the NucBox's street index" below). Plain
+// CommonJS, no browser half: only this server and the suites read it.
+var Streets = require('./streets.js');
 
 var ROOT = __dirname;
 var PORT = parseInt(process.env.PORT, 10) || 8080;
@@ -4309,11 +4312,15 @@ var MARK_VIA = ['panel', 'offers', 'review'];
  *
  *   NUCBOX_SEARCH   Nominatim's base, e.g. http://100.x.y.z:8088
  *   NUCBOX_ROUTER   OSRM's base,      e.g. http://100.x.y.z:5000
+ *   NUCBOX_STREETS  the NucBox's own server.js, which answers where two
+ *                   streets meet and the stretch of one from its street
+ *                   index (NUCBOX_STREETS_FILE there), e.g.
+ *                   http://100.x.y.z:8080
  *                   (the NucBox's Tailscale address)
  *
- * On the NucBox itself the same two endpoints work against its own copy
- * (http://127.0.0.1:8088 and :5000), because nothing here knows which machine
- * it is on.
+ * On the NucBox itself the same endpoints work against its own copy
+ * (http://127.0.0.1:8088, :5000 and :8080), because nothing here knows which
+ * machine it is on.
  *
  * WHY THROUGH HERE AND NOT FROM THE BROWSER. The panel is served from this
  * machine and is all that talks to it; a browser asking the NucBox directly
@@ -4342,7 +4349,11 @@ function nbxBase(name) {
   }
   return v.replace(/\/+$/, '');
 }
-var NBX = { search: nbxBase('NUCBOX_SEARCH'), route: nbxBase('NUCBOX_ROUTER') };
+var NBX = { search: nbxBase('NUCBOX_SEARCH'), route: nbxBase('NUCBOX_ROUTER'),
+            streets: nbxBase('NUCBOX_STREETS') };
+// Which setting names each relayed question's service, for the words.
+var NBX_SETTING = { search: 'NUCBOX_SEARCH', route: 'NUCBOX_ROUTER', cross: 'NUCBOX_STREETS',
+                    stretch: 'NUCBOX_STREETS' };
 /* Short, because the one caller is a panel read while driving and the
  * alternative it falls back to is already there. Three seconds is chosen,
  * not measured: nobody has timed the real install over Tailscale, and a
@@ -4467,6 +4478,85 @@ function nbxPoint(s) {
     ? m[1] + ',' + m[2] : null;
 }
 
+// "left,top,right,bottom" — two nbxPoints — as written, or null.
+function nbxBox(s) {
+  var corners = String(s).split(',');
+  var a = corners.length === 4 && nbxPoint(corners[0] + ',' + corners[1]);
+  var b = corners.length === 4 && nbxPoint(corners[2] + ',' + corners[3]);
+  return a && b ? a + ',' + b : null;
+}
+
+// A name as a page may send one: 1 to NBX_TERM_MAX printable characters.
+function nbxTerm(v) {
+  var said = String(v).trim();
+  return said && said.length <= NBX_TERM_MAX && !/[\u0000-\u001f]/.test(said) ? said : null;
+}
+
+/* A question about streets — `which` is 'cross' (a, b, box) or 'stretch'
+ * (name, box) — checked for shape, or { error }. ONE check for both ends:
+ * the rig's relay below and the NucBox's own /api/streets answer the same
+ * question, so they refuse the same things for the same reasons, and a
+ * question the relay passed is one the NucBox will take. The box is
+ * optional, as the search's viewbox is: without one the whole index is
+ * asked. */
+function streetQuestion(req, which) {
+  var names = which === 'cross' ? ['a', 'b'] : ['name'];
+  var sq = nbxQuery(req, names.concat(['box']));
+  if (sq.error) return sq;
+  var out = {};
+  for (var i = 0; i < names.length; i++) {
+    out[names[i]] = sq.q[names[i]] === undefined ? null : nbxTerm(sq.q[names[i]]);
+    if (!out[names[i]]) {
+      return { error: names.join(' and ') + ' must each be 1 to ' + NBX_TERM_MAX
+                      + ' printable characters' };
+    }
+  }
+  out.box = null;
+  if (sq.q.box !== undefined) {
+    out.box = nbxBox(sq.q.box);
+    if (!out.box) return { error: 'box is left,top,right,bottom' };
+  }
+  return out;
+}
+
+/* What the NucBox's street index answered, as the fields the page reads, or
+ * { error } for an answer that is not one. Strict, all or nothing: a meeting
+ * or a point that is not two finite numbers refuses the whole answer rather
+ * than being dropped from it, because a corner list with one corner quietly
+ * missing is "only one fits" said of a list that was not whole. */
+function streetAnswer(which, body) {
+  var fin = function (v) { return typeof v === 'number' && isFinite(v); };
+  var names = function (side) {
+    return side && Array.isArray(side.names) && side.names.every(function (n) {
+      return typeof n === 'string';
+    }) ? { names: side.names, how: typeof side.how === 'string' ? side.how : null } : null;
+  };
+  var cut = body && fin(body.cutAt) ? body.cutAt : null;
+  if (which === 'cross') {
+    var a = names(body && body.a), b = names(body && body.b);
+    if (!body || body.ok !== true || !a || !b || !Array.isArray(body.meets)
+        || !body.meets.every(function (m) {
+          return m && fin(m.lat) && fin(m.lon) && fin(m.n) && fin(m.spanM);
+        })) {
+      return { error: 'the NucBox street index answered something that is not where two '
+                      + 'streets meet' };
+    }
+    return { ok: true, a: a, b: b, cutAt: cut, meets: body.meets.map(function (m) {
+      return { lat: m.lat, lon: m.lon, n: m.n, spanM: m.spanM, shared: !!m.shared };
+    }) };
+  }
+  var s = names(body);
+  if (!body || body.ok !== true || !s || !Array.isArray(body.lines)
+      || !body.lines.every(function (l) {
+        return Array.isArray(l) && l.every(function (pt) {
+          return Array.isArray(pt) && pt.length === 2 && fin(pt[0]) && fin(pt[1]);
+        });
+      })) {
+    return { error: 'the NucBox street index answered something that is not a street' };
+  }
+  return { ok: true, names: s.names, how: s.how, cutAt: cut, lines: body.lines };
+}
+
 function nbxRoute(req, res) {
   var reply = function (code, body) {
     send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8' });
@@ -4475,25 +4565,39 @@ function nbxRoute(req, res) {
   if (p === '/api/nbx') {
     // What the page asks first, so with nothing set it does what it always
     // did. Whether, not where: the addresses stay on this machine.
-    return reply(200, { ok: true, search: !!NBX.search, route: !!NBX.route });
+    return reply(200, { ok: true, search: !!NBX.search, route: !!NBX.route,
+                        streets: !!NBX.streets });
   }
-  var which = p === '/api/nbx/search' ? 'search' : p === '/api/nbx/route' ? 'route' : null;
+  var which = { '/api/nbx/search': 'search', '/api/nbx/route': 'route',
+                '/api/nbx/cross': 'cross', '/api/nbx/stretch': 'stretch' }[p] || null;
   if (!which) return reply(404, { ok: false, error: 'no such NucBox endpoint' });
-  if (!NBX[which]) {
+  var base = NBX[which === 'cross' || which === 'stretch' ? 'streets' : which];
+  if (!base) {
     return reply(404, { ok: false, configured: false,
-                        error: 'no NucBox ' + which + ' is set on this machine ('
-                               + (which === 'search' ? 'NUCBOX_SEARCH' : 'NUCBOX_ROUTER') + ')' });
+                        error: 'no NucBox ' + (which === 'cross' || which === 'stretch'
+                                               ? 'street index' : which)
+                               + ' is set on this machine (' + NBX_SETTING[which] + ')' });
   }
   var target;
-  if (which === 'search') {
+  if (which === 'cross' || which === 'stretch') {
+    var st = streetQuestion(req, which);
+    if (st.error) return reply(400, { ok: false, error: st.error });
+    // The NucBox's own server answers these, at the same path with the same
+    // parameters, checked by the same function; nothing else is sent.
+    target = base + '/api/streets/' + which + '?'
+           + (which === 'cross'
+              ? 'a=' + encodeURIComponent(st.a) + '&b=' + encodeURIComponent(st.b)
+              : 'name=' + encodeURIComponent(st.name))
+           + (st.box ? '&box=' + encodeURIComponent(st.box) : '');
+  } else if (which === 'search') {
     var sq = nbxQuery(req, ['q', 'street', 'viewbox']);
     if (sq.error) return reply(400, { ok: false, error: sq.error });
     var term = sq.q.q !== undefined ? 'q' : sq.q.street !== undefined ? 'street' : null;
     if (!term || (sq.q.q !== undefined && sq.q.street !== undefined)) {
       return reply(400, { ok: false, error: 'one of q or street, not both and not neither' });
     }
-    var said = sq.q[term].trim();
-    if (!said || said.length > NBX_TERM_MAX || /[\u0000-\u001f]/.test(said)) {
+    var said = nbxTerm(sq.q[term]);
+    if (!said) {
       return reply(400, { ok: false, error: term + ' must be 1 to ' + NBX_TERM_MAX
                                             + ' printable characters' });
     }
@@ -4502,11 +4606,9 @@ function nbxRoute(req, res) {
     target = NBX.search + '/search?format=jsonv2&limit=' + NBX_LIMIT + '&' + term + '='
            + encodeURIComponent(said);
     if (sq.q.viewbox !== undefined) {
-      var corners = sq.q.viewbox.split(',');
-      var a = corners.length === 4 && nbxPoint(corners[0] + ',' + corners[1]);
-      var b = corners.length === 4 && nbxPoint(corners[2] + ',' + corners[3]);
-      if (!a || !b) return reply(400, { ok: false, error: 'viewbox is left,top,right,bottom' });
-      target += '&viewbox=' + encodeURIComponent(a + ',' + b) + '&bounded=1';
+      var vb = nbxBox(sq.q.viewbox);
+      if (!vb) return reply(400, { ok: false, error: 'viewbox is left,top,right,bottom' });
+      target += '&viewbox=' + encodeURIComponent(vb) + '&bounded=1';
     }
   } else {
     var rq = nbxQuery(req, ['points']);
@@ -4547,6 +4649,9 @@ function nbxRoute(req, res) {
         return { lat: Number(h.lat), lon: Number(h.lon),
                  name: String(h.display_name || '') };
       }).filter(function (h) { return isFinite(h.lat) && isFinite(h.lon); }) };
+    } else if (which === 'cross' || which === 'stretch') {
+      out = streetAnswer(which, body);
+      if (out.error) return down(out.error);
     } else if (body && body.code === 'NoRoute') {
       // An answer, and kept: the router saying there is no road between
       // these points will say it again. ONLY this code. Every other one OSRM
@@ -4582,6 +4687,67 @@ function nbxRoute(req, res) {
     nbxRemember(target, out);
     reply(200, out);
   });
+}
+
+/* --- the NucBox's street index ---------------------------------------------
+ *
+ * Where two named streets meet, and the stretch of one, answered from the
+ * file tools/street_index.py made from the Georgia extract (streets.js does
+ * the answering; README, "The NucBox at home"). It runs HERE, in the
+ * NucBox's own copy of this server, because that server already runs there
+ * and is already reached over Tailscale: one setting on each machine and no
+ * third service to install, start and keep up.
+ *
+ *   NUCBOX_STREETS_FILE   the index, on the NucBox (e.g. ~/streets.json)
+ *
+ * Read once, at start, whole into memory; the server prints how long that
+ * took and what it holds. A file that is set and cannot be read is said at
+ * start and answered as such on every question — never as "no such street",
+ * which would be a fact about Georgia made up from a bad file. Unset is the
+ * ordinary install: /api/streets says nothing is loaded. */
+var STREETS_FILE = String(process.env.NUCBOX_STREETS_FILE || '').trim();
+var STREETS = { ix: null, why: null, ms: null, heapMb: null };
+// The most points a stretch answer carries (streets.js POINTS_MAX); the
+// suites move it.
+var STREETS_POINTS_MAX = Number(process.env.NUCBOX_STREETS_POINTS_MAX) > 0
+  ? Number(process.env.NUCBOX_STREETS_POINTS_MAX) : Streets.POINTS_MAX;
+if (STREETS_FILE) {
+  var streetsT0 = Date.now();
+  try {
+    STREETS.ix = Streets.load(STREETS_FILE);
+    STREETS.ms = Date.now() - streetsT0;
+    STREETS.heapMb = Math.round(process.memoryUsage().heapUsed / 1048576);
+  } catch (e) {
+    STREETS.why = 'the street index at ' + STREETS_FILE + ' could not be read ('
+                + String((e && (e.code || e.message)) || e).slice(0, 120) + ')';
+  }
+}
+
+function streetsRoute(req, res) {
+  var reply = function (code, body) {
+    send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8' });
+  };
+  var p = req.url.split('?')[0];
+  if (p === '/api/streets') {
+    return reply(200, STREETS.ix
+      ? { ok: true, loaded: true, counts: STREETS.ix.counts, bbox: STREETS.ix.bbox,
+          loadMs: STREETS.ms, heapMb: STREETS.heapMb }
+      : { ok: true, loaded: false, error: STREETS.why });
+  }
+  var which = p === '/api/streets/cross' ? 'cross' : p === '/api/streets/stretch' ? 'stretch' : null;
+  if (!which) return reply(404, { ok: false, error: 'no such street endpoint' });
+  if (!STREETS.ix) {
+    return STREETS.why ? reply(503, { ok: false, error: STREETS.why })
+      : reply(404, { ok: false, configured: false,
+                     error: 'no street index is loaded here (NUCBOX_STREETS_FILE)' });
+  }
+  var st = streetQuestion(req, which);
+  if (st.error) return reply(400, { ok: false, error: st.error });
+  var box = Streets.boxOf(st.box);
+  var out = which === 'cross' ? Streets.cross(STREETS.ix, st.a, st.b, box)
+    : Streets.stretch(STREETS.ix, st.name, box, STREETS_POINTS_MAX);
+  out.ok = true;
+  return reply(200, out);
 }
 
 function route(req, res) {
@@ -5064,6 +5230,10 @@ function route(req, res) {
   // The NucBox's search and router, relayed — see nbxRoute.
   if (req.method === 'GET' && /^\/api\/nbx(\/|$)/.test(req.url.split('?')[0])) {
     return nbxRoute(req, res);
+  }
+  // ...and the street index, on the machine that has it — see streetsRoute.
+  if (req.method === 'GET' && /^\/api\/streets(\/|$)/.test(req.url.split('?')[0])) {
+    return streetsRoute(req, res);
   }
 
   if (req.url.split('?')[0] === '/api/places') {
@@ -6235,9 +6405,21 @@ if (process.env.JOURNAL) {
 // The NucBox's services, when set, so a map that falls back to the public one
 // can be traced to a setting rather than guessed at. Nothing is said when
 // neither is set: that is the ordinary install and today's behaviour.
-if (NBX.search || NBX.route) {
+if (NBX.search || NBX.route || NBX.streets) {
   console.log('\nNucBox search: ' + (NBX.search || 'not set (NUCBOX_SEARCH)')
-              + '\nNucBox router: ' + (NBX.route || 'not set (NUCBOX_ROUTER)'));
+              + '\nNucBox router: ' + (NBX.route || 'not set (NUCBOX_ROUTER)')
+              + '\nNucBox streets: ' + (NBX.streets || 'not set (NUCBOX_STREETS)'));
+}
+// The street index this machine holds, when it holds one: what is in it and
+// what it cost to load, measured here, so the driver reads the real figures
+// off the NucBox rather than the estimate in the README.
+if (STREETS.ix) {
+  var sc = STREETS.ix.counts;
+  console.log('\nStreet index: ' + sc.names + ' names, ' + sc.ways + ' ways, ' + sc.nodes
+              + ' nodes from ' + STREETS_FILE + ', loaded in ' + STREETS.ms + ' ms, heap '
+              + STREETS.heapMb + ' MB');
+} else if (STREETS.why) {
+  console.error('\n' + STREETS.why + ' — /api/streets answers that, not "no such street".');
 }
 
 if (scannerEnabled()) {

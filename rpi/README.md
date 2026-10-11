@@ -8154,7 +8154,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 37 suites, 11,100-odd checks
+npm test                # all 38 suites, 11,100-odd checks
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -8281,6 +8281,15 @@ node tests/mapview.test.js      # 347 on the deciding behind both maps, with
                                 #     cases — two walks in a row, a cache hit
                                 #     mid-walk, a hotspot that drops — cost
                                 #     milliseconds instead of seconds
+node tests/streets.test.js      #  58 on the NucBox's street index, from a
+                                #     handful of invented streets through the
+                                #     real exporter (osmium-tool when it is
+                                #     installed) and the real server: names
+                                #     matched as Uber prints them and as OCR
+                                #     misreads them without one street becoming
+                                #     another, corners at a shared node and at a
+                                #     bridge, a dual carriageway as one corner,
+                                #     and a stretch cut at the box's edge
 python3 rpi/test_loop.py        # 269 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when

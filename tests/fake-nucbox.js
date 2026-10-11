@@ -27,6 +27,9 @@
  * route answer on purpose: server.js must drop it, and a suite can only see
  * that if it was there.
  *
+ * And the NucBox's own server.js's two street questions (/api/streets/cross
+ * and /stretch), answered in its shape with one fixed corner and stretch.
+ *
  * Also: "Church St" is two streets of that name in two towns (two that fit
  * and disagree, whatever the card's town), "Slow Place" answers after two and
  * a half seconds (for the timeout), "4821 Kestrel Dr" answers its street and
@@ -235,6 +238,28 @@ function start(done) {
     }
     if (u.pathname === '/__asked') return json(200, asked);
     asked.push(req.url);
+    // The NucBox's own server.js answering from its street index
+    // (server.js streetsRoute), in its shapes: one corner for any two names,
+    // one short stretch for any name. "Slow Street" answers after two and a
+    // half seconds (for the timeout) and "Bad Street" with a meeting that is
+    // not a point (for the relay's all-or-nothing check). What a real index
+    // answers is tests/streets.test.js's.
+    if (u.pathname === '/api/streets/cross' || u.pathname === '/api/streets/stretch') {
+      var said = u.query.a || u.query.name || '';
+      var cross = u.pathname === '/api/streets/cross';
+      var body = cross
+        ? { ok: true, a: { names: [String(u.query.a)], how: 'exact', ways: 1 },
+            b: { names: [String(u.query.b)], how: 'exact', ways: 1 }, cutAt: null,
+            meets: [{ lat: 33.96, lon: -84.55, n: 1, spanM: 0, shared: true }] }
+        : { ok: true, names: [String(u.query.name)], how: 'exact', points: 2, cutAt: null,
+            lines: [[[33.948, -84.56], [33.948, -84.552]]] };
+      if (said === 'Bad Street') {
+        if (cross) body.meets.push({ lat: 'north', lon: -84.55, n: 1, spanM: 0 });
+        else body.lines[0].push([33.948]);
+      }
+      if (said === 'Slow Street') return setTimeout(function () { json(200, body); }, 2500);
+      return json(200, body);
+    }
     if (u.pathname === '/search') {
       if ((u.query.q || '') === 'Slow Place') {
         return setTimeout(function () { json(200, []); }, 2500);

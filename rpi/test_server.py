@@ -4705,13 +4705,18 @@ try:
     _p0, _b0 = start({'SCANNER': '0'}, _nj)
     try:
         _before = len(_asked())
-        eq('with no NucBox set, /api/nbx says neither is set',
-           get(_b0, '/api/nbx'), {'ok': True, 'search': False, 'route': False})
+        eq('with no NucBox set, /api/nbx says none is set',
+           get(_b0, '/api/nbx'), {'ok': True, 'search': False, 'route': False,
+                                  'streets': False})
         _s, _r = _nbx(_b0, "/api/nbx/search?q=McDonald%27s")
         eq('...and a search is refused as not set here, not as unreachable',
            (_s, _r.get('configured'), _r.get('unreachable')), (404, False, None))
         _s, _r = _nbx(_b0, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
         eq('...and so is a route', (_s, _r.get('configured')), (404, False))
+        _s, _r = _nbx(_b0, '/api/nbx/cross?a=Foxglove%20Trl&b=Northgate%20Dr')
+        eq('...and so is where two streets meet, naming the setting',
+           (_s, _r.get('configured'), _r.get('error')),
+           (404, False, 'no NucBox street index is set on this machine (NUCBOX_STREETS)'))
         eq('...and nothing at all reached a NucBox', len(_asked()), _before)
     finally:
         stop(_p0)
@@ -4724,10 +4729,12 @@ try:
         stop(_p0)
 
     _p1, _b1 = start({'SCANNER': '0', 'NUCBOX_SEARCH': _fake_base,
-                      'NUCBOX_ROUTER': _fake_base + '/', 'NUCBOX_TIMEOUT_MS': '800'}, _nj)
+                      'NUCBOX_ROUTER': _fake_base + '/', 'NUCBOX_STREETS': _fake_base,
+                      'NUCBOX_TIMEOUT_MS': '800'}, _nj)
     try:
-        eq('with both set, /api/nbx says both are',
-           get(_b1, '/api/nbx'), {'ok': True, 'search': True, 'route': True})
+        eq('with all three set, /api/nbx says all three are',
+           get(_b1, '/api/nbx'), {'ok': True, 'search': True, 'route': True,
+                                  'streets': True})
         # The real install's own question: McDonald's in a box round Marietta.
         _s, _r = _nbx(_b1, "/api/nbx/search?q=McDonald%27s&viewbox=-84.65,34.04,-84.45,33.87")
         _hits = _r.get('hits') or []
@@ -4797,6 +4804,42 @@ try:
         eq('...and is not cached: asked twice, the router was asked twice',
            len(_asked()), _n + 2)
 
+        # The street index, on the NucBox's own server.js: where two streets
+        # meet, and the stretch of one, each inside a box.
+        _s, _r = _nbx(_b1, '/api/nbx/cross?a=Foxglove%20Trl&b=Northgate%20Dr'
+                           '&box=-84.6,34.0,-84.5,33.9')
+        eq('where two streets meet is relayed, as the corners and the names it '
+           'matched and nothing else',
+           (_s, sorted(_r.keys()), _r.get('meets')),
+           (200, ['a', 'b', 'cutAt', 'meets', 'ok'],
+            [{'lat': 33.96, 'lon': -84.55, 'n': 1, 'spanM': 0, 'shared': True}]))
+        eq('...asked of the NucBox at its own path with the same three parameters',
+           _asked()[-1], '/api/streets/cross?a=Foxglove%20Trl&b=Northgate%20Dr'
+                         '&box=-84.6%2C34.0%2C-84.5%2C33.9')
+        _s, _r = _nbx(_b1, '/api/nbx/stretch?name=Larkspur%20Pkwy%20SE')
+        eq('the stretch of a street is relayed, its lines and nothing else, with no '
+           'box when none is asked', (_s, sorted(_r.keys()), _asked()[-1]),
+           (200, ['cutAt', 'how', 'lines', 'names', 'ok'],
+            '/api/streets/stretch?name=Larkspur%20Pkwy%20SE'))
+        # All or nothing: one meeting that is not a point refuses the answer,
+        # because "only one fits" cannot be said of a list with one dropped.
+        _n = len(_asked())
+        for _which, _q in (('cross', 'a=Bad%20Street&b=X'), ('stretch', 'name=Bad%20Street')):
+            _s, _r = _nbx(_b1, '/api/nbx/%s?%s' % (_which, _q))
+            ok_('an answer with one %s point that is not a point is the NucBox not '
+                'answering, not a shorter list (%r)' % (_which, _r),
+                _s == 502 and _r.get('unreachable') is True
+                and 'street index answered something that is not' in _r.get('error', ''))
+        _nbx(_b1, '/api/nbx/cross?a=Bad%20Street&b=X')
+        eq('...and is not cached', len(_asked()), _n + 3)
+        _t0 = time.time()
+        _s, _r = _nbx(_b1, '/api/nbx/cross?a=Slow%20Street&b=X')
+        eq('a street index slower than NUCBOX_TIMEOUT_MS is reported unreachable',
+           (_s, _r.get('unreachable'), _r.get('error')),
+           (502, True, 'the NucBox did not answer within 0.8 s'))
+        ok_('...after the timeout, not after the NucBox (%.1fs)' % (time.time() - _t0),
+            time.time() - _t0 < 2.0)
+
         # Not an open proxy: every other parameter, path and shape is refused,
         # by name, and none of them reaches the NucBox.
         _n = len(_asked())
@@ -4817,6 +4860,15 @@ try:
                 ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8&alternatives=true',
                  'refused: alternatives'),
                 ('/api/nbx/table?points=-84.5,33.9;-84.4,33.8', 'no such NucBox endpoint'),
+                ('/api/nbx/cross?a=x&b=y&limit=5', 'refused: limit'),
+                ('/api/nbx/cross?a=x&a=y&b=z', 'given more than once: a'),
+                ('/api/nbx/cross?a=x', 'a and b must each be'),
+                ('/api/nbx/cross?a=x&b=' + 'y' * 121, 'a and b must each be'),
+                ('/api/nbx/cross?a=x&b=y&box=-84.6,34,-84.4', 'box is left,top,right,bottom'),
+                ('/api/nbx/cross?a=x&b=y&viewbox=-84.6,34,-84.4,33.9', 'refused: viewbox'),
+                ('/api/nbx/stretch?name=x&a=y', 'refused: a'),
+                ('/api/nbx/stretch?street=x', 'refused: street'),
+                ('/api/nbx/streets?name=x', 'no such NucBox endpoint'),
                 ('/api/nbx/../search?q=a', None)):
             _s, _r = _nbx(_b1, _path)
             ok_('the relay refuses %s (%r)' % (_path[:60], _r),
@@ -4857,6 +4909,32 @@ try:
         eq('...and so is its router', (_s, _r.get('unreachable')), (502, True))
     finally:
         stop(_p2)
+
+    # The real thing at both ends: the exporter's index of the synthetic
+    # streets (tests/fixtures/streets.opl), loaded by a NucBox's server.js,
+    # relayed by a rig's.
+    _idx = os.path.join(_ndir, 'streets.json')
+    subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'street_index.py'),
+                    os.path.join(ROOT, 'tests', 'fixtures', 'streets.osm'), _idx,
+                    '--opl', os.path.join(ROOT, 'tests', 'fixtures', 'streets.opl')],
+                   check=True, capture_output=True)
+    _pn, _bn = start({'SCANNER': '0', 'NUCBOX_STREETS_FILE': _idx}, _nj)
+    _pr, _br = start({'SCANNER': '0', 'NUCBOX_STREETS': _bn}, _nj)
+    try:
+        _s, _r = _nbx(_br, '/api/nbx/cross?a=Foxglove%20Tri&b=Northgate%20Dr'
+                           '&box=-84.6,34.0,-84.5,33.9')
+        eq("a rig relaying to a NucBox's own index answers where the two streets "
+           'meet, the misread "Tri" matched as Trail',
+           (_s, _r.get('a'), _r.get('meets')),
+           (200, {'names': ['Foxglove Trail'], 'how': 'ocr'},
+            [{'lat': 33.96, 'lon': -84.55, 'n': 1, 'spanM': 0, 'shared': True}]))
+        _s, _r = _nbx(_br, '/api/nbx/stretch?name=Larkspur%20Pkwy%20SE'
+                           '&box=-84.56,33.95,-84.54,33.94')
+        eq('...and the stretch of a street inside the box, cut at its edge',
+           (_s, [_l[0] for _l in _r.get('lines') or []]), (200, [[33.948, -84.56]]))
+    finally:
+        stop(_pr)
+        stop(_pn)
 
     # One that never ACCEPTS: a listener whose backlog is full, so the
     # connect itself never completes — the shape of a NucBox whose Tailscale
