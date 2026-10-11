@@ -298,6 +298,32 @@ else:
            and os.path.getsize(os.path.join(ROOT, p)) > BIG]
     ok_('no tracked file outside vendor/ is over %dkB%s' % (
         BIG // 1000, ' (' + ', '.join(big) + ')' if big else ''), not big)
+    # The NucBox and the phone are reached over Tailscale, whose addresses
+    # are 100.64/10, and the driver's own NucBox address was committed in
+    # three places (README, a server.js comment, test_server) and a phone's
+    # in three more (rpi/README, gps.py's and scan_pi.py's --help) before this.
+    # The docs write 100.x.y.z and the suites ask 127.0.0.1 fakes; a real
+    # address in any tracked file is the driver's network in the repo.
+    _cgnat = re.compile(r'\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b')
+    _leaks = []
+    for p in tracked:
+        fp = os.path.join(ROOT, p)
+        if p.startswith('vendor/') or not os.path.isfile(fp) or os.path.getsize(fp) > BIG:
+            continue
+        with open(fp, 'rb') as fh:
+            if _cgnat.search(fh.read().decode('utf-8', 'ignore')):
+                _leaks.append(p)
+    eq('no tracked file carries a Tailscale address (100.64/10); the docs '
+       'write 100.x.y.z', _leaks, [])
+
+# The NucBox's Nominatim, as the README tells the driver to start it, is the
+# command the driver ran: with --shm-size=1g, which the README first left out
+# (Docker's 64 MB of shared memory is not enough for PostgreSQL's import).
+_readme = open(os.path.join(ROOT, 'README.md'), encoding='utf-8').read()
+_nom = [c for c in re.findall(r'docker run[^\n]*', _readme.replace('\\\n', ' '))
+        if 'mediagis/nominatim' in c]
+ok_("the README's Nominatim command carries --shm-size=1g, as the driver ran it (%d)"
+    % len(_nom), _nom and all('--shm-size=1g' in c for c in _nom))
 
 # --- the quick JavaScript pass runs every JavaScript suite -------------------
 #

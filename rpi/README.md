@@ -4401,11 +4401,14 @@ where the new job ends.
 `NUCBOX_ROUTER`; see the main README, *The NucBox at home*), the same disc
 does its refusing before a pin is drawn: each place is searched inside its
 card's disc on the NucBox's own Nominatim, a pin is used only when one
-candidate fits or all that fit agree, and the line says which it was when none
-is used ("no pin for McDonald's — 2 fit the card and disagree · within 9.4 mi
-of you"). The figure becomes road miles from the NucBox's OSRM, labelled
-"+N road mi out of your way", over the same three points and behind every
-refusal above — still no minutes, still never through the new job's end. A
+candidate fits or all that fit agree — never from a list cut at the limit,
+never a street for a door, never chosen by the card's town — and the line
+says which it was when none is used ("no pin for McDonald's — 2 fit the card
+and disagree · within 9.4 mi of you"). The figure becomes road miles from the
+NucBox's OSRM, labelled "+N road mi out of your way", over the same three
+points and behind every refusal above — still no minutes, still never through
+the new job's end, and not at all when it comes out below zero past its
+rounding or a point was moved more than 0.2 mi to a road. A
 NucBox that does not answer leaves today's public geocoder and straight line,
 and the line's tail says so. With neither setting, nothing here changes.
 

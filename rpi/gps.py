@@ -1,7 +1,7 @@
 """Where the rig is, when the receiver is willing to say.
 
     python3 rpi/gps.py --from 127.0.0.1               # gpsd on the Pi
-    python3 rpi/gps.py --from 100.x.y.z:2947     # a phone's server app
+    python3 rpi/gps.py --from 100.x.y.z:2947          # a phone's server app
 
 Anything that speaks on TCP port 2947 — gpsd's port — can hand the rig a
 position, and this is the thing that asks. It was written for a phone in the

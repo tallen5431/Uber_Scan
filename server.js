@@ -4309,6 +4309,7 @@ var MARK_VIA = ['panel', 'offers', 'review'];
  *
  *   NUCBOX_SEARCH   Nominatim's base, e.g. http://100.x.y.z:8088
  *   NUCBOX_ROUTER   OSRM's base,      e.g. http://100.x.y.z:5000
+ *                   (the NucBox's Tailscale address)
  *
  * On the NucBox itself the same two endpoints work against its own copy
  * (http://127.0.0.1:8088 and :5000), because nothing here knows which machine

@@ -193,12 +193,15 @@ Nominatim 4.5, image `mediagis/nominatim:4.5`, `PBF_PATH` pointing at the
 extract, `THREADS=4`, its database in the named volume `nominatim-data`,
 served on port 8088. It gets **its own copy of the `.pbf` in `~/nominatim`**,
 because the image chowns what is mounted at `/nominatim` and doing that to the
-directory OSRM reads from is a surprise nobody wants. The container-side paths
-below are the image's own README's for 4.5, not something this repo measured:
+directory OSRM reads from is a surprise nobody wants. `--shm-size=1g` is in the
+command the driver ran, as in the image README's examples: PostgreSQL inside
+the container works in shared memory, and Docker gives a container 64 MB of
+it unless told otherwise. The container-side paths below are the image's own README's for 4.5,
+not something this repo measured:
 
 ```sh
 mkdir -p ~/nominatim && cp georgia-latest.osm.pbf ~/nominatim/
-docker run -it -e PBF_PATH=/nominatim/data/georgia-latest.osm.pbf -e THREADS=4 \
+docker run -it --shm-size=1g -e PBF_PATH=/nominatim/data/georgia-latest.osm.pbf -e THREADS=4 \
   -v nominatim-data:/var/lib/postgresql/16/main -v ~/nominatim:/nominatim/data \
   -p 8088:8080 --name nominatim mediagis/nominatim:4.5
 ```
@@ -210,7 +213,8 @@ may have none.
 
 ### What the real install answered
 
-Measured against the driver's NucBox at `100.x.y.z`:
+Measured against the driver's NucBox, over its Tailscale address (written
+`100.x.y.z` here and below — use your own):
 
 | Asked | Answered |
 |---|---|
@@ -225,7 +229,9 @@ Measured against the driver's NucBox at `100.x.y.z`:
 So: Uber's abbreviations (Pkwy, SE) are fine, and Uber's **town is the postal
 town**, which often is not OSM's (Atlanta against Cumberland; Marietta against
 Kennesaw for 1985 Cobb Parkway). A place is therefore searched **inside an
-area and never by its town**; the town only breaks a tie. And because a
+area and never by its town**, and the town is not used to choose among what
+comes back either: as a tie-break it pinned a namesake 1.35 mi from the right
+street because its OSM address said the card's postal town. And because a
 street comes back as one point, "the stretch of a street inside the circle"
 and cross streets ("A & B, Town") are not answerable this way — they wait for
 a street index built from the Georgia file, and until then the panel says
@@ -248,7 +254,11 @@ on the line in `Start.sh` that starts the server. The server prints both at
 startup when either is set, and `curl localhost:8080/api/nbx` says which it
 has. On the NucBox itself the same two settings point at
 `http://127.0.0.1:8088` and `:5000`. `NUCBOX_TIMEOUT_MS` (3000) is how long
-the server waits for either before saying the NucBox did not answer.
+the server waits for either before saying the NucBox did not answer — the
+whole question, connecting included, so a NucBox whose address routes
+nowhere is given up on in that time too. Before that was so, a listener
+that never accepted held the server 5 s on Node 22 and was still being waited
+on at 15 s with an HTTP agent of Node 18's kind.
 
 ### What the panel does with them
 
@@ -259,26 +269,41 @@ all:
   car was when that card came up (its GPS fix), out to the card's own
   distance plus half a mile — for up to ten candidates. A pin is used only if
   exactly one candidate is inside the disc, or every one inside is the same
-  place. A merchant is searched by name; a bracketed door ("Jimmy John's (1985
-  Cobb Parkway NW)") by that street address, the town ignored; "Street, Town"
-  and the Trip Planner's door line by the street, the town only breaking a
-  tie. Every refusal is said under the map, refusal first: "no pin for
-  McDonald's — 2 fit the card and disagree · within 9.4 mi of you", "...none
-  fit the card · within 0.6 mi of you, nearest 1.2 mi". A card with no yardstick
-  is searched within sixty miles, one with no fix across Georgia, under the
-  same one-or-all-agree rule.
+  place, and only from a list that did not stop at ten: a cut list cannot
+  show there is only one ("no pin for Starbucks — too many to be sure · the
+  NucBox lists 10 at most"). A merchant is searched by name; a bracketed door
+  ("Jimmy John's (1985 Cobb Parkway NW)") by that street address; "Street,
+  Town" and the Trip Planner's door line by the street. The town is never
+  sent and never used. An address with a house number is pinned only where
+  the answer carries that number — asked for a door it does not hold,
+  Nominatim answers the street ("no pin for 4821 Kestrel Dr — street found,
+  not that door"). Every refusal is said under the map, refusal first: "no
+  pin for McDonald's — 2 fit the card and disagree · within 9.4 mi of you",
+  "...none fit the card · within 0.6 mi of you, nearest 1.2 mi". A card with
+  no yardstick is searched within sixty miles, one with no fix across
+  Georgia, under the same rules.
 * **Road.** "+N mi out of your way" becomes **"+N road mi out of your way"**:
   the road from the car by the new pickup to where the order in the car is
   going, less the road from the car straight there. Never minutes — OSRM's
   durations have no traffic in them and the server drops them before a page
   can see them — and never a route through where the new job ends. Every
   refusal the straight line makes still stands; the router is asked only
-  where the straight figure would have been printed.
+  where the straight figure would have been printed. Two road figures are not
+  printed, and the straight line stands with the reason: one below zero by
+  more than the 0.05 mi the figure rounds away (OSRM routes the fastest road,
+  not the shortest, so going by the pickup can come out shorter than the
+  road it chose direct — "· router took different roads"), and one where
+  OSRM had to move a point more than 0.2 mi to reach a road ("· a pin over
+  0.2 mi off road").
 * **When the NucBox does not answer**, the panel falls back to the public
   geocoder for the places it could not ask, and to straight lines for the
   figure, and says which: "· NucBox down, public map used", "· NucBox router
   down". A router that answers there is no road between the points (OSRM's
-  NoRoute) leaves the straight line too, with "· no road found".
+  NoRoute, and only that) leaves the straight line too, with "· no road
+  found"; any other refusal from OSRM is the router down. A question the
+  rig's own server refuses is a bug in the page, said as one ("no pin for X
+  — a bug: the rig refused the question"), and is never handed to the public
+  map instead.
 
 `map.html` and the offers page still use the public geocoder: they place a
 whole window of offers rather than one card's disc, and choosing among
