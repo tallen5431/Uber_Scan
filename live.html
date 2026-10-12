@@ -2470,7 +2470,22 @@
       // both are what the driver is there to fix.
       var busy = readingAt && (Date.now() - readingAt) < READING_MS
                  && p.phase !== 'error' && p.phase !== 'aim';
+      // ...but "the card" only while there may be one. The motion gate fires
+      // on any picture that moves and settles, so a navigation map, DoorDash's
+      // "Finding offers" and a "Switch to dash in this busier zone" prompt are
+      // each read again and again — and every one of those reads put READING
+      // THE CARD, "working out the pay, the time and the distance", over a
+      // phone with no card on it, with the "no offer on screen" each one came
+      // to on the glass for the few milliseconds before the next read began.
+      // So when the last reading came to nothing offer-like, what is said is
+      // what it found and that the rig is looking again. A card that has just
+      // arrived over that screen gets the same true cue — the rig is reading
+      // the screen — and its verdict in the second and a half after. After a
+      // reading that had something of an offer on it, or before any reading
+      // at all, it is still READING THE CARD.
+      var again = busy && r && noVerdictSaid(r) === NO_OFFER_SAID;
       el.verdictLabel.textContent = blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
+        : again ? 'READING THE SCREEN'
         : busy ? 'READING THE CARD'
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER');
       // Only while aiming, where the number means pixels and says so. On any
@@ -2528,6 +2543,7 @@
             // it would be said of is the last one before the word, too: the
             // word clears at the next read.
             : (blind ? ''
+               : again ? 'no offer on screen · reading again'
                : busy ? 'working out the pay, the time and the distance'
                : (r ? noVerdictSaid(r) + trackNote(r) : '')));
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
@@ -2968,6 +2984,12 @@
   // Those are the frames kept on offer rows; the navigation screens between
   // offers are not among them. The card it was written for, a pay the box
   // cut off, is not in that week's frames at all; it is the 8 Oct one.
+  // What a reading with nothing offer-like on it is said as. Named, because
+  // render() asks whether that is what the last reading came to: a read
+  // starting over a screen that has just read as no offer is the rig
+  // looking again, not a card being priced.
+  var NO_OFFER_SAID = 'scanner running, no offer on screen';
+
   function noVerdictSaid(r) {
     if (r.clipped) return 'pay at the box edge — not trusted';
     if (typeof r.pay === 'number' && r.pay > 0) {
@@ -2982,7 +3004,7 @@
         || named.length) {
       return 'no pay read — box may cut it off';
     }
-    return 'scanner running, no offer on screen';
+    return NO_OFFER_SAID;
   }
 
   // What the dot means.

@@ -464,6 +464,24 @@ const framed = (page) => page.waitForFunction(
         { ready: false, state: 'empty', track: null }));
       await page.waitForTimeout(150);
       slot.placesAfter = await page.evaluate(LOOK, '#places');
+      // ...and the rig reads the screen again, as it does over a navigation
+      // map or "Finding offers" whenever the picture moves and settles. The
+      // last reading found no offer, so "the card" would be a claim nothing
+      // has made.
+      await page.evaluate(() => window.__es.push(
+        { reading: true, at: Date.now() }));
+      await page.waitForTimeout(120);
+      slot.again = await page.evaluate(LOOK, '#verdictLabel');
+      slot.againDetail = await page.evaluate(LOOK, '#detail');
+      // ...against a reading that had part of an offer on it, where a second
+      // read is a card being read again.
+      await page.evaluate(() => window.__es.push(
+        { ready: false, state: 'empty', track: null, pay: null, minutes: 22 }));
+      await page.evaluate(() => window.__es.push(
+        { reading: true, at: Date.now() }));
+      await page.waitForTimeout(120);
+      slot.againCard = await page.evaluate(LOOK, '#verdictLabel');
+      slot.againCardDetail = await page.evaluate(LOOK, '#detail');
       await page.evaluate((r) => window.__es.push(r), READINGS[key]);
       await page.waitForTimeout(150);
       slot.fits = await page.evaluate(() => {
@@ -4530,6 +4548,24 @@ try:
                r['idle']['text'], 'WAITING FOR AN OFFER')
             eq('%s: a card under the reader says so instead' % where,
                r['reading']['text'], 'READING THE CARD')
+            # ...but not over a screen whose last reading found no offer: that
+            # is the rig looking again, and it says what it last found.
+            eq('%s: a read over a screen that just read as no offer is not '
+               'called a card' % where,
+               (r.get('again') or {}).get('text'), 'READING THE SCREEN')
+            eq('%s: ...and says what the last read found' % where,
+               (r.get('againDetail') or {}).get('text'),
+               'no offer on screen · reading again')
+            ok_('%s: ...on the glass, label and line (%r, %r)'
+                % (where, (r.get('again') or {}).get('shown'),
+                   (r.get('againDetail') or {}).get('shown')),
+                (r.get('again') or {}).get('shown')
+                and (r.get('againDetail') or {}).get('shown'))
+            eq('%s: a read after a reading with part of an offer on it is '
+               'still the card' % where,
+               ((r.get('againCard') or {}).get('text'),
+                (r.get('againCardDetail') or {}).get('text')),
+               ('READING THE CARD', 'working out the pay, the time and the distance'))
             # The safety property. A message with no `ready` must not put a
             # number on the panel, because there is no number in it.
             eq('%s: ...without inventing a rate to go with it' % where,

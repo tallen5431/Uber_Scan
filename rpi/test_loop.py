@@ -322,16 +322,21 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # Every read handed to the reader, begun or not: one asked of a reader
     # stuck on the read before it never starts, so `calls` cannot count it.
     submitted = [0]
+    # ...whether each was a ⌖ read of the whole screen, and how many times the
+    # panel was told a read had started.
+    submitted_whole = []
+    readings = [0]
 
     def submit(self, frames, now, geom):
         submitted[0] += 1
+        submitted_whole.append(bool(getattr(geom, 'whole', False)))
         return real[12](self, frames, now, geom)
 
     SP.Reader.submit = submit
     # What the loop tells the server it is pricing a mile at, as a copy: the
     # loop hands over its live dict, which is exactly the thing that changes.
     SP.emit_settings = lambda settings: said_settings.append(dict(settings or {}))
-    SP.emit_reading = lambda *a, **k: None
+    SP.emit_reading = lambda *a, **k: readings.__setitem__(0, readings[0] + 1)
     # Captured rather than printed, like the offer line beside it. The empty
     # answer — a press that found no address — is only visible here.
     SP.emit_dropoff = lambda address, **k: dropoffs.append((address, k))
@@ -443,7 +448,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, offer_kw=offer_kw,
                 beats=beats, calls=calls[0],
-                submitted=submitted[0], planners=said_planners,
+                submitted=submitted[0], submitted_whole=submitted_whole,
+                readings=readings[0], planners=said_planners,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
                 raised=raised, handoff=handoff, finder=finder[0])
@@ -1586,6 +1592,17 @@ ok_('...and the address outside the card box is the answer (%r)'
     % [(d[0] or {}).get('line') for d in r8['dropoffs']][:2],
     any(d[0] and 'Main St' in (d[0].get('line') or '') and d[1].get('asked')
         for d in r8['dropoffs']))
+# ...and the panel is not told a card is being priced while it happens. A ⌖
+# read answers with an address or nothing, never with `ready`, so the reading
+# cue it used to send stood on the panel as READING THE CARD, "working out the
+# pay, the time and the distance", for the page's whole READING_MS after each
+# one — over a navigation screen, through the whole window.
+_card_reads = r8['submitted_whole'].count(False)
+ok_('the premise: both kinds of read were handed over (%d whole, %d card)'
+    % (r8['submitted_whole'].count(True), _card_reads),
+    r8['submitted_whole'].count(True) >= 1 and _card_reads >= 1)
+eq('...and the panel is told a read began for the card reads only',
+   r8['readings'], _card_reads)
 
 # The whole-screen read sees a DIFFERENT payout here — a card under a map, a
 # planner listing two orders' totals. If it reached the offer, the panel would

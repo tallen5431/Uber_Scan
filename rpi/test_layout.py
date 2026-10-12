@@ -921,6 +921,12 @@ for _said, _fields in NOVERDICT_SAID.items():
         NOVERDICT['%s/%s' % (_said, _track)] = dict(
             {'ready': False, 'state': 'empty', 'track': _t, 'places': [], 'text': ''},
             **_fields)
+# ...and a read starting over a screen whose last reading found no offer:
+# READING THE SCREEN and "no offer on screen · reading again", where it said
+# READING THE CARD and "working out the pay, the time and the distance" over a
+# navigation map. Two messages, pushed in order. No track note: the line while
+# a read is out never carries one.
+NOVERDICT['again/alone'] = [NOVERDICT['nothing/alone'], {'reading': True, 'at': 1}]
 # The rig's own display, and the two the panel is proven at.
 NOVERDICT_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '480x320')]
 
@@ -2013,7 +2019,7 @@ const SNAP_MEASURE = (fixture) => {
       for (const [key, reading] of Object.entries(NOVERDICT)) {
         await page.evaluate((r) => {
           window.__es.push({ alive: true, at: 1 });
-          window.__es.push(r);
+          (Array.isArray(r) ? r : [r]).forEach((m) => window.__es.push(m));
         }, reading);
         await page.waitForTimeout(150);
         slot[key] = await page.evaluate(() => {
@@ -2054,8 +2060,31 @@ const SNAP_MEASURE = (fixture) => {
           // times over and a `white-space: nowrap` that ran it off the glass
           // both left the page's scroll size alone. The letters are what a
           // driver would miss, and `off` above is what asks after them.
+          // ...and the verdict's own label, whose words change for one of
+          // these: every letter inside the verdict card and on the glass.
+          const lab = document.getElementById('verdictLabel');
+          const card = document.getElementById('verdict').getBoundingClientRect();
+          const labOff = [];
+          const lw = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT);
+          while ((n = lw.nextNode())) {
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (!c.width && !c.height) continue;
+              if (c.left < Math.max(0, card.left) - 0.5
+                  || c.right > Math.min(window.innerWidth, card.right) + 0.5
+                  || c.top < Math.max(0, card.top) - 0.5
+                  || c.bottom > Math.min(window.innerHeight, card.bottom) + 0.5) labOff.push(n.data[i]);
+            }
+          }
+          const labRange = document.createRange();
+          labRange.selectNodeContents(lab);
           return {
             text: d.textContent.trim(),
+            label: lab.textContent.trim(),
+            labelOff: labOff.join(''),
+            labelLines: Math.round(labRange.getClientRects().length),
             width: Math.round(all.getBoundingClientRect().width * 10) / 10,
             lines: Math.round(r.height / line),
             off: off.join(''),
@@ -2567,6 +2596,27 @@ try:
                was['phone'], view == 'screen')
             ok_('...against the line it replaced at %s (%r)' % (where, was['text']),
                 was['text'] == 'scanner running, no offer on screen')
+            # A read over a screen that just read as no offer: the label and
+            # the line say what it last found, and fit where the line and the
+            # label it stands in for did.
+            ag = nv['again/alone']
+            eq('a read over a no-offer screen is READING THE SCREEN at %s' % where,
+               (ag['label'], ag['text']),
+               ('READING THE SCREEN', 'no offer on screen · reading again'))
+            eq('...every letter of the label in the verdict card at %s' % where,
+               ag['labelOff'], '')
+            eq('...on one line, as WAITING FOR AN OFFER is, at %s (%d, %d)'
+               % (where, ag['labelLines'], was['labelLines']),
+               ag['labelLines'], was['labelLines'])
+            eq('...and every letter of the line on the glass at %s' % where,
+               ag['off'], '')
+            ok_('...on no more lines than the line it replaced at %s (%d, %d)'
+                % (where, ag['lines'], was['lines']),
+                1 <= ag['lines'] <= was['lines'])
+            # Everything but the label's own box, whose width is its words'.
+            _nolabel = lambda l: dict(l, label=l['label'][1:2] + l['label'][3:])
+            eq('...moving nothing else on the panel at %s' % where,
+               _nolabel(ag['layout']), _nolabel(was['layout']))
             for key, opens in (('nopay', 'no pay read'),
                                ('notime', 'pay, no time'),
                                ('clipped', 'pay at the box edge')):

@@ -1911,6 +1911,13 @@ def emit_reading():
     back, because the whole point is the gap between the two. Like the
     heartbeat, it carries no `ready` and no numbers, so it cannot overwrite a
     verdict or vouch for one — it says only that the wait has a reason.
+
+    Only for a read that is looking for an offer, which is the read whose end
+    is a message carrying `ready`. A ⌖ read of the whole screen is not one —
+    see where this is called. And "a card" is the panel's word, not this
+    message's: the loop does not know a card is there until the read says so,
+    so live.html says READING THE SCREEN instead when the last read found no
+    offer at all.
     """
     print(json.dumps({'reading': True, 'at': int(time.time() * 1000)}),
           flush=True)
@@ -4975,14 +4982,21 @@ def main():
             # card box drawn by hand made that a blind spot — see
             # cropbox.parse_card. Only while asked: an unprompted read is
             # hunting offers and keeps the card crop.
+            whole_read = dropoff_asked and time.time() < dropoff_until
             reader.submit([frame] if partner is None else [frame, partner],
-                          time.time(),
-                          scanner.geometry(whole=dropoff_asked
-                                           and time.time() < dropoff_until))
+                          time.time(), scanner.geometry(whole=whole_read))
             looked = True
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.
-            if args.json:
+            #
+            # Not for a ⌖ read. It is a read of the whole screen for an
+            # address, digest() returns before emit() for it, so nothing
+            # carrying `ready` ever followed — and the panel said READING THE
+            # CARD, "working out the pay, the time and the distance", for its
+            # whole 8s READING_MS after every one, through the twelve-second
+            # window, over a navigation screen. The ⌖ button says "⌖ reading…"
+            # for that read itself.
+            if args.json and not whole_read:
                 emit_reading()
             if not reader.threaded and collect():
                 break
