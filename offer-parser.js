@@ -145,6 +145,26 @@
     '\\+\\s*[$S5§]?\\s*((?:' + DC + '|[.,])+(?:\\s(?:' + DC + '|[.,])+)?)'
     + '\\s*incl(?:uded)?\\b', 'gi');
 
+  /* ...and the same for the other things a card says a part of its pay came
+   * from: a tip, a promotion, a boost, a surge, a bonus, an extra, DoorDash's
+   * Peak Pay. Where the
+   * headline is in the text these never mattered; where the drawn box cut it
+   * off, the largest figure left was one of these, and it was the payout:
+   * "Includes $3.00 tip" inside the box under a cut-off $14.48 read $3.00,
+   * PASS at $5.1/hr, and "+$2.00 promo" $2.00 at $3.4/hr, each on 8 of 8
+   * rendered frames. By grammar, in four shapes and never a word on one side
+   * alone — "+$2.00 promo", "Boost +$3.00", "Includes $3.00 tip", "Surge
+   * $1.50 extra" — so "$14.48 Includes expected tip", "$11.42 Guaranteed
+   * (incl. tip)" and "$16.05 Promo" keep their headline. The Python twin,
+   * PAY_PART, says the rest. */
+  var PART_WORD = '(?:tips?|promo(?:tion)?s?|boost|surge|bonus|extra|peak\\s*pay)\\b';
+  var PART_AMOUNT = '[$S5§]\\s*(?:' + DC + '|[.,])+';
+  var PAY_PART = new RegExp(
+    '\\+\\s*' + PART_AMOUNT + '\\s*' + PART_WORD
+    + '|\\b' + PART_WORD + '\\s*[:\\-•]?\\s*\\+\\s*' + PART_AMOUNT
+    + '|\\bincl(?:udes?|uded|\\.)?\\s*' + PART_AMOUNT + '\\s*(?:expected\\s+)?' + PART_WORD
+    + '|\\b' + PART_WORD + '\\s*' + PART_AMOUNT + '\\s*extra\\b', 'gi');
+
   /* One payout, cut in half by the reader.
    *
    * The headline is the biggest type on the card and the crop's own edge runs
@@ -268,7 +288,7 @@
    * the rider's star follows it at once — see HEADLINE_LABEL. The Python twin
    * says the rest. */
   function findPay(text, where) {
-    var chips = collect(text, PAY_CHIP);
+    var chips = collect(text, PAY_CHIP).concat(collectSpans(text, PAY_PART));
     var units = collectSpans(text, PAY_IS_A_DURATION)
       .concat(collectSpans(text, PAY_IS_PER_ORDER));
     var all = collect(text, MONEY_STRICT);
