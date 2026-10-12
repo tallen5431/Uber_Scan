@@ -1220,8 +1220,10 @@
    * which runs no scanner, there is no beat and so nothing at all.
    *
    * The view is fitted to include the dot ONCE, on the page's first answer,
-   * and never follows it: every pan is tiles down a hotspot whose cost has not
-   * been measured, and the trail and the pins are what this page is for. Not
+   * and never follows it, unlike the panel's Map view (see live.html's
+   * drawHere): the trail and the pins are what this page is for, a row in the
+   * sidebar takes the view to its pin and a follow would take it back on the
+   * next answer, and there is no ⛶ Map here to start a follow again. Not
    * "the first time there is one": opened with no fix, a page that waited for
    * one pulled the view back to the car whenever the first fix came in —
    * after the driver had panned off to the trail — which is a fit on a beat.

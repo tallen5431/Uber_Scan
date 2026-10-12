@@ -2534,8 +2534,32 @@ const framed = (page) => page.waitForFunction(
       var into = function (list, x) { (how(x.opts) ? window.__how : window[list]).push(x); };
       window.L = {
         map: function (node) {
-          window.__lmap = { node: node && node.id,
-            setView: function (ll) { window.__view = ll; return this; },
+          // Where the view is and its zoom, so the follow's "is the dot in the
+          // middle" can be asked of it: a flat projection at Leaflet's own
+          // scale (256px a tile, 2^zoom tiles round the world), which is what
+          // the question needs and no more. Leaflet's events are kept and
+          // fired as Leaflet fires them: a zoom's zoomstart a moment AFTER
+          // the call that asked for it, then moveend; a pan's moveend after
+          // it; a drag only when the test fires one.
+          var hands = {};
+          window.__pans = [];
+          window.__lmap = { node: node && node.id, centre: [33.94, -84.58], zoom: 11,
+            on: function (ev, fn) { (hands[ev] = hands[ev] || []).push(fn); return this; },
+            fire: function (ev) { (hands[ev] || []).forEach(function (fn) { fn({}); }); return this; },
+            later: function (evs) { var m = this;
+              setTimeout(function () { evs.forEach(function (ev) { m.fire(ev); }); }, 40); },
+            setView: function (ll, z) { window.__view = ll; this.centre = ll;
+              if (typeof z === 'number' && z !== this.zoom) { this.zoom = z;
+                this.later(['zoomstart', 'moveend']); } else this.later(['moveend']);
+              return this; },
+            panTo: function (ll) { window.__pans.push([ll[0], ll[1], this.zoom]);
+              this.centre = ll; this.later(['moveend']); return this; },
+            getZoom: function () { return this.zoom; },
+            getSize: function () { return { x: node.clientWidth, y: node.clientHeight }; },
+            latLngToContainerPoint: function (ll) {
+              var k = 256 * Math.pow(2, this.zoom) / 360;
+              return { x: node.clientWidth / 2 + (ll[1] - this.centre[1]) * k,
+                       y: node.clientHeight / 2 - (ll[0] - this.centre[0]) * k }; },
             invalidateSize: function () { window.__sized = (window.__sized || 0) + 1; },
             removeLayer: function (g) {
               window.__marks = window.__marks.filter(function (m) { return m.group !== g; });
@@ -2543,8 +2567,13 @@ const framed = (page) => page.waitForFunction(
               window.__circles = window.__circles.filter(function (c) { return c.group !== g; });
               window.__how = window.__how.filter(function (c) { return c.group !== g; });
             },
-            on: function () { return this; },
-            fitBounds: function (b) { window.__fit = b; } };
+            // Framed on the bounds' middle at zoom 12, and a zoom: Leaflet
+            // says zoomstart for the page's own fit as for a hand's.
+            fitBounds: function (b) { window.__fit = b;
+              var la = b.map(function (p) { return p[0]; }), lo = b.map(function (p) { return p[1]; });
+              this.centre = [(Math.min.apply(null, la) + Math.max.apply(null, la)) / 2,
+                             (Math.min.apply(null, lo) + Math.max.apply(null, lo)) / 2];
+              this.zoom = 12; this.later(['zoomstart', 'moveend']); } };
           return window.__lmap;
         },
         tileLayer: function (url, o) { window.__tiles = { url: url, opts: o };
@@ -3089,9 +3118,10 @@ const framed = (page) => page.waitForFunction(
    * The heartbeat's newest fix, drawn on the map as a dot inside a circle the
    * size of its own error, with "±N m · N s old" in the corner. The gate's
    * answer comes with the fix from rpi/gps.py and the page only reads it: a
-   * rough fix is no dot and a reason, a stale one is grey. And the map never
-   * follows it — tiles cost hotspot data nobody has measured — so the view is
-   * fitted to include it on the way in and then left alone. Marietta Square
+   * rough fix is no dot and a reason, a stale one is grey. The view is fitted
+   * to include it on the way in, and after that goes after a fresh dot only
+   * when it moves out of the middle of the map — at the zoom the map is at —
+   * until a hand on the map stops it and ⛶ Map round again starts it. Marietta Square
    * and points by it: public places, invented fixes. */
   {
     stage = 'the map mode: you are here';
@@ -3135,8 +3165,24 @@ const framed = (page) => page.waitForFunction(
         dots: (window.__marks || []).filter(function (m) {
           return /you are here/.test(String(m.popup || '')); })
           .map(function (m) { return m.ll; }),
-        fit: window.__fit, view: window.__view || null };
+        fit: window.__fit, view: window.__view || null,
+        pans: (window.__pans || []).slice(),
+        zoom: window.__lmap ? window.__lmap.zoom : null };
     };
+    // The view put where the test wants it, at zoom 14, and what moved it
+    // forgotten. Then a point `share` of the map's height north of the
+    // centre, measured on the page's own map: 0.2 is inside the middle
+    // three-fifths, 0.45 is outside it, whatever size the panel gives it.
+    const putView = (at) => {
+      window.__lmap.centre = at; window.__lmap.zoom = 14;
+      window.__pans = []; window.__fit = null; window.__view = null;
+    };
+    const north = (share) => {
+      const m = window.__lmap;
+      const k = 256 * Math.pow(2, m.zoom) / 360;
+      return m.centre[0] + share * document.getElementById('liveMap').clientHeight / k;
+    };
+    const FROM = [33.9526, -84.5499];
     // Before Map view: a beat with a fix draws nothing and says nothing.
     await page.waitForTimeout(300);
     out.hereBefore = await page.evaluate(look);
@@ -3145,12 +3191,30 @@ const framed = (page) => page.waitForFunction(
     await page.click('#viewMode');            // → map
     await page.waitForTimeout(3000);          // two lookups, a second apart
     out.hereOn = await page.evaluate(look);
-    // The car moves a kilometre north. The dot follows the car; the map does
-    // not follow the dot.
-    await page.evaluate(() => { window.__fit = null; window.__view = null; });
-    await page.evaluate(beat, Object.assign({}, GOOD, { lat: 33.9616 }));
+    // The car moves a little, inside the middle of the map: the dot moves,
+    // the map does not.
+    await page.evaluate(putView, FROM);
+    const near = await page.evaluate(north, 0.2);
+    await page.evaluate(beat, Object.assign({}, GOOD, { lat: near }));
     await page.waitForTimeout(300);
-    out.hereMoved = await page.evaluate(look);
+    out.hereInside = Object.assign(await page.evaluate(look), { lat: near });
+    // The same card read again, as the scanner sends it on every frame that
+    // still shows it: a message, and the same card, so nothing to fit.
+    await page.evaluate(() => { window.__fit = null; window.__view = null; });
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      offer: { id: 'o-here', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(300);
+    out.hereSameCard = await page.evaluate(look);
+    // ...and then out of it: the map goes to the dot, at the zoom it was at.
+    const far = await page.evaluate(north, 0.45);
+    await page.evaluate(beat, Object.assign({}, GOOD, { lat: far }));
+    await page.waitForTimeout(300);
+    out.hereMoved = Object.assign(await page.evaluate(look), { lat: far });
+    await page.evaluate(() => { window.__pans = []; });
     // The gate refuses the next one for its quality: no dot, and why.
     await page.evaluate(beat, Object.assign({}, GOOD, { gpsErr: 129.2, gpsOk: false,
                                                         gpsWhy: 'rough' }));
@@ -3188,6 +3252,38 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(beat, Object.assign({}, GOOD, { lat: 33.9706 }));
     await page.waitForTimeout(300);
     out.hereLate = await page.evaluate(look);
+    // A hand on the map: the driver drags it. Leaflet says dragstart; the
+    // next beat out of the middle moves nothing, and the corner says so.
+    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(() => window.__lmap.fire('dragstart'));
+    await page.evaluate(beat, Object.assign({}, GOOD, {
+      lat: await page.evaluate(north, 0.45) }));
+    await page.waitForTimeout(300);
+    out.hereDragged = await page.evaluate(look);
+    // ⛶ Map round again: fitted, and following.
+    await page.click('#viewMode');            // → phone
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');            // → scene
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');            // → map
+    await page.waitForTimeout(600);
+    const refit = await page.evaluate(() => window.__fit);
+    // Somewhere the dot has not been: the follow judges a dot that MOVED.
+    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(beat, Object.assign({}, GOOD, {
+      lat: await page.evaluate(north, 0.4) }));
+    await page.waitForTimeout(300);
+    out.hereResumed = Object.assign(await page.evaluate(look), { refit: refit });
+    // A zoom by hand — the + button, the wheel — is a zoomstart that no move
+    // of the page's own is under: a second and more after the last one (the
+    // pan just above), which is live.html's OWN_MOVE_MS.
+    await page.waitForTimeout(1200);
+    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(() => window.__lmap.fire('zoomstart'));
+    await page.evaluate(beat, Object.assign({}, GOOD, {
+      lat: await page.evaluate(north, -0.45) }));
+    await page.waitForTimeout(300);
+    out.hereZoomed = await page.evaluate(look);
     await page.close();
   }
 
@@ -7003,17 +7099,34 @@ try:
     _fit = _ho.get('fit') or []
     ok_('entering Map view fits the view to include the dot (%r)' % (_fit,),
         [33.9526, -84.5499] in _fit and len(_fit) > 1)
+    # --- ...and the map following it -------------------------------------
+    #
+    # The driver asked for it. At the edges only, at the zoom it is at, and
+    # not once a hand is on the map: every pan is tiles down the hotspot.
+    _hi = got.get('hereInside') or {}
+    eq('the dot moves with the next beat', _hi.get('dots'), [[_hi.get('lat'), -84.5499]])
+    eq('a dot that stays in the middle of the map does not move the map',
+       (_hi.get('pans'), _hi.get('fit'), _hi.get('view')), ([], None, None))
+    # Every message the scanner sends goes through showMap, and its
+    # same-card branch fitted the view to the pins on each one: a beat every
+    # four seconds undid any pan, the driver's or the follow's.
+    _hc = got.get('hereSameCard') or {}
+    eq('the same card in a new message does not fit the view again',
+       (_hc.get('fit'), _hc.get('view'), _hc.get('pans')), (None, None, []))
     _hm = got.get('hereMoved') or {}
-    eq('the dot moves with the next beat', _hm.get('dots'), [[33.9616, -84.5499]])
-    # The panel re-fits to the card's pins on every message while the map is
-    # up (showMap's same-card branch), so a fit may happen; what may not is a
-    # fit or a view that goes where the dot went.
-    _mfit = _hm.get('fit') or []
-    ok_('...and the map does not move with it (%r, %r)' % (_mfit, _hm.get('view')),
-        [33.9616, -84.5499] not in _mfit and _hm.get('view') != [33.9616, -84.5499])
+    eq('a dot that leaves the middle takes the map to it, at the zoom it was at',
+       (_hm.get('pans'), _hm.get('zoom'), _hm.get('fit'), _hm.get('view')),
+       ([[_hm.get('lat'), -84.5499, 14]], 14, None, None))
+    # Leaflet says zoomstart for the page's own fit on the way in as it does
+    # for a hand on the + button. Read as the driver's, it paused the follow
+    # before the follow had moved once.
+    ok_('the page\'s own fit is not the driver taking the map: it still follows '
+        '(%r, %r)' % (_ho.get('note'), _hm.get('pans')),
+        'not following' not in (_ho.get('note') or '') and len(_hm.get('pans') or []) == 1)
     _hr = got.get('hereRough') or {}
     eq('a fix the gate refused is not drawn',
        (len(_hr.get('dots') or []), len(_hr.get('circles') or [])), (0, 0))
+    eq('...and does not move the map', _hr.get('pans'), [])
     eq('...and the label says why, with the figure', _hr.get('note'),
        'GPS too rough here (±129 m)')
     _hs = got.get('hereStale') or {}
@@ -7022,6 +7135,10 @@ try:
         [c.get('colour') for c in (_hs.get('circles') or [])]),
        ([[33.9526, -84.5499]], True, ['#8a8f98']))
     eq('...saying how old', _hs.get('note'), '±28 m · 45 s old')
+    # Where the car WAS, half a map's height from the centre: out of the
+    # middle, and not a place to take the map.
+    eq('a grey dot out of the middle of the map does not move the map',
+       _hs.get('pans'), [])
     _hq = got.get('hereSilent') or {}
     ok_('a dot whose beats stopped greys on the page\'s own clock (%r)'
         % ((_hq.get('grey'), _hq.get('note')),),
@@ -7040,6 +7157,25 @@ try:
     ok_('...and the view is not fitted to it: the one fit was the entry\'s '
         '(%r, %r)' % (_lfit, _hl.get('view')),
         [33.9706, -84.5499] not in _lfit and _hl.get('view') != [33.9706, -84.5499])
+    # A hand on the map. Every message the scanner sends goes through
+    # showMap, and it used to re-fit the view to the pins on each one, so a
+    # drag lasted until the next beat; the fit, the pan and the view are all
+    # held to nothing here.
+    _hd = got.get('hereDragged') or {}
+    eq('a drag on the map stops it following: a dot out of the middle moves '
+       'nothing', (_hd.get('pans'), _hd.get('fit'), _hd.get('view')), ([], None, None))
+    ok_('...and the corner says it is not following (%r)' % _hd.get('note'),
+        re.match(r'^±28 m · \d+ s old · not following$', _hd.get('note') or ''))
+    _hz = got.get('hereZoomed') or {}
+    eq('a zoom by hand stops it following too',
+       (_hz.get('pans'), _hz.get('fit'), _hz.get('view')), ([], None, None))
+    _hu = got.get('hereResumed') or {}
+    ok_('⛶ Map round again follows the dot again (%r)' % (_hu.get('pans'),),
+        len(_hu.get('pans') or []) == 1 and (_hu.get('pans') or [[0, 0, 0]])[0][2] == 14)
+    ok_('...having fitted the view first, as the press always has (%r)'
+        % (_hu.get('refit'),), bool(_hu.get('refit')))
+    ok_('...and the corner stops saying it is not (%r)' % _hu.get('note'),
+        re.match(r'^±28 m · \d+ s old$', _hu.get('note') or ''))
 
     # --- 📷 Snap ----------------------------------------------------------
     #
