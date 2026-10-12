@@ -827,7 +827,60 @@ eq('a number is drawn as itself', SP._fig(20.0), '20.0')
 # that never tells it are different facts, which is the shape of fault this
 # project keeps finding.
 ok_('the loop hands the panel what it knows about the journey',
-    'render_panel(rate, parsed, whole=whole)' in inspect.getsource(SP.main))
+    'render_panel(rate, parsed, whole=whole,' in inspect.getsource(SP.main))
+
+# --- a payout read off a card found above the box is marked here too --------
+#
+# live.html labels that payout PAY ?; the panel bolted to the dashboard drew
+# the same figure plain, so the two screens answered "did the box hold this
+# payout?" differently. A "?" after the payout, on the figures line, and
+# nowhere else on the panel.
+_pf_card = {'pay': 14.48, 'minutes': 18.0, 'miles': 8.6}
+# The rows each figures line can ink: from its cap height (38px at the go
+# panel's size, 49px at the doubt panel's) to below its baseline (400, 300),
+# clear of the rate above the one and the label above the other.
+for _state, _why, _line in (('go', None, (355, 416)), ('doubt', 'time', (245, 312))):
+    _drawn = SP.render_panel(_rate(_state, 48.3, _why), _pf_card)
+    _foundp = SP.render_panel(_rate(_state, 48.3, _why), _pf_card, pay_from='found')
+    _rows = np.nonzero((_drawn != _foundp).any(axis=(1, 2)))[0]
+    ok_('the %s panel marks a payout off a found card, on its figures line only '
+        '(rows %s)' % (_state, (int(_rows.min()), int(_rows.max())) if len(_rows) else None),
+        len(_rows) > 0 and _rows.min() >= _line[0] and _rows.max() <= _line[1])
+eq('...the mark is " ?" after the payout, and nothing for the box\'s own',
+   (SP._found_mark('found'), SP._found_mark('drawn')), (' ?', ''))
+ok_('...and the loop hands the panel where the payout came from',
+    'pay_from=pay_from)' in inspect.getsource(SP.main))
+
+# --- where the payout a reading SHOWS came from -------------------------------
+#
+# payout_from, over the reads of one card as the loop meets them: off a card
+# found above the box, then the box's own reads of the same card (the merge
+# keeps the episode and the payout), a line with no payout, the same card
+# again, a ⌖ read, and a different card. `kept` is carried between calls as
+# the loop carries it.
+_FB = [0.025, 0.44, 0.95, 0.48]
+_seq = [('found read', {'cropFrom': 'found', 'crop': _FB}, {'pay': 14.48, 'episode': 3}, False),
+        ('the box\'s read of it', {'cropFrom': 'drawn', 'crop': [0, 0.6, 1, 0.4]},
+         {'pay': 14.48, 'episode': 3}, False),
+        ('no payout', {'cropFrom': 'drawn'}, {'pay': None}, False),
+        ('the box again', {'cropFrom': 'drawn'}, {'pay': 14.48, 'episode': 3}, False),
+        ('a ⌖ read', {'cropFrom': 'drawn'}, {'pay': 14.48}, True),
+        ('the box after it', {'cropFrom': 'drawn'}, {'pay': 14.48, 'episode': 3}, False),
+        ('another card', {'cropFrom': 'drawn'}, {'pay': 9.40, 'episode': 4}, False),
+        ('the first card back, a new episode', {'cropFrom': 'drawn'},
+         {'pay': 14.48, 'episode': 5}, False)]
+_kept, _said = None, {}
+for _n, _o, _p, _w in _seq:
+    _from, _box, _kept = SP.payout_from(_kept, _o, _p, _w)
+    _said[_n] = (_from, _box)
+eq('a found card\'s payout is "found", outlined on the card found, through the box\'s '
+   'reads of the same card, and again after a line with no payout or a ⌖ read',
+   [_said[n] for n in ('found read', 'the box\'s read of it', 'the box again',
+                       'the box after it')], [('found', _FB)] * 4)
+eq('...and "drawn", with no outline, on a line with no payout, a ⌖ read, another '
+   'card, and that card back as a new episode',
+   [_said[n] for n in ('no payout', 'a ⌖ read', 'another card',
+                       'the first card back, a new episode')], [('drawn', None)] * 4)
 
 # Every reason the parser can refuse a card for has a label here.
 #

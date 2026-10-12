@@ -2613,7 +2613,24 @@
     // Raw, always. This row is checked against the phone, so it has to be what
     // the card says — a "net pay" here would never match and the check would
     // be worse than useless.
-    el.lPay.textContent = 'pay';
+    //
+    // ...and labelled PAY ? when the payout was read off a card the rig went
+    // looking for above the drawn card box rather than off the box
+    // (pipeline.Scanner._look, rpi/cardfind.py): `cropFrom` on the line, which
+    // the scanner says per card, not per read, so it stays while the panel
+    // shows that card's payout (payout_from in rpi/scan_pi.py). The live view's
+    // amber outline says the same and shows which card, but the live view is
+    // not always up, and this row is the one a driver checks against the
+    // phone — a payout the box did not hold is the one most worth checking.
+    // The "?" is the panel's own word for "not settled, look again", as on
+    // "ACCEPT ?" above. "FOUND PAY" was tried first and measured off: it
+    // wrapped to two lines under the figure at 800x480 and lifted the verdict
+    // label 9px, and on the 3.5" hat it ran letters out of its cell. "PAY?"
+    // ran its "?" out of the cell on the hat's phone picture; "PAY ?" breaks
+    // there, as "MIN LEFT" does beside it. rpi/test_layout.py holds it inside
+    // its cell and on the glass, moving nothing but the figure a few pixels
+    // sideways, at 1024x600, 800x480 and 480x320 in both pictures.
+    el.lPay.textContent = r.cropFrom === 'found' ? 'pay ?' : 'pay';
     el.vPay.textContent = money(r.pay, 2);
     // The card's own minutes where it states them, the time left to a delivery
     // deadline where it does not. Not the billed minutes: this row is what a

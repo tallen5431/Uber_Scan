@@ -214,7 +214,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         fail_after=None, phone_hold=None, gps_hold=None, phone=None,
         planners=None,
         freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None,
-        ring=1, stall_again=None, offer=None, real_look=None):
+        ring=1, stall_again=None, offer=None, real_look=None, found_for=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -244,6 +244,9 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     OCR engine is stubbed: it answers `box_text` for every crop of a read until
     the card finder has been asked during that read, and `found_text` after.
     `finder` in the result counts the times the finder was asked.
+    `found_for(n, k)`: with the stubbed reader, a crop (x, y, w, h) when frame
+    k of read call n is to come back as a read off a card found above the box
+    — cropFrom "found", that crop, rescued — and None for the box as drawn.
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
     it began, the exception main() raised, if any, and the handoff directory."""
@@ -296,10 +299,15 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                     for _ in range(len(frames))]
         # `fitted_for(n)`: a crop of its own for each read, so a check can
         # tell which read a kept picture came from.
-        return [out_for(texts_for_call(calls[0], k),
+        outs = [out_for(texts_for_call(calls[0], k),
                         fitted=fitted_for(calls[0]) if fitted_for else fitted,
                         clipped=bool(clipped_for and clipped_for(calls[0], k)))
                 for k in range(len(frames))]
+        for k, one in enumerate(outs):
+            box = found_for(calls[0], k) if found_for else None
+            if box:
+                one.update(cropFrom='found', crop=list(box), rescued=1)
+        return outs
 
     announced, verdicts, beats, logs, alive, dropoffs = [], [], [], [], [], []
     # ...and the keywords each offer line was told with: `where` and `whole`
@@ -2559,6 +2567,53 @@ ok_('...the seen row counts it, beside the clipped ones (%r)'
     any((x.get('rescued') or 0) >= 1 for x in r20['rows'] if x.get('kind') == 'seen'))
 ok_('...and the setup line says the finder is on',
     any(l.startswith('setup: card finder on') for l in r20['logs']))
+
+# WHERE THE PAYOUT SHOWN CAME FROM, NOT WHERE THE LAST READ DID. The panel
+# shows the merged reading, and a card read off a card found above the box and
+# then through the box as drawn, at the same payout, is one episode with the
+# found read's figures in it. Said per read, the line went back to "drawn" and
+# the amber outline came down on the first drawn read, while the panel went on
+# showing the payout the found card gave. Reads 1-2 here are off a found card,
+# 3-6 the same card through the box, and from 7 there is no payout at all.
+_pf_ho, _pf_fold = tempfile.mkdtemp(), tempfile.mkdtemp()
+_pf_snap = os.path.join(tempfile.mkdtemp(), 'live.jpg')
+_pf_req, _pf_amber = [None], []
+
+
+def _pf_until(rows, ann, calls):
+    if 4 <= calls <= 6:
+        _pf_amber.append(_amber(_pf_snap))
+    if _pf_req[0] is None and calls >= 4:
+        _pf_req[0] = _ask_snap(_pf_ho, _pf_fold)
+    # ...until the outline is down: after read 7 the stubbed screen does not
+    # change, and no read follows it for as long as this would wait.
+    return (calls >= 7 and os.path.exists(os.path.join(_pf_fold, 'reader.json'))
+            and _amber(_pf_snap) == 0)
+
+
+r20b = run(lambda n, k: _EARLY_FOUND if n <= 6 else '',
+           found_for=lambda n, k: [0.025, 0.44, 0.95, 0.48] if n <= 2 else None,
+           handoff=_pf_ho, seconds=40.0, extra_argv=['--snapshot', _pf_snap],
+           until=_pf_until)
+_pf_lines = [(v[0][1].get('pay'), v[1].get('crop_from')) for v in r20b['verdicts']]
+ok_('a card whose payout a found card gave keeps saying "found" on the panel\'s line '
+    'through the reads of it the box gave (%d lines at $14.48, %r)'
+    % (sum(1 for p, _ in _pf_lines if p == 14.48),
+       sorted(set(f for p, f in _pf_lines if p == 14.48))),
+    sum(1 for p, _ in _pf_lines if p == 14.48) > 2
+    and all(f == 'found' for p, f in _pf_lines if p == 14.48))
+ok_('...and a line with no payout says "drawn" (%r)'
+    % sorted(set(f for p, f in _pf_lines if p is None)),
+    any(p is None for p, _ in _pf_lines)
+    and all(f == 'drawn' for p, f in _pf_lines if p is None))
+ok_('...the amber outline stays up over the box\'s reads of that card (%r)' % _pf_amber,
+    any(a > 100 for a in _pf_amber))
+eq('...and comes down once no payout is shown', _amber(_pf_snap), 0)
+_pf_said = (_json_or_none(os.path.join(_pf_fold, 'reader.json')) or {}).get('read') or {}
+eq('...a Snap\'s reader.json, taken on a read through the box, says the crop was the '
+   'box and the payout a found card\'s',
+   ((_pf_said.get('parsed') or {}).get('pay'), _pf_said.get('cropFrom'),
+    _pf_said.get('payFrom')), (14.48, 'drawn', 'found'))
 
 # ...and with it off, by config or by flag, the reads are the box as drawn: the
 # finder is never asked, nothing is rescued, and the setup line says why.

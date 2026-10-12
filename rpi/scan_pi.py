@@ -821,8 +821,13 @@ def reader_record(last, now, offer_log=None, counters=None, beat=None,
                           'wholeScreen': last['wholeScreen'],
                           'crop': last['crop'],
                           # ...and whether that crop is the box the driver
-                          # drew or a card found above it. See emit().
+                          # drew or a card found above it — this read's own.
                           'cropFrom': last.get('cropFrom', 'drawn'),
+                          # ...and where the payout in `parsed` came from,
+                          # which a merge can make a found card's though this
+                          # read was the box: what the panel's line says as
+                          # cropFrom. See payout_from.
+                          'payFrom': last.get('payFrom', 'drawn'),
                           'text': last['text'],
                           'parsed': last['parsed'],
                           'rate': last['rate']}
@@ -1263,6 +1268,39 @@ UNPARSED_DIR = 'unparsed'
 # Why a read was not usable, in the words the log uses — one rule for the log's
 # sample line and for which pictures go into UNPARSED_DIR. See read_why.
 NO_JOURNEY = 'a payout but no journey'
+
+
+def payout_from(kept, out, parsed, whole):
+    """Where the payout a reading SHOWS came from: ('found' or 'drawn', the card
+    for the live view to outline in amber or None, what to keep for next time).
+
+    Not where this read came from. The panel shows the MERGED reading, and a
+    card read once off a card found above the drawn box (out['cropFrom'],
+    pipeline.Scanner._look) and then through the box as drawn stays the same
+    accumulator episode, at the same payout, with what the found read put into
+    the merge still in it. Said per read, the panel's line went back to "drawn"
+    and the amber outline came down on the box's first read of the card, while
+    the panel went on showing the payout the found card gave.
+
+    So it is said per episode. `kept` is (episode, crop) for the last found
+    card that gave an episode its payout, or None. Every reading of that
+    episode that shows a payout is "found" and outlines that card; a reading
+    with no payout, another episode or a ⌖ read is "drawn" with no outline.
+    Kept with its episode rather than with the outline, because a line with no
+    payout between two reads of the same card (the accumulator passes it
+    through with no episode) or a ⌖ read takes the outline down, and the next
+    read of that card, back in the same episode, has to put it back on the
+    card it means. A later read of the box that holds the payout itself does
+    not clear it either: the merge still holds what the found read put in it,
+    and the "?" on the panel asks for a look, not a different decision.
+    """
+    shows = (not whole and parsed.get('pay') is not None
+             and parsed.get('episode') is not None)
+    if shows and out.get('cropFrom') == 'found':
+        kept = (parsed['episode'], out.get('crop'))
+    if shows and kept is not None and parsed['episode'] == kept[0]:
+        return 'found', kept[1], kept
+    return 'drawn', None, kept
 
 
 def read_why(out, parsed):
@@ -2983,13 +3021,15 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # on 13 of 42 cards. Only ever on a reading with no verdict — the
         # empty parse cannot be rated — so it can never sit beside a number.
         'clipped': bool(clipped),
-        # Which crop this read was taken through: 'found' when the drawn card
-        # box read a journey and no payout and the payout came off a taller
-        # card found above it (pipeline.Scanner._look, cardfind.py); 'drawn'
-        # for every other read — the card box, a ⌖ read of the whole screen
-        # box, and the centred crop a detected screen is read through. A
-        # payout the rig went looking for is a different claim from one the
-        # driver's own box held, and the panel is told which this is.
+        # Which crop the PAYOUT on this line was read through: 'found' when
+        # the drawn card box read a journey and no payout and the payout came
+        # off a taller card found above it (pipeline.Scanner._look,
+        # cardfind.py) — on this read, or on an earlier read of the same card
+        # that the merge carried it from (payout_from); 'drawn' for
+        # every other line — the card box, a ⌖ read of the whole screen box,
+        # the centred crop a detected screen is read through, and a line with
+        # no payout. A payout the rig went looking for is a different claim
+        # from one the driver's own box held, and the panel marks it.
         'cropFrom': crop_from,
     }
     sys.stdout.write(json.dumps(payload) + '\n')
@@ -3373,8 +3413,10 @@ def main():
     # from, and the beat is what the panel was told.
     last_read = None
     last_beat = None
-    # The card the last read found above the drawn card box, or None. See
-    # write_snapshot's `found`.
+    # The accumulator episode whose payout a card found above the drawn card
+    # box gave, and that card, or None; and the card the live view outlines
+    # now. See payout_from.
+    found_kept = None
     found_box = None
     # The card currently being watched, and what has become of it. See
     # Health.saw — an episode that ends having shown a payout but written
@@ -3428,7 +3470,7 @@ def main():
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
         nonlocal unparsed_kept_for
-        nonlocal last_read, found_box
+        nonlocal last_read, found_box, found_kept
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -3469,17 +3511,17 @@ def main():
         # it in - the driver who took a moment to get the destination up is
         # exactly the driver whose address arrives at the end of the window.
         started = read_at if read_at is not None else time.time()
-        # The card this read was taken through, for the live view to outline
-        # in amber, for as long as the last read is one that went looking for
-        # it. Any other read — the box as drawn, a ⌖ read — takes it down.
-        found_box = out.get('crop') if out.get('cropFrom') == 'found' else None
+        # Where the payout this reading shows came from, which is not always
+        # where this read came from — see payout_from. One answer, for the
+        # panel's line, a Snap's reader.json and the live view's outline.
+        pay_from, found_box, found_kept = payout_from(found_kept, out, parsed, whole)
         # ...and kept for 📷 Snap, ⌖ reads included: the last card the reader
         # cut out — `fitted`, before preprocess() made tesseract's input from
         # it — is what "what was the reader looking at?" asks about. A
         # reference, not a copy — the reader makes a new crop every read.
         last_read = {'at': started, 'fitted': out.get('fitted'),
                      'wholeScreen': bool(whole), 'crop': out.get('crop'),
-                     'cropFrom': out.get('cropFrom', 'drawn'),
+                     'cropFrom': out.get('cropFrom', 'drawn'), 'payFrom': pay_from,
                      'text': out.get('text'), 'parsed': parsed, 'rate': rate}
         # WITH OR WITHOUT THE BUTTON.
         #
@@ -3939,7 +3981,7 @@ def main():
         if args.json:
             emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole,
                  clipped=bool(out.get('clipped')),
-                 crop_from=out.get('cropFrom', 'drawn'))
+                 crop_from=pay_from)
         else:
             show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
 
@@ -4155,7 +4197,8 @@ def main():
                                whole=whole)
 
         if args.display:
-            cv2.imshow('uber-scan', render_panel(rate, parsed, whole=whole))
+            cv2.imshow('uber-scan', render_panel(rate, parsed, whole=whole,
+                                                 pay_from=pay_from))
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 return True
         return False
@@ -5177,11 +5220,17 @@ DOUBT_LABELS = {'pay': 'CHECK PAY', 'time': 'CHECK TIME', 'speed': 'CHECK MILES'
 #
 # A dash, which is what every other screen here draws for a figure that is not
 # there, and what the driver already reads as "the card did not say".
+def _found_mark(pay_from):
+    """After the payout on render_panel's figures line: " ?" when a found
+    card gave it (payout_from), nothing otherwise."""
+    return ' ?' if pay_from == 'found' else ''
+
+
 def _fig(value, places=1):
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return '--'
     return ('%%.%df' % places) % value
-def render_panel(rate, parsed, size=(800, 480), whole=True):
+def render_panel(rate, parsed, size=(800, 480), whole=True, pay_from='drawn'):
     """Big, flat, readable at a glance and at arm's length.
 
     `whole` says the whole journey was in view. A reading without it is a
@@ -5199,6 +5248,11 @@ def render_panel(rate, parsed, size=(800, 480), whole=True):
 
     Defaults True so that a caller which does not know cannot accidentally
     cast doubt on a reading that never earned it.
+
+    `pay_from` is payout_from's answer, and 'found' puts a "?" after the
+    payout — the payout was read off a card found above the drawn card box,
+    not off the box. live.html labels the same figure PAY ? for the same
+    reason; a driver reading both screens is told the same thing on each.
     """
     panel = np.zeros((size[1], size[0], 3), dtype=np.uint8)
     # `.get`, not `[...]`: this is the scan loop, and a state this function has
@@ -5219,8 +5273,9 @@ def render_panel(rate, parsed, size=(800, 480), whole=True):
                     (40, 150), cv2.FONT_HERSHEY_SIMPLEX, 2.6, (255, 255, 255), 6)
         # The card's own numbers here, deliberately — see above. What is not
         # deliberate is printing the word "None" where it said nothing.
-        cv2.putText(panel, '$%.2f  %s min  %s mi'
-                    % (parsed['pay'], _fig(parsed['minutes']), _fig(parsed['miles'])),
+        cv2.putText(panel, '$%.2f%s  %s min  %s mi'
+                    % (parsed['pay'], _found_mark(pay_from), _fig(parsed['minutes']),
+                       _fig(parsed['miles'])),
                     (40, 300), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (255, 255, 255), 4)
         cv2.putText(panel, 'that is not what a real offer looks like',
                     (40, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (210, 210, 210), 2)
@@ -5255,8 +5310,8 @@ def render_panel(rate, parsed, size=(800, 480), whole=True):
     # is why that screen has been right about these cards and this one has not:
     # a driver checking one against the other was reading two different fields
     # with the same label. Same source now.
-    cv2.putText(panel, '$%.2f  %s min  %s mi'
-                % (parsed['pay'],
+    cv2.putText(panel, '$%.2f%s  %s min  %s mi'
+                % (parsed['pay'], _found_mark(pay_from),
                    _fig(rate.get('minutes', parsed.get('minutes'))),
                    _fig(rate.get('miles', parsed.get('miles')))),
                 (40, 400), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
