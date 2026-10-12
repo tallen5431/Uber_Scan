@@ -1277,7 +1277,7 @@ UNPARSED_DIR = 'unparsed'
 NO_JOURNEY = 'a payout but no journey'
 
 
-def payout_from(kept, out, parsed, whole):
+def payout_from(kept, out, parsed):
     """Where the payout a reading SHOWS came from: ('found' or 'drawn', the card
     for the live view to outline in amber or None, what to keep for next time).
 
@@ -1300,12 +1300,22 @@ def payout_from(kept, out, parsed, whole):
     card it means. A later read of the box that holds the payout itself does
     not clear it either: the merge still holds what the found read put in it,
     and the "?" on the panel asks for a look, not a different decision.
+
+    The episode is the whole test, because only a merged reading with a payout
+    has one: accumulate.add passes a reading with no payout through without
+    it, and a ⌖ read is never merged (digest), so neither can equal a kept
+    episode. A found read always has one: rescue_refused refuses a found card
+    with no payout, and the parser never reads a payout of $0. This used to
+    ask "not a ⌖ read, and a payout" as well, ahead of the episode; no input
+    could make those two decide anything, so a version without either passed
+    every check, and the checks that named "a ⌖ read" and "no payout" were not
+    holding the thing that decides them. test_scan_pi holds the episode, and
+    holds that those two readings carry none.
     """
-    shows = (not whole and parsed.get('pay') is not None
-             and parsed.get('episode') is not None)
-    if shows and out.get('cropFrom') == 'found':
-        kept = (parsed['episode'], out.get('crop'))
-    if shows and kept is not None and parsed['episode'] == kept[0]:
+    episode = parsed.get('episode')
+    if out.get('cropFrom') == 'found':
+        kept = (episode, out.get('crop'))
+    if kept is not None and episode == kept[0]:
         return 'found', kept[1], kept
     return 'drawn', None, kept
 
@@ -3521,7 +3531,7 @@ def main():
         # Where the payout this reading shows came from, which is not always
         # where this read came from — see payout_from. One answer, for the
         # panel's line, a Snap's reader.json and the live view's outline.
-        pay_from, found_box, found_kept = payout_from(found_kept, out, parsed, whole)
+        pay_from, found_box, found_kept = payout_from(found_kept, out, parsed)
         # ...and kept for 📷 Snap, ⌖ reads included: the last card the reader
         # cut out — `fitted`, before preprocess() made tesseract's input from
         # it — is what "what was the reader looking at?" asks about. A

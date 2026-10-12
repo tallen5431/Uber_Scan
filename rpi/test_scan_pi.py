@@ -858,29 +858,44 @@ ok_('...and the loop hands the panel where the payout came from',
 # keeps the episode and the payout), a line with no payout, the same card
 # again, a ⌖ read, and a different card. `kept` is carried between calls as
 # the loop carries it.
+#
+# The line with no payout and the ⌖ read are made the way the loop makes them —
+# through the accumulator, and straight off the parser — not written out by
+# hand: what keeps them "drawn" is that neither carries an episode, and a
+# hand-written dict with none says nothing about whether the real ones do.
 _FB = [0.025, 0.44, 0.95, 0.48]
-_seq = [('found read', {'cropFrom': 'found', 'crop': _FB}, {'pay': 14.48, 'episode': 3}, False),
+_nopay = SP.OfferAccumulator().add(_OP.parse('Pit.'))
+_whole = _OP.parse('$14.48\n12 min (3.1 mi) away\n18 min (6.2 mi) trip\nAccept')
+eq('a line with no payout comes out of the accumulator with no episode, and a ⌖ '
+   'read (never merged) off the parser with none',
+   (_nopay.get('pay'), 'episode' in _nopay, _whole.get('pay'), 'episode' in _whole),
+   (None, False, 14.48, False))
+ok_('...and the loop does not merge a ⌖ read',
+    "parsed = out['parsed'] if whole else accumulator.add(out['parsed'])"
+    in inspect.getsource(SP.main))
+_seq = [('found read', {'cropFrom': 'found', 'crop': _FB}, {'pay': 14.48, 'episode': 3}),
         ('the box\'s read of it', {'cropFrom': 'drawn', 'crop': [0, 0.6, 1, 0.4]},
-         {'pay': 14.48, 'episode': 3}, False),
-        ('no payout', {'cropFrom': 'drawn'}, {'pay': None}, False),
-        ('the box again', {'cropFrom': 'drawn'}, {'pay': 14.48, 'episode': 3}, False),
-        ('a ⌖ read', {'cropFrom': 'drawn'}, {'pay': 14.48}, True),
-        ('the box after it', {'cropFrom': 'drawn'}, {'pay': 14.48, 'episode': 3}, False),
-        ('another card', {'cropFrom': 'drawn'}, {'pay': 9.40, 'episode': 4}, False),
+         {'pay': 14.48, 'episode': 3}),
+        ('no payout', {'cropFrom': 'drawn'}, _nopay),
+        ('the box again', {'cropFrom': 'drawn'}, {'pay': 14.48, 'episode': 3}),
+        ('a ⌖ read', {'cropFrom': 'drawn'}, _whole),
+        ('the box after it', {'cropFrom': 'drawn'}, {'pay': 14.48, 'episode': 3}),
+        ('another card', {'cropFrom': 'drawn'}, {'pay': 9.40, 'episode': 4}),
         ('the first card back, a new episode', {'cropFrom': 'drawn'},
-         {'pay': 14.48, 'episode': 5}, False)]
+         {'pay': 14.48, 'episode': 5})]
 _kept, _said = None, {}
-for _n, _o, _p, _w in _seq:
-    _from, _box, _kept = SP.payout_from(_kept, _o, _p, _w)
+for _n, _o, _p in _seq:
+    _from, _box, _kept = SP.payout_from(_kept, _o, _p)
     _said[_n] = (_from, _box)
 eq('a found card\'s payout is "found", outlined on the card found, through the box\'s '
    'reads of the same card, and again after a line with no payout or a ⌖ read',
    [_said[n] for n in ('found read', 'the box\'s read of it', 'the box again',
                        'the box after it')], [('found', _FB)] * 4)
-eq('...and "drawn", with no outline, on a line with no payout, a ⌖ read, another '
-   'card, and that card back as a new episode',
-   [_said[n] for n in ('no payout', 'a ⌖ read', 'another card',
-                       'the first card back, a new episode')], [('drawn', None)] * 4)
+eq('...and "drawn", with no outline, on a line with no payout and a ⌖ read',
+   [_said[n] for n in ('no payout', 'a ⌖ read')], [('drawn', None)] * 2)
+eq('...and on another card, and that card back as a new episode',
+   [_said[n] for n in ('another card', 'the first card back, a new episode')],
+   [('drawn', None)] * 2)
 
 # Every reason the parser can refuse a card for has a label here.
 #
