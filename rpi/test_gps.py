@@ -16,6 +16,7 @@ seconds nobody should spend.
 """
 
 import json
+import math
 import os
 import socket
 import sys
@@ -691,6 +692,214 @@ try:
     ok += 1
 finally:
     phone.close()
+
+# --- a position that does not move -----------------------------------------
+#
+# The owner's VK-162 under gpsd's binary u-blox mode: TPV lat/lon bit-identical
+# second after second, for an hour and a half of driving, while the same lines'
+# ECEF moved — and every one of them passed the gate. See FROZEN_AFTER in
+# gps.py. Built here at Marietta Square, a public place, never at the owner's
+# coordinates; the SHAPE is the owner's: mode 3, eph 27.8, epx 11.4, nine
+# decimals, five lines a second apart, the ECEF moving +0.11 m in x and
+# -2.65 m in y over the five (interpolated evenly between — only the first
+# and last were read off the rig), and lying 3,048.7 m due west of the frozen
+# lat/lon, as the owner's did.
+
+def ecef_of(lat, lon, h):
+    """Geodetic -> ECEF, the closed form, written out here so ecef_to_lla is
+    checked against an independent statement of the ellipsoid, not its own."""
+    a, e2 = 6378137.0, (1 / 298.257223563) * (2 - 1 / 298.257223563)
+    la, lo = math.radians(lat), math.radians(lon)
+    n = a / math.sqrt(1 - e2 * math.sin(la) ** 2)
+    return ((n + h) * math.cos(la) * math.cos(lo),
+            (n + h) * math.cos(la) * math.sin(lo),
+            (n * (1 - e2) + h) * math.sin(la))
+
+
+def west(lat, lon, metres):
+    """The point `metres` due west, on the sphere metres_apart uses."""
+    return lat, lon - math.degrees(metres / (6378137.0 * math.cos(math.radians(lat))))
+
+
+def north(lat, lon, metres):
+    return lat + math.degrees(metres / 6378137.0), lon
+
+
+SQ = (33.9526, -84.5499)
+
+
+def frozen_tpv(xyz, lat=SQ[0], lon=SQ[1], **more):
+    msg = {'class': 'TPV', 'device': '/dev/ttyACM0', 'mode': 3,
+           'time': '2026-10-12T19:51:0%dZ' % more.pop('sec', 0),
+           'lat': lat, 'lon': lon, 'altHAE': 300.0, 'eph': 27.8, 'epx': 11.4,
+           'ecefx': round(xyz[0], 2), 'ecefy': round(xyz[1], 2),
+           'ecefz': round(xyz[2], 2), 'ecefpAcc': 15.7}
+    msg.update(more)
+    return json.dumps(msg)
+
+
+def feed(lines, step=1.0):
+    """Each line to a real Phone over a real socket, `step` seconds of its
+    clock apart, and what latest() said after each — the heartbeat's view."""
+    clock = Clock()
+    gates = [threading.Event() for _ in lines]
+    script = []
+    for gate, line in zip(gates, lines):
+        script += [gate, line + '\r\n']
+    phone = FakePhone(greet='{"class":"VERSION","release":"3.22"}', script=script)
+    it = G.Phone(phone.address, stale_after=20.0, clock=clock).start()
+    seen = []
+    try:
+        waited(lambda: it.state()['lines'] >= 1)
+        for i, gate in enumerate(gates):
+            if i:
+                clock.now += step
+            gate.set()
+            waited(lambda: it.state()['lines'] >= i + 2)
+            seen.append(it.latest() or {})
+    finally:
+        it.stop()
+        phone.close()
+    return seen
+
+
+def lla(*xyz):
+    """ecef_to_lla, with a crash an answer of its own, so a division by
+    nothing fails the check that names it rather than the whole file."""
+    try:
+        return G.ecef_to_lla(*xyz)
+    except Exception as e:                       # noqa: BLE001
+        return 'raised %s' % type(e).__name__
+
+
+# ECEF -> lat/lon, against points built the other way, to half a metre.
+_worst = 0.0
+for _lat, _lon, _h in ((33.9526, -84.5499, 300.0), (0.0, 0.0, 0.0),
+                       (-33.8568, 151.2153, 5.0), (27.9881, 86.9250, 8848.0),
+                       (31.5590, 35.4732, -430.0), (89.99, -45.0, 0.0),
+                       (-89.99, 120.0, 2800.0), (64.8378, -147.7164, 136.0)):
+    _back = lla(*ecef_of(_lat, _lon, _h))
+    _worst = (max(_worst, G.metres_apart(_lat, _lon, _back[0], _back[1]),
+                  abs(_back[2] - _h)) if isinstance(_back, tuple) else float('inf'))
+ok_('ECEF -> lat/lon/height comes back within half a metre at eight points, '
+    'poles to sea floor (worst %.2g m)' % _worst, _worst < 0.5)
+_eq = lla(6378137.0, 0.0, 0.0)
+ok_('...and the equator at the prime meridian is (0, 0, 0)',
+    isinstance(_eq, tuple) and abs(_eq[0]) < 1e-9 and abs(_eq[1]) < 1e-9 and abs(_eq[2]) < 1e-3)
+_np = lla(0.0, 0.0, 6378137.0 * (1 - 1 / 298.257223563))
+ok_('...and the north pole is latitude 90 at height 0, not a division by '
+    'nothing (%r)' % (_np,), isinstance(_np, tuple) and abs(_np[0] - 90) < 1e-9 and abs(_np[2]) < 1e-3)
+eq('...and a receiver with no solution, all zeros, is no position',
+   G.ecef_to_lla(0.0, 0.0, 0.0), None)
+eq('...nor is NaN', G.ecef_to_lla(float('nan'), 1.0, 1.0), None)
+
+# The owner's five lines, reshaped. Frozen lat/lon; the ECEF where the car is.
+_car = west(SQ[0], SQ[1], 3048.7)
+_base = ecef_of(_car[0], _car[1], 300.0)
+OWNER5 = [frozen_tpv((_base[0] + 0.11 * k / 4, _base[1] - 2.65 * k / 4, _base[2]),
+                     lat=33.952600000, lon=-84.549900000, sec=k) for k in range(5)]
+got = G.parse_line(OWNER5[0])
+eq('a TPV whose lat/lon are 3 km from its own ECEF uses the ECEF position',
+   got and got.get('source'), 'ecef')
+ok_('...and it is where the ECEF says, within half a metre (%.2f m)'
+    % G.metres_apart(got['lat'], got['lon'], *_car),
+    G.metres_apart(got['lat'], got['lon'], *_car) < 0.5)
+ok_('...says by how much they disagreed (%r)' % got.get('ecefGap'),
+    abs(got.get('ecefGap', 0) - 3048.7) < 1.0)
+eq('...keeps gpsd\'s pair beside it', (got.get('gpsdLat'), got.get('gpsdLon')),
+   (33.9526, -84.5499))
+ok_('...and says what was done on the fix (%r)' % got.get('note'),
+    'ECEF' in (got.get('note') or '') and '3049 m' in got.get('note'))
+eq('...keeping gpsd\'s error estimate for the gate to ask', got.get('err'), 27.8)
+seen = feed(OWNER5)
+eq('through Phone, every one of the five is the ECEF\'s position, judged usable',
+   [(s.get('source'), s.get('ok')) for s in seen], [('ecef', True)] * 5)
+ok_('...and the last is within the 2.65 m its own ECEF moved of where the '
+    'car started (%.2f m)' % G.metres_apart(seen[-1]['lat'], seen[-1]['lon'], *_car),
+    G.metres_apart(seen[-1]['lat'], seen[-1]['lon'], *_car) < 2.7)
+
+# Agreeing positions are left alone: a car driving north at 15 m/s whose
+# ECEF is its lat/lon's.
+_path = [north(SQ[0], SQ[1], 15.0 * k) for k in range(8)]
+AGREE = [frozen_tpv(ecef_of(la, lo, 300.0), lat=round(la, 9), lon=round(lo, 9),
+                    speed=15.0, sec=k) for k, (la, lo) in enumerate(_path)]
+seen = feed(AGREE)
+eq('a TPV whose lat/lon agree with its ECEF keeps gpsd\'s, to the bit',
+   [(s.get('source'), s.get('lat'), s.get('lon')) for s in seen],
+   [('gpsd', round(la, 9), round(lo, 9)) for la, lo in _path])
+ok_('...agreeing to centimetres (worst %.3f m)'
+    % max(s.get('ecefGap', 99) for s in seen),
+    max(s.get('ecefGap', 99) for s in seen) < 0.05)
+eq('...and every one usable', [s.get('ok') for s in seen], [True] * 8)
+eq('...with no note', [s.get('note') for s in seen], [None] * 8)
+
+# Frozen lat/lon, the car driving north at 15 m/s, the ECEF moving with it.
+# gpsd's pair is believed while it is inside ECEF_AGREE of the ECEF, and the
+# ECEF's from the fix after.
+_path = [north(SQ[0], SQ[1], 15.0 * k) for k in range(10)]
+DRIVE = [frozen_tpv(ecef_of(la, lo, 300.0), sec=k % 10)
+         for k, (la, lo) in enumerate(_path)]
+seen = feed(DRIVE)
+eq('frozen lat/lon with moving ECEF: gpsd\'s pair inside 50 m, the ECEF '
+   'position from 60 m on',
+   [s.get('source') for s in seen], ['gpsd'] * 4 + ['ecef'] * 6)
+ok_('...and the last fix is where the car is, not where it froze (%.2f m off)'
+    % G.metres_apart(seen[-1]['lat'], seen[-1]['lon'], *_path[-1]),
+    G.metres_apart(seen[-1]['lat'], seen[-1]['lon'], *_path[-1]) < 0.5)
+eq('...and every one usable — the frozen pair only while it was within the '
+   'gate\'s own error', [s.get('ok') for s in seen], [True] * 10)
+
+# ...and at a crawl, 6 m/s with no speed on the line: the stretch where the
+# ECEF has moved past ECEF_MOVED but not yet past ECEF_AGREE is refused as
+# frozen, then the ECEF takes over.
+_path = [north(SQ[0], SQ[1], 6.0 * k) for k in range(11)]
+CRAWL = [frozen_tpv(ecef_of(la, lo, 300.0), sec=k % 10)
+         for k, (la, lo) in enumerate(_path)]
+seen = feed(CRAWL)
+eq('a frozen lat/lon whose ECEF has crept 25-50 m is refused as frozen',
+   [(s.get('source'), s.get('why')) for s in seen],
+   [('gpsd', None)] * 6 + [('gpsd', 'frozen')] * 3 + [('ecef', None)] * 2)
+
+# Frozen with a speed and no ECEF at all — gpsd's NMEA path, or a phone.
+STUCK = [json.dumps({'class': 'TPV', 'mode': 3, 'lat': 33.952600000,
+                     'lon': -84.549900000, 'eph': 27.8, 'speed': 13.4})] * 9
+seen = feed(STUCK)
+eq('frozen lat/lon while the TPV says 13.4 m/s is refused as frozen past '
+   'five seconds', [s.get('why') for s in seen], [None] * 6 + ['frozen'] * 3)
+eq('...and says how long it has stood', seen[-1].get('heldFor'), 8.0)
+_aside = feed([STUCK[0], json.dumps(dict(json.loads(STUCK[0]),
+                                         lat=33.952600001))] + STUCK[:7])
+eq('a lat/lon that moves by one bit starts the count again',
+   [s.get('heldFor') for s in _aside], [0.0, 0.0, 0.0] + [float(k) for k in range(1, 7)])
+
+# Parked in a real static hold: lat/lon still, the ECEF inside its jitter (the
+# owner's 2.65 m, scattered), the speed noise. Right, so not refused.
+_wobble = [(0.0, 0.0), (1.1, -0.8), (-0.6, 2.4), (2.0, 1.3), (-1.7, -2.2)]
+PARKED = [frozen_tpv((_base[0] + dx, _base[1] + dy, _base[2]), lat=_car[0],
+                     lon=_car[1], speed=0.12, sec=k % 10)
+          for k, (dx, dy) in enumerate(_wobble * 6)]
+seen = feed(PARKED)
+eq('a parked receiver holding still for 29 s is not refused',
+   [s.get('why') for s in seen], [None] * 30)
+ok_('...though it has stood that long (%r)' % seen[-1].get('heldFor'),
+    seen[-1].get('heldFor') == 29.0)
+
+# The gate's own arithmetic, one arm at a time.
+_held = {'mode': 3, 'err': 27.8, 'ageSeconds': 1.0, 'heldFor': 6.0}
+eq('held past five seconds at 3 m/s is frozen',
+   G.usable(dict(_held, speed=3.0)), (False, 'frozen'))
+eq('...and so by its ECEF velocity alone',
+   G.usable(dict(_held, ecefSpeed=3.0)), (False, 'frozen'))
+eq('...and so by its ECEF having moved 30 m alone',
+   G.usable(dict(_held, heldMoved=30.0)), (False, 'frozen'))
+eq('held exactly five seconds at speed is not yet',
+   G.usable(dict(_held, heldFor=5.0, speed=30.0)), (True, None))
+eq('held a minute at walking-noise speed inside the ECEF jitter is fine',
+   G.usable(dict(_held, heldFor=60.0, speed=1.9, ecefSpeed=1.9, heldMoved=24.0)),
+   (True, None))
+_v = G.parse_line(frozen_tpv(_base, lat=_car[0], lon=_car[1], ecefvx=3.0,
+                             ecefvy=-4.0, ecefvz=12.0))
+eq('ECEF velocity is read as a speed', _v and _v.get('ecefSpeed'), 13.0)
 
 # The wall clock leaping, as NTP makes it do at the start of every shift on a
 # Pi that booted in 1970. Every other check here hands Phone a clock; this one
