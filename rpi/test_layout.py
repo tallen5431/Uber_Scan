@@ -1700,6 +1700,40 @@ const SNAP_MEASURE = (fixture) => {
           note.textContent = '';
           return out;
         }, HERE_LINES);
+        // ...and the key to how each place was found (drawHow), across the
+        // map's foot: shown as the page's own rule draws it on this panel,
+        // and asked the same of — inside the map, below the zoom buttons
+        // (10px in, two 30px buttons and their 2px borders: 74px), ONE row,
+        // nothing cut — plus which of its two forms this panel gets.
+        shown.key = await page.evaluate(() => {
+          const key = document.getElementById('mapKey');
+          const map = document.getElementById('liveMap').getBoundingClientRect();
+          key.hidden = false;
+          const r = key.getBoundingClientRect();
+          const tops = {};
+          const walk = document.createTreeWalker(key, NodeFilter.SHOW_TEXT);
+          let text = '', n;
+          while ((n = walk.nextNode())) {
+            const rg = document.createRange();
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (c.width || c.height) { tops[Math.round(c.top)] = 1; text += n.data[i]; }
+            }
+          }
+          const out = {
+            inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
+              && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
+            belowZoom: r.top >= map.top + 74,
+            rows: Object.keys(tops).length,
+            spills: key.scrollWidth > key.clientWidth + 1
+              || key.scrollHeight > key.clientHeight + 1,
+            text: text.replace(/\s+/g, ' ').trim(),
+            w: Math.round(r.width), mapW: Math.round(map.width) };
+          key.hidden = true;
+          return out;
+        });
         shown.captionStyle = await page.evaluate(() => {
           const cs = getComputedStyle(document.getElementById('viewNote'));
           return { overflow: cs.overflow,
@@ -3115,6 +3149,23 @@ try:
                     ok_('...in two rows at most, nothing spilling, at %s (%r)'
                         % (panel, (m.get('rows'), m.get('spills'))),
                         (m.get('rows') or 9) <= 2 and not m.get('spills'))
+                # --- the key to how each place was found ----------------
+                #
+                # One line across the map's foot, in a glance: grey, colour,
+                # hollow and the circle. On the 3.5" hat the map is 228px
+                # wide and the whole key 270px, so there it drops two words;
+                # what has to hold on every panel is that the form it gets
+                # is one row, whole, on the map, below the zoom buttons.
+                key = phone.get('key') or {}
+                ok_('the map\'s key sits inside the map, below the zoom buttons, at %s (%r)'
+                    % (panel, key), key.get('inside') and key.get('belowZoom'))
+                ok_('...in one row, nothing cut, at %s (%r)'
+                    % (panel, (key.get('rows'), key.get('spills'), key.get('w'), key.get('mapW'))),
+                    key.get('rows') == 1 and not key.get('spills'))
+                eq('...saying the circle, the pin, the grey and the hollow at %s' % panel,
+                   key.get('text'),
+                   "◯ reach · ● pin · ● found · ○ outside" if h <= 380
+                   else "◯ card's reach · ● pin · ● also found · ○ outside")
 
                 # ...and the way out. A cycle that cannot be completed is worse
                 # than a toggle: the driver pressed once for a look and cannot

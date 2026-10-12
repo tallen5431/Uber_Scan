@@ -2540,6 +2540,15 @@ const framed = (page) => page.waitForFunction(
                         hasTotal: true, legs: 2, whole: true };
       window.__lmap = null; window.__marks = []; window.__lines = [];
       window.__fit = null; window.__asked = []; window.__circles = [];
+      // What drawHow draws of how each place was found — the card's discs,
+      // the NucBox's candidates, a street's stretch — told apart by the class
+      // the page gives them ('mv-how ...'), and kept apart from the marks,
+      // lines and circles above so the checks on the job's own marks count
+      // what they always counted. Drawn without that class, a candidate
+      // lands among the marks and those counts go wrong.
+      window.__how = [];
+      var how = function (o) { return !!(o && /\\bmv-how\\b/.test(o.className || '')); };
+      var into = function (list, x) { (how(x.opts) ? window.__how : window[list]).push(x); };
       window.L = {
         map: function (node) {
           window.__lmap = { node: node && node.id,
@@ -2549,6 +2558,7 @@ const framed = (page) => page.waitForFunction(
               window.__marks = window.__marks.filter(function (m) { return m.group !== g; });
               window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
               window.__circles = window.__circles.filter(function (c) { return c.group !== g; });
+              window.__how = window.__how.filter(function (c) { return c.group !== g; });
             },
             fitBounds: function (b) { window.__fit = b; } };
           return window.__lmap;
@@ -2559,20 +2569,23 @@ const framed = (page) => page.waitForFunction(
         circleMarker: function (ll, opts) {
           var m = { ll: ll, opts: opts, group: null,
                     bindPopup: function (h) { this.popup = h; return this; },
-                    addTo: function (g) { this.group = g; window.__marks.push(this);
+                    bindTooltip: function (h) { this.tip = h; return this; },
+                    addTo: function (g) { this.group = g; into('__marks', this);
                                           return this; } };
           return m; },
         polyline: function (pts, opts) {
           var l = { pts: pts, opts: opts, group: null,
                     bindPopup: function (h) { this.popup = h; return this; },
-                    addTo: function (g) { this.group = g; window.__lines.push(this);
+                    bindTooltip: function (h) { this.tip = h; return this; },
+                    addTo: function (g) { this.group = g; into('__lines', this);
                                           return this; } };
           return l; },
         // The "you are here" accuracy circle, kept apart from the marks so the
         // checks on the four job marks count what they always counted.
         circle: function (ll, opts) {
           var c = { ll: ll, opts: opts, group: null,
-                    addTo: function (g) { this.group = g; window.__circles.push(this);
+                    bindTooltip: function (h) { this.tip = h; return this; },
+                    addTo: function (g) { this.group = g; into('__circles', this);
                                           return this; } };
           return c; }
       };
@@ -2693,6 +2706,13 @@ const framed = (page) => page.waitForFunction(
                  dashed: !!(l.opts && l.opts.dashArray) };
       }),
       fit: window.__fit,
+      // drawHow's layers, with no NucBox set: the public geocoder's one
+      // answer has no list behind it, so only the two cards' discs.
+      how: (window.__how || []).map(function (x) {
+        return { cls: String((x.opts || {}).className || ''), ll: x.ll || null,
+                 radius: (x.opts || {}).radius, colour: (x.opts || {}).color };
+      }),
+      keyShown: !document.getElementById('mapKey').hidden,
       note: document.getElementById('viewNote').textContent.trim(),
       // The remembered view. A map mode written here would ask a public
       // geocoder on the next page load with nobody pressing anything.
@@ -3100,6 +3120,15 @@ const framed = (page) => page.waitForFunction(
     out.mapDisc = { wrong: await note() };
     out.mapDisc.wrongMarks = await page.evaluate(() => (window.__marks || []).length);
     out.mapDisc.wrongPin = await pinOf('pick this one up');
+    // The card's disc under the refused pin: the public geocoder's one
+    // answer has no list behind it, so the disc is all drawHow has to draw.
+    const howNow = () => page.evaluate(() => ({
+      how: (window.__how || []).map(function (x) {
+        return { cls: String((x.opts || {}).className || ''), ll: x.ll || null,
+                 radius: (x.opts || {}).radius };
+      }),
+      key: !document.getElementById('mapKey').hidden }));
+    out.mapDisc.wrongHow = await howNow();
     // The same wrong branch with NOTHING in the car. The refusal is about the
     // pin, so it must not wait behind the guards for the held order: this
     // used to be an ordinary green pickup under "nothing in the car to
@@ -3148,6 +3177,15 @@ const framed = (page) => page.waitForFunction(
     await push({ id: 'o-heldbare', pickup: "McDonald's (Marietta Sq)", held: null });
     await page.waitForTimeout(800);
     out.mapDisc.heldBare = await note();
+    // No fix and nothing in the car: no disc to draw, no NucBox list, so
+    // nothing of how it was found — and no key over a map with nothing it
+    // explains. Its place was asked with no box under o-nofix, so this one
+    // is answered from the cache.
+    await push({ id: 'o-bare', pickup: "McDonald's (Marietta Sq)", nohold: true,
+                 card: { lat: null, lon: null, gpsAge: null, gpsErr: null,
+                         gpsMode: null, gpsOk: null, gpsWhy: null } });
+    await page.waitForTimeout(1200);
+    out.mapDisc.bareHow = await howNow();
     out.mapDisc.nbxAsked = nbxAsked;
     await page.close();
   }
@@ -3215,6 +3253,26 @@ const framed = (page) => page.waitForFunction(
           (k) => String(k.popup || '').indexOf('where the order in your car is going') >= 0)[0];
         return m ? m.ll : null;
       });
+      // What drawHow put on the map, by the class the page gave each layer:
+      // the discs (with their radius in metres), the candidates and the
+      // hollow ones (with their tooltips), and a street's stretch.
+      const how = () => page.evaluate(() => (window.__how || []).map((x) => ({
+        cls: String((x.opts || {}).className || ''),
+        ll: x.ll || null, pts: x.pts || null,
+        radius: (x.opts || {}).radius, fill: (x.opts || {}).fillOpacity,
+        tip: x.tip || null })));
+      const keyShown = () => page.evaluate(() => {
+        const k = document.getElementById('mapKey');
+        return !!k && !k.hidden;
+      });
+      // Every question this page put to its own server's NucBox relay, by
+      // path and query, so a drawing that asked anything of its own shows up
+      // as a path the walk never needed, or one asked twice.
+      const relayAsked = [];
+      page.on('request', (q) => {
+        const u = new URL(q.url());
+        if (/^\/api\/nbx\//.test(u.pathname)) relayAsked.push(u.pathname + u.search);
+      });
       const r = {};
       await push({ id: 'n-one' });
       await page.waitForTimeout(300);
@@ -3226,6 +3284,10 @@ const framed = (page) => page.waitForFunction(
       await page.waitForTimeout(which === 'noSearch' ? 6000 : 2500);
       r.one = await note();
       r.onePick = await pick();
+      r.oneHow = await how();
+      r.oneKey = await keyShown();
+      r.oneFit = await page.evaluate(() => window.__fit);
+      r.oneAsked = relayAsked.splice(0);
       // What the figure should be off the fake's own road (a quarter longer
       // than the straight line, leg by leg), worked out with the page's MV.
       r.oneWant = await page.evaluate(() => {
@@ -3239,11 +3301,13 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.several = await note();
         r.severalPick = await pick();
+        r.severalHow = await how();
         // A card 1.25 mi from the nearest branch, printing 0.6 mi.
         await push({ id: 'n-none', pickup: "McDonald's",
                      card: { lat: 33.9700, lon: -84.5650, miles: 0.6 } });
         await page.waitForTimeout(1500);
         r.none = await note();
+        r.noneHow = await how();
         // An Early look card whose bracketed door IS found: the card's own
         // refusal stands exactly as it does for the straight line.
         r.routesBefore = (await (await fetch(FAKE + '/__asked')).json())
@@ -3281,11 +3345,13 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.cut = await note();
         r.cutPick = await pick();
+        r.cutHow = await how();
         // A door the NucBox holds only the street of.
         await push({ id: 'n-door', pickup: "Jimmy John's (4821 Kestrel Dr)" });
         await page.waitForTimeout(1500);
         r.door = await note();
         r.doorPick = await pick();
+        r.doorHow = await how();
         // A place name longer than the relay will pass on: refused by this
         // rig's own server, which is a bug in the question, not a NucBox down.
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
@@ -3312,6 +3378,7 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.corner = await note();
         r.cornerHeld = await heldPin();
+        r.cornerHow = await how();
         r.cornerWant = await page.evaluate(() => 1.25 * window.MapView.detour(
           { lat: 33.9526, lon: -84.5499 }, { lat: 33.9830, lon: -84.5499 },
           { lat: 33.96, lon: -84.55 }));
@@ -3321,6 +3388,7 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.twice = await note();
         r.twiceHeld = await heldPin();
+        r.twiceHow = await how();
         // A numberless street the index holds: its stretch inside the held
         // card's disc, pinned at the point nearest the car, and the figure
         // the straight line's at every point of the stretch — worked out
@@ -3334,6 +3402,7 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.stretch = await note();
         r.stretchHeld = await heldPin();
+        r.stretchHow = await how();
         r.stretchRoutesAfter = await routesAt();
         r.stretchWant = await page.evaluate(() => {
           const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
@@ -6112,7 +6181,27 @@ try:
     # getting from it back to where the car was already going.
     eq('...two of them empty, two of them paid',
        len([l for l in lines if l.get('dashed')]), 2)
-    ok_('...and the view is fitted to all of it', len(on.get('fit') or []) == 4)
+    # The four marks and both cards' discs (drawHow): the card printed 12 mi
+    # and the held one 9, each searched and held to its figure plus half a
+    # mile round the fix both came up at, 34.010, -84.600. The north edge of
+    # the bigger disc is in the fit, which the pins alone never reach.
+    _fit = on.get('fit') or []
+    ok_('...and the view is fitted to all of it, and to both cards\' discs (%r)' % (_fit,),
+        len(_fit) == 8 and all(m.get('ll') in _fit for m in marks)
+        and any(abs(p[0] - (34.010 + 12.5 / 69.0)) < 1e-9 for p in _fit)
+        and any(abs(p[0] - (34.010 + 9.5 / 69.0)) < 1e-9 for p in _fit))
+    _how = on.get('how') or []
+    eq('with no NucBox, how each place was found is the two cards\' discs and '
+       'nothing else: the public map\'s one answer has no list behind it',
+       sorted((h.get('cls'), round(h.get('radius') or 0)) for h in _how),
+       [('mv-how mv-disc mv-held', round(9.5 * 1609.344)),
+        ('mv-how mv-disc mv-new', round(12.5 * 1609.344))])
+    ok_('...each at its card\'s own fix, this card\'s blue as the car and the '
+        'held card\'s amber as its ring (%r)' % (_how,),
+        all(h.get('ll') == [34.010, -84.600] for h in _how)
+        and {(h.get('cls'), h.get('colour')) for h in _how}
+        == {('mv-how mv-disc mv-new', '#7aa2f7'), ('mv-how mv-disc mv-held', '#f5a524')})
+    ok_('...and the key to them is on the map', on.get('keyShown'))
 
     # THE figure, and the reason this mode exists. The driver's words: "if it
     # makes sense to pickup the second offer since it would be mostly along the
@@ -6186,6 +6275,19 @@ try:
        disc.get('heldBare'),
        'the rig kept no card for the order in your car, so its end cannot be '
        'checked')
+    # The refusal, seen: the card's 9.9 mi disc drawn round its fix, and the
+    # red pin 21.8 mi out past its edge. The disc is the one cardRefuses held
+    # the pin to, so the circle and the red cannot be two rules.
+    _wh = (disc.get('wrongHow') or {}).get('how') or []
+    _new = [h for h in _wh if h.get('cls') == 'mv-how mv-disc mv-new']
+    ok_('a pin the card refuses lies outside the card\'s disc drawn round its fix, '
+        'its distance plus half a mile (%r)' % (_wh,),
+        len(_new) == 1 and _new[0].get('ll') == [33.9526, -84.5499]
+        and abs((_new[0].get('radius') or 0) - 9.9 * 1609.344) < 1e-6)
+    eq('no fix and nothing in the car: nothing of how it was found is drawn, '
+       'and no key over a map with nothing it explains',
+       ((disc.get('bareHow') or {}).get('how'), (disc.get('bareHow') or {}).get('key')),
+       ([], False))
     # With no NucBox set — this server has neither setting — the page asks
     # whether one is, at each walk, and nothing else: every line above is the
     # line it always was, off the public geocoder.
@@ -6320,6 +6422,114 @@ try:
                  st.get('longStreet') or '') and st.get('longStreetHeld'))
     eq('...and with the NucBox answering, the public map is asked nothing',
        st.get('publicAsked'), [])
+
+    # HOW EACH PLACE WAS FOUND, drawn (drawHow): what the NucBox sent for
+    # each place, beside what was chosen, off the answers the walk already
+    # holds. Read by the class the page gives each layer.
+    def _of(how, cls, ll=None):
+        return [h for h in (how or []) if h.get('cls') == cls
+                and (ll is None or h.get('ll') == ll)]
+    _MI = 1609.344
+    _oh = both.get('oneHow')
+    ok_('this card\'s disc is drawn at its fix, 3.0 mi and the half mile, and the '
+        'held card\'s at its own, 9.4 and the half mile (%r)' % (_oh,),
+        [round(h.get('radius'), 3) for h in _of(_oh, 'mv-how mv-disc mv-new', [33.9526, -84.5499])]
+        == [round(3.5 * _MI, 3)]
+        and [round(h.get('radius'), 3) for h in _of(_oh, 'mv-how mv-disc mv-held', [33.9526, -84.5499])]
+        == [round(9.9 * _MI, 3)])
+    _c = _of(_oh, 'mv-how mv-cand mv-new', [33.983, -84.5499])
+    ok_('...the branch the disc kept is drawn grey under its pin, saying it was '
+        'the one inside (%r)' % (_c,),
+        len(_c) == 1 and _c[0].get('tip') == "McDonald's… — the one inside the 3.5 mi "
+        "searched, pinned" and _c[0].get('fill') == 0.9
+        and both.get('onePick') == [33.983, -84.5499])
+    _c = _of(_oh, 'mv-how mv-cand mv-held')
+    ok_('...and the held end\'s two pieces of street, drawn in the held card\'s '
+        'colour, each saying they agreed into its pin (%r)' % (_c,),
+        len(_c) == 2 and all(c.get('tip') == 'Shadowood… — one of 2 that agree, '
+                             'pinned at their middle' for c in _c))
+    ok_('...with the key to them on the map', both.get('oneKey'))
+    _fit = both.get('oneFit') or []
+    ok_('...and the one fit takes in both discs and every pin (%r)' % (_fit,),
+        len(_fit) == 8
+        and any(abs(p[0] - (33.9526 + 9.9 / 69.0)) < 1e-9 for p in _fit)
+        and any(abs(p[0] - (33.9526 + 3.5 / 69.0)) < 1e-9 for p in _fit)
+        and [33.983, -84.5499] in _fit and [33.9526, -84.5499] in _fit)
+    # Zero requests to draw it. The walk asks the NucBox once per place and
+    # the router twice; everything drawn above came out of those answers. A
+    # drawing that asked for its candidates itself shows up here as a path
+    # the walk never needed, or one asked twice.
+    _asked = both.get('oneAsked') or []
+    ok_('drawing how each place was found asks nothing more: three places and two '
+        'routes, each once, and no other question (%r)' % (_asked,),
+        len(_asked) == 5 and len(set(_asked)) == 5
+        and sorted(a.split('?')[0] for a in _asked)
+        == ['/api/nbx/route', '/api/nbx/route', '/api/nbx/search', '/api/nbx/search',
+            '/api/nbx/search'])
+    _sh = both.get('severalHow')
+    _c = _of(_sh, 'mv-how mv-cand mv-new', [33.983, -84.5499]) \
+        + _of(_sh, 'mv-how mv-cand mv-new', [33.901, -84.477])
+    ok_('a refused place has no pin, and its candidates are drawn grey with the '
+        'caption\'s own refusal as their tooltip (%r)' % (_c,),
+        len(_c) == 2 and both.get('severalPick') is None
+        and all(c.get('tip') == both.get('several') for c in _c))
+    _o = _of(_sh, 'mv-how mv-out mv-new', [34.07, -84.67])
+    ok_('...and the branch past the card\'s disc drawn hollow, saying how far out '
+        'it is (%r)' % (_o,),
+        len(_o) == 1 and _o[0].get('fill') == 0
+        and _o[0].get('tip') == both.get('several') + " · this one 10.6 mi from the "
+        "card's fix, outside the 9.9 mi searched")
+    _nh = both.get('noneHow')
+    _o = _of(_nh, 'mv-how mv-out mv-new', [33.983, -84.5499])
+    ok_('none inside a 0.6 mi card: the disc drawn at 1.1 mi round its own fix and '
+        'the nearest branch hollow outside it, with the refusal (%r)' % (_nh,),
+        [round(h.get('radius'), 3) for h in _of(_nh, 'mv-how mv-disc mv-new', [33.97, -84.565])]
+        == [round(1.1 * _MI, 3)]
+        and len(_o) == 1 and (_o[0].get('tip') or '').startswith(both.get('none') or '?')
+        and not _of(_nh, 'mv-how mv-cand mv-new', [33.983, -84.5499]))
+    _ch = [h for h in (both.get('cutHow') or []) if 'Starbucks' in (h.get('tip') or '')]
+    ok_('a list cut at the limit is drawn as it was sent, ten of them, the one '
+        'inside grey and the rest hollow, every one too many to be sure (%r)'
+        % ([(h.get('cls'), h.get('ll')) for h in _ch],),
+        len(_ch) == 10
+        and len([h for h in _ch if h.get('cls') == 'mv-how mv-cand mv-new']) == 1
+        and len([h for h in _ch if h.get('cls') == 'mv-how mv-out mv-new']) == 9
+        and all((h.get('tip') or '').startswith(both.get('cut') or '?') for h in _ch))
+    _d = _of(both.get('doorHow'), 'mv-how mv-cand mv-new', [33.97, -84.53])
+    ok_('a door the NucBox holds only the street of: the street drawn grey, no pin, '
+        'saying it is not that door (%r)' % (_d,),
+        len(_d) == 1 and both.get('doorPick') is None
+        and _d[0].get('tip') == (both.get('door') or '?') + ' · this one its street, '
+        'not door 4821')
+    _k = _of(st.get('cornerHow'), 'mv-how mv-cand mv-held')
+    ok_('a corner pinned where its streets meet: the meeting drawn under the held '
+        'pin, in the held card\'s colour, inside its 3.0 mi card\'s disc (%r)' % (_k,),
+        len(_k) == 1 and _k[0].get('ll') == st.get('cornerHeld') == [33.96, -84.55]
+        and [round(h.get('radius'), 3) for h in _of(st.get('cornerHow'), 'mv-how mv-disc mv-held')]
+        == [round(3.5 * _MI, 3)])
+    _k = _of(st.get('twiceHow'), 'mv-how mv-cand mv-held')
+    ok_('a corner refused for meeting twice: both meetings drawn, no pin, each with '
+        'the refusal (%r)' % (_k,),
+        sorted(k.get('ll')[0] for k in _k) == [33.965, 33.969]
+        and st.get('twiceHeld') is None
+        and all(k.get('tip') == st.get('twice') for k in _k))
+    def _crow(a, b):
+        import math
+        la, lb = math.radians(a[0]), math.radians(b[0])
+        h = (math.sin((lb - la) / 2) ** 2
+             + math.sin(math.radians(b[1] - a[1]) / 2) ** 2 * math.cos(la) * math.cos(lb))
+        return 2 * 3958.8 * math.asin(min(1, math.sqrt(h)))
+    _s = _of(st.get('stretchHow'), 'mv-how mv-street mv-chosen mv-held')
+    ok_('a numberless street pinned: its stretch drawn as a line in the held card\'s '
+        'colour, every point of it inside the held card\'s 3.5 mi, the pin on it (%r)'
+        % ([len(x.get('pts') or []) for x in _s],),
+        len(_s) == 1 and len(_s[0].get('pts') or []) > 1
+        and all(_crow([33.9526, -84.5499], p) <= 3.5 + 1e-9 for p in _s[0]['pts'])
+        and bool(st.get('stretchHeld'))
+        and min(_crow(st['stretchHeld'], p) for p in _s[0]['pts']) < 0.01)
+    _bad = [h for r in (both, noroad, st) for k, v in r.items() if k.endswith('How')
+            for h in (v or []) if not h.get('cls', '').startswith('mv-how mv-')]
+    eq('every layer of it carries its kind as a class', _bad, [])
     _lines = [v for r in (both, noroad, nosearch, st) for k, v in r.items()
               if isinstance(v, str)]
     eq('no NucBox line on the panel speaks of minutes',

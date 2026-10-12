@@ -645,6 +645,38 @@
               background: rgba(11, 13, 16, .85); pointer-events: none; }
   #hereNote.grey { color: var(--muted); }
   #hereNote[hidden] { display: none; }
+  /* The key to drawHow's marks, one line across the map's foot, above
+     Leaflet's attribution (which keeps the bottom-right corner, 16px) and
+     clear of nothing else Leaflet draws. One line and never two: it is read
+     in a glance, and rpi/test_layout.py holds it to one row inside the map
+     at 800x480, 1024x600 and 480x320, nothing spilling. The glyphs carry the
+     colours drawHow uses, so the key is the marks themselves. */
+  #liveMap { position: relative; }
+  #mapKey { position: absolute; left: 8px; bottom: 18px; z-index: 1001;
+            max-width: calc(100% - 16px); box-sizing: border-box;
+            padding: 1px 7px; border-radius: 9px; font-size: 12px;
+            line-height: 1.35; white-space: nowrap; overflow: hidden;
+            color: var(--text); background: rgba(11, 13, 16, .85);
+            pointer-events: none; }
+  #mapKey[hidden] { display: none; }
+  #mapKey .k-disc { color: #7aa2f7; }
+  #mapKey .k-pin { color: #17c964; }
+  #mapKey .k-cand { color: #8a8f98; }
+  #mapKey .k-out { color: #8a8f98; }
+  /* A mark's tooltip says why, and a refusal with its disc is long: the
+     suite's McDonald's outside a 9.4 mi card's disc is 142 characters, which
+     Leaflet's own `nowrap` draws as one line several times the hat's 228px
+     map. Wrapped instead, at most 200px wide. */
+  #liveMap .mv-tip { white-space: normal; width: max-content; max-width: 200px;
+                     font-size: 12px; line-height: 1.35; }
+  /* The 3.5" hat's map is 228px wide and the whole key 270px at this size,
+     so there it drops two words and two pixels of padding a side, and is
+     205px in a 216px room: "◯ reach · ● pin · ● found · ○ outside".
+     Measured in DejaVu Sans; rpi/test_layout.py holds both forms. */
+  @media (max-height: 380px) {
+    #mapKey { left: 6px; max-width: calc(100% - 12px); padding: 1px 5px; }
+    #mapKey .k-long { display: none; }
+  }
 
   /* Drawing the box to read. The scanner finds the phone by looking for it,
      which is right almost always and useless when it is not — a reflection, a
@@ -865,7 +897,12 @@
          the geocoder is asked about places customers live, so switching here
          is the press that decides it — the same gate as "Place them on a map"
          on the map page. -->
-    <div id="liveMap" hidden></div>
+    <!-- The key to how each place was found (drawHow): one line over the
+         map's bottom edge, inside the map so it is drawn only where the map
+         is. Shown only when there is something of that drawn. -->
+    <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-disc">◯</span> <span class="k-long">card's </span>reach
+      · <span class="k-pin">●</span> pin · <span class="k-cand">●</span> <span class="k-long">also </span>found
+      · <span class="k-out">○</span> outside</div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
          or why there is no dot: "GPS too rough here (±130 m)". Over the map's
          corner rather than in the caption below it, which is the detour's row
@@ -3903,6 +3940,8 @@
   var hereAnchor = null;
   var hereWanted = false;
   var hereNote = document.getElementById('hereNote');
+  // The key to how each place was found; see drawHow.
+  var mapKey = document.getElementById('mapKey');
   // What is drawn now — position, error and grey — so the once-a-second tick
   // that ages the label does not take the dot down and put it back each time,
   // closing its popup under the driver's pointer.
@@ -3988,7 +4027,11 @@
              // NucBox could not be asked at all (and the public map was) —
              // and how many it answered before that, so "public map used"
              // is never said of a pin the NucBox gave.
-             nbxWhy: {}, nbxDown: null, nbxAnswered: 0 };
+             nbxWhy: {}, nbxDown: null, nbxAnswered: 0,
+             // ...and every answer it gave, pinned or not, with its disc:
+             // what drawHow draws of how each place was found. The same
+             // objects the walk chose from, so drawing asks nothing.
+             nbxSeen: {} };
   }
 
   /* A place name, cut to what fits the caption's cap.
@@ -4208,6 +4251,7 @@
           }
           found[q] = got.at || null;
           want.nbxAnswered++;
+          want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
           landed();
         }
@@ -4338,6 +4382,86 @@
   function clearMap() {
     if (theMap && mapLayer) { theMap.removeLayer(mapLayer); mapLayer = null; }
     lastBounds = null;
+    mapKey.hidden = true;
+  }
+
+  /* HOW EACH PLACE WAS FOUND, drawn — the driver's words: "show on the map
+     how the rig located each place, so they can see at a glance that it is
+     working (or why it refused)".
+
+     Under the pins, faint, and deciding nothing: MV.discShape and MV.located
+     say what to draw, off what the walk already holds — the card's own fix
+     and distance, and each NucBox answer kept with what was chosen from it
+     (want.nbxSeen). No question is asked to draw any of it.
+
+       the card's disc    a dashed circle at the card's fix, its distance
+                          plus half a mile: where every place of the card
+                          was searched and every pin of it is held to. Blue
+                          as the car it is drawn round; amber for the order
+                          in the car, whose end is held to ITS card's disc.
+       also found         a small grey dot for every candidate the NucBox
+                          sent (a corner: every meeting of its two streets),
+                          edged in the disc's colour; the pin in colour on
+                          top is what was chosen from them.
+       outside            a hollow dashed ring: sent, but past the disc.
+       a street           a numberless street's stretch inside the disc, as
+                          a line — solid in the disc's colour when it was
+                          pinned, grey and dashed when refused. Nothing
+                          outside the disc is drawn.
+
+     A refused place has no pin and its candidates carry the refusal as their
+     tooltip, word for word the caption's (MV.nbxRefusal, cut to the same
+     DISC_PLACE_SHOWN), so the map and the line under it cannot disagree.
+
+     The discs join `bounds`, so the one fit drawMap makes takes in the car,
+     the discs and the pins — every pin the NucBox gave is inside a disc by
+     construction — and a candidate outside its disc gets no say in the view,
+     for the reason a stray gets none on the map page. Returns whether
+     anything was drawn, which is whether the key under the map is shown. */
+  var HOW_COLOUR = { 'new': '#7aa2f7', held: '#f5a524' };
+  var HOW_GREY = '#8a8f98';
+
+  function drawHow(want, bounds) {
+    var any = false;
+    var cards = [['new', MV.discFor(want.card)]];
+    if (want.held) cards.push(['held', MV.discFor(want.heldCard)]);
+    cards.forEach(function (c) {
+      var d = MV.discShape(c[1]);
+      if (!d) return;
+      any = true;
+      L.circle([d.lat, d.lon], {
+        radius: d.metres, weight: 1.5, color: HOW_COLOUR[c[0]], opacity: .7,
+        dashArray: '5 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: .04,
+        interactive: false, className: 'mv-how mv-disc mv-' + c[0]
+      }).addTo(mapLayer);
+      bounds.push(d.corners[0], d.corners[1]);
+    });
+    var seen = want.nbxSeen || {};
+    Object.keys(seen).forEach(function (q) {
+      var s = seen[q];
+      var how = MV.located(s.res, s.disc, shortPlace(q, DISC_PLACE_SHOWN), s.whose);
+      var colour = HOW_COLOUR[s.whose] || HOW_GREY;
+      how.lines.forEach(function (l) {
+        any = true;
+        var chosen = l.kind === 'chosen';
+        L.polyline(l.pts, {
+          color: chosen ? colour : HOW_GREY, weight: chosen ? 5 : 4,
+          opacity: chosen ? .55 : .8, dashArray: chosen ? null : '6 5',
+          className: 'mv-how mv-street mv-' + l.kind + ' mv-' + s.whose
+        }).bindTooltip(esc(l.tip), { className: 'mv-tip', sticky: true }).addTo(mapLayer);
+      });
+      how.marks.forEach(function (m) {
+        any = true;
+        var out = m.kind === 'outside';
+        L.circleMarker([m.lat, m.lon], {
+          radius: 5, weight: 2, color: out ? HOW_GREY : colour,
+          dashArray: out ? '2 3' : null,
+          fillColor: HOW_GREY, fillOpacity: out ? 0 : .9,
+          className: 'mv-how ' + (out ? 'mv-out' : 'mv-cand') + ' mv-' + s.whose
+        }).bindTooltip(esc(m.tip), { className: 'mv-tip' }).addTo(mapLayer);
+      });
+    });
+    return any;
   }
 
   /* What the pins are, and which of them cannot be right — asked once, by
@@ -4389,6 +4513,9 @@
       mapDot(at, colour, label, name, ring).addTo(mapLayer);
       bounds.push([at.lat, at.lon]);
     }
+    // How each place was found, under the pins: drawn first so every pin
+    // sits on top of it. Its discs join the view; see drawHow.
+    mapKey.hidden = !drawHow(want, bounds);
 
     // The car first, because every other mark here is a guess and this one is
     // not. A pickup pin a long way from it is a pin to distrust whatever the
