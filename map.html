@@ -698,7 +698,7 @@
    * the arithmetic rather than found in the data. Accusations are inherited,
    * never invented. */
   function view() {
-    if (!lastRun) return { placed: [], strays: {}, found: {} };
+    if (!lastRun) return { placed: [], strays: {}, found: {}, asked: {} };
     var keep = lastRun.placed.filter(function (p) { return inBlock(p.offer); });
     var wanted = {};
     keep.forEach(function (p) {
@@ -709,12 +709,13 @@
     Object.keys(lastRun.strays || {}).forEach(function (name) {
       if (wanted[name]) strays[name] = lastRun.strays[name];
     });
-    return { placed: keep, strays: strays, found: lastRun.found };
+    return { placed: keep, strays: strays, found: lastRun.found,
+             asked: lastRun.asked || {} };
   }
 
   function redraw() {
     var v = view();
-    render(v.placed, v.strays, v.found);
+    render(v.placed, v.strays, v.found, v.asked);
   }
 
   /* Moving the box does not geocode. It cannot: the answer already on the page
@@ -728,7 +729,7 @@
     var v = view();
     var withEnds = sub.filter(function (o) { return o.pickup || o.dropoff; });
     el.place.disabled = withEnds.length === 0;
-    render(v.placed, v.strays, v.found);
+    render(v.placed, v.strays, v.found, v.asked);
     var missing = withEnds.length - v.placed.length;
     say(sub.length + ' offer' + (sub.length === 1 ? '' : 's') + ' here · '
         + v.placed.length + ' already looked up'
@@ -755,14 +756,23 @@
 
   /* A dot, with the number of jobs on it when there is more than one. The
      count is the point: a mount outside one restaurant is twelve offers, and
-     twelve identical pins stacked to the pixel look exactly like one. */
-  function dot(colour, count) {
+     twelve identical pins stacked to the pixel look exactly like one.
+     HOLLOW — a dashed ring in the pin's colour, nothing inside it — for a
+     place the box round where the car was found nothing for, that was then
+     asked wide and answered outside that box (MV.howFound): the one case the
+     box exists to refuse, drawn so it is seen without opening every popup.
+     The same mark Map view on the panel gives a candidate outside its card's
+     disc. */
+  function dot(colour, count, hollow) {
     var many = count > 1;
     var size = many ? 20 : 12;
-    return L.divIcon({ className: '', iconSize: [size, size],
+    return L.divIcon({ className: hollow ? 'mv-out' : '', iconSize: [size, size],
       html: '<div style="width:' + size + 'px;height:' + size + 'px;'
-          + 'border-radius:50%;background:' + colour + ';border:2px solid #0b0d10;'
-          + 'color:#0b0d10;font:700 11px/' + (size - 4) + 'px system-ui,sans-serif;'
+          + 'box-sizing:border-box;border-radius:50%;'
+          + (hollow ? 'background:transparent;border:3px dashed ' + colour + ';color:'
+                      + colour + ';'
+                    : 'background:' + colour + ';border:2px solid #0b0d10;color:#0b0d10;')
+          + 'font:700 11px/' + (size - 4) + 'px system-ui,sans-serif;'
           + 'text-align:center">' + (many ? count : '') + '</div>' });
   }
 
@@ -770,7 +780,7 @@
     try { return new Date(at).toLocaleString(); } catch (e) { return String(at); }
   }
 
-  function render(placed, strays, found) {
+  function render(placed, strays, found, asked) {
     if (!ensureMap()) return;
     placedNow = placed || [];
     if (layer) { map.removeLayer(layer); }
@@ -798,12 +808,17 @@
       var both = place.roles.pickup && place.roles.dropoff;
       var pays = place.jobs.map(function (p) { return p.offer.pay; })
                            .filter(function (v) { return typeof v === 'number'; });
+      // How the walk found it: inside the box round where the car was, or
+      // asked wide when that box found nothing (MV.howFound, off the walk's
+      // own record of what it asked — no question asked to say so).
+      var how = MV.howFound(place.point, (asked || {})[place.name]);
       var marker = L.marker([place.point.lat, place.point.lon],
-                            { icon: dot(colour, place.jobs.length) })
+                            { icon: dot(colour, place.jobs.length, !!(how && how.outside)) })
         .bindPopup('<b>' + esc(place.name) + '</b>'
                    + (out ? '<br><b>' + out.toFixed(0) + ' mi from everything else '
                           + '— this pin is almost certainly wrong</b>' : '')
                    + '<br><span class="note">' + esc(place.point.name) + '</span>'
+                   + (how ? '<br><span class="note">' + esc(how.line) + '</span>' : '')
                    // OFFERS, not jobs. Most offers are turned down, so a pin
                    // reading 12 on a shop the driver took two from said they
                    // had worked there twelve times — a fact about the rig's

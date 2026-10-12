@@ -486,9 +486,14 @@ const KNOWN = {
     // What each pin is: where, what colour, and the count drawn on it.
     pinDetail: window.__pins.map(function (m) {
       var html = (m.icon && m.icon.html) || '';
-      var colour = (html.match(/background:(#[0-9a-f]{6})/i) || [])[1] || '';
+      // A solid pin's colour is its background; a hollow one's (MV.howFound:
+      // found only outside the box round the car) is its dashed ring's.
+      var colour = (html.match(/background:(#[0-9a-f]{6})/i)
+                    || html.match(/dashed (#[0-9a-f]{6})/i) || [])[1] || '';
       var count = (html.match(/>(\d*)<\/div>/) || [])[1] || '';
       return { ll: m.ll, colour: colour, count: count,
+               hollow: /background:transparent/.test(html)
+                 && /\bmv-out\b/.test((m.icon && m.icon.className) || ''),
                popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
                                            .replace(/\s+/g, ' ').trim() };
     }),
@@ -1411,6 +1416,45 @@ try:
         ok_('...and marked as nowhere near the rest, which is what it is (%r)'
             % (boise_pin[0].get('popup') or '')[:70],
             'almost certainly wrong' in (boise_pin[0].get('popup') or ''))
+
+    # --- how each place was found, on its pin --------------------------------
+    #
+    # This page asks the PUBLIC geocoder for one answer a place, inside a box
+    # round where the car was (or with no box), and asks wide when that box
+    # found nothing. So that is what each pin says of how it was found
+    # (MV.howFound), and the one case the box exists to refuse — the wide
+    # answer landing outside it — is drawn hollow, the mark Map view gives a
+    # candidate outside its card's disc. Off the walk's own record of what it
+    # asked: no question more.
+    ok_('a place the box round the car found nothing for, answered outside it '
+        'when asked wide, is drawn hollow and says so (%r)'
+        % ((boise_pin or [{}])[0],),
+        boise_pin and boise_pin[0].get('hollow') is True
+        and boise_pin[0].get('colour') == '#f31260'
+        and 'nothing inside the 60 mi box round where the car was, so asked '
+            'without it — and found outside it' in (boise_pin[0].get('popup') or ''))
+    _ken = [p for p in (placed.get('pinDetail') or [])
+            if (p.get('popup') or '').startswith('Cobb Pkwy NW, Kennesaw')]
+    ok_('...a place its box found is solid and says it was found inside the box (%r)'
+        % ((_ken or [{}])[0],),
+        _ken and _ken[0].get('hollow') is False
+        and 'found inside the 60 mi box round where the car was' in (_ken[0].get('popup') or ''))
+    _kro = [p for p in (placed.get('pinDetail') or [])
+            if (p.get('popup') or '').startswith('Kroger (Chastain)')]
+    ok_('...and one no row placed the car for says it was asked with no box (%r)'
+        % ((_kro or [{}])[0],),
+        _kro and _kro[0].get('hollow') is False
+        and 'asked with no box — no row naming it knows where the car was'
+            in (_kro[0].get('popup') or ''))
+    eq('...and only the one place answered outside its box is hollow',
+       len([p for p in (placed.get('pinDetail') or []) if p.get('hollow')]), 1)
+    # What the pins say of how each place was found is the walk's own record
+    # (MV.placeAll's `asked`). A pin that asked again to find out would show
+    # up here as the same question — the same words in the same box — asked
+    # a second time.
+    _qs = list(zip(asked_all, boxes))
+    eq('saying how each place was found asks nothing more: no question, words and '
+       'box, is asked twice', len(_qs) - len(set(_qs)), 0)
 
     # --- asking twice costs nothing, except what could not be asked --------
     #
