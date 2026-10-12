@@ -434,7 +434,9 @@ all:
   edge as a hollow dashed ring; a numberless street's stretch inside the
   disc as a line, solid when pinned and grey when refused, nothing of it
   outside the disc drawn. A refused place has no pin and its candidates
-  carry the caption's own refusal as their tooltip. A key across the map's
+  say the caption's own refusal: pointed at or tapped, a mark's words show
+  in one box across the map's foot, wrapped to the map's width, never in a
+  tooltip beside the mark that the map would clip. A key across the map's
   foot says which is which ("◯ card's reach · ● pin · ● also found · ○
   outside"; "◯ reach · ● pin · ● found · ○ outside" on the 3.5" hat). It is
   drawn off the answers the walk already holds and asks nothing; the view is

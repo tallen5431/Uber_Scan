@@ -2560,6 +2560,7 @@ const framed = (page) => page.waitForFunction(
               window.__circles = window.__circles.filter(function (c) { return c.group !== g; });
               window.__how = window.__how.filter(function (c) { return c.group !== g; });
             },
+            on: function () { return this; },
             fitBounds: function (b) { window.__fit = b; } };
           return window.__lmap;
         },
@@ -2569,14 +2570,18 @@ const framed = (page) => page.waitForFunction(
         circleMarker: function (ll, opts) {
           var m = { ll: ll, opts: opts, group: null,
                     bindPopup: function (h) { this.popup = h; return this; },
-                    bindTooltip: function (h) { this.tip = h; return this; },
+                    bindTooltip: function (h) { this.leafletTip = h; return this; },
+                    on: function (ev, fn) { (this.handlers = this.handlers || {})[ev] = fn;
+                                            return this; },
                     addTo: function (g) { this.group = g; into('__marks', this);
                                           return this; } };
           return m; },
         polyline: function (pts, opts) {
           var l = { pts: pts, opts: opts, group: null,
                     bindPopup: function (h) { this.popup = h; return this; },
-                    bindTooltip: function (h) { this.tip = h; return this; },
+                    bindTooltip: function (h) { this.leafletTip = h; return this; },
+                    on: function (ev, fn) { (this.handlers = this.handlers || {})[ev] = fn;
+                                            return this; },
                     addTo: function (g) { this.group = g; into('__lines', this);
                                           return this; } };
           return l; },
@@ -2584,7 +2589,9 @@ const framed = (page) => page.waitForFunction(
         // checks on the four job marks count what they always counted.
         circle: function (ll, opts) {
           var c = { ll: ll, opts: opts, group: null,
-                    bindTooltip: function (h) { this.tip = h; return this; },
+                    bindTooltip: function (h) { this.leafletTip = h; return this; },
+                    on: function (ev, fn) { (this.handlers = this.handlers || {})[ev] = fn;
+                                            return this; },
                     addTo: function (g) { this.group = g; into('__circles', this);
                                           return this; } };
           return c; }
@@ -3260,7 +3267,7 @@ const framed = (page) => page.waitForFunction(
         cls: String((x.opts || {}).className || ''),
         ll: x.ll || null, pts: x.pts || null,
         radius: (x.opts || {}).radius, fill: (x.opts || {}).fillOpacity,
-        tip: x.tip || null })));
+        tip: x.mvTip || null, leafletTip: x.leafletTip || null })));
       const keyShown = () => page.evaluate(() => {
         const k = document.getElementById('mapKey');
         return !!k && !k.hidden;
@@ -3302,6 +3309,20 @@ const framed = (page) => page.waitForFunction(
         r.several = await note();
         r.severalPick = await pick();
         r.severalHow = await how();
+        // Pointing at the hollow branch, as Leaflet would on the rig: the
+        // handler the page gave the mark, fired, and what the map's tip box
+        // then says — and again once the pointer leaves it.
+        r.severalPoint = await page.evaluate(() => {
+          const m = (window.__how || []).filter(
+            (x) => String((x.opts || {}).className || '').split(' ').indexOf('mv-out') >= 0)[0];
+          const tip = document.getElementById('mapTip');
+          const h = (m && m.handlers) || {};
+          if (h.mouseover) h.mouseover();
+          const over = { shown: !tip.hidden, text: tip.textContent,
+                         inMap: !!tip.closest('#liveMap') };
+          if (h.mouseout) h.mouseout();
+          return { over: over, gone: tip.hidden };
+        });
         // A card 1.25 mi from the nearest branch, printing 0.6 mi.
         await push({ id: 'n-none', pickup: "McDonald's",
                      card: { lat: 33.9700, lon: -84.5650, miles: 0.6 } });
@@ -6479,6 +6500,19 @@ try:
         len(_o) == 1 and _o[0].get('fill') == 0
         and _o[0].get('tip') == both.get('several') + " · this one 10.6 mi from the "
         "card's fix, outside the 9.9 mi searched")
+    # Its words in the map's own box, whole, and not in a Leaflet tooltip
+    # beside the mark: on the 3.5" hat's 228px map that tooltip lost up to
+    # 106px of a 214px box to the map's edge (rpi/test_layout.py holds the
+    # box inside the map on every panel).
+    _p = both.get('severalPoint') or {}
+    eq('pointing at a mark shows its whole reason in the tip box across the '
+       'map\'s foot, and leaving it takes the box away',
+       (_p.get('over'), _p.get('gone')),
+       ({'shown': True, 'text': (_o[0].get('tip') if _o else '?'), 'inMap': True}, True))
+    eq('...and no mark of how a place was found has a Leaflet tooltip, which the '
+       'map clips at its edge',
+       [h.get('cls') for r in (both, st) for k, v in r.items() if k.endswith('How')
+        for h in (v or []) if h.get('leafletTip')], [])
     _nh = both.get('noneHow')
     _o = _of(_nh, 'mv-how mv-out mv-new', [33.983, -84.5499])
     ok_('none inside a 0.6 mi card: the disc drawn at 1.1 mi round its own fix and '

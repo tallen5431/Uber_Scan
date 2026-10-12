@@ -1734,6 +1734,50 @@ const SNAP_MEASURE = (fixture) => {
           key.hidden = true;
           return out;
         });
+        // ...and what a mark of drawHow's says when pointed at (#mapTip):
+        // the longest the suite's marks say — a refused McDonald's with the
+        // branch outside its 9.9 mi disc, 142 characters — in the one box
+        // across the map's foot. The map places it, not the mark, so where
+        // the mark is does not move it; what is asked is what a screenshot
+        // shows: inside the map, every word in it (nothing cut), and its rows.
+        // It replaced a Leaflet tooltip beside the mark, which the map clipped
+        // by up to 92px on the hat (see #mapTip's rule).
+        shown.tip = await page.evaluate((text) => {
+          const tip = document.getElementById('mapTip');
+          const map = document.getElementById('liveMap').getBoundingClientRect();
+          tip.textContent = text;
+          tip.hidden = false;
+          const r = tip.getBoundingClientRect();
+          const tops = {};
+          let seen = '';
+          const n = tip.firstChild;
+          const rg = document.createRange();
+          for (let i = 0; i < n.length; i++) {
+            rg.setStart(n, i);
+            rg.setEnd(n, i + 1);
+            const c = rg.getBoundingClientRect();
+            if (!c.width && !c.height) { seen += n.data[i]; continue; }
+            if (c.left >= map.left - 0.5 && c.right <= map.right + 0.5
+                && c.top >= map.top - 0.5 && c.bottom <= map.bottom + 0.5
+                && c.right <= r.right + 0.5 && c.bottom <= r.bottom + 0.5) {
+              seen += n.data[i];
+              tops[Math.round(c.top)] = 1;
+            }
+          }
+          const out = {
+            inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
+              && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
+            whole: seen === text,
+            spills: tip.scrollWidth > tip.clientWidth + 1
+              || tip.scrollHeight > tip.clientHeight + 1,
+            rows: Object.keys(tops).length,
+            h: Math.round(r.height), mapH: Math.round(map.height),
+            w: Math.round(r.width), mapW: Math.round(map.width) };
+          tip.hidden = true;
+          tip.textContent = '';
+          return out;
+        }, "no pin for McDonald's… — 2 fit the card and disagree · within 9.4 mi of you"
+           + " · this one 10.6 mi from the card's fix, outside the 9.9 mi searched");
         shown.captionStyle = await page.evaluate(() => {
           const cs = getComputedStyle(document.getElementById('viewNote'));
           return { overflow: cs.overflow,
@@ -3166,6 +3210,11 @@ try:
                    key.get('text'),
                    "◯ reach · ● pin · ● found · ○ outside" if h <= 380
                    else "◯ card's reach · ● pin · ● also found · ○ outside")
+                # --- what a mark says, pointed at -------------------------
+                tip = phone.get('tip') or {}
+                ok_('a mark\'s longest reason sits inside the map, every word of it '
+                    'readable, nothing spilling, at %s (%r)' % (panel, tip),
+                    tip.get('inside') and tip.get('whole') and not tip.get('spills'))
 
                 # ...and the way out. A cycle that cannot be completed is worse
                 # than a toggle: the driver pressed once for a look and cannot
