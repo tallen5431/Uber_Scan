@@ -899,8 +899,14 @@ PAY_IS_PER_ORDER = re.compile(
     re.IGNORECASE | ASCII)
 
 
-def find_pay(text, where=None, printed=None):
+def find_pay(text, where=None, printed=None, figures=None):
     """The offer's headline payout, and — if asked — where every headline was.
+
+    `figures`, when given a list, is filled with the position of EVERY figure
+    that could have been the payout — headline-printed or not, one per `$`
+    (the "$1" fragment PAY_SPLIT joins and the join start at the same one).
+    Asked by pipeline.py of a crop it found, which must hold one card's
+    payout and no other. See payout_figures.
 
     `printed`, when given a list, has one flag appended: whether the payout
     chosen is printed the way a card prints its headline — to the cent, or
@@ -1000,6 +1006,8 @@ def find_pay(text, where=None, printed=None):
             found.append((v, m.start(), True))
             if best is None or v > best:
                 best = v
+    if figures is not None:
+        figures.extend(sorted(set(at for _, at, _ in found)))
     if printed is not None and best is not None:
         printed.append(min((one for one in found if one[0] == best),
                            key=lambda one: one[1])[2])
@@ -1030,6 +1038,23 @@ def pay_is_printed(text):
     """
     flag = []
     return find_pay(normalize(text or ''), printed=flag) is not None and bool(flag and flag[0])
+
+
+def payout_figures(text):
+    """How many figures in this text could each have been an offer's payout.
+
+    Every dollar figure find_pay would weigh — not inside a "+$0.50 included"
+    chip, not a duration, a distance or a bonus per order, with a real digit
+    in it — counted once per `$`, whether or not it is printed as a headline.
+    Asked by pipeline.py of a reading taken through a crop it FOUND, and of
+    nothing else: a found crop is one card, and a second figure in it means
+    the walk up from the button ran through another card above it. The drawn
+    box is not held to this — a Trip Radar list and a stray map `$3` are
+    one_card's business there (see find_pay's `where`).
+    """
+    at = []
+    find_pay(normalize(text or ''), figures=at)
+    return len(at)
 
 
 def find_legs(text):

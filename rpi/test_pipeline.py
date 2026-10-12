@@ -1312,6 +1312,43 @@ if TC.available():
                % (_name, _what, _lo['text'][:30]),
                (_lo['parsed']['pay'], _lo['cropFrom']), (None, 'drawn'))
 
+    # A card stacked above a DoorDash-shaped offer, bigger payout, no button of
+    # its own, and the box drawn so it holds the deadline and not the distance.
+    # The walk up from the red bar runs through both; the read of both took
+    # the upper card's $22.75 and the lower card's 7:15 deadline, agreed with
+    # the box on the one figure it had, and — before a second figure was
+    # refused — was rescued, complete, at this width on the light card (3 of
+    # 60 frames over ten mount widths). The lower card's "$9 . 40" read as a
+    # bare "$9", no headline, so the parser did not cut the text there.
+    _said = []
+    _rr = PL.rescue_refused
+
+    def _spy(box, found, text):
+        _said.append((found['pay'], found['deliverBy'], _rr(box, found, text)))
+        return _said[-1][2]
+
+    PL.rescue_refused = _spy
+    try:
+        _dd = look(TC.dash_stacked_screen(TC.DASH_DAY), box=TC.BOX_DASH, width=640, seed=1)
+    finally:
+        PL.rescue_refused = _rr
+    eq('a found card holding two payouts is refused, and the card above\'s $22.75 '
+       'never reaches the panel with this offer\'s deadline',
+       (_dd['parsed']['pay'], _dd['cropFrom'], _dd['rescued']), (None, 'drawn', 0))
+    eq('...refused for its second figure, on a found read that agreed with the box '
+       'on the one figure the box had',
+       _said, [(22.75, 1155, 'it holds a second dollar figure \u2014 more than one card')])
+    _boxdd = {'pay': None, 'minutes': None, 'miles': None, 'deliverBy': 1155}
+    eq('...and "$9" under a "$22.75" is a second figure, headline or not',
+       PL.rescue_refused(_boxdd, {'pay': 22.75, 'minutes': None, 'miles': None,
+                                  'deliverBy': 1155},
+                         'Order in progress\n$22.75\nGuaranteed (incl. tips)\n3.2 imi\n'
+                         'Decline\n$9 . 40\nGuaranteed (incl. tips)\n9.8 mi\n'
+                         'Deliver by 7:15 PM'),
+       'it holds a second dollar figure \u2014 more than one card')
+    eq('...while a cents chip on the one card is not',
+       PL.OP.payout_figures('$14.48\n+$0.50 included\nEst. delivery 4:15 PM'), 1)
+
     # A payout is kept off a found card only as cards print one: to the cent,
     # or a whole dollar with its label straight after it.
     _whole = look(TC.early_look_screen(pay='$14'))

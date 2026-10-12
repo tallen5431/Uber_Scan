@@ -394,6 +394,50 @@ def stacked_screen(pal=NIGHT_CARD, nav=False):
     return _bgr(im)
 
 
+# A DoorDash-shaped card: red Accept, the distance on a line of its own above a
+# "Deliver by" deadline, and a "Guaranteed" label under the payout. Drawn with a
+# card stacked above it on one sheet, no button of its own and a bigger payout,
+# and a card box drawn between the distance and the deadline: the box reads the
+# deadline alone, and the walk up from the red bar runs through both cards.
+DASH_CARD = dict(NIGHT_CARD, red=(220, 30, 40), red_fg=(255, 255, 255))
+DASH_DAY = dict(DAY_CARD, red=(220, 30, 40), red_fg=(255, 255, 255))
+DASH_TOP = 900
+# The box: its top between "9.8 mi" (DASH_TOP+380..+420) and "Deliver by"
+# (DASH_TOP+450), so it holds the deadline and not the distance.
+BOX_DASH = [0.021, (DASH_TOP + 435) / float(H), 0.941, 1.0 - (DASH_TOP + 435) / float(H)]
+DASH_UPPER = [(40, 'Order in progress', 34, False, True),
+              (120, '$22.75', 86, True, False),
+              (235, 'Guaranteed (incl. tips)', 32, False, True),
+              (300, '3.1 mi', 40, True, False)]
+
+
+def dash_stacked_screen(pal=DASH_CARD, upper=DASH_UPPER, top=DASH_TOP):
+    """A $9.40 DoorDash-shaped offer under a $22.75 card with no button of its own.
+
+    The truth for the offer the red bar belongs to: $9.40, 9.8 mi, deliver by
+    7:15 PM. The $22.75 and 3.1 mi above it are another card's.
+    """
+    im, d, bottom = _screen(pal, False)
+    _sheet(pal, STACK_TOP if upper else top, bottom, d)
+    if upper:
+        _lines(pal, STACK_TOP, upper, d)
+        d.line([(CARD_MARGIN + 30, top - 20), (W - CARD_MARGIN - 30, top - 20)],
+               fill=pal['rule'], width=3)
+    _lines(pal, top, [
+        (40, 'Decline', 30, False, True),
+        (100, 'High paying offer!', 34, True, False),
+        (190, '$9.40', 86, True, False),
+        (305, 'Guaranteed (incl. tips)', 32, False, True),
+        (380, '9.8 mi', 40, True, False),
+        (450, 'Deliver by 7:15 PM', 40, True, False),
+        (525, 'Pickup Papa Johns Store 3317', 30, False, True),
+        (575, 'Customer dropoff', 30, False, True),
+        (640, 'Order total hidden', 30, False, True),
+        (700, 'More text', 30, False, True)], d)
+    _bar(pal, bottom, d, 'Accept', 'red')
+    return _bgr(im)
+
+
 def degrade(screen, kind, seed=0, strength=1.0):
     """What a windscreen and a car do to a screen, applied in the phone's pixels.
 

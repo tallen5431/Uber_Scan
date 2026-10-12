@@ -2468,8 +2468,10 @@ is: the Accept or Match bar near the box's bottom, the card's sides, then up
 to its top. Only a **sure** answer whose top is above the box's is read, through
 the same helper as the box, the way up the box's read decided, and clipped the
 same way. The reading is kept only if it moves none of the minutes, miles or
-deadline the box read, and its payout is printed as a card prints one (to the
-cent, or a whole dollar with its label straight after). Never on a ⌖ read,
+deadline the box read, its text holds one dollar figure and no second one (a
+found crop is one card; two figures are two cards), and its payout is printed
+as a card prints one (to the cent, or a whole dollar with its label straight
+after). Never on a ⌖ read,
 never with the box at the top of the screen box, never on a read that found a
 payout.
 
@@ -2482,6 +2484,25 @@ was rescued on 73 of 144 and the two-order card on 79 of 144, every one with
 the card's own figures; the stacked card on none of 144, and the short card
 never through a card found. **No rescued reading carried a wrong figure.**
 With the box drawn under the "Est. delivery" line, none of 288.
+
+The one-figure rule came after those, from a screen built to break the
+others: a $22.75 card stacked above a DoorDash-shaped $9.40 one (red Accept,
+"9.8 mi" on its own line, then "Deliver by 7:15 PM"), one sheet, no button on
+the upper card, and the box drawn between the distance and the deadline, so
+the box read the deadline alone (`testcards.dash_stacked_screen`). The found
+read took the upper card's $22.75 with the lower card's 7:15 deadline, agreed
+with the box on the one figure the box had, and was rescued — complete, and
+not this offer — on 3 of 60 frames over ten mount widths (the other 57 read
+the deadline differently and were refused for it). The lower card's "$9 . 40"
+had read as a bare "$9", which is no headline, so the parser did not cut the
+text there. A second dollar figure of any kind now refuses the found read:
+none of the 60 is rescued (nor are any of 120 more, clean and under glare,
+blur, sheen, banding and a dimmed screen — none of which had been before it
+either), and the same $9.40 card drawn on its own
+(`dash_stacked_screen(upper=None)`) is still rescued, at its own figures, on
+all six frames tried. What it cost the cards above:
+nothing — the 576 and 288 frames give the same tallies, rescue for rescue,
+with the rule and without it.
 
 It says what it did: the panel's line carries `cropFrom` — `found` for this,
 `drawn` for every other read (the card box, a ⌖ read's whole screen box and

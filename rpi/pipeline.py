@@ -1498,6 +1498,21 @@ def rescue_refused(box, found, found_text):
         that way on their own; the card has to be drawn so. The rule was
         written for "$14." and "$14. 48", each priced $14.00 where the card
         said $14.48, on frames lost with the machine they were measured on.)
+      - its text holds a second dollar figure (OP.payout_figures). A found
+        crop is one card from its button up; two figures in it are two cards,
+        and the larger one — the one find_pay takes — need not be this
+        offer's. A card stacked above a DoorDash-shaped one with no button of
+        its own ($22.75, 3.1 mi over $9.40, 9.8 mi, "Deliver by 7:15 PM"),
+        with the box drawn between the "9.8 mi" and "Deliver by" lines, so
+        the box read the deadline alone: the found read took $22.75 and the
+        7:15 deadline, agreed with the box on the one figure it had, and was
+        rescued — complete, and not this offer — on 3 of 60 frames over ten
+        mount widths (the other 57 read the deadline differently and were
+        refused by the clause above). The lower card's "$9 . 40" read as a
+        bare "$9", which is no headline, so one_card did not cut the text
+        there. With this clause, none of the 60; what it costs the cards that
+        ARE one card is in rpi/README.md, under A card taller than the card
+        box.
 
     The other half of the stacked card's case is not here because it is asked
     first: a box that read NO journey is never rescued at all (see _look),
@@ -1511,6 +1526,8 @@ def rescue_refused(box, found, found_text):
     for key in JOURNEY:
         if box[key] is not None and found[key] != box[key]:
             return 'it reads a different %s from the box' % key
+    if OP.payout_figures(found_text) > 1:
+        return 'it holds a second dollar figure \u2014 more than one card'
     if not OP.pay_is_printed(found_text):
         return 'its payout is not printed the way a card prints one'
     return None
