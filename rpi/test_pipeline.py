@@ -3,7 +3,9 @@
     python3 rpi/test_pipeline.py
 
 The OCR engine itself is not exercised here — these are the geometric decisions
-around it, which are the ones that fail silently. A crop in the wrong place
+around it, which are the ones that fail silently — except in the last block,
+a card taller than the drawn card box, where what is held is what a read does
+with what the engine makes of a rendered card. A crop in the wrong place
 reports "no offer" on a screen with an offer on it, and reports it confidently.
 """
 
@@ -781,7 +783,7 @@ NAV_SCREEN = {'complete': False, 'pay': None, 'minutes': 12.0, 'miles': None}
 
 
 def reading(parsed):
-    return {'parsed': dict(parsed), 'dropped': 0, 'recovered': 0}
+    return {'parsed': dict(parsed), 'dropped': 0, 'recovered': 0, 'rescued': 0}
 
 
 ahead = PL.Scanner(quad=None, card_height=200, ocr_height=0)
@@ -826,7 +828,7 @@ stale.card_share = 0.42                            # as if measured mid-read
 drawn.roi = [0.0, 0.0, 1.0, 1.0]                   # the driver, meanwhile
 drawn.fixed_card_share = 1.0
 drawn.card_share = 1.0
-drawn.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0}], stale)
+drawn.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0, 'rescued': 0}], stale)
 eq('a box drawn during a read survives the read landing', drawn.card_share, 1.0)
 eq('...and so does the crop it pinned', drawn.roi, [0.0, 0.0, 1.0, 1.0])
 
@@ -835,7 +837,7 @@ steady = PL.Scanner(quad=None, card_height=200, ocr_height=0)
 fresh = steady.geometry()
 fresh.card_share = 0.42
 fresh.dark_mode = True
-steady.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0}], fresh)
+steady.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0, 'rescued': 0}], fresh)
 eq('an undisturbed measurement is kept', steady.card_share, 0.42)
 eq('...along with which way up the ink was', steady.dark_mode, True)
 
@@ -848,17 +850,18 @@ eased = PL.Scanner(quad=[[0, 0], [10, 0], [10, 20], [0, 20]], card_height=200,
 drifted = eased.geometry()
 drifted.card_share = 0.37
 eased.quad = np.asarray([[1, 0], [11, 0], [11, 20], [1, 20]], dtype=np.float32)
-eased.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0}], drifted)
+eased.settle([{'parsed': {'complete': False}, 'dropped': 0, 'recovered': 0, 'rescued': 0}], drifted)
 eq('corners easing along does not throw the measurement away',
    eased.card_share, 0.37)
 
 # The counters are per read and added up on one thread, so two frames read at
 # once cannot lose an increment between them.
 counted = PL.Scanner(quad=None, card_height=200, ocr_height=0)
-counted.settle([{'parsed': {'complete': False}, 'dropped': 1, 'recovered': 0},
-                {'parsed': {'complete': False}, 'dropped': 1, 'recovered': 1}])
+counted.settle([{'parsed': {'complete': False}, 'dropped': 1, 'recovered': 0, 'rescued': 0},
+                {'parsed': {'complete': False}, 'dropped': 1, 'recovered': 1, 'rescued': 1}])
 eq('both dropped frames are counted', counted.dropped, 2)
 eq('...and the recovered payout', counted.recovered, 1)
+eq('...and the payout read off a card found above the box', counted.rescued, 1)
 
 # --- a box drawn by hand reads what is inside it ---------------------------
 #
@@ -1092,7 +1095,9 @@ ok_('...and one with neither a duration nor a deadline has nothing to agree with
     not _eligible(None, None, None))
 # ...and the reader still asks. A gate that answers correctly and a reader that
 # never calls it are different facts.
-_look_src = inspect.getsource(PL.Scanner._look)
+# In _read_box since the found-card read went through the same chain: one
+# helper for the drawn box and a found card both. See Scanner._look.
+_look_src = inspect.getsource(PL.Scanner._read_box)
 ok_('the reader asks before taking a second look',
     'worth_a_second_look(parsed)' in _look_src)
 
@@ -1119,6 +1124,222 @@ ok_('...and one that finds no payout is not',
     not _agrees(_first, {'pay': None, 'minutes': None, 'miles': 9.8, 'deliverBy': 1155}))
 ok_('...and asks before taking its answer',
     'second_look_agrees(parsed, second)' in _look_src)
+
+
+# --- a card taller than the card box it is read through ----------------------
+#
+# The one block here that reads: what is being held is what Scanner._look does
+# with what the reader makes of a rendered card, so the engine has to run. The
+# card box is the 8 Oct one, drawn round a short "Exclusive" card; the taller
+# "Early look" card's $14.48 sits across its top edge, and through the box the
+# reader gets "Pit." for it and the rest of the card whole.
+import testcards as TC                                        # noqa: E402
+import cardfind as CF                                         # noqa: E402
+
+if TC.available():
+    BOX = TC.BOX_8OCT
+    WIDTH = 720
+
+    def mounted(screen, width=WIDTH, seed=1):
+        return TC.mount(screen, width, seed=seed), np.array(TC.screen_corners(width), np.float32)
+
+    def look(screen, box=BOX, finder=True, whole=False, width=WIDTH, seed=1):
+        frame, quad = mounted(screen, width, seed)
+        s = PL.Scanner(quad=quad, roi=list(box), card_share=box[3], card_finder=finder)
+        return s._look(frame, None, s.geometry(whole=whole))
+
+    class Asked(object):
+        """CF.find_card, counted — or answered, when `answer` is given."""
+
+        def __init__(self, answer=None):
+            self.answer, self.calls, self.real = answer, 0, CF.find_card
+
+        def __enter__(self):
+            CF.find_card = self
+            return self
+
+        def __call__(self, grey, box):
+            self.calls += 1
+            return self.answer(grey, box) if self.answer else self.real(grey, box)
+
+        def __exit__(self, *exc):
+            CF.find_card = self.real
+
+    EARLY = TC.early_look_screen()
+    _box = look(EARLY, finder=False)
+    eq('through the drawn box alone the taller card reads its journey and no payout',
+       (_box['parsed']['pay'], _box['parsed']['miles'], _box['parsed']['deliverBy']),
+       (None, 8.6, 975))
+
+    with Asked() as _asked:
+        _found = look(EARLY)
+    eq('a taller card puts its payout on the panel, journey and all',
+       (_found['parsed']['pay'], _found['parsed']['miles'], _found['parsed']['deliverBy'],
+        _found['parsed']['complete']), (14.48, 8.6, 975, True))
+    eq('...said as a read through the card found, not the box drawn',
+       (_found['cropFrom'], _found['rescued']), ('found', 1))
+    ok_('...and the crop reported is the found card, above the drawn box (%r)'
+        % (_found['crop'],),
+        _found['crop'] != list(BOX) and _found['crop'][1] < BOX[1] - PL.TALLER
+        and abs(_found['crop'][1] - TC.EARLY_TOP / float(TC.H)) < 0.01)
+    eq('...the finder asked once for it', _asked.calls, 1)
+    eq('the drawn box\'s own read reports the drawn box, and "drawn"',
+       (_box['crop'], _box['cropFrom'], _box['rescued']), (list(BOX), 'drawn', 0))
+
+    _two = look(TC.two_order_screen())
+    eq('a card carrying two orders, taller again, is read the same way',
+       (_two['parsed']['pay'], _two['parsed']['miles'], _two['cropFrom']),
+       (18.52, 11.2, 'found'))
+
+    # A read that found its payout is the box, as drawn: the finder is never
+    # so much as asked.
+    with Asked() as _asked:
+        _short = look(TC.exclusive_screen())
+    eq('a read that found a payout never calls the finder',
+       (_short['parsed']['pay'], _asked.calls, _short['cropFrom']), (4.21, 0, 'drawn'))
+
+    # ...nor with the finder off, whatever the read found.
+    with Asked() as _asked:
+        _off = look(EARLY, finder=False)
+    eq('cardFinder off never calls the finder, and the payout stays lost',
+       (_asked.calls, _off['parsed']['pay'], _off['cropFrom']), (0, None, 'drawn'))
+
+    # An unsure answer changes nothing at all — even one carrying a box.
+    def _unsure(grey, box):
+        return {'sure': False, 'box': [0.02, 0.44, 0.95, 0.48], 'why': 'made up'}
+
+    with Asked(_unsure):
+        _u = look(EARLY)
+    eq('an unsure finder changes nothing: same text, figures, crop and picture',
+       (_u['text'], _u['parsed'], _u['crop'], _u['cropFrom'], _u['rescued']),
+       (_box['text'], _box['parsed'], _box['crop'], 'drawn', 0))
+    ok_('...the very picture the reader was given', np.array_equal(_u['fitted'], _box['fitted']))
+
+    # A card that starts inside the drawn box, or level with it, is the card
+    # the box was drawn on: not taller, and not read again.
+    for _top, _what in ((BOX[1] + 0.01, 'inside the box'),
+                        (BOX[1] - PL.TALLER / 2, 'level with its top')):
+        def _at(grey, box, _top=_top):
+            return {'sure': True, 'box': [0.025, _top, 0.95, 0.927 - _top], 'why': 'made up'}
+
+        _reads = []
+        _rb = PL.Scanner._read_box
+        PL.Scanner._read_box = lambda self, *a, **k: _reads.append(a[1]) or _rb(self, *a, **k)
+        try:
+            with Asked(_at):
+                _in = look(EARLY)
+        finally:
+            PL.Scanner._read_box = _rb
+        eq('a card starting %s is not taller, and is not read again' % _what,
+           (_in['cropFrom'], _in['parsed']['pay'], _in['text'], _reads),
+           ('drawn', None, _box['text'], [list(BOX)]))
+
+    # ⌖ reads the whole screen box already. A screen with no payout anywhere on
+    # it — the journey and no money, through the whole box — is the one that
+    # would otherwise ask.
+    _nopay = TC.early_look_screen(pay='')
+    with Asked() as _asked:
+        _w = look(_nopay, whole=True)
+    eq('a ⌖ read never looks for a taller card',
+       (_asked.calls, _w['cropFrom']), (0, 'drawn'))
+    ok_('...on a screen whose whole-box read has the journey and no payout (%r)'
+        % ((_w['parsed']['pay'], _w['parsed']['deliverBy']),),
+        _w['parsed']['pay'] is None and _w['parsed']['deliverBy'] is not None)
+
+    # A card box drawn from the very top of the screen box has nothing above it
+    # to look in, and the finder is not asked.
+    _top_box = [BOX[0], 0.0, BOX[2], 1.0]
+    eq('a card box from the top of the screen box has no room above it',
+       (PL.room_above(_top_box), PL.room_above(BOX)), (False, True))
+    with Asked() as _asked:
+        _t = look(_nopay, box=_top_box)
+    eq('...and no room above never asks the finder', _asked.calls, 0)
+    ok_('...on a read that found the journey and no payout (%r)'
+        % ((_t['parsed']['pay'], _t['parsed']['deliverBy']),),
+        _t['parsed']['pay'] is None and _t['parsed']['deliverBy'] is not None)
+    eq('a box with no card box drawn in it is not a card box at all',
+       (PL.drawn_card_box(PL.WHOLE_SCREEN), PL.drawn_card_box(None),
+        PL.room_above(list(PL.WHOLE_SCREEN))), (False, False, False))
+
+    # The first read's polarity, not one decided again off the found crop. A
+    # dark card under a shadow down its left side: the found crop on its own
+    # comes out light — measured, 22 of the 183 found crops of dark cards over
+    # the rendered set did — and read that way up the payout is lost.
+    _shade = TC.degrade(EARLY, 'shadow', seed=0)
+    _sh = look(_shade, width=640, seed=1)
+    eq('a dark card in a left-hand shadow is read the way up its first read was, '
+       'and its payout reaches the panel',
+       (_sh['parsed']['pay'], _sh['cropFrom']), (14.48, 'found'))
+    _frame, _quad = mounted(_shade, 640, 1)
+    _g = PL.Scanner(quad=_quad, roi=list(BOX), card_share=BOX[3]).geometry()
+    _scr = PL.warp(_frame, _quad, _g.read_height)
+    _fb = CF.find_card(PL.to_grey(_scr), BOX)['box']
+    ok_('...a crop that, judged on its own, would have been turned the other way up',
+        PL.is_dark_mode(PL.to_grey(PL.fit_for_ocr(PL.crop(_scr, BOX), _g.ocr_height)))
+        != PL.is_dark_mode(PL.to_grey(PL.fit_for_ocr(PL.crop(_scr, _fb), _g.ocr_height))))
+
+    # A found top that runs through the payout's own top edge leaves it flush
+    # against the crop: money_is_clipped applies to the found read as to the
+    # drawn one, and a half-shaved figure is not taken.
+    _pay_top = (TC.EARLY_TOP + 190 + 14) / float(TC.H)
+
+    def _flush(grey, box):
+        return {'sure': True, 'box': [0.025, _pay_top, 0.95, 0.927 - _pay_top],
+                'why': 'made up'}
+
+    with Asked(_flush):
+        _fl = look(EARLY)
+    eq('a payout flush with the found card\'s top is refused, not taken',
+       (_fl['parsed']['pay'], _fl['cropFrom'], _fl['rescued']), (None, 'drawn', 0))
+
+    # A dark card stacked above, with no button of its own: one sheet with the
+    # offer, so the walk up from the Match bar runs through both, and the read
+    # of both gives the UPPER card's 12 min / 3.1 mi. The box read 8.6 mi and
+    # 4:15 PM, and a rescue may not move a figure the box read.
+    _st = look(TC.stacked_screen())
+    eq('a found card that rewrites a figure the box read is refused, and the '
+       'stacked card\'s 3.1 mi never reaches the panel',
+       (_st['parsed']['pay'], _st['parsed']['miles'], _st['cropFrom']), (None, 8.6, 'drawn'))
+
+    # ...and with the box drawn under the "Est. delivery" line there is no
+    # figure for the found card to be held to, so there is no rescue at all.
+    LOW = [BOX[0], 0.62, BOX[2], 0.38]
+    for _name, _pal in (('dark', TC.NIGHT_CARD), ('light', TC.DAY_CARD)):
+        for _what, _screen in (('taller', TC.early_look_screen(_pal)),
+                               ('stacked', TC.stacked_screen(_pal))):
+            _lo = look(_screen, box=LOW)
+            eq('a %s %s card whose box read no journey is not rescued (%r)'
+               % (_name, _what, _lo['text'][:30]),
+               (_lo['parsed']['pay'], _lo['cropFrom']), (None, 'drawn'))
+
+    # A payout is kept off a found card only as cards print one: to the cent,
+    # or a whole dollar with its label straight after it.
+    _whole = look(TC.early_look_screen(pay='$14'))
+    eq('a whole-dollar payout with its label after it is taken off a found card',
+       (_whole['parsed']['pay'], _whole['cropFrom']), (14.0, 'found'))
+    _cut = look(TC.early_look_screen(pay='$14.'))
+    eq('...one with the cents missing is refused, not priced as $14.00',
+       (_cut['parsed']['pay'], _cut['cropFrom']), (None, 'drawn'))
+    _boxd = {'pay': None, 'minutes': None, 'miles': 8.6, 'deliverBy': 975}
+    _at = {'pay': 7.0, 'minutes': None, 'miles': 8.6, 'deliverBy': 975}
+    eq('"$7 Guaranteed" is a payout as printed',
+       PL.rescue_refused(_boxd, _at, '$7 Guaranteed (incl. tip)\nEst. delivery 4:15 PM'), None)
+    eq('...and "$14. 48" is not',
+       PL.rescue_refused(_boxd, dict(_at, pay=14.0),
+                         '$14. 48\nIncludes expected tip\nEst. delivery 4:15 PM'),
+       'its payout is not printed the way a card prints one')
+
+    # A left-hand shadow on the cards the finder cannot see the edge of ends
+    # with no payout; on the one it can, with the card's own. Never another.
+    for _name, _pal in (('dark', TC.NIGHT_CARD), ('light', TC.DAY_CARD),
+                        ('dark-on-dark', TC.NIGHT_ALL)):
+        for _seed in range(2):
+            _ls = look(TC.degrade(TC.early_look_screen(_pal), 'shadow', seed=_seed),
+                       width=(640, 780)[_seed], seed=_seed + 1)
+            _p = _ls['parsed']
+            ok_('a %s card in a left-hand shadow ends with no payout or its own, never '
+                'another figure (%r)' % (_name, (_p['pay'], _p['miles'], _p['deliverBy'])),
+                _p['pay'] is None or (_p['pay'], _p['miles'], _p['deliverBy']) == (14.48, 8.6, 975))
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d pipeline checks passed' % ok)

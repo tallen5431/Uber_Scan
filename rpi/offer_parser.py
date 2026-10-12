@@ -899,8 +899,14 @@ PAY_IS_PER_ORDER = re.compile(
     re.IGNORECASE | ASCII)
 
 
-def find_pay(text, where=None):
+def find_pay(text, where=None, printed=None):
     """The offer's headline payout, and — if asked — where every headline was.
+
+    `printed`, when given a list, has one flag appended: whether the payout
+    chosen is printed the way a card prints its headline — to the cent, or
+    followed at once by its label or the rider's star (CENTS, HEADLINE_LABEL).
+    The same test `where` applies to the figures that are NOT chosen, asked
+    here of the one that is. See pay_is_printed.
 
     `where` is filled with (amount, position) for the chosen payout and every
     other figure that looks like a headline, in the order they appear. parse()
@@ -994,6 +1000,9 @@ def find_pay(text, where=None):
             found.append((v, m.start(), True))
             if best is None or v > best:
                 best = v
+    if printed is not None and best is not None:
+        printed.append(min((one for one in found if one[0] == best),
+                           key=lambda one: one[1])[2])
     if where is not None:
         # The chosen payout is kept whatever it printed, and it is the FIRST of
         # its value by position — the one one_card and card_span take as `top`.
@@ -1004,6 +1013,23 @@ def find_pay(text, where=None):
         where.extend((v, at) for i, (v, at, headline) in enumerate(found)
                      if headline or i == chosen)
     return best
+
+
+def pay_is_printed(text):
+    """Is the payout in this text printed the way an offer card prints one?
+
+    To the cent, or a whole dollar followed at once by the card's own label or
+    the rider's star: Uber prints "$7 Guaranteed", "$10 Includes expected tip",
+    "$18 * 5.00". Asked by pipeline.py of a reading taken through a crop it
+    FOUND rather than one the driver drew (see Scanner._look), and of nothing
+    else: a found card printing "$14." read as $14.00, a whole reading and a
+    confident wrong figure (pipeline.rescue_refused says where that was seen).
+    The drawn box's own reads are not held to this — it would refuse every
+    whole-dollar card read with something between the figure and its label,
+    which is 144 of the week's 208 (see CENTS).
+    """
+    flag = []
+    return find_pay(normalize(text or ''), printed=flag) is not None and bool(flag and flag[0])
 
 
 def find_legs(text):

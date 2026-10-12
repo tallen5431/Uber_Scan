@@ -1009,7 +1009,7 @@ class StubScanner(object):
         if self.blow_up:
             raise RuntimeError('tesseract fell over')
         self.seen.append((list(frames), geom))
-        return [{'parsed': {'pay': f}, 'dropped': 0, 'recovered': 0} for f in frames]
+        return [{'parsed': {'pay': f}, 'dropped': 0, 'recovered': 0, 'rescued': 0} for f in frames]
 
     def settle(self, outs, geom=None):
         self.settled.append(outs)
@@ -1167,7 +1167,7 @@ def worst_frame_gap(extra_argv, hold, seconds=9.0):
         # is the loop around it, so the OCR is exactly what must not run.
         real_sleep(hold)
         return [{'parsed': dict(empty), 'rate': OP2.rate(empty, {}), 'locked': False,
-                 'text': '', 'clipped': False, 'dropped': 0, 'recovered': 0,
+                 'text': '', 'clipped': False, 'dropped': 0, 'recovered': 0, 'rescued': 0,
                  'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
                  'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
                 for _ in frames]
@@ -1307,7 +1307,7 @@ def one_plain_leg(self, frames, now=None, geom=None):
     parsed = OP2.parse('$16.05 20 min (7.3 mi) trip')
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': '', 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -2887,7 +2887,7 @@ def _nav_then_address(self, frames, now=None, geom=None):
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -2959,7 +2959,7 @@ def _address_after_two_seconds(self, frames, now=None, geom=None):
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -3089,7 +3089,7 @@ def _street_and_address(self, frames, now=None, geom=None):
     parsed = OP2.parse(_BOTH)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': _BOTH, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -3140,7 +3140,7 @@ def _address_every_time(self, frames, now=None, geom=None):
     parsed = OP2.parse(_ASKED_NAV)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': _ASKED_NAV, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -3231,7 +3231,7 @@ def _offer_card_then_address(self, frames, now=None, geom=None):
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -3265,7 +3265,7 @@ def _address_with_a_payout(self, frames, now=None, geom=None):
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -3304,7 +3304,7 @@ def _payout_lost_to_glare(self, frames, now=None, geom=None):
     parsed = OP2.parse(_LOST)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': _LOST, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -3362,7 +3362,7 @@ def _street_but_no_address(self, frames, now=None, geom=None):
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 
@@ -3393,7 +3393,7 @@ def _slow_address(self, frames, now=None, geom=None):
     _REAL_SLEEP(1.6)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
-             'recovered': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
 

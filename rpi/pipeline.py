@@ -58,8 +58,10 @@ import pytesseract                                            # noqa: E402
 
 try:
     from . import offer_parser as OP
+    from . import cardfind as CF
 except ImportError:  # running as a plain script
     import offer_parser as OP
+    import cardfind as CF
 
 
 # --- tuning ---------------------------------------------------------------
@@ -1331,13 +1333,18 @@ class Geometry:
     """
 
     __slots__ = ('quad', 'roi', 'fixed_card_share', 'card_share',
-                 'card_height', 'ocr_height', 'dark_mode', 'whole')
+                 'card_height', 'ocr_height', 'dark_mode', 'whole', 'card_finder')
 
     def __init__(self, quad=None, roi=None, fixed_card_share=None,
                  card_share=CARD_SHARE, card_height=CARD_HEIGHT,
-                 ocr_height=OCR_CARD_HEIGHT, dark_mode=None, whole=False):
+                 ocr_height=OCR_CARD_HEIGHT, dark_mode=None, whole=False,
+                 card_finder=True):
         self.quad = quad
         self.roi = roi
+        # Whether a read that found a journey and no payout may look above the
+        # drawn card box for a taller card. See Scanner._look and cardfind.py;
+        # config "cardFinder": false and --no-card-find turn it off.
+        self.card_finder = card_finder
         # Read ALL of the screen box, not the card crop inside it: what a ⌖
         # press asks for, because a trip planner's addresses sit outside where
         # the offer cards land. The warp is unchanged — the same pixels per
@@ -1408,13 +1415,86 @@ def second_look_agrees(first, second):
                 and second['deliverBy'] == first['deliverBy'])
 
 
+# How far above the drawn card box a found card's top must be before it counts
+# as a taller card, as a fraction of the screen box's height. Below this the
+# found card starts inside the drawn box, or level with it — the card the box
+# was drawn on, which the read just failed on for some reason a bigger crop
+# cannot fix. Also the least room above the box the finder is asked to look in.
+TALLER = 0.005
+
+
+def drawn_card_box(roi):
+    """Is this crop a card box the driver drew inside the screen box?
+
+    Not the whole box (a screen box drawn with No card box, cropbox.PIN_WHOLE)
+    and not the centred crop a detected screen is read through (roi None): the
+    finder looks above a box somebody drew round ONE card, which is the only
+    crop that is the wrong height for the next card by construction.
+    """
+    return roi is not None and [float(v) for v in roi] != list(WHOLE_SCREEN)
+
+
+def room_above(roi):
+    """Is there any of the screen box above the drawn card box to look in?
+
+    One answer for two askers: Scanner._look, before it asks the finder, and
+    scan_pi's setup line, which says whether the finder can ever be asked.
+    """
+    return drawn_card_box(roi) and float(roi[1]) > TALLER
+
+
+# The journey figures a rescued read may not move. See rescue_refused.
+JOURNEY = ('minutes', 'miles', 'deliverBy')
+
+
+def rescue_refused(box, found, found_text):
+    """Why the read of the found card may NOT replace the read of the drawn box,
+    or None when it may.
+
+    Each clause after the first closes a wrong figure that reached a whole
+    reading on rendered screens without it (rpi/test_pipeline.py holds each):
+
+      - no payout in the found card either: nothing was rescued;
+      - it rewrites a journey figure the box read. A dark card stacked above
+        the offer, with no button of its own, is one sheet with it, so the
+        walk up from the Match bar runs through both — and the read of both
+        took the upper card's 3.1 mi. Without this clause, on 76 of 144
+        rendered frames of that screen: $14.48 at 3.1 mi, complete, priced,
+        and not this offer. With it, none;
+      - its payout is not printed the way a card prints one (OP.pay_is_printed).
+        A card printing "$14." read off the found crop as $14.00, complete and
+        priced. (None of the 288 rendered frames of the two taller cards read
+        that way on their own; the card has to be drawn so. The rule was
+        written for "$14." and "$14. 48", each priced $14.00 where the card
+        said $14.48, on frames lost with the machine they were measured on.)
+
+    The other half of the stacked card's case is not here because it is asked
+    first: a box that read NO journey is never rescued at all (see _look),
+    since there is then nothing for the found card's figures to be held to.
+    With the box drawn under the "Est. delivery" line, and that asked after
+    the finder instead of before it, 78 of 144 frames of the stacked screen
+    were rescued at its 3.1 mi.
+    """
+    if found['pay'] is None:
+        return 'no payout in the found card either'
+    for key in JOURNEY:
+        if box[key] is not None and found[key] != box[key]:
+            return 'it reads a different %s from the box' % key
+    if not OP.pay_is_printed(found_text):
+        return 'its payout is not printed the way a card prints one'
+    return None
+
+
 class Scanner:
     """Holds the motion gate and the agreement counter across frames."""
 
     def __init__(self, quad=None, agree_to_lock=2,
                  card_height=CARD_HEIGHT, config=OCR_CONFIG, roi=None,
-                 ocr_height=OCR_CARD_HEIGHT, card_share=None):
+                 ocr_height=OCR_CARD_HEIGHT, card_share=None, card_finder=True):
         self.quad = None if quad is None else np.asarray(quad, dtype=np.float32)
+        # Whether a card taller than the drawn card box may be looked for above
+        # it. See Geometry.card_finder.
+        self.card_finder = bool(card_finder)
         # A fixed override for the crop, as fractional (x, y, w, h) of the
         # warped screen. Left None — which is the normal case — the crop is
         # derived per read from the measured geometry, which is what stops it
@@ -1451,6 +1531,9 @@ class Scanner:
         # counter: if this climbs on a rig, the mount is producing the exact
         # shape of frame the default segmentation mishandles.
         self.recovered = 0
+        # ...and reads whose payout came from a card found above the drawn
+        # card box. See _look.
+        self.rescued = 0
         self.locked = False
         self.last = None
 
@@ -1466,7 +1549,8 @@ class Scanner:
                         card_height=self.card_height,
                         ocr_height=self.ocr_height,
                         dark_mode=self.dark_mode,
-                        whole=whole)
+                        whole=whole,
+                        card_finder=self.card_finder)
 
     @property
     def crop_box(self):
@@ -1659,6 +1743,7 @@ class Scanner:
             out['locked'] = self.locked
             self.dropped += out['dropped']
             self.recovered += out['recovered']
+            self.rescued += out['rescued']
         # The two things a read measures rather than is given, brought back to
         # where the next read will look for them. (The counters above are per
         # read and added up here for the same reason: two frames read at once
@@ -1716,10 +1801,125 @@ class Scanner:
         # Decided here rather than inside preprocess, and remembered, so two
         # consecutive reads of one still card cannot come back turned opposite
         # ways up — which is what the health line's banding number subtracts.
-        fitted = to_grey(fit_for_ocr(crop(screen, g.crop_box), g.ocr_height))
-        g.dark_mode = is_dark_mode(fitted, was=g.dark_mode)
-        prepped = preprocess(fitted, dark=g.dark_mode)
-        t2 = time.perf_counter()
+        got = self._read_box(screen, g.crop_box, g)
+        g.dark_mode = got['dark']
+        first = got['ms']
+        t3 = time.perf_counter()
+        crop_from = 'drawn'
+        rescued = 0
+
+        # A CARD TALLER THAN THE BOX IT IS READ THROUGH.
+        #
+        # The card box is drawn once, round whichever card was up, and a taller
+        # card puts its payout above it. On 8 Oct an Uber "Early look" card's
+        # $14.48 sat across the top edge of a box drawn round a shorter
+        # "Exclusive" card: the reader got "gg Pit." for the payout and the
+        # rest of the card perfectly, and the panel said there was no offer.
+        # Rendered the way that phone drew it (testcards.early_look_screen),
+        # the box read "Pit." for it at all three mount distances tried.
+        #
+        # So when a read through a DRAWN card box comes back with a journey and
+        # no payout — the chain above, second look and clipping included, has
+        # run and failed — and there is screen above the box, the card is
+        # looked for by its shape (cardfind.py) and, if the finder is sure of
+        # one that starts above the box, read again through that. Not on a ⌖
+        # read: that takes the whole screen box already. Not on a clipped read
+        # either, and without a clause for it: a payout against the box's edge
+        # leaves `parse('')`, which has no journey to be worth a look.
+        #
+        # Through the same helper as the read above, so the found box gets the
+        # same fit, the same second look and the same clipping test — and the
+        # FIRST read's polarity. Decided again off the found crop alone, 22 of
+        # the 183 found crops of dark cards over the rendered set came out the
+        # other way up; on a dark card in a left-hand shadow that loses the
+        # payout the rescue was for.
+        #
+        # The reading is kept only if rescue_refused finds nothing wrong with
+        # it; what it found is said as `cropFrom` on everything downstream.
+        if (g.card_finder and not g.whole and worth_a_second_look(got['parsed'])
+                and room_above(g.roi)):
+            found = CF.find_card(to_grey(screen), g.roi)
+            if found['sure'] and found['box'][1] < float(g.roi[1]) - TALLER:
+                again = self._read_box(screen, found['box'], g, dark=g.dark_mode)
+                # A found read whose payout sits against the found top was
+                # emptied by money_is_clipped in _read_box, and has no payout
+                # for rescue_refused to take.
+                if rescue_refused(got['parsed'], again['parsed'], again['text']) is None:
+                    got = again
+                    crop_from = 'found'
+                    rescued = 1
+        t4 = time.perf_counter()
+        text, parsed, clipped = got['text'], got['parsed'], got['clipped']
+        prepped, fitted = got['prepped'], got['fitted']
+
+        # No rate here. There was one — `OP.rate(parsed, self.settings)`, off a
+        # copy of the settings block the Scanner was handed at startup — and
+        # nothing read it: scan_pi's digest() prices the MERGED reading off the
+        # live config and overwrites `out['rate']` before any consumer looks,
+        # and no other caller of look/read ever asked for it. It was a second
+        # settings object with no reader, which is the shape of a fault waiting
+        # for its first change: a cost per mile set from a screen reaches one
+        # copy, and the other goes on disagreeing about the driver's money in
+        # the same process. Pricing belongs to the caller that knows the
+        # settings in force now.
+
+        return {
+            'parsed': parsed,
+            'locked': self.locked,
+            'text': text,
+            # Why a read was unsatisfying, for whoever has to explain it later.
+            'clipped': clipped,
+            # Carried out rather than counted in place: settle() adds them up on
+            # one thread. See there.
+            'dropped': 1 if clipped else 0,
+            'recovered': got['recovered'],
+            # Whether the payout came from a card found above the drawn card
+            # box rather than from the box (see above), and so which crop this
+            # was: 'found' for that card, 'drawn' for everything else — the
+            # drawn card box, a ⌖ read's whole screen box, and the centred crop
+            # a detected screen is read through alike. The panel, a Snap's
+            # reader.json and the health tally all say it from here.
+            'rescued': rescued,
+            'cropFrom': crop_from,
+            'crop': list(got['crop']),
+            # The exact picture the reader was given, so a caller can measure how
+            # bright it was and whether it was rippling.
+            'card': prepped,
+            # ...and the same card BEFORE preprocess() touched it.
+            #
+            # `card` above is contrast-stretched, thresholded and sometimes
+            # inverted — a picture of a page, and the end of a decision chain
+            # rather than the input to one. Every question about how to read
+            # these cards better is a question about what preprocess() should
+            # have done, and that cannot be asked of its own output. This is the
+            # greyscale card as it came off the warp, which is where a different
+            # threshold, a different scale or a different psm would start.
+            'fitted': fitted,
+            'ms': {
+                'warp': (t1 - t0) * 1000,
+                'prep': first['prep'],
+                'ocr': first['ocr'],
+                # The finder and the found card's read, when there were any.
+                'find': (t4 - t3) * 1000,
+                'total': (t4 - t0) * 1000,
+            },
+        }
+
+    def _read_box(self, screen, box, g, dark=None):
+        """Read one crop of the warped screen: the drawn box, or a found card.
+
+        ONE helper for both, so a crop the finder chose is fitted, read, given
+        its second look and tested for a clipped payout exactly as the drawn
+        box is — two copies of this chain would be two chances for a fix to
+        reach one of them. `dark` is the polarity to read with; None decides it
+        from this crop, with the geometry's last answer as the hint.
+        """
+        t0 = time.perf_counter()
+        fitted = to_grey(fit_for_ocr(crop(screen, box), g.ocr_height))
+        if dark is None:
+            dark = is_dark_mode(fitted, was=g.dark_mode)
+        prepped = preprocess(fitted, dark=dark)
+        t1 = time.perf_counter()
         # Asked for its layout as well as its text, at no extra cost, because
         # where the payout landed is the only way to tell a crop that read
         # nothing from a crop that read half of something.
@@ -1771,7 +1971,7 @@ class Scanner:
             if second_look_agrees(parsed, second):
                 text, lines, parsed = again, again_lines, second
                 recovered = 1
-        t3 = time.perf_counter()
+        t2 = time.perf_counter()
 
         # A payout hard against the cut edge is half a number, and half a
         # number still reads as a number: a "4.95" rating with its top shaved
@@ -1782,50 +1982,10 @@ class Scanner:
         clipped = money_is_clipped(lines, prepped.shape[0])
         if clipped:
             parsed = OP.parse('')
-        # No rate here. There was one — `OP.rate(parsed, self.settings)`, off a
-        # copy of the settings block the Scanner was handed at startup — and
-        # nothing read it: scan_pi's digest() prices the MERGED reading off the
-        # live config and overwrites `out['rate']` before any consumer looks,
-        # and no other caller of look/read ever asked for it. It was a second
-        # settings object with no reader, which is the shape of a fault waiting
-        # for its first change: a cost per mile set from a screen reaches one
-        # copy, and the other goes on disagreeing about the driver's money in
-        # the same process. Pricing belongs to the caller that knows the
-        # settings in force now.
-        t4 = time.perf_counter()
-
-        return {
-            'parsed': parsed,
-            'locked': self.locked,
-            'text': text,
-            # Why a read was unsatisfying, for whoever has to explain it later.
-            'clipped': clipped,
-            # Carried out rather than counted in place: settle() adds them up on
-            # one thread. See there.
-            'dropped': 1 if clipped else 0,
-            'recovered': recovered,
-            'crop': list(g.crop_box),
-            # The exact picture the reader was given, so a caller can measure how
-            # bright it was and whether it was rippling.
-            'card': prepped,
-            # ...and the same card BEFORE preprocess() touched it.
-            #
-            # `card` above is contrast-stretched, thresholded and sometimes
-            # inverted — a picture of a page, and the end of a decision chain
-            # rather than the input to one. Every question about how to read
-            # these cards better is a question about what preprocess() should
-            # have done, and that cannot be asked of its own output. This is the
-            # greyscale card as it came off the warp, which is where a different
-            # threshold, a different scale or a different psm would start.
-            'fitted': fitted,
-            'ms': {
-                'warp': (t1 - t0) * 1000,
-                'prep': (t2 - t1) * 1000,
-                'ocr': (t3 - t2) * 1000,
-                'parse': (t4 - t3) * 1000,
-                'total': (t4 - t0) * 1000,
-            },
-        }
+        return {'fitted': fitted, 'dark': dark, 'prepped': prepped, 'text': text,
+                'lines': lines, 'parsed': parsed, 'recovered': recovered,
+                'clipped': clipped, 'crop': list(box),
+                'ms': {'prep': (t1 - t0) * 1000, 'ocr': (t2 - t1) * 1000}}
 
     def _consider(self, parsed):
         if not parsed['complete']:

@@ -201,7 +201,7 @@ def out_for(text, clipped=False, fitted=None):
     p = OP.parse('' if clipped else text)
     return {'parsed': dict(p), 'rate': OP.rate(p, {'target': 25}), 'locked': False,
             'text': text, 'clipped': clipped, 'dropped': 1 if clipped else 0,
-            'recovered': 0,
+            'recovered': 0, 'rescued': 0,
             'crop': [0, 0, 1, 1], 'card': None, 'fitted': fitted,
             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 1}}
 

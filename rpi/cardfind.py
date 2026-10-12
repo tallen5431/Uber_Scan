@@ -59,8 +59,9 @@ import numpy as np
 
 # The finder works on a small copy. A card's edge and its button are coarse
 # features: at 600 rows a text line is still several rows tall and the bar is
-# about thirty, and the whole search costs a few milliseconds against a read's
-# hundreds (see test_cardfind.py for the measured ratio).
+# about thirty. Measured on the development box over 36 warped screens, a look
+# costs 27.5ms median against 309ms for the read it follows (8.9%), and is
+# only paid on a read that found a journey and no payout.
 FIND_HEIGHT = 600
 
 # Where the bar is looked for: from this far above the drawn box's bottom to
