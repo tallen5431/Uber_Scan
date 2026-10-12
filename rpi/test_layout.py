@@ -1705,10 +1705,14 @@ const SNAP_MEASURE = (fixture) => {
         // and asked the same of — inside the map, below the zoom buttons
         // (10px in, two 30px buttons and their 2px borders: 74px), ONE row,
         // nothing cut — plus which of its two forms this panel gets.
-        shown.key = await page.evaluate(() => {
+        // Both of its forms: what it says of the marks, and what it says
+        // when drawing them failed (showKey(null)).
+        const KEY_MEASURE = (failed) => {
           const key = document.getElementById('mapKey');
           const map = document.getElementById('liveMap').getBoundingClientRect();
           key.hidden = false;
+          key.querySelector('.k-all').hidden = failed;
+          key.querySelector('.k-fail').hidden = !failed;
           const r = key.getBoundingClientRect();
           const tops = {};
           const walk = document.createTreeWalker(key, NodeFilter.SHOW_TEXT);
@@ -1732,8 +1736,12 @@ const SNAP_MEASURE = (fixture) => {
             text: text.replace(/\s+/g, ' ').trim(),
             w: Math.round(r.width), mapW: Math.round(map.width) };
           key.hidden = true;
+          key.querySelector('.k-all').hidden = false;
+          key.querySelector('.k-fail').hidden = true;
           return out;
-        });
+        };
+        shown.key = await page.evaluate(KEY_MEASURE, false);
+        shown.keyFailed = await page.evaluate(KEY_MEASURE, true);
         // ...and what a mark of drawHow's says when pointed at (#mapTip):
         // the longest the suite's marks say — a refused McDonald's with the
         // branch outside its 9.9 mi disc, 142 characters — in the one box
@@ -3210,6 +3218,13 @@ try:
                    key.get('text'),
                    "◯ reach · ● pin · ● found · ○ outside" if h <= 380
                    else "◯ card's reach · ● pin · ● also found · ○ outside")
+                key = phone.get('keyFailed') or {}
+                ok_('the key saying how each place was found was not drawn sits inside '
+                    'the map, below the zoom buttons, in one row, nothing cut, at %s (%r)'
+                    % (panel, key),
+                    key.get('inside') and key.get('belowZoom') and key.get('rows') == 1
+                    and not key.get('spills')
+                    and key.get('text') == 'how each was found: not drawn')
                 # --- what a mark says, pointed at -------------------------
                 tip = phone.get('tip') or {}
                 ok_('a mark\'s longest reason sits inside the map, every word of it '

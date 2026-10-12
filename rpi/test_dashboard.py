@@ -2571,6 +2571,7 @@ const framed = (page) => page.waitForFunction(
           var m = { ll: ll, opts: opts, group: null,
                     bindPopup: function (h) { this.popup = h; return this; },
                     bindTooltip: function (h) { this.leafletTip = h; return this; },
+                    bringToBack: function () { this.atBack = true; return this; },
                     on: function (ev, fn) { (this.handlers = this.handlers || {})[ev] = fn;
                                             return this; },
                     addTo: function (g) { this.group = g; into('__marks', this);
@@ -2580,6 +2581,7 @@ const framed = (page) => page.waitForFunction(
           var l = { pts: pts, opts: opts, group: null,
                     bindPopup: function (h) { this.popup = h; return this; },
                     bindTooltip: function (h) { this.leafletTip = h; return this; },
+                    bringToBack: function () { this.atBack = true; return this; },
                     on: function (ev, fn) { (this.handlers = this.handlers || {})[ev] = fn;
                                             return this; },
                     addTo: function (g) { this.group = g; into('__lines', this);
@@ -2590,6 +2592,7 @@ const framed = (page) => page.waitForFunction(
         circle: function (ll, opts) {
           var c = { ll: ll, opts: opts, group: null,
                     bindTooltip: function (h) { this.leafletTip = h; return this; },
+                    bringToBack: function () { this.atBack = true; return this; },
                     on: function (ev, fn) { (this.handlers = this.handlers || {})[ev] = fn;
                                             return this; },
                     addTo: function (g) { this.group = g; into('__circles', this);
@@ -2928,6 +2931,50 @@ const framed = (page) => page.waitForFunction(
       // control anywhere that brought them back. This button is now that
       // control, so coming back has to re-fit.
       refit: !!window.__fit }));
+
+    /* The drawing of how each place was found THROWS — as it does when this
+       live.html runs against an older map-view.js, which sw.js allows: it
+       revalidates each file on its own, and the old one has no discShape.
+       What must survive is everything else: the car, the pins, the runs and
+       the line under the map, exactly as for the same card a moment ago —
+       and nothing of the drawing left half done. */
+    stage = 'the map mode: drawing how places were found throws';
+    out.mapHowThrew = await page.evaluate(async () => {
+      // Part-way, which is the harder case: this card's disc is made, and
+      // the held card's throws, every time it is drawn.
+      const MV = window.MapView, kept = MV.discShape;
+      let calls = 0;
+      MV.discShape = function (d) {
+        if (++calls % 2 === 0) throw new TypeError('MV.discShape is not a function');
+        return kept(d);
+      };
+      const errs = [];
+      const was = console.error;
+      console.error = function () { errs.push([].slice.call(arguments).join(' ')); };
+      window.__es.push({
+        ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+        minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                   card: window.__HELD },
+        offer: { id: 'o-map-8', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+                 miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+                 dropoff: 'Canton Rd, Marietta',
+                 ...window.__CARD } });
+      await new Promise((r) => setTimeout(r, 2600));
+      MV.discShape = kept;
+      console.error = was;
+      const key = document.getElementById('mapKey');
+      return {
+        marks: (window.__marks || []).map((m) => m.ll),
+        lines: (window.__lines || []).length,
+        how: (window.__how || []).length,
+        fit: (window.__fit || []).length,
+        note: document.getElementById('viewNote').textContent.trim(),
+        key: key.hidden ? null
+          : [].slice.call(key.querySelectorAll('.k-all, .k-fail'))
+              .filter((e) => !e.hidden).map((e) => e.textContent.replace(/\s+/g, ' ').trim()),
+        logged: errs.length };
+    });
 
     // ...and back out, which also has to give the picture back.
     stage = 'the map mode: back to the picture';
@@ -6729,6 +6776,22 @@ try:
     # A driver who nudged the map with the mouse and lost the pins had no
     # control anywhere that brought them back; this button is now that control.
     ok_('...and the view is fitted to them again', round_.get('refit'))
+
+    # The drawing of how each place was found throwing part-way (the held
+    # card's MV.discShape throwing after this card's disc was made, as an
+    # older map-view.js with no discShape throws) costs that drawing and
+    # nothing else.
+    _t = got.get('mapHowThrew') or {}
+    eq('when drawing how places were found throws, the car and the pins are still '
+       'drawn, with their runs, and the view fitted to them',
+       (len(_t.get('marks') or []), _t.get('lines'), _t.get('fit')), (4, 4, 4))
+    ok_('...and the line under the map is the same card\'s line as before (%r)'
+        % _t.get('note'), bool(was) and _t.get('note') == was)
+    eq('...with nothing of it half drawn, and the key saying it was not drawn '
+       'rather than naming marks that are not there',
+       (_t.get('how'), _t.get('key')), (0, ['how each was found: not drawn']))
+    ok_('...and the throw logged, not swallowed (%r)' % _t.get('logged'),
+        (_t.get('logged') or 0) >= 1)
 
     # A card that names nowhere, arriving while the map is up. 129 of this
     # driver's own 272 cards are this, so the path that draws nothing is the

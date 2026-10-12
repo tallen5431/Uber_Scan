@@ -912,9 +912,9 @@
     <!-- The key to how each place was found (drawHow): one line over the
          map's bottom edge, inside the map so it is drawn only where the map
          is. Shown only when there is something of that drawn. -->
-    <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-disc">◯</span> <span class="k-long">card's </span>reach
+    <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-all"><span class="k-disc">◯</span> <span class="k-long">card's </span>reach
       · <span class="k-pin">●</span> pin · <span class="k-cand">●</span> <span class="k-long">also </span>found
-      · <span class="k-out">○</span> outside</div><div id="mapTip" hidden></div></div>
+      · <span class="k-out">○</span> outside</span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
          or why there is no dot: "GPS too rough here (±130 m)". Over the map's
          corner rather than in the caption below it, which is the detour's row
@@ -4457,18 +4457,19 @@
   var HOW_GREY = '#8a8f98';
 
   function drawHow(want) {
-    var any = false;
+    // Every layer made first and only then put on the map, all of them, so a
+    // throw part-way leaves nothing of it half drawn (see drawMap).
+    var made = [];
     var cards = [['new', MV.discFor(want.card)]];
     if (want.held) cards.push(['held', MV.discFor(want.heldCard)]);
     cards.forEach(function (c) {
       var d = MV.discShape(c[1]);
       if (!d) return;
-      any = true;
-      L.circle([d.lat, d.lon], {
+      made.push(L.circle([d.lat, d.lon], {
         radius: d.metres, weight: 1.5, color: HOW_COLOUR[c[0]], opacity: .7,
         dashArray: '5 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: .04,
         interactive: false, className: 'mv-how mv-disc mv-' + c[0]
-      }).addTo(mapLayer);
+      }));
     });
     var seen = want.nbxSeen || {};
     Object.keys(seen).forEach(function (q) {
@@ -4476,28 +4477,39 @@
       var how = MV.located(s.res, s.disc, shortPlace(q, DISC_PLACE_SHOWN), s.whose);
       var colour = HOW_COLOUR[s.whose] || HOW_GREY;
       how.lines.forEach(function (l) {
-        any = true;
         var chosen = l.kind === 'chosen';
-        tipOn(L.polyline(l.pts, {
+        made.push(tipOn(L.polyline(l.pts, {
           color: chosen ? colour : HOW_GREY, weight: chosen ? 5 : 4,
           opacity: chosen ? .55 : .8, dashArray: chosen ? null : '6 5',
           bubblingMouseEvents: false,
           className: 'mv-how mv-street mv-' + l.kind + ' mv-' + s.whose
-        }), l.tip).addTo(mapLayer);
+        }), l.tip));
       });
       how.marks.forEach(function (m) {
-        any = true;
         var out = m.kind === 'outside';
-        tipOn(L.circleMarker([m.lat, m.lon], {
+        made.push(tipOn(L.circleMarker([m.lat, m.lon], {
           radius: 5, weight: 2, color: out ? HOW_GREY : colour,
           dashArray: out ? '2 3' : null,
           fillColor: HOW_GREY, fillOpacity: out ? 0 : .9,
           bubblingMouseEvents: false,
           className: 'mv-how ' + (out ? 'mv-out' : 'mv-cand') + ' mv-' + s.whose
-        }), m.tip).addTo(mapLayer);
+        }), m.tip));
       });
     });
-    return any;
+    // Under the pins, which drawMap put down first: each sent to the back in
+    // turn from the last made, so the discs end lowest and the candidates
+    // over them, as they were made.
+    for (var i = made.length - 1; i >= 0; i--) made[i].addTo(mapLayer).bringToBack();
+    return made.length > 0;
+  }
+
+  /* The key, for what drawHow did: true, it drew something and the key says
+     what; false, nothing to explain and no key; null, it failed and the key
+     says only that — not the marks, which are not there. */
+  function showKey(drawn) {
+    mapKey.hidden = drawn === false;
+    mapKey.querySelector('.k-all').hidden = drawn === null;
+    mapKey.querySelector('.k-fail').hidden = drawn !== null;
   }
 
   /* What the pins are, and which of them cannot be right — asked once, by
@@ -4551,9 +4563,6 @@
       mapDot(at, colour, label, name, ring).addTo(mapLayer);
       bounds.push([at.lat, at.lon]);
     }
-    // How each place was found, under the pins: drawn first so every pin
-    // sits on top of it. None of it joins the view; see drawHow.
-    mapKey.hidden = !drawHow(want);
 
     // The car first, because every other mark here is a guess and this one is
     // not. A pickup pin a long way from it is a pin to distrust whatever the
@@ -4621,6 +4630,25 @@
                  { color: '#c084fc', weight: 3, dashArray: '2 7',
                    opacity: .9 }).addTo(mapLayer);
     }
+
+    /* How each place was found, AFTER everything above and guarded, so that
+       any failure in it costs it alone: the car, the pins, the runs, the view
+       and the line under the map are already decided and are drawn the
+       same. Drawn first and unguarded it took all of them down — and the
+       likely throw is not a bug in it: sw.js revalidates each file on its
+       own, so this page can run against the map-view.js before it, where
+       MV.discShape is undefined. A failure leaves nothing of it half drawn
+       (drawHow puts its layers down only once all are made) and the key
+       says it was not drawn rather than naming marks that are not there.
+       Under the pins all the same: see drawHow. */
+    var drewHow;
+    try {
+      drewHow = drawHow(want);
+    } catch (e) {
+      drewHow = null;
+      if (window.console) console.error('drawing how each place was found:', e);
+    }
+    showKey(drewHow);
 
     fitView(bounds);
     // Kept so coming back to this same card can put both of them back — the
