@@ -1173,9 +1173,9 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None,
     `view` picks between aiming the camera and reading the phone through it.
     See SCREEN_HEIGHT.
 
-    `found` is the card the last read was taken through when the finder found
-    it above the drawn card box — fractions of the screen, outlined in amber in
-    either view (PL.outline_found), and None the rest of the time.
+    `found` is the card found above the drawn card box that gave the payout
+    the panel is showing (payout_from) — fractions of the screen, outlined in
+    amber in either view (PL.outline_found), and None the rest of the time.
     """
     global _snapshot_error
     quality = SNAPSHOT_QUALITY

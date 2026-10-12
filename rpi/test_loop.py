@@ -2622,9 +2622,18 @@ for _how, _cfg, _argv, _why in (
         ('flag', _EARLY_CFG, ['--no-card-find'], '--no-card-find')):
     _off = run(lambda n, k: '', real_look=(_EARLY_BOX, _EARLY_FOUND), offer=_EARLY_FRAME,
                config_extra=_cfg, extra_argv=['--snapshot', _cf_snap + '.off'] + _argv,
-               seconds=30.0, until=lambda rows, ann, calls: calls >= 3)
+               seconds=15.0, until=lambda rows, ann, calls: calls >= 6)
     # Every one of those reads found the journey and no payout, which is the
-    # read the finder is asked about when it is on.
+    # read the finder is asked about when it is on. Run to six looks or fifteen
+    # seconds, whichever is first. Off, the reads stop at four looks — two
+    # rounds of paired reads, the first of the blank mount — because a reading
+    # with no payout stops the verify beat (next_verify) and the stubbed
+    # picture never moves the gate again. A main() that turned the finder on
+    # whatever the config said is given the payout on the card's first round,
+    # and so keeps reading: by six looks its line said "found" and $14.48 was
+    # in the journal. Stopped at three looks, as this first was, that main()
+    # had put nothing on the line or in the journal yet, and only "the finder
+    # is never asked" failed for it.
     eq('with the card finder off by %s the finder is never asked, over %d reads'
        % (_how, _off['calls']), (_off['finder'], _off['calls'] >= 3), (0, True))
     eq('...every line says the box as drawn',
