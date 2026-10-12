@@ -126,7 +126,7 @@
 
   /* Why a row that carries a coordinate is not a position, or null.
    *
-   * The gate's own word (`gpsWhy`: unrated, nomode, rough or stale) or
+   * The gate's own word (`gpsWhy`: unrated, nomode, rough, frozen or stale) or
    * 'unjudged' for a coordinate nobody judged. Null for a row with no
    * coordinate at all, which is the ordinary "did not know" and not a refusal.
    * For the counts beside what fixOf lets through, so a refused fix is a
@@ -171,11 +171,15 @@
      `stale`, which is a grey dot rather than none. Short, because they sit in
      the map's corner on a 228px column on the 3.5" hat; rpi/test_layout.py
      measures every one there, and rpi/test_lint.py holds this table to the
-     gate's own words. */
+     gate's own words. `frozen` is a receiver repeating one position while
+     the car moves — the owner's VK-162 under gpsd's binary mode did it for a
+     whole shift — and is no dot, because the dot would be where the car was
+     minutes ago drawn as where it is. */
   var GPS_REFUSED = {
     unrated: 'GPS gives no accuracy here',
     nomode: 'GPS reports no 2D/3D fix',
-    rough: 'GPS too rough here'
+    rough: 'GPS too rough here',
+    frozen: 'GPS stuck on one spot'
   };
 
   function spellSeconds(s) {
@@ -1010,6 +1014,8 @@
       rough: 'GPS fix on this card too rough to measure from',
       unrated: 'GPS on this card gave no accuracy to measure from',
       nomode: 'GPS on this card had no 2D/3D fix to measure from',
+      frozen: 'GPS on this card was stuck on one spot, so nothing to measure '
+        + 'from',
       other: 'GPS fix on this card was never judged, so nothing to measure from'
     },
     held: {
@@ -1020,6 +1026,8 @@
       rough: 'GPS fix on the order in your car too rough to check its end',
       unrated: 'GPS on the order in your car gave no accuracy to check its end',
       nomode: 'GPS on the order in your car had no 2D/3D fix to check its end',
+      frozen: 'GPS on the order in your car was stuck on one spot, so its end '
+        + 'cannot be checked',
       other: 'GPS fix on the order in your car was never judged, so its end '
         + 'cannot be checked'
     }
