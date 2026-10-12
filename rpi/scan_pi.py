@@ -1266,8 +1266,9 @@ DOUBT_DIR = 'doubt'
 #
 # Not only new layouts, though. A card whose first read found the payout and
 # not the journey, and whose next read parsed, keeps that first read here too:
-# it is exactly "a payout and no journey" when it is judged. On the owner's
-# measured week that was 59 of the 1,166 cards. Kept rather than filtered: the
+# read_why says exactly NO_JOURNEY, "a payout but no journey", when it is
+# judged. On the owner's measured week that was 59 of the 1,166 cards. Kept
+# rather than filtered: the
 # picture is written before the next read exists, and at its first read a
 # card that never parses looks the same as one that parses a read later.
 UNPARSED_DIR = 'unparsed'

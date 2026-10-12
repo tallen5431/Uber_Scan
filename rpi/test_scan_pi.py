@@ -2879,6 +2879,14 @@ eq('...nor one whose payout was clipped',
    'the payout sat against the top edge of the crop')
 eq('...and a complete read has nothing to say', SP.read_why({}, {'pay': 7.25, 'complete': True}),
    None)
+# The comment beside UNPARSED_DIR quotes read_why's words to say which reads
+# land there, and quoted them as "a payout and no journey" — words the log has
+# never printed, so a driver grepping the log for them found nothing. Held to
+# the constant: whatever NO_JOURNEY says, that comment says.
+_ud = open(SP.__file__, encoding='utf-8').read()
+_ud = _ud[_ud.index('# ...and the cards that showed a payout'):_ud.index('\nUNPARSED_DIR = ')]
+eq('the comment beside UNPARSED_DIR quotes read_why\'s words, and only those',
+   re.findall(r'"(a payout[^"]*)"', _ud), [SP.NO_JOURNEY])
 
 _uw = tempfile.mkdtemp()
 _pic = SP.save_scan(_card, 'ep3', _uw, at=1_700_000_000.0, text='$7.25\nTap to see more')
