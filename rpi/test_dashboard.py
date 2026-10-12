@@ -1463,6 +1463,27 @@ const framed = (page) => page.waitForFunction(
       mile: await page.evaluate(LOOK, '#vMile'),
     };
 
+    // The same card, its payout read off a card found above the drawn card
+    // box, then the box's own read of it, then a line with no verdict: the
+    // payout's label says which, and goes back to "pay" when it is not.
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.divides, { cropFrom: 'found' }));
+    await page.waitForTimeout(200);
+    out.foundPay = { found: await page.evaluate(LOOK, '#lPay') };
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.divides, { cropFrom: 'drawn' }));
+    await page.waitForTimeout(200);
+    out.foundPay.drawn = await page.evaluate(LOOK, '#lPay');
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.divides, { cropFrom: 'found' }));
+    await page.waitForTimeout(200);
+    await page.evaluate(() => window.__es.push({ ready: false, state: 'empty', track: null,
+                                                  places: [], text: '', cropFrom: 'drawn' }));
+    await page.waitForTimeout(200);
+    out.foundPay.after = await page.evaluate(LOOK, '#lPay');
+    await page.evaluate((r) => window.__es.push(r), READINGS.divides);
+    await page.waitForTimeout(200);
+
     // A distance the reader itself does not trust. `perMile` is null there for
     // the same reason, and dividing by the number anyway would put a confident
     // rate on the glass with nothing behind it.
@@ -5273,6 +5294,17 @@ try:
         # The check is only a check if both halves of the sum are beside it.
         ok_('...beside the payout it divided', '14' in ((pm.get('pay') or {}).get('text') or ''))
         ok_('...and the distance it divided by', '7.0' in ((pm.get('mile') or {}).get('text') or ''))
+
+    # A payout read off a card found above the drawn card box is labelled so,
+    # in the label's own slot, and only while the line says so.
+    fp = got.get('foundPay') or {}
+    eq('a payout read off a card found above the box is labelled PAY ?',
+       ((fp.get('found') or {}).get('text') or '').strip().lower(), 'pay ?')
+    ok_('...on the glass', (fp.get('found') or {}).get('shown'))
+    eq('...and the box\'s own payout plain "pay"',
+       ((fp.get('drawn') or {}).get('text') or '').strip().lower(), 'pay')
+    eq('...as is the label once a line with no verdict follows',
+       ((fp.get('after') or {}).get('text') or '').strip().lower(), 'pay')
 
     unc = got.get('permileUncertain') or {}
     ok_('the unreadable-distance case was measured', bool(unc))

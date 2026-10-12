@@ -821,8 +821,13 @@ def reader_record(last, now, offer_log=None, counters=None, beat=None,
                           'wholeScreen': last['wholeScreen'],
                           'crop': last['crop'],
                           # ...and whether that crop is the box the driver
-                          # drew or a card found above it. See emit().
+                          # drew or a card found above it — this read's own.
                           'cropFrom': last.get('cropFrom', 'drawn'),
+                          # ...and where the payout in `parsed` came from,
+                          # which a merge can make a found card's though this
+                          # read was the box: what the panel's line says as
+                          # cropFrom. See pay_from in main().
+                          'payFrom': last.get('payFrom', 'drawn'),
                           'text': last['text'],
                           'parsed': last['parsed'],
                           'rate': last['rate']}
@@ -2983,13 +2988,15 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # on 13 of 42 cards. Only ever on a reading with no verdict — the
         # empty parse cannot be rated — so it can never sit beside a number.
         'clipped': bool(clipped),
-        # Which crop this read was taken through: 'found' when the drawn card
-        # box read a journey and no payout and the payout came off a taller
-        # card found above it (pipeline.Scanner._look, cardfind.py); 'drawn'
-        # for every other read — the card box, a ⌖ read of the whole screen
-        # box, and the centred crop a detected screen is read through. A
-        # payout the rig went looking for is a different claim from one the
-        # driver's own box held, and the panel is told which this is.
+        # Which crop the PAYOUT on this line was read through: 'found' when
+        # the drawn card box read a journey and no payout and the payout came
+        # off a taller card found above it (pipeline.Scanner._look,
+        # cardfind.py) — on this read, or on an earlier read of the same card
+        # that the merge carried it from (pay_from in main()); 'drawn' for
+        # every other line — the card box, a ⌖ read of the whole screen box,
+        # the centred crop a detected screen is read through, and a line with
+        # no payout. A payout the rig went looking for is a different claim
+        # from one the driver's own box held, and the panel marks it.
         'cropFrom': crop_from,
     }
     sys.stdout.write(json.dumps(payload) + '\n')
@@ -3373,9 +3380,10 @@ def main():
     # from, and the beat is what the panel was told.
     last_read = None
     last_beat = None
-    # The card the last read found above the drawn card box, or None. See
-    # write_snapshot's `found`.
+    # The card a read found above the drawn card box, and the accumulator
+    # episode whose payout it gave, or None. See pay_from.
     found_box = None
+    found_episode = None
     # The card currently being watched, and what has become of it. See
     # Health.saw — an episode that ends having shown a payout but written
     # nothing is a card the rig saw and failed to keep.
@@ -3428,7 +3436,7 @@ def main():
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
         nonlocal unparsed_kept_for
-        nonlocal last_read, found_box
+        nonlocal last_read, found_box, found_episode
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -3469,17 +3477,33 @@ def main():
         # it in - the driver who took a moment to get the destination up is
         # exactly the driver whose address arrives at the end of the window.
         started = read_at if read_at is not None else time.time()
-        # The card this read was taken through, for the live view to outline
-        # in amber, for as long as the last read is one that went looking for
-        # it. Any other read — the box as drawn, a ⌖ read — takes it down.
-        found_box = out.get('crop') if out.get('cropFrom') == 'found' else None
+        # WHERE THE PAYOUT THIS READING SHOWS CAME FROM — which is not always
+        # where this read came from. The panel shows the MERGED reading, and
+        # a card read once off a card found above the box (out['cropFrom'],
+        # pipeline.Scanner._look) and then through the box as drawn stays the
+        # same episode, at the same payout, with the found read's figures in
+        # the merge. Said per read, the line went back to "drawn" and the
+        # amber outline came down on the second read while the panel went on
+        # showing the payout a found card gave. So it is said per episode:
+        # once a found card has given an episode its payout, every reading of
+        # that episode that shows a payout says "found" and keeps the outline
+        # on the card found; a reading with no payout, a new card, or a ⌖
+        # read says "drawn" and takes the outline down. One answer, used for
+        # the panel's line, a Snap's reader.json and the live view alike.
+        if not whole and out.get('cropFrom') == 'found' and parsed.get('pay') is not None:
+            found_episode, found_box = parsed.get('episode'), out.get('crop')
+        pay_from = ('found' if not whole and parsed.get('pay') is not None
+                    and found_episode is not None
+                    and parsed.get('episode') == found_episode else 'drawn')
+        if pay_from != 'found':
+            found_box = None
         # ...and kept for 📷 Snap, ⌖ reads included: the last card the reader
         # cut out — `fitted`, before preprocess() made tesseract's input from
         # it — is what "what was the reader looking at?" asks about. A
         # reference, not a copy — the reader makes a new crop every read.
         last_read = {'at': started, 'fitted': out.get('fitted'),
                      'wholeScreen': bool(whole), 'crop': out.get('crop'),
-                     'cropFrom': out.get('cropFrom', 'drawn'),
+                     'cropFrom': out.get('cropFrom', 'drawn'), 'payFrom': pay_from,
                      'text': out.get('text'), 'parsed': parsed, 'rate': rate}
         # WITH OR WITHOUT THE BUTTON.
         #
@@ -3939,7 +3963,7 @@ def main():
         if args.json:
             emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole,
                  clipped=bool(out.get('clipped')),
-                 crop_from=out.get('cropFrom', 'drawn'))
+                 crop_from=pay_from)
         else:
             show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
 

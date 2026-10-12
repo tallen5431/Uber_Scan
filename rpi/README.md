@@ -2504,11 +2504,21 @@ all six frames tried. What it cost the cards above:
 nothing — the 576 and 288 frames give the same tallies, rescue for rescue,
 with the rule and without it.
 
-It says what it did: the panel's line carries `cropFrom` — `found` for this,
-`drawn` for every other read (the card box, a ⌖ read's whole screen box and
-the centred crop alike) — and so does a 📷 Snap's `reader.json`; the health
-line and the `seen` row count it as `rescued` beside `clipped`; and the live
-view outlines the card found in **amber**. `"cardFinder": false` in
+It says what it did, and says it of the payout shown rather than of the last
+read. The panel shows the merged reading, and a card read once off a card
+found and then through the box, at the same payout, is one card with the found
+read's figures in it — so once a found card has given a card its payout, every
+line of that card with a payout on it carries `cropFrom: "found"`, and the
+live view keeps the card found outlined in **amber**; a line with no payout, a
+new card or a ⌖ read says `drawn` and takes the outline down. (Said per read,
+as it first was, the second read of the card through the box put "drawn" on
+the line and took the outline down while the panel still showed the found
+card's payout.) On the panel the payout's label reads **PAY ?** instead of
+PAY — the "?" of "ACCEPT ?", look again — because the live view is not always
+up and the pay row is the one checked against the phone. A 📷 Snap's
+`reader.json` gives both: `cropFrom`, the crop that read's own picture came
+off, and `payFrom`, what the panel's line said. The health line and the `seen`
+row count rescued reads, per read, as `rescued` beside `clipped`. `"cardFinder": false` in
 `config.json`, or `--no-card-find`, turns it off, and the reads are then the
 ones this rig gave before it existed, byte for byte — measured against the
 reader as it stood before, on 240 rendered reads: the same text, parse, crop,

@@ -1728,6 +1728,39 @@ ok_('...and holds a great deal more of the phone than the scene did',
     phone_img.shape[0] * phone_img.shape[1] > 8 * scene_img.shape[0] * scene_img.shape[1]
     * ((1400 - 700) * (1500 - 300)) / float(2328 * 1748))
 
+# The card the last read found above the drawn card box is outlined in amber
+# in either view — the phone view as well as the scene, since the phone view
+# is the one a driver checking the payout is looking at.
+def _amber_px(img, box=None):
+    """Amber pixels in `img`, or — given a box — (along its outline, anywhere)."""
+    b, g, r = [img[..., i].astype(int) for i in range(3)]
+    hit = (r > 200) & (g > 120) & (g < 220) & (b < 90)
+    if box is None:
+        return int(np.count_nonzero(hit))
+    h, w = hit.shape
+    x0, y0 = int(box[0] * w), int(box[1] * h)
+    x1, y1 = int((box[0] + box[2]) * w), int((box[1] + box[3]) * h)
+    ring = np.zeros_like(hit)
+    ring[max(0, y0 - 4):y1 + 5, max(0, x0 - 4):x1 + 5] = True
+    ring[y0 + 5:y1 - 4, x0 + 5:x1 - 4] = False
+    return int(np.count_nonzero(hit & ring)), int(np.count_nonzero(hit))
+
+
+_fbox = [0.03, 0.40, 0.94, 0.52]
+SP.write_snapshot(big, cfg_min, shot, quad=phone, roi=None, view=SP.VIEW_SCREEN, found=_fbox)
+_fimg = cv2.imread(shot)
+_on, _all = _amber_px(_fimg, _fbox)
+# Its perimeter in the picture's pixels, at least once round.
+_round = 2 * (_fbox[2] * _fimg.shape[1] + _fbox[3] * _fimg.shape[0])
+ok_('the phone view outlines a card found above the box in amber, all the way '
+    'round it and nowhere else (%d amber pixels on its outline of %d, perimeter %d)'
+    % (_on, _all, _round), _on >= _round and _on >= 0.95 * _all)
+SP.write_snapshot(big, cfg_min, shot, quad=phone, roi=None, view=SP.VIEW_SCREEN)
+eq('...and none without one', _amber_px(cv2.imread(shot)), 0)
+SP.write_snapshot(big, cfg_min, shot, quad=phone, roi=None, view=SP.VIEW_SCENE, found=_fbox)
+ok_('...as the scene view does (%d amber pixels)' % _amber_px(cv2.imread(shot)),
+    _amber_px(cv2.imread(shot)) > 100)
+
 # No corners is the case this has to survive rather than the case it is for:
 # the phone out of frame, the mount knocked, the outline sitting on a
 # reflection. Falling back to the scene shows the driver which of those it is.

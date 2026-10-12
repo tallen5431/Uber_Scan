@@ -924,6 +924,23 @@ for _said, _fields in NOVERDICT_SAID.items():
 # The rig's own display, and the two the panel is proven at.
 NOVERDICT_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '480x320')]
 
+# A payout read off a card found above the drawn card box: the label under it
+# reads PAY ? where it reads PAY (live.html, `cropFrom`). Measured against the
+# same card read through the box, on the panels the no-verdict line is proven
+# on, in both pictures, over the longest minutes label, "min left": at $99.99,
+# the widest two-figure payout, and at $999.99 — a verdict stops at $300
+# (offer_parser.SANE_PAY), but a doubted reading keeps its figures on the
+# panel, so three figures are on the glass with the label beside them.
+_FOUNDPAY_CARD = {'ready': True, 'locked': True, 'whole': True, 'state': 'go',
+                  'doubt': None, 'perHour': 999.9, 'grossPerHour': 999.9,
+                  'pay': 999.99, 'minutes': 60.0, 'cardMinutes': 60.0, 'miles': 99.9,
+                  'cost': 0, 'costPerMile': 0, 'fromDeadline': True,
+                  'deliverBy': 1155, 'track': None, 'places': [], 'text': ''}
+FOUNDPAY = {'drawn': dict(_FOUNDPAY_CARD, cropFrom='drawn', pay=99.99),
+            'found': dict(_FOUNDPAY_CARD, cropFrom='found', pay=99.99),
+            'drawn3': dict(_FOUNDPAY_CARD, cropFrom='drawn'),
+            'found3': dict(_FOUNDPAY_CARD, cropFrom='found')}
+
 # The Trip Planner's stops, as the driving screen lists them after a ⌖ press:
 # at the most the block is asked to hold. Four stops and the line saying why
 # the order's end was not taken from them — five lines — with an ×2 pickup, a
@@ -1049,7 +1066,10 @@ DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
        snapPanelsJson, noVerdictJson, noVerdictPanelsJson, plannerJson,
-       plannerPanelsJson, hereJson] = process.argv.slice(2);
+       plannerPanelsJson, hereJson, foundPayJson] = process.argv.slice(2);
+// A card's payout read off a card found above the box, and the same read
+// through the box; see FOUNDPAY on the Python side.
+const FOUNDPAY = JSON.parse(foundPayJson);
 // The "you are here" label's forms, made by MV.hereDot; see HERE_LINES.
 const HERE_LINES = JSON.parse(hereJson);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
@@ -2047,6 +2067,54 @@ const SNAP_MEASURE = (fixture) => {
         });
       }
       out[panel[0] + ' ' + view + ' noverdict'] = slot;
+      // ...and on the same page, a card with a verdict whose payout is labelled
+      // PAY ?, against the same card labelled PAY.
+      const fp = {};
+      for (const [key, reading] of Object.entries(FOUNDPAY)) {
+        await page.evaluate((r) => {
+          window.__es.push({ alive: true, at: 1 });
+          window.__es.push(r);
+        }, reading);
+        await page.waitForTimeout(150);
+        fp[key] = await page.evaluate(() => {
+          const lab = document.getElementById('lPay');
+          const cell = lab.parentElement.getBoundingClientRect();
+          const off = [];
+          const walk = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT);
+          const rg = document.createRange();
+          let n;
+          while ((n = walk.nextNode())) {
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (!c.width && !c.height) continue;
+              if (c.left < Math.max(0, cell.left) - 0.5
+                  || c.right > Math.min(window.innerWidth, cell.right) + 0.5
+                  || c.top < -0.5 || c.bottom > window.innerHeight + 0.5) off.push(n.data[i]);
+            }
+          }
+          const box = (sel) => {
+            const b = document.querySelector(sel).getBoundingClientRect();
+            return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+          };
+          const cs = getComputedStyle(lab);
+          const v = document.getElementById('vPay').getBoundingClientRect();
+          return {
+            text: lab.textContent.trim(),
+            // The figure inside its own cell: the label beside it is what
+            // changes, and the cell centres the two together.
+            payIn: v.left >= cell.left - 0.5 && v.right <= cell.right + 0.5,
+            shown: cell.width > 0 && cs.display !== 'none' && cs.visibility !== 'hidden',
+            off: off.join(''),
+            layout: { label: box('#verdictLabel'), verdict: box('#verdict'),
+                      pay: box('#vPay'), min: box('#vMin'), mile: box('#vMile'),
+                      perMile: box('#vPerMile'), minLabel: box('#lMin'),
+                      bar: box('.bottombar'), row: box('.connbar'), view: box('#viewWrap') },
+          };
+        });
+      }
+      out[panel[0] + ' ' + view + ' foundpay'] = fp;
       await page.close();
       await ctx.close();
     }
@@ -2425,7 +2493,7 @@ try:
          json.dumps({'stops': PLANNER_STOPS, 'unfiled': PLANNER_UNFILED,
                      'notes': PLANNER_NOTES, 'notice': PLANNER_NOTICE,
                      'blind': PLANNER_BLIND}),
-         json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES)],
+         json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -2525,6 +2593,41 @@ try:
                     ref = old if s['lines'] == old['lines'] else was
                     eq('..."%s" %s, moving nothing the old line did not move at %s'
                        % (opens, note, where), s['layout'], ref['layout'])
+
+    # PAY ? under a payout read off a card found above the box: every
+    # letter of it inside its own cell and on the glass, and nothing else on
+    # the panel moved from where PAY left it — the four figures, the labels
+    # beside them, the verdict, the picture, the status row and the bar.
+    for panel, w, h in NOVERDICT_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            fp = got.get('%s %s foundpay' % (panel, view)) or {}
+            ok_('a payout off a found card was measured at %s' % where,
+                'found' in fp and 'drawn' in fp)
+            if not ('found' in fp and 'drawn' in fp):
+                continue
+            eq('...labelled PAY ? at %s' % where,
+               (fp['found']['text'].lower(), fp['drawn']['text'].lower()),
+               ('pay ?', 'pay'))
+            ok_('...shown at %s' % where, fp['found']['shown'])
+            eq('...every letter of it in its cell and on the glass at %s' % where,
+               fp['found']['off'], '')
+            # Nothing moves but the figure, sideways inside its own cell: the
+            # cell centres the figure and its label together, so a longer label
+            # takes the figure a few pixels left on the panels that lay them
+            # side by side (480x320). Up and down, and everything else on the
+            # panel, exactly where PAY left it.
+            _still = lambda l: dict(l, pay=l['pay'][1:])
+            eq('...moving nothing PAY did not move, the figure itself bar a few '
+               'pixels sideways inside its cell, at %s' % where,
+               _still(fp['found']['layout']), _still(fp['drawn']['layout']))
+            ok_('...the figure still inside its cell at %s' % where, fp['found']['payIn'])
+            # Three figures leave no room beside them, on the 3.5" hat's phone
+            # picture, even for PAY. So asked against PAY: no letter off its
+            # cell that PAY did not put off too.
+            ok_('...and at $999.99, no more of it off its cell than PAY at %s (%r, %r)'
+                % (where, fp['found3']['off'], fp['drawn3']['off']),
+                len(fp['found3']['off'].strip()) <= len(fp['drawn3']['off'].strip()))
 
     # The Trip Planner's stops between offers, at the most the block holds:
     # four stops and the line under them. Every one on a line of its own, its
